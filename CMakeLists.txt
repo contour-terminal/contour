@@ -79,6 +79,7 @@ if(LIBTERMINAL_TESTING)
         src/terminal/Screen_test.cpp
         src/terminal/OutputHandler_test.cpp
         src/terminal/UTF8_test.cpp
+        src/terminal/terminal_test.cpp
     )
     set_target_properties(terminal_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)

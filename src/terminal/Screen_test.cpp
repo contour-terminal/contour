@@ -1,4 +1,3 @@
-#define CATCH_CONFIG_MAIN
 #include <terminal/Screen.h>
 #include <catch2/catch.hpp>
 #include <string_view>
