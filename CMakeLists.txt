@@ -77,10 +77,10 @@ if(LIBTERMINAL_TESTING)
     add_executable(terminal_test
         src/terminal/Parser_test.cpp
         src/terminal/Screen_test.cpp
-        # src/terminal/OutputHandler_test.cpp
-        # src/terminal/UTF8_test.cpp
+        src/terminal/OutputHandler_test.cpp
+        src/terminal/UTF8_test.cpp
     )
     set_target_properties(terminal_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-    target_link_libraries(terminal_test PUBLIC fmt::fmt-header-only Catch2::Catch2 terminal)
+    target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
 endif(LIBTERMINAL_TESTING)

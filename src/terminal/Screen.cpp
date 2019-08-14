@@ -126,41 +126,46 @@ void Screen::Buffer::appendChar(wchar_t ch)
 
 void Screen::Buffer::scrollUp(size_t v_n)
 {
-    if (margin_.horizontal != Range{1, numColumns()})
+    scrollUp(v_n, margin_);
+}
+
+void Screen::Buffer::scrollUp(size_t v_n, Margin const& margin)
+{
+    if (margin.horizontal != Range{1, numColumns()})
     {
         // a full "inside" scroll-up
-        auto const marginHeight = margin_.vertical.length();
+        auto const marginHeight = margin.vertical.length();
         auto const n = min(v_n, marginHeight);
 
         if (n < marginHeight)
         {
-            auto targetLine = next(begin(lines), margin_.vertical.from - 1);     // target line
-            auto sourceLine = next(begin(lines), margin_.vertical.from - 1 + n); // source line
-            auto const bottomLine = next(begin(lines), margin_.vertical.to);     // bottom margin's end-line iterator
+            auto targetLine = next(begin(lines), margin.vertical.from - 1);     // target line
+            auto sourceLine = next(begin(lines), margin.vertical.from - 1 + n); // source line
+            auto const bottomLine = next(begin(lines), margin.vertical.to);     // bottom margin's end-line iterator
 
             for (; sourceLine != bottomLine; ++sourceLine, ++targetLine)
             {
                 copy_n(
-                    next(begin(*sourceLine), margin_.horizontal.from - 1),
-                    margin_.horizontal.length(),
-                    next(begin(*targetLine), margin_.horizontal.from - 1)
+                    next(begin(*sourceLine), margin.horizontal.from - 1),
+                    margin.horizontal.length(),
+                    next(begin(*targetLine), margin.horizontal.from - 1)
                 );
             }
         }
 
         // clear bottom n lines in margin.
-        auto targetLine = next(begin(lines), margin_.vertical.to - n);
-        auto const bottomLine = next(begin(lines), margin_.vertical.to);     // bottom margin's end-line iterator
+        auto targetLine = next(begin(lines), margin.vertical.to - n);
+        auto const bottomLine = next(begin(lines), margin.vertical.to);     // bottom margin's end-line iterator
         for (; targetLine != bottomLine; ++targetLine)
         {
             fill_n(
-                next(begin(*targetLine), margin_.horizontal.from - 1),
-                margin_.horizontal.length(),
+                next(begin(*targetLine), margin.horizontal.from - 1),
+                margin.horizontal.length(),
                 Cell{}
             );
         }
     }
-    else if (margin_.vertical == Range{1, numLines()})
+    else if (margin.vertical == Range{1, numLines()})
     {
         // full-screen scroll-up
         auto const n = min(v_n, numLines());
@@ -180,19 +185,19 @@ void Screen::Buffer::scrollUp(size_t v_n)
     else
     {
         // scroll up only inside vertical margin with full horizontal extend
-        auto const marginHeight = margin_.vertical.length();
+        auto const marginHeight = margin.vertical.length();
         auto const n = min(v_n, marginHeight);
         if (n < marginHeight)
         {
             rotate(
-                next(begin(lines), margin_.vertical.from - 1),
-                next(begin(lines), margin_.vertical.from - 1 + n),
-                next(begin(lines), margin_.vertical.to)
+                next(begin(lines), margin.vertical.from - 1),
+                next(begin(lines), margin.vertical.from - 1 + n),
+                next(begin(lines), margin.vertical.to)
             );
         }
 
-        auto const e_i = margin_.vertical.to - n;
-        for (auto li = next(begin(lines), e_i); li != next(begin(lines), margin_.vertical.to); ++li)
+        auto const e_i = margin.vertical.to - n;
+        for (auto li = next(begin(lines), e_i); li != next(begin(lines), margin.vertical.to); ++li)
             fill(begin(*li), end(*li), Cell{});
     }
 
@@ -530,17 +535,17 @@ void Screen::operator()(InsertLines const& v)
 
 void Screen::operator()(DeleteLines const& v)
 {
-    fill(
-        state_->currentLine,
-        next(
-            state_->currentLine,
-            min(
-                static_cast<long int>(v.n),
-                distance(state_->currentLine, end(state_->lines))
-            )
-        ),
-        Buffer::Line{columnCount(), Cell{}}
-    );
+    if (state_->margin_.vertical.from <= state_->cursor.row &&
+        state_->cursor.row <= state_->margin_.vertical.to)
+    {
+        auto const marginTopAdjust = size_t{state_->cursor.row - state_->margin_.vertical.from};
+        auto const margin = Buffer::Margin{
+            { state_->margin_.vertical.from + marginTopAdjust, state_->margin_.vertical.to },
+            state_->margin_.horizontal
+        };
+
+        state_->scrollUp(v.n, margin);
+    }
 }
 
 void Screen::operator()(DeleteCharacters const& v)

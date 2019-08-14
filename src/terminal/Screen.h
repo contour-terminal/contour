@@ -298,6 +298,7 @@ class Screen {
         }
 
         void scrollUp(size_t n);
+        void scrollUp(size_t n, Margin const& margin);
         void scrollDown(size_t n);
 
         void verifyCursorIterators() const;
