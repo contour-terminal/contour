@@ -1,0 +1,121 @@
+version: 2
+
+defaults:
+  - workflow_trigger_on_tags: &workflow_trigger_on_tags
+      filters:
+        tags:
+          only: /.*/
+
+  - workflow_x64_ubuntu1904_gcc: &workflow_x64_ubuntu1904_gcc
+      <<: *workflow_trigger_on_tags
+      requires:
+        - build_x64_ubuntu1904_gcc
+
+  - workflow_x64_ubuntu1904_clang: &workflow_x64_ubuntu1904_clang
+      <<: *workflow_trigger_on_tags
+      requires:
+        - build_x64_ubuntu1904_clang
+
+  - setup_prerelease_commit_hash: &setup_prerelease_commit_hash
+      name: Store commit hash and prerelease
+      command: |
+        if [ "$CIRCLE_BRANCH" = release -o -n "$CIRCLE_TAG" ]; then echo -n > prerelease.txt; else date -u +"nightly.%Y.%-m.%-d" > prerelease.txt; fi
+        echo -n "$CIRCLE_SHA1" > commit_hash.txt
+
+  - checkout_submodules: &checkout_submodules
+      name: Checkout submodules recursively
+      command: |
+        set -ex
+        git submodule sync --recursive
+        git submodule update --recursive --init
+
+  - install_deps_gcc: &install_deps_gcc
+      name: Install Dependencies
+      command: |
+        set -ex
+        apt -qq update
+        apt -qy install cmake ninja-build g++-9
+
+  - install_deps_clang: &install_deps_clang
+      name: Install Dependencies
+      command: |
+        set -ex
+        apt -qq update
+        apt -qy install cmake ninja-build clang++-8
+
+  - run_build: &run_build
+      name: Build
+      command: |
+        set -ex
+        if [ "$CIRCLE_BRANCH" = release -o -n "$CIRCLE_TAG" ]; then echo -n > prerelease.txt; else date -u +"nightly.%Y.%-m.%-d" > prerelease.txt; fi
+        echo -n "$CIRCLE_SHA1" > commit_hash.txt
+        mkdir -p build
+        cd build
+        [ -n "$COVERAGE" -a "$CIRCLE_BRANCH" != release -a -z "$CIRCLE_TAG" ] && CMAKE_OPTIONS="$CMAKE_OPTIONS -DCOVERAGE=ON"
+        cmake .. -DCMAKE_BUILD_TYPE="Debug" $CMAKE_OPTIONS -G Ninja
+        ninja -j3
+
+  - test_steps: &test_steps
+      - checkout
+      - attach_workspace:
+          at: build
+      - run:
+          name: test result prep
+          command: mkdir build/test_results
+      - run:
+          name: terminal_test
+          command: ./build/terminal_test -s '*' --reporter junit >build/test_results/terminal_test.xml
+      - store_test_results:
+          path: build/test_results
+      - store_artifacts:
+          path: build
+
+  - test_x64_ubuntu1904: &test_x64_ubuntu1904
+      docker:
+        - image: buildpack-deps:disco
+      steps: *test_steps
+
+jobs:
+
+  build_x64_ubuntu1904_gcc:
+    docker:
+      - image: buildpack-deps:disco
+    environment:
+      COVERAGE: "ON"
+    steps:
+      - checkout
+      - run: *checkout_submodules
+      - run: *install_deps_gcc
+      - run: *run_build
+      - persist_to_workspace:
+          root: build
+          paths:
+            - "*"
+
+  build_x64_ubuntu1904_clang:
+    docker:
+      - image: buildpack-deps:disco
+    environment:
+      COVERAGE: "ON"
+    steps:
+      - checkout
+      - run: *checkout_submodules
+      - run: *install_deps_clang
+      - run: *run_build
+      - persist_to_workspace:
+          root: build
+          paths:
+            - "*"
+
+  test_x64_ubuntu1904_gcc: *test_x64_ubuntu1904
+  test_x64_ubuntu1904_clang: *test_x64_ubuntu1904
+
+workflows:
+  version: 2
+
+  build_and_test:
+    jobs:
+      - build_x64_ubuntu1904_gcc: *workflow_trigger_on_tags
+      - build_x64_ubuntu1904_clang: *workflow_trigger_on_tags
+      - test_x64_ubuntu1904_gcc: *workflow_x64_ubuntu1904_gcc
+      - test_x64_ubuntu1904_clang: *workflow_x64_ubuntu1904_clang

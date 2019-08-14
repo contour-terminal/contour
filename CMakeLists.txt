@@ -19,6 +19,14 @@ option(LIBTERMINAL_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJ
 option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
 
 # ----------------------------------------------------------------------------
+# code coverage
+option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+if(LIBTERMINAL_COVERAGE)
+    add_compile_options(-g --coverage)
+    set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
+endif()
+
+# ----------------------------------------------------------------------------
 # fmtlib
 
 if(LIBTERMINAL_EMBEDDED_FMTLIB)
