@@ -1,5 +1,6 @@
 # libterminal - A modern C++ terminal emulator library
 [![CircleCI](https://circleci.com/gh/christianparpart/libterminal.svg?style=svg)](https://circleci.com/gh/christianparpart/libterminal)
+[![codecov](https://codecov.io/gh/christianparpart/libterminal/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/libterminal)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
 
 **IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
