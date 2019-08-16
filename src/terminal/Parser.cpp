@@ -11,6 +11,9 @@
 
 #include <fmt/format.h>
 
+#define VT_PARSER_TABLES 1
+//#define VT_PARSER_SWITCH 1
+
 namespace terminal {
 
 using namespace std;
@@ -64,11 +67,19 @@ void Parser::parse()
                 [&](utf8::Decoder::Invalid invalid) {
                     log("Invalid UTF8!");
                     currentChar_ = invalid.replacementCharacter;
+                    #if defined(VT_PARSER_TABLES)
                     handleViaTables();
+                    #else
+                    handleViaSwitch();
+                    #endif
                 },
                 [&](utf8::Decoder::Success success) {
                     currentChar_ = success.value;
+                    #if defined(VT_PARSER_TABLES)
                     handleViaTables();
+                    #else
+                    handleViaSwitch();
+                    #endif
                 },
             },
             utf8Decoder_.decode(currentByte()));
@@ -99,6 +110,17 @@ void Parser::logTrace(std::string const& message) const
     }
 }
 
+void Parser::invokeAction(ActionClass actionClass, Action action)
+{
+    // if (action != Action::Ignore && action != Action::Undefined)
+    //     log("0x{:02X} '{}' {} {}: {}", currentChar(), escape(currentChar()), to_string(actionClass),
+    //         to_string(state_), to_string(action));
+
+    if (actionHandler_)
+        actionHandler_(actionClass, action, currentChar());
+}
+
+#if defined(VT_PARSER_TABLES)
 void Parser::handleViaTables()
 {
     auto const s = static_cast<size_t>(state_);
@@ -121,7 +143,9 @@ void Parser::handleViaTables()
         log("Parser Error: Unknown action for state/input pair ({}, {})", to_string(state_),
             escape(currentChar()));
 }
+#endif
 
+#if defined(VT_PARSER_SWITCH)
 void Parser::handleViaSwitch()
 {
     logTrace("handle character");
@@ -344,16 +368,6 @@ void Parser::handleViaSwitch()
     }
 }
 
-void Parser::invokeAction(ActionClass actionClass, Action action)
-{
-    // if (action != Action::Ignore && action != Action::Undefined)
-    //     log("0x{:02X} '{}' {} {}: {}", currentChar(), escape(currentChar()), to_string(actionClass),
-    //         to_string(state_), to_string(action));
-
-    if (actionHandler_)
-        actionHandler_(actionClass, action, currentChar());
-}
-
 void Parser::transitionTo(State targetState, Action action)
 {
     invokeAction(ActionClass::Transition, action);
@@ -377,5 +391,6 @@ void Parser::transitionTo(State targetState, Action action)
             break;
     }
 }
+#endif
 
 }  // namespace terminal
