@@ -58,7 +58,7 @@ defaults:
       - run:
           name: terminal_test
           command: ./build/terminal_test --reporter junit -o build/test_results/terminal_test.xml
-      - run: *run_cov
+      - run:
           name: Coverage
           command: codecov --flags all --gcov-glob '*3rdparty/*'
       - store_test_results:
@@ -68,14 +68,14 @@ defaults:
 
   - test_x64_ubuntu1904: &test_x64_ubuntu1904
       docker:
-        - image: trapni/libterminal-buildpack-deps:master
+        - image: trapni/libterminal-buildpack-deps
       steps: *test_steps
 
 jobs:
 
   build_x64_ubuntu1904_gcc:
     docker:
-      - image: trapni/libterminal-buildpack-deps:master
+      - image: trapni/libterminal-buildpack-deps
     environment:
       COVERAGE: "ON"
     steps:
@@ -89,7 +89,7 @@ jobs:
 
   build_x64_ubuntu1904_clang:
     docker:
-      - image: trapni/libterminal-buildpack-deps:master
+      - image: trapni/libterminal-buildpack-deps
     environment:
       COVERAGE: "ON"
     steps:

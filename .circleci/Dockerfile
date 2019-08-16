@@ -1,4 +1,4 @@
-FROM ubuntu:19.04 AS base
+FROM buildpack-deps:disco AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
 
