@@ -7,7 +7,7 @@ RUN set -ex; \
 	apt-get install -qqy --no-install-recommends \
 		build-essential \
 		software-properties-common \
-		cmake ninja-build clang++-8 g++-9 \
+		cmake ninja-build clang++-8 g++-9 lcov \
 		; \
 	apt-get install -qy python-pip; \
 	pip install codecov; \
