@@ -6,6 +6,11 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(ClangTidy)
 include(EnableCcache)
 
+# toolchain
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 find_package(Threads)
 
 set(MASTER_PROJECT OFF)
@@ -16,11 +21,12 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
 option(LIBTERMINAL_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
+option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(LIBTERMINAL_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 
 # ----------------------------------------------------------------------------
 # code coverage
-option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 if(LIBTERMINAL_COVERAGE)
     add_compile_options(-g --coverage)
     set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
@@ -41,6 +47,10 @@ if(LIBTERMINAL_TESTING AND LIBTERMINAL_EMBEDDED_CATCH2)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
 else()
     # master project must provide its own fmtlib
+endif()
+
+if(LIBTERMINAL_EXAMPLES)
+    add_subdirectory(examples)
 endif()
 
 # ----------------------------------------------------------------------------
