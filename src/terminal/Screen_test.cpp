@@ -284,7 +284,42 @@ TEST_CASE("DeleteLines", "[screen]")
 // TODO: DeleteCharacters
 
 // TODO: ClearScrollbackBuffer
-// TODO: ScrollUp
+TEST_CASE("ScrollUp", "[screen]")
+{
+    Screen screen{3, 3, {}, [&](auto const& msg) { INFO(msg); }, {}};
+    screen.write("ABC\n");
+    screen.write("DEF\n");
+    screen.write("GHI");
+    REQUIRE("ABC\nDEF\nGHI\n" == screen.renderText());
+
+    SECTION("no-op") {
+        INFO("begin:");
+        screen(ScrollUp{0});
+        INFO("end:");
+        REQUIRE("ABC\nDEF\nGHI\n" == screen.renderText());
+    }
+
+    SECTION("by-1") {
+        screen(ScrollUp{1});
+        REQUIRE("DEF\nGHI\n   \n" == screen.renderText());
+    }
+
+    SECTION("by-2") {
+        screen(ScrollUp{2});
+        REQUIRE("GHI\n   \n   \n" == screen.renderText());
+    }
+
+    SECTION("by-3") {
+        screen(ScrollUp{3});
+        REQUIRE("   \n   \n   \n" == screen.renderText());
+    }
+
+    SECTION("clamped") {
+        screen(ScrollUp{4});
+        REQUIRE("   \n   \n   \n" == screen.renderText());
+    }
+}
+
 // TODO: ScrollDown
 
 TEST_CASE("MoveCursorUp", "[screen]")

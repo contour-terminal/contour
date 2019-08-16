@@ -11,10 +11,7 @@ namespace terminal {
 
 void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
 {
-    auto const rowCount = numLines();
-    auto const columnCount = numColumns();
-
-    if (margin_.horizontal == Range{1, columnCount} && margin_.vertical == Range{1, rowCount})
+    if (margin_.horizontal == Range{1, numColumns_} && margin_.vertical == Range{1, numLines_})
     {
         // full screen margins adapt implicitely to remain full-size
         margin_ = Margin{
@@ -31,18 +28,18 @@ void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
         margin_.vertical.to = min(margin_.vertical.to, newRowCount);
     }
 
-    if (newColumnCount > columnCount)
+    if (newColumnCount > numColumns_)
     {
         // TODO: grow existing lines to newColumnCount
     }
-    else if (newColumnCount < columnCount)
+    else if (newColumnCount < numColumns_)
     {
         // TODO: shrink existing lines to newColumnCount
     }
 
-    if (newRowCount > rowCount)
+    if (newRowCount > numLines_)
     {
-        auto const extendCount = newRowCount - rowCount;
+        auto const extendCount = newRowCount - numLines_;
         auto const rowsToTakeFromSavedLines = min(extendCount, size(savedLines));
         lines.splice(
             begin(lines),
@@ -170,17 +167,21 @@ void Screen::Buffer::scrollUp(size_t v_n, Margin const& margin)
         // full-screen scroll-up
         auto const n = min(v_n, numLines());
 
-        savedLines.splice(
-            end(savedLines),
-            lines,
-            next(begin(lines), n)
-        );
+        if (n > 0)
+        {
+            savedLines.splice(
+                end(savedLines),
+                lines,
+                begin(lines),
+                next(begin(lines), n)
+            );
 
-        generate_n(
-            back_inserter(lines),
-            n,
-            [this]() { return Line{numColumns(), Cell{}}; }
-        );
+            generate_n(
+                back_inserter(lines),
+                n,
+                [this]() { return Line{numColumns(), Cell{}}; }
+            );
+        }
     }
     else
     {

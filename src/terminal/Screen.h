@@ -253,7 +253,9 @@ class Screen {
         };
 
         Buffer(size_t cols, size_t rows)
-            : lines{rows, Line{cols, Cell{}}},
+            : numColumns_{cols},
+              numLines_{rows},
+              lines{rows, Line{cols, Cell{}}},
               margin_{
                   {1, rows},
                   {1, cols}
@@ -262,6 +264,8 @@ class Screen {
             verifyCursorIterators();
         }
 
+        size_t numColumns_;
+        size_t numLines_;
         Lines lines;
         Lines savedLines{};
 
@@ -282,20 +286,8 @@ class Screen {
         void linefeed();
 
         void resize(size_t newColumnCount, size_t newRowCount);
-
-        size_t numLines() const noexcept {
-            return std::distance(
-                begin(lines),
-                end(lines)
-            );
-        }
-
-        size_t numColumns() const noexcept {
-            return std::distance(
-                begin(*begin(lines)),
-                end(*begin(lines))
-            );
-        }
+        size_t numLines() const noexcept { return numLines_; }
+        size_t numColumns() const noexcept { return numColumns_; }
 
         void scrollUp(size_t n);
         void scrollUp(size_t n, Margin const& margin);
