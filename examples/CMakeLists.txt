@@ -1,2 +1,2 @@
-add_executable(stats_term stats_term.cpp)
-target_link_libraries(stats_term terminal)
+add_executable(proxy_term proxy_term.cpp)
+target_link_libraries(proxy_term terminal)
