@@ -29,20 +29,6 @@ defaults:
         git submodule sync --recursive
         git submodule update --recursive --init
 
-  - install_deps_gcc: &install_deps_gcc
-      name: Install Dependencies
-      command: |
-        set -ex
-        apt -qq update
-        apt -qy install cmake ninja-build g++-9
-
-  - install_deps_clang: &install_deps_clang
-      name: Install Dependencies
-      command: |
-        set -ex
-        apt -qq update
-        apt -qy install cmake ninja-build clang++-8
-
   - run_build: &run_build
       name: Build
       command: |
@@ -54,12 +40,6 @@ defaults:
         [ -n "$COVERAGE" -a "$CIRCLE_BRANCH" != release -a -z "$CIRCLE_TAG" ] && CMAKE_OPTIONS="$CMAKE_OPTIONS -DCOVERAGE=ON"
         cmake .. -DCMAKE_BUILD_TYPE="Debug" -DLIBTERMINAL_COVERAGE=ON $CMAKE_OPTIONS -G Ninja
         ninja -j3
-
-  - run_cov: &run_cov
-      name: Coverage
-      command: |
-        cd build
-        codecov --flags all --gcov-glob '*3rdparty/*'
 
   - test_steps: &test_steps
       - checkout
@@ -79,6 +59,8 @@ defaults:
           name: terminal_test
           command: ./build/terminal_test --reporter junit -o build/test_results/terminal_test.xml
       - run: *run_cov
+          name: Coverage
+          command: codecov --flags all --gcov-glob '*3rdparty/*'
       - store_test_results:
           path: build/test_results
       - store_artifacts:
@@ -86,20 +68,19 @@ defaults:
 
   - test_x64_ubuntu1904: &test_x64_ubuntu1904
       docker:
-        - image: buildpack-deps:disco
+        - image: trapni/libterminal-buildpack-deps:master
       steps: *test_steps
 
 jobs:
 
   build_x64_ubuntu1904_gcc:
     docker:
-      - image: buildpack-deps:disco
+      - image: trapni/libterminal-buildpack-deps:master
     environment:
       COVERAGE: "ON"
     steps:
       - checkout
       - run: *checkout_submodules
-      - run: *install_deps_gcc
       - run: *run_build
       - persist_to_workspace:
           root: build
@@ -108,13 +89,12 @@ jobs:
 
   build_x64_ubuntu1904_clang:
     docker:
-      - image: buildpack-deps:disco
+      - image: trapni/libterminal-buildpack-deps:master
     environment:
       COVERAGE: "ON"
     steps:
       - checkout
       - run: *checkout_submodules
-      - run: *install_deps_clang
       - run: *run_build
       - persist_to_workspace:
           root: build
