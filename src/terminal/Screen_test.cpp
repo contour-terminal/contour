@@ -221,24 +221,29 @@ TEST_CASE("ClearLine", "[screen]")
 
 TEST_CASE("InsertLines", "[screen]")
 {
-    Screen screen{2, 3, {}, [&](auto const& msg) { INFO(msg); }, {}};
+    Screen screen{4, 6, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP");
+    REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderText());
 
-    screen.write("AB\nCD");
-    REQUIRE("AB" == screen.renderTextLine(1));
-    REQUIRE("CD" == screen.renderTextLine(2));
-    REQUIRE("  " == screen.renderTextLine(3));
+    SECTION("old") {
+        Screen screen{2, 3, {}, [&](auto const& msg) { INFO(msg); }, {}};
 
-    screen(InsertLines{1});
-    CHECK("AB" == screen.renderTextLine(1));
-    CHECK("  " == screen.renderTextLine(2));
-    CHECK("CD" == screen.renderTextLine(3));
+        screen.write("AB\nCD");
+        REQUIRE("AB" == screen.renderTextLine(1));
+        REQUIRE("CD" == screen.renderTextLine(2));
+        REQUIRE("  " == screen.renderTextLine(3));
 
-    screen(MoveCursorTo{1, 1});
-    screen(InsertLines{1});
-    CHECK("  " == screen.renderTextLine(1));
-    CHECK("AB" == screen.renderTextLine(2));
-    CHECK("  " == screen.renderTextLine(3));
+        screen(InsertLines{1});
+        CHECK("AB" == screen.renderTextLine(1));
+        CHECK("  " == screen.renderTextLine(2));
+        CHECK("CD" == screen.renderTextLine(3));
 
+        screen(MoveCursorTo{1, 1});
+        screen(InsertLines{1});
+        CHECK("  " == screen.renderTextLine(1));
+        CHECK("AB" == screen.renderTextLine(2));
+        CHECK("  " == screen.renderTextLine(3));
+    }
     // TODO: test with (top/bottom and left/right) margins enabled
 }
 

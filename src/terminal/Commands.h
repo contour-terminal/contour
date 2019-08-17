@@ -68,8 +68,15 @@ enum class Mode {
     CursorRestrictedToMargin, 
 
     /**
-     * If enabled, when the cursor is at the right margin and a character is send, it will be 
-     * wrapped onto the next line, poentially scrolling the screen.
+     * DECAWM - Autowrap Mode.
+     *
+     * This control function determines whether or not received characters automatically wrap
+     * to the next line when the cursor reaches the right border of a page in page memory.
+     *
+     * If the DECAWM function is set, then graphic characters received when the cursor
+     * is at the right border of the page appear at the beginning of the next line.
+     *
+     * Any text on the page scrolls up if the cursor is at the end of the scrolling region.
      */
     AutoWrap,
 
@@ -155,13 +162,39 @@ struct ClearToBeginOfScreen {};
 struct ClearScreen {};
 
 struct ClearScrollbackBuffer {};
-struct ScrollUp { cursor_pos_t n; };
-struct ScrollDown { cursor_pos_t n; };
+
+/// SU - Pan Down.
+///
+/// This control function moves the user window down a specified number of lines in page memory.
+struct ScrollUp {
+    /// This is the number of lines to move the user window down in page memory.
+    /// @p n new lines appear at the bottom of the display.
+    /// @p n old lines disappear at the top of the display.
+    /// You cannot pan past the bottom margin of the current page.
+    cursor_pos_t n;
+};
+
+/// SD - Pan Up.
+///
+/// This control function moves the user window up a specified number of lines in page memory.
+struct ScrollDown {
+    /// This is the number of lines to move the user window up in page memory.
+    /// @p n new lines appear at the top of the display.
+    /// @p n old lines disappear at the bottom of the display.
+    /// You cannot pan past the top margin of the current page.
+    cursor_pos_t n;
+};
 
 struct ClearToEndOfLine {};
 struct ClearToBeginOfLine {};
 struct ClearLine {};
 
+/// IL - Insert Line
+///
+/// This control function inserts one or more blank lines, starting at the cursor.
+///
+/// As lines are inserted, lines below the cursor and in the scrolling region move down.
+/// Lines scrolled off the page are lost. IL has no effect outside the page margins.
 struct InsertLines { cursor_pos_t n; };
 
 /// DL - Delete Line
@@ -175,21 +208,89 @@ struct InsertLines { cursor_pos_t n; };
 ///
 /// DL has no effect outside the scrolling margins.
 struct DeleteLines {
+    /// This is the number of lines to delete.
     cursor_pos_t n;
 };
 
-struct DeleteCharacters { cursor_pos_t n; };
+/// DCH - Delete Character.
+///
+/// This control function deletes one or more characters from the cursor position to the right.
+///
+/// As characters are deleted, the remaining characters between the cursor and right margin move to the left.
+/// Character attributes move with the characters.
+/// The terminal adds blank spaces with no visual character attributes at the right margin.
+/// DCH has no effect outside the scrolling margins.
+struct DeleteCharacters {
+    /// This is the number of characters to delete.
+    ///
+    /// If this value is greater than the number of characters between the cursor and the right margin,
+    /// then DCH only deletes the remaining characters.
+    cursor_pos_t n;
+};
 
-struct MoveCursorUp { cursor_pos_t n; };
-struct MoveCursorDown { cursor_pos_t n; };
-struct MoveCursorForward { cursor_pos_t n; };
-struct MoveCursorBackward { cursor_pos_t n; };
-struct MoveCursorToColumn { cursor_pos_t column; };
+/// CUU - Cursor Up.
+/// Moves the cursor up a specified number of lines in the same column.
+/// The cursor stops at the top margin.
+/// If the cursor is already above the top margin, then the cursor stops at the top line.
+struct MoveCursorUp {
+    /// This is the number of lines to move the cursor up.
+    cursor_pos_t n;
+};
+
+/// CUD - Cursor Down.
+///
+/// This control function moves the cursor down a specified number of lines in the same column.
+/// The cursor stops at the bottom margin.
+/// If the cursor is already below the bottom margin, then the cursor stops at the bottom line.
+struct MoveCursorDown {
+    /// This is the number of lines to move the cursor down.
+    cursor_pos_t n;
+};
+
+/// CUF - Cursor Forward.
+///
+/// This control function moves the cursor to the right by a specified number of columns.
+/// The cursor stops at the right border of the page.
+struct MoveCursorForward {
+    /// This is the number of columns to move the cursor to the right.
+    cursor_pos_t n;
+};
+
+/// CUB - Cursor Backward.
+///
+/// This control function moves the cursor to the left by a specified number of columns.
+/// The cursor stops at the left border of the page.
+struct MoveCursorBackward {
+    /// This is the number of columns to move the cursor to the left.
+    cursor_pos_t n;
+};
+
+/// CHA - Cursor Horizontal Absolute.
+///
+/// Move the active position to the n-th character of the active line.
+///
+/// The active position is moved to the n-th character position of the active line.
+struct MoveCursorToColumn {
+    /// This is the number of active positions to the n-th character of the active line.
+    cursor_pos_t column;
+};
 
 /// Moves the cursor to the left margin on the current line.
 struct MoveCursorToBeginOfLine {};
 
-struct MoveCursorTo { cursor_pos_t row; cursor_pos_t column; };
+/// CUP - Cursor Position.
+///
+/// This control function moves the cursor to the specified line and column.
+/// The starting point for lines and columns depends on the setting of origin mode (DECOM).
+/// CUP applies only to the current page.
+struct MoveCursorTo {
+    /// This is the number of the line to move to. If the value is 0 or 1, then the cursor moves to line 1.
+    cursor_pos_t row;
+
+    /// This is the number of the column to move to. If the value is 0 or 1, then the cursor moves to column 1.
+    cursor_pos_t column;
+};
+
 struct MoveCursorToNextTab {};
 
 struct HideCursor {};
@@ -265,10 +366,27 @@ struct Index {};
 /// Moves the cursor up, but also scrolling the screen if already at top
 struct ReverseIndex {};
 
-// DECBI - Back Index
+/// DECBI - Back Index.
+///
+/// This control function moves the cursor backward one column.
+/// If the cursor is at the left margin, then all screen data within the margin moves one column to the right.
+/// The column that shifted past the right margin is lost.
+///
+/// DECBI adds a new column at the left margin with no visual attributes.
+/// DECBI is not affected by the margins.
+/// If the cursor is at the left border of the page when the terminal receives DECBI, then the terminal ignores DECBI.
 struct BackIndex {};
 
-// DECFI - Forward Index
+/// DECFI - Forward Index
+///
+/// This control function moves the cursor forward one column.
+/// If the cursor is at the right margin, then all screen data within the margins moves one column to the left.
+/// The column shifted past the left margin is lost.
+///
+/// DECFI adds a new column at the right margin, with no visual attributes.
+/// DECFI is not affected by the margins.
+/// If the cursor is at the right border of the page when the terminal receives DECFI,
+/// then the terminal ignores DECFI.
 struct ForwardIndex {};
 
 // OSC commands:
