@@ -809,6 +809,23 @@ void Screen::operator()(SetLeftRightMargin const& margin)
     state_->margin_.horizontal.to = margin.right;
 }
 
+void Screen::operator()(ScreenAlignmentPattern const&)
+{
+    // sets the margins to the extremes of the page
+    state_->margin_.vertical.from = 1;
+    state_->margin_.vertical.to = rowCount_;
+    state_->margin_.horizontal.from = 1;
+    state_->margin_.horizontal.to = columnCount_;
+
+    // and moves the cursor to the home position
+    moveCursorTo(1, 1);
+
+    // fills the complete screen area with a test pattern
+    for (auto& line: state_->lines)
+        for (auto& col: line)
+            col.character = 'X';
+}
+
 void Screen::operator()(SendMouseEvents const& v)
 {
 }

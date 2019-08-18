@@ -389,6 +389,14 @@ struct BackIndex {};
 /// then the terminal ignores DECFI.
 struct ForwardIndex {};
 
+/// DECALN - Screen Alignment Pattern.
+///
+/// This control function fills the complete screen area with a test pattern used for adjusting screen alignment.
+/// Normally, only manufacturing and service personnel would use DECALN.
+///
+/// DECALN sets the margins to the extremes of the page, and moves the cursor to the home position.
+struct ScreenAlignmentPattern {};
+
 // OSC commands:
 struct ChangeWindowTitle { std::string title; };
 struct ChangeIconName { std::string name; };
@@ -451,6 +459,7 @@ using Command = std::variant<
     SingleShiftSelect,
     SetTopBottomMargin,
     SetLeftRightMargin,
+    ScreenAlignmentPattern,
 
     // OSC
     ChangeWindowTitle,

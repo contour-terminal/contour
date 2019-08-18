@@ -218,6 +218,7 @@ string to_string(Command const& _command)
             [&](SingleShiftSelect const& v) { return format("SingleShiftSelect({})", to_string(v.table)); },
             [&](SetTopBottomMargin const& v) { return format("SetTopBottomMargin({}, {})", v.top, v.bottom); },
             [&](SetLeftRightMargin const& v) { return format("SetLeftRightMargin({}, {})", v.left, v.right); },
+            [&](ScreenAlignmentPattern const& v) { return format("ScreenAlignmentPattern()"); },
             [&](AppendChar const& v) { return format("AppendChar({})", escape(utf8::to_string(utf8::encode(v.ch)))); },
             [&](ChangeWindowTitle const& v) { return format("ChangeWindowTitle(\"{}\")", v.title); },
             [&](ChangeIconName const& v) { return format("ChangeIconName(\"{}\")", v.name); },

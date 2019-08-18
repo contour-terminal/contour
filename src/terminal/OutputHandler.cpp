@@ -12,6 +12,30 @@ namespace terminal {
 
 using namespace std;
 
+optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
+{
+    if (_intermediate.size() != 1)
+        return nullopt;
+
+    wchar_t const code = _intermediate[0];
+    switch (code)
+    {
+        case '(':
+            return {CharsetTable::G0};
+        case ')':
+        case '-':
+            return {CharsetTable::G1};
+        case '*':
+        case '.':
+            return {CharsetTable::G2};
+        case '+':
+        case '/':
+            return {CharsetTable::G3};
+        default:
+            return nullopt;
+    }
+}
+
 void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t _currentChar)
 {
     currentChar_ = _currentChar;
@@ -49,7 +73,19 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t
             executeControlFunction();
             return;
         case Action::ESC_Dispatch:
-            dispatchESC();
+            if (intermediateCharacters_.empty())
+                dispatchESC();
+            else if (intermediateCharacters_ == "#" && currentChar() == '8')
+                emit<ScreenAlignmentPattern>();
+            else if (currentChar_ == '0')
+            {
+                if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
+                    emit<DesignateCharset>(*g, Charset::Special);
+                else
+                    log("Invalid charset table identifier: {}", escape(intermediateCharacters_[0]));
+            }
+            else
+                logInvalidESC();
             return;
         case Action::OSC_Start:
             // no need, we inline OSC_Put and OSC_End's actions
@@ -129,26 +165,6 @@ void OutputHandler::executeControlFunction()
     }
 }
 
-constexpr optional<CharsetTable> getCharsetTableForCode(wchar_t code)
-{
-    switch (code)
-    {
-        case '(':
-            return {CharsetTable::G0};
-        case ')':
-        case '-':
-            return {CharsetTable::G1};
-        case '*':
-        case '.':
-            return {CharsetTable::G2};
-        case '+':
-        case '/':
-            return {CharsetTable::G3};
-        default:
-            return nullopt;
-    }
-}
-
 void OutputHandler::dispatchESC()
 {
     switch (currentChar())
@@ -176,12 +192,6 @@ void OutputHandler::dispatchESC()
             break;
         case 'M':
             emit<ReverseIndex>();
-            break;
-        case '0':  // Special Character and Line Drawing Set
-            if (auto g = getCharsetTableForCode(intermediateCharacters_[0]); g.has_value())
-                emit<DesignateCharset>(*g, Charset::Special);
-            else
-                log("Invalid charset table identifier: {}", escape(intermediateCharacters_[0]));
             break;
         case 'N':  // SS2: Single Shift Select of G2 Character Set
             emit<SingleShiftSelect>(CharsetTable::G2);
@@ -728,6 +738,11 @@ void OutputHandler::logUnsupportedCSI() const
             begin(parameters_), end(parameters_), string{},
             [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
         static_cast<char>(currentChar()));
+}
+
+void OutputHandler::logInvalidESC(std::string const& message) const
+{
+    log("Invalid ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
 }
 
 void OutputHandler::logInvalidCSI(std::string const& message) const

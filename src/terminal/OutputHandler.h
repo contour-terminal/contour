@@ -79,6 +79,7 @@ class OutputHandler {
             debugLog_(fmt::format(msg, args...));
     }
 
+    void logInvalidESC(std::string const& message = "") const;
     void logInvalidCSI(std::string const& message = "") const;
     void logUnsupportedCSI() const;
     void logUnsupported(std::string_view const& msg) const;

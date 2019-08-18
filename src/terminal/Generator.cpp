@@ -195,6 +195,7 @@ void Generator::operator()(Command const& command)
         [&](SetMode mode) { write("\033[{}{}", to_code(mode.mode), mode.enable ? 'h' : 'l'); },
         [&](SetTopBottomMargin margin) { write("\033[{};{}r", margin.top, margin.bottom); },
         [&](SetLeftRightMargin margin) { write("\033[{};{}s", margin.left, margin.right); },
+        [&](ScreenAlignmentPattern) { write("\033#8"); },
         [&](SendMouseEvents v) { write("\033[?{}{}", to_code(v.protocol), v.enable ? 'h' : 'l'); },
         [&](AlternateKeypadMode v) { write("\033{}", v.enable ? '=' : '>'); },
         [&](Index) { write("\033D"); },

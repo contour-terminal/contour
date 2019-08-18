@@ -735,6 +735,36 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
     REQUIRE(2 == screen.currentColumn());
 }
 
+TEST_CASE("ScreenAlignmentPattern", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen(SetLeftRightMargin{2, 4});
+    screen(SetTopBottomMargin{2, 4});
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+
+    REQUIRE(5 == screen.currentRow());
+    REQUIRE(5 == screen.currentColumn());
+
+    REQUIRE(2 == screen.margin().horizontal.from);
+    REQUIRE(4 == screen.margin().horizontal.to);
+    REQUIRE(2 == screen.margin().vertical.from);
+    REQUIRE(4 == screen.margin().vertical.to);
+
+    SECTION("test") {
+        screen(ScreenAlignmentPattern{});
+        REQUIRE("XXXXX\nXXXXX\nXXXXX\nXXXXX\nXXXXX\n" == screen.renderText());
+
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(1 == screen.currentColumn());
+
+        REQUIRE(1 == screen.margin().horizontal.from);
+        REQUIRE(5 == screen.margin().horizontal.to);
+        REQUIRE(1 == screen.margin().vertical.from);
+        REQUIRE(5 == screen.margin().vertical.to);
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition

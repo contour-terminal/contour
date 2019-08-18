@@ -163,6 +163,7 @@ class Screen {
     void operator()(SetMode const& v);
     void operator()(SetTopBottomMargin const& v);
     void operator()(SetLeftRightMargin const& v);
+    void operator()(ScreenAlignmentPattern const& v);
     void operator()(SendMouseEvents const& v);
     void operator()(AlternateKeypadMode const& v);
     void operator()(DesignateCharset const& v);
@@ -303,6 +304,9 @@ class Screen {
         if (logger_)
             logger_("Screen: " + fmt::format(message, std::forward<Args>(args)...));
     }
+
+  public:
+    Buffer::Margin const& margin() const noexcept { return state_->margin_; }
 
   private:
     Logger const logger_;
