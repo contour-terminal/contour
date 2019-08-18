@@ -60,13 +60,29 @@ void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
     }
 }
 
+void Screen::Buffer::moveCursorTo(Coordinate to)
+{
+    cursor = clampCoordinate(toRealCoordinate(to));
+    updateCursorIterators();
+}
+
 Screen::Cell& Screen::Buffer::at(cursor_pos_t row, cursor_pos_t col)
 {
+    if (cursorRestrictedToMargin)
+    {
+        row += margin_.vertical.from - 1;
+        col += margin_.horizontal.from - 1;
+    }
     return (*next(begin(lines), row - 1))[col - 1];
 }
 
 Screen::Cell const& Screen::Buffer::at(cursor_pos_t row, cursor_pos_t col) const
 {
+    if (cursorRestrictedToMargin)
+    {
+        row += margin_.vertical.from - 1;
+        col += margin_.horizontal.from - 1;
+    }
     return (*next(begin(lines), row - 1))[col - 1];
 }
 
@@ -94,12 +110,12 @@ void Screen::Buffer::linefeed()
         currentColumn = begin(*currentLine);
     }
 
-    verifyCursorIterators();
+    verifyState();
 }
 
 void Screen::Buffer::appendChar(wchar_t ch)
 {
-    verifyCursorIterators();
+    verifyState();
 
     if (wrapPending && autoWrap)
     {
@@ -113,7 +129,7 @@ void Screen::Buffer::appendChar(wchar_t ch)
     {
         cursor.column++;
         currentColumn++;
-        verifyCursorIterators();
+        verifyState();
     }
     else if (autoWrap)
     {
@@ -315,11 +331,16 @@ void Screen::Buffer::updateCursorIterators()
     currentLine = next(begin(lines), cursor.row - 1);
     currentColumn = next(begin(*currentLine), cursor.column - 1);
 
-    verifyCursorIterators();
+    verifyState();
 }
 
-void Screen::Buffer::verifyCursorIterators() const
+void Screen::Buffer::verifyState() const
 {
+    // verify cursor positions
+    auto const clampedCursor = clampCoordinate(cursor);
+    assert(cursor == clampedCursor);
+
+    // verify iterators
     auto const line = next(begin(lines), cursor.row - 1);
     auto const col = next(begin(*line), cursor.column - 1);
 
@@ -540,7 +561,7 @@ void Screen::operator()(DeleteLines const& v)
         state_->cursor.row <= state_->margin_.vertical.to)
     {
         auto const marginTopAdjust = size_t{state_->cursor.row - state_->margin_.vertical.from};
-        auto const margin = Buffer::Margin{
+        auto const margin = Margin{
             { state_->margin_.vertical.from + marginTopAdjust, state_->margin_.vertical.to },
             state_->margin_.horizontal
         };
@@ -570,7 +591,7 @@ void Screen::operator()(MoveCursorUp const& v)
     state_->cursor.row -= n;
     state_->currentLine = prev(state_->currentLine, n);
     state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorDown const& v)
@@ -579,7 +600,7 @@ void Screen::operator()(MoveCursorDown const& v)
     state_->cursor.row += n;
     state_->currentLine = next(state_->currentLine, n);
     state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorForward const& v)
@@ -590,7 +611,7 @@ void Screen::operator()(MoveCursorForward const& v)
         state_->currentColumn,
         n
     );
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorBackward const& v)
@@ -602,7 +623,7 @@ void Screen::operator()(MoveCursorBackward const& v)
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
     state_->wrapPending = false;
 
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorToColumn const& v)
@@ -610,7 +631,7 @@ void Screen::operator()(MoveCursorToColumn const& v)
     auto const n = min(v.column, columnCount());
     state_->cursor.column = n;
     state_->currentColumn = next(begin(*state_->currentLine), n - 1);
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorToBeginOfLine const& v)
@@ -621,7 +642,7 @@ void Screen::operator()(MoveCursorToBeginOfLine const& v)
         begin(*state_->currentLine),
         state_->cursor.column - 1
     );
-    state_->verifyCursorIterators();
+    state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorTo const& v)
@@ -784,6 +805,9 @@ void Screen::operator()(SetMode const& v)
         case Mode::AutoWrap:
             state_->autoWrap = v.enable;
             break;
+        case Mode::CursorRestrictedToMargin:
+            state_->cursorRestrictedToMargin = v.enable;
+            break;
         default:
             break;
     }
@@ -805,8 +829,11 @@ void Screen::operator()(SetTopBottomMargin const& margin)
 
 void Screen::operator()(SetLeftRightMargin const& margin)
 {
-    state_->margin_.horizontal.from = margin.left;
-    state_->margin_.horizontal.to = margin.right;
+    if (isModeEnabled(Mode::LeftRightMargin))
+    {
+        state_->margin_.horizontal.from = margin.left;
+        state_->margin_.horizontal.to = margin.right;
+    }
 }
 
 void Screen::operator()(ScreenAlignmentPattern const&)
@@ -882,11 +909,7 @@ Screen::Cell& Screen::at(cursor_pos_t rowNr, cursor_pos_t colNr) noexcept
 
 void Screen::moveCursorTo(Coordinate to)
 {
-    state_->cursor.row = clamp(to.row, cursor_pos_t{1}, rowCount());
-    state_->cursor.column = clamp(to.column, cursor_pos_t{1}, columnCount());
-    log("moveCursorTo: {}:{}", state_->cursor.row, state_->cursor.column);
-
-    state_->updateCursorIterators();
+    state_->moveCursorTo(to);
 }
 // }}}
 

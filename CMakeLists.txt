@@ -79,7 +79,7 @@ set(terminal_SOURCES
     src/terminal/Generator.cpp
     src/terminal/OutputHandler.cpp
     src/terminal/Parser.cpp
-    #src/terminal/Process.cpp
+    src/terminal/Process.cpp
     src/terminal/Screen.cpp
     src/terminal/Terminal.cpp
     src/terminal/VTType.cpp
@@ -87,7 +87,8 @@ set(terminal_SOURCES
 
 set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only)
 if(UNIX)
-	append(LIBTERMINAL_LIBRARIES util)
+    list(APPEND LIBTERMINAL_LIBRARIES util)
+    list(APPEND terminal_SOURCES src/terminal/Parser.cpp) # TODO: move back to main list ASAP
 endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})

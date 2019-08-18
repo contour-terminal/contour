@@ -13,8 +13,8 @@ using cursor_pos_t = size_t;
 
 /// Screen coordinates between 1..n including.
 struct Coordinate {
-    size_t row;
-    size_t column;
+    cursor_pos_t row;
+    cursor_pos_t column;
 };
 
 constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
@@ -65,6 +65,23 @@ enum class Mode {
     Columns132,
     SmoothScroll,
     ReverseVideo,
+    /**
+     * DECOM - Origin Mode.
+     *
+     * This control function sets the origin for the cursor.
+     * DECOM determines if the cursor position is restricted to inside the page margins.
+     * When you power up or reset the terminal, you reset origin mode.
+     *
+     * Default: Origin is at the upper-left of the screen, independent of margins.
+     *
+     * When DECOM is set, the home cursor position is at the upper-left corner of the screen, within the margins.
+     * The starting point for line numbers depends on the current top margin setting.
+     * The cursor cannot move outside of the margins.
+     *
+     * When DECOM is reset, the home cursor position is at the upper-left corner of the screen.
+     * The starting point for line numbers is independent of the margins.
+     * The cursor can move outside of the margins.
+     */
     CursorRestrictedToMargin, 
 
     /**

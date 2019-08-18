@@ -62,7 +62,6 @@ TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
 {
     auto screen = Screen{3, 2, {}, [&](auto const& msg) { INFO(msg); }, {}};
     screen(SetMode{Mode::AutoWrap, true});
-    printf("inside test above sections!\n");
 
     INFO("write ABC");
     screen.write("ABC");
@@ -459,22 +458,46 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 
 TEST_CASE("MoveCursorTo", "[screen]")
 {
-    Screen screen{3, 3, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
-    // in-range
-    screen(MoveCursorTo{3, 2});
-    REQUIRE(3 == screen.currentRow());
-    REQUIRE(2 == screen.currentColumn());
+    SECTION("origin mode disabled") {
+        SECTION("in range") {
+            screen(MoveCursorTo{3, 2});
+            REQUIRE(3 == screen.currentRow());
+            REQUIRE(2 == screen.currentColumn());
+        }
 
-    // origin
-    screen(MoveCursorTo{1, 1});
-    REQUIRE(1 == screen.currentRow());
-    REQUIRE(1 == screen.currentColumn());
+        SECTION("origin") {
+            screen(MoveCursorTo{1, 1});
+            REQUIRE(1 == screen.currentRow());
+            REQUIRE(1 == screen.currentColumn());
+        }
 
-    // overflow
-    screen(MoveCursorTo{5, 7});
-    REQUIRE(3 == screen.currentRow());
-    REQUIRE(3 == screen.currentColumn());
+        SECTION("clamped") {
+            screen(MoveCursorTo{6, 7});
+            REQUIRE(5 == screen.currentRow());
+            REQUIRE(5 == screen.currentColumn());
+        }
+    }
+
+    SECTION("origin-mode enabled") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+
+        SECTION("move to origin") {
+            screen(MoveCursorTo{1, 1});
+            CHECK(1 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+            CHECK(2 == screen.realCurrentRow());
+            CHECK(2 == screen.realCurrentColumn());
+            CHECK('7' == (char)screen.at(1, 1).character);
+            CHECK('I' == (char)screen.at(3, 3).character);
+        }
+    }
 }
 
 TEST_CASE("MoveCursorToNextTab", "[screen]")
@@ -518,6 +541,8 @@ TEST_CASE("Index_outside_margin", "[screen]")
 
     // with cursor above top margin
     screen(MoveCursorTo{1, 3});
+    REQUIRE(1 == screen.currentRow());
+    REQUIRE(3 == screen.currentColumn());
     screen(Index{});
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderText());
     REQUIRE(2 == screen.currentRow());
@@ -576,13 +601,17 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
     screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
 
     // test IND with cursor at bottom margin and NOT full horizontal margins
-    screen(SetTopBottomMargin{2, 4});
+    screen(SetMode{Mode::LeftRightMargin, true});
     screen(SetLeftRightMargin{2, 4});
-    screen(MoveCursorTo{4, 2});
-    screen(Index{});
-    REQUIRE("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderText());
+    screen(SetTopBottomMargin{2, 4});
+    screen(MoveCursorTo{4, 2}); // cursor at bottom margin
     REQUIRE(4 == screen.currentRow());
     REQUIRE(2 == screen.currentColumn());
+
+    screen(Index{});
+    CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderText());
+    CHECK(4 == screen.currentRow());
+    CHECK(2 == screen.currentColumn());
 }
 
 TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
@@ -685,13 +714,14 @@ TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 
 TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 {
-    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    Screen screen{ 5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {} };
     screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
-    screen(SetTopBottomMargin{2, 4});
+    screen(SetMode{Mode::LeftRightMargin, true});
     screen(SetLeftRightMargin{2, 4});
+    screen(SetTopBottomMargin{2, 4});
 
     // below bottom margin
     screen(MoveCursorTo{5, 2});
@@ -739,15 +769,12 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 {
     Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
     screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
-    screen(SetLeftRightMargin{2, 4});
     screen(SetTopBottomMargin{2, 4});
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
     REQUIRE(5 == screen.currentRow());
     REQUIRE(5 == screen.currentColumn());
 
-    REQUIRE(2 == screen.margin().horizontal.from);
-    REQUIRE(4 == screen.margin().horizontal.to);
     REQUIRE(2 == screen.margin().vertical.from);
     REQUIRE(4 == screen.margin().vertical.to);
 

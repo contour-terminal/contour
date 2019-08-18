@@ -180,8 +180,23 @@ class Screen {
     size_t rowCount() const noexcept { return rowCount_; }
     void resize(size_t columnCount, size_t rowCount);
 
-    cursor_pos_t currentRow() const noexcept { return state_->cursor.row; }
-    cursor_pos_t currentColumn() const noexcept { return state_->cursor.column; }
+    cursor_pos_t realCurrentRow() const noexcept { return state_->cursor.row; }
+    cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
+
+    cursor_pos_t currentRow() const noexcept {
+		if (!state_->cursorRestrictedToMargin)
+			return state_->cursor.row;
+		else
+	        return state_->cursor.row - state_->margin_.vertical.from + 1;
+    }
+
+    cursor_pos_t currentColumn() const noexcept {
+		if (!state_->cursorRestrictedToMargin)
+			return state_->cursor.column;
+		else
+			return state_->cursor.column - state_->margin_.horizontal.from + 1;
+    }
+
     Coordinate const& currentCursor() const noexcept { return state_->cursor; }
 
     Cell const& currentCell()  const noexcept { return *state_->currentColumn; }
@@ -226,6 +241,20 @@ class Screen {
         reply(fmt::format(fmt, std::forward<Args>(args)...));
     }
 
+    struct Range {
+        size_t from;
+        size_t to;
+
+        constexpr size_t length() const noexcept { return to - from + 1; }
+        constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
+        constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
+    };
+
+    struct Margin {
+        Range vertical{}; // top-bottom
+        Range horizontal{}; // left-right
+    };
+
   private:
     struct Buffer {
         using Line = std::vector<Cell>;
@@ -239,20 +268,6 @@ class Screen {
             bool blinking = false;
         };
 
-        struct Range {
-            size_t from;
-            size_t to;
-
-            constexpr size_t length() const noexcept { return to - from + 1; }
-            constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
-            constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
-        };
-
-        struct Margin {
-            Range vertical{}; // top-bottom
-            Range horizontal{}; // left-right
-        };
-
         Buffer(size_t cols, size_t rows)
             : numColumns_{cols},
               numLines_{rows},
@@ -262,7 +277,7 @@ class Screen {
                   {1, cols}
               }
         {
-            verifyCursorIterators();
+            verifyState();
         }
 
         size_t numColumns_;
@@ -274,14 +289,12 @@ class Screen {
         Coordinate cursor{1, 1};
         bool autoWrap{false};
         bool wrapPending{false};
+        bool cursorRestrictedToMargin{false};
         GraphicsAttributes graphicsRendition{};
         std::stack<Save> saveStack{};
 
         Lines::iterator currentLine{std::begin(lines)};
         Line::iterator currentColumn{std::begin(*currentLine)};
-
-        Cell& at(cursor_pos_t row, cursor_pos_t col);
-        Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
 
         void appendChar(wchar_t ch);
         void linefeed();
@@ -294,8 +307,44 @@ class Screen {
         void scrollUp(size_t n, Margin const& margin);
         void scrollDown(size_t n);
 
-        void verifyCursorIterators() const;
+        void verifyState() const;
         void updateCursorIterators();
+
+        constexpr Coordinate origin() const noexcept {
+            if (cursorRestrictedToMargin)
+                return {margin_.vertical.from, margin_.horizontal.from};
+            else
+                return {1, 1};
+        }
+
+        Cell& at(cursor_pos_t row, cursor_pos_t col);
+        Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
+
+		/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
+		Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
+		{
+			if (!cursorRestrictedToMargin)
+				return pos;
+			else
+				return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
+		}
+
+		/// Clamps given coordinates, respecting DECOM (Origin Mode).
+		Coordinate clampCoordinate(Coordinate const& to) const noexcept
+		{
+			if (!cursorRestrictedToMargin)
+				return {
+					std::clamp(to.row, cursor_pos_t{ 1 }, numLines_),
+					std::clamp(to.column, cursor_pos_t{ 1 }, numColumns_)
+				};
+			else
+				return {
+					std::clamp(to.row, cursor_pos_t{ 1 }, margin_.vertical.to),
+					std::clamp(to.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
+				};
+		}
+
+		void moveCursorTo(Coordinate to);
     };
 
     template <typename... Args>
@@ -306,7 +355,7 @@ class Screen {
     }
 
   public:
-    Buffer::Margin const& margin() const noexcept { return state_->margin_; }
+    Margin const& margin() const noexcept { return state_->margin_; }
 
   private:
     Logger const logger_;
