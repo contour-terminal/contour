@@ -444,71 +444,57 @@ struct ChangeWindowTitle { std::string title; };
 struct ChangeIconName { std::string name; };
 
 using Command = std::variant<
-    Bell,
-    Linefeed,
-    Backspace,
-    FullReset,
-
-    DeviceStatusReport,
-    ReportCursorPosition,
-    SendDeviceAttributes,
-    SendTerminalId,
-
-    ClearToEndOfScreen,
-    ClearToBeginOfScreen,
-    ClearScreen,
-
-    ClearScrollbackBuffer,
-    ScrollUp,
-    ScrollDown,
-
-    ClearToEndOfLine,
-    ClearToBeginOfLine,
-    ClearLine,
-
-    InsertLines,
-    DeleteLines,
-    DeleteCharacters,
-
-    MoveCursorUp,
-    MoveCursorDown,
-    MoveCursorForward,
-    MoveCursorBackward,
-    MoveCursorToColumn,
-    MoveCursorToBeginOfLine,
-    MoveCursorTo,
-    MoveCursorToNextTab,
-    HideCursor,
-    ShowCursor,
-    SaveCursor,
-    RestoreCursor,
-
-    Index,
-    ReverseIndex,
-    BackIndex,
-    ForwardIndex,
-
-    SetForegroundColor,
-    SetBackgroundColor,
-    SetGraphicsRendition,
-
-    SetMode,
-
-    SendMouseEvents,
+    AppendChar,
 
     AlternateKeypadMode,
-    DesignateCharset,
-    SingleShiftSelect,
-    SetTopBottomMargin,
-    SetLeftRightMargin,
-    ScreenAlignmentPattern,
-
-    // OSC
-    ChangeWindowTitle,
+    BackIndex,
+    Backspace,
+    Bell,
     ChangeIconName,
-
-    // Ground
-    AppendChar
+    ChangeWindowTitle,
+    ClearLine,
+    ClearScreen,
+    ClearScrollbackBuffer,
+    ClearToBeginOfLine,
+    ClearToBeginOfScreen,
+    ClearToEndOfLine,
+    ClearToEndOfScreen,
+    DeleteCharacters,
+    DeleteLines,
+    DesignateCharset,
+    DeviceStatusReport,
+    ForwardIndex,
+    FullReset,
+    HideCursor,
+    Index,
+    InsertLines,
+    Linefeed,
+    MoveCursorBackward,
+    MoveCursorDown,
+    MoveCursorForward,
+    MoveCursorTo,
+    MoveCursorToBeginOfLine,
+    MoveCursorToColumn,
+    MoveCursorToNextTab,
+    MoveCursorUp,
+    ReportCursorPosition,
+    RestoreCursor,
+    ReverseIndex,
+    SaveCursor,
+    ScreenAlignmentPattern,
+    ScrollDown,
+    ScrollUp,
+    SendDeviceAttributes,
+    SendMouseEvents,
+    SendTerminalId,
+    SetBackgroundColor,
+    SetForegroundColor,
+    SetGraphicsRendition,
+    SetLeftRightMargin,
+    SetMode,
+    SetTopBottomMargin,
+    ShowCursor,
+    SingleShiftSelect
 >;
 
 std::string to_string(Command const& cmd);
