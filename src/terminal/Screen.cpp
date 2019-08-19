@@ -556,7 +556,7 @@ void Screen::operator()(DeleteCharacters const& v)
         next(
             state_->currentColumn,
             min(
-                static_cast<long int>(v.n),
+                static_cast<ptrdiff_t>(v.n),
                 distance(state_->currentColumn, end(*state_->currentLine))
             )
         ),

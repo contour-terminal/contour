@@ -1,3 +1,5 @@
 /build/
+/out/
+/.vs/
 /.vscode/
 /Testing/

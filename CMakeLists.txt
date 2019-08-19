@@ -27,10 +27,10 @@ option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" $
 
 # ----------------------------------------------------------------------------
 # code coverage
-if(LIBTERMINAL_COVERAGE)
-    add_compile_options(-g --coverage)
-    set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
-    message("-- Enabling code coverage: ${CMAKE_EXE_LINKER_FLAGS}")
+if(LIBTERMINAL_COVERAGE AND NOT MSVC)
+	add_compile_options(-g --coverage)
+	set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
+	message("-- Enabling code coverage: ${CMAKE_EXE_LINKER_FLAGS}")
 endif()
 
 # ----------------------------------------------------------------------------
@@ -49,7 +49,7 @@ else()
     # master project must provide its own fmtlib
 endif()
 
-if(LIBTERMINAL_EXAMPLES)
+if(LIBTERMINAL_EXAMPLES AND NOT MSVC) # TODO: Enable once Process API is ported to Windows
     add_subdirectory(examples)
 endif()
 
@@ -79,16 +79,21 @@ set(terminal_SOURCES
     src/terminal/Generator.cpp
     src/terminal/OutputHandler.cpp
     src/terminal/Parser.cpp
-    src/terminal/Process.cpp
+    #src/terminal/Process.cpp
     src/terminal/Screen.cpp
     src/terminal/Terminal.cpp
     src/terminal/VTType.cpp
 )
 
+set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only)
+if(UNIX)
+	append(LIBTERMINAL_LIBRARIES util)
+endif()
+
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
 set_target_properties(terminal PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_include_directories(terminal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
-target_link_libraries(terminal PUBLIC fmt::fmt-header-only util)
+target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
 
 # ----------------------------------------------------------------------------
 if(LIBTERMINAL_TESTING)
@@ -97,7 +102,7 @@ if(LIBTERMINAL_TESTING)
         src/terminal/Parser_test.cpp
         src/terminal/Screen_test.cpp
         src/terminal/OutputHandler_test.cpp
-        src/terminal/UTF8_test.cpp
+        #src/terminal/UTF8_test.cpp
         src/terminal/terminal_test.cpp
     )
     set_target_properties(terminal_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

@@ -57,7 +57,7 @@ string to_string(BrightColor color)
 string to_string(RGBColor const c)
 {
     char buf[16];
-    ssize_t n = snprintf(buf, sizeof(buf), "%u.%u.%u", c.red, c.green, c.blue);
+    auto n = snprintf(buf, sizeof(buf), "%u.%u.%u", c.red, c.green, c.blue);
     return string(buf, n);
 }
 
