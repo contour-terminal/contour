@@ -176,6 +176,16 @@ struct Linefeed {};
 struct Backspace {};
 struct FullReset {};
 
+/// CNL - Cursor Next Line.
+///
+/// Move the cursor to the next line.
+///
+/// The active position is moved to the first character of the n-th following line.
+struct CursorNextLine {
+    /// This is the active position to the first character of the n-th following line.
+    size_t n;
+};
+
 /// CPL - Cursor Previous Line.
 ///
 /// The active position is moved to the first character of the n-th preceding line.
@@ -467,6 +477,7 @@ using Command = std::variant<
     ClearToBeginOfScreen,
     ClearToEndOfLine,
     ClearToEndOfScreen,
+    CursorNextLine,
     CursorPreviousLine,
     DeleteCharacters,
     DeleteLines,

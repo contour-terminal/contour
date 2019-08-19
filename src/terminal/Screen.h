@@ -145,6 +145,7 @@ class Screen {
     void operator()(ClearToEndOfLine const& v);
     void operator()(ClearToBeginOfLine const& v);
     void operator()(ClearLine const& v);
+    void operator()(CursorNextLine const& v);
     void operator()(CursorPreviousLine const& v);
     void operator()(InsertLines const& v);
     void operator()(DeleteLines const& v);

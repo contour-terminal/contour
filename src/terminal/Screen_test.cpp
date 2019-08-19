@@ -799,6 +799,57 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
     }
 }
 
+TEST_CASE("CursorNextLine", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen(MoveCursorTo{2, 3});
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(2 == screen.currentRow());
+    REQUIRE(3 == screen.currentColumn());
+
+    SECTION("without margins") {
+        SECTION("normal") {
+            screen(CursorNextLine{1});
+            CHECK(3 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("clamped") {
+            screen(CursorNextLine{5});
+            CHECK(5 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+    }
+
+    SECTION("with margins") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(MoveCursorTo{1, 2});
+
+        SECTION("normal-1") {
+            screen(CursorNextLine{1});
+            CHECK(2 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("normal-2") {
+            screen(CursorNextLine{2});
+            CHECK(3 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("clamped") {
+            screen(CursorNextLine{3});
+            CHECK(3 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+    }
+}
+
 TEST_CASE("CursorPreviousLine", "[screen]")
 {
     Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
