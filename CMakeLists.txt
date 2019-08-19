@@ -30,7 +30,9 @@ option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" $
 if(LIBTERMINAL_COVERAGE AND NOT MSVC)
 	add_compile_options(-g --coverage)
 	set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
-	message("-- Enabling code coverage: ${CMAKE_EXE_LINKER_FLAGS}")
+    message("-- Code coverage: enabled")
+else()
+    message("-- Code coverage: disabled")
 endif()
 
 # ----------------------------------------------------------------------------
