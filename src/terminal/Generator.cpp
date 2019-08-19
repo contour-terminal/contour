@@ -140,6 +140,7 @@ void Generator::operator()(Command const& command)
         [&](ClearToEndOfLine) { write("\033[K"); },
         [&](ClearToBeginOfLine) { write("\033[1K"); },
         [&](ClearLine) { write("\033[2K"); },
+        [&](CursorPreviousLine const& v) { write("\033[{}F", v.n); },
         [&](InsertLines const& lines) { write("\033[{}L", lines.n); },
         [&](DeleteLines const& lines) { write("\033[{}M", lines.n); },
         [&](DeleteCharacters const& chars) { write("\033[{}P", chars.n); },

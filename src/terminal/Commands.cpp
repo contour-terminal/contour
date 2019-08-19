@@ -192,6 +192,7 @@ string to_string(Command const& _command)
             [&](ClearToEndOfLine) { return "ClearToEndOfLine"s; },
             [&](ClearToBeginOfLine) { return "ClearToBeginOfLine"s; },
             [&](ClearLine) { return "ClearLine"s; },
+            [&](CursorPreviousLine) { return "CursorPreviousLine"s; },
             [&](InsertLines const& v) { return format("InsertLines({})", v.n); },
             [&](DeleteLines const& v) { return format("DeleteLines({})", v.n); },
             [&](DeleteCharacters const& v) { return format("DeleteCharacters({})", v.n); },

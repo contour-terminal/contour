@@ -556,6 +556,12 @@ void Screen::operator()(ClearLine const& v)
     );
 }
 
+void Screen::operator()(CursorPreviousLine const& v)
+{
+    auto const n = min(v.n, currentRow() - 1);
+    state_->moveCursorTo({currentRow() - n, 1});
+}
+
 void Screen::operator()(InsertLines const& v)
 {
     for (cursor_pos_t i = 0; i < v.n; ++i)

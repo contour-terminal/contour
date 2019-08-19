@@ -799,6 +799,56 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
     }
 }
 
+TEST_CASE("CursorPreviousLine", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(5 == screen.currentRow());
+    REQUIRE(5 == screen.currentColumn());
+
+    SECTION("without margins") {
+        SECTION("normal") {
+            screen(CursorPreviousLine{1});
+            CHECK(4 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("clamped") {
+            screen(CursorPreviousLine{5});
+            CHECK(1 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+    }
+
+    SECTION("with margins") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(MoveCursorTo{3, 3});
+
+        SECTION("normal-1") {
+            screen(CursorPreviousLine{1});
+            CHECK(2 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("normal-2") {
+            screen(CursorPreviousLine{2});
+            CHECK(1 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+
+        SECTION("clamped") {
+            screen(CursorPreviousLine{3});
+            CHECK(1 == screen.currentRow());
+            CHECK(1 == screen.currentColumn());
+        }
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition

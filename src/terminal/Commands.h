@@ -176,6 +176,14 @@ struct Linefeed {};
 struct Backspace {};
 struct FullReset {};
 
+/// CPL - Cursor Previous Line.
+///
+/// The active position is moved to the first character of the n-th preceding line.
+struct CursorPreviousLine {
+    /// This is the number of active position moved to the first character of the n-th preceding line.
+    size_t n;
+};
+
 struct DeviceStatusReport {};
 struct ReportCursorPosition {};
 struct SendDeviceAttributes {};
@@ -459,6 +467,7 @@ using Command = std::variant<
     ClearToBeginOfScreen,
     ClearToEndOfLine,
     ClearToEndOfScreen,
+    CursorPreviousLine,
     DeleteCharacters,
     DeleteLines,
     DesignateCharset,

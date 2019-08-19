@@ -283,6 +283,10 @@ void OutputHandler::dispatchCSI()
             setDefaultParameter(1);
             emit<MoveCursorBackward>(param(0));
             break;
+        case 'F':
+            setDefaultParameter(1);
+            emit<CursorPreviousLine>(param(0));
+            break;
         case 'G':
             setDefaultParameter(1);
             emit<MoveCursorToColumn>(param(0));
