@@ -468,7 +468,7 @@ void Screen::operator()(DeviceStatusReport const& v)
 
 void Screen::operator()(ReportCursorPosition const& v)
 {
-    reply("\033[?{};{}R", currentRow(), currentColumn());
+    reply("\033[{};{}R", currentRow(), currentColumn());
 }
 
 void Screen::operator()(SendDeviceAttributes const& v)

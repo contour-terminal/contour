@@ -900,6 +900,39 @@ TEST_CASE("CursorPreviousLine", "[screen]")
     }
 }
 
+TEST_CASE("ReportCursorPosition", "[screen]")
+{
+    string reply;
+    Screen screen{5, 5,
+        [&](auto const& _reply) { reply += _reply; },
+        [&](auto const& _msg) { UNSCOPED_INFO(_msg); },
+        {}
+    };
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen(MoveCursorTo{2, 3});
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE("" == reply);
+    REQUIRE(2 == screen.currentRow());
+    REQUIRE(3 == screen.currentColumn());
+
+    SECTION("with Origin mode disabled") {
+        screen(ReportCursorPosition{});
+        CHECK("\033[2;3R" == reply);
+    }
+
+    SECTION("with margins and origin mode enabled") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(MoveCursorTo{3, 2});
+
+        screen(ReportCursorPosition{});
+        CHECK("\033[3;2R" == reply);
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
@@ -919,6 +952,5 @@ TEST_CASE("CursorPreviousLine", "[screen]")
 // TODO: FullReset
 
 // TODO: DeviceStatusReport
-// TODO: ReportCursorPosition
 // TODO: SendDeviceAttributes
 // TODO: SendTerminalId

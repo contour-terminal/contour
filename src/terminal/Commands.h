@@ -195,7 +195,14 @@ struct CursorPreviousLine {
 };
 
 struct DeviceStatusReport {};
+
+
+/// CPR - Cursor Position Report.
+///
+/// The host asks the terminal for a cursor position report.
+/// @see CursorPositionReport.
 struct ReportCursorPosition {};
+
 struct SendDeviceAttributes {};
 struct SendTerminalId {};
 
