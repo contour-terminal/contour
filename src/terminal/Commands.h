@@ -344,7 +344,25 @@ struct SetTopBottomMargin {
     size_t bottom;
 };
 
-struct SetLeftRightMargin { size_t left; size_t right; };
+/// DECSLRM - Set Left and Right Margins.
+///
+/// This control function sets the left and right margins to define the scrolling region.
+/// DECSLRM only works when vertical split screen mode (DECLRMM) is set.
+///
+/// The value of the left margin (Pl) must be less than the right margin (Pr).
+///
+/// Notes:
+/// * The maximum size of the scrolling region is the page size, based on the setting of set columns per page (DECSCPP).
+/// * The minimum size of the scrolling region is two columns.
+/// * The terminal only recognizes this control function if vertical split screen mode (DECLRMM) is set.
+/// * DECSLRM moves the cursor to column 1, line 1 of the page.
+/// * If the left and right margins are set to columns other than 1 and 80 (or 132), then the terminal cannot scroll smoothly.
+/// * Available in: VT Level 4 mode only
+/// * Default: Margins are at the left and right page borders.
+struct SetLeftRightMargin {
+    size_t left;
+    size_t right;
+};
 
 enum class MouseProtocol {
     X10 = 9,

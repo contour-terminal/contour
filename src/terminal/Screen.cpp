@@ -823,16 +823,24 @@ void Screen::setMode(Mode _mode, bool _enable)
 
 void Screen::operator()(SetTopBottomMargin const& margin)
 {
-    state_->margin_.vertical.from = margin.top;
-    state_->margin_.vertical.to = margin.bottom;
+    if (auto const bottom = min(margin.bottom, state_->numLines_); margin.top < bottom)
+    {
+        state_->margin_.vertical.from = margin.top;
+        state_->margin_.vertical.to = bottom;
+        state_->moveCursorTo({1, 1});
+    }
 }
 
 void Screen::operator()(SetLeftRightMargin const& margin)
 {
     if (isModeEnabled(Mode::LeftRightMargin))
     {
-        state_->margin_.horizontal.from = margin.left;
-        state_->margin_.horizontal.to = margin.right;
+        if (auto const right = min(margin.right, state_->numColumns_); margin.left + 1 < right)
+        {
+            state_->margin_.horizontal.from = margin.left;
+            state_->margin_.horizontal.to = right;
+            state_->moveCursorTo({1, 1});
+        }
     }
 }
 

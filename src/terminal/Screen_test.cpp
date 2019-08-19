@@ -772,8 +772,8 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
     screen(SetTopBottomMargin{2, 4});
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
-    REQUIRE(5 == screen.currentRow());
-    REQUIRE(5 == screen.currentColumn());
+    REQUIRE(1 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn());
 
     REQUIRE(2 == screen.margin().vertical.from);
     REQUIRE(4 == screen.margin().vertical.to);
