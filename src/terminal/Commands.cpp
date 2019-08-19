@@ -187,6 +187,7 @@ string to_string(Command const& _command)
             [&](FullReset) { return "FullReset"s; },
             [&](DeviceStatusReport) { return "DeviceStatusReport"s; },
             [&](ReportCursorPosition) { return "ReportCursorPosition"s; },
+            [&](ReportExtendedCursorPosition) { return "ReportExtendedCursorPosition"s; },
             [&](SendDeviceAttributes) { return "SendDeviceAttributes"s; },
             [&](SendTerminalId) { return "SendTerminalId"s; },
             [&](ClearToEndOfScreen) { return "ClearToEndOfScreen"s; },

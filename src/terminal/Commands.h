@@ -209,6 +209,11 @@ struct DeviceStatusReport {};
 /// @see CursorPositionReport.
 struct ReportCursorPosition {};
 
+/// DECXCPR - Extended Cursor Position.
+///
+/// The host asks the terminal for the current cursor position, including the current page number.
+struct ReportExtendedCursorPosition {};
+
 struct SendDeviceAttributes {};
 struct SendTerminalId {};
 
@@ -511,6 +516,7 @@ using Command = std::variant<
     MoveCursorToNextTab,
     MoveCursorUp,
     ReportCursorPosition,
+    ReportExtendedCursorPosition,
     RestoreCursor,
     ReverseIndex,
     SaveCursor,

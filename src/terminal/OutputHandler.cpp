@@ -250,6 +250,9 @@ void OutputHandler::dispatchCSI_ext()
 {
     switch (currentChar())
     {
+        case '6':
+            emit<ReportExtendedCursorPosition>();
+            break;
         case 'h':
             for (size_t i = 0; i < parameterCount(); ++i)
                 setModeDEC(param(i), true);

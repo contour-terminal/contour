@@ -477,6 +477,12 @@ void Screen::operator()(ReportCursorPosition const& v)
     reply("\033[{};{}R", currentRow(), currentColumn());
 }
 
+void Screen::operator()(ReportExtendedCursorPosition const& v)
+{
+    auto const pageNum = 1;
+    reply("\033[{};{};{}R", currentRow(), currentColumn(), pageNum);
+}
+
 void Screen::operator()(SendDeviceAttributes const& v)
 {
     reply("\033[{}c",

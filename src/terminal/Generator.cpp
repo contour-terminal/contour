@@ -135,6 +135,7 @@ void Generator::operator()(Command const& command)
         [&](FullReset) { write("\033c"); },
         [&](DeviceStatusReport) { write("\033[5n"); },
         [&](ReportCursorPosition) { write("\033[6n"); },
+        [&](ReportExtendedCursorPosition) { write("\033[?6n"); },
         [&](SendDeviceAttributes) { write("\033[c"); },
         [&](SendTerminalId) { write("\033[>c"); },
         [&](ClearToEndOfScreen) { write("\033[0J"); },

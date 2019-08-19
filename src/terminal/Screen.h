@@ -140,6 +140,7 @@ class Screen {
     void operator()(Backspace const& v);
     void operator()(DeviceStatusReport const& v);
     void operator()(ReportCursorPosition const& v);
+    void operator()(ReportExtendedCursorPosition const& v);
     void operator()(SendDeviceAttributes const& v);
     void operator()(SendTerminalId const& v);
     void operator()(ClearToEndOfScreen const& v);

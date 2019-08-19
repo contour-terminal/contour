@@ -299,8 +299,8 @@ TEST_CASE("DeleteLines", "[screen]")
 }
 
 // TODO: DeleteCharacters
-
 // TODO: ClearScrollbackBuffer
+
 TEST_CASE("ScrollUp", "[screen]")
 {
     Screen screen{3, 3, {}, [&](auto const& msg) { INFO(msg); }, {}};
@@ -936,6 +936,39 @@ TEST_CASE("ReportCursorPosition", "[screen]")
 
         screen(ReportCursorPosition{});
         CHECK("\033[3;2R" == reply);
+    }
+}
+
+TEST_CASE("ReportExtendedCursorPosition", "[screen]")
+{
+    string reply;
+    Screen screen{5, 5,
+        [&](auto const& _reply) { reply += _reply; },
+        [&](auto const& _msg) { UNSCOPED_INFO(_msg); },
+        {}
+    };
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen(MoveCursorTo{2, 3});
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE("" == reply);
+    REQUIRE(2 == screen.currentRow());
+    REQUIRE(3 == screen.currentColumn());
+
+    SECTION("with Origin mode disabled") {
+        screen(ReportExtendedCursorPosition{});
+        CHECK("\033[2;3;1R" == reply);
+    }
+
+    SECTION("with margins and origin mode enabled") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(MoveCursorTo{3, 2});
+
+        screen(ReportExtendedCursorPosition{});
+        CHECK("\033[3;2;1R" == reply);
     }
 }
 
