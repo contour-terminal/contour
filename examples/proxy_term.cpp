@@ -25,42 +25,56 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <thread>
 
 #include <cstddef>
 
+#if defined(__unix__)
 #include <fcntl.h>
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
+#elif defined(_MSC_VER)
+#include <Windows.h>
+using ssize_t = SSIZE_T;
+#endif
 
 using std::placeholders::_1;
 using fmt::format;
 
 using namespace std;
+namespace {
+	string getErrorString()
+	{
+#if defined(__unix__)
+		return strerror(errno);
+#else
+		DWORD errorMessageID = GetLastError();
+		if (errorMessageID == 0)
+			return "";
 
-class NonBlocking {
-  public:
-    explicit NonBlocking(int fd) : fd_{fd} { set(true); }
-    ~NonBlocking() { set(false); }
+		LPSTR messageBuffer = nullptr;
+		size_t size = FormatMessageA(
+			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			nullptr,
+			errorMessageID,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPSTR)& messageBuffer,
+			0,
+			nullptr
+		);
 
-  private:
-    void set(bool enable)
-    {
-        if (int flags = fcntl(fd_, F_GETFL); flags != -1)
-        {
-            if (enable)
-                flags |= O_NONBLOCK;
-            else
-                flags &= ~O_NONBLOCK;
-            fcntl(fd_, F_SETFL, flags);
-        }
-    }
+		string message(messageBuffer, size);
 
-    int fd_;
-};
+		LocalFree(messageBuffer);
+
+		return message;
+#endif
+	}
+} // anonymous namespace
 
 enum class Mode {
     PassThrough,
@@ -68,29 +82,138 @@ enum class Mode {
     Redraw,
 };
 
-class Forwarder {
+auto const envvars = terminal::Process::Environment{
+    {"TERM", "xterm-256color"},
+    {"COLORTERM", "xterm"},
+    {"COLORFGBG", "15;0"},
+    {"LINES", ""},
+    {"COLUMNS", ""},
+    {"TERMCAP", ""}
+};
+
+class ProxyTerm {
   public:
-    explicit Forwarder(Mode mode,
-                       terminal::WindowSize const& windowSize,
-                       string shell = terminal::Process::loginShell())
+    ProxyTerm(Mode mode,
+              terminal::WindowSize const& windowSize,
+              string shell = terminal::Process::loginShell())
         : mode_{mode},
+#if defined(__unix__)
           tio_{setupTerminalSettings(STDIN_FILENO)},
+#endif
           logger_{ofstream{"trace.log", ios::trunc}},
-          process_{windowSize, shell},
           terminal_{
               windowSize.columns,
               windowSize.rows,
-              bind(&Forwarder::screenReply, this, _1),
+              bind(&ProxyTerm::screenReply, this, _1),
               [this](auto const& msg) { log("terminal: {}", msg); },
-              bind(&Forwarder::onStdout, this, _1)
-          }
+              bind(&ProxyTerm::onStdout, this, _1)
+          },
+		  pty_{ windowSize },
+		  process_{ pty_, shell, {shell}, envvars },
+		  inputThread_{ bind(&ProxyTerm::inputThread, this) },
+		  outputThread_{ bind(&ProxyTerm::outputThread, this) }
     {
         // TODO: when outside term changes windows size, propagate it into here too.
         // TODO: query current cursor position and initialize cursor in internal screen to it OR reset outside screen, too
         log("Forwarder-Mode: {}", static_cast<int>(mode_));
     }
 
-    void onStdout(vector<terminal::Command> const& commands)
+	void join()
+	{
+		inputThread_.join();
+		outputThread_.join();
+	}
+
+	~ProxyTerm()
+	{
+		// restore some settings
+		terminal::Generator generator{ [this](char const* s, size_t n) { writeToConsole(s, n); } };
+		generator(terminal::SetMode{ terminal::Mode::VisibleCursor, true });
+
+		// restore flags upon exit
+#if defined(__unix__)
+		tcsetattr(STDIN_FILENO, TCSANOW, &tio_);
+#endif
+	}
+
+  private:
+	void inputThread()
+	{
+		for (;;)
+		{
+			char buf[4096];
+			ssize_t const n = readFromConsole(buf, sizeof(buf));
+			if (n == -1)
+				log("inputThread: read failed. {}", getErrorString());
+			else
+			{
+				log("inputThread: input data: {}", terminal::escape(buf, next(buf, n)));
+				ssize_t nwritten = 0;
+				while (nwritten < n)
+				{
+					auto rv = pty_.write(buf + nwritten, n - nwritten);
+					if (rv == -1)
+						log("inputThread: failed to write to PTY. {}", getErrorString());
+					else
+						nwritten += rv;
+				}
+			}
+		}
+	}
+
+	void outputThread()
+	{
+		enableConsoleVT();
+		for (;;)
+		{
+			char buf[4096];
+			if (size_t const n = pty_.read(buf, sizeof(buf)); n > 0)
+			{
+				log("outputThread.data: {}", terminal::escape(buf, buf + n));
+				terminal_.write(buf, n);
+				if (mode_ == Mode::PassThrough)
+					writeToConsole(buf, n);
+			}
+		}
+	}
+
+	ssize_t readFromConsole(char* _buf, size_t _size)
+	{
+#if defined(__unix__)
+		return ::read(STDIN_FILENO, _buf, _size);
+#else
+		DWORD size{ static_cast<DWORD>(_size) };
+		DWORD nread{};
+		if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), _buf, size, &nread, nullptr))
+			return nread;
+		else
+			return -1;
+#endif
+	}
+
+	void writeToConsole(char const* _buf, size_t _size)
+	{
+#if defined(__unix__)
+		::write(STDOUT_FILENO, buf, n);
+#else
+		DWORD nwritten{};
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
+#endif
+	}
+
+	void enableConsoleVT()
+	{
+#if defined(_MSC_VER)
+		HANDLE hConsole = {GetStdHandle(STD_OUTPUT_HANDLE)};
+		DWORD consoleMode{};
+		GetConsoleMode(hConsole, &consoleMode);
+		consoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+		if (!SetConsoleMode(hConsole, consoleMode))
+			throw runtime_error{"Could not enable Console VT processing. " + getErrorString()};
+#endif
+	}
+
+	void onStdout(vector<terminal::Command> const& commands)
     {
         auto const generated = terminal::Generator::generate(commands);
 
@@ -101,7 +224,7 @@ class Forwarder {
         switch (mode_)
         {
             case Mode::Proxy:
-                write(generated);
+                writeToConsole(generated.data(), generated.size());
                 break;
             case Mode::Redraw:
                 redraw();
@@ -114,7 +237,7 @@ class Forwarder {
     // PoC-style naive implementation of a full screen redraw
     void redraw()
     {
-        terminal::Generator generator{[this](char const* s, size_t n) { write(s, n); }};
+        terminal::Generator generator{[this](char const* s, size_t n) { writeToConsole(s, n); }};
 
         generator(terminal::SetMode{terminal::Mode::VisibleCursor, false});
         generator(terminal::SetMode{terminal::Mode::AutoWrap, false});
@@ -143,90 +266,9 @@ class Forwarder {
         generator(terminal::SetMode{terminal::Mode::VisibleCursor, true});
     }
 
-    void write(char const* data, size_t size)
-    {
-        ::write(STDOUT_FILENO, data, size);
-    }
-
-    void write(string_view const& text)
-    {
-        write(text.data(), text.size());
-    }
-
-    template <typename... Args>
-    void write(string_view const& text, Args&&... args)
-    {
-        write(fmt::format(text, forward<Args>(args)...));
-    }
-
-    ~Forwarder()
-    {
-        // restore some settings
-        terminal::Generator generator{[this](char const* s, size_t n) { write(s, n); }};
-        generator(terminal::SetMode{terminal::Mode::VisibleCursor, true});
-
-        // restore flags upon exit
-        tcsetattr(STDIN_FILENO, TCSANOW, &tio_);
-    }
-
-    int main()
-    {
-        while (runLoopOnce())
-            ;
-
-        return EXIT_SUCCESS;
-    }
-
-  private:
     void screenReply(string_view const& message)
     {
-        (void) ::write(process_.masterFd(), message.data(), message.size());
-    }
-
-    bool runLoopOnce()
-    {
-        fd_set sin;
-        fd_set sout;
-        fd_set serr;
-
-        FD_ZERO(&sin);
-        FD_ZERO(&sout);
-        FD_ZERO(&serr);
-
-        FD_SET(STDIN_FILENO, &sin);
-        FD_SET(process_.masterFd(), &sin);
-        int const nfd = max(STDIN_FILENO, process_.masterFd()) + 1;
-
-        select(nfd, &sin, &sout, &serr, nullptr);
-
-        if (FD_ISSET(STDIN_FILENO, &sin))
-        {
-            auto const _ = NonBlocking{STDIN_FILENO};
-            char buf[4096];
-            ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-            if (n <= 0)
-                return false;
-            log("input: {}", terminal::escape(buf, next(buf, n)));
-            if (process_.send(buf, n) != n)
-                return false;
-        }
-
-        if (FD_ISSET(process_.masterFd(), &sin))
-        {
-            auto const _ = NonBlocking{process_.masterFd()};
-            uint8_t buf[4096];
-            if (ssize_t n = read(process_.masterFd(), buf, sizeof(buf)); n > 0)
-            {
-                log("output: {}", terminal::escape(buf, buf + n));
-                terminal_.write((char const*) buf, n);
-                if (mode_ == Mode::PassThrough)
-                    write(string_view{(char const*)buf, static_cast<size_t>(n)});
-            }
-            else
-                return false;
-        }
-
-        return true;
+        pty_.write(message.data(), message.size());
     }
 
     void log(string_view const& msg)
@@ -242,6 +284,7 @@ class Forwarder {
             *logger_ << fmt::format(msg, forward<Args>(args)...) << endl;
     }
 
+#if defined(__unix__)
     static termios getTerminalSettings(int fd)
     {
         termios tio;
@@ -295,14 +338,21 @@ class Forwarder {
 
         return save;
     }
+#endif
 
   private:
     Mode const mode_;
+#if defined(__unix__)
     termios tio_;
+#endif
     optional<ofstream> logger_;
-    terminal::Process process_;
     terminal::Terminal terminal_;
-    string generated_;
+    terminal::PseudoTerminal pty_;
+    terminal::Process process_;
+	thread inputThread_;
+	thread outputThread_;
+	string generated_{};
+
 };
 
 int main(int argc, char const* argv[])
@@ -310,5 +360,6 @@ int main(int argc, char const* argv[])
     auto windowSize = terminal::currentWindowSize();
     cout << "Host Window Size: " << windowSize.columns << "x" << windowSize.rows << endl;
 
-    return Forwarder{Mode::Redraw, windowSize}.main();
+    auto p = ProxyTerm{Mode::Redraw, windowSize};
+	p.join();
 }

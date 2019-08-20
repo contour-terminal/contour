@@ -51,10 +51,6 @@ else()
     # master project must provide its own fmtlib
 endif()
 
-if(LIBTERMINAL_EXAMPLES AND NOT MSVC) # TODO: Enable once Process API is ported to Windows
-    add_subdirectory(examples)
-endif()
-
 # ----------------------------------------------------------------------------
 if(NOT MSVC)
     add_definitions(-Wall)
@@ -81,6 +77,7 @@ set(terminal_SOURCES
     src/terminal/Generator.cpp
     src/terminal/OutputHandler.cpp
     src/terminal/Parser.cpp
+	src/terminal/Process.cpp
     src/terminal/Screen.cpp
     src/terminal/Terminal.cpp
     src/terminal/VTType.cpp
@@ -89,7 +86,6 @@ set(terminal_SOURCES
 set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
-    list(APPEND terminal_SOURCES src/terminal/Process.cpp) # TODO: move back to main list ASAP
 endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
@@ -111,3 +107,7 @@ if(LIBTERMINAL_TESTING)
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
 endif(LIBTERMINAL_TESTING)
+
+if(LIBTERMINAL_EXAMPLES)
+    add_subdirectory(examples)
+endif()
