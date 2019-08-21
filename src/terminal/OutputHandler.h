@@ -53,7 +53,7 @@ class OutputHandler {
   private:
     wchar_t currentChar() const noexcept { return currentChar_; }
 
-    void setDefaultParameter(int value) noexcept { defaultParameter_ = value; }
+    void setDefaultParameter(size_t value) noexcept { defaultParameter_ = value; }
 
     size_t parameterCount() const noexcept { return parameters_.size(); }
 
@@ -109,7 +109,7 @@ class OutputHandler {
 
     std::string intermediateCharacters_{};
     std::vector<size_t> parameters_{0};
-    int defaultParameter_ = 0;
+    size_t defaultParameter_ = 0;
     bool private_ = false;
 
     size_t rowCount_;

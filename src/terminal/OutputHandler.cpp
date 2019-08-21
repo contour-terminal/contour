@@ -703,13 +703,13 @@ size_t OutputHandler::parseColor(size_t i)
     if (i + 1 < parameterCount())
     {
         ++i;
-        unsigned const mode = param(i);
+        auto const mode = param(i);
         if (mode == 5)
         {
             if (i + 1 < parameterCount())
             {
                 ++i;
-                unsigned const value = param(i);
+                auto const value = param(i);
                 if (i <= 255)
                     emit<T>(static_cast<IndexedColor>(value));
                 else
@@ -722,13 +722,12 @@ size_t OutputHandler::parseColor(size_t i)
         {
             if (i + 3 < parameterCount())
             {
-                unsigned const r = param(i + 1);
-                unsigned const g = param(i + 2);
-                unsigned const b = param(i + 3);
+                auto const r = param(i + 1);
+				auto const g = param(i + 2);
+				auto const b = param(i + 3);
                 i += 3;
                 if (r <= 255 && g <= 255 && b <= 255)
-                    emit<T>(
-                        RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+                    emit<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
                 else
                     logInvalidCSI("RGB color out of range.");
             }
