@@ -202,6 +202,15 @@ struct CursorPreviousLine {
 
 struct DeviceStatusReport {};
 
+/// ECH—Erase Character
+///
+/// This control function erases one or more characters, from the cursor position to the right.
+/// ECH clears character attributes from erased character positions.
+/// ECH works inside or outside the scrolling margins.
+struct EraseCharacters {
+    /// This is the number of characters to erase. A Pn value of 0 or 1 erases one character.
+    size_t n;
+};
 
 /// CPR - Cursor Position Report.
 ///
@@ -501,6 +510,7 @@ using Command = std::variant<
     DeleteLines,
     DesignateCharset,
     DeviceStatusReport,
+    EraseCharacters,
     ForwardIndex,
     FullReset,
     HideCursor,

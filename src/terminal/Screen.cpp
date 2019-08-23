@@ -534,6 +534,15 @@ void Screen::operator()(ClearScrollbackBuffer const& v)
     state_->savedLines.clear();
 }
 
+void Screen::operator()(EraseCharacters const& v)
+{
+    // Spec: https://vt100.net/docs/vt510-rm/ECH.html
+    // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
+    // TODO: See what xterm does ;-)
+    size_t const n = min(state_->numColumns() - realCurrentColumn() + 1, v.n == 0 ? 1 : v.n);
+    fill_n(state_->currentColumn, n, Cell{});
+}
+
 void Screen::operator()(ScrollUp const& v)
 {
     state_->scrollUp(v.n);

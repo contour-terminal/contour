@@ -301,6 +301,35 @@ TEST_CASE("DeleteLines", "[screen]")
 // TODO: DeleteCharacters
 // TODO: ClearScrollbackBuffer
 
+TEST_CASE("EraseCharacters", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\033[H");
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(1 == screen.currentColumn());
+    REQUIRE(1 == screen.currentRow());
+
+    SECTION("ECH-0 equals ECH-1") {
+        screen(EraseCharacters{0});
+        REQUIRE(" 2345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("ECH-1") {
+        screen(EraseCharacters{1});
+        REQUIRE(" 2345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("ECH-5") {
+        screen(EraseCharacters{5});
+        REQUIRE("     \n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("ECH-6-clamped") {
+        screen(EraseCharacters{6});
+        REQUIRE("     \n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+}
+
 TEST_CASE("ScrollUp", "[screen]")
 {
     Screen screen{3, 3, {}, [&](auto const& msg) { INFO(msg); }, {}};

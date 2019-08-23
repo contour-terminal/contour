@@ -147,6 +147,7 @@ class Screen {
     void operator()(ClearToBeginOfScreen const& v);
     void operator()(ClearScreen const& v);
     void operator()(ClearScrollbackBuffer const& v);
+    void operator()(EraseCharacters const& v);
     void operator()(ScrollUp const& v);
     void operator()(ScrollDown const& v);
     void operator()(ClearToEndOfLine const& v);

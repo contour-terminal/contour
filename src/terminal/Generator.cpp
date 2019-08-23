@@ -142,6 +142,7 @@ void Generator::operator()(Command const& command)
         [&](ClearToBeginOfScreen) { write("\033[1J"); },
         [&](ClearScreen) { write("\033[2J"); },
         [&](ClearScrollbackBuffer) { write("\033[3J"); },
+        [&](EraseCharacters const& v) { write("\033[{}X", v.n); },
         [&](ScrollUp const& up) { write("\033[{}S", up.n); },
         [&](ScrollDown const& down) { write("\033[{}T", down.n); },
         [&](ClearToEndOfLine) { write("\033[K"); },

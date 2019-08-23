@@ -359,6 +359,10 @@ void OutputHandler::dispatchCSI()
             setDefaultParameter(1);
             emit<ScrollDown>(param(0));
             break;
+        case 'X':
+            setDefaultParameter(1);
+            emit<EraseCharacters>(param(0));
+            break;
         case 'c':
             // Send Primary DA
             if (param(0) == 0)

@@ -204,6 +204,7 @@ string to_string(Command const& _command)
             [&](InsertLines const& v) { return format("InsertLines({})", v.n); },
             [&](DeleteLines const& v) { return format("DeleteLines({})", v.n); },
             [&](DeleteCharacters const& v) { return format("DeleteCharacters({})", v.n); },
+            [&](EraseCharacters const& v) { return format("EraseCharacters({})", v.n); },
             [&](MoveCursorUp const& v) { return format("MoveCursorUp", v.n); },
             [&](MoveCursorDown const& v) { return format("MoveCursorDown", v.n); },
             [&](MoveCursorForward const& v) { return format("MoveCursorForward", v.n); },
