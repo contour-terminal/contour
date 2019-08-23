@@ -371,7 +371,10 @@ Screen::Screen(size_t columnCount,
                Hook onCommands) :
     logger_{move(logger)},
     onCommands_{move(onCommands)},
-    handler_{rowCount},
+    handler_{
+		rowCount,
+		[this](string const& msg) { log("OutputHandler: " + msg); }
+	},
     parser_{
         ref(handler_),
         [this](string const& msg) { log("debug.parser: " + msg); },
