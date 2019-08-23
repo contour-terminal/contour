@@ -155,7 +155,6 @@ class [[nodiscard]] Process {
 
 private:
 	NativeHandle pid_{};
-	PseudoTerminal* pty_{};
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};
