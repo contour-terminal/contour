@@ -352,11 +352,11 @@ void OutputHandler::dispatchCSI()
             emit<DeleteCharacters>(param(0));
             break;
         case 'S':
-            // scroll up = move window contents down
+            setDefaultParameter(1);
             emit<ScrollUp>(param(0));
             break;
         case 'T':
-            // scroll down = move window contents up
+            setDefaultParameter(1);
             emit<ScrollDown>(param(0));
             break;
         case 'c':
