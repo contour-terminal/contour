@@ -95,7 +95,7 @@ enum class Mode {
      * The starting point for line numbers is independent of the margins.
      * The cursor can move outside of the margins.
      */
-    CursorRestrictedToMargin, 
+    CursorRestrictedToMargin,
 
     /**
      * DECAWM - Autowrap Mode.
@@ -137,7 +137,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::Columns132: return "?3";
         case Mode::SmoothScroll: return "?4";
         case Mode::ReverseVideo: return "?5";
-        case Mode::CursorRestrictedToMargin: return "?6"; 
+        case Mode::CursorRestrictedToMargin: return "?6";
         case Mode::AutoWrap: return "?7";
         case Mode::ShowToolbar: return "?10";
         case Mode::BlinkingCursor: return "?12";

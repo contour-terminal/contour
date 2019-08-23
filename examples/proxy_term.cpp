@@ -47,33 +47,33 @@ using fmt::format;
 
 using namespace std;
 namespace {
-	string getErrorString()
-	{
+    string getErrorString()
+    {
 #if defined(__unix__)
-		return strerror(errno);
+        return strerror(errno);
 #else
-		DWORD errorMessageID = GetLastError();
-		if (errorMessageID == 0)
-			return "";
+        DWORD errorMessageID = GetLastError();
+        if (errorMessageID == 0)
+            return "";
 
-		LPSTR messageBuffer = nullptr;
-		size_t size = FormatMessageA(
-			FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-			nullptr,
-			errorMessageID,
-			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-			(LPSTR)& messageBuffer,
-			0,
-			nullptr
-		);
+        LPSTR messageBuffer = nullptr;
+        size_t size = FormatMessageA(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            nullptr,
+            errorMessageID,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            (LPSTR)& messageBuffer,
+            0,
+            nullptr
+        );
 
-		string message(messageBuffer, size);
+        string message(messageBuffer, size);
 
-		LocalFree(messageBuffer);
+        LocalFree(messageBuffer);
 
-		return message;
+        return message;
 #endif
-	}
+    }
 } // anonymous namespace
 
 enum class Mode {
@@ -108,112 +108,112 @@ class ProxyTerm {
               [this](auto const& msg) { log("terminal: {}", msg); },
               bind(&ProxyTerm::onStdout, this, _1)
           },
-		  pty_{ windowSize },
-		  process_{ pty_, shell, {shell}, envvars },
-		  inputThread_{ bind(&ProxyTerm::inputThread, this) },
-		  outputThread_{ bind(&ProxyTerm::outputThread, this) }
+          pty_{ windowSize },
+          process_{ pty_, shell, {shell}, envvars },
+          inputThread_{ bind(&ProxyTerm::inputThread, this) },
+          outputThread_{ bind(&ProxyTerm::outputThread, this) }
     {
         // TODO: when outside term changes windows size, propagate it into here too.
         // TODO: query current cursor position and initialize cursor in internal screen to it OR reset outside screen, too
         log("Forwarder-Mode: {}", static_cast<int>(mode_));
     }
 
-	void join()
-	{
-		inputThread_.join();
-		outputThread_.join();
-	}
+    void join()
+    {
+        inputThread_.join();
+        outputThread_.join();
+    }
 
-	~ProxyTerm()
-	{
-		// restore some settings
-		terminal::Generator generator{ [this](char const* s, size_t n) { writeToConsole(s, n); } };
-		generator(terminal::SetMode{ terminal::Mode::VisibleCursor, true });
+    ~ProxyTerm()
+    {
+        // restore some settings
+        terminal::Generator generator{ [this](char const* s, size_t n) { writeToConsole(s, n); } };
+        generator(terminal::SetMode{ terminal::Mode::VisibleCursor, true });
 
-		// restore flags upon exit
+        // restore flags upon exit
 #if defined(__unix__)
-		tcsetattr(STDIN_FILENO, TCSANOW, &tio_);
+        tcsetattr(STDIN_FILENO, TCSANOW, &tio_);
 #endif
-	}
+    }
 
   private:
-	void inputThread()
-	{
-		for (;;)
-		{
-			char buf[4096];
-			ssize_t const n = readFromConsole(buf, sizeof(buf));
-			if (n == -1)
-				log("inputThread: read failed. {}", getErrorString());
-			else
-			{
-				log("inputThread: input data: {}", terminal::escape(buf, next(buf, n)));
-				ssize_t nwritten = 0;
-				while (nwritten < n)
-				{
-					auto rv = pty_.write(buf + nwritten, n - nwritten);
-					if (rv == -1)
-						log("inputThread: failed to write to PTY. {}", getErrorString());
-					else
-						nwritten += rv;
-				}
-			}
-		}
-	}
+    void inputThread()
+    {
+        for (;;)
+        {
+            char buf[4096];
+            ssize_t const n = readFromConsole(buf, sizeof(buf));
+            if (n == -1)
+                log("inputThread: read failed. {}", getErrorString());
+            else
+            {
+                log("inputThread: input data: {}", terminal::escape(buf, next(buf, n)));
+                ssize_t nwritten = 0;
+                while (nwritten < n)
+                {
+                    auto rv = pty_.write(buf + nwritten, n - nwritten);
+                    if (rv == -1)
+                        log("inputThread: failed to write to PTY. {}", getErrorString());
+                    else
+                        nwritten += rv;
+                }
+            }
+        }
+    }
 
-	void outputThread()
-	{
-		enableConsoleVT();
-		for (;;)
-		{
-			char buf[4096];
-			if (size_t const n = pty_.read(buf, sizeof(buf)); n > 0)
-			{
-				log("outputThread.data: {}", terminal::escape(buf, buf + n));
-				terminal_.write(buf, n);
-				if (mode_ == Mode::PassThrough)
-					writeToConsole(buf, n);
-			}
-		}
-	}
+    void outputThread()
+    {
+        enableConsoleVT();
+        for (;;)
+        {
+            char buf[4096];
+            if (size_t const n = pty_.read(buf, sizeof(buf)); n > 0)
+            {
+                log("outputThread.data: {}", terminal::escape(buf, buf + n));
+                terminal_.write(buf, n);
+                if (mode_ == Mode::PassThrough)
+                    writeToConsole(buf, n);
+            }
+        }
+    }
 
-	ssize_t readFromConsole(char* _buf, size_t _size)
-	{
+    ssize_t readFromConsole(char* _buf, size_t _size)
+    {
 #if defined(__unix__)
-		return ::read(STDIN_FILENO, _buf, _size);
+        return ::read(STDIN_FILENO, _buf, _size);
 #else
-		DWORD size{ static_cast<DWORD>(_size) };
-		DWORD nread{};
-		if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), _buf, size, &nread, nullptr))
-			return nread;
-		else
-			return -1;
+        DWORD size{ static_cast<DWORD>(_size) };
+        DWORD nread{};
+        if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), _buf, size, &nread, nullptr))
+            return nread;
+        else
+            return -1;
 #endif
-	}
+    }
 
-	void writeToConsole(char const* _buf, size_t _size)
-	{
+    void writeToConsole(char const* _buf, size_t _size)
+    {
 #if defined(__unix__)
-		::write(STDOUT_FILENO, _buf, _size);
+        ::write(STDOUT_FILENO, _buf, _size);
 #else
-		DWORD nwritten{};
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
+        DWORD nwritten{};
+        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
 #endif
-	}
+    }
 
-	void enableConsoleVT()
-	{
+    void enableConsoleVT()
+    {
 #if defined(_MSC_VER)
-		HANDLE hConsole = {GetStdHandle(STD_OUTPUT_HANDLE)};
-		DWORD consoleMode{};
-		GetConsoleMode(hConsole, &consoleMode);
-		consoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-		if (!SetConsoleMode(hConsole, consoleMode))
-			throw runtime_error{"Could not enable Console VT processing. " + getErrorString()};
+        HANDLE hConsole = {GetStdHandle(STD_OUTPUT_HANDLE)};
+        DWORD consoleMode{};
+        GetConsoleMode(hConsole, &consoleMode);
+        consoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        if (!SetConsoleMode(hConsole, consoleMode))
+            throw runtime_error{"Could not enable Console VT processing. " + getErrorString()};
 #endif
-	}
+    }
 
-	void onStdout(vector<terminal::Command> const& commands)
+    void onStdout(vector<terminal::Command> const& commands)
     {
         auto const generated = terminal::Generator::generate(commands);
 
@@ -349,9 +349,9 @@ class ProxyTerm {
     terminal::Terminal terminal_;
     terminal::PseudoTerminal pty_;
     terminal::Process process_;
-	thread inputThread_;
-	thread outputThread_;
-	string generated_{};
+    thread inputThread_;
+    thread outputThread_;
+    string generated_{};
 
 };
 
@@ -361,5 +361,5 @@ int main(int argc, char const* argv[])
     cout << "Host Window Size: " << windowSize.columns << "x" << windowSize.rows << endl;
 
     auto p = ProxyTerm{Mode::Redraw, windowSize};
-	p.join();
+    p.join();
 }
