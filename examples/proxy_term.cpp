@@ -217,9 +217,9 @@ class ProxyTerm {
     {
         auto const generated = terminal::Generator::generate(commands);
 
-        log("create: {}", terminal::escape(generated));
-        for (terminal::Command const& command: commands)
-            log("command: {}", to_string(command));
+        // log("create: {}", terminal::escape(generated));
+        // for (terminal::Command const& command: commands)
+        //     log("command: {}", to_string(command));
 
         switch (mode_)
         {
