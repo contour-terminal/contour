@@ -194,7 +194,7 @@ class ProxyTerm {
 	void writeToConsole(char const* _buf, size_t _size)
 	{
 #if defined(__unix__)
-		::write(STDOUT_FILENO, buf, n);
+		::write(STDOUT_FILENO, _buf, _size);
 #else
 		DWORD nwritten{};
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
