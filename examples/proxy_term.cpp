@@ -15,13 +15,13 @@
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/Process.h>
+#include <terminal/PseudoTerminal.h>
 #include <terminal/Screen.h>
 #include <terminal/Terminal.h>
 #include <terminal/Util.h>
 
 #include <fmt/format.h>
 
-#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <iterator>

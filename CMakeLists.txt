@@ -28,8 +28,8 @@ option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" $
 # ----------------------------------------------------------------------------
 # code coverage
 if(LIBTERMINAL_COVERAGE AND NOT MSVC)
-	add_compile_options(-g --coverage)
-	set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
+    add_compile_options(-g --coverage)
+    set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
     message("-- Code coverage: enabled")
 else()
     message("-- Code coverage: disabled")
@@ -66,6 +66,7 @@ set(terminal_HEADERS
     src/terminal/OutputHandler.h
     src/terminal/Parser.h
     src/terminal/Process.h
+    src/terminal/PseudoTerminal.h
     src/terminal/Screen.h
     src/terminal/Terminal.h
     src/terminal/VTType.h
@@ -77,7 +78,8 @@ set(terminal_SOURCES
     src/terminal/Generator.cpp
     src/terminal/OutputHandler.cpp
     src/terminal/Parser.cpp
-	src/terminal/Process.cpp
+    src/terminal/Process.cpp
+    src/terminal/PseudoTerminal.cpp
     src/terminal/Screen.cpp
     src/terminal/Terminal.cpp
     src/terminal/VTType.cpp

@@ -12,7 +12,9 @@
  * limitations under the License.
  */
 #include <terminal/Process.h>
+#include <terminal/PseudoTerminal.h>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -21,7 +23,6 @@
 #include <unordered_map>
 
 #if !defined(_MSC_VER)
-#include <pty.h>
 #include <utmp.h>
 #include <pwd.h>
 #include <sys/types.h>
@@ -32,7 +33,7 @@
 using namespace std;
 
 namespace {
-    string GetLastErrorAsString()
+    string getLastErrorAsString()
     {
 #if defined(__unix__)
         return strerror(errno);
@@ -62,146 +63,6 @@ namespace {
 } // anonymous namespace
 
 namespace terminal {
-
-WindowSize currentWindowSize()
-{
-#if defined(__unix__)
-    auto w = winsize{};
-
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1)
-        throw runtime_error{strerror(errno)};
-
-    return WindowSize{w.ws_col, w.ws_row};
-#else
-    CONSOLE_SCREEN_BUFFER_INFO csbi{};
-    HANDLE hConsole{ GetStdHandle(STD_OUTPUT_HANDLE) };
-    if (GetConsoleScreenBufferInfo(hConsole, &csbi))
-        return WindowSize{
-            static_cast<unsigned short>(csbi.srWindow.Right - csbi.srWindow.Left + 1),
-            static_cast<unsigned short>(csbi.srWindow.Bottom - csbi.srWindow.Top + 1)
-    };
-    else
-        throw runtime_error{GetLastErrorAsString()};
-#endif
-}
-
-std::string Process::loginShell()
-{
-#if defined(_MSC_VER)
-    return "cmd.exe"s;
-#else
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return pw->pw_shell;
-    else
-        return "/bin/sh"s;
-#endif
-}
-
-PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize)
-{
-#if defined(__unix__)
-    // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-    winsize const ws{_windowSize.rows, _windowSize.columns, 0, 0};
-    // TODO: termios term{};
-    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, &ws) < 0)
-        throw runtime_error{ "Failed to open PTY. " + GetLastErrorAsString() };
-#else
-    master_ = INVALID_HANDLE_VALUE;
-    input_ = INVALID_HANDLE_VALUE;
-    output_ = INVALID_HANDLE_VALUE;
-
-    HANDLE hPipePTYIn{ INVALID_HANDLE_VALUE };
-    HANDLE hPipePTYOut{ INVALID_HANDLE_VALUE };
-
-    // Create the pipes to which the ConPTY will connect to
-    if (!CreatePipe(&hPipePTYIn, &output_, NULL, 0))
-        throw runtime_error{ GetLastErrorAsString() };
-
-    if (!CreatePipe(&input_, &hPipePTYOut, NULL, 0))
-    {
-        CloseHandle(hPipePTYIn);
-        throw runtime_error{ GetLastErrorAsString() };
-    }
-
-    // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
-    HRESULT hr = CreatePseudoConsole(
-        { static_cast<SHORT>(_windowSize.columns), static_cast<SHORT>(_windowSize.rows) },
-        hPipePTYIn,
-        hPipePTYOut,
-        0,
-        &master_
-    );
-
-    if (hPipePTYIn != INVALID_HANDLE_VALUE)
-        CloseHandle(hPipePTYIn);
-
-    if (hPipePTYOut != INVALID_HANDLE_VALUE)
-        CloseHandle(hPipePTYOut);
-
-    if (hr != S_OK)
-        throw runtime_error{ GetLastErrorAsString() };
-#endif
-}
-
-PseudoTerminal::~PseudoTerminal()
-{
-    release();
-}
-
-void PseudoTerminal::release()
-{
-#if defined(__unix__)
-    if (master_ >= 0)
-    {
-        close(master_);
-        master_ = -1;
-    }
-#else
-    if (master_ != INVALID_HANDLE_VALUE)
-    {
-        ClosePseudoConsole(master_);
-        master_ = INVALID_HANDLE_VALUE;
-    }
-    if (input_ != INVALID_HANDLE_VALUE)
-    {
-        CloseHandle(input_);
-        input_ = INVALID_HANDLE_VALUE;
-    }
-    if (output_ != INVALID_HANDLE_VALUE)
-    {
-        CloseHandle(output_);
-        output_ = INVALID_HANDLE_VALUE;
-    }
-#endif
-}
-
-auto PseudoTerminal::read(char* buf, size_t size) -> ssize_t
-{
-#if defined(__unix__)
-    return ::read(master_, buf, size);
-#else
-    DWORD nread{};
-    if (ReadFile(input_, buf, static_cast<DWORD>(size), &nread, nullptr))
-        return nread;
-    else
-        return -1;
-#endif
-}
-
-auto PseudoTerminal::write(char const* buf, size_t size) -> ssize_t
-{
-#if defined(__unix__)
-    return ::write(master_, buf, size);
-#else
-    DWORD nwritten{};
-    if (WriteFile(output_, buf, static_cast<DWORD>(size), &nwritten, nullptr))
-        return nwritten;
-    else
-        return -1;
-#endif
-}
-
-/////////////////////////////////////////////////////////////////////////////////
 
 #if defined(_MSC_VER)
 namespace {
@@ -261,7 +122,7 @@ Process::Process(
             close(_pty.slave()); // TODO: release slave in PTY object
             break;
         case -1: // fork error
-            throw runtime_error{ strerror(errno) };
+            throw runtime_error{ getLastErrorAsString() };
         case 0:  // in child
         {
             close(_pty.master());
@@ -301,14 +162,15 @@ Process::Process(
         &startupInfo_.StartupInfo,          // Pointer to STARTUPINFO
         &processInfo_);                     // Pointer to PROCESS_INFORMATION
     if (!success)
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error{ getLastErrorAsString() };
 #endif
 }
 
 Process::~Process()
 {
 #if defined(__unix__)
-    // TODO
+    if (pid_ != -1)
+        (void) wait();
 #else
     CloseHandle(processInfo_.hThread);
     CloseHandle(processInfo_.hProcess);
@@ -321,8 +183,12 @@ Process::~Process()
 Process::ExitStatus Process::wait()
 {
 #if defined(__unix__)
+    assert(pid_ != -1);
     int status = 0;
-    waitpid(pid_, &status, 0);
+    if (waitpid(pid_, &status, 0) == -1)
+        throw runtime_error{getLastErrorAsString()};
+
+    pid_ = -1;
 
     if (WIFEXITED(status))
         return NormalExit{ WEXITSTATUS(status) };
@@ -336,14 +202,26 @@ Process::ExitStatus Process::wait()
         throw runtime_error{ "Unknown waitpid() return value." };
 #else
     if (WaitForSingleObject(processInfo_.hThread, INFINITE /*10 * 1000*/) != S_OK)
-        printf("WaitForSingleObject(thr): %s\n", GetLastErrorAsString().c_str());
+        printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
     //if (WaitForSingleObject(processInfo_.hProcess, INFINITE) != S_OK)
-    //    printf("WaitForSingleObject(proc): %s\n", GetLastErrorAsString().c_str());
+    //    printf("WaitForSingleObject(proc): %s\n", getLastErrorAsString().c_str());
     DWORD exitCode;
     if (GetExitCodeProcess(processInfo_.hProcess, &exitCode))
         return NormalExit{ static_cast<int>(exitCode) };
     else
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error{ getLastErrorAsString() };
+#endif
+}
+
+std::string Process::loginShell()
+{
+#if defined(_MSC_VER)
+    return "cmd.exe"s;
+#else
+    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
+        return pw->pw_shell;
+    else
+        return "/bin/sh"s;
 #endif
 }
 
