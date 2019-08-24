@@ -420,20 +420,29 @@ TEST_CASE("MoveCursorForward", "[screen]")
     REQUIRE(1 == screen.currentRow());
     REQUIRE(1 == screen.currentColumn());
 
-    // no-op
-    screen(MoveCursorForward{0});
-    REQUIRE(1 == screen.currentRow());
-    REQUIRE(1 == screen.currentColumn());
+    SECTION("no-op") {
+        screen(MoveCursorForward{0});
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(1 == screen.currentColumn());
+    }
 
-    // in-range
-    screen(MoveCursorForward{1});
-    REQUIRE(1 == screen.currentRow());
-    REQUIRE(2 == screen.currentColumn());
+    SECTION("CUF-1") {
+        screen(MoveCursorForward{1});
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(2 == screen.currentColumn());
+    }
 
-    // overflow
-    screen(MoveCursorForward{5});
-    REQUIRE(1 == screen.currentRow());
-    REQUIRE(3 == screen.currentColumn());
+    SECTION("CUF-3 (to right border)") {
+        screen(MoveCursorForward{screen.columnCount()});
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(screen.columnCount() == screen.currentColumn());
+    }
+
+    SECTION("CUF-overflow") {
+        screen(MoveCursorForward{screen.columnCount() + 1});
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(screen.columnCount() == screen.currentColumn());
+    }
 }
 
 TEST_CASE("MoveCursorBackward", "[screen]")
