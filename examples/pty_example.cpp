@@ -111,7 +111,25 @@ int main()
 		thread pipeListenerThread {[&]() { pipeListener(pty); }};
 		terminal::Process proc {pty, args[0], args, {}};
 
-		terminal::Process::ExitStatus exitStatus = proc.wait();
+        for (bool waiting = true; waiting; )
+        {
+            terminal::Process::ExitStatus exitStatus = proc.wait();
+            if (holds_alternative<terminal::Process::NormalExit>(exitStatus))
+            {
+                cout << "Process terminated normally with exit code " << get<terminal::Process::NormalExit>(exitStatus).exitCode << '\n';
+                waiting = false;
+            }
+            else if (holds_alternative<terminal::Process::SignalExit>(exitStatus))
+            {
+                cout << "Process terminated with signal " << get<terminal::Process::SignalExit>(exitStatus).signum << '\n';
+                waiting = false;
+            }
+            else if (holds_alternative<terminal::Process::Suspend>(exitStatus))
+                cout << "Process suspended.";
+            else if (holds_alternative<terminal::Process::Resume>(exitStatus))
+                cout << "Process resumed.";
+        }
+
 		pty.release();
 		pipeListenerThread.join();
 	}
