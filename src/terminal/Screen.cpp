@@ -81,6 +81,11 @@ void Screen::Buffer::moveCursorTo(Coordinate to)
 
 Screen::Cell& Screen::Buffer::at(cursor_pos_t row, cursor_pos_t col)
 {
+    return (*next(begin(lines), row - 1))[col - 1];
+}
+
+Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
+{
     if (cursorRestrictedToMargin)
     {
         row += margin_.vertical.from - 1;
@@ -421,6 +426,20 @@ void Screen::render(Renderer const& render)
     for (cursor_pos_t row = 1; row <= rowCount(); ++row)
         for (cursor_pos_t col = 1; col <= columnCount(); ++col)
             render(row, col, at(row, col));
+}
+
+string Screen::renderHistoryTextLine(size_t _lineNumberIntoHistory) const
+{
+    string line;
+    line.reserve(columnCount());
+    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory);
+    for (Cell const& cell : *lineIter)
+        if (cell.character)
+            line += utf8::to_string(utf8::encode(cell.character));
+        else
+            line += " "; // fill character
+
+    return line;
 }
 
 string Screen::renderTextLine(size_t row) const

@@ -235,6 +235,9 @@ class Screen {
     Cell const& at(cursor_pos_t row, cursor_pos_t col) const noexcept;
     Cell& at(cursor_pos_t row, cursor_pos_t col) noexcept;
 
+    /// Retrieves the cell at given cursor, respecting origin mode.
+    Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return state_->withOriginAt(row, col); }
+
     bool isPrimaryScreen() const noexcept { return state_ == &primaryBuffer_; }
     bool isAlternateScreen() const noexcept { return state_ == &alternateBuffer_; }
 
@@ -337,6 +340,9 @@ class Screen {
         Cell& at(cursor_pos_t row, cursor_pos_t col);
         Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
 
+        /// Retrieves the cell at given cursor, respecting origin mode.
+        Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col);
+
 		/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
 		Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
 		{
@@ -373,6 +379,16 @@ class Screen {
 
   public:
     Margin const& margin() const noexcept { return state_->margin_; }
+    Buffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
+
+    /**
+     * Returns the n'th saved line into the history scrollback buffer.
+     *
+     * @param _lineNumberIntoHistory the 0-based offset into the history buffer.
+     *
+     * @returns the textual representation of the n'th line into the history.
+     */
+    std::string renderHistoryTextLine(size_t _lineNumberIntoHistory) const;
 
   private:
     Logger const logger_;

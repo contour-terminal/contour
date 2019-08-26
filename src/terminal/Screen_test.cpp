@@ -299,7 +299,17 @@ TEST_CASE("DeleteLines", "[screen]")
 }
 
 // TODO: DeleteCharacters
-// TODO: ClearScrollbackBuffer
+
+TEST_CASE("ClearScrollbackBuffer", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\033[H");
+    REQUIRE("67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\n" == screen.renderText());
+    REQUIRE(1 == screen.currentColumn());
+    REQUIRE(1 == screen.currentRow());
+    REQUIRE(1 == screen.scrollbackLines().size());
+    REQUIRE("12345" == screen.renderHistoryTextLine(0));
+}
 
 TEST_CASE("EraseCharacters", "[screen]")
 {
@@ -366,7 +376,129 @@ TEST_CASE("ScrollUp", "[screen]")
     }
 }
 
-// TODO: ScrollDown
+TEST_CASE("ScrollDown", "[screen]")
+{
+    Screen screen{5, 5, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+
+    SECTION("scroll fully inside margins") {
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetTopBottomMargin{2, 4});
+        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+
+        SECTION("SD 1") {
+            screen(ScrollDown{1});
+            CHECK("12345\n6   0\nA789E\nFBCDJ\nKLMNO\n" == screen.renderText());
+        }
+
+        SECTION("SD 2") {
+            screen(ScrollDown{2});
+            CHECK(
+                "12345\n"
+                "6   0\n"
+                "A   E\n"
+                "F789J\n"
+                "KLMNO\n" == screen.renderText());
+        }
+
+        SECTION("SD 3") {
+            screen(ScrollDown{3});
+            CHECK(
+                "12345\n"
+                "6   0\n"
+                "A   E\n"
+                "F   J\n"
+                "KLMNO\n" == screen.renderText());
+        }
+    }
+
+    SECTION("vertical margins") {
+        screen(SetTopBottomMargin{2, 4});
+        SECTION("SD 0") {
+            screen(ScrollDown{0});
+            REQUIRE(
+                "12345\n"
+                "67890\n"
+                "ABCDE\n"
+                "FGHIJ\n"
+                "KLMNO\n" == screen.renderText());
+        }
+
+        SECTION("SD 1") {
+            screen(ScrollDown{1});
+            REQUIRE(
+                "12345\n"
+                "     \n"
+                "67890\n"
+                "ABCDE\n"
+                "KLMNO\n" == screen.renderText());
+        }
+
+        SECTION("SD 3") {
+            screen(ScrollDown{5});
+            REQUIRE(
+                "12345\n"
+                "     \n"
+                "     \n"
+                "     \n"
+                "KLMNO\n" == screen.renderText());
+        }
+
+        SECTION("SD 4 clamped") {
+            screen(ScrollDown{4});
+            REQUIRE(
+                "12345\n"
+                "     \n"
+                "     \n"
+                "     \n"
+                "KLMNO\n" == screen.renderText());
+        }
+    }
+
+    SECTION("no custom margins") {
+        SECTION("SD 0") {
+            screen(ScrollDown{0});
+            REQUIRE(
+                "12345\n"
+                "67890\n"
+                "ABCDE\n"
+                "FGHIJ\n"
+                "KLMNO\n" == screen.renderText());
+        }
+        SECTION("SD 1") {
+            screen(ScrollDown{1});
+            REQUIRE(
+                "     \n"
+                "12345\n"
+                "67890\n"
+                "ABCDE\n"
+                "FGHIJ\n"
+                == screen.renderText());
+        }
+        SECTION("SD 5") {
+            screen(ScrollDown{5});
+            REQUIRE(
+                "     \n"
+                "     \n"
+                "     \n"
+                "     \n"
+                "     \n"
+                == screen.renderText());
+        }
+        SECTION("SD 6 clamped") {
+            screen(ScrollDown{6});
+            REQUIRE(
+                "     \n"
+                "     \n"
+                "     \n"
+                "     \n"
+                "     \n"
+                == screen.renderText());
+        }
+    }
+}
 
 TEST_CASE("MoveCursorUp", "[screen]")
 {
@@ -545,8 +677,8 @@ TEST_CASE("MoveCursorTo", "[screen]")
             CHECK(1 == screen.currentColumn());
             CHECK(2 == screen.realCurrentRow());
             CHECK(2 == screen.realCurrentColumn());
-            CHECK('7' == (char)screen.at(1, 1).character);
-            CHECK('I' == (char)screen.at(3, 3).character);
+            CHECK('7' == (char)screen.withOriginAt(1, 1).character);
+            CHECK('I' == (char)screen.withOriginAt(3, 3).character);
         }
     }
 }
