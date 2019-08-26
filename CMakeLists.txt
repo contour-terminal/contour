@@ -62,7 +62,7 @@ endif()
 set(terminal_HEADERS
     src/terminal/Color.h
     src/terminal/Commands.h
-    src/terminal/Generator.h
+    src/terminal/OutputGenerator.h
     src/terminal/OutputHandler.h
     src/terminal/Parser.h
     src/terminal/Process.h
@@ -75,7 +75,7 @@ set(terminal_HEADERS
 set(terminal_SOURCES
     src/terminal/Color.cpp
     src/terminal/Commands.cpp
-    src/terminal/Generator.cpp
+    src/terminal/OutputGenerator.cpp
     src/terminal/OutputHandler.cpp
     src/terminal/Parser.cpp
     src/terminal/Process.cpp

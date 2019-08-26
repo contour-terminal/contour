@@ -26,13 +26,13 @@
 namespace terminal {
 
 /// Encodes Command stream into ANSI codes and text.
-class Generator {
+class OutputGenerator {
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    explicit Generator(Writer writer) : writer_{writer} {}
-    explicit Generator(std::ostream& output) : Generator{[&](auto d, auto n) { output.write(d, n); }} {}
-    ~Generator();
+    explicit OutputGenerator(Writer writer) : writer_{writer} {}
+    explicit OutputGenerator(std::ostream& output) : OutputGenerator{[&](auto d, auto n) { output.write(d, n); }} {}
+    ~OutputGenerator();
 
     void operator()(std::vector<Command> const& commands);
     void operator()(Command const& command);
@@ -48,7 +48,7 @@ class Generator {
     static std::string generate(std::vector<Command> const& commands)
     {
         auto output = std::string{};
-        Generator{[&](auto d, auto n) { output += std::string{d, n}; }}(commands);
+        OutputGenerator{[&](auto d, auto n) { output += std::string{d, n}; }}(commands);
         return output;
     }
 

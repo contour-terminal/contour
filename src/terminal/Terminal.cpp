@@ -13,7 +13,7 @@
  */
 #include <terminal/Terminal.h>
 
-#include <terminal/Generator.h>
+#include <terminal/OutputGenerator.h>
 #include <terminal/Util.h>
 
 using namespace std;

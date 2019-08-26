@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Generator.h>
+#include <terminal/OutputGenerator.h>
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/Process.h>
@@ -127,7 +127,7 @@ class ProxyTerm {
     ~ProxyTerm()
     {
         // restore some settings
-        terminal::Generator generator{ [this](char const* s, size_t n) { writeToConsole(s, n); } };
+        terminal::OutputGenerator generator{ [this](char const* s, size_t n) { writeToConsole(s, n); } };
         generator(terminal::SetMode{ terminal::Mode::VisibleCursor, true });
 
         // restore flags upon exit
@@ -215,7 +215,7 @@ class ProxyTerm {
 
     void onStdout(vector<terminal::Command> const& commands)
     {
-        auto const generated = terminal::Generator::generate(commands);
+        auto const generated = terminal::OutputGenerator::generate(commands);
 
         // log("create: {}", terminal::escape(generated));
         // for (terminal::Command const& command: commands)
@@ -237,7 +237,7 @@ class ProxyTerm {
     // PoC-style naive implementation of a full screen redraw
     void redraw()
     {
-        terminal::Generator generator{[this](char const* s, size_t n) { writeToConsole(s, n); }};
+        terminal::OutputGenerator generator{[this](char const* s, size_t n) { writeToConsole(s, n); }};
 
         generator(terminal::SetMode{terminal::Mode::VisibleCursor, false});
         generator(terminal::SetMode{terminal::Mode::AutoWrap, false});

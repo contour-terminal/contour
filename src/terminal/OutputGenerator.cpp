@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Color.h>
-#include <terminal/Generator.h>
+#include <terminal/OutputGenerator.h>
 #include <terminal/UTF8.h>
 #include <terminal/Util.h>
 
@@ -27,12 +27,12 @@ using namespace std;
 
 namespace terminal {
 
-Generator::~Generator()
+OutputGenerator::~OutputGenerator()
 {
     flush();
 }
 
-void Generator::operator()(std::vector<Command> const& commands)
+void OutputGenerator::operator()(std::vector<Command> const& commands)
 {
     for (Command const& command : commands)
         (*this)(command);
@@ -69,7 +69,7 @@ optional<char> finalChar(Charset charset)
     return nullopt;
 }
 
-string Generator::flush(vector<int> _sgr)
+string OutputGenerator::flush(vector<int> _sgr)
 {
     if (_sgr.empty())
         return "";
@@ -85,7 +85,7 @@ string Generator::flush(vector<int> _sgr)
     return fmt::format("\033[{}m", params);
 }
 
-void Generator::flush()
+void OutputGenerator::flush()
 {
     if (!sgr_.empty())
     {
@@ -95,7 +95,7 @@ void Generator::flush()
     }
 }
 
-void Generator::sgr_add(int n)
+void OutputGenerator::sgr_add(int n)
 {
     if (n == 0)
     {
@@ -115,7 +115,7 @@ void Generator::sgr_add(int n)
     }
 }
 
-void Generator::operator()(Command const& command)
+void OutputGenerator::operator()(Command const& command)
 {
     auto const pairOrNone = [](int _default, int _a, int _b) -> string {
         if (_a == _default && _b == _default)
