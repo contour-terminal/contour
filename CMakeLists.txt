@@ -1,22 +1,18 @@
-# vim:ts=4:sw=4:et
 cmake_minimum_required(VERSION 3.13)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(Toolchain)
+
 project(libterminal VERSION "0.0.0" LANGUAGES CXX)
 
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(ClangTidy)
-include(EnableCcache)
-
-# toolchain
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-find_package(Threads)
-
 set(MASTER_PROJECT OFF)
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
     set(MASTER_PROJECT ON)
 endif()
+
+include(EnableCcache)
+include(ClangTidy)
+find_package(Threads)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
@@ -91,7 +87,6 @@ if(UNIX)
 endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
-set_target_properties(terminal PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_include_directories(terminal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
 target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
 
@@ -105,7 +100,6 @@ if(LIBTERMINAL_TESTING)
         #src/terminal/UTF8_test.cpp
         src/terminal/terminal_test.cpp
     )
-    set_target_properties(terminal_test PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
 endif(LIBTERMINAL_TESTING)
