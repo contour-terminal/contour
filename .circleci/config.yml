@@ -44,7 +44,9 @@ defaults:
         set -ex
         mkdir build
         cd build
-        cmake .. -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_CXX_COMPILER=$CXX -DLIBTERMINAL_COVERAGE=$COVERAGE
+        CMAKE_OPTIONS=(-DCMAKE_CXX_COMPILER=$CXX -DLIBTERMINAL_COVERAGE=$COVERAGE)
+        test -n "${CMAKE_TOOLCHAIN_FILE}" && CMAKE_OPTIONS=(${CMAKE_OPTIONS[@]} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
+        cmake .. -DCMAKE_BUILD_TYPE="Debug" "${CMAKE_OPTIONS[@]}"
         make -j3
 
   - test_x64_ubuntu1904: &test_x64_ubuntu1904
@@ -101,12 +103,46 @@ jobs:
           paths:
             - "*"
 
+  build_x64_ubuntu1904_gcc_cxx20:
+    docker:
+      - image: buildpack-deps:disco
+    environment:
+      COVERAGE: "ON"
+      CXX: "g++"
+      CMAKE_TOOLCHAIN_FILE: "cmake/toolchains/cxx20.cmake"
+    steps:
+      - checkout
+      - run: *run_install_deps
+      - run: *checkout_submodules
+      - run: *run_build
+      - persist_to_workspace:
+          root: build
+          paths:
+            - "*"
+
   build_x64_ubuntu1904_clang:
     docker:
       - image: buildpack-deps:disco
     environment:
       COVERAGE: "OFF"
       CXX: "clang++-8"
+    steps:
+      - checkout
+      - run: *run_install_deps
+      - run: *checkout_submodules
+      - run: *run_build
+      - persist_to_workspace:
+          root: build
+          paths:
+            - "*"
+
+  build_x64_ubuntu1904_clang_cxx20:
+    docker:
+      - image: buildpack-deps:disco
+    environment:
+      COVERAGE: "OFF"
+      CXX: "clang++-8"
+      CMAKE_TOOLCHAIN_FILE: "cmake/toolchains/cxx20.cmake"
     steps:
       - checkout
       - run: *run_install_deps
@@ -133,6 +169,8 @@ workflows:
   build_and_test:
     jobs:
       - build_x64_ubuntu1904_gcc: *workflow_trigger_on_tags
+      - build_x64_ubuntu1904_gcc_cxx20: *workflow_trigger_on_tags
       - build_x64_ubuntu1904_clang: *workflow_trigger_on_tags
+      - build_x64_ubuntu1904_clang_cxx20: *workflow_trigger_on_tags
       - test_x64_ubuntu1904_gcc: *workflow_x64_ubuntu1904_gcc
       - test_x64_ubuntu1904_clang: *workflow_x64_ubuntu1904_clang
