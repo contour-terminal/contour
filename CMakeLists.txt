@@ -49,9 +49,9 @@ endif()
 
 # ----------------------------------------------------------------------------
 if(NOT MSVC)
-    add_definitions(-Wall)
-    add_definitions(-Werror)
-    add_definitions(-pedantic)
+    add_compile_options(-Wall -Werror -pedantic)
+else()
+    add_definitions(-DNOMINMAX)
 endif()
 
 # ----------------------------------------------------------------------------

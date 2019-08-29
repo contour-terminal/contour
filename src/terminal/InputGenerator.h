@@ -30,7 +30,7 @@ class Modifier {
 
     constexpr Modifier(Key _key) : mask_{static_cast<unsigned>(_key)} {}
 
-    constexpr bool value() const noexcept { return mask_; }
+    constexpr unsigned value() const noexcept { return mask_; }
 
     constexpr bool none() const noexcept { return value() == 0; }
     constexpr bool shift() const noexcept { return value() & Shift; }
