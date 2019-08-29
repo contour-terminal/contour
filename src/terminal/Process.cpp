@@ -132,6 +132,7 @@ Process::Process(
             char** argv = new char* [_args.size() + 1];
             for (size_t i = 0; i < _args.size(); ++i)
                 argv[i] = const_cast<char*>(_args[i].c_str());
+			argv[_args.size()] = nullptr;
 
             for (auto&& [name, value] : _env)
                 setenv(name.c_str(), value.c_str(), true);
