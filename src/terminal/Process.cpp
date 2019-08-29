@@ -174,7 +174,7 @@ Process::~Process()
 #else
     CloseHandle(processInfo_.hThread);
     CloseHandle(processInfo_.hProcess);
-
+ 
     DeleteProcThreadAttributeList(startupInfo_.lpAttributeList);
     free(startupInfo_.lpAttributeList);
 #endif
@@ -216,7 +216,7 @@ Process::ExitStatus Process::wait()
 std::string Process::loginShell()
 {
 #if defined(_MSC_VER)
-    return "cmd.exe"s;
+    return "powershell.exe"s;
 #else
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
         return pw->pw_shell;
