@@ -139,6 +139,9 @@ class ProxyTerm {
   private:
     void inputThread()
     {
+#if defined(_MSC_VER)
+        setupConsoleInput();
+#endif
         for (;;)
         {
             char buf[4096];
@@ -337,6 +340,17 @@ class ProxyTerm {
             tcflush(STDIN_FILENO, TCIOFLUSH);
 
         return save;
+    }
+#else
+    void setupConsoleInput()
+    {
+        HANDLE hConsole = { GetStdHandle(STD_INPUT_HANDLE) };
+        DWORD consoleMode{};
+        GetConsoleMode(hConsole, &consoleMode);
+        consoleMode &= ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT);
+        //consoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        if (!SetConsoleMode(hConsole, consoleMode))
+            throw runtime_error{ "Could not enable Console VT processing. " + getErrorString() };
     }
 #endif
 
