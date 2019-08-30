@@ -27,6 +27,12 @@
 
 namespace terminal {
 
+/// Terminal API to manage keyboard and screen of a pseudo terminal.
+///
+/// With a terminal being attached to a Process, the terminal's screen
+/// gets updated according to the process' outputted text,
+/// whereas input to the process can be send high-level via the various
+/// send(...) member functions.
 class Terminal : public PseudoTerminal {
   public:
     using Logger = std::function<void(std::string_view const& message)>;
@@ -39,13 +45,15 @@ class Terminal : public PseudoTerminal {
     bool send(Key _key, Modifier _modifier);
     //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier);
     //TODO: bool send(MouseMoveEvent _mouseMove);
+    //TODO: void send(Signal _signalNumber);
 
     // write to screen
     void writeToScreen(char const* data, size_t size);
 
+    /// @returns const-reference screen of this terminal.
     Screen const& screen() const noexcept { return screen_; }
-    Screen& screen() noexcept { return screen_; }
 
+    /// Waits until process screen update thread has terminated.
     void join();
 
   private:
