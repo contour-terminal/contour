@@ -126,7 +126,7 @@ class Screen {
     void write(std::string_view const& text) { write(text.data(), text.size()); }
 
     /// Renders the full screen by passing every grid cell to the callback.
-    void render(Renderer const& renderer);
+    void render(Renderer const& renderer) const;
 
     /// Renders a single text line.
     std::string renderTextLine(size_t row) const;

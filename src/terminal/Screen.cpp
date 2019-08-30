@@ -424,7 +424,7 @@ void Screen::write(char const *data, size_t size)
         onCommands_(handler_.commands());
 }
 
-void Screen::render(Renderer const& render)
+void Screen::render(Renderer const& render) const
 {
     for (cursor_pos_t row = 1; row <= rowCount(); ++row)
         for (cursor_pos_t col = 1; col <= columnCount(); ++col)
