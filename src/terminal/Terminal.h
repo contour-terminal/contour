@@ -21,6 +21,7 @@
 #include <fmt/format.h>
 
 #include <functional>
+#include <mutex>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -50,8 +51,11 @@ class Terminal : public PseudoTerminal {
     // write to screen
     void writeToScreen(char const* data, size_t size);
 
+    /// Thread-safe access to screen data for rendering
+    void render(Screen::Renderer const& renderer) const;
+
     /// @returns const-reference screen of this terminal.
-    Screen const& screen() const noexcept { return screen_; }
+    [[deprecated]] Screen const& screen() const noexcept { return screen_; }
 
     /// Waits until process screen update thread has terminated.
     void join();
@@ -68,6 +72,7 @@ class Terminal : public PseudoTerminal {
     InputGenerator::SequenceList pendingInput_;
     Screen screen_;
     Screen::Hook onScreenCommands_;
+    std::mutex mutable screenLock_;
     std::thread screenUpdateThread_;
 };
 

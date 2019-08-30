@@ -57,6 +57,7 @@ void Terminal::screenUpdateThread()
         if (size_t const n = read(buf, sizeof(buf)); n > 0)
         {
             //log("outputThread.data: {}", terminal::escape(buf, buf + n));
+            lock_guard<mutex> _l{ screenLock_ };
             screen_.write(buf, n);
         }
     }
@@ -88,7 +89,15 @@ void Terminal::flushInput()
 
 void Terminal::writeToScreen(char const* data, size_t size)
 {
+    lock_guard<mutex> _l{ screenLock_ };
+
     screen_.write(data, size);
+}
+
+void Terminal::render(Screen::Renderer const& renderer) const
+{
+    lock_guard<mutex> _l{ screenLock_ };
+    screen_.render(renderer);
 }
 
 void Terminal::join()
