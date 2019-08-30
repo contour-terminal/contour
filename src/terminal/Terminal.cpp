@@ -62,7 +62,7 @@ void Terminal::screenUpdateThread()
     }
 }
 
-bool Terminal::send(wchar_t _characterEvent, Modifier _modifier)
+bool Terminal::send(char32_t _characterEvent, Modifier _modifier)
 {
     bool const success = inputGenerator_.generate(_characterEvent, _modifier);
     flushInput();

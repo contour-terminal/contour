@@ -41,11 +41,11 @@ class Terminal : public PseudoTerminal {
     Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands = {});
 
     // API for keyboard input handling
-    bool send(wchar_t _characterEvent, Modifier _modifier);
-    bool send(Key _key, Modifier _modifier);
-    //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier);
-    //TODO: bool send(MouseMoveEvent _mouseMove);
-    //TODO: void send(Signal _signalNumber);
+    bool send(char32_t _characterEvent, Modifier _modifier = Modifier::None);
+    bool send(Key _key, Modifier _modifier = Modifier::None);
+    //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier = Modifier::None);
+    //TODO: bool send(MouseMoveEvent _mouseMove = Modifier::None);
+    //TODO: void send(Signal _signalNumber = Modifier::None);
 
     // write to screen
     void writeToScreen(char const* data, size_t size);
