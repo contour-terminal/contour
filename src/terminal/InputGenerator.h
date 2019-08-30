@@ -35,6 +35,7 @@ class Modifier {
     constexpr unsigned value() const noexcept { return mask_; }
 
     constexpr bool none() const noexcept { return value() == 0; }
+    constexpr bool some() const noexcept { return value() != 0; }
     constexpr bool shift() const noexcept { return value() & Shift; }
     constexpr bool alt() const noexcept { return value() & Alt; }
     constexpr bool control() const noexcept { return value() & Control; }
@@ -105,6 +106,8 @@ constexpr size_t makeVirtualTerminalParam(Modifier _modifier) noexcept
             return 0;
     }
 }
+
+std::string to_string(Modifier _modifier);
 
 enum class Key {
     // C0 keys

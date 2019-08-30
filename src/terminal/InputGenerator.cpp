@@ -22,12 +22,13 @@
 #include <fmt/format.h>
 
 using namespace std;
-using namespace terminal;
 
 #define ESC "\x1B"
 #define CSI "\x1B["
 #define DEL "\x7F"
 #define SS3 "\x4F"
+
+namespace terminal {
 
 namespace mappings {
     struct KeyMapping {
@@ -145,11 +146,33 @@ namespace mappings {
     {
         for (KeyMapping const& km : _mappings)
             if (km.key == _key)
-                return {km.mapping};
+                return { km.mapping };
 
         return nullopt;
     }
 }
+
+string to_string(Modifier _modifier)
+{
+    string out;
+    auto const append = [&](const char* s) {
+        if (!out.empty())
+            out += ",";
+        out += s;
+    };
+
+    if (_modifier.shift())
+        append("Shift");
+    if (_modifier.alt())
+        append("Alt");
+    if (_modifier.control())
+        append("Control");
+    if (_modifier.meta())
+        append("Meta");
+
+    return out;
+}
+
 
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
@@ -166,7 +189,7 @@ bool InputGenerator::generate(wchar_t _characterEvent, Modifier _modifier)
     if (_modifier.control() && _characterEvent == L' ')
         return emit("\x00");
     else if (_modifier.control() && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
-        return emit(tolower(_characterEvent) - 'a');
+        return emit(tolower(_characterEvent) - 'a' + 1);
     else if (!_modifier.control() && utf8::isASCII(_characterEvent))
         return emit(static_cast<char>(_characterEvent));
     else if (!_modifier)
@@ -223,8 +246,10 @@ inline bool InputGenerator::emit(char _asciiChar)
 }
 
 template <typename T, size_t N>
-inline bool InputGenerator::emit(T (&_sequence)[N])
+inline bool InputGenerator::emit(T(&_sequence)[N])
 {
     pendingSequences_.emplace_back(string(_sequence));
     return true;
 }
+
+} // namespace terminal
