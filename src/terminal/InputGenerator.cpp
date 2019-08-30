@@ -72,6 +72,11 @@ namespace mappings {
     };
 
     auto constexpr standard = array{
+        KeyMapping{Key::Enter, "\r"},
+        KeyMapping{Key::Backspace, "\b"},
+        KeyMapping{Key::Tab, "\t"},
+        KeyMapping{Key::Escape, ESC},
+
         // cursor keys
         KeyMapping{Key::UpArrow, CSI "A"},
         KeyMapping{Key::DownArrow, CSI "B"},

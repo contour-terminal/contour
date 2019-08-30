@@ -22,12 +22,14 @@ namespace terminal {
 class Modifier {
   public:
     enum Key : unsigned {
+        None = 0,
         Shift = 1,
         Alt = 2,
         Control = 4,
         Meta = 8,
     };
 
+    constexpr Modifier() : mask_{} {}
     constexpr Modifier(Key _key) : mask_{static_cast<unsigned>(_key)} {}
 
     constexpr unsigned value() const noexcept { return mask_; }
@@ -39,6 +41,12 @@ class Modifier {
     constexpr bool meta() const noexcept { return value() & Meta; }
 
     constexpr operator unsigned () const noexcept { return mask_; }
+
+    constexpr Modifier& operator|=(Modifier const& _other) noexcept
+    {
+        mask_ |= _other.mask_;
+        return *this;
+    }
 
   private:
     unsigned mask_;
@@ -99,6 +107,12 @@ constexpr size_t makeVirtualTerminalParam(Modifier _modifier) noexcept
 }
 
 enum class Key {
+    // C0 keys
+    Enter,
+    Backspace,
+    Tab,
+    Escape,
+
     // function keys
     F1,
     F2,
