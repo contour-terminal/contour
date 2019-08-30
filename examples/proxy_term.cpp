@@ -102,9 +102,7 @@ class ProxyTerm {
 #endif
           logger_{ofstream{"trace.log", ios::trunc}},
           terminal_{
-              windowSize.columns,
-              windowSize.rows,
-              bind(&ProxyTerm::screenReply, this, _1),
+              windowSize,
               [this](auto const& msg) { log("terminal: {}", msg); },
               bind(&ProxyTerm::onStdout, this, _1)
           },
@@ -173,7 +171,7 @@ class ProxyTerm {
             if (size_t const n = pty_.read(buf, sizeof(buf)); n > 0)
             {
                 log("outputThread.data: {}", terminal::escape(buf, buf + n));
-                terminal_.write(buf, n);
+                terminal_.writeToScreen(buf, n);
                 if (mode_ == Mode::PassThrough)
                     writeToConsole(buf, n);
             }
@@ -267,11 +265,6 @@ class ProxyTerm {
 
         // (TODO: make visible ONLY if meant to be visible)
         generator(terminal::SetMode{terminal::Mode::VisibleCursor, true});
-    }
-
-    void screenReply(string_view const& message)
-    {
-        pty_.write(message.data(), message.size());
     }
 
     void log(string_view const& msg)

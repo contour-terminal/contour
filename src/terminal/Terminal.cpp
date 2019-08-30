@@ -17,28 +17,83 @@
 #include <terminal/Util.h>
 
 using namespace std;
+using namespace std::placeholders;
 
 namespace terminal {
 
-Terminal::Terminal(size_t cols,
-                   size_t rows,
-                   Screen::Reply reply,
-                   Logger logger,
-                   Hook onCommands)
-  : logger_{move(logger)},
+Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
+  : PseudoTerminal{ _winSize },
+    logger_{move(_logger)},
+    inputGenerator_{},
     screen_{
-        cols,
-        rows,
-        move(reply),
+        _winSize.columns,
+        _winSize.rows,
+        bind(&Terminal::onScreenReply, this, _1),
         [this](auto const& msg) { logger_(msg); },
-        move(onCommands)
-    }
+        bind(&Terminal::onScreenCommands, this, _1)
+    },
+    onScreenCommands_{ move(_onScreenCommands) },
+    screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) }
 {
 }
 
-void Terminal::write(char const* data, size_t size)
+void Terminal::onScreenReply(std::string_view const& reply)
+{
+    write(reply.data(), reply.size());
+}
+
+void Terminal::onScreenCommands(std::vector<Command> const& commands)
+{
+    // Screen output commands be here - anything this terminal is interested in?
+    if (onScreenCommands_)
+        onScreenCommands_(commands);
+}
+
+void Terminal::screenUpdateThread()
+{
+    for (;;)
+    {
+        char buf[4096];
+        if (size_t const n = read(buf, sizeof(buf)); n > 0)
+        {
+            //log("outputThread.data: {}", terminal::escape(buf, buf + n));
+            screen_.write(buf, n);
+        }
+    }
+}
+
+bool Terminal::send(wchar_t _characterEvent, Modifier _modifier)
+{
+    bool const success = inputGenerator_.generate(_characterEvent, _modifier);
+    flushInput();
+    return success;
+}
+
+bool Terminal::send(Key _key, Modifier _modifier)
+{
+    bool const success = inputGenerator_.generate(_key, _modifier);
+    flushInput();
+    return success;
+}
+
+void Terminal::flushInput()
+{
+    inputGenerator_.swap(pendingInput_);
+
+    for (auto const& seq : pendingInput_)
+        write(seq.data(), seq.size());
+
+    pendingInput_.clear();
+}
+
+void Terminal::writeToScreen(char const* data, size_t size)
 {
     screen_.write(data, size);
+}
+
+void Terminal::join()
+{
+    screenUpdateThread_.join();
 }
 
 }  // namespace terminal

@@ -22,38 +22,45 @@
 
 #include <functional>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 namespace terminal {
 
-class Terminal {
+class Terminal : public PseudoTerminal {
   public:
     using Logger = std::function<void(std::string_view const& message)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
-    Terminal(
-        size_t cols,
-        size_t rows,
-        Screen::Reply reply,
-        Logger logger,
-        Hook onCommands);
+    Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands = {});
 
     // API for keyboard input handling
     bool send(wchar_t _characterEvent, Modifier _modifier);
     bool send(Key _key, Modifier _modifier);
-    bool send(MouseButtonEvent _mouseButton, Modifier _modifier);
-    bool send(MouseMoveEvent _mouseMove);
+    //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier);
+    //TODO: bool send(MouseMoveEvent _mouseMove);
 
     // write to screen
-    void write(char const* data, size_t size);
+    void writeToScreen(char const* data, size_t size);
 
     Screen const& screen() const noexcept { return screen_; }
     Screen& screen() noexcept { return screen_; }
 
+    void join();
+
+  private:
+    void flushInput();
+    void screenUpdateThread();
+    void onScreenReply(std::string_view const& reply);
+    void onScreenCommands(std::vector<Command> const& commands);
+
   private:
     Logger const logger_;
     InputGenerator inputGenerator_;
+    InputGenerator::SequenceList pendingInput_;
     Screen screen_;
-    //PseudoTerminal pty_;
+    Screen::Hook onScreenCommands_;
+    std::thread screenUpdateThread_;
 };
 
 }  // namespace terminal
