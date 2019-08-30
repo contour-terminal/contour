@@ -75,6 +75,7 @@ void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
 
 void Screen::Buffer::moveCursorTo(Coordinate to)
 {
+    wrapPending = false;
     cursor = clampCoordinate(toRealCoordinate(to));
     updateCursorIterators();
 }
