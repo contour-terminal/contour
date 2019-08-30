@@ -82,11 +82,6 @@ void Screen::Buffer::moveCursorTo(Coordinate to)
     updateCursorIterators();
 }
 
-Screen::Cell& Screen::Buffer::at(cursor_pos_t row, cursor_pos_t col)
-{
-    return (*next(begin(lines), row - 1))[col - 1];
-}
-
 Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
 {
     if (cursorRestrictedToMargin)
@@ -94,17 +89,21 @@ Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
         row += margin_.vertical.from - 1;
         col += margin_.horizontal.from - 1;
     }
-    return (*next(begin(lines), row - 1))[col - 1];
+    return at(row, col);
 }
 
-Screen::Cell const& Screen::Buffer::at(cursor_pos_t row, cursor_pos_t col) const
+Screen::Cell& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col)
 {
-    if (cursorRestrictedToMargin)
-    {
-        row += margin_.vertical.from - 1;
-        col += margin_.horizontal.from - 1;
-    }
-    return (*next(begin(lines), row - 1))[col - 1];
+    assert(_row >= 1 && _row <= numLines_);
+    assert(_col >= 1 && _col <= numColumns_);
+    assert(numLines_ == lines.size());
+
+    return (*next(begin(lines), _row - 1))[_col - 1];
+}
+
+Screen::Cell const& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col) const
+{
+    return const_cast<Buffer*>(this)->at(_row, _col);
 }
 
 void Screen::Buffer::linefeed()
@@ -121,11 +120,14 @@ void Screen::Buffer::linefeed()
     else
     {
         cursor.column = 1;
-        savedLines.splice(
-            end(savedLines),
-            lines,
-            begin(lines)
-        );
+        //savedLines.splice(
+        //    end(savedLines),
+        //    lines,
+        //    begin(lines)
+        //);
+        savedLines.emplace_back(move(lines.front()));
+        lines.pop_front();
+
         lines.emplace_back(numColumns(), Cell{});
         currentLine = prev(end(lines));
         currentColumn = begin(*currentLine);
@@ -357,6 +359,8 @@ void Screen::Buffer::updateCursorIterators()
 
 void Screen::Buffer::verifyState() const
 {
+    assert(numLines_ == lines.size());
+
     // verify cursor positions
     auto const clampedCursor = clampCoordinate(cursor);
     assert(cursor == clampedCursor);
