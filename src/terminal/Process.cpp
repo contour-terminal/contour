@@ -181,8 +181,45 @@ Process::~Process()
 #endif
 }
 
+optional<Process::ExitStatus> Process::checkStatus() const
+{
+    if (exitStatus_.has_value())
+        return exitStatus_;
+
+#if defined(__unix__)
+    assert(pid_ != -1);
+    int status = 0;
+    if (waitpid(pid_, &status, WNOHANG) == -1)
+        throw runtime_error{ getLastErrorAsString() };
+
+    pid_ = -1;
+
+    if (WIFEXITED(status))
+        return exitStatus_ = ExitStatus{ NormalExit{ WEXITSTATUS(status) } };
+    else if (WIFSIGNALED(status))
+        return exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } };
+    else if (WIFSTOPPED(status))
+        return exitStatus_ = ExitStatus{ Suspend{} };
+    else if (WIFCONTINUED(status))
+        return exitStatus_ = ExitStatus{ Resume{} };
+    else
+        throw runtime_error{ "Unknown waitpid() return value." };
+#else
+    if (WaitForSingleObject(processInfo_.hThread, 0) != S_OK)
+        printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
+    DWORD exitCode;
+    if (GetExitCodeProcess(processInfo_.hProcess, &exitCode))
+        return exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } };
+    else
+        throw runtime_error{ getLastErrorAsString() };
+#endif
+}
+
 Process::ExitStatus Process::wait()
 {
+    if (exitStatus_.has_value())
+        return exitStatus_.value();
+
 #if defined(__unix__)
     assert(pid_ != -1);
     int status = 0;
@@ -192,13 +229,13 @@ Process::ExitStatus Process::wait()
     pid_ = -1;
 
     if (WIFEXITED(status))
-        return NormalExit{ WEXITSTATUS(status) };
+        return exitStatus_ = ExitStatus{ NormalExit{ WEXITSTATUS(status) } };
     else if (WIFSIGNALED(status))
-        return SignalExit{ WTERMSIG(status) };
+        return exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } };
     else if (WIFSTOPPED(status))
-        return Suspend{};
+        return exitStatus_ = ExitStatus{ Suspend{} };
     else if (WIFCONTINUED(status))
-        return Resume{};
+        return exitStatus_ = ExitStatus{ Resume{} };
     else
         throw runtime_error{ "Unknown waitpid() return value." };
 #else
@@ -208,7 +245,7 @@ Process::ExitStatus Process::wait()
     //    printf("WaitForSingleObject(proc): %s\n", getLastErrorAsString().c_str());
     DWORD exitCode;
     if (GetExitCodeProcess(processInfo_.hProcess, &exitCode))
-        return NormalExit{ static_cast<int>(exitCode) };
+        return *(exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } });
     else
         throw runtime_error{ getLastErrorAsString() };
 #endif

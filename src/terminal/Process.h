@@ -14,6 +14,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -70,6 +71,7 @@ class [[nodiscard]] Process {
 
 	NativeHandle nativeHandle() const noexcept { return pid_; }
 
+    [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
 	[[nodiscard]] ExitStatus wait();
 
 private:
@@ -79,6 +81,8 @@ private:
 	PROCESS_INFORMATION processInfo_{};
 	STARTUPINFOEX startupInfo_{};
 #endif
+
+    mutable std::optional<Process::ExitStatus> exitStatus_{};
 };
 
 }  // namespace terminal
