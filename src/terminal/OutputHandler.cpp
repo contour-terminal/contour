@@ -647,28 +647,28 @@ void OutputHandler::dispatchGraphicsRendition()
                 emit<SetBackgroundColor>(DefaultColor{});
                 break;
             case 90:
-                emit<SetBackgroundColor>(BrightColor::Black);
+                emit<SetForegroundColor>(BrightColor::Black);
                 break;
             case 91:
-                emit<SetBackgroundColor>(BrightColor::Red);
+                emit<SetForegroundColor>(BrightColor::Red);
                 break;
             case 92:
-                emit<SetBackgroundColor>(BrightColor::Green);
+                emit<SetForegroundColor>(BrightColor::Green);
                 break;
             case 93:
-                emit<SetBackgroundColor>(BrightColor::Yellow);
+                emit<SetForegroundColor>(BrightColor::Yellow);
                 break;
             case 94:
-                emit<SetBackgroundColor>(BrightColor::Blue);
+                emit<SetForegroundColor>(BrightColor::Blue);
                 break;
             case 95:
-                emit<SetBackgroundColor>(BrightColor::Magenta);
+                emit<SetForegroundColor>(BrightColor::Magenta);
                 break;
             case 96:
-                emit<SetBackgroundColor>(BrightColor::Cyan);
+                emit<SetForegroundColor>(BrightColor::Cyan);
                 break;
             case 97:
-                emit<SetBackgroundColor>(BrightColor::White);
+                emit<SetForegroundColor>(BrightColor::White);
                 break;
             case 100:
                 emit<SetBackgroundColor>(BrightColor::Black);
