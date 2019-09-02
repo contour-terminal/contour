@@ -196,7 +196,7 @@ class InputGenerator {
     void setNumpadKeysMode(KeyMode _mode);
 
     /// Generates input sequence for a pressed character.
-    bool generate(wchar_t _characterEvent, Modifier _modifier);
+    bool generate(char32_t _characterEvent, Modifier _modifier);
 
     /// Generates input sequence for a pressed special key.
     bool generate(Key _key, Modifier _modifier);

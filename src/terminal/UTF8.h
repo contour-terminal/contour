@@ -26,28 +26,28 @@
 namespace utf8 {
 
 // XXX some type traits (TODO use STD specialization instead)
-constexpr bool isASCII(wchar_t x) noexcept
+constexpr bool isASCII(char32_t x) noexcept
 {
     return x <= 0x7F;
 }
 
-constexpr bool isLatin(wchar_t x) noexcept
+constexpr bool isLatin(char32_t x) noexcept
 {
     return x < 0xFF;
 }
 
-constexpr bool isC1(wchar_t x) noexcept
+constexpr bool isC1(char32_t x) noexcept
 {
     return x >= 0x7F      // std::numeric_limits<terminal::C1_8bit>::min()
            && x <= 0x9F;  // std::numeric_limits<terminal::C1_8bit>::max()
 }
 
-constexpr bool isControl(wchar_t x) noexcept
+constexpr bool isControl(char32_t x) noexcept
 {
     return (0 <= x && x < 0x1F) || (0x80 <= x && x <= 0x9F);
 }
 
-//! Decodes an UTF8 byte stream into Unicode characters of type wchar_t.
+//! Decodes an UTF8 byte stream into Unicode characters of type char32_t.
 class Decoder {
   public:
     constexpr Decoder() noexcept {}
@@ -60,8 +60,8 @@ class Decoder {
     }
 
     struct Incomplete {};
-    struct Invalid { static constexpr wchar_t replacementCharacter {0xFFFD}; };
-    struct Success { wchar_t value; };
+    struct Invalid { static constexpr char32_t replacementCharacter {0xFFFD}; };
+    struct Success { char32_t value; };
     using Result = std::variant<Incomplete, Invalid, Success>;
 
     constexpr Result decode(uint8_t _byte)
@@ -134,7 +134,7 @@ class Decoder {
   private:
     size_t expectedLength_{};
     size_t currentLength_{};
-    wchar_t character_{};
+    char32_t character_{};
 };
 
 template <class... Ts>
@@ -144,9 +144,9 @@ struct overloaded : Ts... {
 template <class... Ts>
 overloaded(Ts...)->overloaded<Ts...>;
 
-inline std::wstring decode(char const* begin, char const* end)
+inline std::u32string decode(char const* begin, char const* end)
 {
-    std::wstring out;
+    std::u32string out;
     for (auto decode = Decoder{}; begin != end; ++begin)
     {
         visit(
@@ -196,7 +196,7 @@ inline std::string to_string(Bytes const& _utf8)
     return s;
 }
 
-inline Bytes encode(wchar_t character)
+inline Bytes encode(char32_t character)
 {
     if (character <= 0x7F)
         return Bytes{static_cast<uint8_t>(character & 0b0111'1111)};

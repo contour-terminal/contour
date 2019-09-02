@@ -371,7 +371,7 @@ struct SetForegroundColor { Color color; };
 struct SetBackgroundColor { Color color; };
 struct SetGraphicsRendition { GraphicsRendition rendition; };
 
-struct AppendChar { wchar_t ch; };
+struct AppendChar { char32_t ch; };
 
 struct SetMode { Mode mode; bool enable; };
 

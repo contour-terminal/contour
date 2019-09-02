@@ -184,7 +184,7 @@ void InputGenerator::setNumpadKeysMode(KeyMode _mode)
     numpadKeysMode_ = _mode;
 }
 
-bool InputGenerator::generate(wchar_t _characterEvent, Modifier _modifier)
+bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
     if (_modifier.control() && _characterEvent == L' ')
         return emit("\x00");

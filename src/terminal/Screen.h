@@ -95,7 +95,7 @@ class Screen {
 
     /// Grid cell with character and graphics rendition information.
     struct Cell {
-        wchar_t character{};
+        char32_t character{};
         GraphicsAttributes attributes{};
     };
 
@@ -324,7 +324,7 @@ class Screen {
         Lines::iterator currentLine{std::begin(lines)};
         Line::iterator currentColumn{std::begin(*currentLine)};
 
-        void appendChar(wchar_t ch);
+        void appendChar(char32_t ch);
         void linefeed();
 
         void resize(size_t newColumnCount, size_t newRowCount);

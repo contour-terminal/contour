@@ -117,7 +117,7 @@ void OutputGenerator::sgr_add(int n)
 
 void OutputGenerator::operator()(Command const& command)
 {
-    auto const pairOrNone = [](int _default, int _a, int _b) -> string {
+    auto const pairOrNone = [](size_t _default, size_t _a, size_t _b) -> string {
         if (_a == _default && _b == _default)
             return "";
         else if (_a == _default)

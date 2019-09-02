@@ -136,7 +136,7 @@ void Screen::Buffer::linefeed()
     verifyState();
 }
 
-void Screen::Buffer::appendChar(wchar_t ch)
+void Screen::Buffer::appendChar(char32_t ch)
 {
     verifyState();
 

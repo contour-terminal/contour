@@ -56,7 +56,7 @@ class OutputGenerator {
     static std::string flush(std::vector<int> _sgr);
     void sgr_add(int _param);
 
-    void write(wchar_t v)
+    void write(char32_t v)
     {
         write(utf8::encode(v));
     }

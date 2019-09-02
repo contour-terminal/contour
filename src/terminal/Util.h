@@ -23,7 +23,7 @@ namespace terminal {
 template <class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 template <class... Ts> overloaded(Ts...)->overloaded<Ts...>;
 
-inline std::string escape(uint8_t ch)
+inline std::string escape(char32_t ch)
 {
     switch (ch)
     {
@@ -41,7 +41,7 @@ inline std::string escape(uint8_t ch)
             if (std::isprint(ch))
                 return fmt::format("{}", static_cast<char>(ch));
             else
-                return fmt::format("\\x{:02X}", ch);
+                return fmt::format("\\x{:02X}", static_cast<uint32_t>(ch));
     }
 }
 

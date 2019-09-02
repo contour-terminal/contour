@@ -168,7 +168,7 @@ class Parser {
         OSC_End,
     };
 
-    using ActionHandler = std::function<void(ActionClass, Action, wchar_t)>;
+    using ActionHandler = std::function<void(ActionClass, Action, char32_t)>;
     using Logger = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
 
@@ -374,13 +374,13 @@ class Parser {
     bool dataAvailable() const noexcept { return begin_ != end_; }
     void advance() noexcept { ++begin_; }
     uint8_t currentByte() const noexcept { return *begin_; }
-    wchar_t currentChar() const noexcept { return currentChar_; }
+    char32_t currentChar() const noexcept { return currentChar_; }
 
   private:
     State state_ = State::Ground;
     utf8::Decoder utf8Decoder_;
 
-    wchar_t currentChar_{};
+    char32_t currentChar_{};
     iterator begin_ = nullptr;
     iterator end_ = nullptr;
 

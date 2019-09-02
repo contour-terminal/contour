@@ -30,7 +30,7 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
     if (_intermediate.size() != 1)
         return nullopt;
 
-    wchar_t const code = _intermediate[0];
+    char32_t const code = _intermediate[0];
     switch (code)
     {
         case '(':
@@ -49,7 +49,7 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
     }
 }
 
-void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t _currentChar)
+void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_t _currentChar)
 {
     currentChar_ = _currentChar;
 
@@ -63,7 +63,7 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t
             private_ = false;
             return;
         case Action::Collect:
-            intermediateCharacters_.push_back(currentChar());
+            intermediateCharacters_.push_back(static_cast<char>(currentChar())); // cast OK, because non-ASCII wouldn't be valid collected chars
             return;
         case Action::Print:
             emit<AppendChar>(currentChar());
@@ -72,7 +72,7 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t
             if (currentChar() == ';')
                 parameters_.push_back(0);
             else
-                parameters_.back() = parameters_.back() * 10 + (currentChar() - '0');
+                parameters_.back() = parameters_.back() * 10 + (currentChar() - U'0');
             return;
         case Action::CSI_Dispatch:
             if (intermediateCharacters_.empty())
@@ -104,7 +104,7 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, wchar_t
             // no need, we inline OSC_Put and OSC_End's actions
             break;
         case Action::OSC_Put:
-            intermediateCharacters_.push_back(currentChar());
+            intermediateCharacters_.push_back(static_cast<char>(currentChar())); // cast OK, becuase only ASCII's allowed (I think) TODO: check that fact
             break;
         case Action::OSC_End:
             if (intermediateCharacters_.size() > 1 && intermediateCharacters_[1] == ';')

@@ -40,9 +40,9 @@ class OutputHandler {
         rowCount_ = rows;
     }
 
-    void invokeAction(ActionClass actionClass, Action action, wchar_t currentChar);
+    void invokeAction(ActionClass actionClass, Action action, char32_t currentChar);
 
-    void operator()(ActionClass actionClass, Action action, wchar_t currentChar)
+    void operator()(ActionClass actionClass, Action action, char32_t currentChar)
     {
         return invokeAction(actionClass, action, currentChar);
     }
@@ -51,7 +51,7 @@ class OutputHandler {
     std::vector<Command> const& commands() const noexcept { return commands_; }
 
   private:
-    wchar_t currentChar() const noexcept { return currentChar_; }
+    char32_t currentChar() const noexcept { return currentChar_; }
 
     void setDefaultParameter(size_t value) noexcept { defaultParameter_ = value; }
 
@@ -104,7 +104,7 @@ class OutputHandler {
     }
 
   private:
-    wchar_t currentChar_{};
+    char32_t currentChar_{};
     std::vector<Command> commands_{};
 
     std::string intermediateCharacters_{};

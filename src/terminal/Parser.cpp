@@ -33,27 +33,27 @@ using namespace std;
 
 using Range = ParserTable::Range;
 
-constexpr bool includes(Range const& range, wchar_t value) noexcept
+constexpr bool includes(Range const& range, char32_t value) noexcept
 {
     return range.first <= value && value <= range.last;
 }
 
-constexpr bool isExecuteChar(wchar_t value) noexcept
+constexpr bool isExecuteChar(char32_t value) noexcept
 {
     return includes(Range{0x00, 0x17}, value) || value == 0x19 || includes(Range{0x1C, 0x1F}, value);
 }
 
-constexpr bool isParamChar(wchar_t value) noexcept
+constexpr bool isParamChar(char32_t value) noexcept
 {
     return includes(Range{0x30, 0x39}, value) || value == 0x3B;
 }
 
-constexpr bool isC1(wchar_t value) noexcept
+constexpr bool isC1(char32_t value) noexcept
 {
     return includes(Range{0x80, 0x9F}, value);
 }
 
-constexpr bool isPrintChar(wchar_t value) noexcept
+constexpr bool isPrintChar(char32_t value) noexcept
 {
     return includes(Range{0x20, 0x7F}, value) || (value > 0x7F && !isC1(value));
 }
