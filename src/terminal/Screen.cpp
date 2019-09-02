@@ -120,13 +120,11 @@ void Screen::Buffer::linefeed()
     else
     {
         cursor.column = 1;
-        //savedLines.splice(
-        //    end(savedLines),
-        //    lines,
-        //    begin(lines)
-        //);
-        savedLines.emplace_back(move(lines.front()));
-        lines.pop_front();
+        savedLines.splice(
+           end(savedLines),
+           lines,
+           begin(lines)
+        );
 
         lines.emplace_back(numColumns(), Cell{});
         currentLine = prev(end(lines));
