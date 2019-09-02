@@ -246,42 +246,47 @@ void Screen::Buffer::scrollUp(size_t v_n, Margin const& margin)
 
 void Screen::Buffer::scrollDown(size_t v_n)
 {
-    auto const marginHeight = margin_.vertical.length();
+    scrollDown(v_n, margin_);
+}
+
+void Screen::Buffer::scrollDown(size_t v_n, Margin const& _margin)
+{
+    auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
 
-    if (margin_.horizontal != Range{1, numColumns()})
+    if (_margin.horizontal != Range{1, numColumns()})
     {
         // full "inside" scroll-down
         if (n < marginHeight)
         {
-            auto sourceLine = next(begin(lines), margin_.vertical.to - n - 1);
-            auto targetLine = next(begin(lines), margin_.vertical.to - 1);
-            auto const sourceEndLine = next(begin(lines), margin_.vertical.from - 1);
+            auto sourceLine = next(begin(lines), _margin.vertical.to - n - 1);
+            auto targetLine = next(begin(lines), _margin.vertical.to - 1);
+            auto const sourceEndLine = next(begin(lines), _margin.vertical.from - 1);
 
             while (sourceLine != sourceEndLine)
             {
                 copy_n(
-                    next(begin(*sourceLine), margin_.horizontal.from - 1),
-                    margin_.horizontal.length(),
-                    next(begin(*targetLine), margin_.horizontal.from - 1)
+                    next(begin(*sourceLine), _margin.horizontal.from - 1),
+                    _margin.horizontal.length(),
+                    next(begin(*targetLine), _margin.horizontal.from - 1)
                 );
                 --targetLine;
                 --sourceLine;
             }
 
             copy_n(
-                next(begin(*sourceLine), margin_.horizontal.from - 1),
-                margin_.horizontal.length(),
-                next(begin(*targetLine), margin_.horizontal.from - 1)
+                next(begin(*sourceLine), _margin.horizontal.from - 1),
+                _margin.horizontal.length(),
+                next(begin(*targetLine), _margin.horizontal.from - 1)
             );
 
             for_each(
-                next(begin(lines), margin_.vertical.from - 1),
-                next(begin(lines), margin_.vertical.from - 1 + n),
-                [this](Line& line) {
+                next(begin(lines), _margin.vertical.from - 1),
+                next(begin(lines), _margin.vertical.from - 1 + n),
+                [this, _margin](Line& line) {
                     fill_n(
-                        next(begin(line), margin_.horizontal.from - 1),
-                        margin_.horizontal.length(),
+                        next(begin(line), _margin.horizontal.from - 1),
+                        _margin.horizontal.length(),
                         Cell{}
                     );
                 }
@@ -291,19 +296,19 @@ void Screen::Buffer::scrollDown(size_t v_n)
         {
             // clear everything in margin
             for_each(
-                next(begin(lines), margin_.vertical.from - 1),
-                next(begin(lines), margin_.vertical.to),
-                [this](Line& line) {
+                next(begin(lines), _margin.vertical.from - 1),
+                next(begin(lines), _margin.vertical.to),
+                [this, _margin](Line& line) {
                     fill_n(
-                        next(begin(line), margin_.horizontal.from - 1),
-                        margin_.horizontal.length(),
+                        next(begin(line), _margin.horizontal.from - 1),
+                        _margin.horizontal.length(),
                         Cell{}
                     );
                 }
             );
         }
     }
-    else if (margin_.vertical == Range{1, numLines()})
+    else if (_margin.vertical == Range{1, numLines()})
     {
         rotate(
             begin(lines),
@@ -327,14 +332,14 @@ void Screen::Buffer::scrollDown(size_t v_n)
     {
         // scroll down only inside vertical margin with full horizontal extend
         rotate(
-            next(begin(lines), margin_.vertical.from - 1),
-            next(begin(lines), margin_.vertical.to - n),
-            next(begin(lines), margin_.vertical.to)
+            next(begin(lines), _margin.vertical.from - 1),
+            next(begin(lines), _margin.vertical.to - n),
+            next(begin(lines), _margin.vertical.to)
         );
 
         for_each(
-            next(begin(lines), margin_.vertical.from - 1),
-            next(begin(lines), margin_.vertical.from - 1 + n),
+            next(begin(lines), _margin.vertical.from - 1),
+            next(begin(lines), _margin.vertical.from - 1 + n),
             [](Line& line) {
                 fill(
                     begin(line),
@@ -649,22 +654,29 @@ void Screen::operator()(CursorPreviousLine const& v)
 
 void Screen::operator()(InsertLines const& v)
 {
-    for (cursor_pos_t i = 0; i < v.n; ++i)
-        state_->lines.emplace(state_->currentLine, Buffer::Line{rowCount(), Cell{}});
+    if (isCursorInsideMargins())
+    {
+        state_->scrollDown(
+            v.n,
+            Margin{
+                { state_->cursor.row, state_->margin_.vertical.to },
+                state_->margin_.horizontal
+            }
+        );
+    }
 }
 
 void Screen::operator()(DeleteLines const& v)
 {
-    if (state_->margin_.vertical.from <= state_->cursor.row &&
-        state_->cursor.row <= state_->margin_.vertical.to)
+    if (isCursorInsideMargins())
     {
-        auto const marginTopAdjust = size_t{state_->cursor.row - state_->margin_.vertical.from};
-        auto const margin = Margin{
-            { state_->margin_.vertical.from + marginTopAdjust, state_->margin_.vertical.to },
-            state_->margin_.horizontal
-        };
-
-        state_->scrollUp(v.n, margin);
+        state_->scrollUp(
+            v.n,
+            Margin{
+                { state_->cursor.row, state_->margin_.vertical.to },
+                state_->margin_.horizontal
+            }
+        );
     }
 }
 

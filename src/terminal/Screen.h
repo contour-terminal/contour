@@ -208,6 +208,13 @@ class Screen {
     cursor_pos_t realCurrentRow() const noexcept { return state_->cursor.row; }
     cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
 
+    bool isCursorInsideMargins() const noexcept {
+        return state_->margin_.horizontal.from <= state_->cursor.row
+            && state_->cursor.row <= state_->margin_.horizontal.to
+            && state_->margin_.vertical.from <= state_->cursor.column
+            && state_->cursor.column <= state_->margin_.vertical.to;
+    }
+
     cursor_pos_t currentRow() const noexcept {
 		if (!state_->cursorRestrictedToMargin)
 			return state_->cursor.row;
@@ -334,6 +341,7 @@ class Screen {
         void scrollUp(size_t n);
         void scrollUp(size_t n, Margin const& margin);
         void scrollDown(size_t n);
+        void scrollDown(size_t n, Margin const& margin);
 
         void verifyState() const;
         void updateCursorIterators();
