@@ -12,11 +12,13 @@
  * limitations under the License.
  */
 #include <terminal/Screen.h>
+#include <terminal/OutputGenerator.h>
 #include <terminal/Util.h>
 #include <terminal/VTType.h>
 
 #include <algorithm>
 #include <iterator>
+#include <sstream>
 
 using namespace std;
 
@@ -468,6 +470,36 @@ string Screen::renderText() const
     }
 
     return text;
+}
+
+std::string Screen::screenshot() const
+{
+    auto result = std::stringstream{};
+    auto generator = OutputGenerator{ result };
+
+    generator(HideCursor{});
+    generator(ClearScreen{});
+    generator(MoveCursorTo{ 1, 1 });
+
+    for (cursor_pos_t row = 1; row <= rowCount_; ++row)
+    {
+        for (cursor_pos_t col = 1; col <= columnCount_; ++col)
+        {
+            Cell const& cell = at(row, col);
+
+            //TODO: generator(SetGraphicsRendition{ cell.attributes.styles });
+            generator(SetForegroundColor{ cell.attributes.foregroundColor });
+            generator(SetBackgroundColor{ cell.attributes.backgroundColor });
+            generator(AppendChar{ cell.character ? cell.character : L' ' });
+        }
+        generator(Linefeed{});
+    }
+
+    generator(MoveCursorTo{ state_->cursor.row, state_->cursor.column });
+    //TODO: if (isCursorVisible())
+        generator(ShowCursor{});
+
+    return result.str();
 }
 
 // {{{ ops

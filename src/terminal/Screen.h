@@ -134,6 +134,14 @@ class Screen {
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
     std::string renderText() const;
 
+    /// Takes a screenshot by outputting VT sequences needed to render the current state of the screen.
+    ///
+    /// @note Only the screenshot of the current buffer is taken, not both (main and alternate).
+    ///
+    /// @returns necessary commands needed to draw the current screen state,
+    ///          including initial clear screen, and initial cursor hide.
+    std::string screenshot() const;
+
     void operator()(Bell const& v);
     void operator()(FullReset const& v);
     void operator()(Linefeed const& v);
