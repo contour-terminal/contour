@@ -83,7 +83,7 @@ set(terminal_SOURCES
     src/terminal/VTType.cpp
 )
 
-set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only)
+set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only Threads::Threads)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
 endif()
