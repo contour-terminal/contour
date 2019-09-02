@@ -50,12 +50,12 @@ public:
 	 * @see Process.
 	 */
 	explicit PseudoTerminal(WindowSize const& windowSize);
-	~PseudoTerminal();
+	virtual ~PseudoTerminal();
 
 	/// Releases this PTY early.
 	///
 	/// This is automatically invoked when the destructor is called.
-	void release();
+	virtual void close();
 
 	/// Reads from the terminal whatever has been written to from the other side of the terminal.
 	///

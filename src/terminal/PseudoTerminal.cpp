@@ -133,10 +133,10 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize)
 
 PseudoTerminal::~PseudoTerminal()
 {
-    release();
+    close();
 }
 
-void PseudoTerminal::release()
+void PseudoTerminal::close()
 {
 #if defined(__unix__)
     if (master_ >= 0)

@@ -130,7 +130,7 @@ int main()
                 cout << "Process resumed.";
         }
 
-		pty.release();
+		pty.close();
 		pipeListenerThread.join();
 	}
 	catch (exception const& ex)
