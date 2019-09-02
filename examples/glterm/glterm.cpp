@@ -35,6 +35,19 @@
 
 #include "Window.h"
 #include "TextShaper.h"
+#include "CellBackground.h"
+
+// TODOs:
+// - [x] proper glterm termination (window close as well as process exit)
+// - [ ] other SGRs (bold, italic, etc)
+// - [ ] fix text positioning (chars seem pressed down instead of centered)
+// - [ ] font loading on Linux
+// - [ ] input: F13..F25
+// - [ ] input: GLFW_KEY_PRINT_SCREEN
+// - [ ] input: GLFW_KEY_PAUSE
+// - [ ] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
+// - [ ] input: GLFW_KEY_KP_EQUAL
+// - [ ] show cursor (in correct shapes, with blinking)
 
 #if defined(__unix__)
 #include <unistd.h>
@@ -60,98 +73,6 @@ auto const envvars = terminal::Process::Environment{
     {"COLUMNS", ""},
     {"TERMCAP", ""}
 };
-
-class CellBackground {
-public:
-    CellBackground(unsigned _width, unsigned _height);
-    ~CellBackground();
-
-    void onResize(unsigned _width, unsigned _height);
-    void render(glm::ivec2 pos, terminal::RGBColor const& _color);
-
-private:
-    static std::string vertexShader()
-    {
-        return R"(
-            // Vertex Shader
-            #version 150 core
-            in vec2 position;
-            uniform mat4 transform;
-            void main()
-            {
-                gl_Position = transform * vec4(position, -0.5, 1.0);
-            }
-        )";
-    }
-
-    static std::string fragmentShader()
-    {
-        return R"(
-            // Fragment Shader
-            #version 150 core
-            out vec4 outColor;
-            uniform vec3 backgroundColor;
-            void main()
-            {
-                outColor = vec4(backgroundColor, 1.0);
-            }
-        )";
-    }
-
-    Shader shader_{ vertexShader(), fragmentShader() };
-    GLuint vbo_{};
-    GLuint vao_{};
-
-    glm::mat4 projectionMatrix_;
-};
-
-CellBackground::CellBackground(unsigned _width, unsigned _height)
-{
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height));
-
-    // setup background shader
-    GLfloat const vertices[] = {
-        0.0f, 0.0f,                           // bottom left
-        (GLfloat)_width, 0.0f,                // bottom right
-        (GLfloat)_width, (GLfloat)_height,    // top right
-        0.0f, (GLfloat)_height                // top left
-    };
-
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
-
-    // specify vertex data layout
-    auto posAttr = glGetAttribLocation(shader_, "position");
-    glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(posAttr);
-}
-
-CellBackground::~CellBackground()
-{
-    glDeleteBuffers(1, &vbo_);
-    glDeleteVertexArrays(1, &vao_);
-}
-
-void CellBackground::onResize(unsigned _width, unsigned _height)
-{
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height));
-}
-
-void CellBackground::render(glm::ivec2 _pos, terminal::RGBColor const& color)
-{
-    shader_.use();
-    shader_.setVec3("backgroundColor", glm::vec3{ color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f });
-
-    glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos[0], _pos[1], 0.0f));
-    shader_.setMat4("transform", projectionMatrix_ * translation);
-
-    glBindVertexArray(vao_);
-    glDrawArrays(GL_QUADS, 0, 4);
-}
 
 class GLTerm {
   public:
@@ -181,18 +102,15 @@ class GLTerm {
 
     terminal::Terminal terminal_;
     terminal::Process process_;
+    std::thread processExitWatcher_;
 };
-
-constexpr terminal::WindowSize computeLinesAndColumns(unsigned _width, unsigned _height, unsigned _charWidth, unsigned _lineHeight) noexcept
-{
-    auto const rows = static_cast<unsigned short>(_height / _lineHeight);
-    auto const cols = static_cast<unsigned short>(_width / _charWidth);
-    return { cols, rows };
-}
 
 terminal::WindowSize GLTerm::computeWindowSize() const noexcept
 {
-    return computeLinesAndColumns(window_.width(), window_.height(), textShaper_.maxAdvance(), textShaper_.lineHeight());
+    auto const rows = static_cast<unsigned short>(window_.height() / textShaper_.lineHeight());
+    auto const cols = static_cast<unsigned short>(window_.width() / textShaper_.maxAdvance());
+
+    return { cols, rows };
 }
 
 GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std::string const& _shell) :
@@ -209,7 +127,20 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
         [this](auto const& msg) { log("terminal: {}", msg); },
         bind(&GLTerm::onScreenUpdateHook, this, _1),
     },
-    process_{ terminal_, _shell, {_shell}, envvars }
+    process_{ terminal_, _shell, {_shell}, envvars },
+    processExitWatcher_{ [this]() {
+        using namespace terminal;
+        while (true)
+            if (visit(overloaded{[&](Process::NormalExit) { return true; },
+                                 [&](Process::SignalExit) { return true; },
+                                 [&](Process::Suspend) { return false; },
+                                 [&](Process::Resume) { return false; },
+                      },
+                      process_.wait()))
+                break;
+        terminal_.close();
+        quit_ = true;
+    }}
 {
     //glEnable(GL_CULL_FACE);
     glEnable(GL_DEPTH_TEST);
@@ -223,6 +154,7 @@ GLTerm::~GLTerm()
 {
     (void) process_.wait();
     terminal_.wait();
+    processExitWatcher_.join();
 }
 
 template <typename... Args>
@@ -351,8 +283,6 @@ void GLTerm::render()
     });
 
     glfwSwapBuffers(window_);
-
-    logger_.flush();
 }
 
 void GLTerm::onResize(unsigned _width, unsigned _height)
@@ -363,7 +293,7 @@ void GLTerm::onResize(unsigned _width, unsigned _height)
     auto const freeHeight = _height - usedHeight;
     auto const freeWidth = _width - usedWidth;
 
-    printf("Resized to %ux%u (%ux%u) (free: %ux%u) (CharBox: %ux%u)\n",
+    logger_ << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
         winSize.columns, winSize.rows,
         _width, _height,
         freeWidth, freeHeight,
@@ -481,17 +411,19 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
     {
         terminal::Modifier const mods = makeModifier(_mods);
 
-        printf("key: %d %s, action:%d, mod:%02x (%s)\n",
-            _key,
-            glfwGetKeyName(_key, _scanCode),
-            _action,
-            _mods,
-            terminal::to_string(mods).c_str());
+        char const* keyName = glfwGetKeyName(_key, _scanCode);
+
+        logger_ << fmt::format("key: {} {}, action:{}, mod:{:02X} ({})\n",
+                               _key,
+                               keyName ? keyName : "",
+                               _action,
+                               static_cast<unsigned>(_mods),
+                               terminal::to_string(mods));
 
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
-            printf("Taking screenshot.\n");
+            logger_ << "Taking screenshot.\n";
             auto const screenshot = terminal_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
@@ -505,7 +437,7 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
             // allow only mods + alphanumerics
             terminal_.send(*cstr, mods);
         //else
-        //    printf("No key mapping found for key:%d, scanCode:%d, name:%s (%s).\n", _key, _scanCode, cstr, terminal::to_string(mods).c_str());
+        //    logger << fmt::format("No key mapping found for key:{}, scanCode:{}, name:{} ({}).\n", _key, _scanCode, cstr, terminal::to_string(mods));
 
         glfwPostEmptyEvent();
     }
@@ -514,9 +446,9 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
 void GLTerm::onChar(char32_t _char)
 {
     if (utf8::isASCII(_char) && isprint(_char))
-        printf("char: %c\n", static_cast<int>(_char));
+        logger_ << fmt::format("char: {}\n", static_cast<char>(_char));
     else
-        printf("char: 0x%04X\n", static_cast<unsigned int>(_char));
+        logger_ << fmt::format("char: 0x{:04X}\n", static_cast<uint32_t>(_char));
 
     terminal_.send(_char, terminal::Modifier{});
 
@@ -527,10 +459,10 @@ void GLTerm::onScreenUpdateHook([[maybe_unused]] vector<terminal::Command> const
 {
     // we could add some high level VT output logging here.
     glfwPostEmptyEvent();
-    printf("onScreenUpdate: %zu instructions\n", _commands.size());
+    //logger_ << fmt::format("onScreenUpdate: {} instructions\n", _commands.size());
 
-    for (terminal::Command const& command : _commands)
-        logger_ << to_string(command) << '\n';
+    //for (terminal::Command const& command : _commands)
+    //    logger_ << to_string(command) << '\n';
 }
 
 int main(int argc, char const* argv[])
