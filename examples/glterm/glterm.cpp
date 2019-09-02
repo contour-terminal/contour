@@ -265,8 +265,8 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
 
 GLTerm::~GLTerm()
 {
-    process_.wait();
-    terminal_.join();
+    (void) process_.wait();
+    terminal_.wait();
 }
 
 template <typename... Args>
@@ -381,7 +381,7 @@ void GLTerm::render()
 
         RGBColor const fgColor = makeColor(cell.attributes.foregroundColor, defaultForegroundColor);
         //TODO: other SGRs
-        
+
         if (cell.character && cell.character != ' ')
         {
             textShaper_.render(

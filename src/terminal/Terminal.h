@@ -58,7 +58,7 @@ class Terminal : public PseudoTerminal {
     [[deprecated]] Screen const& screen() const noexcept { return screen_; }
 
     /// Waits until process screen update thread has terminated.
-    void join();
+    void wait();
 
   private:
     void flushInput();

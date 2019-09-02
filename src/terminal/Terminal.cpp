@@ -90,7 +90,6 @@ void Terminal::flushInput()
 void Terminal::writeToScreen(char const* data, size_t size)
 {
     lock_guard<mutex> _l{ screenLock_ };
-
     screen_.write(data, size);
 }
 
@@ -100,7 +99,7 @@ void Terminal::render(Screen::Renderer const& renderer) const
     screen_.render(renderer);
 }
 
-void Terminal::join()
+void Terminal::wait()
 {
     screenUpdateThread_.join();
 }
