@@ -174,68 +174,6 @@ int GLTerm::main()
     return EXIT_SUCCESS;
 }
 
-terminal::RGBColor makeColor(terminal::Color const& _color, terminal::RGBColor _defaultColor)
-{
-    using namespace terminal;
-    return visit(
-        terminal::overloaded{
-            [=](UndefinedColor) {
-                return _defaultColor;
-            },
-            [=](DefaultColor) {
-                return _defaultColor;
-            },
-            [=](IndexedColor color) {
-                switch (color) {
-                    case IndexedColor::Black:
-                        return RGBColor{ 0, 0, 0 };
-                    case IndexedColor::Red:
-                        return RGBColor{ 128, 0, 0 };
-                    case IndexedColor::Green:
-                        return RGBColor{ 0, 128, 0 };
-                    case IndexedColor::Yellow:
-                        return RGBColor{ 128, 128, 0 };
-                    case IndexedColor::Blue:
-                        return RGBColor{ 0, 0, 128 };
-                    case IndexedColor::Magenta:
-                        return RGBColor{ 128, 0, 128 };
-                    case IndexedColor::Cyan:
-                        return RGBColor{ 0, 128, 128 };
-                    case IndexedColor::White:
-                        return RGBColor{ 128, 128, 128 };
-                    case IndexedColor::Default:
-                        return _defaultColor;
-                }
-                return _defaultColor;
-            },
-            [=](BrightColor color) {
-                switch (color) {
-                    case BrightColor::Black:
-                        return RGBColor{ 0, 0, 0 };
-                    case BrightColor::Red:
-                        return RGBColor{ 255, 0, 0 };
-                    case BrightColor::Green:
-                        return RGBColor{ 0, 255, 0 };
-                    case BrightColor::Yellow:
-                        return RGBColor{ 255, 255, 0 };
-                    case BrightColor::Blue:
-                        return RGBColor{ 0, 0, 255 };
-                    case BrightColor::Magenta:
-                        return RGBColor{ 255, 0, 255 };
-                    case BrightColor::Cyan:
-                        return RGBColor{ 0, 255, 255 };
-                    case BrightColor::White:
-                        return RGBColor{ 255, 255, 255 };
-                }
-                return _defaultColor;
-            },
-            [](RGBColor color) {
-                return color;
-            },
-        },
-        _color);
-}
-
 void GLTerm::render()
 {
     auto const winSize = computeWindowSize();
@@ -264,10 +202,10 @@ void GLTerm::render()
     terminal_.render([&](cursor_pos_t row, cursor_pos_t col, Screen::Cell const& cell) {
         cellBackground_.render(
             makeCoords(col, row),
-            makeColor(cell.attributes.backgroundColor, defaultBackgroundColor)
+            convertToRGB(cell.attributes.backgroundColor, defaultBackgroundColor)
         );
 
-        RGBColor const fgColor = makeColor(cell.attributes.foregroundColor, defaultForegroundColor);
+        RGBColor const fgColor = convertToRGB(cell.attributes.foregroundColor, defaultForegroundColor);
         //TODO: other SGRs
 
         if (cell.character && cell.character != ' ')
