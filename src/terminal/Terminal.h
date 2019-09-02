@@ -54,6 +54,15 @@ class Terminal : public PseudoTerminal {
     /// Thread-safe access to screen data for rendering
     void render(Screen::Renderer const& renderer) const;
 
+    struct Cursor {
+        cursor_pos_t row;
+        cursor_pos_t column;
+    };
+
+    Cursor cursor() const;
+
+    std::string screenshot() const;
+
     /// @returns const-reference screen of this terminal.
     [[deprecated]] Screen const& screen() const noexcept { return screen_; }
 

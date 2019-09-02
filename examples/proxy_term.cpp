@@ -37,7 +37,9 @@
 #include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
-#elif defined(_MSC_VER)
+#endif
+
+#if defined(_MSC_VER)
 #include <Windows.h>
 using ssize_t = SSIZE_T;
 #endif
@@ -244,7 +246,7 @@ class ProxyTerm {
         generator(terminal::SetMode{terminal::Mode::AutoWrap, false});
         generator(terminal::SetGraphicsRendition{terminal::GraphicsRendition::Reset});
 
-        terminal_.screen().render(
+        terminal_.render(
             [&](auto row, auto col, terminal::Screen::Cell const& cell) {
                 generator(terminal::MoveCursorTo{row, col});
                 generator(terminal::SetForegroundColor{cell.attributes.foregroundColor});
@@ -260,8 +262,8 @@ class ProxyTerm {
         );
 
         // position cursor
-        generator(terminal::MoveCursorTo{terminal_.screen().currentRow(),
-                                         terminal_.screen().currentColumn()});
+        generator(terminal::MoveCursorTo{terminal_.cursor().row,
+                                         terminal_.cursor().column});
 
         // (TODO: make visible ONLY if meant to be visible)
         generator(terminal::SetMode{terminal::Mode::VisibleCursor, true});

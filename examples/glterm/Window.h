@@ -86,7 +86,11 @@ inline Window::Window(unsigned _width, unsigned _height, std::string const& _tit
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
+
+    #if defined(GLFW_LOCK_KEY_MODS)
+    // seems like it isn't defined on Ubuntu 19.04's glfw3
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
+    #endif
 
     glViewport(0, 0, _width, _height);
 }

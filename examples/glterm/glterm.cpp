@@ -36,6 +36,14 @@
 #include "Window.h"
 #include "TextShaper.h"
 
+#if defined(__unix__)
+#include <unistd.h>
+#endif
+
+#if defined(_MSC_VER)
+#include <Windows.h>
+#endif
+
 using namespace std;
 using namespace std::placeholders;
 
@@ -43,58 +51,6 @@ using namespace std::placeholders;
 #define GLTERM_FONT_PATH "C:\\WINDOWS\\FONTS\\CONSOLA.TTF"
 // Hmm, how'd that look like on Linux, again? :-D
 #endif
-
-namespace {
-    string getErrorString()
-    {
-#if !defined(_MSC_VER)
-        return strerror(errno);
-#else
-        DWORD errorMessageID = GetLastError();
-        if (errorMessageID == 0)
-            return "";
-
-        LPSTR messageBuffer = nullptr;
-        size_t size = FormatMessageA(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr,
-            errorMessageID,
-            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-            (LPSTR)& messageBuffer,
-            0,
-            nullptr
-        );
-
-        string message(messageBuffer, size);
-
-        LocalFree(messageBuffer);
-
-        return message;
-#endif
-    }
-
-    void enableConsoleOutputVT()
-    {
-#if defined(_MSC_VER)
-        HANDLE hConsole = { GetStdHandle(STD_OUTPUT_HANDLE) };
-        DWORD consoleMode{};
-        GetConsoleMode(hConsole, &consoleMode);
-        consoleMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-        if (!SetConsoleMode(hConsole, consoleMode))
-            throw runtime_error{ "Could not enable Console VT processing. " + getErrorString() };
-#endif
-    }
-
-    void writeToConsole(char const* _buf, size_t _size)
-    {
-#if !defined(_MSC_VER)
-        ::write(STDOUT_FILENO, _buf, _size);
-#else
-        DWORD nwritten{};
-        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
-#endif
-    }
-} // anonymous namespace
 
 auto const envvars = terminal::Process::Environment{
     {"TERM", "xterm-256color"},
@@ -499,7 +455,7 @@ optional<terminal::Key> glfwKeyToTerminalKey(int _key)
         return { i->second };
 
     return nullopt;
-};
+}
 
 constexpr terminal::Modifier makeModifier(int _mods)
 {
@@ -536,7 +492,7 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
             printf("Taking screenshot.\n");
-            auto const screenshot = terminal_.screen().screenshot();
+            auto const screenshot = terminal_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
             ofs.flush();
@@ -581,8 +537,6 @@ int main(int argc, char const* argv[])
 {
     try
     {
-        enableConsoleOutputVT();
-
         unsigned const fontSize = 28;
         unsigned const charWidth = 15;
         unsigned const charHeight = 33;
