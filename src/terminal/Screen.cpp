@@ -560,7 +560,7 @@ void Screen::operator()(EraseCharacters const& v)
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
     size_t const n = min(state_->numColumns() - realCurrentColumn() + 1, v.n == 0 ? 1 : v.n);
-    fill_n(state_->currentColumn, n, Cell{});
+    fill_n(state_->currentColumn, n, Cell{{}, state_->graphicsRendition});
 }
 
 void Screen::operator()(ScrollUp const& v)
