@@ -54,12 +54,14 @@ void Terminal::screenUpdateThread()
     for (;;)
     {
         char buf[4096];
-        if (size_t const n = read(buf, sizeof(buf)); n > 0)
+        if (auto const n = read(buf, sizeof(buf)); n != -1)
         {
             //log("outputThread.data: {}", terminal::escape(buf, buf + n));
             lock_guard<mutex> _l{ screenLock_ };
             screen_.write(buf, n);
         }
+        else
+            break;
     }
 }
 
