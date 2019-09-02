@@ -14,8 +14,8 @@
 #pragma once
 
 #include <terminal/Commands.h>
-#include <terminal/OutputHandler.h>
-#include <terminal/Parser.h>
+#include <terminal/InputGenerator.h>
+#include <terminal/PseudoTerminal.h>
 #include <terminal/Screen.h>
 
 #include <fmt/format.h>
@@ -37,17 +37,23 @@ class Terminal {
         Logger logger,
         Hook onCommands);
 
+    // API for keyboard input handling
+    bool send(wchar_t _characterEvent, Modifier _modifier);
+    bool send(Key _key, Modifier _modifier);
+    bool send(MouseButtonEvent _mouseButton, Modifier _modifier);
+    bool send(MouseMoveEvent _mouseMove);
+
     // write to screen
     void write(char const* data, size_t size);
 
     Screen const& screen() const noexcept { return screen_; }
     Screen& screen() noexcept { return screen_; }
 
-    // TODO: API for keyboard input handling
-
   private:
     Logger const logger_;
+    InputGenerator inputGenerator_;
     Screen screen_;
+    //PseudoTerminal pty_;
 };
 
 }  // namespace terminal
