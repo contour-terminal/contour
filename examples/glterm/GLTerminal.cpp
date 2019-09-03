@@ -12,6 +12,12 @@
  * limitations under the License.
  */
 #include "GLTerminal.h"
+#include <terminal/Util.h>
+#include <iostream>
+
+using namespace std;
+using namespace std::placeholders;
+using namespace terminal;
 
 auto const envvars = terminal::Process::Environment{
     {"TERM", "xterm-256color"},
@@ -22,16 +28,25 @@ auto const envvars = terminal::Process::Environment{
     {"TERMCAP", ""}
 };
 
-GLTerminal::GLTerminal(unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height)
+#ifndef GLTERM_FONT_PATH
+#define GLTERM_FONT_PATH "C:\\WINDOWS\\FONTS\\CONSOLA.TTF"
+// Hmm, how'd that look like on Linux, again? :-D
+#endif
+
+GLTerminal::GLTerminal(
+    unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height,
+    size_t _fontSize, string const& _shell) :
+    width_{ _width },
+    height_{ _height },
     textShaper_{ GLTERM_FONT_PATH , _fontSize },
     cellBackground_{ textShaper_.maxAdvance(), textShaper_.lineHeight() },
     terminal_{
         computeWindowSize(),
-        [this](auto const& msg) { log("terminal: {}", msg); },
+        [this](auto const& msg) { cout << "terminal: " << msg << '\n'; },
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
-    processExitWatcher_{ [this]() { wait(); alive_ = false; }}
+    processExitWatcher_{ [this]() { wait(); }}
 {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -42,6 +57,11 @@ GLTerminal::GLTerminal(unsigned _bottomLeft, unsigned _bottomRight, unsigned _wi
 GLTerminal::~GLTerminal()
 {
     wait();
+}
+
+bool GLTerminal::alive() const
+{
+    return alive_;
 }
 
 void GLTerminal::wait()
@@ -58,6 +78,7 @@ void GLTerminal::wait()
 
     terminal_.wait();
     processExitWatcher_.join();
+    alive_ = false;
 }
 
 void GLTerminal::resize(unsigned _width, unsigned _height)
@@ -68,7 +89,10 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
     auto const freeHeight = _height - usedHeight;
     auto const freeWidth = _width - usedWidth;
 
-    logger_ << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
+    width_ = _width;
+    height_ = _height;
+
+    cout << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
         winSize.columns, winSize.rows,
         _width, _height,
         freeWidth, freeHeight,
@@ -87,13 +111,21 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
 
 }
 
+terminal::WindowSize GLTerminal::computeWindowSize() const noexcept
+{
+    auto const rows = static_cast<unsigned short>(height_ / textShaper_.lineHeight());
+    auto const cols = static_cast<unsigned short>(width_ / textShaper_.maxAdvance());
+
+    return { cols, rows };
+}
+
 void GLTerminal::render()
 {
     auto const winSize = computeWindowSize();
     auto const usedHeight = winSize.rows * textShaper_.lineHeight();
     auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
-    auto const freeHeight = window_.height() - usedHeight;
-    auto const freeWidth = window_.width() - usedWidth;
+    auto const freeHeight = height_ - usedHeight;
+    auto const freeWidth = width_ - usedWidth;
     auto const bottomMargin = freeHeight / 2;
     auto const leftMargin = freeWidth / 2;
 
@@ -131,11 +163,6 @@ void GLTerminal::render()
     });
 }
 
-bool GLTerminal::send(char32_t _characterEvent, Modifier _modifier)
+void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
 }
-
-bool GLTerminal::send(Key _key, Modifier _modifier)
-{
-}
-

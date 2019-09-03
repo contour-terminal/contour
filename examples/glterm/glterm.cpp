@@ -61,11 +61,6 @@
 using namespace std;
 using namespace std::placeholders;
 
-#ifndef GLTERM_FONT_PATH
-#define GLTERM_FONT_PATH "C:\\WINDOWS\\FONTS\\CONSOLA.TTF"
-// Hmm, how'd that look like on Linux, again? :-D
-#endif
-
 class GLTerm {
   public:
     GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std::string const& _shell);
@@ -91,14 +86,6 @@ class GLTerm {
     GLTerminal terminalView_;
 };
 
-terminal::WindowSize GLTerm::computeWindowSize() const noexcept
-{
-    auto const rows = static_cast<unsigned short>(window_.height() / textShaper_.lineHeight());
-    auto const cols = static_cast<unsigned short>(window_.width() / textShaper_.maxAdvance());
-
-    return { cols, rows };
-}
-
 GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std::string const& _shell) :
     window_{ _width, _height, "glterm",
         bind(&GLTerm::onKey, this, _1, _2, _3, _4),
@@ -106,7 +93,7 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
         bind(&GLTerm::onResize, this, _1, _2)
     },
     logger_{ "glterm.log", ios::trunc },
-    terminalView_{0, 0, _width, _height}
+    terminalView_{0, 0, _width, _height, _fontSize, _shell}
 {
     onResize(_width, _height);
 }
@@ -123,7 +110,7 @@ void GLTerm::log(std::string const& msg, Args... args)
 
 int GLTerm::main()
 {
-    while (!glfwWindowShouldClose(window_) && !terminalView_.alive())
+    while (!glfwWindowShouldClose(window_) && terminalView_.alive())
     {
         terminalView_.render();
         glfwPollEvents();

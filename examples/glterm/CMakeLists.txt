@@ -7,7 +7,7 @@ find_package(glm CONFIG)
 if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND)
     message(STATUS "-- Building glterm: yes")
     add_executable(glterm
-        CellBackground.h
+        CellBackground.cpp CellBackground.h
         GLTerminal.cpp GLTerminal.h
         Shader.h
         TextShaper.h

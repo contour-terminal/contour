@@ -15,6 +15,8 @@
 
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
+#include <string>
+#include <vector>
 
 #include "CellBackground.h"
 #include "TextShaper.h"
@@ -22,11 +24,15 @@
 /// OpenGL-Terminal Object.
 class GLTerminal {
   public:
-    GLTerminal(unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height);
+    GLTerminal(
+        unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height,
+        size_t _fontSize, std::string const& _shell);
     ~GLTerminal();
 
-    bool send(char32_t _characterEvent, Modifier _modifier) { return terminal_.send(_characterEvent, _modifier); }
-    bool send(Key _key, Modifier _modifier) { return terminal_.send(_key, _modifier); }
+    terminal::WindowSize computeWindowSize() const noexcept;
+
+    bool send(char32_t _characterEvent, terminal::Modifier _modifier) { return terminal_.send(_characterEvent, _modifier); }
+    bool send(terminal::Key _key, terminal::Modifier _modifier) { return terminal_.send(_key, _modifier); }
     std::string screenshot() const { return terminal_.screenshot(); }
 
     //void translate(unsigned _bottomLeft, unsigned _bottomRight);
@@ -36,8 +42,12 @@ class GLTerminal {
     bool alive() const;
     void wait();
 
+    void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
+
   private:
     bool alive_ = true;
+    unsigned width_;
+    unsigned height_;
 
     TextShaper textShaper_;
     CellBackground cellBackground_;
