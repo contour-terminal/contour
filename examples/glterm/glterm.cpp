@@ -300,13 +300,13 @@ optional<terminal::Key> glfwKeyToTerminalKey(int _key)
         make_pair(GLFW_KEY_KP_7, Key::Numpad_7),
         make_pair(GLFW_KEY_KP_8, Key::Numpad_8),
         make_pair(GLFW_KEY_KP_9, Key::Numpad_9),
-        make_pair(GLFW_KEY_KP_DECIMAL, Key::Numpad_Dot), // TODO: renmae to Numpad_Decimal?
-        make_pair(GLFW_KEY_KP_DIVIDE, Key::Numpad_Div),
-        make_pair(GLFW_KEY_KP_MULTIPLY, Key::Numpad_Mul),
-        make_pair(GLFW_KEY_KP_SUBTRACT, Key::Numpad_Minus),
-        make_pair(GLFW_KEY_KP_ADD, Key::Numpad_Plus),
+        make_pair(GLFW_KEY_KP_DECIMAL, Key::Numpad_Decimal),
+        make_pair(GLFW_KEY_KP_DIVIDE, Key::Numpad_Divide),
+        make_pair(GLFW_KEY_KP_MULTIPLY, Key::Numpad_Multiply),
+        make_pair(GLFW_KEY_KP_SUBTRACT, Key::Numpad_Subtract),
+        make_pair(GLFW_KEY_KP_ADD, Key::Numpad_Add),
         make_pair(GLFW_KEY_KP_ENTER, Key::Numpad_Enter),
-        //make_pair(GLFW_KEY_KP_EQUAL, Key::Numpad_Equal), // TODO
+        make_pair(GLFW_KEY_KP_EQUAL, Key::Numpad_Equal),
         #if 0
         #define GLFW_KEY_LEFT_SHIFT         340
         #define GLFW_KEY_LEFT_CONTROL       341

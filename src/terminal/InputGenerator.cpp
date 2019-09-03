@@ -117,13 +117,14 @@ namespace mappings {
 
     auto constexpr applicationNumpadKeys = array{
         KeyMapping{Key::Numpad_NumLock, SS3 "P"},
-        KeyMapping{Key::Numpad_Div, SS3 "Q"},
-        KeyMapping{Key::Numpad_Mul, SS3 "Q"},
-        KeyMapping{Key::Numpad_Minus, SS3 "Q"},
+        KeyMapping{Key::Numpad_Divide, SS3 "Q"},
+        KeyMapping{Key::Numpad_Multiply, SS3 "Q"},
+        KeyMapping{Key::Numpad_Subtract, SS3 "Q"},
         KeyMapping{Key::Numpad_CapsLock, SS3 "m"},
-        KeyMapping{Key::Numpad_Plus, SS3 "l"},
-        KeyMapping{Key::Numpad_Dot, SS3 "n"},
+        KeyMapping{Key::Numpad_Add, SS3 "l"},
+        KeyMapping{Key::Numpad_Decimal, SS3 "n"},
         KeyMapping{Key::Numpad_Enter, SS3 "M"},
+        //KeyMapping{Key::Numpad_Equal, SS3 "X"}, TODO: verify this mapping and this whole map
         KeyMapping{Key::Numpad_0, SS3 "p"},
         KeyMapping{Key::Numpad_1, SS3 "q"},
         KeyMapping{Key::Numpad_2, SS3 "r"},
