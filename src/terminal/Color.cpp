@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Color.h>
+#include <terminal/Util.h>
 
 using namespace std;
 
