@@ -75,7 +75,7 @@ constexpr bool operator!=(RGBColor const& a, RGBColor const& b) noexcept
 
 using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
 
-RGBColor convertToRGB(Color const& _color, RGBColor const& _defaultColor);
+RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor);
 
 constexpr bool operator==(Color const& a, Color const& b) noexcept
 {

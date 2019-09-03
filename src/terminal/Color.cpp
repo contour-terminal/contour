@@ -95,7 +95,7 @@ string to_string(Color const& c)
     return "?";
 }
 
-RGBColor convertToRGB(Color const& _color, RGBColor const& _defaultColor)
+RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor)
 {
     return visit(
         overloaded{

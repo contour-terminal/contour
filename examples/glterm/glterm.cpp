@@ -203,10 +203,10 @@ void GLTerm::render()
     terminal_.render([&](cursor_pos_t row, cursor_pos_t col, Screen::Cell const& cell) {
         cellBackground_.render(
             makeCoords(col, row),
-            convertToRGB(cell.attributes.backgroundColor, defaultBackgroundColor)
+            toRGB(cell.attributes.backgroundColor, defaultBackgroundColor)
         );
 
-        RGBColor const fgColor = convertToRGB(cell.attributes.foregroundColor, defaultForegroundColor);
+        RGBColor const fgColor = toRGB(cell.attributes.foregroundColor, defaultForegroundColor);
         //TODO: other SGRs
 
         if (cell.character && cell.character != ' ')
