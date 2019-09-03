@@ -41,14 +41,14 @@ class Terminal : public PseudoTerminal {
 
     Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands = {});
 
-    // API for keyboard input handling
+    // Keyboard input handling
     bool send(char32_t _characterEvent, Modifier _modifier = Modifier::None);
     bool send(Key _key, Modifier _modifier = Modifier::None);
     //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier = Modifier::None);
     //TODO: bool send(MouseMoveEvent _mouseMove = Modifier::None);
     //TODO: void send(Signal _signalNumber = Modifier::None);
 
-    // write to screen
+    /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
 
     /// Thread-safe access to screen data for rendering
@@ -57,14 +57,15 @@ class Terminal : public PseudoTerminal {
     struct Cursor {
         cursor_pos_t row;
         cursor_pos_t column;
+        //TODO: bool visible;
+        //TODO: CursorShape shape;
     };
 
+    /// @returns the current Cursor state.
     Cursor cursor() const;
 
+    /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
     std::string screenshot() const;
-
-    /// @returns const-reference screen of this terminal.
-    [[deprecated]] Screen const& screen() const noexcept { return screen_; }
 
     /// Waits until process screen update thread has terminated.
     void wait();
