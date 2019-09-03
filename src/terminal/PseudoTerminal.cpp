@@ -198,7 +198,12 @@ WindowSize PseudoTerminal::size() const noexcept
 void PseudoTerminal::resize(WindowSize const& _newWindowSize)
 {
 #if defined(__unix__)
-    // TODO
+    auto w = winsize{};
+    w.ws_col = _newWindowSize.columns;
+    w.ws_row = _newWindowSize.rows;
+
+    if (ioctl(master_, TIOCSWINSZ, &w) == -1)
+        throw runtime_error{strerror(errno)};
 #elif defined(_MSC_VER)
     COORD coords;
     coords.X = _newWindowSize.columns;
