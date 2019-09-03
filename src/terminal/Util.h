@@ -38,10 +38,12 @@ inline std::string escape(char32_t ch)
         case '\n':
             return "\\n";
         default:
-            if (std::isprint(ch))
+            if (ch <= 0xFF && std::isprint(ch))
                 return fmt::format("{}", static_cast<char>(ch));
+            else if (ch <= 0xFF)
+                return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
             else
-                return fmt::format("\\x{:02X}", static_cast<uint32_t>(ch));
+                return fmt::format("?{{}}", static_cast<uint32_t>(ch));
     }
 }
 
