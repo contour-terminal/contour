@@ -229,13 +229,13 @@ Process::ExitStatus Process::wait()
     pid_ = -1;
 
     if (WIFEXITED(status))
-        return exitStatus_ = { ExitStatus{ NormalExit{ WEXITSTATUS(status) } } };
+        return *(exitStatus_ = ExitStatus{ NormalExit{ WEXITSTATUS(status) } });
     else if (WIFSIGNALED(status))
-        return exitStatus_ = { ExitStatus{ SignalExit{ WTERMSIG(status) } } };
+        return *(exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } });
     else if (WIFSTOPPED(status))
-        return exitStatus_ = { ExitStatus{ Suspend{} } };
+        return *(exitStatus_ = ExitStatus{ Suspend{} });
     else if (WIFCONTINUED(status))
-        return exitStatus_ = { ExitStatus{ Resume{} } };
+        return *(exitStatus_ = ExitStatus{ Resume{} });
     else
         throw runtime_error{ "Unknown waitpid() return value." };
 #else
@@ -245,7 +245,7 @@ Process::ExitStatus Process::wait()
     //    printf("WaitForSingleObject(proc): %s\n", getLastErrorAsString().c_str());
     DWORD exitCode;
     if (GetExitCodeProcess(processInfo_.hProcess, &exitCode))
-        return *(exitStatus_ = { ExitStatus{ NormalExit{ static_cast<int>(exitCode) } } });
+        return *(exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } });
     else
         throw runtime_error{ getLastErrorAsString() };
 #endif

@@ -142,7 +142,7 @@ void PseudoTerminal::close()
 #if defined(__unix__)
     if (master_ >= 0)
     {
-        close(master_);
+        ::close(master_);
         master_ = -1;
     }
 #else
