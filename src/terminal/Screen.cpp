@@ -768,10 +768,12 @@ void Screen::operator()(MoveCursorToNextTab const& v)
 
 void Screen::operator()(HideCursor const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(ShowCursor const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(SaveCursor const& v)
@@ -818,7 +820,7 @@ void Screen::operator()(ReverseIndex const& v)
 void Screen::operator()(BackIndex const& v)
 {
     if (currentColumn() == state_->margin_.horizontal.from)
-        ;// scrollRight(1);
+        ;// TODO: scrollRight(1);
     else
         moveCursorTo(currentRow(), currentColumn() - 1);
 }
@@ -826,7 +828,7 @@ void Screen::operator()(BackIndex const& v)
 void Screen::operator()(ForwardIndex const& v)
 {
     if (currentColumn() == state_->margin_.horizontal.to)
-        ;// scrollLeft(1);
+        ;// TODO: scrollLeft(1);
     else
         moveCursorTo(currentRow(), currentColumn() + 1);
 }
@@ -971,26 +973,32 @@ void Screen::operator()(ScreenAlignmentPattern const&)
 
 void Screen::operator()(SendMouseEvents const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(AlternateKeypadMode const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(DesignateCharset const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(SingleShiftSelect const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(ChangeWindowTitle const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(ChangeIconName const& v)
 {
+    // TODO
 }
 
 void Screen::operator()(AppendChar const& v)

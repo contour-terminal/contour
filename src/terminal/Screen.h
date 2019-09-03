@@ -229,10 +229,20 @@ class Screen {
 			return state_->cursor.column - state_->margin_.horizontal.from + 1;
     }
 
-    Coordinate const& currentCursor() const noexcept { return state_->cursor; }
+    Coordinate const& currentCursor() const noexcept
+    {
+        return state_->cursor;
+    }
 
-    Cell const& currentCell()  const noexcept { return *state_->currentColumn; }
-    Cell& currentCell() noexcept { return *state_->currentColumn; }
+    Cell const& currentCell() const noexcept
+    {
+        return *state_->currentColumn;
+    }
+
+    Cell& currentCell() noexcept
+    {
+        return *state_->currentColumn;
+    }
 
     Cell& currentCell(Cell value)
     {
