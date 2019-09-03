@@ -92,6 +92,11 @@ inline Window::Window(unsigned _width, unsigned _height, std::string const& _tit
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
     #endif
 
+    //glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     glViewport(0, 0, _width, _height);
 }
 

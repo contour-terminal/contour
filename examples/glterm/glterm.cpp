@@ -34,12 +34,12 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Window.h"
-#include "TextShaper.h"
-#include "CellBackground.h"
+#include "GLTerminal.h"
 
 // TODOs:
 // - [x] proper glterm termination (window close as well as process exit)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
+// - [ ] Fullscreen support (ALT+ENTER, or similar)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
 // - [ ] font loading on Linux
@@ -66,15 +66,6 @@ using namespace std::placeholders;
 // Hmm, how'd that look like on Linux, again? :-D
 #endif
 
-auto const envvars = terminal::Process::Environment{
-    {"TERM", "xterm-256color"},
-    {"COLORTERM", "xterm"},
-    {"COLORFGBG", "15;0"},
-    {"LINES", ""},
-    {"COLUMNS", ""},
-    {"TERMCAP", ""}
-};
-
 class GLTerm {
   public:
     GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std::string const& _shell);
@@ -96,14 +87,8 @@ class GLTerm {
 
   private:
     Window window_;
-    TextShaper textShaper_;
-    CellBackground cellBackground_;
     std::ofstream logger_;
-    bool quit_ = false;
-
-    terminal::Terminal terminal_;
-    terminal::Process process_;
-    std::thread processExitWatcher_;
+    GLTerminal terminalView_;
 };
 
 terminal::WindowSize GLTerm::computeWindowSize() const noexcept
@@ -120,42 +105,14 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
         bind(&GLTerm::onChar, this, _1),
         bind(&GLTerm::onResize, this, _1, _2)
     },
-    textShaper_{ GLTERM_FONT_PATH , _fontSize },
-    cellBackground_{ textShaper_.maxAdvance(), textShaper_.lineHeight() },
     logger_{ "glterm.log", ios::trunc },
-    terminal_{
-        computeWindowSize(),
-        [this](auto const& msg) { log("terminal: {}", msg); },
-        bind(&GLTerm::onScreenUpdateHook, this, _1),
-    },
-    process_{ terminal_, _shell, {_shell}, envvars },
-    processExitWatcher_{ [this]() {
-        using namespace terminal;
-        while (true)
-            if (visit(overloaded{[&](Process::NormalExit) { return true; },
-                                 [&](Process::SignalExit) { return true; },
-                                 [&](Process::Suspend) { return false; },
-                                 [&](Process::Resume) { return false; },
-                      },
-                      process_.wait()))
-                break;
-        terminal_.close();
-        quit_ = true;
-    }}
+    terminalView_{0, 0, _width, _height}
 {
-    //glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     onResize(_width, _height);
 }
 
 GLTerm::~GLTerm()
 {
-    (void) process_.wait();
-    terminal_.wait();
-    processExitWatcher_.join();
 }
 
 template <typename... Args>
@@ -166,9 +123,9 @@ void GLTerm::log(std::string const& msg, Args... args)
 
 int GLTerm::main()
 {
-    while (!glfwWindowShouldClose(window_) && !quit_)
+    while (!glfwWindowShouldClose(window_) && !terminalView_.alive())
     {
-        render();
+        terminalView_.render();
         glfwPollEvents();
     }
 
@@ -177,80 +134,18 @@ int GLTerm::main()
 
 void GLTerm::render()
 {
-    auto const winSize = computeWindowSize();
-    auto const usedHeight = winSize.rows * textShaper_.lineHeight();
-    auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
-    auto const freeHeight = window_.height() - usedHeight;
-    auto const freeWidth = window_.width() - usedWidth;
-    auto const bottomMargin = freeHeight / 2;
-    auto const leftMargin = freeWidth / 2;
-
-    using namespace terminal;
-
-    auto constexpr defaultForegroundColor = RGBColor{ 255, 255, 255 };
-    auto constexpr defaultBackgroundColor = RGBColor{ 0, 32, 32 };
-
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    auto const makeCoords = [&](cursor_pos_t col, cursor_pos_t row) {
-        return glm::ivec2{
-            leftMargin + (col - 1) * textShaper_.maxAdvance(),
-            bottomMargin + (winSize.rows - row) * textShaper_.lineHeight()
-        };
-    };
-
-    terminal_.render([&](cursor_pos_t row, cursor_pos_t col, Screen::Cell const& cell) {
-        cellBackground_.render(
-            makeCoords(col, row),
-            toRGB(cell.attributes.backgroundColor, defaultBackgroundColor)
-        );
-
-        RGBColor const fgColor = toRGB(cell.attributes.foregroundColor, defaultForegroundColor);
-        //TODO: other SGRs
-
-        if (cell.character && cell.character != ' ')
-        {
-            textShaper_.render(
-                makeCoords(col, row),
-                cell.character,
-                fgColor.red / 255.0f,
-                fgColor.green / 255.0f,
-                fgColor.blue / 255.0f
-            );
-        }
-    });
+    terminalView_.render();
 
     glfwSwapBuffers(window_);
 }
 
 void GLTerm::onResize(unsigned _width, unsigned _height)
 {
-    auto const winSize = computeWindowSize();
-    auto const usedHeight = winSize.rows * textShaper_.lineHeight();
-    auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
-    auto const freeHeight = _height - usedHeight;
-    auto const freeWidth = _width - usedWidth;
-
-    logger_ << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
-        winSize.columns, winSize.rows,
-        _width, _height,
-        freeWidth, freeHeight,
-        textShaper_.maxAdvance(), textShaper_.lineHeight()
-    );
-
-    terminal_.resize(winSize);
-
-    cellBackground_.onResize(_width, _height);
-
-    textShaper_.shader().use();
-    textShaper_.shader().setMat4(
-        "projection",
-        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
-    );
-
     glViewport(0, 0, _width, _height);
-
+    terminalView_.resize(_width, _height);
     render();
 }
 
@@ -365,7 +260,7 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
             logger_ << "Taking screenshot.\n";
-            auto const screenshot = terminal_.screenshot();
+            auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
             ofs.flush();
@@ -373,10 +268,10 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
         }
 
         if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
-            terminal_.send(key.value(), mods);
+            terminalView_.send(key.value(), mods);
         else if (const char* cstr = glfwGetKeyName(_key, _scanCode); cstr != nullptr && strlen(cstr) == 1 && mods.some() && isalnum(*cstr))
             // allow only mods + alphanumerics
-            terminal_.send(*cstr, mods);
+            terminalView_.send(*cstr, mods);
         //else
         //    logger << fmt::format("No key mapping found for key:{}, scanCode:{}, name:{} ({}).\n", _key, _scanCode, cstr, terminal::to_string(mods));
 
@@ -391,7 +286,7 @@ void GLTerm::onChar(char32_t _char)
     else
         logger_ << fmt::format("char: 0x{:04X}\n", static_cast<uint32_t>(_char));
 
-    terminal_.send(_char, terminal::Modifier{});
+    terminalView_.send(_char, terminal::Modifier{});
 
     glfwPostEmptyEvent();
 }
