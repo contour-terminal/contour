@@ -41,6 +41,7 @@
 // - [x] proper glterm termination (window close as well as process exit)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
+// - [ ] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [ ] font loading on Linux
 // - [ ] input: F13..F25
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
