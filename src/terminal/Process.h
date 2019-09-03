@@ -75,7 +75,7 @@ class [[nodiscard]] Process {
 	[[nodiscard]] ExitStatus wait();
 
 private:
-	NativeHandle pid_{};
+	mutable NativeHandle pid_{};
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};
