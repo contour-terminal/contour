@@ -73,6 +73,12 @@ public:
 	/// @returns Number of bytes written or -1 on error.
 	auto write(char const* buf, size_t size) -> ssize_t;
 
+    /// @returns current underlying window size in characters width and height.
+    WindowSize size() const noexcept;
+
+    /// Resizes underlying window buffer by given character width and height.
+    virtual void resize(WindowSize const& _newWindowSize);
+
 	/// @returns The native master PTY handle.
 	PtyHandle master() const noexcept { return master_; }
 
@@ -101,6 +107,7 @@ public:
 
 private:
 	PtyHandle master_;
+    WindowSize size_;
 
 #if defined(__unix__)
 	PtyHandle slave_;

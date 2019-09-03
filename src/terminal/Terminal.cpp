@@ -113,6 +113,13 @@ void Terminal::render(Screen::Renderer const& renderer) const
     screen_.render(renderer);
 }
 
+void Terminal::resize(WindowSize const& _newWindowSize)
+{
+    lock_guard<mutex> _l{ screenLock_ };
+    screen_.resize(_newWindowSize.columns, _newWindowSize.rows);
+    PseudoTerminal::resize(_newWindowSize);
+}
+
 void Terminal::wait()
 {
     screenUpdateThread_.join();

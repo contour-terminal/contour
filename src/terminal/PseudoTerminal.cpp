@@ -85,7 +85,8 @@ WindowSize currentWindowSize()
 #endif
 }
 
-PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize)
+PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
+    size_{ _windowSize }
 {
 #if defined(__unix__)
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
@@ -186,6 +187,25 @@ auto PseudoTerminal::write(char const* buf, size_t size) -> ssize_t
         return nwritten;
     else
         return -1;
+#endif
+}
+
+WindowSize PseudoTerminal::size() const noexcept
+{
+    return size_;
+}
+
+void PseudoTerminal::resize(WindowSize const& _newWindowSize)
+{
+#if defined(__unix__)
+    // TODO
+#elif defined(_MSC_VER)
+    COORD coords;
+    coords.X = _newWindowSize.columns;
+    coords.Y = _newWindowSize.rows;
+    HRESULT const result = ResizePseudoConsole(master_, coords);
+    if (result != S_OK)
+        throw runtime_error{ GetLastErrorAsString() };
 #endif
 }
 

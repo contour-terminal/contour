@@ -67,6 +67,8 @@ class Terminal : public PseudoTerminal {
     /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
     std::string screenshot() const;
 
+    void resize(WindowSize const& _newWindowSize) override;
+
     /// Waits until process screen update thread has terminated.
     void wait();
 
