@@ -154,14 +154,25 @@ void OutputHandler::executeControlFunction()
 {
     switch (currentChar())
     {
-        case 0x07:
+        case 0x07: // BEL
             emit<Bell>();
             break;
-        case 0x08:
+        case 0x08: // BS
             emit<Backspace>();
             break;
-        case 0x0A:
+        case 0x09: // VT
+            emit<MoveCursorToNextTab>();
+            break;
+        case 0x0A: // LF
             emit<Linefeed>();
+            break;
+        case 0x0B: // VT
+            // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
+            emit<Index>();
+            break;
+        case 0x0C: // FF
+            // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
+            emit<Index>();
             break;
         case 0x0D:
             emit<MoveCursorToBeginOfLine>();
