@@ -38,6 +38,7 @@
 
 // TODOs:
 // - [x] proper glterm termination (window close as well as process exit)
+// - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [ ] Fullscreen support (ALT+ENTER, or similar)
 // - [ ] other SGRs (bold, italic, etc)
@@ -46,7 +47,6 @@
 // - [ ] input: F13..F25
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
 // - [ ] input: GLFW_KEY_PAUSE
-// - [ ] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [ ] input: GLFW_KEY_KP_EQUAL
 // - [ ] show cursor (in correct shapes, with blinking)
 
@@ -67,8 +67,6 @@ class GLTerm {
     ~GLTerm();
 
     int main();
-
-    terminal::WindowSize computeWindowSize() const noexcept;
 
   private:
     template <typename... Args>
@@ -92,10 +90,10 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
         bind(&GLTerm::onChar, this, _1),
         bind(&GLTerm::onResize, this, _1, _2)
     },
-    logger_{ "glterm.log", ios::trunc },
+    logger_{}, // "glterm.log", ios::trunc },
     terminalView_{0, 0, _width, _height, _fontSize, _shell}
 {
-    onResize(_width, _height);
+    glViewport(0, 0, _width, _height);
 }
 
 GLTerm::~GLTerm()
@@ -105,14 +103,16 @@ GLTerm::~GLTerm()
 template <typename... Args>
 void GLTerm::log(std::string const& msg, Args... args)
 {
+    #if 0
     logger_ << fmt::format(msg, args...) << '\n';
+    #endif
 }
 
 int GLTerm::main()
 {
     while (!glfwWindowShouldClose(window_) && terminalView_.alive())
     {
-        terminalView_.render();
+        render();
         glfwPollEvents();
     }
 
@@ -236,21 +236,20 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
 
         char const* keyName = glfwGetKeyName(_key, _scanCode);
 
-        logger_ << fmt::format("key: {} {}, action:{}, mod:{:02X} ({})\n",
-                               _key,
-                               keyName ? keyName : "",
-                               _action,
-                               static_cast<unsigned>(_mods),
-                               terminal::to_string(mods));
+        log("key: {} {}, action:{}, mod:{:02X} ({})",
+            _key,
+            keyName ? keyName : "",
+            _action,
+            static_cast<unsigned>(_mods),
+            terminal::to_string(mods));
 
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
-            logger_ << "Taking screenshot.\n";
+            log("Taking screenshot.");
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
-            ofs.flush();
             return;
         }
 
@@ -269,9 +268,9 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
 void GLTerm::onChar(char32_t _char)
 {
     if (utf8::isASCII(_char) && isprint(_char))
-        logger_ << fmt::format("char: {}\n", static_cast<char>(_char));
+        log("char: {}", static_cast<char>(_char));
     else
-        logger_ << fmt::format("char: 0x{:04X}\n", static_cast<uint32_t>(_char));
+        log("char: 0x{:04X}", static_cast<uint32_t>(_char));
 
     terminalView_.send(_char, terminal::Modifier{});
 
@@ -282,10 +281,10 @@ void GLTerm::onScreenUpdateHook([[maybe_unused]] vector<terminal::Command> const
 {
     // we could add some high level VT output logging here.
     glfwPostEmptyEvent();
-    //logger_ << fmt::format("onScreenUpdate: {} instructions\n", _commands.size());
+    log("onScreenUpdate: {} instructions\n", _commands.size());
 
-    //for (terminal::Command const& command : _commands)
-    //    logger_ << to_string(command) << '\n';
+    // for (terminal::Command const& command : _commands)
+    //     log("{}", to_string(command));
 }
 
 int main(int argc, char const* argv[])

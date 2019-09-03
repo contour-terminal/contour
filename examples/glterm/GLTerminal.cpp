@@ -33,25 +33,38 @@ auto const envvars = terminal::Process::Environment{
 // Hmm, how'd that look like on Linux, again? :-D
 #endif
 
-GLTerminal::GLTerminal(
-    unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height,
-    size_t _fontSize, string const& _shell) :
+GLTerminal::GLTerminal(unsigned _bottomLeft, unsigned _bottomRight,
+                       unsigned _width, unsigned _height,
+                       unsigned _fontSize, string const& _shell) :
     width_{ _width },
     height_{ _height },
     textShaper_{ GLTERM_FONT_PATH , _fontSize },
-    cellBackground_{ textShaper_.maxAdvance(), textShaper_.lineHeight() },
+    cellBackground_{
+        textShaper_.maxAdvance(),
+        textShaper_.lineHeight(),
+        _width,
+        _height
+    },
     terminal_{
-        computeWindowSize(),
-        [this](auto const& msg) { cout << "terminal: " << msg << '\n'; },
+        terminal::WindowSize{
+            static_cast<unsigned short>(width_ / textShaper_.maxAdvance()),
+            static_cast<unsigned short>(height_ / textShaper_.lineHeight())
+        },
+        [this](auto const& msg) { /*TODO(traceLog) cout << "terminal: " << msg << '\n'; */ },
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
     processExitWatcher_{ [this]() { wait(); }}
 {
+    // TODO: we could pass the projection matrix in the ctor of TextShaper, too.
+    textShaper_.shader().use();
+    textShaper_.shader().setMat4(
+        "projection",
+        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
+    );
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    resize(_width, _height);
 }
 
 GLTerminal::~GLTerminal()
@@ -64,33 +77,19 @@ bool GLTerminal::alive() const
     return alive_;
 }
 
-void GLTerminal::wait()
-{
-    using namespace terminal;
-    while (true)
-        if (visit(overloaded{[&](Process::NormalExit) { return true; },
-                             [&](Process::SignalExit) { return true; },
-                             [&](Process::Suspend) { return false; },
-                             [&](Process::Resume) { return false; },
-                  },
-                  process_.wait()))
-            break;
-
-    terminal_.wait();
-    processExitWatcher_.join();
-    alive_ = false;
-}
-
 void GLTerminal::resize(unsigned _width, unsigned _height)
 {
-    auto const winSize = computeWindowSize();
+    width_ = _width;
+    height_ = _height;
+
+    auto const winSize = terminal::WindowSize{
+        static_cast<unsigned short>(height_ / textShaper_.lineHeight()),
+        static_cast<unsigned short>(width_ / textShaper_.maxAdvance())
+    };
     auto const usedHeight = winSize.rows * textShaper_.lineHeight();
     auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
     auto const freeHeight = _height - usedHeight;
     auto const freeWidth = _width - usedWidth;
-
-    width_ = _width;
-    height_ = _height;
 
     cout << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
         winSize.columns, winSize.rows,
@@ -101,27 +100,18 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
 
     terminal_.resize(winSize);
 
-    cellBackground_.onResize(_width, _height);
+    cellBackground_.setProjection(_width, _height);
 
     textShaper_.shader().use();
     textShaper_.shader().setMat4(
         "projection",
         glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
     );
-
-}
-
-terminal::WindowSize GLTerminal::computeWindowSize() const noexcept
-{
-    auto const rows = static_cast<unsigned short>(height_ / textShaper_.lineHeight());
-    auto const cols = static_cast<unsigned short>(width_ / textShaper_.maxAdvance());
-
-    return { cols, rows };
 }
 
 void GLTerminal::render()
 {
-    auto const winSize = computeWindowSize();
+    auto const winSize = terminal_.size();
     auto const usedHeight = winSize.rows * textShaper_.lineHeight();
     auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
     auto const freeHeight = height_ - usedHeight;
@@ -161,6 +151,23 @@ void GLTerminal::render()
             );
         }
     });
+}
+
+void GLTerminal::wait()
+{
+    using namespace terminal;
+    while (true)
+        if (visit(overloaded{[&](Process::NormalExit) { return true; },
+                             [&](Process::SignalExit) { return true; },
+                             [&](Process::Suspend) { return false; },
+                             [&](Process::Resume) { return false; },
+                  },
+                  process_.wait()))
+            break;
+
+    terminal_.wait();
+    processExitWatcher_.join();
+    alive_ = false;
 }
 
 void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)

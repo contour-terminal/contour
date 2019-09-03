@@ -19,7 +19,7 @@
 
 class TextShaper {
 public:
-    TextShaper(std::string _fontPath, unsigned short _fontSize);
+    TextShaper(std::string _fontPath, unsigned int _fontSize);
 
     TextShaper(TextShaper&&) = delete;
     TextShaper(TextShaper const&) = delete;
@@ -88,10 +88,10 @@ private:
             uniform vec3 textColor;
 
             void main()
-            {    
+            {
                 vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);
                 color = vec4(textColor, 1.0) * sampled;
-            }  
+            }
         )";
         return code;
     }
@@ -106,7 +106,7 @@ private:
     Shader shader_;
 };
 
-inline TextShaper::TextShaper(std::string _fontPath, unsigned short _fontSize) :
+inline TextShaper::TextShaper(std::string _fontPath, unsigned int _fontSize) :
     shader_{ vertexShaderCode(), fragmentShaderCode() }
 {
     if (FT_Init_FreeType(&ft_))

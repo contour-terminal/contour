@@ -26,7 +26,7 @@ class GLTerminal {
   public:
     GLTerminal(
         unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height,
-        size_t _fontSize, std::string const& _shell);
+        unsigned _fontSize, std::string const& _shell);
     ~GLTerminal();
 
     terminal::WindowSize computeWindowSize() const noexcept;

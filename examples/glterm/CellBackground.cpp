@@ -1,8 +1,8 @@
 #include "CellBackground.h"
 
-CellBackground::CellBackground(unsigned _width, unsigned _height)
+CellBackground::CellBackground(unsigned _width, unsigned _height, unsigned _projectionWidth, unsigned _projectionHeight)
 {
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height));
+    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_projectionWidth), 0.0f, static_cast<GLfloat>(_projectionHeight));
 
     // setup background shader
     GLfloat const vertices[] = {
@@ -31,9 +31,9 @@ CellBackground::~CellBackground()
     glDeleteVertexArrays(1, &vao_);
 }
 
-void CellBackground::onResize(unsigned _width, unsigned _height)
+void CellBackground::setProjection(unsigned _projectionWidth, unsigned _projectionHeight)
 {
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height));
+    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_projectionWidth), 0.0f, static_cast<GLfloat>(_projectionHeight));
 }
 
 void CellBackground::render(glm::ivec2 _pos, terminal::RGBColor const& color)

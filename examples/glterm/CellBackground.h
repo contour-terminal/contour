@@ -24,10 +24,10 @@
 
 class CellBackground {
   public:
-    CellBackground(unsigned _width, unsigned _height);
+    CellBackground(unsigned _width, unsigned _height, unsigned _projectionWidth, unsigned _projectionHeight);
     ~CellBackground();
 
-    void onResize(unsigned _width, unsigned _height);
+    void setProjection(unsigned _width, unsigned _height);
     void render(glm::ivec2 pos, terminal::RGBColor const& _color);
 
   private:
