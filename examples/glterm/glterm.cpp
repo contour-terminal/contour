@@ -39,9 +39,9 @@
 
 // TODOs:
 // - [x] proper glterm termination (window close as well as process exit)
+// - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
-// - [ ] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [ ] font loading on Linux
 // - [ ] input: F13..F25
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
@@ -238,6 +238,8 @@ void GLTerm::onResize(unsigned _width, unsigned _height)
         freeWidth, freeHeight,
         textShaper_.maxAdvance(), textShaper_.lineHeight()
     );
+
+    terminal_.resize(winSize);
 
     cellBackground_.onResize(_width, _height);
 
