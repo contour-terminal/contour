@@ -91,7 +91,13 @@ GLTerm::GLTerm(unsigned _width, unsigned _height, unsigned short _fontSize, std:
         bind(&GLTerm::onResize, this, _1, _2)
     },
     logger_{}, // "glterm.log", ios::trunc },
-    terminalView_{0, 0, _width, _height, _fontSize, _shell}
+    terminalView_{
+        _width,
+        _height,
+        _fontSize,
+        _shell,
+        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
+    }
 {
     glViewport(0, 0, _width, _height);
 }
@@ -132,6 +138,7 @@ void GLTerm::render()
 void GLTerm::onResize(unsigned _width, unsigned _height)
 {
     glViewport(0, 0, _width, _height);
+    terminalView_.setProjection(glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)));
     terminalView_.resize(_width, _height);
     render();
 }

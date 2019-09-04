@@ -21,15 +21,15 @@
 #include "CellBackground.h"
 #include "TextShaper.h"
 
+#include <glm/matrix.hpp>
+
 /// OpenGL-Terminal Object.
 class GLTerminal {
   public:
-    GLTerminal(
-        unsigned _bottomLeft, unsigned _bottomRight, unsigned _width, unsigned _height,
-        unsigned _fontSize, std::string const& _shell);
+    GLTerminal(unsigned _width, unsigned _height,
+               unsigned _fontSize, std::string const& _shell,
+               glm::mat4 const& _projectionMatrix);
     ~GLTerminal();
-
-    terminal::WindowSize computeWindowSize() const noexcept;
 
     bool send(char32_t _characterEvent, terminal::Modifier _modifier) { return terminal_.send(_characterEvent, _modifier); }
     bool send(terminal::Key _key, terminal::Modifier _modifier) { return terminal_.send(_key, _modifier); }
@@ -37,6 +37,7 @@ class GLTerminal {
 
     //void translate(unsigned _bottomLeft, unsigned _bottomRight);
     void resize(unsigned _width, unsigned _height);
+    void setProjection(glm::mat4 const& _projectionMatrix);
     void render();
 
     bool alive() const;

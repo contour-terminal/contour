@@ -1,8 +1,23 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "CellBackground.h"
+#include <GL/glew.h>
+#include <glm/gtc/matrix_transform.hpp>
 
-CellBackground::CellBackground(unsigned _width, unsigned _height, unsigned _projectionWidth, unsigned _projectionHeight)
+CellBackground::CellBackground(unsigned _width, unsigned _height, glm::mat4 const& _projectionMatrix)
 {
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_projectionWidth), 0.0f, static_cast<GLfloat>(_projectionHeight));
+    projectionMatrix_ = _projectionMatrix;
 
     // setup background shader
     GLfloat const vertices[] = {
@@ -31,9 +46,9 @@ CellBackground::~CellBackground()
     glDeleteVertexArrays(1, &vao_);
 }
 
-void CellBackground::setProjection(unsigned _projectionWidth, unsigned _projectionHeight)
+void CellBackground::setProjection(glm::mat4 const& _projectionMatrix)
 {
-    projectionMatrix_ = glm::ortho(0.0f, static_cast<GLfloat>(_projectionWidth), 0.0f, static_cast<GLfloat>(_projectionHeight));
+    projectionMatrix_ = _projectionMatrix;
 }
 
 void CellBackground::render(glm::ivec2 _pos, terminal::RGBColor const& color)

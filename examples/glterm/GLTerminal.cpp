@@ -33,17 +33,16 @@ auto const envvars = terminal::Process::Environment{
 // Hmm, how'd that look like on Linux, again? :-D
 #endif
 
-GLTerminal::GLTerminal(unsigned _bottomLeft, unsigned _bottomRight,
-                       unsigned _width, unsigned _height,
-                       unsigned _fontSize, string const& _shell) :
+GLTerminal::GLTerminal(unsigned _width, unsigned _height,
+                       unsigned _fontSize, string const& _shell,
+                       glm::mat4 const& _projectionMatrix) :
     width_{ _width },
     height_{ _height },
-    textShaper_{ GLTERM_FONT_PATH , _fontSize },
+    textShaper_{ GLTERM_FONT_PATH , _fontSize, _projectionMatrix },
     cellBackground_{
         textShaper_.maxAdvance(),
         textShaper_.lineHeight(),
-        _width,
-        _height
+        _projectionMatrix
     },
     terminal_{
         terminal::WindowSize{
@@ -56,13 +55,6 @@ GLTerminal::GLTerminal(unsigned _bottomLeft, unsigned _bottomRight,
     process_{ terminal_, _shell, {_shell}, envvars },
     processExitWatcher_{ [this]() { wait(); }}
 {
-    // TODO: we could pass the projection matrix in the ctor of TextShaper, too.
-    textShaper_.shader().use();
-    textShaper_.shader().setMat4(
-        "projection",
-        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
-    );
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -99,14 +91,12 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
     );
 
     terminal_.resize(winSize);
+}
 
-    cellBackground_.setProjection(_width, _height);
-
-    textShaper_.shader().use();
-    textShaper_.shader().setMat4(
-        "projection",
-        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
-    );
+void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
+{
+    cellBackground_.setProjection(_projectionMatrix);
+    textShaper_.setProjection(_projectionMatrix);
 }
 
 void GLTerminal::render()

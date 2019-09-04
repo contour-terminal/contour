@@ -4,6 +4,9 @@
 #include <sstream>
 #include <iostream>
 
+#include <gl/glew.h>
+#include <glm/matrix.hpp>
+
 class Shader
 {
 private:

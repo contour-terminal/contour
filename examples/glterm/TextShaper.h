@@ -19,7 +19,7 @@
 
 class TextShaper {
 public:
-    TextShaper(std::string _fontPath, unsigned int _fontSize);
+    TextShaper(std::string _fontPath, unsigned int _fontSize, glm::mat4 const& _projectionMatrix);
 
     TextShaper(TextShaper&&) = delete;
     TextShaper(TextShaper const&) = delete;
@@ -45,7 +45,11 @@ public:
         return face_->size->metrics.max_advance >> 6;
     }
 
-    Shader& shader() noexcept { return shader_; }
+    void setProjection(glm::mat4 const& _projectionMatrix)
+    {
+        shader_.use();
+        shader_.setMat4("projection", _projectionMatrix);
+    }
 
 private:
     struct Glyph {
@@ -106,7 +110,7 @@ private:
     Shader shader_;
 };
 
-inline TextShaper::TextShaper(std::string _fontPath, unsigned int _fontSize) :
+inline TextShaper::TextShaper(std::string _fontPath, unsigned int _fontSize, glm::mat4 const& _projectionMatrix) :
     shader_{ vertexShaderCode(), fragmentShaderCode() }
 {
     if (FT_Init_FreeType(&ft_))
@@ -139,6 +143,8 @@ inline TextShaper::TextShaper(std::string _fontPath, unsigned int _fontSize) :
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+
+    setProjection(_projectionMatrix);
 }
 
 inline TextShaper::~TextShaper()

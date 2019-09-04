@@ -13,22 +13,21 @@
  */
 #pragma once
 
+#include "TextShaper.h"
+
 #include <terminal/Color.h>
 
 #include <GL/glew.h>
-
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
-#include "TextShaper.h"
-
+/// OpenGL Object for rendering character cell's background.
 class CellBackground {
   public:
-    CellBackground(unsigned _width, unsigned _height, unsigned _projectionWidth, unsigned _projectionHeight);
+    CellBackground(unsigned _width, unsigned _height, glm::mat4 const& _projectionMatrix);
     ~CellBackground();
 
-    void setProjection(unsigned _width, unsigned _height);
-    void render(glm::ivec2 pos, terminal::RGBColor const& _color);
+    void setProjection(glm::mat4 const& _projectionMatrix);
+    void render(glm::ivec2 _translation, terminal::RGBColor const& _color);
 
   private:
     static std::string vertexShader()
