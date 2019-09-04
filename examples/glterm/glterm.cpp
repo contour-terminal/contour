@@ -40,6 +40,7 @@
 // - [x] proper glterm termination (window close as well as process exit)
 // - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
+// - [ ] logging: runtime-configurable logging (to file or stdout)
 // - [ ] Fullscreen support (ALT+ENTER, or similar)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
@@ -52,10 +53,6 @@
 
 #if defined(__unix__)
 #include <unistd.h>
-#endif
-
-#if defined(_MSC_VER)
-#include <Windows.h>
 #endif
 
 using namespace std;
