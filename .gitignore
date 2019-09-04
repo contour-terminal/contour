@@ -1,7 +1,20 @@
-/build/
-/out/
-/.vs/
+# Visual Studio Code
 /.vscode/
-/sandbox/
-/Testing/
+/build/
+
+# Visual Studio
+/.vs/
+/out/
 /CMakeSettings.json
+
+# CMake (CTest)
+/Testing/
+
+# This is a workspace-local sandbox directory with test files not to be included in Git.
+/sandbox/
+
+# Never add any log files.
+*.log
+
+# Never accidentally add any screenshot files.
+*.vt
