@@ -62,6 +62,7 @@ GLTerminal::GLTerminal(unsigned _width, unsigned _height,
 GLTerminal::~GLTerminal()
 {
     wait();
+    processExitWatcher_.join();
 }
 
 bool GLTerminal::alive() const
@@ -145,7 +146,11 @@ void GLTerminal::render()
 
 void GLTerminal::wait()
 {
-    using namespace terminal;
+    if (!alive_)
+        return;
+
+    using terminal::Process;
+
     while (true)
         if (visit(overloaded{[&](Process::NormalExit) { return true; },
                              [&](Process::SignalExit) { return true; },
@@ -155,8 +160,8 @@ void GLTerminal::wait()
                   process_.wait()))
             break;
 
+    terminal_.close();
     terminal_.wait();
-    processExitWatcher_.join();
     alive_ = false;
 }
 
