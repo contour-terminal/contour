@@ -281,7 +281,7 @@ void Screen::Buffer::scrollDown(size_t v_n, Margin const& _margin)
             for_each(
                 next(begin(lines), _margin.vertical.from - 1),
                 next(begin(lines), _margin.vertical.from - 1 + n),
-                [this, _margin](Line& line) {
+                [_margin](Line& line) {
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
@@ -296,7 +296,7 @@ void Screen::Buffer::scrollDown(size_t v_n, Margin const& _margin)
             for_each(
                 next(begin(lines), _margin.vertical.from - 1),
                 next(begin(lines), _margin.vertical.to),
-                [this, _margin](Line& line) {
+                [_margin](Line& line) {
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
