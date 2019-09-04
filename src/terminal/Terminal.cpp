@@ -86,6 +86,10 @@ bool Terminal::send(Key _key, Modifier _modifier)
 
 void Terminal::flushInput()
 {
+    if (logger_)
+        for (auto const& seq : pendingInput_)
+            logger_(fmt::format("Sending input: '{}'", escape(seq)));
+
     inputGenerator_.swap(pendingInput_);
 
     for (auto const& seq : pendingInput_)
