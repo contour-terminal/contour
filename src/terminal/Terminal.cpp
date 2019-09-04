@@ -39,7 +39,7 @@ Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
 
 Terminal::~Terminal()
 {
-    wait();
+    //wait();
 }
 
 void Terminal::onScreenReply(std::string_view const& reply)
