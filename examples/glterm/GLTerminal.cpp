@@ -14,6 +14,7 @@
 #include "GLTerminal.h"
 #include <terminal/Util.h>
 #include <iostream>
+#include <utility>
 
 using namespace std;
 using namespace std::placeholders;
@@ -28,17 +29,15 @@ auto const envvars = terminal::Process::Environment{
     {"TERMCAP", ""}
 };
 
-#ifndef GLTERM_FONT_PATH
-#define GLTERM_FONT_PATH "C:\\WINDOWS\\FONTS\\CONSOLA.TTF"
-// Hmm, how'd that look like on Linux, again? :-D
-#endif
-
-GLTerminal::GLTerminal(unsigned _width, unsigned _height,
-                       unsigned _fontSize, string const& _shell,
+GLTerminal::GLTerminal(unsigned _width,
+                       unsigned _height,
+                       unsigned _fontSize,
+                       string const& _fontFamily,
+                       string const& _shell,
                        glm::mat4 const& _projectionMatrix) :
     width_{ _width },
     height_{ _height },
-    textShaper_{ GLTERM_FONT_PATH , _fontSize, _projectionMatrix },
+    textShaper_{ _fontFamily, _fontSize, _projectionMatrix },
     cellBackground_{
         textShaper_.maxAdvance(),
         textShaper_.lineHeight(),
@@ -49,7 +48,7 @@ GLTerminal::GLTerminal(unsigned _width, unsigned _height,
             static_cast<unsigned short>(width_ / textShaper_.maxAdvance()),
             static_cast<unsigned short>(height_ / textShaper_.lineHeight())
         },
-        [this](auto const& msg) { /*TODO(traceLog) cout << "terminal: " << msg << '\n'; */ },
+        [](auto const& msg) { /*TODO(traceLog) cout << "terminal: " << msg << '\n';*/ },
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
@@ -110,7 +109,9 @@ void GLTerminal::render()
     auto const bottomMargin = freeHeight / 2;
     auto const leftMargin = freeWidth / 2;
 
-    using namespace terminal;
+    using terminal::cursor_pos_t;
+    using terminal::CharacterStyleMask;
+    using terminal::Screen;
 
     auto constexpr defaultForegroundColor = RGBColor{ 255, 255, 255 };
     auto constexpr defaultBackgroundColor = RGBColor{ 0, 32, 32 };
@@ -123,13 +124,53 @@ void GLTerminal::render()
     };
 
     terminal_.render([&](cursor_pos_t row, cursor_pos_t col, Screen::Cell const& cell) {
-        cellBackground_.render(
-            makeCoords(col, row),
-            toRGB(cell.attributes.backgroundColor, defaultBackgroundColor)
-        );
+        auto const [fgColor, bgColor] = [&]() {
+            return (cell.attributes.styles & CharacterStyleMask::Inverse)
+                ? pair{ toRGB(cell.attributes.backgroundColor, defaultBackgroundColor),
+                        toRGB(cell.attributes.foregroundColor, defaultForegroundColor) }
+                : pair{ toRGB(cell.attributes.foregroundColor, defaultForegroundColor),
+                        toRGB(cell.attributes.backgroundColor, defaultBackgroundColor) };
+        }();
 
-        RGBColor const fgColor = toRGB(cell.attributes.foregroundColor, defaultForegroundColor);
-        //TODO: other SGRs
+        float const opacity = [&]() {
+            if (cell.attributes.styles & CharacterStyleMask::Hidden)
+                return 0.0f;
+            else if (cell.attributes.styles & CharacterStyleMask::Faint)
+                return 0.5f;
+            else
+                return 1.0f;
+        }();
+
+        if (cell.attributes.styles & CharacterStyleMask::Bold)
+        {
+            // TODO: switch font
+        }
+
+        if (cell.attributes.styles & CharacterStyleMask::Italic)
+        {
+            // TODO: *Maybe* update transformation matrix to have chars italic *OR* change font (depending on bold-state)
+        }
+
+        if (cell.attributes.styles & CharacterStyleMask::Blinking)
+        {
+            // TODO: update textshaper's shader to blink
+        }
+
+        if (cell.attributes.styles & CharacterStyleMask::CrossedOut)
+        {
+            // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+        }
+
+        if (cell.attributes.styles & CharacterStyleMask::DoublyUnderlined)
+        {
+            // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+        }
+        else if (cell.attributes.styles & CharacterStyleMask::Underline)
+        {
+            // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+        }
+
+        cellBackground_.render(makeCoords(col, row), bgColor);
 
         if (cell.character && cell.character != ' ')
         {
@@ -138,7 +179,8 @@ void GLTerminal::render()
                 cell.character,
                 fgColor.red / 255.0f,
                 fgColor.green / 255.0f,
-                fgColor.blue / 255.0f
+                fgColor.blue / 255.0f,
+                opacity
             );
         }
     });

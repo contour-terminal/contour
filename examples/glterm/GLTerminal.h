@@ -27,7 +27,9 @@
 class GLTerminal {
   public:
     GLTerminal(unsigned _width, unsigned _height,
-               unsigned _fontSize, std::string const& _shell,
+               unsigned _fontSize,
+               std::string const& _fontFamily,
+               std::string const& _shell,
                glm::mat4 const& _projectionMatrix);
     ~GLTerminal();
 

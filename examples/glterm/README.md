@@ -21,7 +21,7 @@ the least platform dependant code as possible.
 This is tested on Ubuntu 19.04, but *any* Linux should do:
 
 ```!sh
-apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev
+apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-dev
 ```
 
 ### Prerequisites Windows 10
@@ -30,7 +30,7 @@ For Windows, you must have Windows 10, 2018 Fall Creators Update.
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```!psh
-vcpkg install freetype glew glfw3 glm
+vcpkg install freetype fontconfig glew glfw3 glm
 ```
 
 ### Prerequisites Mac OS/X
