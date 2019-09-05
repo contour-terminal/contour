@@ -24,6 +24,35 @@ using namespace std;
 
 namespace terminal {
 
+string to_string(CharacterStyleMask _mask)
+{
+    string out;
+    auto const append = [&](string_view _name) {
+        if (!out.empty())
+            out += ",";
+        out += _name;
+    };
+    if (_mask & CharacterStyleMask::Bold)
+        append("bold");
+    if (_mask & CharacterStyleMask::Faint)
+        append("italic");
+    if (_mask & CharacterStyleMask::Italic)
+        append("underline");
+    if (_mask & CharacterStyleMask::Underline)
+        append("blinking");
+    if (_mask & CharacterStyleMask::Blinking)
+        append("blinking");
+    if (_mask & CharacterStyleMask::Inverse)
+        append("inverse");
+    if (_mask & CharacterStyleMask::Hidden)
+        append("hidden");
+    if (_mask & CharacterStyleMask::CrossedOut)
+        append("crossed-out");
+    if (_mask & CharacterStyleMask::DoublyUnderlined)
+        append("doubly-underlined");
+    return out;
+}
+
 void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
 {
     if (margin_.horizontal == Range{1, numColumns_} && margin_.vertical == Range{1, numLines_})
@@ -387,9 +416,9 @@ Screen::Screen(size_t columnCount,
     logger_{move(logger)},
     onCommands_{move(onCommands)},
     handler_{
-		rowCount,
-		[this](string const& msg) { log("OutputHandler: " + msg); }
-	},
+        rowCount,
+        [this](string const& msg) { log("OutputHandler: " + msg); }
+    },
     parser_{
         ref(handler_),
         [this](string const& msg) { log("debug.parser: " + msg); },

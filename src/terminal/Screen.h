@@ -31,46 +31,86 @@
 
 namespace terminal {
 
-enum class CharacterStyleMask : uint16_t {
-    Bold = (1 << 0),
-    Faint = (1 << 1),
-    Italic = (1 << 2),
-    Underline = (1 << 3),
-    Blinking = (1 << 4),
-    Inverse = (1 << 5),
-    Hidden = (1 << 6),
-    CrossedOut = (1 << 7),
-    DoublyUnderlined = (1 << 8),
+class CharacterStyleMask {
+  public:
+	enum Mask : uint16_t {
+		Bold = (1 << 0),
+		Faint = (1 << 1),
+		Italic = (1 << 2),
+		Underline = (1 << 3),
+		Blinking = (1 << 4),
+		Inverse = (1 << 5),
+		Hidden = (1 << 6),
+		CrossedOut = (1 << 7),
+		DoublyUnderlined = (1 << 8),
+	};
+
+	constexpr CharacterStyleMask() : mask_{} {}
+	constexpr CharacterStyleMask(Mask m) : mask_{m} {}
+	constexpr CharacterStyleMask(unsigned m) : mask_{m} {}
+	constexpr CharacterStyleMask(CharacterStyleMask const& _other) noexcept : mask_{_other.mask_} {}
+
+	constexpr CharacterStyleMask& operator=(CharacterStyleMask const& _other) noexcept
+	{
+		mask_ = _other.mask_;
+		return *this;
+	}
+
+	constexpr unsigned mask() const noexcept { return mask_; }
+
+	constexpr operator unsigned () const noexcept { return mask_; }
+
+  private:
+	unsigned mask_;
 };
+
+std::string to_string(CharacterStyleMask _mask);
 
 constexpr bool operator==(CharacterStyleMask a, CharacterStyleMask b) noexcept
 {
-    return static_cast<unsigned>(a) == static_cast<unsigned>(b);
+	return a.mask() == b.mask();
 }
 
-constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask b) noexcept
+// constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask b) noexcept
+// {
+// 	return CharacterStyleMask{a.mask() | b.mask()};
+// }
+// 
+// constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
+// {
+// 	return CharacterStyleMask{a.mask() | static_cast<unsigned>(b)};
+// }
+// 
+// constexpr CharacterStyleMask operator~(CharacterStyleMask a) noexcept
+// {
+// 	return CharacterStyleMask{~a.mask()};
+// }
+
+constexpr CharacterStyleMask& operator|=(CharacterStyleMask& a, CharacterStyleMask b) noexcept
 {
-    return static_cast<CharacterStyleMask>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+    a = a | b;
+	return a;
 }
 
-constexpr CharacterStyleMask operator~(CharacterStyleMask a) noexcept
+// constexpr CharacterStyleMask operator&(CharacterStyleMask a, CharacterStyleMask b) noexcept
+// {
+//     return CharacterStyleMask{a.mask() & b.mask()};
+// }
+// 
+// constexpr CharacterStyleMask operator&(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
+// {
+//     return CharacterStyleMask{a.mask() & static_cast<unsigned>(b)};
+// }
+
+constexpr CharacterStyleMask& operator&=(CharacterStyleMask& a, CharacterStyleMask b) noexcept
 {
-    return static_cast<CharacterStyleMask>(!static_cast<unsigned>(a));
+    a = a & b;
+	return a;
 }
 
-constexpr CharacterStyleMask operator|=(CharacterStyleMask a, CharacterStyleMask b) noexcept
+constexpr bool operator!(CharacterStyleMask a) noexcept
 {
-    return a | b;
-}
-
-constexpr CharacterStyleMask operator&=(CharacterStyleMask a, CharacterStyleMask b) noexcept
-{
-    return a | b;
-}
-
-constexpr bool operator&(CharacterStyleMask a, CharacterStyleMask b) noexcept
-{
-    return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
+	return a.mask() == 0;
 }
 
 /**
