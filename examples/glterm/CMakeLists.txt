@@ -16,6 +16,7 @@ if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND)
     add_executable(glterm
         CellBackground.cpp CellBackground.h
         GLTerminal.cpp GLTerminal.h
+        Logger.cpp Logger.h
         Shader.cpp Shader.h
         TextShaper.cpp TextShaper.h
         Window.h

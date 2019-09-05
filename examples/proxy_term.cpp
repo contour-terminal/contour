@@ -105,7 +105,8 @@ class ProxyTerm {
           logger_{ofstream{"trace.log", ios::trunc}},
           terminal_{
               windowSize,
-              [this](auto const& msg) { log("terminal: {}", msg); },
+              [this](auto const& msg) { log("[warning] terminal: {}", msg); },
+              [this](auto const& msg) { log("[error] terminal: {}", msg); },
               bind(&ProxyTerm::onStdout, this, _1)
           },
           pty_{ windowSize },

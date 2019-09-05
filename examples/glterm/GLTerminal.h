@@ -20,6 +20,7 @@
 
 #include "CellBackground.h"
 #include "TextShaper.h"
+#include "Logger.h"
 
 #include <glm/matrix.hpp>
 
@@ -30,12 +31,13 @@ class GLTerminal {
                unsigned _fontSize,
                std::string const& _fontFamily,
                std::string const& _shell,
-               glm::mat4 const& _projectionMatrix);
+               glm::mat4 const& _projectionMatrix,
+               Logger& _logger);
     ~GLTerminal();
 
-    bool send(char32_t _characterEvent, terminal::Modifier _modifier) { return terminal_.send(_characterEvent, _modifier); }
-    bool send(terminal::Key _key, terminal::Modifier _modifier) { return terminal_.send(_key, _modifier); }
-    std::string screenshot() const { return terminal_.screenshot(); }
+    bool send(char32_t _characterEvent, terminal::Modifier _modifier);
+    bool send(terminal::Key _key, terminal::Modifier _modifier);
+    std::string screenshot() const;
 
     //void translate(unsigned _bottomLeft, unsigned _bottomRight);
     void resize(unsigned _width, unsigned _height);
@@ -45,12 +47,23 @@ class GLTerminal {
     bool alive() const;
     void wait();
 
+  private:
+    void renderCell(terminal::cursor_pos_t row, terminal::cursor_pos_t col, terminal::Screen::Cell const& cell);
     void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
 
   private:
     bool alive_ = true;
+
     unsigned width_;
     unsigned height_;
+
+    struct Margin {
+        unsigned left{};
+        unsigned bottom{};
+    };
+    Margin margin_{};
+
+    Logger& logger_;
 
     TextShaper textShaper_;
     CellBackground cellBackground_;

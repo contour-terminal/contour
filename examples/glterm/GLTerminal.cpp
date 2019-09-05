@@ -12,7 +12,10 @@
  * limitations under the License.
  */
 #include "GLTerminal.h"
+#include "Logger.h"
+
 #include <terminal/Util.h>
+
 #include <iostream>
 #include <utility>
 
@@ -34,9 +37,11 @@ GLTerminal::GLTerminal(unsigned _width,
                        unsigned _fontSize,
                        string const& _fontFamily,
                        string const& _shell,
-                       glm::mat4 const& _projectionMatrix) :
+                       glm::mat4 const& _projectionMatrix,
+                       Logger& _logger) :
     width_{ _width },
     height_{ _height },
+    logger_{ _logger },
     textShaper_{ _fontFamily, _fontSize, _projectionMatrix },
     cellBackground_{
         textShaper_.maxAdvance(),
@@ -48,7 +53,8 @@ GLTerminal::GLTerminal(unsigned _width,
             static_cast<unsigned short>(width_ / textShaper_.maxAdvance()),
             static_cast<unsigned short>(height_ / textShaper_.lineHeight())
         },
-        [](auto const& msg) { /*TODO(traceLog) cout << "terminal: " << msg << '\n';*/ },
+        [this](string const& msg) { logger_.warning(msg); },
+        [this](string const& msg) { logger_.error(msg); },
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
@@ -67,6 +73,23 @@ GLTerminal::~GLTerminal()
 bool GLTerminal::alive() const
 {
     return alive_;
+}
+
+bool GLTerminal::send(char32_t _characterEvent, terminal::Modifier _modifier)
+{
+    logger_.keyPress(_characterEvent, _modifier);
+    return terminal_.send(_characterEvent, _modifier);
+}
+
+bool GLTerminal::send(terminal::Key _key, terminal::Modifier _modifier)
+{
+    logger_.keyPress(_key, _modifier);
+    return terminal_.send(_key, _modifier);
+}
+
+std::string GLTerminal::screenshot() const
+{
+    return terminal_.screenshot();
 }
 
 void GLTerminal::resize(unsigned _width, unsigned _height)
@@ -91,6 +114,16 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
     );
 
     terminal_.resize(winSize);
+
+    margin_ = [winSize, this]() {
+        auto const usedHeight = winSize.rows * textShaper_.lineHeight();
+        auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
+        auto const freeHeight = height_ - usedHeight;
+        auto const freeWidth = width_ - usedWidth;
+        auto const bottomMargin = freeHeight / 2;
+        auto const leftMargin = freeWidth / 2;
+        return Margin{leftMargin, bottomMargin};
+    }();
 }
 
 void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
@@ -101,89 +134,80 @@ void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
 
 void GLTerminal::render()
 {
-    auto const winSize = terminal_.size();
-    auto const usedHeight = winSize.rows * textShaper_.lineHeight();
-    auto const usedWidth = winSize.columns * textShaper_.maxAdvance();
-    auto const freeHeight = height_ - usedHeight;
-    auto const freeWidth = width_ - usedWidth;
-    auto const bottomMargin = freeHeight / 2;
-    auto const leftMargin = freeWidth / 2;
+    terminal_.render(bind(&GLTerminal::renderCell, this, _1, _2, _3));
+}
 
-    using terminal::cursor_pos_t;
-    using terminal::CharacterStyleMask;
-    using terminal::Screen;
-
-    auto constexpr defaultForegroundColor = RGBColor{ 255, 255, 255 };
-    auto constexpr defaultBackgroundColor = RGBColor{ 0, 32, 32 };
-
-    auto const makeCoords = [&](cursor_pos_t col, cursor_pos_t row) {
+void GLTerminal::renderCell(terminal::cursor_pos_t row, terminal::cursor_pos_t col, terminal::Screen::Cell const& cell)
+{
+    auto const makeCoords = [this](cursor_pos_t col, cursor_pos_t row) {
         return glm::ivec2{
-            leftMargin + (col - 1) * textShaper_.maxAdvance(),
-            bottomMargin + (winSize.rows - row) * textShaper_.lineHeight()
+            margin_.left + (col - 1) * textShaper_.maxAdvance(),
+            margin_.bottom + (terminal_.size().rows - row) * textShaper_.lineHeight()
         };
     };
 
-    terminal_.render([&](cursor_pos_t row, cursor_pos_t col, Screen::Cell const& cell) {
-        auto const [fgColor, bgColor] = [&]() {
-            return (cell.attributes.styles & CharacterStyleMask::Inverse)
-                ? pair{ toRGB(cell.attributes.backgroundColor, defaultBackgroundColor),
-                        toRGB(cell.attributes.foregroundColor, defaultForegroundColor) }
-                : pair{ toRGB(cell.attributes.foregroundColor, defaultForegroundColor),
-                        toRGB(cell.attributes.backgroundColor, defaultBackgroundColor) };
-        }();
+    auto const [fgColor, bgColor] = [&]() {
+        auto constexpr defaultForegroundColor = RGBColor{ 255, 255, 255 };
+        auto constexpr defaultBackgroundColor = RGBColor{ 0, 32, 32 };
 
-        float const opacity = [&]() {
-            if (cell.attributes.styles & CharacterStyleMask::Hidden)
-                return 0.0f;
-            else if (cell.attributes.styles & CharacterStyleMask::Faint)
-                return 0.5f;
-            else
-                return 1.0f;
-        }();
+        return (cell.attributes.styles & CharacterStyleMask::Inverse)
+            ? pair{ toRGB(cell.attributes.backgroundColor, defaultBackgroundColor),
+                    toRGB(cell.attributes.foregroundColor, defaultForegroundColor) }
+            : pair{ toRGB(cell.attributes.foregroundColor, defaultForegroundColor),
+                    toRGB(cell.attributes.backgroundColor, defaultBackgroundColor) };
+    }();
 
-        if (cell.attributes.styles & CharacterStyleMask::Bold)
-        {
-            // TODO: switch font
-        }
+    float const opacity = [&]() {
+        if (cell.attributes.styles & CharacterStyleMask::Hidden)
+            return 0.0f;
+        else if (cell.attributes.styles & CharacterStyleMask::Faint)
+            return 0.5f;
+        else
+            return 1.0f;
+    }();
 
-        if (cell.attributes.styles & CharacterStyleMask::Italic)
-        {
-            // TODO: *Maybe* update transformation matrix to have chars italic *OR* change font (depending on bold-state)
-        }
+    if (cell.attributes.styles & CharacterStyleMask::Bold)
+    {
+        // TODO: switch font
+    }
 
-        if (cell.attributes.styles & CharacterStyleMask::Blinking)
-        {
-            // TODO: update textshaper's shader to blink
-        }
+    if (cell.attributes.styles & CharacterStyleMask::Italic)
+    {
+        // TODO: *Maybe* update transformation matrix to have chars italic *OR* change font (depending on bold-state)
+    }
 
-        if (cell.attributes.styles & CharacterStyleMask::CrossedOut)
-        {
-            // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-        }
+    if (cell.attributes.styles & CharacterStyleMask::Blinking)
+    {
+        // TODO: update textshaper's shader to blink
+    }
 
-        if (cell.attributes.styles & CharacterStyleMask::DoublyUnderlined)
-        {
-            // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-        }
-        else if (cell.attributes.styles & CharacterStyleMask::Underline)
-        {
-            // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-        }
+    if (cell.attributes.styles & CharacterStyleMask::CrossedOut)
+    {
+        // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+    }
 
-        cellBackground_.render(makeCoords(col, row), bgColor);
+    if (cell.attributes.styles & CharacterStyleMask::DoublyUnderlined)
+    {
+        // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+    }
+    else if (cell.attributes.styles & CharacterStyleMask::Underline)
+    {
+        // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
+    }
 
-        if (cell.character && cell.character != ' ')
-        {
-            textShaper_.render(
-                makeCoords(col, row),
-                cell.character,
-                fgColor.red / 255.0f,
-                fgColor.green / 255.0f,
-                fgColor.blue / 255.0f,
-                opacity
-            );
-        }
-    });
+    cellBackground_.render(makeCoords(col, row), bgColor);
+
+    if (cell.character && cell.character != ' ')
+    {
+        textShaper_.render(
+            makeCoords(col, row),
+            cell.character,
+            fgColor.red / 255.0f,
+            fgColor.green / 255.0f,
+            fgColor.blue / 255.0f,
+            opacity
+        );
+    }
 }
 
 void GLTerminal::wait()
@@ -209,4 +233,8 @@ void GLTerminal::wait()
 
 void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
+    logger_.debug(fmt::format("onScreenUpdate: {} instructions", _commands.size()));
+
+    for (terminal::Command const& command : _commands)
+        logger_.screenTrace(to_string(command));
 }

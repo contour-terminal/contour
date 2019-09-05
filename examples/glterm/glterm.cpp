@@ -35,6 +35,7 @@
 
 #include "Window.h"
 #include "GLTerminal.h"
+#include "Logger.h"
 
 #if defined(__linux__)
 #include <fontconfig/fontconfig.h>
@@ -44,8 +45,8 @@
 // - [x] proper glterm termination (window close as well as process exit)
 // - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
-// - [ ] other SGRs (bold, italic, etc)
 // - [ ] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
+// - [ ] other SGRs (bold, italic, etc)
 // - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
 // - [ ] Hi-DPI support (hm, because I need it)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
@@ -70,47 +71,47 @@ class GLTerm {
         unsigned _height,
         unsigned short _fontSize,
         std::string const& _fontFamily,
-        std::string const& _shell);
+        std::string const& _shell,
+        LogLevel _logLevel);
 
     ~GLTerm();
 
     int main();
 
   private:
-    template <typename... Args>
-    void log(std::string const& msg, Args... args);
-
     void render();
     void onResize(unsigned _width, unsigned _height);
     void onKey(int _key, int _scanCode, int _action, int _mods);
     void onChar(char32_t _char);
     void onContentScale(float _xs, float _ys);
-    void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
 
   private:
+    Logger logger_;
     Window window_;
-    std::ofstream logger_;
     GLTerminal terminalView_;
 };
 
 GLTerm::GLTerm(unsigned _width, unsigned _height,
                unsigned short _fontSize,
                std::string const& _fontFamily,
-               std::string const& _shell) :
+               std::string const& _shell,
+               LogLevel _logLevel) :
+    //loggingSink_{"glterm.log", ios::trunc},
+    logger_{_logLevel, &cout},
     window_{ _width, _height, "glterm",
         bind(&GLTerm::onKey, this, _1, _2, _3, _4),
         bind(&GLTerm::onChar, this, _1),
         bind(&GLTerm::onResize, this, _1, _2),
         bind(&GLTerm::onContentScale, this, _1, _2)
     },
-    logger_{}, // "glterm.log", ios::trunc },
     terminalView_{
         _width,
         _height,
         static_cast<unsigned>(_fontSize * window_.contentScale().second),
         _fontFamily,
         _shell,
-        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height))
+        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)),
+        logger_
     }
 {
     glViewport(0, 0, _width, _height);
@@ -118,14 +119,6 @@ GLTerm::GLTerm(unsigned _width, unsigned _height,
 
 GLTerm::~GLTerm()
 {
-}
-
-template <typename... Args>
-void GLTerm::log(std::string const& msg, Args... args)
-{
-    #if 1
-    cout /* logger_ */ << fmt::format(msg, args...) << '\n';
-    #endif
 }
 
 int GLTerm::main()
@@ -263,17 +256,18 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
 
         char const* keyName = glfwGetKeyName(_key, _scanCode);
 
-        log("key: {} {}, action:{}, mod:{:02X} ({})",
+        logger_.keyTrace(fmt::format(
+            "key: {} {}, action:{}, mod:{:02X} ({})",
             _key,
             keyName ? keyName : "(null)",
             _action,
             static_cast<unsigned>(_mods),
-            terminal::to_string(mods));
+            terminal::to_string(mods)));
 
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
-            log("Taking screenshot.");
+            logger_.debug("Taking screenshot.");
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
@@ -290,45 +284,53 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
             // allow only mods + alphanumerics
             terminalView_.send(*cstr, mods);
         }
-        //else
-        //    logger << fmt::format("No key mapping found for key:{}, scanCode:{}, name:{} ({}).\n", _key, _scanCode, cstr, terminal::to_string(mods));
-
-        //glfwPostEmptyEvent();
+        else if (mods && mods != terminal::Modifier::Shift)
+            logger_.warning(fmt::format(
+                "No key mapping found for key:{}, scanCode:{}, name:{} ({}).",
+                _key, _scanCode, cstr, terminal::to_string(mods)
+            ));
     }
 }
 
 void GLTerm::onChar(char32_t _char)
 {
-    if (utf8::isASCII(_char) && isprint(_char))
-        log("char: {}", static_cast<char>(_char));
-    else
-        log("char: 0x{:04X}", static_cast<uint32_t>(_char));
-
     terminalView_.send(_char, terminal::Modifier{});
-
-    //glfwPostEmptyEvent();
 }
 
-void GLTerm::onScreenUpdateHook([[maybe_unused]] vector<terminal::Command> const& _commands)
+LogLevel toLogLevel(std::string const& _name)
 {
-    // we could add some high level VT output logging here.
-    //glfwPostEmptyEvent();
-    log("onScreenUpdate: {} instructions\n", _commands.size());
-
-    // for (terminal::Command const& command : _commands)
-    //     log("{}", to_string(command));
+    if (_name == "trace")
+        return LogLevel::Trace;
+    else if (_name == "debug")
+        return LogLevel::Debug;
+    else if (_name == "warning")
+        return LogLevel::Warning;
+    else if (_name == "error")
+        return LogLevel::Error;
+    else if (_name == "none")
+        return LogLevel::None;
+    else
+        return LogLevel::None;
 }
 
 int main(int argc, char const* argv[])
 {
     try
     {
+        LogLevel const logLevel = []() {
+            if (char const* var = getenv("GLTERM_LOGLEVEL"); var && *var)
+                return toLogLevel(var);
+            else
+                return LogLevel::Debug;
+        }();
+
         auto glterm = GLTerm{
             1600, // width
             720,  // height
-            14,   // fontSize
+            18,   // fontSize
             "Ubuntu Mono,Consolas,monospace",
-            terminal::Process::loginShell()
+            terminal::Process::loginShell(),
+            logLevel
         };
         return glterm.main();
     }
