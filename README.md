@@ -5,18 +5,19 @@
 
 **IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
 
-## MIlestone-1:
+## Milestone-1:
 - [x] Process: PTY-aware Process API
 - [x] Parser: parsing of VT100-VT520
 - [x] OutputHandler: basic VT output handling
 - [x] demo PTY client app that's just proxying all process data and performing a full screen redraw upon updates
 - [x] Process: Windows Platform support
+- [x] Terminal: fully functioning Terminal API
 - [ ] Screen management done (as much as needed to run: top, htop, mc, vim, tmux, bash)
 - [ ] InputHandler: basic VT input handling (as much as needed to run: top, htop, mc, vim, tmux, bash)
-- [ ] Terminal: fully functioning Terminal API
+- [ ] example GUI terminal emulator (glterm)
 - [ ] => initial release 0.1.0
 
-## MIlestone-2:
+## Milestone-2:
 - [ ] Mouse support
 - [ ] OutputHandler: support most VT100-VT520 control functions
 - [ ] Screen: support most VT100-VT520 control functions
