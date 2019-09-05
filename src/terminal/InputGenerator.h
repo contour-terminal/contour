@@ -166,6 +166,8 @@ enum class Key {
     Numpad_9,
 };
 
+std::string to_string(Key _key);
+
 struct MouseMoveEvent {
     int row;
     int column;

@@ -174,6 +174,58 @@ string to_string(Modifier _modifier)
     return out;
 }
 
+string to_string(Key _key)
+{
+    switch (_key)
+    {
+        case Key::Enter: return "Enter";
+        case Key::Backspace: return "Backspace";
+        case Key::Tab: return "Tab";
+        case Key::Escape: return "Escape";
+        case Key::F1: return "F1";
+        case Key::F2: return "F2";
+        case Key::F3: return "F3";
+        case Key::F4: return "F4";
+        case Key::F5: return "F5";
+        case Key::F6: return "F6";
+        case Key::F7: return "F7";
+        case Key::F8: return "F8";
+        case Key::F9: return "F9";
+        case Key::F10: return "F10";
+        case Key::F11: return "F11";
+        case Key::F12: return "F12";
+        case Key::DownArrow: return "DownArrow";
+        case Key::LeftArrow: return "LeftArrow";
+        case Key::RightArrow: return "RightArrow";
+        case Key::UpArrow: return "UpArrow";
+        case Key::Insert: return "Insert";
+        case Key::Delete: return "Delete";
+        case Key::Home: return "Home";
+        case Key::End: return "End";
+        case Key::PageUp: return "PageUp";
+        case Key::PageDown: return "PageDown";
+        case Key::Numpad_NumLock: return "Numpad_NumLock";
+        case Key::Numpad_Divide: return "Numpad_Divide";
+        case Key::Numpad_Multiply: return "Numpad_Multiply";
+        case Key::Numpad_Subtract: return "Numpad_Subtract";
+        case Key::Numpad_CapsLock: return "Numpad_CapsLock";
+        case Key::Numpad_Add: return "Numpad_Add";
+        case Key::Numpad_Decimal: return "Numpad_Decimal";
+        case Key::Numpad_Enter: return "Numpad_Enter";
+        case Key::Numpad_Equal: return "Numpad_Equal";
+        case Key::Numpad_0: return "Numpad_0";
+        case Key::Numpad_1: return "Numpad_1";
+        case Key::Numpad_2: return "Numpad_2";
+        case Key::Numpad_3: return "Numpad_3";
+        case Key::Numpad_4: return "Numpad_4";
+        case Key::Numpad_5: return "Numpad_5";
+        case Key::Numpad_6: return "Numpad_6";
+        case Key::Numpad_7: return "Numpad_7";
+        case Key::Numpad_8: return "Numpad_8";
+        case Key::Numpad_9: return "Numpad_9";
+    }
+    return "(unknown)";
+}
 
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
