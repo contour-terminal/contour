@@ -21,15 +21,14 @@ using namespace std::placeholders;
 
 namespace terminal {
 
-Terminal::Terminal(WindowSize _winSize, Logger _warning, Logger _error, Hook _onScreenCommands)
+Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
     inputGenerator_{},
     screen_{
         _winSize.columns,
         _winSize.rows,
         bind(&Terminal::onScreenReply, this, _1),
-        move(_warning),
-        move(_error),
+        move(_logger),
         bind(&Terminal::onScreenCommands, this, _1)
     },
     onScreenCommands_{ move(_onScreenCommands) },

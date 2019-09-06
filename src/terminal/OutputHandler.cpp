@@ -768,26 +768,36 @@ size_t OutputHandler::parseColor(size_t i)
 
 void OutputHandler::logUnsupported(std::string_view const& msg) const
 {
-    logWarning("Unsupported: {}", msg);
+    log<UnsupportedOutputEvent>("Unsupported: {}", msg);
 }
 
 void OutputHandler::logUnsupportedCSI() const
 {
-    logWarning("Unsupported CSI: {} {} {}", intermediateCharacters_,
+    auto const seq = fmt::format(
+        "CSI {} {} {}",
+        intermediateCharacters_,
         accumulate(
             begin(parameters_), end(parameters_), string{},
-            [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
+            [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); }),
         static_cast<char>(currentChar()));
+    log<UnsupportedOutputEvent>("Unsupported CSI sequence {}.", seq);
 }
 
 void OutputHandler::logInvalidESC(std::string const& message) const
 {
-    logError("Invalid ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
+    log<InvalidOutputEvent>("Invalid escape sequence. ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
 }
 
 void OutputHandler::logInvalidCSI(std::string const& message) const
 {
-    logError("Invalid CSI. {}", message);
+    auto const seq = fmt::format(
+        "CSI {} {} {}",
+        intermediateCharacters_,
+        accumulate(
+            begin(parameters_), end(parameters_), string{},
+            [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); }),
+        static_cast<char>(currentChar()));
+    log<InvalidOutputEvent>("Invalid CSI sequence {}. {}", seq, message);
 }
 
 }  // namespace terminal

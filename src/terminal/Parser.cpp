@@ -78,7 +78,7 @@ void Parser::parse()
             overloaded{
                 [&](utf8::Decoder::Incomplete) {},
                 [&](utf8::Decoder::Invalid invalid) {
-                    log("Invalid UTF8!");
+                    log<ParserErrorEvent>("Invalid UTF8!");
                     currentChar_ = invalid.replacementCharacter;
                     #if defined(VT_PARSER_TABLES)
                     handleViaTables();
@@ -104,23 +104,33 @@ void Parser::parse()
 void Parser::logInvalidInput() const
 {
     if (isprint(currentChar()))
-        log("{}: invalid character: {:02X} '{}'", to_string(state_), static_cast<unsigned>(currentChar()),
+        log<ParserErrorEvent>(
+            "{}: invalid character: {:02X} '{}'",
+            to_string(state_),
+            static_cast<unsigned>(currentChar()),
             static_cast<char>(currentChar()));
     else
-        log("{}: invalid character: {:02X}", to_string(state_), static_cast<unsigned>(currentChar()));
+        log<ParserErrorEvent>(
+            "{}: invalid character: {:02X}",
+            to_string(state_),
+            static_cast<unsigned>(currentChar()));
 }
 
-void Parser::logTrace(std::string const& message) const
+void Parser::logTrace(std::string const& /*_message*/) const
 {
-    if (traceLog_)
-    {
-        string const character =
-            currentChar() ? fmt::format("character: {:02X}", static_cast<unsigned>(currentChar())) : string("");
+    //if (logger_)
+    //{
+    //    string const character =
+    //        currentChar() ? fmt::format("character: {:02X}", static_cast<unsigned>(currentChar())) : string("");
 
-        traceLog_(fmt::format("{}: {}: {:02X} {} {}", to_string(state_), message,
-                              static_cast<unsigned>(currentByte()), escape(static_cast<unsigned>(currentByte())),
-                              character));
-    }
+    //    log<ParserTraceEvent>(
+    //        "{}: {}: {:02X} {} {}",
+    //        to_string(state_),
+    //        _message,
+    //        static_cast<unsigned>(currentByte()),
+    //        escape(static_cast<unsigned>(currentByte())),
+    //        character);
+    //}
 }
 
 void Parser::invokeAction(ActionClass actionClass, Action action)
@@ -153,7 +163,9 @@ void Parser::handleViaTables()
     else if (Action const a = table.events[s][currentChar()]; a != Action::Undefined)
         invokeAction(ActionClass::Event, a);
     else
-        log("Parser Error: Unknown action for state/input pair ({}, {})", to_string(state_),
+        log<ParserErrorEvent>(
+            "Parser Error: Unknown action for state/input pair ({}, {})",
+            to_string(state_),
             escape(currentChar()));
 }
 #endif

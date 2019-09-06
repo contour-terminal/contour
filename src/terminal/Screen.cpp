@@ -411,19 +411,19 @@ void Screen::Buffer::verifyState() const
 Screen::Screen(size_t columnCount,
                size_t rowCount,
                Reply reply,
-               Logger _warning,
-               Logger _error,
+               Logger _logger,
                Hook onCommands) :
-    onCommands_{move(onCommands)},
-    handler_{rowCount, move(_warning), move(_error)},
-    parser_{ref(handler_)},
-    primaryBuffer_{columnCount, rowCount},
-    alternateBuffer_{columnCount, rowCount},
-    state_{&primaryBuffer_},
+    onCommands_{ move(onCommands) },
+    logger_{ _logger },
+    reply_{ move(reply) },
+    handler_{ rowCount, _logger },
+    parser_{ ref(handler_), _logger },
+    primaryBuffer_{ columnCount, rowCount },
+    alternateBuffer_{ columnCount, rowCount },
+    state_{ &primaryBuffer_ },
     enabledModes_{},
-    columnCount_{columnCount},
-    rowCount_{rowCount},
-    reply_{move(reply)}
+    columnCount_{ columnCount },
+    rowCount_{ rowCount }
 {
 }
 
@@ -438,10 +438,13 @@ void Screen::resize(size_t newColumnCount, size_t newRowCount)
     columnCount_ = newColumnCount;
 }
 
-void Screen::write(char const *data, size_t size)
+void Screen::write(char const * _data, size_t _size)
 {
+    if (logger_)
+        logger_(RawOutputEvent{ escape(_data, _data + _size) });
+
     handler_.commands().clear();
-    parser_.parseFragment(data, size);
+    parser_.parseFragment(_data, _size);
 
     for (Command const& command : handler_.commands())
         visit(*this, command);

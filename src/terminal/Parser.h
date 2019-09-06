@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Commands.h>
+#include <terminal/Logger.h>
 #include <terminal/UTF8.h>
 
 #include <cstdint>
@@ -169,14 +170,10 @@ class Parser {
     };
 
     using ActionHandler = std::function<void(ActionClass, Action, char32_t)>;
-    using Logger = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
 
-    explicit Parser(ActionHandler actionHandler) : Parser{std::move(actionHandler), Logger{}, Logger{}} {}
-
-    Parser(ActionHandler actionHandler, Logger debugLog, Logger traceLog)
-        : actionHandler_{std::move(actionHandler)}, debugLog_{std::move(debugLog)}, traceLog_{
-                                                                                        std::move(traceLog)}
+    explicit Parser(ActionHandler _actionHandler, Logger _logger = {})
+        : actionHandler_{std::move(_actionHandler)}, logger_{std::move(_logger)}
     {
     }
 
@@ -354,11 +351,11 @@ class Parser {
     };
 
   private:
-    template <typename... Args>
+    template <typename Event, typename... Args>
     void log(std::string_view const& msg, Args... args) const
     {
-        if (debugLog_)
-            debugLog_(fmt::format(msg, args...));
+        if (logger_)
+            logger_(Event{ fmt::format(msg, args...) });
     }
 
     void logInvalidInput() const;
@@ -385,8 +382,7 @@ class Parser {
     iterator end_ = nullptr;
 
     ActionHandler const actionHandler_;
-    Logger const debugLog_;
-    Logger const traceLog_;
+    Logger const logger_;
 };
 
 constexpr std::string_view to_string(Parser::State state)

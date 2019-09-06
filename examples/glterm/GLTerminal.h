@@ -20,7 +20,7 @@
 
 #include "CellBackground.h"
 #include "TextShaper.h"
-#include "Logger.h"
+#include "GLLogger.h"
 
 #include <glm/matrix.hpp>
 
@@ -32,7 +32,7 @@ class GLTerminal {
                std::string const& _fontFamily,
                std::string const& _shell,
                glm::mat4 const& _projectionMatrix,
-               Logger& _logger);
+               GLLogger& _logger);
     ~GLTerminal();
 
     bool send(char32_t _characterEvent, terminal::Modifier _modifier);
@@ -63,7 +63,7 @@ class GLTerminal {
     };
     Margin margin_{};
 
-    Logger& logger_;
+    GLLogger& logger_;
 
     TextShaper textShaper_;
     CellBackground cellBackground_;

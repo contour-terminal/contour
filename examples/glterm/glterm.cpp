@@ -35,7 +35,7 @@
 
 #include "Window.h"
 #include "GLTerminal.h"
-#include "Logger.h"
+#include "GLLogger.h"
 
 #if defined(__linux__)
 #include <fontconfig/fontconfig.h>
@@ -72,7 +72,7 @@ class GLTerm {
         unsigned short _fontSize,
         std::string const& _fontFamily,
         std::string const& _shell,
-        LogLevel _logLevel);
+        LogMask _logMask);
 
     ~GLTerm();
 
@@ -86,7 +86,7 @@ class GLTerm {
     void onContentScale(float _xs, float _ys);
 
   private:
-    Logger logger_;
+    GLLogger logger_;
     Window window_;
     GLTerminal terminalView_;
 };
@@ -95,9 +95,9 @@ GLTerm::GLTerm(unsigned _width, unsigned _height,
                unsigned short _fontSize,
                std::string const& _fontFamily,
                std::string const& _shell,
-               LogLevel _logLevel) :
+               LogMask _logMask) :
     //loggingSink_{"glterm.log", ios::trunc},
-    logger_{_logLevel, &cout},
+    logger_{_logMask, &cout},
     window_{ _width, _height, "glterm",
         bind(&GLTerm::onKey, this, _1, _2, _3, _4),
         bind(&GLTerm::onChar, this, _1),
@@ -267,7 +267,6 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
-            logger_.debug("Taking screenshot.");
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
@@ -284,11 +283,11 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
             // allow only mods + alphanumerics
             terminalView_.send(*cstr, mods);
         }
-        else if (mods && mods != terminal::Modifier::Shift)
-            logger_.warning(fmt::format(
-                "No key mapping found for key:{}, scanCode:{}, name:{} ({}).",
-                _key, _scanCode, cstr, terminal::to_string(mods)
-            ));
+        //else if (mods && mods != terminal::Modifier::Shift)
+        //    logger_(UnsupportedInputMappingEvent{fmt::format(
+        //        "key:{}, scanCode:{}, name:{} ({})",
+        //        _key, _scanCode, cstr, terminal::to_string(mods)
+        //    )});
     }
 }
 
@@ -297,40 +296,22 @@ void GLTerm::onChar(char32_t _char)
     terminalView_.send(_char, terminal::Modifier{});
 }
 
-LogLevel toLogLevel(std::string const& _name)
-{
-    if (_name == "trace")
-        return LogLevel::Trace;
-    else if (_name == "debug")
-        return LogLevel::Debug;
-    else if (_name == "warning")
-        return LogLevel::Warning;
-    else if (_name == "error")
-        return LogLevel::Error;
-    else if (_name == "none")
-        return LogLevel::None;
-    else
-        return LogLevel::None;
-}
-
 int main(int argc, char const* argv[])
 {
     try
     {
-        LogLevel const logLevel = []() {
-            if (char const* var = getenv("GLTERM_LOGLEVEL"); var && *var)
-                return toLogLevel(var);
-            else
-                return LogLevel::Debug;
-        }();
-
         auto glterm = GLTerm{
             1600, // width
             720,  // height
             18,   // fontSize
             "Ubuntu Mono,Consolas,monospace",
             terminal::Process::loginShell(),
-            logLevel
+            LogMask::ParserError
+            | LogMask::InvalidOutput
+            | LogMask::UnsupportedOutput
+            | LogMask::RawInput
+            | LogMask::RawOutput
+            //| LogMask::TraceOutput
         };
         return glterm.main();
     }

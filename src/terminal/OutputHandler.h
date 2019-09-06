@@ -13,30 +13,28 @@
  */
 #pragma once
 
+#include <terminal/Logger.h>
 #include <terminal/Parser.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace terminal {
 
 class OutputHandler {
   public:
-    using Logger = std::function<void(std::string const&)>;
     using ActionClass = Parser::ActionClass;
     using Action = Parser::Action;
 
     size_t constexpr static MaxParameters = 16;
 
-    OutputHandler(size_t _rows, Logger _warning, Logger _error)
+    OutputHandler(size_t _rows, Logger _logger)
         : rowCount_{_rows},
-          warning_{std::move(_warning)},
-          error_{std::move(_error)}
+          logger_{std::move(_logger)}
     {
         parameters_.reserve(MaxParameters);
     }
-
-    OutputHandler(size_t _rows, Logger _logger) : OutputHandler{_rows, _logger, _logger} {}
 
     void updateRowCount(size_t rows)
     {
@@ -88,18 +86,11 @@ class OutputHandler {
         // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
     }
 
-    template <typename... Args>
-    void logWarning(std::string_view const& msg, Args... args) const
+    template <typename Event, typename... Args>
+    void log(std::string_view const& msg, Args... args) const
     {
-        if (warning_)
-            warning_(fmt::format(msg, args...));
-    }
-
-    template <typename... Args>
-    void logError(std::string_view const& msg, Args... args) const
-    {
-        if (error_)
-            error_(fmt::format(msg, args...));
+        if (logger_)
+            logger_(Event{ fmt::format(msg, args...) });
     }
 
     void logInvalidESC(std::string const& message = "") const;
@@ -124,8 +115,7 @@ class OutputHandler {
 
     size_t rowCount_;
 
-    Logger const warning_;
-    Logger const error_;
+    Logger const logger_;
 };
 
 }  // namespace terminal

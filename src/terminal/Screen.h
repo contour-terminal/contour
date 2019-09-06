@@ -15,6 +15,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Commands.h>
+#include <terminal/Logger.h>
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 
@@ -123,7 +124,6 @@ constexpr bool operator!(CharacterStyleMask a) noexcept
  */
 class Screen {
   public:
-    using Logger = std::function<void(std::string const& message)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
     /// Character graphics rendition information.
@@ -139,7 +139,7 @@ class Screen {
         GraphicsAttributes attributes{};
     };
 
-    using Reply = std::function<void(std::string_view const&)>;
+    using Reply = std::function<void(std::string const&)>;
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
 
   public:
@@ -149,27 +149,18 @@ class Screen {
      * @param columnCount column width of this screen.
      * @param rowCount row height of this screen.
      * @param reply reply-callback with the data to send back to terminal input.
-     * @param warning an optional logger for warnings.
+     * @param logger an optional logger for logging various events.
      * @param error an optional logger for errors.
      * @param onCommands hook to the commands being executed by the screen.
      */
     Screen(size_t _columnCount,
            size_t _rowCount,
            Reply _reply,
-           Logger _warning,
-           Logger _error,
+           Logger _logger,
            Hook _onCommands);
 
-    // for backwards compatibility (in other words: writing tests)
-    Screen(size_t _columnCount,
-           size_t _rowCount,
-           Reply _reply,
-           Logger _logger,
-           Hook _onCommands) :
-        Screen{_columnCount, _rowCount, _reply, _logger, _logger, _onCommands} {}
-
     Screen(size_t columnCount, size_t rowCount) :
-        Screen{columnCount, rowCount, {}, {}, {}, {}} {}
+        Screen{columnCount, rowCount, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* data, size_t size);
@@ -326,14 +317,14 @@ class Screen {
     void setMode(Mode mode, bool enable);
 
     // interactive replies
-    void reply(std::string_view const& message)
+    void reply(std::string const& message)
     {
         if (reply_)
             reply_(message);
     }
 
     template <typename... Args>
-    void reply(std::string_view const& fmt, Args&&... args)
+    void reply(std::string const& fmt, Args&&... args)
     {
         reply(fmt::format(fmt, std::forward<Args>(args)...));
     }
@@ -463,6 +454,9 @@ class Screen {
 
   private:
     Hook const onCommands_;
+    Logger const logger_;
+    Reply const reply_;
+
     OutputHandler handler_;
     Parser parser_;
 
@@ -474,8 +468,6 @@ class Screen {
 
     size_t columnCount_;
     size_t rowCount_;
-
-    Reply const reply_;
 };
 
 constexpr bool operator==(Screen::GraphicsAttributes const& a, Screen::GraphicsAttributes const& b) noexcept

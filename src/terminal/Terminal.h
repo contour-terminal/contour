@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Commands.h>
+#include <terminal/Logger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/PseudoTerminal.h>
 #include <terminal/Screen.h>
@@ -36,10 +37,9 @@ namespace terminal {
 /// send(...) member functions.
 class Terminal : public PseudoTerminal {
   public:
-    using Logger = std::function<void(std::string const& message)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
-    Terminal(WindowSize _winSize, Logger _warning, Logger _error, Hook _onScreenCommands = {});
+    explicit Terminal(WindowSize _winSize, Logger _logger = {}, Hook _onScreenCommands = {});
     ~Terminal() override;
 
     // Keyboard input handling
@@ -80,7 +80,6 @@ class Terminal : public PseudoTerminal {
     void onScreenCommands(std::vector<Command> const& commands);
 
   private:
-    Logger const logger_;
     InputGenerator inputGenerator_;
     InputGenerator::SequenceList pendingInput_;
     Screen screen_;

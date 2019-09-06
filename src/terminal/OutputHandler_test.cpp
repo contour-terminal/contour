@@ -46,8 +46,7 @@ TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[debug] parser: {}", msg)); },
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[trace] parser: {}", msg)); }};
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("parser: {}", msg)); }};
 
     parser.parseFragment("A\xC3\xB6Z");  // AöZ
 
@@ -70,8 +69,7 @@ TEST_CASE("set_g1_special", "[OutputHandler]")
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[debug] parser: {}", msg)); },
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[trace] parser: {}", msg)); }};
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
     parser.parseFragment("\033)0");
     REQUIRE(1 == output.commands().size());
@@ -88,8 +86,7 @@ TEST_CASE("color_fg_indexed", "[OutputHandler]")
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[debug] parser: {}", msg)); },
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[trace] parser: {}", msg)); }};
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
     parser.parseFragment("\033[38;5;235m");
     REQUIRE(1 == output.commands().size());
@@ -108,8 +105,7 @@ TEST_CASE("color_bg_indexed", "[OutputHandler]")
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[debug] parser: {}", msg)); },
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[trace] parser: {}", msg)); }};
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
     parser.parseFragment("\033[48;5;235m");
     REQUIRE(1 == output.commands().size());

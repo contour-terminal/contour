@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include "GLTerminal.h"
-#include "Logger.h"
+#include "GLLogger.h"
 
 #include <terminal/Util.h>
 
@@ -38,7 +38,7 @@ GLTerminal::GLTerminal(unsigned _width,
                        string const& _fontFamily,
                        string const& _shell,
                        glm::mat4 const& _projectionMatrix,
-                       Logger& _logger) :
+                       GLLogger& _logger) :
     width_{ _width },
     height_{ _height },
     logger_{ _logger },
@@ -53,8 +53,7 @@ GLTerminal::GLTerminal(unsigned _width,
             static_cast<unsigned short>(width_ / textShaper_.maxAdvance()),
             static_cast<unsigned short>(height_ / textShaper_.lineHeight())
         },
-        [this](string const& msg) { logger_.warning(msg); },
-        [this](string const& msg) { logger_.error(msg); },
+        [this](terminal::LogEvent const& _event) { logger_(_event); },
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
@@ -233,8 +232,8 @@ void GLTerminal::wait()
 
 void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
-    logger_.debug(fmt::format("onScreenUpdate: {} instructions", _commands.size()));
+    logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
 
     for (terminal::Command const& command : _commands)
-        logger_.screenTrace(to_string(command));
+        logger_(TraceOutputEvent{ to_string(command) });
 }
