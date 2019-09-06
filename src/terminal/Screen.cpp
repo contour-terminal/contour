@@ -646,7 +646,7 @@ void Screen::operator()(ClearToEndOfLine const& v)
     fill(
         state_->currentColumn,
         end(*state_->currentLine),
-        Cell{}
+        Cell{{}, state_->graphicsRendition}
     );
 }
 
@@ -655,7 +655,7 @@ void Screen::operator()(ClearToBeginOfLine const& v)
     fill(
         begin(*state_->currentLine),
         next(state_->currentColumn),
-        Cell{}
+        Cell{{}, state_->graphicsRendition}
     );
 }
 
@@ -664,7 +664,7 @@ void Screen::operator()(ClearLine const& v)
     fill(
         begin(*state_->currentLine),
         end(*state_->currentLine),
-        Cell{}
+        Cell{{}, state_->graphicsRendition}
     );
 }
 

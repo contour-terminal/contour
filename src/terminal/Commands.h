@@ -254,8 +254,25 @@ struct ScrollDown {
     cursor_pos_t n;
 };
 
+/// EL - Erase in Line (from cursor position to the end).
+///
+/// This control function erases characters on the line that has the cursor.
+/// EL clears all character attributes from erased character positions.
+/// EL works inside or outside the scrolling margins.
 struct ClearToEndOfLine {};
+
+/// EL - Erase in Line (from cursor position to beginning).
+///
+/// This control function erases characters on the line that has the cursor.
+/// EL clears all character attributes from erased character positions.
+/// EL works inside or outside the scrolling margins.
 struct ClearToBeginOfLine {};
+
+/// EL - Erase in Line (full line).
+///
+/// This control function erases characters on the line that has the cursor.
+/// EL clears all character attributes from erased character positions.
+/// EL works inside or outside the scrolling margins.
 struct ClearLine {};
 
 /// IL - Insert Line
