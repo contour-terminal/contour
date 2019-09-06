@@ -36,10 +36,10 @@ namespace terminal {
 /// send(...) member functions.
 class Terminal : public PseudoTerminal {
   public:
-    using Logger = std::function<void(std::string_view const& message)>;
+    using Logger = std::function<void(std::string const& message)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
-    Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands = {});
+    Terminal(WindowSize _winSize, Logger _warning, Logger _error, Hook _onScreenCommands = {});
     ~Terminal() override;
 
     // Keyboard input handling

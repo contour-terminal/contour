@@ -21,15 +21,15 @@ using namespace std::placeholders;
 
 namespace terminal {
 
-Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
+Terminal::Terminal(WindowSize _winSize, Logger _warning, Logger _error, Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
-    logger_{move(_logger)},
     inputGenerator_{},
     screen_{
         _winSize.columns,
         _winSize.rows,
         bind(&Terminal::onScreenReply, this, _1),
-        [this](auto const& msg) { logger_(msg); },
+        move(_warning),
+        move(_error),
         bind(&Terminal::onScreenCommands, this, _1)
     },
     onScreenCommands_{ move(_onScreenCommands) },
@@ -86,10 +86,6 @@ bool Terminal::send(Key _key, Modifier _modifier)
 
 void Terminal::flushInput()
 {
-    if (logger_)
-        for (auto const& seq : pendingInput_)
-            logger_(fmt::format("Sending input: '{}'", escape(seq)));
-
     inputGenerator_.swap(pendingInput_);
 
     for (auto const& seq : pendingInput_)

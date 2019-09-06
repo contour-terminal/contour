@@ -26,10 +26,7 @@ TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
     auto output = OutputHandler{
             RowCount,
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
-    auto parser = Parser{
-            ref(output),
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[debug] parser: {}", msg)); },
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[trace] parser: {}", msg)); }};
+    auto parser = Parser{ref(output)};
 
     parser.parseFragment("\xC3\xB6");  // ö
 

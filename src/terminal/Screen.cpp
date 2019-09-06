@@ -411,19 +411,12 @@ void Screen::Buffer::verifyState() const
 Screen::Screen(size_t columnCount,
                size_t rowCount,
                Reply reply,
-               Logger logger,
+               Logger _warning,
+               Logger _error,
                Hook onCommands) :
-    logger_{move(logger)},
     onCommands_{move(onCommands)},
-    handler_{
-        rowCount,
-        [this](string const& msg) { log("OutputHandler: " + msg); }
-    },
-    parser_{
-        ref(handler_),
-        [this](string const& msg) { log("debug.parser: " + msg); },
-        [this](string const& msg) { log("trace.parser: " + msg); }
-    },
+    handler_{rowCount, move(_warning), move(_error)},
+    parser_{ref(handler_)},
     primaryBuffer_{columnCount, rowCount},
     alternateBuffer_{columnCount, rowCount},
     state_{&primaryBuffer_},
@@ -451,10 +444,7 @@ void Screen::write(char const *data, size_t size)
     parser_.parseFragment(data, size);
 
     for (Command const& command : handler_.commands())
-    {
-        log("write: {}", to_string(command));
         visit(*this, command);
-    }
 
     if (onCommands_)
         onCommands_(handler_.commands());

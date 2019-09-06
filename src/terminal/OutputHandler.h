@@ -28,12 +28,15 @@ class OutputHandler {
 
     size_t constexpr static MaxParameters = 16;
 
-    explicit OutputHandler(size_t rows, Logger debugLogger = Logger{})
-        : rowCount_{rows},
-          debugLog_{std::move(debugLogger)}
+    OutputHandler(size_t _rows, Logger _warning, Logger _error)
+        : rowCount_{_rows},
+          warning_{std::move(_warning)},
+          error_{std::move(_error)}
     {
         parameters_.reserve(MaxParameters);
     }
+
+    OutputHandler(size_t _rows, Logger _logger) : OutputHandler{_rows, _logger, _logger} {}
 
     void updateRowCount(size_t rows)
     {
@@ -86,10 +89,17 @@ class OutputHandler {
     }
 
     template <typename... Args>
-    void log(std::string_view const& msg, Args... args) const
+    void logWarning(std::string_view const& msg, Args... args) const
     {
-        if (debugLog_)
-            debugLog_(fmt::format(msg, args...));
+        if (warning_)
+            warning_(fmt::format(msg, args...));
+    }
+
+    template <typename... Args>
+    void logError(std::string_view const& msg, Args... args) const
+    {
+        if (error_)
+            error_(fmt::format(msg, args...));
     }
 
     void logInvalidESC(std::string const& message = "") const;
@@ -114,7 +124,8 @@ class OutputHandler {
 
     size_t rowCount_;
 
-    Logger const debugLog_;
+    Logger const warning_;
+    Logger const error_;
 };
 
 }  // namespace terminal

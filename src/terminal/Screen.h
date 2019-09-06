@@ -123,7 +123,7 @@ constexpr bool operator!(CharacterStyleMask a) noexcept
  */
 class Screen {
   public:
-    using Logger = std::function<void(std::string_view const& message)>;
+    using Logger = std::function<void(std::string const& message)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
     /// Character graphics rendition information.
@@ -149,16 +149,27 @@ class Screen {
      * @param columnCount column width of this screen.
      * @param rowCount row height of this screen.
      * @param reply reply-callback with the data to send back to terminal input.
-     * @param logger an optional logger for debug and trace logging.
+     * @param warning an optional logger for warnings.
+     * @param error an optional logger for errors.
      * @param onCommands hook to the commands being executed by the screen.
      */
-    Screen(size_t columnCount,
-           size_t rowCount,
-           Reply reply,
-           Logger logger,
-           Hook onCommands);
+    Screen(size_t _columnCount,
+           size_t _rowCount,
+           Reply _reply,
+           Logger _warning,
+           Logger _error,
+           Hook _onCommands);
 
-    Screen(size_t columnCount, size_t rowCount) : Screen{columnCount, rowCount, {}, {}, {}} {}
+    // for backwards compatibility (in other words: writing tests)
+    Screen(size_t _columnCount,
+           size_t _rowCount,
+           Reply _reply,
+           Logger _logger,
+           Hook _onCommands) :
+        Screen{_columnCount, _rowCount, _reply, _logger, _logger, _onCommands} {}
+
+    Screen(size_t columnCount, size_t rowCount) :
+        Screen{columnCount, rowCount, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* data, size_t size);
@@ -437,13 +448,6 @@ class Screen {
 		void moveCursorTo(Coordinate to);
     };
 
-    template <typename... Args>
-    void log(std::string_view message, Args&&... args)
-    {
-        if (logger_)
-            logger_("Screen: " + fmt::format(message, std::forward<Args>(args)...));
-    }
-
   public:
     Margin const& margin() const noexcept { return state_->margin_; }
     Buffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
@@ -458,7 +462,6 @@ class Screen {
     std::string renderHistoryTextLine(size_t _lineNumberIntoHistory) const;
 
   private:
-    Logger const logger_;
     Hook const onCommands_;
     OutputHandler handler_;
     Parser parser_;

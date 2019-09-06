@@ -90,12 +90,14 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 dispatchESC();
             else if (intermediateCharacters_ == "#" && currentChar() == '8')
                 emit<ScreenAlignmentPattern>();
+            else if (intermediateCharacters_ == "(" && currentChar_ == 'B')
+                logUnsupported("Designate Character Set US-ASCII.");
             else if (currentChar_ == '0')
             {
                 if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
                     emit<DesignateCharset>(*g, Charset::Special);
                 else
-                    log("Invalid charset table identifier: {}", escape(intermediateCharacters_[0]));
+                    logInvalidESC(fmt::format("Invalid charset table identifier: {}", escape(intermediateCharacters_[0])));
             }
             else
                 logInvalidESC();
@@ -279,7 +281,7 @@ void OutputHandler::dispatchCSI_ext()
 
 void OutputHandler::dispatchCSI()
 {
-    // log("dispatch CSI: {} {} {}", intermediateCharacters_,
+    // logDebug("dispatch CSI: {} {} {}", intermediateCharacters_,
     //     accumulate(
     //         begin(parameters_), end(parameters_), string{},
     //         [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
@@ -766,12 +768,12 @@ size_t OutputHandler::parseColor(size_t i)
 
 void OutputHandler::logUnsupported(std::string_view const& msg) const
 {
-    log("Unsupported: {}", msg);
+    logWarning("Unsupported: {}", msg);
 }
 
 void OutputHandler::logUnsupportedCSI() const
 {
-    log("Unsupported CSI: {} {} {}", intermediateCharacters_,
+    logWarning("Unsupported CSI: {} {} {}", intermediateCharacters_,
         accumulate(
             begin(parameters_), end(parameters_), string{},
             [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
@@ -780,12 +782,12 @@ void OutputHandler::logUnsupportedCSI() const
 
 void OutputHandler::logInvalidESC(std::string const& message) const
 {
-    log("Invalid ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
+    logError("Invalid ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
 }
 
 void OutputHandler::logInvalidCSI(std::string const& message) const
 {
-    log("Invalid CSI. {}", message);
+    logError("Invalid CSI. {}", message);
 }
 
 }  // namespace terminal
