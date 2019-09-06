@@ -379,6 +379,20 @@ struct MoveCursorTo {
 
 struct MoveCursorToNextTab {};
 
+/// VPA - Vertical Line Position Absolute
+///
+/// VPA causes the active position to be moved to the corresponding horizontal position.
+///
+/// The default value is 1.
+///
+/// Move cursor to line Pn. VPA causes the active position to be moved to the corresponding horizontal
+/// position at vertical position Pn.
+/// If an attempt is made to move the active position below the last
+/// line, then the active position stops on the last line.
+struct MoveCursorToLine {
+    cursor_pos_t row;
+};
+
 struct HideCursor {};
 struct ShowCursor {};
 struct SaveCursor {};
@@ -540,6 +554,7 @@ using Command = std::variant<
     MoveCursorTo,
     MoveCursorToBeginOfLine,
     MoveCursorToColumn,
+    MoveCursorToLine,
     MoveCursorToNextTab,
     MoveCursorUp,
     ReportCursorPosition,

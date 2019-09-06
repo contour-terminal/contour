@@ -381,6 +381,10 @@ void OutputHandler::dispatchCSI()
             else
                 logInvalidCSI();
             break;
+        case 'd':
+            setDefaultParameter(1);
+            emit<MoveCursorToLine>(param(0));
+            break;
         case 'n':
             switch (param(0))
             {

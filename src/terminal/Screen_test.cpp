@@ -626,6 +626,32 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
     REQUIRE(3 == screen.currentColumn()); // clamped
 }
 
+TEST_CASE("MoveCursorToLine", "[screen]")
+{
+    Screen screen{3, 3, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};
+    REQUIRE(1 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn());
+
+    // no-op
+    screen(MoveCursorToLine{});
+    REQUIRE(1 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn());
+
+    // in-range
+    screen(MoveCursorToLine{3});
+    REQUIRE(3 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn());
+
+    screen(MoveCursorToLine{2});
+    REQUIRE(2 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn());
+
+    // overflow
+    screen(MoveCursorToLine{5});
+    REQUIRE(3 == screen.currentRow());
+    REQUIRE(1 == screen.currentColumn()); // clamped
+}
+
 TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 {
     Screen screen{3, 3, {}, [&](auto const& msg) { UNSCOPED_INFO(msg); }, {}};

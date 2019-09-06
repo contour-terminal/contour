@@ -787,6 +787,11 @@ void Screen::operator()(MoveCursorTo const& v)
     moveCursorTo(v.row, v.column);
 }
 
+void Screen::operator()(MoveCursorToLine const& v)
+{
+    moveCursorTo(v.row, state_->cursor.column);
+}
+
 void Screen::operator()(MoveCursorToNextTab const& v)
 {
     auto constexpr TabWidth = 8;

@@ -213,6 +213,7 @@ class Screen {
     void operator()(MoveCursorToColumn const& v);
     void operator()(MoveCursorToBeginOfLine const& v);
     void operator()(MoveCursorTo const& v);
+    void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
     void operator()(HideCursor const& v);
     void operator()(ShowCursor const& v);
