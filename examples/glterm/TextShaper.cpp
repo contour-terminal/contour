@@ -1,5 +1,7 @@
 #include "TextShaper.h"
 
+#include <stdexcept>
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ERRORS_H
@@ -137,15 +139,13 @@ string const& TextShaper::fragmentShaderCode()
 	return code;
 }
 
-unsigned TextShaper::render(glm::ivec2 _pos, char32_t _char, float _r, float _g, float _b, float _opacity)
+unsigned TextShaper::render(glm::ivec2 _pos, char32_t _char, glm::vec4 const& _color, TextStyle _style)
 {
-    return render(_pos[0], _pos[1], _char, _r, _g, _b, _opacity);
-}
+    unsigned const _x = _pos[0];
+    unsigned const _y = _pos[1];
 
-unsigned TextShaper::render(unsigned _x, unsigned _y, char32_t _char, float _r, float _g, float _b, float _opacity)
-{
     shader_.use();
-    shader_.setVec4("textColor", glm::vec4{ _r, _g, _b, _opacity });
+    shader_.setVec4("textColor", _color);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao_);
 

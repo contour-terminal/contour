@@ -201,10 +201,13 @@ void GLTerminal::renderCell(terminal::cursor_pos_t row, terminal::cursor_pos_t c
         textShaper_.render(
             makeCoords(col, row),
             cell.character,
-            fgColor.red / 255.0f,
-            fgColor.green / 255.0f,
-            fgColor.blue / 255.0f,
-            opacity
+            glm::vec4{
+                fgColor.red / 255.0f,
+                fgColor.green / 255.0f,
+                fgColor.blue / 255.0f,
+                opacity
+            },
+            TextStyle::Regular
         );
     }
 }

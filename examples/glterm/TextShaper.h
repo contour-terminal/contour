@@ -12,6 +12,13 @@
 #include <string>
 #include <unordered_map>
 
+enum class TextStyle {
+    Regular,
+    Bold,
+    Italic,
+    BoldItalic,
+};
+
 class TextShaper {
 public:
     TextShaper(std::string const& _fontFamily, unsigned int _fontSize, glm::mat4 const& _projectionMatrix);
@@ -22,8 +29,7 @@ public:
     TextShaper& operator=(TextShaper const&) = delete;
     ~TextShaper();
 
-    unsigned render(glm::ivec2 _pos, char32_t _char, float _r, float _g, float _b, float _opacity = 1.0f);
-    unsigned render(unsigned _y, unsigned _x, char32_t _char, float _r, float _g, float _b, float _opacity = 1.0f);
+    unsigned render(glm::ivec2 _pos, char32_t _char, glm::vec4 const& _color, TextStyle _style);
 
     unsigned fontSize() const noexcept { return fontSize_; }
     unsigned lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
