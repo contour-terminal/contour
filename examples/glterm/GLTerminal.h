@@ -19,20 +19,24 @@
 #include <vector>
 
 #include "CellBackground.h"
-#include "TextShaper.h"
+#include "FontManager.h"
+#include "GLTextShaper.h"
 #include "GLLogger.h"
 
 #include <glm/matrix.hpp>
 
+class Font;
+
 /// OpenGL-Terminal Object.
 class GLTerminal {
-  public:
-    GLTerminal(unsigned _width, unsigned _height,
-               unsigned _fontSize,
-               std::string const& _fontFamily,
-               std::string const& _shell,
-               glm::mat4 const& _projectionMatrix,
-               GLLogger& _logger);
+public:
+    GLTerminal(
+        terminal::WindowSize const& _winSize,
+        unsigned _width, unsigned _height,
+        Font& _fontFamily,
+        std::string const& _shell,
+        glm::mat4 const& _projectionMatrix,
+        GLLogger& _logger);
     ~GLTerminal();
 
     bool send(char32_t _characterEvent, terminal::Modifier _modifier);
@@ -47,12 +51,40 @@ class GLTerminal {
     bool alive() const;
     void wait();
 
-  private:
-    void renderCell(terminal::cursor_pos_t row, terminal::cursor_pos_t col, terminal::Screen::Cell const& cell);
+private:
+    using cursor_pos_t = terminal::cursor_pos_t;
+    using RGBColor = terminal::RGBColor;
+    using GraphicsAttributes = terminal::Screen::GraphicsAttributes;
+    using Cell = terminal::Screen::Cell;
+
+    /// Renders and then clears current cell group if current @p _cell cannot be appended, or appends to current cell group otherwise.
+    void fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
+    void renderCellGroup();
     void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
 
-  private:
+    glm::ivec2 makeCoords(cursor_pos_t col, cursor_pos_t row) const;
+    std::pair<RGBColor, RGBColor> makeColors(GraphicsAttributes const& _attributes) const;
+    float makeOpacity(GraphicsAttributes const& _attributes) const noexcept;
+
+private:
     bool alive_ = true;
+
+    struct PendingDraw {
+        cursor_pos_t lineNumber{};
+        cursor_pos_t startColumn{};
+        GraphicsAttributes attributes{};
+        std::vector<char32_t> text{};
+
+        void reset(cursor_pos_t _row, cursor_pos_t _col, GraphicsAttributes const& _attributes, char32_t _char)
+        {
+            lineNumber = _row;
+            startColumn = _col;
+            attributes = _attributes;
+            text.clear();
+            text.push_back(_char);
+        }
+    };
+    PendingDraw pendingDraw_;
 
     unsigned width_;
     unsigned height_;
@@ -65,7 +97,8 @@ class GLTerminal {
 
     GLLogger& logger_;
 
-    TextShaper textShaper_;
+    Font& regularFont_;
+    GLTextShaper textShaper_;
     CellBackground cellBackground_;
 
     terminal::Terminal terminal_;

@@ -33,9 +33,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "FontManager.h"
 #include "Window.h"
 #include "GLTerminal.h"
 #include "GLLogger.h"
+#include "Flags.h"
 
 #if defined(__linux__)
 #include <fontconfig/fontconfig.h>
@@ -67,8 +69,7 @@ using namespace std::placeholders;
 class GLTerm {
   public:
     GLTerm(
-        unsigned _width,
-        unsigned _height,
+        terminal::WindowSize const& _winSize,
         unsigned short _fontSize,
         std::string const& _fontFamily,
         std::string const& _shell,
@@ -87,34 +88,48 @@ class GLTerm {
 
   private:
     GLLogger logger_;
+    FontManager fontManager_;
+    Font& regularFont_;
     Window window_;
     GLTerminal terminalView_;
 };
 
-GLTerm::GLTerm(unsigned _width, unsigned _height,
+GLTerm::GLTerm(terminal::WindowSize const& _winSize,
                unsigned short _fontSize,
                std::string const& _fontFamily,
                std::string const& _shell,
                LogMask _logMask) :
     //loggingSink_{"glterm.log", ios::trunc},
     logger_{_logMask, &cout},
-    window_{ _width, _height, "glterm",
+    fontManager_{},
+    regularFont_{
+        fontManager_.load(
+            _fontFamily,
+            static_cast<unsigned>(_fontSize * Window::primaryMonitorContentScale().second)
+        )
+    },
+    window_{
+        _winSize.columns * regularFont_.maxAdvance(),
+        _winSize.rows * regularFont_.lineHeight(),
+        "glterm",
         bind(&GLTerm::onKey, this, _1, _2, _3, _4),
         bind(&GLTerm::onChar, this, _1),
         bind(&GLTerm::onResize, this, _1, _2),
         bind(&GLTerm::onContentScale, this, _1, _2)
     },
     terminalView_{
-        _width,
-        _height,
-        static_cast<unsigned>(_fontSize * window_.contentScale().second),
-        _fontFamily,
+        _winSize,
+        window_.width(),
+        window_.height(),
+        regularFont_,
         _shell,
-        glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)),
+        glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         logger_
     }
 {
-    glViewport(0, 0, _width, _height);
+    if (!regularFont_.isFixedWidth())
+        throw runtime_error{ "Regular font is not a fixed-width font." };
+    glViewport(0, 0, window_.width(), window_.height());
 }
 
 GLTerm::~GLTerm()
@@ -300,18 +315,75 @@ int main(int argc, char const* argv[])
 {
     try
     {
+        util::Flags flags;
+        flags.defineBool("help", 'h', "Shows this help and quits.");
+        flags.defineBool("log-raw-input", 0, "Enables logging of raw input.");
+        flags.defineBool("log-raw-output", 0, "Enables logging of raw output.");
+        flags.defineBool("log-invalid-output", 0, "Enables logging of invalid output sequences.");
+        flags.defineBool("log-unsupported-output", 0, "Enables logging of unsupported output sequences.");
+        flags.defineBool("log-trace-output", 0, "Enables logging of output trace.");
+        flags.defineNumber("font-size", 'S', "PIXELS", "Defines character font-size.", 12);
+        flags.defineNumber("columns", 'C', "COUNT", "Defines number of text columns.", 130);
+        flags.defineNumber("lines", 'L', "COUNT", "Defines number of text lines.", 25);
+        flags.defineString("font", 'F', "PATTERN", "Defines font family.", "Fira Code, Ubuntu Mono, Consolas, monospace");
+        flags.defineString("shell", 's', "SHELL", "Defines shell to invoke.", terminal::Process::loginShell());
+
+        LogMask const logMask = [&]() {
+            LogMask mask{};
+            if (flags.isSet("log-parser-error"))
+                mask |= LogMask::ParserError;
+
+            if (flags.isSet("log-invalid-output"))
+                mask |= LogMask::InvalidOutput;
+
+            if (flags.isSet("log-unsupported-output"))
+                mask |= LogMask::UnsupportedOutput;
+
+            if (flags.isSet("log-raw-input"))
+                mask |= LogMask::RawInput;
+
+            if (flags.isSet("log-raw-output"))
+                mask |= LogMask::RawOutput;
+
+            if (flags.isSet("log-trace-output"))
+                mask |= LogMask::TraceOutput;
+
+            #if !defined(NDEBUG)
+            mask |= LogMask::ParserError;
+            mask |= LogMask::InvalidOutput;
+            mask |= LogMask::UnsupportedOutput;
+            mask |= LogMask::RawInput;
+            mask |= LogMask::RawOutput;
+            #endif
+            #if 0 // !defined(NDEBUG)
+            mask |= LogMask::TraceOutput;
+            #endif
+
+            return mask;
+        }();
+
+        flags.parse(argc, argv);
+
+        if (flags.getBool("help"))
+        {
+            cout << "glterm - Terminal Emulator.\n"
+                 << "\n"
+                 << "Usage:\n"
+                 << "  glterm [OPTIONS ...]\n"
+                 << "\n"
+                 << flags.helpText() << endl;
+            return EXIT_SUCCESS;
+        }
+
         auto glterm = GLTerm{
-            1600, // width
-            720,  // height
-            18,   // fontSize
-            "Ubuntu Mono,Consolas,monospace",
-            terminal::Process::loginShell(),
-            LogMask::ParserError
-            | LogMask::InvalidOutput
-            | LogMask::UnsupportedOutput
-            | LogMask::RawInput
-            | LogMask::RawOutput
-            //| LogMask::TraceOutput
+            terminal::WindowSize{
+                static_cast<unsigned short>(flags.getNumber("columns")),
+                static_cast<unsigned short>(flags.getNumber("lines"))
+            },
+            static_cast<unsigned short>(flags.getNumber("font-size")),
+            flags.getString("font"),
+            flags.getString("shell"),
+            logMask
         };
         return glterm.main();
     }

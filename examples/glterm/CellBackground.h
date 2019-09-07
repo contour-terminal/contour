@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include "TextShaper.h"
+#include "Shader.h"
 
 #include <terminal/Color.h>
 

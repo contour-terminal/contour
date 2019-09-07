@@ -1,0 +1,210 @@
+#include "FontManager.h"
+
+#include <harfbuzz/hb.h>
+#include <harfbuzz/hb-ft.h>
+
+#include <cctype>
+
+#if defined(__linux__)
+#define HAVE_FONTCONFIG
+#endif
+
+#if defined(HAVE_FONTCONFIG)
+#include <fontconfig/fontconfig.h>
+#endif
+
+using namespace std;
+
+static string freetypeErrorString(FT_Error _errorCode)
+{
+    #undef __FTERRORS_H__
+    #define FT_ERROR_START_LIST     switch (_errorCode) {
+    #define FT_ERRORDEF(e, v, s)    case e: return s;
+    #define FT_ERROR_END_LIST       }
+    #include FT_ERRORS_H
+    return "(Unknown error)";
+}
+
+static bool endsWidthIgnoreCase(string const& _text, string const& _suffix)
+{
+    if (_text.size() < _suffix.size())
+        return false;
+
+    auto const* text = &_text[_text.size() - _suffix.size()];
+    for (size_t i = 0; i < _suffix.size(); ++i)
+        if (tolower(text[i]) != tolower(_suffix[i]))
+            return false;
+
+    return true;
+}
+
+static string getFontFilePath([[maybe_unused]] string const& _fontPattern)
+{
+    if (endsWidthIgnoreCase(_fontPattern, ".ttf") || endsWidthIgnoreCase(_fontPattern, ".otf"))
+        return _fontPattern;
+
+    #if defined(HAVE_FONTCONFIG)
+    string const pattern = _fontPattern; // TODO: append bold/italic if needed
+
+    FcConfig* fcConfig = FcInitLoadConfigAndFonts();
+    FcPattern* fcPattern = FcNameParse((FcChar8 const*) pattern.c_str());
+
+    FcDefaultSubstitute(fcPattern);
+    FcConfigSubstitute(fcConfig, fcPattern, FcMatchPattern);
+
+    FcResult fcResult;
+    FcPattern* matchedPattern = FcFontMatch(fcConfig, fcPattern, &fcResult);
+    auto path = string{};
+    if (fcResult == FcResultMatch && matchedPattern)
+    {
+        char* resultPath{};
+        if (FcPatternGetString(matchedPattern, FC_FILE, 0, (FcChar8**) &resultPath) == FcResultMatch)
+            path = string{resultPath};
+        FcPatternDestroy(matchedPattern);
+    }
+    FcPatternDestroy(fcPattern);
+    FcConfigDestroy(fcConfig);
+    return path;
+    #endif
+
+    #if defined(_WIN32)
+    // TODO: Read https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-enumfontfamiliesexa
+    // This is pretty damn hard coded, and to be properly implemented once the other font related code's done,
+    // *OR* being completely deleted when FontConfig's windows build fix released and available via vcpkg.
+    if (_fontPattern.find("bold italic") != string::npos)
+        return "C:\\Windows\\Fonts\\consolaz.ttf";
+    else if (_fontPattern.find("italic") != string::npos)
+        return "C:\\Windows\\Fonts\\consolai.ttf";
+    else if (_fontPattern.find("bold") != string::npos)
+        return "C:\\Windows\\Fonts\\consolab.ttf";
+    else
+        return "C:\\Windows\\Fonts\\consola.ttf";
+    #endif
+}
+
+FontManager::FontManager()
+{
+    if (FT_Init_FreeType(&ft_))
+        throw runtime_error{ "Failed to initialize FreeType." };
+}
+
+FontManager::~FontManager()
+{
+    fonts_.clear();
+    FT_Done_FreeType(ft_);
+}
+
+Font& FontManager::load(string const& _fontPattern, unsigned int _fontSize)
+{
+    string const filePath = getFontFilePath(_fontPattern);
+
+    if (auto i = fonts_.find(filePath); i != fonts_.end())
+        return i->second;
+
+    return fonts_.emplace(make_pair(filePath, Font{ ft_, filePath, _fontSize })).first->second;
+}
+
+// -------------------------------------------------------------------------------------------------------
+
+Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize) :
+    ft_{ _ft },
+    face_{},
+    fontSize_{ _fontSize }
+{
+    if (FT_New_Face(ft_, _fontPath.c_str(), 0, &face_))
+        throw runtime_error{ "Failed to load font." };
+
+    FT_Error ec = FT_Select_Charmap(face_, FT_ENCODING_UNICODE);
+    if (ec)
+        throw runtime_error{ string{"Failed to set charmap. "} + freetypeErrorString(ec) };
+
+    ec = FT_Set_Pixel_Sizes(face_, 0, static_cast<FT_UInt>(_fontSize));
+    if (ec)
+        throw runtime_error{ string{"Failed to set font pixel size. "} + freetypeErrorString(ec) };
+
+    loadGlyphByIndex(0);
+    // XXX Woot, needed in order to retrieve maxAdvance()'s field,
+    // as max_advance metric seems to be broken on at least FiraCode (Regular),
+    // which is twice as large as it should be, but taking
+    // a regular face's advance value works.
+}
+
+Font::Font(Font&& v) :
+    ft_{ v.ft_ },
+    face_{ v.face_ },
+    fontSize_{ v.fontSize_ }
+{
+    v.ft_ = nullptr;
+    v.face_ = nullptr;
+    v.fontSize_ = 0;
+}
+
+Font& Font::operator=(Font&& v)
+{
+    ft_ = v.ft_;
+    face_ = v.face_;
+    fontSize_ = v.fontSize_;
+
+    v.ft_ = nullptr;
+    v.face_ = nullptr;
+    v.fontSize_ = 0;
+
+    return *this;
+}
+
+Font::~Font()
+{
+    if (face_)
+        FT_Done_Face(face_);
+}
+
+void Font::loadGlyphByIndex(unsigned int _glyphIndex)
+{
+    FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, FT_LOAD_RENDER);
+    if (ec != FT_Err_Ok)
+        throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
+}
+
+vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
+{
+    //for (size_t i = 0; i < _chars.size(); ++i)
+    //    if (_chars[i] == 0)
+    //        const_cast<vector<char32_t>&>(_chars).at(i) = U' '; // TODO: remove me.
+
+    hb_buffer_t* hb_buf = hb_buffer_create(); // TODO: reuse (and reset instead) buffer
+    hb_buffer_add_utf32(hb_buf, (uint32_t const*)_chars.data(), _chars.size(), 0, _chars.size());
+    hb_buffer_set_direction(hb_buf, HB_DIRECTION_LTR);
+    hb_buffer_guess_segment_properties(hb_buf);
+
+    hb_font_t* hb_font = hb_ft_font_create(face_, nullptr); // TODO: reuse HB font
+
+    hb_shape(hb_font, hb_buf, nullptr, 0);
+
+    unsigned const len = hb_buffer_get_length(hb_buf);
+    hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf, nullptr);
+    hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(hb_buf, nullptr);
+
+    auto result = vector<GlyphPosition>{};
+
+    unsigned int cx = 0;
+    unsigned int cy = 0;
+    unsigned int advance = 0; // not yet exposed nor needed on caller side
+    for (unsigned i = 0; i < len; ++i)
+    {
+        result.emplace_back(GlyphPosition{
+            cx + pos[i].x_offset / 64,
+            cy + pos[i].y_offset / 64,
+            info[i].codepoint
+        });
+
+        cx += pos[i].x_advance / 64; // TODO: shouldn't we be using maxAdvance() here?
+        cy += pos[i].y_advance / 64;
+        advance += pos[i].x_advance / 64;
+    }
+
+    hb_buffer_destroy(hb_buf);
+    hb_font_destroy(hb_font);
+
+    return result;
+}
+
