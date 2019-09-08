@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/UTF8.h>
+
 #include <fmt/format.h>
 #include <cctype>
 #include <numeric>
@@ -43,7 +45,13 @@ inline std::string escape(char32_t ch)
             else if (ch <= 0xFF)
                 return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
             else
-                return fmt::format("?{{}}", static_cast<uint32_t>(ch));
+            {
+                auto const bytes = utf8::encode(ch);
+                auto res = std::string{};
+                for (auto const byte : bytes)
+                    res += byte; // fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
+                return res;
+            }
     }
 }
 
