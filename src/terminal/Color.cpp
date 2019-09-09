@@ -110,19 +110,19 @@ RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor)
                     case IndexedColor::Black:
                         return RGBColor{ 0, 0, 0 };
                     case IndexedColor::Red:
-                        return RGBColor{ 128, 0, 0 };
+                        return RGBColor{ 205, 0, 0 };
                     case IndexedColor::Green:
-                        return RGBColor{ 0, 128, 0 };
+                        return RGBColor{ 0, 205, 0 };
                     case IndexedColor::Yellow:
-                        return RGBColor{ 128, 128, 0 };
+                        return RGBColor{ 205, 205, 0 };
                     case IndexedColor::Blue:
-                        return RGBColor{ 0, 0, 128 };
+                        return RGBColor{ 0, 0, 238 };
                     case IndexedColor::Magenta:
-                        return RGBColor{ 128, 0, 128 };
+                        return RGBColor{ 205, 0, 205 };
                     case IndexedColor::Cyan:
-                        return RGBColor{ 0, 128, 128 };
+                        return RGBColor{ 0, 205, 205 };
                     case IndexedColor::White:
-                        return RGBColor{ 128, 128, 128 };
+                        return RGBColor{ 229, 229, 229 };
                     case IndexedColor::Default:
                         return _defaultColor;
                 }
@@ -139,7 +139,7 @@ RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor)
                     case BrightColor::Yellow:
                         return RGBColor{ 255, 255, 0 };
                     case BrightColor::Blue:
-                        return RGBColor{ 0, 0, 255 };
+                        return RGBColor{ 92, 92, 255 };
                     case BrightColor::Magenta:
                         return RGBColor{ 255, 0, 255 };
                     case BrightColor::Cyan:
