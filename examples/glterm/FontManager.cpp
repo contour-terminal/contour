@@ -109,6 +109,8 @@ Font& FontManager::load(string const& _fontPattern, unsigned int _fontSize)
 Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize) :
     ft_{ _ft },
     face_{},
+    hb_font_{},
+    hb_buf_{},
     fontSize_{ _fontSize }
 {
     if (FT_New_Face(ft_, _fontPath.c_str(), 0, &face_))
@@ -122,6 +124,9 @@ Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize)
     if (ec)
         throw runtime_error{ string{"Failed to set font pixel size. "} + freetypeErrorString(ec) };
 
+    hb_font_ = hb_ft_font_create_referenced(face_);
+    hb_buf_ = hb_buffer_create();
+
     loadGlyphByIndex(0);
     // XXX Woot, needed in order to retrieve maxAdvance()'s field,
     // as max_advance metric seems to be broken on at least FiraCode (Regular),
@@ -132,21 +137,31 @@ Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize)
 Font::Font(Font&& v) :
     ft_{ v.ft_ },
     face_{ v.face_ },
+    hb_font_{ v.hb_font_ },
+    hb_buf_{ v.hb_buf_ },
     fontSize_{ v.fontSize_ }
 {
     v.ft_ = nullptr;
     v.face_ = nullptr;
+    v.hb_font_ = nullptr;
+    v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
 }
 
 Font& Font::operator=(Font&& v)
 {
+    // TODO: free current resources, if any
+
     ft_ = v.ft_;
     face_ = v.face_;
+    hb_font_ = v.hb_font_;
+    hb_buf_ = v.hb_buf_;
     fontSize_ = v.fontSize_;
 
     v.ft_ = nullptr;
     v.face_ = nullptr;
+    v.hb_font_ = nullptr;
+    v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
 
     return *this;
@@ -156,6 +171,12 @@ Font::~Font()
 {
     if (face_)
         FT_Done_Face(face_);
+
+    if (hb_font_)
+        hb_font_destroy(hb_font_);
+
+    if (hb_buf_)
+        hb_buffer_destroy(hb_buf_);
 }
 
 void Font::loadGlyphByIndex(unsigned int _glyphIndex)
@@ -167,22 +188,16 @@ void Font::loadGlyphByIndex(unsigned int _glyphIndex)
 
 vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
 {
-    //for (size_t i = 0; i < _chars.size(); ++i)
-    //    if (_chars[i] == 0)
-    //        const_cast<vector<char32_t>&>(_chars).at(i) = U' '; // TODO: remove me.
+    hb_buffer_clear_contents(hb_buf_);
+    hb_buffer_add_utf32(hb_buf_, (uint32_t const*)_chars.data(), _chars.size(), 0, _chars.size());
+    hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
+    hb_buffer_guess_segment_properties(hb_buf_);
 
-    hb_buffer_t* hb_buf = hb_buffer_create(); // TODO: reuse (and reset instead) buffer
-    hb_buffer_add_utf32(hb_buf, (uint32_t const*)_chars.data(), _chars.size(), 0, _chars.size());
-    hb_buffer_set_direction(hb_buf, HB_DIRECTION_LTR);
-    hb_buffer_guess_segment_properties(hb_buf);
+    hb_shape(hb_font_, hb_buf_, nullptr, 0);
 
-    hb_font_t* hb_font = hb_ft_font_create(face_, nullptr); // TODO: reuse HB font
-
-    hb_shape(hb_font, hb_buf, nullptr, 0);
-
-    unsigned const len = hb_buffer_get_length(hb_buf);
-    hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf, nullptr);
-    hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(hb_buf, nullptr);
+    unsigned const len = hb_buffer_get_length(hb_buf_);
+    hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
+    hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
 
     auto result = vector<GlyphPosition>{};
 
@@ -201,9 +216,6 @@ vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
         cy += pos[i].y_advance / 64;
         advance += pos[i].x_advance / 64;
     }
-
-    hb_buffer_destroy(hb_buf);
-    hb_font_destroy(hb_font);
 
     return result;
 }

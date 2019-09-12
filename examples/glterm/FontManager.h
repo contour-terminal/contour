@@ -9,6 +9,9 @@
 #include <freetype/freetype.h>
 #endif
 
+#include <harfbuzz/hb.h>
+#include <harfbuzz/hb-ft.h>
+
 #include <array>
 #include <string>
 #include <unordered_map>
@@ -82,6 +85,8 @@ class Font {
   private:
     FT_Library ft_;
     FT_Face face_;
+    hb_font_t* hb_font_;
+    hb_buffer_t* hb_buf_;
     unsigned int fontSize_;
 };
 
