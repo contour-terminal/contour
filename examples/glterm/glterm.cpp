@@ -48,10 +48,12 @@
 // - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [x] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
+// - [x] Hi-DPI support (hm, because I need it)
+// - [ ] Fix font size on non-Hi-DPI screens (such as my Linux monitor)
 // - [ ] show cursor (in correct shapes, with blinking)
+// - [ ] input: fix input sequences on non ConPTY hosts (cursor keys, ...?)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
-// - [ ] Hi-DPI support (hm, because I need it)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
 // - [ ] font loading on Linux
 // - [ ] input: F13..F25
