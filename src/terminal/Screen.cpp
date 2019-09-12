@@ -394,12 +394,12 @@ void Screen::Buffer::verifyState() const
     assert(numLines_ == lines.size());
 
     // verify cursor positions
-    auto const clampedCursor = clampCoordinate(cursor);
+    [[maybe_unused]] auto const clampedCursor = clampCoordinate(cursor);
     assert(cursor == clampedCursor);
 
     // verify iterators
-    auto const line = next(begin(lines), cursor.row - 1);
-    auto const col = next(begin(*line), cursor.column - 1);
+    [[maybe_unused]] auto const line = next(begin(lines), cursor.row - 1);
+    [[maybe_unused]] auto const col = next(begin(*line), cursor.column - 1);
 
     assert(line == currentLine);
     assert(col == currentColumn);
