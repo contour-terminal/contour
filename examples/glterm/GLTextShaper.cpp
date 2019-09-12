@@ -90,8 +90,14 @@ void GLTextShaper::render(
     glm::vec4 const& _color,
     FontStyle _style)
 {
-    auto const glyphPositions = regularFont_.render(_chars); // TODO _style
     Font& font = regularFont_; // TODO: respect _style
+    auto const glyphPositions = font.render(_chars);
+
+    shader_.use();
+    shader_.setVec4("textColor", _color);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
 
     for (auto const& gpos : glyphPositions)
     {
@@ -102,20 +108,12 @@ void GLTextShaper::render(
         unsigned const x = _pos.x + gpos.x;
         unsigned const y = _pos.y + gpos.y;
 
-        shader_.use();                                // TODO: move this block before for-loop if possible
-        shader_.setVec4("textColor", _color);
-        glActiveTexture(GL_TEXTURE0);
-        glBindVertexArray(vao_);
-
-        glColor3f(1.0, 1.0, 1.0); // TODO: check if this line is really needed. Move before for-loop if possible.
-
         auto const xpos = static_cast<GLfloat>(x + glyph.bearing.x);
         auto const ypos = static_cast<GLfloat>(y + font.baseline() - glyph.descender);
         auto const w = static_cast<GLfloat>(glyph.size.x);
         auto const h = static_cast<GLfloat>(glyph.size.y);
 
-        // Update VBO for each character
-        GLfloat vertices[6][4] = {
+        GLfloat const vertices[6][4] = {
             { xpos,     ypos + h,   0.0, 0.0 },
             { xpos,     ypos,       0.0, 1.0 },
             { xpos + w, ypos,       1.0, 1.0 },
@@ -125,26 +123,25 @@ void GLTextShaper::render(
             { xpos + w, ypos + h,   1.0, 0.0 }
         };
 
-        // Render glyph texture over quad
         glBindTexture(GL_TEXTURE_2D, glyph.textureID);
-
-        // Update content of VBO memory
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices); // Be sure to use glBufferSubData and not glBufferData
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
+
+    #if !defined(NDEBUG)
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    #endif
 }
 
 GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontStyle _style)
 {
-    Font& font = regularFont_; // TODO: respect _style
-    auto& cache = cache_[0]; // TODO: respect _style
-
+    auto& cache = cache_[static_cast<size_t>(_style)];
     if (auto i = cache.find(_index); i != cache.end())
         return i->second;
 
+    Font& font = regularFont_; // TODO: respect _style
     font.loadGlyphByIndex(_index);
 
     // Generate texture

@@ -1,7 +1,7 @@
 find_package(Freetype)
 find_package(OpenGL)
-find_package(glfw3 CONFIG)
 find_package(GLEW)
+find_package(glfw3 CONFIG)
 find_package(glm CONFIG)
 
 if("${CMAKE_SYSTEM}" MATCHES "Linux")
@@ -28,7 +28,7 @@ if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND AND
         glterm.cpp
     )
 
-    set(GLTERM_LIBRARIES glm glfw GLEW::GLEW OpenGL::GL Freetype::Freetype terminal)
+    set(GLTERM_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw Freetype::Freetype terminal)
     if("${CMAKE_SYSTEM}" MATCHES "Linux")
         list(APPEND GLTERM_LIBRARIES fontconfig)
         list(APPEND GLTERM_LIBRARIES PkgConfig::harfbuzz)
