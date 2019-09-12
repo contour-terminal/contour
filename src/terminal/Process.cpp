@@ -147,7 +147,7 @@ Process::Process(
 
     string cmd = _path;
     for (size_t i = 1; i < _args.size(); ++i)
-        cmd += " " + _args[i];
+        cmd += " \"" + _args[i] + "\"";
 
     // TODO: _env
 
