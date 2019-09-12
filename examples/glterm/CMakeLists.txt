@@ -20,6 +20,7 @@ if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND AND
         CellBackground.cpp CellBackground.h
         Flags.cpp Flags.h
         FontManager.cpp FontManager.h
+        GLCursor.cpp GLCursor.h
         GLLogger.cpp GLLogger.h
         GLTextShaper.cpp GLTextShaper.h
         GLTerminal.cpp GLTerminal.h
