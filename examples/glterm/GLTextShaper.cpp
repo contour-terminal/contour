@@ -91,7 +91,8 @@ void GLTextShaper::render(
     FontStyle _style)
 {
     Font& font = regularFont_; // TODO: respect _style
-    auto const glyphPositions = font.render(_chars);
+
+    font.render(_chars, glyphPositions_);
 
     shader_.use();
     shader_.setVec4("textColor", _color);
@@ -99,7 +100,7 @@ void GLTextShaper::render(
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
 
-    for (auto const& gpos : glyphPositions)
+    for (auto const& gpos : glyphPositions_)
     {
         if (gpos.codepoint == 0)
             continue;
@@ -128,6 +129,8 @@ void GLTextShaper::render(
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
+
+    glyphPositions_.clear();
 
     #if !defined(NDEBUG)
     glBindVertexArray(0);

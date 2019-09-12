@@ -186,7 +186,7 @@ void Font::loadGlyphByIndex(unsigned int _glyphIndex)
         throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
 }
 
-vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
+void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _result)
 {
     hb_buffer_clear_contents(hb_buf_);
     hb_buffer_add_utf32(hb_buf_, (uint32_t const*)_chars.data(), _chars.size(), 0, _chars.size());
@@ -199,14 +199,12 @@ vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
     hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
     hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
 
-    auto result = vector<GlyphPosition>{};
-
     unsigned int cx = 0;
     unsigned int cy = 0;
     unsigned int advance = 0; // not yet exposed nor needed on caller side
     for (unsigned i = 0; i < len; ++i)
     {
-        result.emplace_back(GlyphPosition{
+        _result.emplace_back(GlyphPosition{
             cx + pos[i].x_offset / 64,
             cy + pos[i].y_offset / 64,
             info[i].codepoint
@@ -216,7 +214,4 @@ vector<Font::GlyphPosition> Font::render(vector<char32_t> const& _chars)
         cy += pos[i].y_advance / 64;
         advance += pos[i].x_advance / 64;
     }
-
-    return result;
 }
-

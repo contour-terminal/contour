@@ -80,7 +80,7 @@ class Font {
         unsigned int codepoint;
     };
     /// Renders text into glyph positions of this font.
-    std::vector<GlyphPosition> render(std::vector<char32_t> const& _chars);
+    void render(std::vector<char32_t> const& _chars, std::vector<GlyphPosition>& _result);
 
   private:
     FT_Library ft_;

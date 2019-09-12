@@ -36,7 +36,6 @@ class GLTextShaper {
     };
 
     Glyph& getGlyphByIndex(unsigned long _index, FontStyle _style);
-    unsigned renderGlyph(glm::ivec2 _pos, Glyph const& _glyph, glm::vec4 const& _color);
 
     static std::string const& fragmentShaderCode();
     static std::string const& vertexShaderCode();
@@ -44,6 +43,7 @@ class GLTextShaper {
   private:
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;
     Font& regularFont_;
+    std::vector<Font::GlyphPosition> glyphPositions_;
     GLuint vbo_;
     GLuint vao_;
     glm::mat4 projectionMatrix_;
