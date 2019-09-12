@@ -317,6 +317,7 @@ int main(int argc, char const* argv[])
     {
         util::Flags flags;
         flags.defineBool("help", 'h', "Shows this help and quits.");
+        flags.defineBool("log-parser-error", 0, "Enables logging of parser errorrs.");
         flags.defineBool("log-raw-input", 0, "Enables logging of raw input.");
         flags.defineBool("log-raw-output", 0, "Enables logging of raw output.");
         flags.defineBool("log-invalid-output", 0, "Enables logging of invalid output sequences.");
@@ -327,6 +328,8 @@ int main(int argc, char const* argv[])
         flags.defineNumber("lines", 'L', "COUNT", "Defines number of text lines.", 25);
         flags.defineString("font", 'F', "PATTERN", "Defines font family.", "Fira Code, Ubuntu Mono, Consolas, monospace");
         flags.defineString("shell", 's', "SHELL", "Defines shell to invoke.", terminal::Process::loginShell());
+
+        flags.parse(argc, argv);
 
         LogMask const logMask = [&]() {
             LogMask mask{};
@@ -348,21 +351,8 @@ int main(int argc, char const* argv[])
             if (flags.getBool("log-trace-output"))
                 mask |= LogMask::TraceOutput;
 
-            #if !defined(NDEBUG)
-            mask |= LogMask::ParserError;
-            mask |= LogMask::InvalidOutput;
-            mask |= LogMask::UnsupportedOutput;
-            mask |= LogMask::RawInput;
-            mask |= LogMask::RawOutput;
-            #endif
-            #if 0 // !defined(NDEBUG)
-            mask |= LogMask::TraceOutput;
-            #endif
-
             return mask;
         }();
-
-        flags.parse(argc, argv);
 
         if (flags.getBool("help"))
         {
