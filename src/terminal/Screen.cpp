@@ -425,6 +425,7 @@ Screen::Screen(size_t columnCount,
     columnCount_{ columnCount },
     rowCount_{ rowCount }
 {
+    (*this)(SetMode{Mode::AutoWrap, true});
 }
 
 void Screen::resize(size_t newColumnCount, size_t newRowCount)
