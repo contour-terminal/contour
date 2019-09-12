@@ -330,22 +330,22 @@ int main(int argc, char const* argv[])
 
         LogMask const logMask = [&]() {
             LogMask mask{};
-            if (flags.isSet("log-parser-error"))
+            if (flags.getBool("log-parser-error"))
                 mask |= LogMask::ParserError;
 
-            if (flags.isSet("log-invalid-output"))
+            if (flags.getBool("log-invalid-output"))
                 mask |= LogMask::InvalidOutput;
 
-            if (flags.isSet("log-unsupported-output"))
+            if (flags.getBool("log-unsupported-output"))
                 mask |= LogMask::UnsupportedOutput;
 
-            if (flags.isSet("log-raw-input"))
+            if (flags.getBool("log-raw-input"))
                 mask |= LogMask::RawInput;
 
-            if (flags.isSet("log-raw-output"))
+            if (flags.getBool("log-raw-output"))
                 mask |= LogMask::RawOutput;
 
-            if (flags.isSet("log-trace-output"))
+            if (flags.getBool("log-trace-output"))
                 mask |= LogMask::TraceOutput;
 
             #if !defined(NDEBUG)
