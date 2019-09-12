@@ -47,7 +47,8 @@
 // - [x] proper glterm termination (window close as well as process exit)
 // - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
-// - [ ] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
+// - [x] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
+// - [ ] show cursor (in correct shapes, with blinking)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
 // - [ ] Hi-DPI support (hm, because I need it)
@@ -57,7 +58,6 @@
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
 // - [ ] input: GLFW_KEY_PAUSE
 // - [ ] input: GLFW_KEY_KP_EQUAL
-// - [ ] show cursor (in correct shapes, with blinking)
 
 #if defined(__unix__)
 #include <unistd.h>
