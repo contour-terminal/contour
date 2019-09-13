@@ -763,6 +763,7 @@ void Screen::operator()(MoveCursorBackward const& v)
 
 void Screen::operator()(MoveCursorToColumn const& v)
 {
+    state_->wrapPending = false;
     auto const n = min(v.column, columnCount());
     state_->cursor.column = n;
     state_->currentColumn = next(begin(*state_->currentLine), n - 1);
