@@ -1,28 +1,111 @@
 #include "GLCursor.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 using namespace std;
 
-GLCursor::GLCursor(glm::ivec2 _size, CursorShape _shape)
+auto constexpr vertexShader = R"(
+    #version 150 core
+    in vec2 position;
+    uniform mat4 transform;
+    void main()
+    {
+        gl_Position = transform * vec4(position, 0.2, 1.0);
+    }
+)";
+
+auto constexpr fragmentShader = R"(
+    #version 150 core
+    uniform vec3 color;
+    void main()
+    {
+        gl_FragColor = vec4(color, 1.0);
+    }
+)";
+
+GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, glm::vec3 const& _color) :
+    shape_{ _shape },
+    transform_{ move(_transform) },
+    shader_{ make_unique<Shader>(vertexShader, fragmentShader) },
+    transformLocation_{ shader_->uniformLocation("transform") },
+    colorLocation_{ shader_->uniformLocation("color") },
+    vbo_{},
+    vao_{}
 {
-    // TODO: timer fuer blinking starten
+    setColor(_color);
+
+    // --------------------------------------------------------------------
+    // setup vertices
+    glGenBuffers(1, &vbo_);
+    //TODO: call setSize(_size); instead
+    GLfloat const vertices[] = {
+        0.0f, 0.0f,                           // bottom left
+        (GLfloat)_size.x, 0.0f,               // bottom right
+        (GLfloat)_size.x, (GLfloat)_size.y,   // top right
+        0.0f, (GLfloat)_size.y                // top left
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glGenVertexArrays(1, &vao_);
+    glBindVertexArray(vao_);
+
+    // specify vertex data layout
+    auto const posAttr = shader_->attributeLocation("position");
+    glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(posAttr);
 }
 
-void GLCursor::setShape(CursorShape _shape)
+GLCursor::~GLCursor()
 {
-    // setzt nicht nur shape_ sondern auch gleich die QUAD vertices,
-    // sodass sie das jeweilige shape formen
+    glDeleteBuffers(1, &vbo_);
+    glDeleteVertexArrays(1, &vao_);
 }
 
 void GLCursor::setTransform(glm::mat4 _mat)
 {
+    transform_ = _mat;
 }
 
-void GLCursor::resize(glm::ivec2 _size)
+void GLCursor::setShape(CursorShape _shape)
 {
-    }
+    // TODO: update shaper parameters to reflect new shape (by changing vertices?)
+}
 
-void GLCursor::render(glm::mat4 transform)
+void GLCursor::setColor(glm::vec3 _color)
+{
+    shader_->use();
+    shader_->setVec3(colorLocation_, _color);
+}
+
+void GLCursor::setSize(glm::vec2 _size)
+{
+    // TODO: check if this is enough
+
+    GLfloat const vertices[] = {
+        0.0f, 0.0f,                           // bottom left
+        (GLfloat)_size.x, 0.0f,               // bottom right
+        (GLfloat)_size.x, (GLfloat)_size.y,   // top right
+        0.0f, (GLfloat)_size.y                // top left
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+}
+
+void GLCursor::render(glm::ivec2 _pos)
 {
     // kann alle shapes rendern, same code paths
+    shader_->use();
+
+    auto const pos = shader_->uniformLocation("pos");
+    shader_->setVec2(pos, glm::vec2{ glm::vec2{_pos.x, _pos.y} });
+
+    glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos[0], _pos[1], 0.0f));
+    shader_->setMat4(transformLocation_, transform_ * translation);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_QUADS, 0, 4);
 }
 

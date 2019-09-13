@@ -41,6 +41,8 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
                        unsigned _width,
                        unsigned _height,
                        Font& _regularFont,
+                       CursorShape _cursorShape,
+                       glm::vec3 const& _cursorColor,
                        string const& _shell,
                        glm::mat4 const& _projectionMatrix,
                        GLLogger& _logger) :
@@ -54,6 +56,15 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
         regularFont_.maxAdvance(),
         regularFont_.lineHeight(),
         _projectionMatrix
+    },
+    cursor_{
+        glm::ivec2{
+            regularFont_.maxAdvance(),
+            regularFont_.lineHeight(),
+        },
+        _projectionMatrix,
+        _cursorShape,
+        _cursorColor
     },
     terminal_{
         _winSize,
@@ -152,6 +163,9 @@ void GLTerminal::render()
 {
     terminal_.render(bind(&GLTerminal::fillCellGroup, this, _1, _2, _3));
     renderCellGroup();
+
+    // TODO: only render when visible
+    cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
 }
 
 void GLTerminal::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)

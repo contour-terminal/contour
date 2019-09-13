@@ -22,8 +22,9 @@
 
 #include "CellBackground.h"
 #include "FontManager.h"
-#include "GLTextShaper.h"
+#include "GLCursor.h"
 #include "GLLogger.h"
+#include "GLTextShaper.h"
 
 #include <glm/matrix.hpp>
 
@@ -31,14 +32,15 @@ class Font;
 
 /// OpenGL-Terminal Object.
 class GLTerminal {
-public:
-    GLTerminal(
-        terminal::WindowSize const& _winSize,
-        unsigned _width, unsigned _height,
-        Font& _fontFamily,
-        std::string const& _shell,
-        glm::mat4 const& _projectionMatrix,
-        GLLogger& _logger);
+  public:
+    GLTerminal(terminal::WindowSize const& _winSize,
+               unsigned _width, unsigned _height,
+               Font& _fontFamily,
+               CursorShape _cursorShape,
+               glm::vec3 const& _cursorColor,
+               std::string const& _shell,
+               glm::mat4 const& _projectionMatrix,
+               GLLogger& _logger);
 
     GLTerminal(GLTerminal const&) = delete;
     GLTerminal(GLTerminal&&) = delete;
@@ -78,7 +80,7 @@ public:
     /// The alive() test will fail after this call.
     void wait();
 
-private:
+  private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
     using GraphicsAttributes = terminal::Screen::GraphicsAttributes;
@@ -93,7 +95,7 @@ private:
     std::pair<RGBColor, RGBColor> makeColors(GraphicsAttributes const& _attributes) const;
     float makeOpacity(GraphicsAttributes const& _attributes) const noexcept;
 
-private:
+  private:
     bool alive_ = true;
 
     /// Holds an array of directly connected characters on a single line that all share the same visual attributes.
@@ -131,6 +133,7 @@ private:
     Font& regularFont_;
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
+    GLCursor cursor_;
 
     terminal::Terminal terminal_;
     terminal::Process process_;

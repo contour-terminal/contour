@@ -28,6 +28,7 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -51,11 +52,17 @@
 // - [x] Hi-DPI support (hm, because I need it)
 // - [ ] Fix font size on non-Hi-DPI screens (such as my Linux monitor)
 // - [ ] show cursor (in correct shapes, with blinking)
+//   - [x] CursorShape: Block
+//   - [ ] Screen: HideCursor / ShowCursor
+//   - [ ] CursorShape: Beam
+//   - [ ] CursorShape: Underline
+//   - [ ] Blinking Mode
+// - [ ] basic runtime-reloadable config file (yaml?)
 // - [ ] input: fix input sequences on non ConPTY hosts (cursor keys, ...?)
 // - [ ] other SGRs (bold, italic, etc)
 // - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
 // - [ ] fix text positioning (chars seem pressed down instead of centered)
-// - [ ] font loading on Linux
+// - [ ] font (fontconfig) loading on Linux
 // - [ ] input: F13..F25
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
 // - [ ] input: GLFW_KEY_PAUSE
@@ -74,6 +81,8 @@ class GLTerm {
         terminal::WindowSize const& _winSize,
         unsigned short _fontSize,
         std::string const& _fontFamily,
+        CursorShape _cursorShape,
+        glm::vec3 const& _cursorColor,
         std::string const& _shell,
         LogMask _logMask);
 
@@ -99,6 +108,8 @@ class GLTerm {
 GLTerm::GLTerm(terminal::WindowSize const& _winSize,
                unsigned short _fontSize,
                std::string const& _fontFamily,
+               CursorShape _cursorShape,
+               glm::vec3 const& _cursorColor,
                std::string const& _shell,
                LogMask _logMask) :
     //loggingSink_{"glterm.log", ios::trunc},
@@ -124,6 +135,8 @@ GLTerm::GLTerm(terminal::WindowSize const& _winSize,
         window_.width(),
         window_.height(),
         regularFont_,
+        _cursorShape,
+        _cursorColor,
         _shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         logger_
@@ -315,6 +328,20 @@ void GLTerm::onChar(char32_t _char)
     terminalView_.send(_char, terminal::Modifier{});
 }
 
+CursorShape makeCursorShape(string const& _name)
+{
+    if (_name == "block")
+        return CursorShape::Block;
+
+    if (_name == "underscore")
+        return CursorShape::Underscore;
+
+    if (_name == "beam")
+        return CursorShape::Beam;
+
+    throw runtime_error("Invalid cursor shape. Use one of block, underscore, beam.");
+}
+
 int main(int argc, char const* argv[])
 {
     try
@@ -331,6 +358,7 @@ int main(int argc, char const* argv[])
         flags.defineNumber("columns", 'C', "COUNT", "Defines number of text columns.", 130);
         flags.defineNumber("lines", 'L', "COUNT", "Defines number of text lines.", 25);
         flags.defineString("font", 'F', "PATTERN", "Defines font family.", "Fira Code, Ubuntu Mono, Consolas, monospace");
+        flags.defineString("cursor-shape", 'P', "SHAPE", "Defines cursor shape.", "block");
         flags.defineString("shell", 's', "SHELL", "Defines shell to invoke.", terminal::Process::loginShell());
 
         flags.parse(argc, argv);
@@ -369,6 +397,8 @@ int main(int argc, char const* argv[])
             return EXIT_SUCCESS;
         }
 
+        auto const cursorColor = glm::vec3{ 1.0, 1.0, 0.0 };
+
         auto glterm = GLTerm{
             terminal::WindowSize{
                 static_cast<unsigned short>(flags.getNumber("columns")),
@@ -376,6 +406,8 @@ int main(int argc, char const* argv[])
             },
             static_cast<unsigned short>(flags.getNumber("font-size")),
             flags.getString("font"),
+            makeCursorShape(flags.getString("cursor-shape")),
+            cursorColor,
             flags.getString("shell"),
             logMask
         };
