@@ -25,8 +25,8 @@
 - [ ] Tests: almost complete unit tests
 - [ ] Unicode: multi codepoint grapheme support
 - [ ] Telemetry: control function usage counts, error counts, warning counts
-- [ ] examples/glterm: Screen text selection and copy-to-clipboard support.
-- [ ] examples/glterm: Paste support.
+- [ ] examples/absolute: Screen text selection and copy-to-clipboard support.
+- [ ] examples/absolute: Paste support.
 - [ ] => release 0.2.0
 
 ### Users
