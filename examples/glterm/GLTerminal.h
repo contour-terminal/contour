@@ -15,6 +15,8 @@
 
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
+
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -37,18 +39,43 @@ public:
         std::string const& _shell,
         glm::mat4 const& _projectionMatrix,
         GLLogger& _logger);
+
+    GLTerminal(GLTerminal const&) = delete;
+    GLTerminal(GLTerminal&&) = delete;
+    GLTerminal& operator=(GLTerminal const&) = delete;
+    GLTerminal& operator=(GLTerminal&&) = delete;
+
     ~GLTerminal();
 
     bool send(char32_t _characterEvent, terminal::Modifier _modifier);
     bool send(terminal::Key _key, terminal::Modifier _modifier);
+
+    /// Takes a screenshot of the current screen buffer in VT sequence format.
     std::string screenshot() const;
 
-    //void translate(unsigned _bottomLeft, unsigned _bottomRight);
+    /// Resizes the terminal view to the given number of pixels.
+    ///
+    /// It also computes the appropricate number of text lines and character columns
+    /// and resizes the internal screen buffer as well as informs the connected
+    /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
+
+    /// Sets the projection matrix used for translating rendering coordinates.
     void setProjection(glm::mat4 const& _projectionMatrix);
+
+    /// Checks if a render() method should be called by checking the dirty bit,
+    /// and if so, clears the dirty bit and returns true, false otherwise.
+    bool shouldRender();
+
+    /// Renders the screen buffer to the current OpenGL screen.
     void render();
 
+    /// Checks if there is still a slave connected to the PTY.
     bool alive() const;
+
+    /// Waits until the PTY slave has terminated, and then closes the underlying terminal.
+    ///
+    /// The alive() test will fail after this call.
     void wait();
 
 private:
@@ -69,6 +96,7 @@ private:
 private:
     bool alive_ = true;
 
+    /// Holds an array of directly connected characters on a single line that all share the same visual attributes.
     struct PendingDraw {
         cursor_pos_t lineNumber{};
         cursor_pos_t startColumn{};
@@ -96,6 +124,9 @@ private:
     Margin margin_{};
 
     GLLogger& logger_;
+
+    /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
+    std::atomic<bool> updated_;
 
     Font& regularFont_;
     GLTextShaper textShaper_;

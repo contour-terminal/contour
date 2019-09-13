@@ -142,7 +142,9 @@ int GLTerm::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
-        render();
+        if (terminalView_.shouldRender())
+            render();
+
         glfwWaitEventsTimeout(0.5);
     }
 

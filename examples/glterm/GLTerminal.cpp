@@ -47,6 +47,7 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
     width_{ _width },
     height_{ _height },
     logger_{ _logger },
+    updated_{ false },
     regularFont_{ _regularFont },
     textShaper_{ _regularFont, _projectionMatrix },
     cellBackground_{
@@ -132,6 +133,19 @@ void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
 {
     cellBackground_.setProjection(_projectionMatrix);
     textShaper_.setProjection(_projectionMatrix);
+}
+
+bool GLTerminal::shouldRender()
+{
+    bool current = updated_.load();
+
+    if (!current)
+        return false;
+
+    if (!std::atomic_compare_exchange_weak(&updated_, &current, false))
+        return false;
+
+    return true;
 }
 
 void GLTerminal::render()
@@ -259,5 +273,6 @@ void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _comma
     for (terminal::Command const& command : _commands)
         logger_(TraceOutputEvent{ to_string(command) });
 
+    updated_.store(true);
     glfwPostEmptyEvent();
 }
