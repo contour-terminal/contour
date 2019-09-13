@@ -397,7 +397,7 @@ int main(int argc, char const* argv[])
             return EXIT_SUCCESS;
         }
 
-        auto const cursorColor = glm::vec3{ 1.0, 1.0, 0.0 };
+        auto const cursorColor = glm::vec3{ 0.6, 0.6, 0.6 };
 
         auto glterm = GLTerm{
             terminal::WindowSize{
