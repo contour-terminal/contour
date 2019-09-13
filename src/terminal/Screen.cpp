@@ -447,8 +447,12 @@ void Screen::write(char const * _data, size_t _size)
     handler_.commands().clear();
     parser_.parseFragment(_data, _size);
 
+    state_->verifyState();
     for (Command const& command : handler_.commands())
+    {
         visit(*this, command);
+        state_->verifyState();
+    }
 
     if (onCommands_)
         onCommands_(handler_.commands());
