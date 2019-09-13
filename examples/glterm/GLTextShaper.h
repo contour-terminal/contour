@@ -48,5 +48,6 @@ class GLTextShaper {
     GLuint vao_;
     glm::mat4 projectionMatrix_;
     Shader shader_;
+    GLint colorLocation_;
 };
 

@@ -17,6 +17,7 @@
 
 CellBackground::CellBackground(unsigned _width, unsigned _height, glm::mat4 const& _projectionMatrix)
 {
+    transformLocation_ = shader_.uniformLocation("transform");
     projectionMatrix_ = _projectionMatrix;
 
     // setup background shader
@@ -57,7 +58,7 @@ void CellBackground::render(glm::ivec2 _pos, terminal::RGBColor const& color)
     shader_.setVec3("backgroundColor", glm::vec3{ color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f });
 
     glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos[0], _pos[1], 0.0f));
-    shader_.setMat4("transform", projectionMatrix_ * translation);
+    shader_.setMat4(transformLocation_, projectionMatrix_ * translation);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_QUADS, 0, 4);

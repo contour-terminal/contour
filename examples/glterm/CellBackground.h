@@ -62,6 +62,7 @@ class CellBackground {
     GLuint vbo_{};
     GLuint vao_{};
 
+    GLint transformLocation_;
     glm::mat4 projectionMatrix_;
 };
 

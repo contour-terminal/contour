@@ -14,7 +14,8 @@ GLTextShaper::GLTextShaper(Font& _regularFont, glm::mat4 const& _projection) :
     cache_{},
     regularFont_{ _regularFont },
     projectionMatrix_{ _projection },
-    shader_{ vertexShaderCode(), fragmentShaderCode() }
+    shader_{ vertexShaderCode(), fragmentShaderCode() },
+    colorLocation_{ shader_.uniformLocation("textColor") }
 {
     // disable byte-alignment restriction
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -95,7 +96,7 @@ void GLTextShaper::render(
     font.render(_chars, glyphPositions_);
 
     shader_.use();
-    shader_.setVec4("textColor", _color);
+    shader_.setVec4(colorLocation_, _color);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
