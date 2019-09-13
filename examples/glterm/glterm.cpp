@@ -143,7 +143,7 @@ int GLTerm::main()
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
         render();
-        glfwPollEvents();
+        glfwWaitEventsTimeout(0.5);
     }
 
     return EXIT_SUCCESS;

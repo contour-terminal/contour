@@ -17,6 +17,10 @@
 
 #include <terminal/Util.h>
 
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
+
 #include <iostream>
 #include <utility>
 
@@ -254,4 +258,6 @@ void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _comma
 
     for (terminal::Command const& command : _commands)
         logger_(TraceOutputEvent{ to_string(command) });
+
+    glfwPostEmptyEvent();
 }
