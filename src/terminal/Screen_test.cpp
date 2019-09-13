@@ -34,6 +34,8 @@ TEST_CASE("AppendChar", "[screen]")
     auto screen = Screen{3, 1, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
     REQUIRE("   " == screen.renderTextLine(1));
 
+    screen(SetMode{ Mode::AutoWrap, false });
+
     screen.write("A");
     REQUIRE("A  " == screen.renderTextLine(1));
 
@@ -45,6 +47,10 @@ TEST_CASE("AppendChar", "[screen]")
 
     screen.write("D");
     REQUIRE("ABD" == screen.renderTextLine(1));
+
+    screen(SetMode{ Mode::AutoWrap, true });
+    screen.write("EF");
+    REQUIRE("F  " == screen.renderTextLine(1));
 }
 
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
