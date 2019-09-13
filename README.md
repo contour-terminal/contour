@@ -14,7 +14,7 @@
 - [x] Terminal: fully functioning Terminal API
 - [x] Screen buffer management done
 - [x] InputHandler: basic VT input handling
-- [ ] example GUI terminal emulator (glterm)
+- [x] example GUI terminal emulator: [|absolute|](https://github.com/christianparpart/libterminal/tree/master/examples/absolute)
 - [ ] ensure the following works almost perfect: bash, top, htop, mc, vim, tmux
 - [ ] => initial release 0.1.0
 

@@ -6,4 +6,4 @@ target_link_libraries(proxy_term terminal Threads::Threads)
 
 add_executable(termbench termbench.cpp)
 
-add_subdirectory(glterm)
+add_subdirectory("absolute")

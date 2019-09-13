@@ -11,20 +11,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/InputGenerator.h>
-#include <terminal/OutputGenerator.h>
-#include <terminal/Terminal.h>
-#include <terminal/Process.h>
-#include <terminal/UTF8.h>
-#include <terminal/Util.h>
+#include "AbsoluteTerminal.h"
 
+#include <iostream>
+#include <fstream>
 #include <cstdio>
 #include <cctype>
-#include <fstream>
-#include <iostream>
-#include <iomanip>
-#include <unordered_map>
-#include <variant>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -34,85 +26,17 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include "FontManager.h"
-#include "Window.h"
-#include "GLTerminal.h"
-#include "GLLogger.h"
-#include "Flags.h"
-
-#if defined(__linux__)
-#include <fontconfig/fontconfig.h>
-#endif
-
-// TODOs:
-// - [x] proper glterm termination (window close as well as process exit)
-// - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
-// - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
-// - [x] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
-// - [x] Hi-DPI support (hm, because I need it)
-// - [ ] Fix font size on non-Hi-DPI screens (such as my Linux monitor)
-// - [ ] show cursor (in correct shapes, with blinking)
-//   - [x] CursorShape: Block
-//   - [ ] Screen: HideCursor / ShowCursor
-//   - [ ] CursorShape: Beam
-//   - [ ] CursorShape: Underline
-//   - [ ] Blinking Mode
-// - [ ] basic runtime-reloadable config file (yaml?)
-// - [ ] input: fix input sequences on non ConPTY hosts (cursor keys, ...?)
-// - [ ] other SGRs (bold, italic, etc)
-// - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
-// - [ ] fix text positioning (chars seem pressed down instead of centered)
-// - [ ] font (fontconfig) loading on Linux
-// - [ ] input: F13..F25
-// - [ ] input: GLFW_KEY_PRINT_SCREEN
-// - [ ] input: GLFW_KEY_PAUSE
-// - [ ] input: GLFW_KEY_KP_EQUAL
-
-#if defined(__unix__)
-#include <unistd.h>
-#endif
-
 using namespace std;
 using namespace std::placeholders;
 
-class GLTerm {
-  public:
-    GLTerm(
-        terminal::WindowSize const& _winSize,
-        unsigned short _fontSize,
-        std::string const& _fontFamily,
-        CursorShape _cursorShape,
-        glm::vec3 const& _cursorColor,
-        std::string const& _shell,
-        LogMask _logMask);
-
-    ~GLTerm();
-
-    int main();
-
-  private:
-    void render();
-    void onResize(unsigned _width, unsigned _height);
-    void onKey(int _key, int _scanCode, int _action, int _mods);
-    void onChar(char32_t _char);
-    void onContentScale(float _xs, float _ys);
-
-  private:
-    GLLogger logger_;
-    FontManager fontManager_;
-    Font& regularFont_;
-    Window window_;
-    GLTerminal terminalView_;
-};
-
-GLTerm::GLTerm(terminal::WindowSize const& _winSize,
+AbsoluteTerminal::AbsoluteTerminal(terminal::WindowSize const& _winSize,
                unsigned short _fontSize,
                std::string const& _fontFamily,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
                std::string const& _shell,
                LogMask _logMask) :
-    //loggingSink_{"glterm.log", ios::trunc},
+    //loggingSink_{"myterm.log", ios::trunc},
     logger_{_logMask, &cout},
     fontManager_{},
     regularFont_{
@@ -124,11 +48,11 @@ GLTerm::GLTerm(terminal::WindowSize const& _winSize,
     window_{
         _winSize.columns * regularFont_.maxAdvance(),
         _winSize.rows * regularFont_.lineHeight(),
-        "glterm",
-        bind(&GLTerm::onKey, this, _1, _2, _3, _4),
-        bind(&GLTerm::onChar, this, _1),
-        bind(&GLTerm::onResize, this, _1, _2),
-        bind(&GLTerm::onContentScale, this, _1, _2)
+        "myterm",
+        bind(&AbsoluteTerminal::onKey, this, _1, _2, _3, _4),
+        bind(&AbsoluteTerminal::onChar, this, _1),
+        bind(&AbsoluteTerminal::onResize, this, _1, _2),
+        bind(&AbsoluteTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
         _winSize,
@@ -147,11 +71,11 @@ GLTerm::GLTerm(terminal::WindowSize const& _winSize,
     glViewport(0, 0, window_.width(), window_.height());
 }
 
-GLTerm::~GLTerm()
+AbsoluteTerminal::~AbsoluteTerminal()
 {
 }
 
-int GLTerm::main()
+int AbsoluteTerminal::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
@@ -164,7 +88,7 @@ int GLTerm::main()
     return EXIT_SUCCESS;
 }
 
-void GLTerm::render()
+void AbsoluteTerminal::render()
 {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -174,13 +98,13 @@ void GLTerm::render()
     glfwSwapBuffers(window_);
 }
 
-void GLTerm::onContentScale(float _xs, float _ys)
+void AbsoluteTerminal::onContentScale(float _xs, float _ys)
 {
     cout << fmt::format("Updated content scale to: {:.2f} by {:.2f}\n", _xs, _ys);
     // TODO: scale fontSize by factor _ys.
 }
 
-void GLTerm::onResize(unsigned _width, unsigned _height)
+void AbsoluteTerminal::onResize(unsigned _width, unsigned _height)
 {
     glViewport(0, 0, _width, _height);
     terminalView_.setProjection(glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)));
@@ -280,7 +204,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
-void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
+void AbsoluteTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
 {
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
@@ -323,99 +247,8 @@ void GLTerm::onKey(int _key, int _scanCode, int _action, int _mods)
     }
 }
 
-void GLTerm::onChar(char32_t _char)
+void AbsoluteTerminal::onChar(char32_t _char)
 {
     terminalView_.send(_char, terminal::Modifier{});
 }
 
-CursorShape makeCursorShape(string const& _name)
-{
-    if (_name == "block")
-        return CursorShape::Block;
-
-    if (_name == "underscore")
-        return CursorShape::Underscore;
-
-    if (_name == "beam")
-        return CursorShape::Beam;
-
-    throw runtime_error("Invalid cursor shape. Use one of block, underscore, beam.");
-}
-
-int main(int argc, char const* argv[])
-{
-    try
-    {
-        util::Flags flags;
-        flags.defineBool("help", 'h', "Shows this help and quits.");
-        flags.defineBool("log-parser-error", 0, "Enables logging of parser errorrs.");
-        flags.defineBool("log-raw-input", 0, "Enables logging of raw input.");
-        flags.defineBool("log-raw-output", 0, "Enables logging of raw output.");
-        flags.defineBool("log-invalid-output", 0, "Enables logging of invalid output sequences.");
-        flags.defineBool("log-unsupported-output", 0, "Enables logging of unsupported output sequences.");
-        flags.defineBool("log-trace-output", 0, "Enables logging of output trace.");
-        flags.defineNumber("font-size", 'S', "PIXELS", "Defines character font-size.", 12);
-        flags.defineNumber("columns", 'C', "COUNT", "Defines number of text columns.", 130);
-        flags.defineNumber("lines", 'L', "COUNT", "Defines number of text lines.", 25);
-        flags.defineString("font", 'F', "PATTERN", "Defines font family.", "Fira Code, Ubuntu Mono, Consolas, monospace");
-        flags.defineString("cursor-shape", 'P', "SHAPE", "Defines cursor shape.", "block");
-        flags.defineString("shell", 's', "SHELL", "Defines shell to invoke.", terminal::Process::loginShell());
-
-        flags.parse(argc, argv);
-
-        LogMask const logMask = [&]() {
-            LogMask mask{};
-            if (flags.getBool("log-parser-error"))
-                mask |= LogMask::ParserError;
-
-            if (flags.getBool("log-invalid-output"))
-                mask |= LogMask::InvalidOutput;
-
-            if (flags.getBool("log-unsupported-output"))
-                mask |= LogMask::UnsupportedOutput;
-
-            if (flags.getBool("log-raw-input"))
-                mask |= LogMask::RawInput;
-
-            if (flags.getBool("log-raw-output"))
-                mask |= LogMask::RawOutput;
-
-            if (flags.getBool("log-trace-output"))
-                mask |= LogMask::TraceOutput;
-
-            return mask;
-        }();
-
-        if (flags.getBool("help"))
-        {
-            cout << "glterm - Terminal Emulator.\n"
-                 << "\n"
-                 << "Usage:\n"
-                 << "  glterm [OPTIONS ...]\n"
-                 << "\n"
-                 << flags.helpText() << endl;
-            return EXIT_SUCCESS;
-        }
-
-        auto const cursorColor = glm::vec3{ 0.6, 0.6, 0.6 };
-
-        auto glterm = GLTerm{
-            terminal::WindowSize{
-                static_cast<unsigned short>(flags.getNumber("columns")),
-                static_cast<unsigned short>(flags.getNumber("lines"))
-            },
-            static_cast<unsigned short>(flags.getNumber("font-size")),
-            flags.getString("font"),
-            makeCursorShape(flags.getString("cursor-shape")),
-            cursorColor,
-            flags.getString("shell"),
-            logMask
-        };
-        return glterm.main();
-    }
-    catch (exception const& e)
-    {
-        cerr << "Unhandled error caught. " << e.what() << endl;
-        return EXIT_FAILURE;
-    }
-}
