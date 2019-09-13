@@ -16,13 +16,18 @@ public:
     void use();
 
     GLint uniformLocation(std::string const& _name) const;
+    GLint attributeLocation(std::string const& _name) const;
 
     void setBool(const std::string& _name, bool _value) const;
     void setInt(const std::string& _name, int _value) const;
     void setFloat(const std::string& _name, float _value) const;
 
+    void setVec2(GLint _id, const glm::vec2& _value) const;
     void setVec2(const std::string& _name, const glm::vec2& _value) const;
+
+    void setVec3(GLint _id, const glm::vec3& _value) const;
     void setVec3(const std::string& _name, const glm::vec3& _value) const;
+
     void setVec4(GLint _id, const glm::vec4& _value) const;
     void setVec4(const std::string& _name, const glm::vec4& _value) const;
 
