@@ -26,6 +26,7 @@
 #include <unistd.h>
 #else
 #include <Windows.h>
+using ssize_t = SSIZE_T;
 #endif
 
 using namespace std;
@@ -76,7 +77,6 @@ namespace {
 		return ::write(STDOUT_FILENO, _buf, _size);
 	#else
 		DWORD nwritten{};
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, static_cast<DWORD>(n), &nwritten, nullptr);
         auto const rv = WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
         if (rv == S_OK)
             return static_cast<ssize_t>(nwritten);
