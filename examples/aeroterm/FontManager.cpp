@@ -218,13 +218,13 @@ void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _
     for (unsigned i = 0; i < len; ++i)
     {
         _result.emplace_back(GlyphPosition{
-            cx + pos[i].x_offset / 64,
-            cy + pos[i].y_offset / 64,
+            cx + (pos[i].x_offset >> 6),
+            cy + (pos[i].y_offset >> 6),
             info[i].codepoint
         });
 
         cx += maxAdvance(), // Ought to be (pos[i].x_advance / 64), but that breaks on some font sizes it seems.
-        cy += pos[i].y_advance / 64;
-        advance += pos[i].x_advance / 64;
+        cy += pos[i].y_advance >> 6;
+        advance += pos[i].x_advance >> 6;
     }
 }
