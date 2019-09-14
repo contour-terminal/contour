@@ -15,9 +15,9 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
 endif()
 
 if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND AND harfbuzz_FOUND)
-    message(STATUS "-- Building |absolute| Terminal Emulator: yes")
-    add_executable("absolute"
-        AbsoluteTerminal.cpp AbsoluteTerminal.h
+    message(STATUS "-- Building Aero Terminal Emulator: yes")
+    add_executable(aeroterm
+        AeroTerminal.cpp AeroTerminal.h
         CellBackground.cpp CellBackground.h
         Flags.cpp Flags.h
         FontManager.cpp FontManager.h
@@ -39,7 +39,7 @@ if(glfw3_FOUND AND OpenGL_FOUND AND glfw3_FOUND AND GLEW_FOUND AND glm_FOUND AND
         #list(APPEND GLTERM_LIBRARIES unofficial::fontconfig::fontconfig)
     endif()
 
-    target_link_libraries("absolute" PRIVATE ${GLTERM_LIBRARIES})
+    target_link_libraries(aeroterm PRIVATE ${GLTERM_LIBRARIES})
 else()
-    message(STATUS "-- Building absolute: no (missing prerequisites)")
+    message(STATUS "-- Building Aero Terminal: no (missing prerequisites)")
 endif()

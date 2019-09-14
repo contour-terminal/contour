@@ -1,8 +1,8 @@
-# |absolute| Terminal Emulator
+# Aero Terminal Emulator
 
 ### Purpose
 
-`|absolute|` is a purely minimal terminal emulator, based on libterminal.
+`aeroterm` is a purely minimal terminal emulator, based on libterminal.
 It purely serves as example on how to hack a terminal with libterminal, and thus will be:
 
 * single-windowed

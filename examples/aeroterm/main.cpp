@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "AbsoluteTerminal.h"
+#include "AeroTerminal.h"
 #include "GLLogger.h"
 #include "Flags.h"
 
@@ -25,7 +25,7 @@
 #include <iostream>
 
 // TODOs:
-// - [x] proper myterm termination (window close as well as process exit)
+// - [x] proper termination (window close as well as process exit)
 // - [x] input: rename Numpad_Dot to Numpad_Decimal, and others (Div -> Divide, etc)
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [x] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
@@ -114,10 +114,10 @@ int main(int argc, char const* argv[])
 
         if (flags.getBool("help"))
         {
-            cout << "|absolute| - Terminal Emulator.\n"
+            cout << "Aero Terminal Emulator.\n"
                  << "\n"
                  << "Usage:\n"
-                 << "  absolute [OPTIONS ...]\n"
+                 << "  aeroterm [OPTIONS ...]\n"
                  << "\n"
                  << flags.helpText() << endl;
             return EXIT_SUCCESS;
@@ -125,7 +125,7 @@ int main(int argc, char const* argv[])
 
         auto const cursorColor = glm::vec3{ 0.6, 0.6, 0.6 };
 
-        auto myterm = AbsoluteTerminal{
+        auto myterm = AeroTerminal{
             terminal::WindowSize{
                 static_cast<unsigned short>(flags.getNumber("columns")),
                 static_cast<unsigned short>(flags.getNumber("lines"))

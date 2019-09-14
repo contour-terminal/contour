@@ -14,7 +14,7 @@
 - [x] Terminal: fully functioning Terminal API
 - [x] Screen buffer management done
 - [x] InputHandler: basic VT input handling
-- [x] example GUI terminal emulator: [|absolute|](https://github.com/christianparpart/libterminal/tree/master/examples/absolute)
+- [x] example GUI terminal emulator: [|Aero Terminal|](https://github.com/christianparpart/libterminal/tree/master/examples/AeroTerm)
 - [ ] ensure the following works almost perfect: bash, top, htop, mc, vim, tmux
 - [ ] => initial release 0.1.0
 
@@ -25,8 +25,8 @@
 - [ ] Tests: almost complete unit tests
 - [ ] Unicode: multi codepoint grapheme support
 - [ ] Telemetry: control function usage counts, error counts, warning counts
-- [ ] examples/absolute: Screen text selection and copy-to-clipboard support.
-- [ ] examples/absolute: Paste support.
+- [ ] examples/AeroTerm: Screen text selection and copy-to-clipboard support.
+- [ ] examples/AeroTerm: Paste support.
 - [ ] => release 0.2.0
 
 ### Users

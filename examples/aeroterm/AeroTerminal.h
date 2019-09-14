@@ -20,9 +20,9 @@
 
 #include <string>
 
-class AbsoluteTerminal {
+class AeroTerminal {
 public:
-    AbsoluteTerminal(
+    AeroTerminal(
         terminal::WindowSize const& _winSize,
         unsigned short _fontSize,
         std::string const& _fontFamily,
@@ -31,7 +31,7 @@ public:
         std::string const& _shell,
         LogMask _logMask);
 
-    ~AbsoluteTerminal();
+    ~AeroTerminal();
 
     int main();
 

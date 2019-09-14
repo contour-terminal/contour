@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "AbsoluteTerminal.h"
+#include "AeroTerminal.h"
 
 #include <iostream>
 #include <fstream>
@@ -29,14 +29,14 @@
 using namespace std;
 using namespace std::placeholders;
 
-AbsoluteTerminal::AbsoluteTerminal(terminal::WindowSize const& _winSize,
+AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
                unsigned short _fontSize,
                std::string const& _fontFamily,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
                std::string const& _shell,
                LogMask _logMask) :
-    //loggingSink_{"myterm.log", ios::trunc},
+    //loggingSink_{"aeroterm.log", ios::trunc},
     logger_{_logMask, &cout},
     fontManager_{},
     regularFont_{
@@ -48,11 +48,11 @@ AbsoluteTerminal::AbsoluteTerminal(terminal::WindowSize const& _winSize,
     window_{
         _winSize.columns * regularFont_.maxAdvance(),
         _winSize.rows * regularFont_.lineHeight(),
-        "myterm",
-        bind(&AbsoluteTerminal::onKey, this, _1, _2, _3, _4),
-        bind(&AbsoluteTerminal::onChar, this, _1),
-        bind(&AbsoluteTerminal::onResize, this, _1, _2),
-        bind(&AbsoluteTerminal::onContentScale, this, _1, _2)
+        "aeroterm",
+        bind(&AeroTerminal::onKey, this, _1, _2, _3, _4),
+        bind(&AeroTerminal::onChar, this, _1),
+        bind(&AeroTerminal::onResize, this, _1, _2),
+        bind(&AeroTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
         _winSize,
@@ -71,11 +71,11 @@ AbsoluteTerminal::AbsoluteTerminal(terminal::WindowSize const& _winSize,
     glViewport(0, 0, window_.width(), window_.height());
 }
 
-AbsoluteTerminal::~AbsoluteTerminal()
+AeroTerminal::~AeroTerminal()
 {
 }
 
-int AbsoluteTerminal::main()
+int AeroTerminal::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
@@ -88,7 +88,7 @@ int AbsoluteTerminal::main()
     return EXIT_SUCCESS;
 }
 
-void AbsoluteTerminal::render()
+void AeroTerminal::render()
 {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -98,13 +98,13 @@ void AbsoluteTerminal::render()
     glfwSwapBuffers(window_);
 }
 
-void AbsoluteTerminal::onContentScale(float _xs, float _ys)
+void AeroTerminal::onContentScale(float _xs, float _ys)
 {
     cout << fmt::format("Updated content scale to: {:.2f} by {:.2f}\n", _xs, _ys);
     // TODO: scale fontSize by factor _ys.
 }
 
-void AbsoluteTerminal::onResize(unsigned _width, unsigned _height)
+void AeroTerminal::onResize(unsigned _width, unsigned _height)
 {
     glViewport(0, 0, _width, _height);
     terminalView_.setProjection(glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)));
@@ -204,7 +204,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
-void AbsoluteTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
+void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
 {
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
@@ -247,7 +247,7 @@ void AbsoluteTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
     }
 }
 
-void AbsoluteTerminal::onChar(char32_t _char)
+void AeroTerminal::onChar(char32_t _char)
 {
     terminalView_.send(_char, terminal::Modifier{});
 }
