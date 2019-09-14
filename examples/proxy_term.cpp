@@ -194,13 +194,17 @@ class ProxyTerm {
 #endif
     }
 
-    void writeToConsole(char const* _buf, size_t _size)
+    ssize_t writeToConsole(char const* _buf, size_t _size)
     {
 #if defined(__unix__)
-        ::write(STDOUT_FILENO, _buf, _size);
+        return ::write(STDOUT_FILENO, _buf, _size);
 #else
         DWORD nwritten{};
-        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
+        auto const rv = WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr);
+        if (rv == S_OK)
+            return static_cast<ssize_t>(nwritten);
+        else
+            return -1;
 #endif
     }
 
