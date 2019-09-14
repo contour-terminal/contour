@@ -20,155 +20,7 @@
 
 using namespace std;
 
-namespace AnsiColor {
-    enum Code : unsigned {
-        Clear = 0,
-        Reset = Clear,
-        Bold = 0x0001,  // 1
-        Dark = 0x0002,  // 2
-        Undef1 = 0x0004,
-        Underline = 0x0008,  // 4
-        Blink = 0x0010,      // 5
-        Undef2 = 0x0020,
-        Reverse = 0x0040,    // 7
-        Concealed = 0x0080,  // 8
-        AllFlags = 0x00FF,
-        Black = 0x0100,
-        Red = 0x0200,
-        Green = 0x0300,
-        Yellow = 0x0400,
-        Blue = 0x0500,
-        Magenta = 0x0600,
-        Cyan = 0x0700,
-        White = 0x0800,
-        AnyFg = 0x0F00,
-        OnBlack = 0x1000,
-        OnRed = 0x2000,
-        OnGreen = 0x3000,
-        OnYellow = 0x4000,
-        OnBlue = 0x5000,
-        OnMagenta = 0x6000,
-        OnCyan = 0x7000,
-        OnWhite = 0x8000,
-        AnyBg = 0xF000
-    };
-
-    /// Combines two ANSI escape sequences into one Code.
-    constexpr inline Code operator|(Code a, Code b)
-    {
-        return Code{unsigned(a) | unsigned(b)};
-    }
-
-    /**
-     * Counts the number of ANSI escape sequences in @p codes.
-     */
-    constexpr unsigned count(Code codes)
-    {
-        if (codes == Clear)
-            return 1;
-
-        unsigned i = 0;
-
-        if (codes & AllFlags)
-            for (int k = 0; k < 8; ++k)
-                if (codes & (1 << k))
-                    ++i;
-
-        if (codes & AnyFg)
-            ++i;
-
-        if (codes & AnyBg)
-            ++i;
-
-        return i;
-    }
-
-    /**
-     * Retrieves the number of bytes required to store the ANSI escape sequences of @p codes
-     * without prefix/suffix notation.
-     */
-    constexpr unsigned capacity(Code codes)
-    {
-        if (codes == Clear)
-            return 1;
-
-        unsigned i = 0;
-
-        if (codes & AllFlags)
-            for (int k = 0; k < 8; ++k)
-                if (codes & (1 << k))
-                    ++i;
-
-        if (codes & AnyFg)
-            i += 2;
-
-        if (codes & AnyBg)
-            i += 2;
-
-        return i + (count(codes) - 1);
-    }
-
-    /// Constructs a sequence of ANSI codes for the colors in this @p codes.
-    template <const Code value, const bool EOS = true>
-    constexpr auto codes()
-    {
-        std::array<char, capacity(value) + 3 + (EOS ? 1 : 0)> result{};
-
-        size_t n = 0;  // n'th escape sequence being iterate through
-        size_t i = 0;  // i'th byte in output array
-
-        result[i++] = '\x1B';
-        result[i++] = '[';
-
-        if constexpr (value != 0)
-        {
-            if (value & AllFlags)
-            {
-                for (int k = 0; k < 8; ++k)
-                {
-                    if (value & (1 << k))
-                    {
-                        if (n++)
-                            result[i++] = ';';
-                        result[i++] = k + '1';
-                    }
-                }
-            }
-
-            if (value & AnyFg)
-            {
-                if (n++)
-                    result[i++] = ';';
-                unsigned const val = ((value >> 8) & 0x0F) + 29;  // 36 -> {'3', '6'}
-                result[i++] = (val / 10) + '0';
-                result[i++] = (val % 10) + '0';
-            }
-
-            if (value & AnyBg)
-            {
-                if (n++)
-                    result[i++] = ';';
-                unsigned const val = ((value >> 12) & 0x0F) + 39;
-                result[i++] = (val / 10) + '0';
-                result[i++] = (val % 10) + '0';
-            }
-        }
-        else
-            result[i++] = '0';  // reset/clear
-
-        result[i++] = 'm';
-
-        return result;
-    }
-
-}  // namespace AnsiColor
-
 namespace util {
-
-auto static constexpr clearColor = AnsiColor::codes<AnsiColor::Clear>();
-auto static constexpr optionColor = AnsiColor::codes<AnsiColor::Bold | AnsiColor::Cyan>();
-auto static constexpr valueColor = AnsiColor::codes<AnsiColor::Bold | AnsiColor::Red>();
-auto static constexpr headerColor = AnsiColor::codes<AnsiColor::Bold | AnsiColor::Green>();
 
 // {{{ Flags::Error
 Flags::Error::Error(ErrorCode code, string arg)
@@ -565,10 +417,10 @@ string Flags::helpText(string_view const& header, size_t width, size_t helpTextO
     stringstream sstr;
 
     if (!header.empty())
-        sstr << headerColor.data() << header << clearColor.data();
+        sstr << header;
 
     if (parametersEnabled_ || !flagDefs_.empty())
-        sstr << headerColor.data() << "Options:\n" << clearColor.data();
+        sstr << "Options:\n";
 
     for (const FlagDef& fd : flagDefs_)
         sstr << fd.makeHelpText(width, helpTextOffset);
@@ -580,7 +432,7 @@ string Flags::helpText(string_view const& header, size_t width, size_t helpTextO
         const streampos p = sstr.tellp();
         const size_t column = static_cast<size_t>(sstr.tellp() - p);
 
-        sstr << "    [--] " << valueColor.data() << parametersPlaceholder_ << clearColor.data();
+        sstr << "    [--] " << parametersPlaceholder_;
         if (column < helpTextOffset)
             sstr << setw(helpTextOffset - column) << ' ';
         else
@@ -627,23 +479,22 @@ string Flags::FlagDef::makeHelpText(size_t width, size_t helpTextOffset) const
 
     // short option
     if (shortOption)
-        sstr << optionColor.data() << "-" << shortOption << clearColor.data() << ", ";
+        sstr << "-" << shortOption << ", ";
     else
         sstr << "    ";
 
     // long option
-    sstr << optionColor.data() << "--" << longOption;
+    sstr << "--" << longOption;
 
     // value placeholder
     if (type != FlagType::Bool)
     {
-        sstr << "=" << valueColor.data();
+        sstr << "=";
         if (!valuePlaceholder.empty())
             sstr << valuePlaceholder;
         else
             sstr << "VALUE";
     }
-    sstr << clearColor.data();
 
     // spacer
     size_t column = static_cast<size_t>(sstr.tellp());
