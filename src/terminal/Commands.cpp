@@ -214,8 +214,6 @@ string to_string(Command const& _command)
             [&](MoveCursorTo const& v) { return format("MoveCursorTo({}, {})", v.row, v.column); },
             [&](MoveCursorToLine const& v) { return format("MoveCursorLine({})", v.row); },
             [&](MoveCursorToNextTab) { return "MoveCursorToNextTab"s; },
-            [&](HideCursor) { return "HideCursor"s; },
-            [&](ShowCursor) { return "ShowCursor"s; },
             [&](SaveCursor) { return "SaveCursor"s; },
             [&](RestoreCursor) { return "RestoreCursor"s; },
             [&](SetForegroundColor const& v) { return format("SetForegroundColor({})", to_string(v.color)); },

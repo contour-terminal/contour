@@ -139,6 +139,16 @@ class Screen {
         GraphicsAttributes attributes{};
     };
 
+    struct Cursor : public Coordinate {
+        bool visible = true;
+
+        Cursor& operator=(Coordinate const& coords) noexcept {
+            column = coords.column;
+            row = coords.row;
+            return *this;
+        }
+    };
+
     using Reply = std::function<void(std::string const&)>;
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
 
@@ -217,8 +227,6 @@ class Screen {
     void operator()(MoveCursorTo const& v);
     void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
-    void operator()(HideCursor const& v);
-    void operator()(ShowCursor const& v);
     void operator()(SaveCursor const& v);
     void operator()(RestoreCursor const& v);
     void operator()(Index const& v);
@@ -272,7 +280,7 @@ class Screen {
 			return state_->cursor.column - state_->margin_.horizontal.from + 1;
     }
 
-    Coordinate const& currentCursor() const noexcept
+    Cursor const& currentCursor() const noexcept
     {
         return state_->cursor;
     }
@@ -350,9 +358,8 @@ class Screen {
 
         // Savable states for DECSC & DECRC
         struct Save {
-            Coordinate cursor;
+            Cursor cursor;
             GraphicsAttributes graphicsRendition{};
-            bool visible = true;
             bool blinking = false;
         };
 
@@ -374,7 +381,7 @@ class Screen {
         Lines savedLines{};
 
         Margin margin_{};
-        Coordinate cursor{1, 1};
+        Cursor cursor{};
         bool autoWrap{false};
         bool wrapPending{false};
         bool cursorRestrictedToMargin{false};

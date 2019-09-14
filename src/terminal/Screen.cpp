@@ -511,7 +511,6 @@ std::string Screen::screenshot() const
     auto result = std::stringstream{};
     auto generator = OutputGenerator{ result };
 
-    generator(HideCursor{});
     generator(ClearScreen{});
     generator(MoveCursorTo{ 1, 1 });
 
@@ -530,8 +529,8 @@ std::string Screen::screenshot() const
     }
 
     generator(MoveCursorTo{ state_->cursor.row, state_->cursor.column });
-    //TODO: if (isCursorVisible())
-        generator(ShowCursor{});
+    if (currentCursor().visible)
+        generator(SetMode{ Mode::VisibleCursor, false });
 
     return result.str();
 }
@@ -799,16 +798,6 @@ void Screen::operator()(MoveCursorToNextTab const& v)
     // TODO: I guess something must remember when a \t was added, for proper move-back?
 }
 
-void Screen::operator()(HideCursor const& v)
-{
-    // TODO
-}
-
-void Screen::operator()(ShowCursor const& v)
-{
-    // TODO
-}
-
 void Screen::operator()(SaveCursor const& v)
 {
     // https://vt100.net/docs/vt510-rm/DECSC.html
@@ -950,6 +939,9 @@ void Screen::operator()(SetMode const& v)
             break;
         case Mode::CursorRestrictedToMargin:
             state_->cursorRestrictedToMargin = v.enable;
+            break;
+        case Mode::VisibleCursor:
+            state_->cursor.visible = v.enable;
             break;
         default:
             break;

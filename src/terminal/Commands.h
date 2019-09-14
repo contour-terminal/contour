@@ -26,8 +26,8 @@ using cursor_pos_t = size_t;
 
 /// Screen coordinates between 1..n including.
 struct Coordinate {
-    cursor_pos_t row;
-    cursor_pos_t column;
+    cursor_pos_t row = 1;
+    cursor_pos_t column = 1;
 };
 
 constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
@@ -393,8 +393,6 @@ struct MoveCursorToLine {
     cursor_pos_t row;
 };
 
-struct HideCursor {};
-struct ShowCursor {};
 struct SaveCursor {};
 struct RestoreCursor {};
 
@@ -544,7 +542,6 @@ using Command = std::variant<
     EraseCharacters,
     ForwardIndex,
     FullReset,
-    HideCursor,
     Index,
     InsertLines,
     Linefeed,
@@ -574,7 +571,6 @@ using Command = std::variant<
     SetLeftRightMargin,
     SetMode,
     SetTopBottomMargin,
-    ShowCursor,
     SingleShiftSelect
 >;
 

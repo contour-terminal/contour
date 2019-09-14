@@ -162,8 +162,6 @@ void OutputGenerator::operator()(Command const& command)
         [&](MoveCursorTo const& to) { write("\033[{}H", pairOrNone(1, to.row, to.column)); },
         [&](MoveCursorToLine const& to) { write("\033[{}d", to.row); },
         [&](MoveCursorToNextTab) { write("\t"); },
-        [&](HideCursor) { write("\033[?25l"); },
-        [&](ShowCursor) { write("\033[?25h"); },
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
         [&](SetForegroundColor const& v) {
