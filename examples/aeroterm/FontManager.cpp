@@ -223,7 +223,7 @@ void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _
             info[i].codepoint
         });
 
-        cx += pos[i].x_advance / 64; // TODO: shouldn't we be using maxAdvance() here?
+        cx += maxAdvance(), // Ought to be (pos[i].x_advance / 64), but that breaks on some font sizes it seems.
         cy += pos[i].y_advance / 64;
         advance += pos[i].x_advance / 64;
     }
