@@ -304,7 +304,70 @@ TEST_CASE("DeleteLines", "[screen]")
     }
 }
 
-// TODO: DeleteCharacters
+TEST_CASE("DeleteCharacters", "[screen]")
+{
+    Screen screen{5, 2, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("12345\n67890\033[1;2H");
+    REQUIRE("12345\n67890\n" == screen.renderText());
+    REQUIRE(2 == screen.currentColumn());
+    REQUIRE(1 == screen.currentRow());
+
+    SECTION("outside margin") {
+        screen(SetMode{ Mode::LeftRightMargin, true });
+        screen(SetLeftRightMargin{ 2, 4 });
+        screen(MoveCursorTo{ 1, 1 });
+        screen(DeleteCharacters{ 1 });
+        REQUIRE("12345\n67890\n" == screen.renderText());
+    }
+
+    SECTION("without horizontal margin") {
+        SECTION("no-op") {
+            screen(DeleteCharacters{ 0 });
+            REQUIRE("12345\n67890\n" == screen.renderText());
+        }
+        SECTION("in-range-1") {
+            screen(DeleteCharacters{ 1 });
+            REQUIRE("1345 \n67890\n" == screen.renderText());
+        }
+        SECTION("in-range-2") {
+            screen(DeleteCharacters{ 2 });
+            REQUIRE("145  \n67890\n" == screen.renderText());
+        }
+        SECTION("in-range-4") {
+            screen(DeleteCharacters{ 4 });
+            REQUIRE("1    \n67890\n" == screen.renderText());
+        }
+        SECTION("clamped") {
+            screen(DeleteCharacters{ 5 });
+            REQUIRE("1    \n67890\n" == screen.renderText());
+        }
+    }
+    SECTION("with horizontal margin") {
+        screen(SetMode{ Mode::LeftRightMargin, true });
+        screen(SetLeftRightMargin{ 1, 4 });
+        screen(MoveCursorTo{ 1, 2 });
+        REQUIRE(2 == screen.currentColumn());
+        REQUIRE(1 == screen.currentRow());
+
+        SECTION("no-op") {
+            screen(DeleteCharacters{ 0 });
+            REQUIRE("12345\n67890\n" == screen.renderText());
+        }
+        SECTION("in-range-1") {
+            REQUIRE("12345\n67890\n" == screen.renderText());
+            screen(DeleteCharacters{ 1 });
+            REQUIRE("134 5\n67890\n" == screen.renderText());
+        }
+        SECTION("in-range-2") {
+            screen(DeleteCharacters{ 2 });
+            REQUIRE("14  5\n67890\n" == screen.renderText());
+        }
+        SECTION("clamped") {
+            screen(DeleteCharacters{ 4 });
+            REQUIRE("1   5\n67890\n" == screen.renderText());
+        }
+    }
+}
 
 TEST_CASE("ClearScrollbackBuffer", "[screen]")
 {

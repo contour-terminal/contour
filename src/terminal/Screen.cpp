@@ -706,17 +706,23 @@ void Screen::operator()(DeleteLines const& v)
 
 void Screen::operator()(DeleteCharacters const& v)
 {
-    fill(
-        state_->currentColumn,
-        next(
+    if (isCursorInsideMargins() && v.n != 0)
+    {
+        auto rightMargin = next(begin(*state_->currentLine), state_->margin_.horizontal.to);
+        auto const n = min(v.n, static_cast<size_t>(distance(state_->currentColumn, rightMargin)));
+        rotate(
             state_->currentColumn,
-            min(
-                static_cast<ptrdiff_t>(v.n),
-                distance(state_->currentColumn, end(*state_->currentLine))
-            )
-        ),
-        Cell{}
-    );
+            next(state_->currentColumn, n),
+            rightMargin
+        );
+        state_->updateCursorIterators();
+        rightMargin = next(begin(*state_->currentLine), state_->margin_.horizontal.to);
+        fill(
+            prev(rightMargin, n),
+            rightMargin,
+            Cell{}
+        );
+    }
 }
 
 void Screen::operator()(MoveCursorUp const& v)

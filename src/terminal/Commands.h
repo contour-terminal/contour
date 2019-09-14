@@ -311,7 +311,7 @@ struct DeleteCharacters {
     ///
     /// If this value is greater than the number of characters between the cursor and the right margin,
     /// then DCH only deletes the remaining characters.
-    cursor_pos_t n;
+    size_t n;
 };
 
 /// CUU - Cursor Up.

@@ -76,12 +76,12 @@ constexpr bool operator==(CharacterStyleMask a, CharacterStyleMask b) noexcept
 // {
 // 	return CharacterStyleMask{a.mask() | b.mask()};
 // }
-// 
+//
 // constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
 // {
 // 	return CharacterStyleMask{a.mask() | static_cast<unsigned>(b)};
 // }
-// 
+//
 // constexpr CharacterStyleMask operator~(CharacterStyleMask a) noexcept
 // {
 // 	return CharacterStyleMask{~a.mask()};
@@ -97,7 +97,7 @@ constexpr CharacterStyleMask& operator|=(CharacterStyleMask& a, CharacterStyleMa
 // {
 //     return CharacterStyleMask{a.mask() & b.mask()};
 // }
-// 
+//
 // constexpr CharacterStyleMask operator&(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
 // {
 //     return CharacterStyleMask{a.mask() & static_cast<unsigned>(b)};
@@ -260,10 +260,12 @@ class Screen {
     cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
 
     bool isCursorInsideMargins() const noexcept {
-        return state_->margin_.horizontal.from <= state_->cursor.row
-            && state_->cursor.row <= state_->margin_.horizontal.to
-            && state_->margin_.vertical.from <= state_->cursor.column
-            && state_->cursor.column <= state_->margin_.vertical.to;
+        if (!state_->margin_.vertical.contains(state_->cursor.row))
+            return false;
+        else if (isModeEnabled(Mode::LeftRightMargin) && !state_->margin_.horizontal.contains(state_->cursor.column))
+            return false;
+        else
+            return true;
     }
 
     cursor_pos_t currentRow() const noexcept {
@@ -344,6 +346,8 @@ class Screen {
         constexpr size_t length() const noexcept { return to - from + 1; }
         constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
         constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
+
+        constexpr bool contains(size_t _value) const noexcept { return from <= _value && _value <= to; }
     };
 
     struct Margin {
