@@ -165,7 +165,8 @@ void GLTerminal::render()
     renderCellGroup();
 
     // TODO: only render when visible
-    cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
+    if (terminal_.cursor().visible)
+        cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
 }
 
 void GLTerminal::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)

@@ -33,7 +33,7 @@
 // - [ ] Fix font size on non-Hi-DPI screens (such as my Linux monitor)
 // - [ ] show cursor (in correct shapes, with blinking)
 //   - [x] CursorShape: Block
-//   - [ ] Screen: HideCursor / ShowCursor
+//   - [x] Screen: HideCursor / ShowCursor
 //   - [ ] CursorShape: Beam
 //   - [ ] CursorShape: Underline
 //   - [ ] Blinking Mode
