@@ -30,7 +30,10 @@ class GLCursor {
     ~GLCursor();
 
     void setTransform(glm::mat4 _mat); // Must projection matrix.
+
+    CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
+
     void setColor(glm::vec3 _color);
     void setSize(glm::vec2 _size);
 

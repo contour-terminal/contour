@@ -26,7 +26,7 @@ GLTextShaper::Glyph::~Glyph()
 GLTextShaper::GLTextShaper(Font& _regularFont, glm::mat4 const& _projection) :
     cache_{},
     regularFont_{ _regularFont },
-    projectionMatrix_{ _projection },
+    //projectionMatrix_{ _projection },
     shader_{ vertexShaderCode(), fragmentShaderCode() },
     colorLocation_{ shader_.uniformLocation("textColor") }
 {

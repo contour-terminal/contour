@@ -59,7 +59,7 @@ class GLTextShaper {
     std::vector<Font::GlyphPosition> glyphPositions_;
     GLuint vbo_;
     GLuint vao_;
-    glm::mat4 projectionMatrix_;
+    //glm::mat4 projectionMatrix_;
     Shader shader_;
     GLint colorLocation_;
 };
