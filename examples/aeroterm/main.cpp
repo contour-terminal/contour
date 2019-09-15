@@ -30,6 +30,7 @@
 // - [x] Fix window-resize: call Screen::resize(), PseudoTerminal::updateWindowSize()
 // - [x] logging: runtime-configurable logging (to file or stdout, differ between error/warn/debug/trace logging)
 // - [x] Hi-DPI support (hm, because I need it)
+// - [x] font (fontconfig) loading on Linux
 // - [ ] Fix font size on non-Hi-DPI screens (such as my Linux monitor)
 // - [ ] show cursor (in correct shapes, with blinking)
 //   - [x] CursorShape: Block
@@ -37,16 +38,12 @@
 //   - [ ] CursorShape: Beam
 //   - [ ] CursorShape: Underline
 //   - [ ] Blinking Mode
-// - [ ] basic runtime-reloadable config file (yaml?)
-// - [ ] input: fix input sequences on non ConPTY hosts (cursor keys, ...?)
 // - [ ] other SGRs (bold, italic, etc)
+// - [ ] basic runtime-reloadable config file (yaml?)
 // - [ ] Windowed fullscreen support (ALT+ENTER, or similar)
-// - [ ] fix text positioning (chars seem pressed down instead of centered)
-// - [ ] font (fontconfig) loading on Linux
 // - [ ] input: F13..F25
 // - [ ] input: GLFW_KEY_PRINT_SCREEN
 // - [ ] input: GLFW_KEY_PAUSE
-// - [ ] input: GLFW_KEY_KP_EQUAL
 
 #if defined(__unix__)
 #include <unistd.h>

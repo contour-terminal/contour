@@ -24,7 +24,7 @@ apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-
 
 ### Prerequisites Windows 10
 
-For Windows, you must have Windows 10, 2018 Fall Creators Update, installed.
+For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```!psh
