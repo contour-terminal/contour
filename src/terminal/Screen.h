@@ -151,6 +151,7 @@ class Screen {
 
     using Reply = std::function<void(std::string const&)>;
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
+    using ModeSwitchCallback = std::function<void(bool)>;
 
   public:
     /**
@@ -165,12 +166,13 @@ class Screen {
      */
     Screen(size_t _columnCount,
            size_t _rowCount,
+           ModeSwitchCallback _useApplicationCursorKeys,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
     Screen(size_t columnCount, size_t rowCount) :
-        Screen{columnCount, rowCount, {}, {}, {}} {}
+        Screen{columnCount, rowCount, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* data, size_t size);
@@ -466,6 +468,7 @@ class Screen {
   private:
     Hook const onCommands_;
     Logger const logger_;
+    ModeSwitchCallback useApplicationCursorKeys_;
     Reply const reply_;
 
     OutputHandler handler_;

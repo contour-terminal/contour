@@ -410,11 +410,13 @@ void Screen::Buffer::verifyState() const
 
 Screen::Screen(size_t columnCount,
                size_t rowCount,
+               ModeSwitchCallback _useApplicationCursorKeys,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
+    useApplicationCursorKeys_{ _useApplicationCursorKeys },
     reply_{ move(reply) },
     handler_{ rowCount, _logger },
     parser_{ ref(handler_), _logger },
@@ -948,6 +950,10 @@ void Screen::operator()(SetMode const& v)
             break;
         case Mode::VisibleCursor:
             state_->cursor.visible = v.enable;
+            break;
+        case Mode::UseApplicationCursorKeys:
+            if (useApplicationCursorKeys_)
+                useApplicationCursorKeys_(v.enable);
             break;
         default:
             break;

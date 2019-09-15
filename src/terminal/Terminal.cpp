@@ -27,6 +27,7 @@ Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
     screen_{
         _winSize.columns,
         _winSize.rows,
+        bind(&Terminal::useApplicationCursorKeys, this, _1),
         bind(&Terminal::onScreenReply, this, _1),
         move(_logger),
         bind(&Terminal::onScreenCommands, this, _1)
@@ -39,6 +40,12 @@ Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
 Terminal::~Terminal()
 {
     //wait();
+}
+
+void Terminal::useApplicationCursorKeys(bool _enable)
+{
+    auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
+    inputGenerator_.setCursorKeysMode(keyMode);
 }
 
 void Terminal::onScreenReply(std::string_view const& reply)

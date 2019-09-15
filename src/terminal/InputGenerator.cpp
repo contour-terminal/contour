@@ -109,32 +109,32 @@ namespace mappings {
 
     /// Cursor key mappings in when cursor key application mode is set.
     auto constexpr applicationCursorKeys = array{
-        KeyMapping{Key::UpArrow, SS3 "A"},
-        KeyMapping{Key::DownArrow, SS3 "B"},
-        KeyMapping{Key::RightArrow, SS3 "C"},
-        KeyMapping{Key::LeftArrow, SS3 "D"},
+        KeyMapping{Key::UpArrow, ESC SS3 "A"},
+        KeyMapping{Key::DownArrow, ESC SS3 "B"},
+        KeyMapping{Key::RightArrow, ESC SS3 "C"},
+        KeyMapping{Key::LeftArrow, ESC SS3 "D"},
     };
 
     auto constexpr applicationNumpadKeys = array{
-        KeyMapping{Key::Numpad_NumLock, SS3 "P"},
-        KeyMapping{Key::Numpad_Divide, SS3 "Q"},
-        KeyMapping{Key::Numpad_Multiply, SS3 "Q"},
-        KeyMapping{Key::Numpad_Subtract, SS3 "Q"},
-        KeyMapping{Key::Numpad_CapsLock, SS3 "m"},
-        KeyMapping{Key::Numpad_Add, SS3 "l"},
-        KeyMapping{Key::Numpad_Decimal, SS3 "n"},
-        KeyMapping{Key::Numpad_Enter, SS3 "M"},
-        //KeyMapping{Key::Numpad_Equal, SS3 "X"}, TODO: verify this mapping and this whole map
-        KeyMapping{Key::Numpad_0, SS3 "p"},
-        KeyMapping{Key::Numpad_1, SS3 "q"},
-        KeyMapping{Key::Numpad_2, SS3 "r"},
-        KeyMapping{Key::Numpad_3, SS3 "s"},
-        KeyMapping{Key::Numpad_4, SS3 "t"},
-        KeyMapping{Key::Numpad_5, SS3 "u"},
-        KeyMapping{Key::Numpad_6, SS3 "v"},
-        KeyMapping{Key::Numpad_7, SS3 "w"},
-        KeyMapping{Key::Numpad_8, SS3 "x"},
-        KeyMapping{Key::Numpad_9, SS3 "y"},
+        KeyMapping{Key::Numpad_NumLock, ESC SS3 "P"},
+        KeyMapping{Key::Numpad_Divide, ESC SS3 "Q"},
+        KeyMapping{Key::Numpad_Multiply, ESC SS3 "Q"},
+        KeyMapping{Key::Numpad_Subtract, ESC SS3 "Q"},
+        KeyMapping{Key::Numpad_CapsLock, ESC SS3 "m"},
+        KeyMapping{Key::Numpad_Add, ESC SS3 "l"},
+        KeyMapping{Key::Numpad_Decimal, ESC SS3 "n"},
+        KeyMapping{Key::Numpad_Enter, ESC SS3 "M"},
+        KeyMapping{Key::Numpad_Equal, ESC SS3 "X"},
+        KeyMapping{Key::Numpad_0, ESC SS3 "p"},
+        KeyMapping{Key::Numpad_1, ESC SS3 "q"},
+        KeyMapping{Key::Numpad_2, ESC SS3 "r"},
+        KeyMapping{Key::Numpad_3, ESC SS3 "s"},
+        KeyMapping{Key::Numpad_4, ESC SS3 "t"},
+        KeyMapping{Key::Numpad_5, ESC SS3 "u"},
+        KeyMapping{Key::Numpad_6, ESC SS3 "v"},
+        KeyMapping{Key::Numpad_7, ESC SS3 "w"},
+        KeyMapping{Key::Numpad_8, ESC SS3 "x"},
+        KeyMapping{Key::Numpad_9, ESC SS3 "y"},
     };
 
     constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept

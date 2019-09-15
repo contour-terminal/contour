@@ -71,6 +71,7 @@ class Terminal : public PseudoTerminal {
   private:
     void flushInput();
     void screenUpdateThread();
+    void useApplicationCursorKeys(bool _enable);
     void onScreenReply(std::string_view const& reply);
     void onScreenCommands(std::vector<Command> const& commands);
 
