@@ -43,6 +43,7 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
                        Font& _regularFont,
                        CursorShape _cursorShape,
                        glm::vec3 const& _cursorColor,
+                       glm::vec4 const& _backgroundColor,
                        string const& _shell,
                        glm::mat4 const& _projectionMatrix,
                        GLLogger& _logger) :
@@ -66,6 +67,8 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
         _cursorShape,
         _cursorColor
     },
+    defaultForegroundColor_{ 0.9, 0.9, 0.9, 1.0 }, // TODO: pass in (ideally via both ColorPalette)
+    defaultBackgroundColor_{ _backgroundColor },
     terminal_{
         _winSize,
         [this](terminal::LogEvent const& _event) { logger_(_event); },
@@ -185,8 +188,6 @@ void GLTerminal::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos
 void GLTerminal::renderCellGroup()
 {
     auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
-    float const opacity = makeOpacity(pendingDraw_.attributes);
-    auto const fg = glm::vec4{ fgColor.red / 255.0f, fgColor.green / 255.0f, fgColor.blue / 255.0f, opacity };
     auto const textStyle = FontStyle::Regular;
 
     if (pendingDraw_.attributes.styles & CharacterStyleMask::Bold)
@@ -225,7 +226,7 @@ void GLTerminal::renderCellGroup()
     textShaper_.render(
         makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber),
         pendingDraw_.text,
-        fg,
+        fgColor,
         textStyle
     );
 }
@@ -238,26 +239,87 @@ glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
     };
 }
 
-std::pair<terminal::RGBColor, terminal::RGBColor> GLTerminal::makeColors(Screen::GraphicsAttributes const& _attributes) const
+glm::vec4 applyColor(Color const& _color, glm::vec4 const& _defaultColor, float _opacity)
 {
-    auto constexpr defaultForegroundColor = RGBColor{ 255, 255, 255 };
-    auto constexpr defaultBackgroundColor = RGBColor{ 0, 32, 32 };
-
-    return (_attributes.styles & CharacterStyleMask::Inverse)
-        ? pair{ toRGB(_attributes.backgroundColor, defaultBackgroundColor),
-                toRGB(_attributes.foregroundColor, defaultForegroundColor) }
-        : pair{ toRGB(_attributes.foregroundColor, defaultForegroundColor),
-                toRGB(_attributes.backgroundColor, defaultBackgroundColor) };
+    using namespace terminal;
+    auto const opacity = _defaultColor[3] * _opacity;
+    auto const defaultColor = glm::vec4{ _defaultColor.r, _defaultColor.g, _defaultColor.b, _defaultColor.a * _opacity };
+    return visit(
+        overloaded{
+            [=](UndefinedColor) {
+                return defaultColor;
+            },
+            [=](DefaultColor) {
+                return defaultColor;
+            },
+            [=](IndexedColor color) {
+                switch (color) {
+                    case IndexedColor::Black:
+                        return glm::vec4{ 0.0, 0.0, 0.0, opacity };
+                    case IndexedColor::Red:
+                        return glm::vec4{ 205 / 255.0, 0, 0, opacity };
+                    case IndexedColor::Green:
+                        return glm::vec4{ 0, 205 / 255.0, 0, opacity };
+                    case IndexedColor::Yellow:
+                        return glm::vec4{ 205 / 255.0, 205 / 255.0, 0, opacity };
+                    case IndexedColor::Blue:
+                        return glm::vec4{ 0, 0, 238 / 255.0, opacity };
+                    case IndexedColor::Magenta:
+                        return glm::vec4{ 205 / 255.0, 0, 205 / 255.0, opacity };
+                    case IndexedColor::Cyan:
+                        return glm::vec4{ 0, 205 / 255.0, 205 / 255.0, opacity };
+                    case IndexedColor::White:
+                        return glm::vec4{ 229 / 255.0, 229 / 255.0, 229 / 255.0, opacity };
+                    case IndexedColor::Default:
+                        return defaultColor;
+                }
+                return defaultColor;
+            },
+            [=](BrightColor color) {
+                switch (color) {
+                    case BrightColor::Black:
+                        return glm::vec4{ 0, 0, 0, opacity };
+                    case BrightColor::Red:
+                        return glm::vec4{ 1, 0, 0, opacity };
+                    case BrightColor::Green:
+                        return glm::vec4{ 0, 1, 0, opacity };
+                    case BrightColor::Yellow:
+                        return glm::vec4{ 1, 1, 0, opacity };
+                    case BrightColor::Blue:
+                        return glm::vec4{ 92 / 255, 92 / 255, 1, opacity };
+                    case BrightColor::Magenta:
+                        return glm::vec4{ 1, 0, 1, opacity };
+                    case BrightColor::Cyan:
+                        return glm::vec4{ 0, 1, 1, opacity };
+                    case BrightColor::White:
+                        return glm::vec4{ 1, 1, 1, opacity };
+                }
+                return defaultColor;
+            },
+            [=](RGBColor color) {
+                return glm::vec4{ color.red / 255.0, color.green / 255.0, color.blue / 255.0, opacity };
+            },
+        },
+        _color
+    );
 }
 
-float GLTerminal::makeOpacity(GraphicsAttributes const& _attributes) const noexcept
+std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(Screen::GraphicsAttributes const& _attributes) const
 {
-    if (_attributes.styles & CharacterStyleMask::Hidden)
-        return 0.0f;
-    else if (_attributes.styles & CharacterStyleMask::Faint)
-        return 0.5f;
-    else
-        return 1.0f;
+    float const opacity = [=]() {
+        if (_attributes.styles & CharacterStyleMask::Hidden)
+            return 0.0f;
+        else if (_attributes.styles & CharacterStyleMask::Faint)
+            return 0.5f;
+        else
+            return 1.0f;
+    }();
+
+    return (_attributes.styles & CharacterStyleMask::Inverse)
+        ? pair{ applyColor(_attributes.backgroundColor, defaultBackgroundColor_, opacity),
+                applyColor(_attributes.foregroundColor, defaultForegroundColor_, opacity) }
+        : pair{ applyColor(_attributes.foregroundColor, defaultForegroundColor_, opacity),
+                applyColor(_attributes.backgroundColor, defaultBackgroundColor_, opacity) };
 }
 
 void GLTerminal::wait()

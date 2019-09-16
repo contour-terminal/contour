@@ -38,6 +38,7 @@ class GLTerminal {
                Font& _fontFamily,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
+               glm::vec4 const& _backgroundColor,
                std::string const& _shell,
                glm::mat4 const& _projectionMatrix,
                GLLogger& _logger);
@@ -80,6 +81,8 @@ class GLTerminal {
     /// The alive() test will fail after this call.
     void wait();
 
+    glm::vec4 const& defaultBackgroundColor() const noexcept { return defaultBackgroundColor_; }
+
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
@@ -92,8 +95,7 @@ class GLTerminal {
     void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
 
     glm::ivec2 makeCoords(cursor_pos_t col, cursor_pos_t row) const;
-    std::pair<RGBColor, RGBColor> makeColors(GraphicsAttributes const& _attributes) const;
-    float makeOpacity(GraphicsAttributes const& _attributes) const noexcept;
+    std::pair<glm::vec4, glm::vec4> makeColors(GraphicsAttributes const& _attributes) const;
 
   private:
     bool alive_ = true;
@@ -134,6 +136,9 @@ class GLTerminal {
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;
+
+    glm::vec4 defaultForegroundColor_;
+    glm::vec4 defaultBackgroundColor_;
 
     terminal::Terminal terminal_;
     terminal::Process process_;

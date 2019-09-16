@@ -20,6 +20,14 @@
 #include <stdexcept>
 #include <string>
 
+#if defined(_WIN32)
+#include <Windows.h>
+#include <dwmapi.h>
+
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#endif
+
 using namespace std;
 
 void Window::init()
@@ -40,6 +48,11 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     init();
 
     glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
+
+#if (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3) || (GLFW_VERSION_MAJOR > 3)
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
+#endif
+    glfwWindowHint(GLFW_DEPTH_BITS, 16);
 
     // FIXME: enabling this causes background to go away.
     //glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -74,6 +87,7 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
 #endif
 
     glEnable(GL_BLEND);
+    glEnable(GL_DEPTH);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     glViewport(0, 0, _width, _height);
@@ -82,6 +96,53 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
 Window::~Window()
 {
     glfwTerminate();
+}
+
+bool Window::enableBackgroundBlur()
+{
+#if defined(_WIN32)
+    // Awesome hack with the noteworty links:
+    // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
+    // * https://github.com/riverar/sample-win32-acrylicblur/blob/master/MainWindow.xaml.cs
+    // * https://stackoverflow.com/questions/44000217/mimicking-acrylic-in-a-win32-app
+    // p.s.: if you find a more official way to do it, please PR me. :)
+
+    bool success = false;
+    if (HWND hwnd = glfwGetWin32Window(window_); hwnd != nullptr)
+    {
+        const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));
+        if (hModule)
+        {
+            struct ACCENTPOLICY
+            {
+                int nAccentState;
+                int nFlags;
+                int nColor;
+                int nAnimationId;
+            };
+            struct WINCOMPATTRDATA
+            {
+                int nAttribute;
+                PVOID pData;
+                ULONG ulDataSize;
+            };
+            typedef BOOL(WINAPI *pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA*);
+            const pSetWindowCompositionAttribute SetWindowCompositionAttribute = (pSetWindowCompositionAttribute)GetProcAddress(hModule, "SetWindowCompositionAttribute");
+            if (SetWindowCompositionAttribute)
+            {
+                ACCENTPOLICY policy = { 3, 0, 0, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
+                WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
+                BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
+                success = rs != FALSE;
+            }
+            FreeLibrary(hModule);
+        }
+    }
+    return success;
+#else
+    // Get me working on Linux (and OS/X), please.
+    return false;
+#endif
 }
 
 void Window::onResize(GLFWwindow* _window, int _width, int _height)
