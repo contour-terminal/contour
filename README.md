@@ -14,7 +14,7 @@
 - [x] Terminal: fully functioning Terminal API
 - [x] Screen buffer management done
 - [x] InputHandler: basic VT input handling
-- [x] example GUI terminal emulator: [|Aero Terminal|](https://github.com/christianparpart/libterminal/tree/master/examples/AeroTerm)
+- [x] example GUI terminal emulator: [Aero Terminal](https://github.com/christianparpart/libterminal/tree/master/examples/AeroTerm)
 - [ ] ensure the following works almost perfect: bash, top, htop, mc, vim, tmux
 - [ ] => initial release 0.1.0
 
