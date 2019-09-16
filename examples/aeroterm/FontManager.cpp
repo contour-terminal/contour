@@ -202,7 +202,13 @@ void Font::loadGlyphByIndex(unsigned int _glyphIndex)
 void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _result)
 {
     hb_buffer_clear_contents(hb_buf_);
-    hb_buffer_add_utf32(hb_buf_, (uint32_t const*)_chars.data(), _chars.size(), 0, _chars.size());
+    hb_buffer_add_utf32(
+        hb_buf_,
+        reinterpret_cast<uint32_t const*>(_chars.data()),
+        static_cast<int>(_chars.size()),
+        0,
+        static_cast<int>(_chars.size())
+    );
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
     hb_buffer_guess_segment_properties(hb_buf_);
 
