@@ -27,7 +27,7 @@ class CellBackground {
     ~CellBackground();
 
     void setProjection(glm::mat4 const& _projectionMatrix);
-    void render(glm::ivec2 _translation, terminal::RGBColor const& _color);
+    void render(glm::ivec2 _translation, glm::vec4 const& _color);
 
   private:
     static std::string vertexShader()
@@ -50,10 +50,10 @@ class CellBackground {
             // Fragment Shader
             #version 150 core
             out vec4 outColor;
-            uniform vec3 backgroundColor;
+            uniform vec4 backgroundColor;
             void main()
             {
-                outColor = vec4(backgroundColor, 1.0);
+                outColor = backgroundColor;
             }
         )";
     }

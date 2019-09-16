@@ -83,6 +83,11 @@ int main(int argc, char const* argv[])
         flags.defineString("font", 'F', "PATTERN", "Defines font family.", "Fira Code, Ubuntu Mono, Consolas, monospace");
         flags.defineString("cursor-shape", 'P', "SHAPE", "Defines cursor shape.", "block");
         flags.defineString("shell", 's', "SHELL", "Defines shell to invoke.", terminal::Process::loginShell());
+        flags.defineFloat("background-red", 'r', "PCT", "Background red color", 0.0f);
+        flags.defineFloat("background-green", 'g', "PCT", "Background red color", 0.0f);
+        flags.defineFloat("background-blue", 'b', "PCT", "Background red color", 0.0f);
+        flags.defineFloat("background-transparency", 'T', "PCT", "Defines background transparency.", 1.0f);
+        flags.defineBool("background-blur", 'A', "Enable background blur.");
 
         flags.parse(argc, argv);
 
@@ -122,6 +127,13 @@ int main(int argc, char const* argv[])
 
         auto const cursorColor = glm::vec3{ 0.6, 0.6, 0.6 };
 
+        auto const backgroundColor = glm::vec4{
+            flags.getFloat("background-red"),
+            flags.getFloat("background-green"),
+            flags.getFloat("background-blue"),
+            flags.getFloat("background-transparency")
+        };
+
         auto myterm = AeroTerminal{
             terminal::WindowSize{
                 static_cast<unsigned short>(flags.getNumber("columns")),
@@ -131,6 +143,8 @@ int main(int argc, char const* argv[])
             flags.getString("font"),
             makeCursorShape(flags.getString("cursor-shape")),
             cursorColor,
+            backgroundColor,
+            flags.getBool("background-blur"),
             flags.getString("shell"),
             logMask
         };

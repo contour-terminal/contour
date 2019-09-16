@@ -52,10 +52,10 @@ void CellBackground::setProjection(glm::mat4 const& _projectionMatrix)
     projectionMatrix_ = _projectionMatrix;
 }
 
-void CellBackground::render(glm::ivec2 _pos, terminal::RGBColor const& color)
+void CellBackground::render(glm::ivec2 _pos, glm::vec4 const& _color)
 {
     shader_.use();
-    shader_.setVec3("backgroundColor", glm::vec3{ color.red / 255.0f, color.green / 255.0f, color.blue / 255.0f });
+    shader_.setVec4("backgroundColor", _color);
 
     glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos[0], _pos[1], 0.0f));
     shader_.setMat4(transformLocation_, projectionMatrix_ * translation);

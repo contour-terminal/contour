@@ -34,6 +34,8 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
                std::string const& _fontFamily,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
+               glm::vec4 const& _backgroundColor,
+               bool _backgroundBlur,
                std::string const& _shell,
                LogMask _logMask) :
     //loggingSink_{"aeroterm.log", ios::trunc},
@@ -61,6 +63,7 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
         regularFont_,
         _cursorShape,
         _cursorColor,
+        _backgroundColor,
         _shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         logger_
@@ -68,6 +71,13 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
 {
     if (!regularFont_.isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
+
+    if (_backgroundBlur)
+    {
+        if (!window_.enableBackgroundBlur())
+            throw runtime_error{ "Could not enable background blur." };
+    }
+
     glViewport(0, 0, window_.width(), window_.height());
 }
 
@@ -90,7 +100,9 @@ int AeroTerminal::main()
 
 void AeroTerminal::render()
 {
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glm::vec4 const& bg = terminalView_.defaultBackgroundColor();
+    glClearColor(bg.r, bg.g, bg.b, bg.a);
+    //glClearColor(0.0f, 0.0f, 0.0f, 0.5f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     terminalView_.render();

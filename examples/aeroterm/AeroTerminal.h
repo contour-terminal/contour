@@ -28,6 +28,8 @@ public:
         std::string const& _fontFamily,
         CursorShape _cursorShape,
         glm::vec3 const& _cursorColor,
+        glm::vec4 const& _backgroundColor,
+        bool _backgroundBlur,
         std::string const& _shell,
         LogMask _logMask);
 

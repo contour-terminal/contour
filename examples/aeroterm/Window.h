@@ -32,6 +32,8 @@ class Window {
            OnKey _onKey, OnChar _onChar, OnResize _onResize, OnContentScale _onContentScale);
     ~Window();
 
+    bool enableBackgroundBlur();
+
     GLFWwindow* handle() const noexcept { return window_; }
     operator GLFWwindow* () noexcept { return window_; }
 
