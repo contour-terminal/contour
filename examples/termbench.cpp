@@ -39,7 +39,7 @@ int main(int argc, char const* argv[])
     auto const end = chrono::steady_clock::now();
     auto const ms = chrono::duration_cast<chrono::milliseconds>(end - start).count();
 
-    cout << "\nDuration: " << (ms / 1000) << "." << (ms % 1000) << " secs" << endl;
+    cout << endl << "Duration: " << (ms / 1000) << "." << (ms % 1000) << " secs" << endl;
 
     return EXIT_SUCCESS;
 }
