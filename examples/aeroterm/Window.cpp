@@ -51,6 +51,11 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
     glfwWindowHint(GLFW_DEPTH_BITS, 16);
 
+#if (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3) || (GLFW_VERSION_MAJOR > 3)
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_TRUE);
+#endif
+    glfwWindowHint(GLFW_DEPTH_BITS, 16);
+
     // FIXME: enabling this causes background to go away.
     //glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     //glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
