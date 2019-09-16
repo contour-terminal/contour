@@ -39,7 +39,7 @@ class CellBackground {
             uniform mat4 transform;
             void main()
             {
-                gl_Position = transform * vec4(position, -0.5, 1.0);
+                gl_Position = transform * vec4(position, 0.0, 1.0);
             }
         )";
     }

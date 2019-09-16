@@ -38,9 +38,21 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     onContentScale_{ move(_onContentScale) }
 {
     init();
+
+    glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
+
+    // FIXME: enabling this causes background to go away.
+    //glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    //glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
     window_ = glfwCreateWindow(_width, _height, _title.c_str(), nullptr, nullptr);
     if (!window_)
-        throw runtime_error{ "Could not create GLFW window." };
+    {
+        char const* desc = nullptr;
+        glfwGetError(&desc);
+        throw runtime_error{ string{"Could not create GLFW window. "} + desc };
+    }
 
     glfwMakeContextCurrent(window_);
 
@@ -52,18 +64,11 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     glfwSetCharCallback(window_, &Window::onChar);
     glfwSetWindowSizeCallback(window_, &Window::onResize);
 
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
-
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
     glfwSetWindowContentScaleCallback(window_, &Window::onContentScale);
 #endif
 
-    //glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
