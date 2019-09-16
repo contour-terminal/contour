@@ -49,9 +49,13 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     window_ = glfwCreateWindow(_width, _height, _title.c_str(), nullptr, nullptr);
     if (!window_)
     {
+#if (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3) || (GLFW_VERSION_MAJOR > 3)
         char const* desc = nullptr;
         glfwGetError(&desc);
         throw runtime_error{ string{"Could not create GLFW window. "} + desc };
+#else
+        throw runtime_error{ "Could not create GLFW window." };
+#endif
     }
 
     glfwMakeContextCurrent(window_);
