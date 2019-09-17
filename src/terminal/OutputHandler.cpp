@@ -443,7 +443,7 @@ void OutputHandler::dispatchCSI()
     }
 }
 
-void OutputHandler::setMode(size_t mode, bool enable)
+void OutputHandler::setMode(unsigned int mode, bool enable)
 {
     switch (mode)
     {
@@ -461,7 +461,7 @@ void OutputHandler::setMode(size_t mode, bool enable)
     }
 }
 
-void OutputHandler::setModeDEC(size_t mode, bool enable)
+void OutputHandler::setModeDEC(unsigned int mode, bool enable)
 {
     switch (mode)
     {
@@ -719,7 +719,7 @@ void OutputHandler::dispatchGraphicsRendition()
 }
 
 template <typename T>
-size_t OutputHandler::parseColor(size_t i)
+unsigned int OutputHandler::parseColor(unsigned int i)
 {
     if (i + 1 < parameterCount())
     {

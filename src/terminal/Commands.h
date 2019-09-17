@@ -22,7 +22,7 @@
 
 namespace terminal {
 
-using cursor_pos_t = size_t;
+using cursor_pos_t = unsigned int;
 
 /// Screen coordinates between 1..n including.
 struct Coordinate {
@@ -189,7 +189,7 @@ struct FullReset {};
 /// The active position is moved to the first character of the n-th following line.
 struct CursorNextLine {
     /// This is the active position to the first character of the n-th following line.
-    size_t n;
+    cursor_pos_t n;
 };
 
 /// CPL - Cursor Previous Line.
@@ -197,7 +197,7 @@ struct CursorNextLine {
 /// The active position is moved to the first character of the n-th preceding line.
 struct CursorPreviousLine {
     /// This is the number of active position moved to the first character of the n-th preceding line.
-    size_t n;
+    cursor_pos_t n;
 };
 
 struct DeviceStatusReport {};
@@ -209,7 +209,7 @@ struct DeviceStatusReport {};
 /// ECH works inside or outside the scrolling margins.
 struct EraseCharacters {
     /// This is the number of characters to erase. A Pn value of 0 or 1 erases one character.
-    size_t n;
+    cursor_pos_t n;
 };
 
 /// CPR - Cursor Position Report.
@@ -311,7 +311,7 @@ struct DeleteCharacters {
     ///
     /// If this value is greater than the number of characters between the cursor and the right margin,
     /// then DCH only deletes the remaining characters.
-    size_t n;
+    cursor_pos_t n;
 };
 
 /// CUU - Cursor Up.
@@ -418,11 +418,11 @@ struct SetMode { Mode mode; bool enable; };
 struct SetTopBottomMargin {
     /// The line number for the top margin.
     /// Default: 1
-    size_t top;
+    cursor_pos_t top;
 
     /// The line number for the bottom margin.
     /// Default: current number of lines per screen
-    size_t bottom;
+    cursor_pos_t bottom;
 };
 
 /// DECSLRM - Set Left and Right Margins.
@@ -441,8 +441,8 @@ struct SetTopBottomMargin {
 /// * Available in: VT Level 4 mode only
 /// * Default: Margins are at the left and right page borders.
 struct SetLeftRightMargin {
-    size_t left;
-    size_t right;
+    cursor_pos_t left;
+    cursor_pos_t right;
 };
 
 enum class MouseProtocol {

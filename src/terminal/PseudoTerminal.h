@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/WindowSize.h>
+
 #include <map>
 #include <string>
 #include <variant>
@@ -25,11 +27,6 @@
 #endif
 
 namespace terminal {
-
-struct [[nodiscard]] WindowSize {
-    unsigned short columns;
-	unsigned short rows;
-};
 
 WindowSize currentWindowSize();
 

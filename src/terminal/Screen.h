@@ -18,6 +18,7 @@
 #include <terminal/Logger.h>
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
+#include <terminal/WindowSize.h>
 
 #include <fmt/format.h>
 
@@ -164,14 +165,14 @@ class Screen {
      * @param error an optional logger for errors.
      * @param onCommands hook to the commands being executed by the screen.
      */
-    Screen(size_t _columnCount,
-           size_t _rowCount,
+    Screen(cursor_pos_t _columnCount,
+           cursor_pos_t _rowCount,
            ModeSwitchCallback _useApplicationCursorKeys,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
-    Screen(size_t columnCount, size_t rowCount) :
+    Screen(cursor_pos_t columnCount, cursor_pos_t rowCount) :
         Screen{columnCount, rowCount, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
@@ -183,7 +184,7 @@ class Screen {
     void render(Renderer const& renderer) const;
 
     /// Renders a single text line.
-    std::string renderTextLine(size_t row) const;
+    std::string renderTextLine(cursor_pos_t row) const;
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
     std::string renderText() const;
@@ -254,9 +255,9 @@ class Screen {
     void reset();
     void resetHard();
 
-    size_t columnCount() const noexcept { return columnCount_; }
-    size_t rowCount() const noexcept { return rowCount_; }
-    void resize(size_t columnCount, size_t rowCount);
+    cursor_pos_t columnCount() const noexcept { return columnCount_; }
+    cursor_pos_t rowCount() const noexcept { return rowCount_; }
+    void resize(WindowSize const& _winSize);
 
     cursor_pos_t realCurrentRow() const noexcept { return state_->cursor.row; }
     cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
@@ -342,14 +343,14 @@ class Screen {
     }
 
     struct Range {
-        size_t from;
-        size_t to;
+        unsigned int from;
+        unsigned int to;
 
-        constexpr size_t length() const noexcept { return to - from + 1; }
+        constexpr unsigned int length() const noexcept { return to - from + 1; }
         constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
         constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
 
-        constexpr bool contains(size_t _value) const noexcept { return from <= _value && _value <= to; }
+        constexpr bool contains(unsigned int _value) const noexcept { return from <= _value && _value <= to; }
     };
 
     struct Margin {
@@ -369,7 +370,7 @@ class Screen {
             bool blinking = false;
         };
 
-        Buffer(size_t cols, size_t rows)
+        Buffer(unsigned int cols, unsigned int rows)
             : numColumns_{cols},
               numLines_{rows},
               lines{rows, Line{cols, Cell{}}},
@@ -381,8 +382,8 @@ class Screen {
             verifyState();
         }
 
-        size_t numColumns_;
-        size_t numLines_;
+        cursor_pos_t numColumns_;
+        cursor_pos_t numLines_;
         Lines lines;
         Lines savedLines{};
 
@@ -400,14 +401,14 @@ class Screen {
         void appendChar(char32_t ch);
         void linefeed();
 
-        void resize(size_t newColumnCount, size_t newRowCount);
-        size_t numLines() const noexcept { return numLines_; }
-        size_t numColumns() const noexcept { return numColumns_; }
+        void resize(WindowSize const& _winSize);
+        cursor_pos_t numLines() const noexcept { return numLines_; }
+        cursor_pos_t numColumns() const noexcept { return numColumns_; }
 
-        void scrollUp(size_t n);
-        void scrollUp(size_t n, Margin const& margin);
-        void scrollDown(size_t n);
-        void scrollDown(size_t n, Margin const& margin);
+        void scrollUp(cursor_pos_t n);
+        void scrollUp(cursor_pos_t n, Margin const& margin);
+        void scrollDown(cursor_pos_t n);
+        void scrollDown(cursor_pos_t n, Margin const& margin);
 
         void verifyState() const;
         void updateCursorIterators();
@@ -463,7 +464,7 @@ class Screen {
      *
      * @returns the textual representation of the n'th line into the history.
      */
-    std::string renderHistoryTextLine(size_t _lineNumberIntoHistory) const;
+    std::string renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const;
 
   private:
     Hook const onCommands_;
@@ -480,8 +481,8 @@ class Screen {
 
     std::set<Mode> enabledModes_{};
 
-    size_t columnCount_;
-    size_t rowCount_;
+    cursor_pos_t columnCount_;
+    cursor_pos_t rowCount_;
 };
 
 constexpr bool operator==(Screen::GraphicsAttributes const& a, Screen::GraphicsAttributes const& b) noexcept

@@ -29,14 +29,14 @@ class OutputHandler {
 
     size_t constexpr static MaxParameters = 16;
 
-    OutputHandler(size_t _rows, Logger _logger)
+    OutputHandler(unsigned int _rows, Logger _logger)
         : rowCount_{_rows},
           logger_{std::move(_logger)}
     {
         parameters_.reserve(MaxParameters);
     }
 
-    void updateRowCount(size_t rows)
+    void updateRowCount(unsigned int rows)
     {
         rowCount_ = rows;
     }
@@ -54,11 +54,11 @@ class OutputHandler {
   private:
     char32_t currentChar() const noexcept { return currentChar_; }
 
-    void setDefaultParameter(size_t value) noexcept { defaultParameter_ = value; }
+    void setDefaultParameter(unsigned int value) noexcept { defaultParameter_ = value; }
 
     size_t parameterCount() const noexcept { return parameters_.size(); }
 
-    size_t param(size_t i) const noexcept
+    unsigned int param(unsigned int i) const noexcept
     {
         if (i < parameters_.size() && parameters_[i])
             return parameters_[i];
@@ -72,12 +72,12 @@ class OutputHandler {
     void dispatchCSI_ext();  // "\033[? ..."
     void dispatchCSI_gt();   // "\033[> ..."
 
-    void setMode(size_t mode, bool enable);
-    void setModeDEC(size_t mode, bool enable);
+    void setMode(unsigned int mode, bool enable);
+    void setModeDEC(unsigned int mode, bool enable);
 
     void dispatchGraphicsRendition();
     template <typename T>
-    size_t parseColor(size_t i);
+    unsigned int parseColor(unsigned int i);
 
     template <typename T, typename... Args>
     void emit(Args&&... args)
@@ -109,11 +109,11 @@ class OutputHandler {
     std::vector<Command> commands_{};
 
     std::string intermediateCharacters_{};
-    std::vector<size_t> parameters_{0};
-    size_t defaultParameter_ = 0;
+    std::vector<unsigned int> parameters_{0};
+    unsigned int defaultParameter_ = 0;
     bool private_ = false;
 
-    size_t rowCount_;
+    unsigned int rowCount_;
 
     Logger const logger_;
 };

@@ -53,38 +53,38 @@ string to_string(CharacterStyleMask _mask)
     return out;
 }
 
-void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
+void Screen::Buffer::resize(WindowSize const& _newSize)
 {
     if (margin_.horizontal == Range{1, numColumns_} && margin_.vertical == Range{1, numLines_})
     {
         // full screen margins adapt implicitely to remain full-size
         margin_ = Margin{
-            {1, newRowCount},
-            {1, newColumnCount}
+            Range{1, _newSize.rows},
+            Range{1, _newSize.columns}
         };
     }
     else
     {
         // clamp margin
-        margin_.horizontal.from = min(margin_.horizontal.from, newColumnCount);
-        margin_.horizontal.to = min(margin_.horizontal.to, newColumnCount);
-        margin_.vertical.from = min(margin_.vertical.from, newRowCount);
-        margin_.vertical.to = min(margin_.vertical.to, newRowCount);
+        margin_.horizontal.from = min(margin_.horizontal.from, _newSize.columns);
+        margin_.horizontal.to = min(margin_.horizontal.to, _newSize.columns);
+        margin_.vertical.from = min(margin_.vertical.from, _newSize.rows);
+        margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
     }
 
-    if (newColumnCount > numColumns_)
+    if (_newSize.columns > numColumns_)
     {
-        // TODO: grow existing lines to newColumnCount
+        // TODO: grow existing lines to _newSize.columns
     }
-    else if (newColumnCount < numColumns_)
+    else if (_newSize.columns < numColumns_)
     {
-        // TODO: shrink existing lines to newColumnCount
+        // TODO: shrink existing lines to _newSize.columns
     }
 
-    if (newRowCount > numLines_)
+    if (_newSize.rows > numLines_)
     {
-        auto const extendCount = newRowCount - numLines_;
-        auto const rowsToTakeFromSavedLines = min(extendCount, size(savedLines));
+        auto const extendCount = _newSize.rows - numLines_;
+        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<cursor_pos_t>(size(savedLines)));
         lines.splice(
             begin(lines),
             savedLines,
@@ -95,11 +95,11 @@ void Screen::Buffer::resize(size_t newColumnCount, size_t newRowCount)
         generate_n(
             back_inserter(lines),
             fillLineCount,
-            [=]() { return Line{newColumnCount, Cell{}}; });
+            [=]() { return Line{_newSize.columns, Cell{}}; });
     }
     else
     {
-        // TODO: shrink existing line count to newRowCount
+        // TODO: shrink existing line count to _newSize.rows
         // by splicing the diff count lines into savedLines bottom
     }
 }
@@ -187,12 +187,12 @@ void Screen::Buffer::appendChar(char32_t ch)
     }
 }
 
-void Screen::Buffer::scrollUp(size_t v_n)
+void Screen::Buffer::scrollUp(cursor_pos_t v_n)
 {
     scrollUp(v_n, margin_);
 }
 
-void Screen::Buffer::scrollUp(size_t v_n, Margin const& margin)
+void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 {
     if (margin.horizontal != Range{1, numColumns()})
     {
@@ -271,12 +271,12 @@ void Screen::Buffer::scrollUp(size_t v_n, Margin const& margin)
     updateCursorIterators();
 }
 
-void Screen::Buffer::scrollDown(size_t v_n)
+void Screen::Buffer::scrollDown(cursor_pos_t v_n)
 {
     scrollDown(v_n, margin_);
 }
 
-void Screen::Buffer::scrollDown(size_t v_n, Margin const& _margin)
+void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
 {
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
@@ -408,8 +408,8 @@ void Screen::Buffer::verifyState() const
 
 // ==================================================================================
 
-Screen::Screen(size_t columnCount,
-               size_t rowCount,
+Screen::Screen(cursor_pos_t columnCount,
+               cursor_pos_t rowCount,
                ModeSwitchCallback _useApplicationCursorKeys,
                Reply reply,
                Logger _logger,
@@ -430,15 +430,15 @@ Screen::Screen(size_t columnCount,
     (*this)(SetMode{Mode::AutoWrap, true});
 }
 
-void Screen::resize(size_t newColumnCount, size_t newRowCount)
+void Screen::resize(WindowSize const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
 
-    primaryBuffer_.resize(newColumnCount, newRowCount);
-    alternateBuffer_.resize(newColumnCount, newRowCount);
+    primaryBuffer_.resize(_newSize);
+    alternateBuffer_.resize(_newSize);
 
-    rowCount_ = newRowCount;
-    columnCount_ = newColumnCount;
+    rowCount_ = _newSize.rows;
+    columnCount_ = _newSize.columns;
 }
 
 void Screen::write(char const * _data, size_t _size)
@@ -467,7 +467,7 @@ void Screen::render(Renderer const& render) const
             render(row, col, at(row, col));
 }
 
-string Screen::renderHistoryTextLine(size_t _lineNumberIntoHistory) const
+string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
     string line;
     line.reserve(columnCount());
@@ -481,7 +481,7 @@ string Screen::renderHistoryTextLine(size_t _lineNumberIntoHistory) const
     return line;
 }
 
-string Screen::renderTextLine(size_t row) const
+string Screen::renderTextLine(cursor_pos_t row) const
 {
     string line;
     line.reserve(columnCount());
@@ -499,7 +499,7 @@ string Screen::renderText() const
     string text;
     text.reserve(rowCount_ * (columnCount_ + 1));
 
-    for (size_t row = 1; row <= rowCount_; ++row)
+    for (cursor_pos_t row = 1; row <= rowCount_; ++row)
     {
         text += renderTextLine(row);
         text += '\n';
@@ -711,7 +711,7 @@ void Screen::operator()(DeleteCharacters const& v)
     if (isCursorInsideMargins() && v.n != 0)
     {
         auto rightMargin = next(begin(*state_->currentLine), state_->margin_.horizontal.to);
-        auto const n = min(v.n, static_cast<size_t>(distance(state_->currentColumn, rightMargin)));
+        auto const n = min(v.n, static_cast<cursor_pos_t>(distance(state_->currentColumn, rightMargin)));
         rotate(
             state_->currentColumn,
             next(state_->currentColumn, n),

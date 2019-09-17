@@ -127,7 +127,7 @@ void Terminal::render(Screen::Renderer const& renderer) const
 void Terminal::resize(WindowSize const& _newWindowSize)
 {
     lock_guard<mutex> _l{ screenLock_ };
-    screen_.resize(_newWindowSize.columns, _newWindowSize.rows);
+    screen_.resize(_newWindowSize);
     PseudoTerminal::resize(_newWindowSize);
 }
 

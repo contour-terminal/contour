@@ -68,6 +68,7 @@ set(terminal_HEADERS
     src/terminal/Screen.h
     src/terminal/Terminal.h
     src/terminal/VTType.h
+    src/terminal/WindowSize.h
 )
 
 set(terminal_SOURCES
