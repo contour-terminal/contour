@@ -66,6 +66,7 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
         _backgroundColor,
         _shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
+        bind(&AeroTerminal::onScreenUpdate, this),
         logger_
     }
 {
@@ -264,3 +265,7 @@ void AeroTerminal::onChar(char32_t _char)
     terminalView_.send(_char, terminal::Modifier{});
 }
 
+void AeroTerminal::onScreenUpdate()
+{
+    glfwPostEmptyEvent();
+}

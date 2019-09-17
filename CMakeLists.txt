@@ -19,6 +19,7 @@ option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [defau
 option(LIBTERMINAL_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
 option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(LIBTERMINAL_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(LIBTERMINAL_GLTERMINAL "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 
 # ----------------------------------------------------------------------------
@@ -105,6 +106,10 @@ if(LIBTERMINAL_TESTING)
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
 endif(LIBTERMINAL_TESTING)
+
+if(LIBTERMINAL_GLTERMINAL)
+    add_subdirectory(src/glterminal)
+endif()
 
 if(LIBTERMINAL_EXAMPLES)
     add_subdirectory(examples)

@@ -12,9 +12,9 @@
  * limitations under the License.
  */
 #include "AeroTerminal.h"
-#include "GLLogger.h"
 #include "Flags.h"
 
+#include <glterminal/GLLogger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/OutputGenerator.h>
 #include <terminal/Terminal.h>

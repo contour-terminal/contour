@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include "FontManager.h"
-#include "Shader.h"
+#include <glterminal/FontManager.h>
+#include <glterminal/Shader.h>
 
 #include <glm/glm.hpp>
 #include <GL/glew.h>

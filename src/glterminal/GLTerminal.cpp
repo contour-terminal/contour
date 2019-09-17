@@ -11,14 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "GLTerminal.h"
-#include "GLLogger.h"
-#include "FontManager.h"
+#include <glterminal/GLTerminal.h>
+#include <glterminal/GLLogger.h>
+#include <glterminal/FontManager.h>
 
 #include <terminal/Util.h>
 
 #include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
 #include <iostream>
@@ -46,6 +45,7 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
                        glm::vec4 const& _backgroundColor,
                        string const& _shell,
                        glm::mat4 const& _projectionMatrix,
+                       function<void()> _onScreenUpdate,
                        GLLogger& _logger) :
     width_{ _width },
     height_{ _height },
@@ -75,7 +75,8 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
         bind(&GLTerminal::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
-    processExitWatcher_{ [this]() { wait(); }}
+    processExitWatcher_{ [this]() { wait(); }},
+    onScreenUpdate_{ move(_onScreenUpdate) }
 {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -351,5 +352,7 @@ void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _comma
         logger_(TraceOutputEvent{ to_string(command) });
 
     updated_.store(true);
-    glfwPostEmptyEvent();
+
+    if (onScreenUpdate_)
+        onScreenUpdate_();
 }

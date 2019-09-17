@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include "FontManager.h"
-#include "GLLogger.h"
-#include "GLTerminal.h"
+#include <glterminal/FontManager.h>
+#include <glterminal/GLLogger.h>
+#include <glterminal/GLTerminal.h>
 #include "Window.h"
 
 #include <string>
@@ -43,6 +43,7 @@ private:
     void onKey(int _key, int _scanCode, int _action, int _mods);
     void onChar(char32_t _char);
     void onContentScale(float _xs, float _ys);
+    void onScreenUpdate();
 
 private:
     GLLogger logger_;

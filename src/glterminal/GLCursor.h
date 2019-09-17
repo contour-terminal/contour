@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include "Shader.h"
+#include <glterminal/Shader.h>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <memory>

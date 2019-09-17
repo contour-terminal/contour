@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "CellBackground.h"
+#include <glterminal/CellBackground.h>
 #include <GL/glew.h>
 #include <glm/gtc/matrix_transform.hpp>
 

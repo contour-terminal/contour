@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "Shader.h"
+#include <glterminal/Shader.h>
 
 #include <string>
 #include <sstream>

@@ -17,14 +17,15 @@
 #include <terminal/Terminal.h>
 
 #include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
-#include "CellBackground.h"
-#include "FontManager.h"
-#include "GLCursor.h"
-#include "GLLogger.h"
-#include "GLTextShaper.h"
+#include <glterminal/CellBackground.h>
+#include <glterminal/FontManager.h>
+#include <glterminal/GLCursor.h>
+#include <glterminal/GLLogger.h>
+#include <glterminal/GLTextShaper.h>
 
 #include <glm/matrix.hpp>
 
@@ -41,6 +42,7 @@ class GLTerminal {
                glm::vec4 const& _backgroundColor,
                std::string const& _shell,
                glm::mat4 const& _projectionMatrix,
+               std::function<void()> _onScreenUpdate,
                GLLogger& _logger);
 
     GLTerminal(GLTerminal const&) = delete;
@@ -143,4 +145,6 @@ class GLTerminal {
     terminal::Terminal terminal_;
     terminal::Process process_;
     std::thread processExitWatcher_;
+
+    std::function<void()> onScreenUpdate_;
 };
