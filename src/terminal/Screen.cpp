@@ -72,17 +72,10 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
         margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
     }
 
-    if (_newSize.columns > numColumns_)
-    {
-        // TODO: grow existing lines to _newSize.columns
-    }
-    else if (_newSize.columns < numColumns_)
-    {
-        // TODO: shrink existing lines to _newSize.columns
-    }
-
     if (_newSize.rows > numLines_)
     {
+        // Grow line count by splicing available lince from history back into buffer, if available,
+        // or create new ones until numLines_ == _newSize.rows.
         auto const extendCount = _newSize.rows - numLines_;
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<cursor_pos_t>(size(savedLines)));
         lines.splice(
@@ -100,7 +93,16 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
     else
     {
         // TODO: shrink existing line count to _newSize.rows
-        // by splicing the diff count lines into savedLines bottom
+        // by splicing the diff count lines into savedLines bottom.
+    }
+
+    if (_newSize.columns > numColumns_)
+    {
+        // TODO: Grow existing columns to _newSize.columns.
+    }
+    else if (_newSize.columns < numColumns_)
+    {
+        // TODO: Shrink existing columns to _newSize.columns.
     }
 }
 
