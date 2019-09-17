@@ -116,8 +116,8 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
     height_ = _height;
 
     auto const winSize = terminal::WindowSize{
-        static_cast<unsigned short>(height_ / regularFont_.lineHeight()),
-        static_cast<unsigned short>(width_ / regularFont_.maxAdvance())
+        static_cast<unsigned short>(width_ / regularFont_.maxAdvance()),
+        static_cast<unsigned short>(height_ / regularFont_.lineHeight())
     };
     auto const usedHeight = winSize.rows * regularFont_.lineHeight();
     auto const usedWidth = winSize.columns * regularFont_.maxAdvance();
