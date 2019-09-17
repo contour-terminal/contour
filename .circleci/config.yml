@@ -23,6 +23,7 @@ defaults:
         apt-get install -qy --no-install-recommends \
           build-essential \
           software-properties-common \
+          libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-dev libharfbuzz-dev \
           cmake ninja-build clang++-8 g++ lcov
 
   - setup_prerelease_commit_hash: &setup_prerelease_commit_hash
