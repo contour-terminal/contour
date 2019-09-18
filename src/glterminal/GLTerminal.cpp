@@ -112,42 +112,47 @@ std::string GLTerminal::screenshot() const
 
 void GLTerminal::resize(unsigned _width, unsigned _height)
 {
+    auto const newSize = terminal::WindowSize{
+        static_cast<unsigned short>(_width / regularFont_.maxAdvance()),
+        static_cast<unsigned short>(_height / regularFont_.lineHeight())
+    };
+
     width_ = _width;
     height_ = _height;
 
-    auto const winSize = terminal::WindowSize{
-        static_cast<unsigned short>(width_ / regularFont_.maxAdvance()),
-        static_cast<unsigned short>(height_ / regularFont_.lineHeight())
-    };
-    auto const usedHeight = winSize.rows * regularFont_.lineHeight();
-    auto const usedWidth = winSize.columns * regularFont_.maxAdvance();
-    auto const freeHeight = _height - usedHeight;
-    auto const freeWidth = _width - usedWidth;
-
-    cout << fmt::format("Resized to {}x{} ({}x{}) (free: {}x{}) (CharBox: {}x{})\n",
-        winSize.columns, winSize.rows,
-        _width, _height,
-        freeWidth, freeHeight,
-        regularFont_.maxAdvance(), regularFont_.lineHeight()
-    );
-
-    terminal_.resize(winSize);
-
-    margin_ = [winSize, this]() {
-        auto const usedHeight = winSize.rows * regularFont_.lineHeight();
-        auto const usedWidth = winSize.columns * regularFont_.maxAdvance();
-        auto const freeHeight = height_ - usedHeight;
-        auto const freeWidth = width_ - usedWidth;
+    auto const computeMargin = [this](unsigned _width, unsigned _height, WindowSize const& ws)
+    {
+        auto const usedHeight = ws.rows * regularFont_.lineHeight();
+        auto const usedWidth = ws.columns * regularFont_.maxAdvance();
+        auto const freeHeight = _height - usedHeight;
+        auto const freeWidth = _width - usedWidth;
         auto const bottomMargin = freeHeight / 2;
         auto const leftMargin = freeWidth / 2;
         return Margin{leftMargin, bottomMargin};
-    }();
+    };
+
+    WindowSize oldSize = terminal_.size();
+    bool const doResize = newSize != oldSize; // terminal_.size();
+    if (doResize)
+        terminal_.resize(newSize);
+
+    margin_ = computeMargin(_width, _height, terminal_.size());
+
+    if (doResize)
+        cout << fmt::format(
+            "Resized to {}x{} ({}x{}) (margin: {}x{}) (CharBox: {}x{})\n",
+            newSize.columns, newSize.rows,
+            _width, _height,
+            margin_.left, margin_.bottom,
+            regularFont_.maxAdvance(), regularFont_.lineHeight()
+        );
 }
 
 void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
 {
     cellBackground_.setProjection(_projectionMatrix);
     textShaper_.setProjection(_projectionMatrix);
+    cursor_.setProjection(_projectionMatrix);
 }
 
 bool GLTerminal::shouldRender()

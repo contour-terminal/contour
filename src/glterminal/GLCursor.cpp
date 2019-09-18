@@ -76,7 +76,7 @@ GLCursor::~GLCursor()
     glDeleteVertexArrays(1, &vao_);
 }
 
-void GLCursor::setTransform(glm::mat4 _mat)
+void GLCursor::setProjection(glm::mat4 _mat)
 {
     transform_ = _mat;
 }
