@@ -55,7 +55,7 @@ string to_string(CharacterStyleMask _mask)
 
 void Screen::Buffer::resize(WindowSize const& _newSize)
 {
-    if (margin_.horizontal == Range{1, numColumns_} && margin_.vertical == Range{1, numLines_})
+    if (margin_.horizontal == Range{1, size_.columns} && margin_.vertical == Range{1, size_.rows})
     {
         // full screen margins adapt implicitely to remain full-size
         margin_ = Margin{
@@ -72,12 +72,12 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
         margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
     }
 
-    if (_newSize.rows > numLines_)
+    if (_newSize.rows > size_.rows)
     {
         // Grow line count by splicing available lince from history back into buffer, if available,
-        // or create new ones until numLines_ == _newSize.rows.
-        auto const extendCount = _newSize.rows - numLines_;
-        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<cursor_pos_t>(size(savedLines)));
+        // or create new ones until size_.rows == _newSize.rows.
+        auto const extendCount = _newSize.rows - size_.rows;
+        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned int>(std::size(savedLines)));
         lines.splice(
             begin(lines),
             savedLines,
@@ -90,20 +90,46 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             fillLineCount,
             [=]() { return Line{_newSize.columns, Cell{}}; });
     }
-    else
+    else if (_newSize.rows < size_.rows)
     {
-        // TODO: shrink existing line count to _newSize.rows
-        // by splicing the diff count lines into savedLines bottom.
+        // Shrink existing line count to _newSize.rows
+        // by splicing the number of lines to be shrinked by into savedLines bottom.
+        auto const n = size_.rows - _newSize.rows;
+        savedLines.splice(
+            end(savedLines),
+            lines,
+            begin(lines),
+            next(begin(lines), n)
+        );
+        assert(lines.size() == _newSize.rows);
     }
 
-    if (_newSize.columns > numColumns_)
+    if (_newSize.columns > size_.columns)
     {
-        // TODO: Grow existing columns to _newSize.columns.
+        // Grow existing columns to _newSize.columns.
+        std::for_each(
+            begin(lines),
+            end(lines),
+            [=](auto& line) { line.resize(_newSize.columns); }
+        );
+        if (wrapPending)
+            cursor.column++;
+        wrapPending = false;
     }
-    else if (_newSize.columns < numColumns_)
+    else if (_newSize.columns < size_.columns)
     {
-        // TODO: Shrink existing columns to _newSize.columns.
+        // Shrink existing columns to _newSize.columns.
+        // Nothing should be done, I think, as we preserve prior (now exceeding) content.
+        if (cursor.column == size_.columns)
+            wrapPending = true;
     }
+
+    // TODO: use `WindowSize size_;` as member instead.
+    size_.rows = _newSize.rows;
+    size_.columns = _newSize.columns;
+
+    cursor = clampCoordinate(cursor);
+    updateCursorIterators();
 }
 
 void Screen::Buffer::moveCursorTo(Coordinate to)
@@ -125,9 +151,9 @@ Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
 
 Screen::Cell& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col)
 {
-    assert(_row >= 1 && _row <= numLines_);
-    assert(_col >= 1 && _col <= numColumns_);
-    assert(numLines_ == lines.size());
+    assert(_row >= 1 && _row <= size_.rows);
+    assert(_col >= 1 && _col <= size_.columns);
+    assert(size_.rows == lines.size());
 
     return (*next(begin(lines), _row - 1))[_col - 1];
 }
@@ -141,7 +167,7 @@ void Screen::Buffer::linefeed()
 {
     wrapPending = false;
 
-    if (cursor.row < numLines())
+    if (cursor.row < size_.rows)
     {
         cursor.row++;
         cursor.column = 1;
@@ -157,7 +183,7 @@ void Screen::Buffer::linefeed()
            begin(lines)
         );
 
-        lines.emplace_back(numColumns(), Cell{});
+        lines.emplace_back(size_.columns, Cell{});
         currentLine = prev(end(lines));
         currentColumn = begin(*currentLine);
     }
@@ -171,13 +197,13 @@ void Screen::Buffer::appendChar(char32_t ch)
 
     if (wrapPending && autoWrap)
     {
-        assert(cursor.column == numColumns());
+        assert(cursor.column == size_.columns);
         linefeed();
     }
 
     *currentColumn = {ch, graphicsRendition};
 
-    if (cursor.column < numColumns())
+    if (cursor.column < size_.columns)
     {
         cursor.column++;
         currentColumn++;
@@ -196,7 +222,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n)
 
 void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 {
-    if (margin.horizontal != Range{1, numColumns()})
+    if (margin.horizontal != Range{1, size_.columns})
     {
         // a full "inside" scroll-up
         auto const marginHeight = margin.vertical.length();
@@ -230,10 +256,10 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             );
         }
     }
-    else if (margin.vertical == Range{1, numLines()})
+    else if (margin.vertical == Range{1, size_.rows})
     {
         // full-screen scroll-up
-        auto const n = min(v_n, numLines());
+        auto const n = min(v_n, size_.rows);
 
         if (n > 0)
         {
@@ -247,7 +273,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             generate_n(
                 back_inserter(lines),
                 n,
-                [this]() { return Line{numColumns(), Cell{}}; }
+                [this]() { return Line{size_.columns, Cell{}}; }
             );
         }
     }
@@ -283,7 +309,7 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
 
-    if (_margin.horizontal != Range{1, numColumns()})
+    if (_margin.horizontal != Range{1, size_.columns})
     {
         // full "inside" scroll-down
         if (n < marginHeight)
@@ -337,7 +363,7 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
             );
         }
     }
-    else if (_margin.vertical == Range{1, numLines()})
+    else if (_margin.vertical == Range{1, size_.rows})
     {
         rotate(
             begin(lines),
@@ -393,7 +419,7 @@ void Screen::Buffer::updateCursorIterators()
 
 void Screen::Buffer::verifyState() const
 {
-    assert(numLines_ == lines.size());
+    assert(size_.rows == lines.size());
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursor = clampCoordinate(cursor);
@@ -405,13 +431,12 @@ void Screen::Buffer::verifyState() const
 
     assert(line == currentLine);
     assert(col == currentColumn);
-    assert(cursor.column == numColumns() || wrapPending == false);
+    assert(cursor.column == size_.columns || wrapPending == false);
 }
 
 // ==================================================================================
 
-Screen::Screen(cursor_pos_t columnCount,
-               cursor_pos_t rowCount,
+Screen::Screen(WindowSize const& _size,
                ModeSwitchCallback _useApplicationCursorKeys,
                Reply reply,
                Logger _logger,
@@ -420,14 +445,13 @@ Screen::Screen(cursor_pos_t columnCount,
     logger_{ _logger },
     useApplicationCursorKeys_{ _useApplicationCursorKeys },
     reply_{ move(reply) },
-    handler_{ rowCount, _logger },
+    handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
-    primaryBuffer_{ columnCount, rowCount },
-    alternateBuffer_{ columnCount, rowCount },
+    primaryBuffer_{ _size },
+    alternateBuffer_{ _size },
     state_{ &primaryBuffer_ },
     enabledModes_{},
-    columnCount_{ columnCount },
-    rowCount_{ rowCount }
+    size_{ _size }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
 }
@@ -435,12 +459,9 @@ Screen::Screen(cursor_pos_t columnCount,
 void Screen::resize(WindowSize const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
-
     primaryBuffer_.resize(_newSize);
     alternateBuffer_.resize(_newSize);
-
-    rowCount_ = _newSize.rows;
-    columnCount_ = _newSize.columns;
+    size_ = _newSize;
 }
 
 void Screen::write(char const * _data, size_t _size)
@@ -464,16 +485,17 @@ void Screen::write(char const * _data, size_t _size)
 
 void Screen::render(Renderer const& render) const
 {
-    for (cursor_pos_t row = 1; row <= rowCount(); ++row)
-        for (cursor_pos_t col = 1; col <= columnCount(); ++col)
+    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
+        for (cursor_pos_t col = 1; col <= size_.columns; ++col)
             render(row, col, at(row, col));
 }
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= state_->savedLines.size());
     string line;
-    line.reserve(columnCount());
-    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory);
+    line.reserve(size_.columns);
+    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
         if (cell.character)
             line += utf8::to_string(utf8::encode(cell.character));
@@ -486,8 +508,8 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 string Screen::renderTextLine(cursor_pos_t row) const
 {
     string line;
-    line.reserve(columnCount());
-    for (cursor_pos_t col = 1; col <= columnCount(); ++col)
+    line.reserve(size_.columns);
+    for (cursor_pos_t col = 1; col <= size_.columns; ++col)
         if (auto const& cell = at(row, col); cell.character)
             line += utf8::to_string(utf8::encode(at(row, col).character));
         else
@@ -499,9 +521,9 @@ string Screen::renderTextLine(cursor_pos_t row) const
 string Screen::renderText() const
 {
     string text;
-    text.reserve(rowCount_ * (columnCount_ + 1));
+    text.reserve(size_.rows * (size_.columns + 1));
 
-    for (cursor_pos_t row = 1; row <= rowCount_; ++row)
+    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
     {
         text += renderTextLine(row);
         text += '\n';
@@ -518,9 +540,9 @@ std::string Screen::screenshot() const
     generator(ClearScreen{});
     generator(MoveCursorTo{ 1, 1 });
 
-    for (cursor_pos_t row = 1; row <= rowCount_; ++row)
+    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
     {
-        for (cursor_pos_t col = 1; col <= columnCount_; ++col)
+        for (cursor_pos_t col = 1; col <= size_.columns; ++col)
         {
             Cell const& cell = at(row, col);
 
@@ -533,7 +555,7 @@ std::string Screen::screenshot() const
     }
 
     generator(MoveCursorTo{ state_->cursor.row, state_->cursor.column });
-    if (currentCursor().visible)
+    if (realCursor().visible)
         generator(SetMode{ Mode::VisibleCursor, false });
 
     return result.str();
@@ -556,7 +578,7 @@ void Screen::operator()(Linefeed const& v)
 
 void Screen::operator()(Backspace const& v)
 {
-    moveCursorTo(currentRow(), currentColumn() > 1 ? currentColumn() - 1 : 1);
+    moveCursorTo({cursorPosition().row, cursorPosition().column > 1 ? cursorPosition().column - 1 : 1});
 }
 
 void Screen::operator()(DeviceStatusReport const& v)
@@ -566,13 +588,13 @@ void Screen::operator()(DeviceStatusReport const& v)
 
 void Screen::operator()(ReportCursorPosition const& v)
 {
-    reply("\033[{};{}R", currentRow(), currentColumn());
+    reply("\033[{};{}R", cursorPosition().row, cursorPosition().column);
 }
 
 void Screen::operator()(ReportExtendedCursorPosition const& v)
 {
     auto const pageNum = 1;
-    reply("\033[{};{};{}R", currentRow(), currentColumn(), pageNum);
+    reply("\033[{};{};{}R", cursorPosition().row, cursorPosition().column, pageNum);
 }
 
 void Screen::operator()(SendDeviceAttributes const& v)
@@ -628,7 +650,7 @@ void Screen::operator()(EraseCharacters const& v)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(state_->numColumns() - realCurrentColumn() + 1, v.n == 0 ? 1 : v.n);
+    size_t const n = min(state_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
     fill_n(state_->currentColumn, n, Cell{{}, state_->graphicsRendition});
 }
 
@@ -671,13 +693,13 @@ void Screen::operator()(ClearLine const& v)
 
 void Screen::operator()(CursorNextLine const& v)
 {
-    state_->moveCursorTo({currentRow() + v.n, 1});
+    state_->moveCursorTo({cursorPosition().row + v.n, 1});
 }
 
 void Screen::operator()(CursorPreviousLine const& v)
 {
-    auto const n = min(v.n, currentRow() - 1);
-    state_->moveCursorTo({currentRow() - n, 1});
+    auto const n = min(v.n, cursorPosition().row - 1);
+    state_->moveCursorTo({cursorPosition().row - n, 1});
 }
 
 void Screen::operator()(InsertLines const& v)
@@ -731,25 +753,25 @@ void Screen::operator()(DeleteCharacters const& v)
 
 void Screen::operator()(MoveCursorUp const& v)
 {
-    auto const n = min(v.n, currentRow() - 1);
+    auto const n = min(v.n, cursorPosition().row - state_->margin_.vertical.from);
     state_->cursor.row -= n;
     state_->currentLine = prev(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
     state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorDown const& v)
 {
-    auto const n = min(v.n, rowCount() - currentRow());
+    auto const n = min(v.n, size_.rows - cursorPosition().row);
     state_->cursor.row += n;
     state_->currentLine = next(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
     state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorForward const& v)
 {
-    auto const n = min(v.n, columnCount_ - state_->cursor.column);
+    auto const n = min(v.n, size_.columns - state_->cursor.column);
     state_->cursor.column += n;
     state_->currentColumn = next(
         state_->currentColumn,
@@ -773,7 +795,7 @@ void Screen::operator()(MoveCursorBackward const& v)
 void Screen::operator()(MoveCursorToColumn const& v)
 {
     state_->wrapPending = false;
-    auto const n = min(v.column, columnCount());
+    auto const n = min(v.column, size_.columns);
     state_->cursor.column = n;
     state_->currentColumn = next(begin(*state_->currentLine), n - 1);
     state_->verifyState();
@@ -792,12 +814,12 @@ void Screen::operator()(MoveCursorToBeginOfLine const& v)
 
 void Screen::operator()(MoveCursorTo const& v)
 {
-    moveCursorTo(v.row, v.column);
+    moveCursorTo(Coordinate{v.row, v.column});
 }
 
 void Screen::operator()(MoveCursorToLine const& v)
 {
-    moveCursorTo(v.row, state_->cursor.column);
+    moveCursorTo({v.row, state_->cursor.column});
 }
 
 void Screen::operator()(MoveCursorToNextTab const& v)
@@ -835,34 +857,34 @@ void Screen::operator()(RestoreCursor const& v)
 
 void Screen::operator()(Index const& v)
 {
-    if (currentRow() == state_->margin_.vertical.to)
+    if (realCursorPosition().row == state_->margin_.vertical.to)
         state_->scrollUp(1);
     else
-        moveCursorTo(currentRow() + 1, currentColumn());
+        moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
 }
 
 void Screen::operator()(ReverseIndex const& v)
 {
-    if (currentRow() == state_->margin_.vertical.from)
+    if (realCursorPosition().row == state_->margin_.vertical.from)
         state_->scrollDown(1);
     else
-        moveCursorTo(currentRow() - 1, currentColumn());
+        moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
 }
 
 void Screen::operator()(BackIndex const& v)
 {
-    if (currentColumn() == state_->margin_.horizontal.from)
+    if (realCursorPosition().column == state_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
     else
-        moveCursorTo(currentRow(), currentColumn() - 1);
+        moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
 }
 
 void Screen::operator()(ForwardIndex const& v)
 {
-    if (currentColumn() == state_->margin_.horizontal.to)
+    if (realCursorPosition().column == state_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
     else
-        moveCursorTo(currentRow(), currentColumn() + 1);
+        moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
 }
 
 void Screen::operator()(SetForegroundColor const& v)
@@ -972,7 +994,7 @@ void Screen::setMode(Mode _mode, bool _enable)
 
 void Screen::operator()(SetTopBottomMargin const& margin)
 {
-    if (auto const bottom = min(margin.bottom, state_->numLines_); margin.top < bottom)
+    if (auto const bottom = min(margin.bottom, state_->size_.rows); margin.top < bottom)
     {
         state_->margin_.vertical.from = margin.top;
         state_->margin_.vertical.to = bottom;
@@ -984,7 +1006,7 @@ void Screen::operator()(SetLeftRightMargin const& margin)
 {
     if (isModeEnabled(Mode::LeftRightMargin))
     {
-        if (auto const right = min(margin.right, state_->numColumns_); margin.left + 1 < right)
+        if (auto const right = min(margin.right, state_->size_.columns); margin.left + 1 < right)
         {
             state_->margin_.horizontal.from = margin.left;
             state_->margin_.horizontal.to = right;
@@ -997,12 +1019,12 @@ void Screen::operator()(ScreenAlignmentPattern const&)
 {
     // sets the margins to the extremes of the page
     state_->margin_.vertical.from = 1;
-    state_->margin_.vertical.to = rowCount_;
+    state_->margin_.vertical.to = size_.rows;
     state_->margin_.horizontal.from = 1;
-    state_->margin_.horizontal.to = columnCount_;
+    state_->margin_.horizontal.to = size_.columns;
 
     // and moves the cursor to the home position
-    moveCursorTo(1, 1);
+    moveCursorTo({1, 1});
 
     // fills the complete screen area with a test pattern
     for (auto& line: state_->lines)
@@ -1049,8 +1071,8 @@ void Screen::operator()(AppendChar const& v)
 // {{{ others
 void Screen::reset()
 {
-    primaryBuffer_ = Buffer{columnCount_, rowCount_};
-    alternateBuffer_ = Buffer{columnCount_, rowCount_};
+    primaryBuffer_ = Buffer{size_};
+    alternateBuffer_ = Buffer{size_};
     state_ = &primaryBuffer_;
     // TODO: is this right? reverting to primary screen buffer?
 }

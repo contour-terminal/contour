@@ -30,6 +30,12 @@ struct Coordinate {
     cursor_pos_t column = 1;
 };
 
+// Prints Coordinate as human readable text to given stream (used for debugging & unit testing).
+inline std::ostream& operator<<(std::ostream& _os, Coordinate const& _coord)
+{
+    return _os << "{" << _coord.row << ", " << _coord.column << "}";
+}
+
 constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
 {
     return a.row == b.row && a.column == b.column;
@@ -195,6 +201,8 @@ struct CursorNextLine {
 /// CPL - Cursor Previous Line.
 ///
 /// The active position is moved to the first character of the n-th preceding line.
+///
+/// NB: This is respecting margins (regardless of DECOM).
 struct CursorPreviousLine {
     /// This is the number of active position moved to the first character of the n-th preceding line.
     cursor_pos_t n;

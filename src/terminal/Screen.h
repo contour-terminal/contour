@@ -158,33 +158,32 @@ class Screen {
     /**
      * Initializes the screen with the given screen size and callbaks.
      *
-     * @param columnCount column width of this screen.
-     * @param rowCount row height of this screen.
-     * @param reply reply-callback with the data to send back to terminal input.
-     * @param logger an optional logger for logging various events.
-     * @param error an optional logger for errors.
-     * @param onCommands hook to the commands being executed by the screen.
+     * @param _size screen dimensions in number of characters per line and number of lines.
+     * @param _reply reply-callback with the data to send back to terminal input.
+     * @param _logger an optional logger for logging various events.
+     * @param _error an optional logger for errors.
+     * @param _onCommands hook to the commands being executed by the screen.
      */
-    Screen(cursor_pos_t _columnCount,
-           cursor_pos_t _rowCount,
+    Screen(WindowSize const& _size,
            ModeSwitchCallback _useApplicationCursorKeys,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
-    Screen(cursor_pos_t columnCount, cursor_pos_t rowCount) :
-        Screen{columnCount, rowCount, {}, {}, {}, {}} {}
+    explicit Screen(WindowSize const& _size) :
+        Screen{_size, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
-    void write(char const* data, size_t size);
+    void write(char const* _data, size_t _size);
 
-    void write(std::string_view const& text) { write(text.data(), text.size()); }
+    /// Writes given data into the screen.
+    void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
 
     /// Renders the full screen by passing every grid cell to the callback.
-    void render(Renderer const& renderer) const;
+    void render(Renderer const& _renderer) const;
 
     /// Renders a single text line.
-    std::string renderTextLine(cursor_pos_t row) const;
+    std::string renderTextLine(cursor_pos_t _row) const;
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
     std::string renderText() const;
@@ -255,12 +254,8 @@ class Screen {
     void reset();
     void resetHard();
 
-    cursor_pos_t columnCount() const noexcept { return columnCount_; }
-    cursor_pos_t rowCount() const noexcept { return rowCount_; }
-    void resize(WindowSize const& _winSize);
-
-    cursor_pos_t realCurrentRow() const noexcept { return state_->cursor.row; }
-    cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
+    WindowSize const& size() const noexcept { return size_; }
+    void resize(WindowSize const& _newSize);
 
     bool isCursorInsideMargins() const noexcept {
         if (!state_->margin_.vertical.contains(state_->cursor.row))
@@ -271,21 +266,19 @@ class Screen {
             return true;
     }
 
-    cursor_pos_t currentRow() const noexcept {
-		if (!state_->cursorRestrictedToMargin)
-			return state_->cursor.row;
-		else
-	        return state_->cursor.row - state_->margin_.vertical.from + 1;
+    Coordinate realCursorPosition() const noexcept { return state_->cursor; }
+
+    Coordinate cursorPosition() const noexcept {
+        if (!state_->cursorRestrictedToMargin)
+            return realCursorPosition();
+        else
+            return Coordinate{
+                state_->cursor.row - state_->margin_.vertical.from + 1,
+                state_->cursor.column - state_->margin_.horizontal.from + 1
+            };
     }
 
-    cursor_pos_t currentColumn() const noexcept {
-		if (!state_->cursorRestrictedToMargin)
-			return state_->cursor.column;
-		else
-			return state_->cursor.column - state_->margin_.horizontal.from + 1;
-    }
-
-    Cursor const& currentCursor() const noexcept
+    Cursor const& realCursor() const noexcept
     {
         return state_->cursor;
     }
@@ -307,11 +300,6 @@ class Screen {
     }
 
     void moveCursorTo(Coordinate to);
-
-    void moveCursorTo(cursor_pos_t row, cursor_pos_t col)
-    {
-        moveCursorTo({row, col});
-    }
 
     Cell const& at(cursor_pos_t row, cursor_pos_t col) const noexcept;
     Cell& at(cursor_pos_t row, cursor_pos_t col) noexcept;
@@ -370,25 +358,22 @@ class Screen {
             bool blinking = false;
         };
 
-        Buffer(unsigned int cols, unsigned int rows)
-            : numColumns_{cols},
-              numLines_{rows},
-              lines{rows, Line{cols, Cell{}}},
+        explicit Buffer(WindowSize const& _size)
+            : size_{ _size },
               margin_{
-                  {1, rows},
-                  {1, cols}
-              }
+                  {1, _size.rows},
+                  {1, _size.columns}
+              },
+              lines{ _size.rows, Line{_size.columns, Cell{}} }
         {
             verifyState();
         }
 
-        cursor_pos_t numColumns_;
-        cursor_pos_t numLines_;
+        WindowSize size_;
+        Margin margin_;
+        Cursor cursor{};
         Lines lines;
         Lines savedLines{};
-
-        Margin margin_{};
-        Cursor cursor{};
         bool autoWrap{false};
         bool wrapPending{false};
         bool cursorRestrictedToMargin{false};
@@ -402,8 +387,9 @@ class Screen {
         void linefeed();
 
         void resize(WindowSize const& _winSize);
-        cursor_pos_t numLines() const noexcept { return numLines_; }
-        cursor_pos_t numColumns() const noexcept { return numColumns_; }
+        WindowSize const& size() const noexcept { return size_; }
+        [[deprecated]] cursor_pos_t numLines() const noexcept { return size_.rows; }
+        [[deprecated]] cursor_pos_t numColumns() const noexcept { return size_.columns; }
 
         void scrollUp(cursor_pos_t n);
         void scrollUp(cursor_pos_t n, Margin const& margin);
@@ -440,8 +426,8 @@ class Screen {
 		{
 			if (!cursorRestrictedToMargin)
 				return {
-					std::clamp(to.row, cursor_pos_t{ 1 }, numLines_),
-					std::clamp(to.column, cursor_pos_t{ 1 }, numColumns_)
+					std::clamp(to.row, cursor_pos_t{ 1 }, size_.rows),
+					std::clamp(to.column, cursor_pos_t{ 1 }, size_.columns)
 				};
 			else
 				return {
@@ -460,7 +446,7 @@ class Screen {
     /**
      * Returns the n'th saved line into the history scrollback buffer.
      *
-     * @param _lineNumberIntoHistory the 0-based offset into the history buffer.
+     * @param _lineNumberIntoHistory the 1-based offset into the history buffer.
      *
      * @returns the textual representation of the n'th line into the history.
      */
@@ -481,8 +467,7 @@ class Screen {
 
     std::set<Mode> enabledModes_{};
 
-    cursor_pos_t columnCount_;
-    cursor_pos_t rowCount_;
+    WindowSize size_;
 };
 
 constexpr bool operator==(Screen::GraphicsAttributes const& a, Screen::GraphicsAttributes const& b) noexcept
