@@ -578,7 +578,7 @@ void Screen::operator()(Linefeed const& v)
 
 void Screen::operator()(Backspace const& v)
 {
-    moveCursorTo(currentRow(), currentColumn() > 1 ? currentColumn() - 1 : 1);
+    moveCursorTo(currentCursor().row, currentCursor().column > 1 ? currentCursor().column - 1 : 1);
 }
 
 void Screen::operator()(DeviceStatusReport const& v)
@@ -588,13 +588,13 @@ void Screen::operator()(DeviceStatusReport const& v)
 
 void Screen::operator()(ReportCursorPosition const& v)
 {
-    reply("\033[{};{}R", currentRow(), currentColumn());
+    reply("\033[{};{}R", currentCursor().row, currentCursor().column);
 }
 
 void Screen::operator()(ReportExtendedCursorPosition const& v)
 {
     auto const pageNum = 1;
-    reply("\033[{};{};{}R", currentRow(), currentColumn(), pageNum);
+    reply("\033[{};{};{}R", currentCursor().row, currentCursor().column, pageNum);
 }
 
 void Screen::operator()(SendDeviceAttributes const& v)
@@ -650,7 +650,7 @@ void Screen::operator()(EraseCharacters const& v)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(state_->size_.columns - realCurrentColumn() + 1, v.n == 0 ? 1 : v.n);
+    size_t const n = min(state_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
     fill_n(state_->currentColumn, n, Cell{{}, state_->graphicsRendition});
 }
 
@@ -693,13 +693,13 @@ void Screen::operator()(ClearLine const& v)
 
 void Screen::operator()(CursorNextLine const& v)
 {
-    state_->moveCursorTo({currentRow() + v.n, 1});
+    state_->moveCursorTo({currentCursor().row + v.n, 1});
 }
 
 void Screen::operator()(CursorPreviousLine const& v)
 {
-    auto const n = min(v.n, currentRow() - 1);
-    state_->moveCursorTo({currentRow() - n, 1});
+    auto const n = min(v.n, currentCursor().row - 1);
+    state_->moveCursorTo({currentCursor().row - n, 1});
 }
 
 void Screen::operator()(InsertLines const& v)
@@ -753,19 +753,19 @@ void Screen::operator()(DeleteCharacters const& v)
 
 void Screen::operator()(MoveCursorUp const& v)
 {
-    auto const n = min(v.n, currentRow() - 1);
+    auto const n = min(v.n, currentCursor().row - 1);
     state_->cursor.row -= n;
     state_->currentLine = prev(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), currentCursor().column - 1);
     state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorDown const& v)
 {
-    auto const n = min(v.n, size_.rows - currentRow());
+    auto const n = min(v.n, size_.rows - currentCursor().row);
     state_->cursor.row += n;
     state_->currentLine = next(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentColumn() - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), currentCursor().column - 1);
     state_->verifyState();
 }
 
@@ -857,34 +857,34 @@ void Screen::operator()(RestoreCursor const& v)
 
 void Screen::operator()(Index const& v)
 {
-    if (currentRow() == state_->margin_.vertical.to)
+    if (currentCursor().row == state_->margin_.vertical.to)
         state_->scrollUp(1);
     else
-        moveCursorTo(currentRow() + 1, currentColumn());
+        moveCursorTo(currentCursor().row + 1, currentCursor().column);
 }
 
 void Screen::operator()(ReverseIndex const& v)
 {
-    if (currentRow() == state_->margin_.vertical.from)
+    if (currentCursor().row == state_->margin_.vertical.from)
         state_->scrollDown(1);
     else
-        moveCursorTo(currentRow() - 1, currentColumn());
+        moveCursorTo(currentCursor().row - 1, currentCursor().column);
 }
 
 void Screen::operator()(BackIndex const& v)
 {
-    if (currentColumn() == state_->margin_.horizontal.from)
+    if (currentCursor().column == state_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
     else
-        moveCursorTo(currentRow(), currentColumn() - 1);
+        moveCursorTo(currentCursor().row, currentCursor().column - 1);
 }
 
 void Screen::operator()(ForwardIndex const& v)
 {
-    if (currentColumn() == state_->margin_.horizontal.to)
+    if (currentCursor().column == state_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
     else
-        moveCursorTo(currentRow(), currentColumn() + 1);
+        moveCursorTo(currentCursor().row, currentCursor().column + 1);
 }
 
 void Screen::operator()(SetForegroundColor const& v)

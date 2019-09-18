@@ -257,9 +257,6 @@ class Screen {
     WindowSize const& size() const noexcept { return size_; }
     void resize(WindowSize const& _newSize);
 
-    cursor_pos_t realCurrentRow() const noexcept { return state_->cursor.row; }
-    cursor_pos_t realCurrentColumn() const noexcept { return state_->cursor.column; }
-
     bool isCursorInsideMargins() const noexcept {
         if (!state_->margin_.vertical.contains(state_->cursor.row))
             return false;
@@ -269,18 +266,16 @@ class Screen {
             return true;
     }
 
-    cursor_pos_t currentRow() const noexcept {
-		if (!state_->cursorRestrictedToMargin)
-			return state_->cursor.row;
-		else
-	        return state_->cursor.row - state_->margin_.vertical.from + 1;
-    }
+    Coordinate realCursorPosition() const noexcept { return state_->cursor; }
 
-    cursor_pos_t currentColumn() const noexcept {
-		if (!state_->cursorRestrictedToMargin)
-			return state_->cursor.column;
-		else
-			return state_->cursor.column - state_->margin_.horizontal.from + 1;
+    Coordinate cursorPosition() const noexcept {
+        if (!state_->cursorRestrictedToMargin)
+            return realCursorPosition();
+        else
+            return Coordinate{
+                state_->cursor.row - state_->margin_.vertical.from + 1,
+                state_->cursor.column - state_->margin_.horizontal.from + 1
+            };
     }
 
     Cursor const& currentCursor() const noexcept
