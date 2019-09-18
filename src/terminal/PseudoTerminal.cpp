@@ -13,9 +13,11 @@
  */
 #include <terminal/PseudoTerminal.h>
 
+#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -90,7 +92,14 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
 {
 #if defined(__unix__)
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-    winsize const ws{_windowSize.rows, _windowSize.columns, 0, 0};
+    assert(_windowSize.rows <= numeric_limits<unsigned short>::max());
+    assert(_windowSize.columns <= numeric_limits<unsigned short>::max());
+    winsize const ws{
+        static_cast<unsigned short>(_windowSize.rows),
+        static_cast<unsigned short>(_windowSize.columns),
+        0,
+        0
+    };
     // TODO: termios term{};
     if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, &ws) < 0)
         throw runtime_error{ "Failed to open PTY. " + GetLastErrorAsString() };
