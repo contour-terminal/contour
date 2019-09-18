@@ -25,8 +25,7 @@ Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
     inputGenerator_{},
     screen_{
-        _winSize.columns,
-        _winSize.rows,
+        _winSize,
         bind(&Terminal::useApplicationCursorKeys, this, _1),
         bind(&Terminal::onScreenReply, this, _1),
         move(_logger),
