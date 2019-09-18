@@ -20,4 +20,14 @@ struct [[nodiscard]] WindowSize {
 	unsigned int rows;
 };
 
+constexpr bool operator==(WindowSize const& _a, WindowSize const& _b) noexcept
+{
+    return _a.columns == _b.columns && _a.rows == _b.rows;
+}
+
+constexpr bool operator!=(WindowSize const& _a, WindowSize const& _b) noexcept
+{
+    return !(_a == _b);
+}
+
 }
