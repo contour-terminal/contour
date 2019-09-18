@@ -34,8 +34,7 @@ TEST_CASE("resize", "[screen]")
     auto screen = Screen{{2, 2}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
     screen.write("AB\nCD");
     REQUIRE("AB\nCD\n" == screen.renderText());
-    REQUIRE(2 == screen.currentCursor().column);
-    REQUIRE(2 == screen.currentCursor().row);
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
     SECTION("no-op") {
         screen.resize({2, 2});
@@ -45,35 +44,30 @@ TEST_CASE("resize", "[screen]")
     SECTION("grow lines") {
         screen.resize({2, 3});
         REQUIRE("AB\nCD\n  \n" == screen.renderText());
-        REQUIRE(2 == screen.currentCursor().column);
-        REQUIRE(2 == screen.currentCursor().row);
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
         screen.write("EF");
         REQUIRE("AB\nCD\nEF\n" == screen.renderText());
-        REQUIRE(2 == screen.currentCursor().column);
-        REQUIRE(3 == screen.currentCursor().row);
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
     }
 
     SECTION("shrink lines") {
         screen.resize({2, 1});
         REQUIRE("CD\n" == screen.renderText());
         REQUIRE("AB" == screen.renderHistoryTextLine(1));
-        REQUIRE(2 == screen.currentCursor().column);
-        REQUIRE(1 == screen.currentCursor().row);
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
     }
 
     SECTION("grow columns") {
         screen.resize({3, 2});
         REQUIRE("AB \nCD \n" == screen.renderText());
-        REQUIRE(3 == screen.currentCursor().column);
-        REQUIRE(2 == screen.currentCursor().row);
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
     }
 
     SECTION("shrink columns") {
         screen.resize({1, 2});
         REQUIRE("A\nC\n" == screen.renderText());
-        REQUIRE(1 == screen.currentCursor().column);
-        REQUIRE(2 == screen.currentCursor().row);
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
     }
 
     SECTION("regrow columns") {
@@ -647,48 +641,67 @@ TEST_CASE("ScrollDown", "[screen]")
 
 TEST_CASE("MoveCursorUp", "[screen]")
 {
-    Screen screen{{2, 3}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("AB\nCD\nEF");
-    REQUIRE(3 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\033[3;2H");
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
 
-    // no-op
-    screen(MoveCursorUp{0});
-    REQUIRE(3 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    SECTION("no-op") {
+        screen(MoveCursorUp{0});
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
+    }
 
-    // in-range
-    screen(MoveCursorUp{1});
-    REQUIRE(2 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    SECTION("in-range") {
+        screen(MoveCursorUp{1});
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+    }
 
-    // overflow
-    screen(MoveCursorUp{5});
-    REQUIRE(1 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    SECTION("overflow") {
+        screen(MoveCursorUp{5});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+    }
+
+    SECTION("with margins") {
+        screen(SetTopBottomMargin{2, 4});
+        screen(MoveCursorTo{3, 2});
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
+
+        SECTION("in-range") {
+            screen(MoveCursorUp{1});
+            REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+        }
+
+        SECTION("overflow") {
+            screen(MoveCursorUp{5});
+            REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+        }
+    }
+
+    SECTION("cursor already above margins") {
+        screen(SetTopBottomMargin{3, 4});
+        screen(MoveCursorTo{2, 3});
+        screen(MoveCursorUp{1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    }
 }
 
 TEST_CASE("MoveCursorDown", "[screen]")
 {
     Screen screen{{2, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
     screen.write("A");
-    REQUIRE(1 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
 
     // no-op
     screen(MoveCursorDown{0});
-    REQUIRE(1 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
 
     // in-range
     screen(MoveCursorDown{1});
-    REQUIRE(2 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
     // overflow
     screen(MoveCursorDown{5});
-    REQUIRE(3 == screen.currentCursor().row);
-    REQUIRE(2 == screen.currentCursor().column);
+    REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
 }
 
 TEST_CASE("MoveCursorForward", "[screen]")
@@ -1158,6 +1171,7 @@ TEST_CASE("CursorPreviousLine", "[screen]")
         screen(SetTopBottomMargin{2, 4});
         screen(SetMode{Mode::CursorRestrictedToMargin, true});
         screen(MoveCursorTo{3, 3});
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 3});
 
         SECTION("normal-1") {
             screen(CursorPreviousLine{1});

@@ -555,7 +555,7 @@ std::string Screen::screenshot() const
     }
 
     generator(MoveCursorTo{ state_->cursor.row, state_->cursor.column });
-    if (currentCursor().visible)
+    if (realCursor().visible)
         generator(SetMode{ Mode::VisibleCursor, false });
 
     return result.str();
@@ -578,7 +578,7 @@ void Screen::operator()(Linefeed const& v)
 
 void Screen::operator()(Backspace const& v)
 {
-    moveCursorTo(currentCursor().row, currentCursor().column > 1 ? currentCursor().column - 1 : 1);
+    moveCursorTo({cursorPosition().row, cursorPosition().column > 1 ? cursorPosition().column - 1 : 1});
 }
 
 void Screen::operator()(DeviceStatusReport const& v)
@@ -588,13 +588,13 @@ void Screen::operator()(DeviceStatusReport const& v)
 
 void Screen::operator()(ReportCursorPosition const& v)
 {
-    reply("\033[{};{}R", currentCursor().row, currentCursor().column);
+    reply("\033[{};{}R", cursorPosition().row, cursorPosition().column);
 }
 
 void Screen::operator()(ReportExtendedCursorPosition const& v)
 {
     auto const pageNum = 1;
-    reply("\033[{};{};{}R", currentCursor().row, currentCursor().column, pageNum);
+    reply("\033[{};{};{}R", cursorPosition().row, cursorPosition().column, pageNum);
 }
 
 void Screen::operator()(SendDeviceAttributes const& v)
@@ -693,13 +693,13 @@ void Screen::operator()(ClearLine const& v)
 
 void Screen::operator()(CursorNextLine const& v)
 {
-    state_->moveCursorTo({currentCursor().row + v.n, 1});
+    state_->moveCursorTo({cursorPosition().row + v.n, 1});
 }
 
 void Screen::operator()(CursorPreviousLine const& v)
 {
-    auto const n = min(v.n, currentCursor().row - 1);
-    state_->moveCursorTo({currentCursor().row - n, 1});
+    auto const n = min(v.n, cursorPosition().row - 1);
+    state_->moveCursorTo({cursorPosition().row - n, 1});
 }
 
 void Screen::operator()(InsertLines const& v)
@@ -753,19 +753,19 @@ void Screen::operator()(DeleteCharacters const& v)
 
 void Screen::operator()(MoveCursorUp const& v)
 {
-    auto const n = min(v.n, currentCursor().row - 1);
+    auto const n = min(v.n, cursorPosition().row - state_->margin_.vertical.from);
     state_->cursor.row -= n;
     state_->currentLine = prev(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentCursor().column - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
     state_->verifyState();
 }
 
 void Screen::operator()(MoveCursorDown const& v)
 {
-    auto const n = min(v.n, size_.rows - currentCursor().row);
+    auto const n = min(v.n, size_.rows - cursorPosition().row);
     state_->cursor.row += n;
     state_->currentLine = next(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), currentCursor().column - 1);
+    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
     state_->verifyState();
 }
 
@@ -814,12 +814,12 @@ void Screen::operator()(MoveCursorToBeginOfLine const& v)
 
 void Screen::operator()(MoveCursorTo const& v)
 {
-    moveCursorTo(v.row, v.column);
+    moveCursorTo(Coordinate{v.row, v.column});
 }
 
 void Screen::operator()(MoveCursorToLine const& v)
 {
-    moveCursorTo(v.row, state_->cursor.column);
+    moveCursorTo({v.row, state_->cursor.column});
 }
 
 void Screen::operator()(MoveCursorToNextTab const& v)
@@ -857,34 +857,34 @@ void Screen::operator()(RestoreCursor const& v)
 
 void Screen::operator()(Index const& v)
 {
-    if (currentCursor().row == state_->margin_.vertical.to)
+    if (realCursorPosition().row == state_->margin_.vertical.to)
         state_->scrollUp(1);
     else
-        moveCursorTo(currentCursor().row + 1, currentCursor().column);
+        moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
 }
 
 void Screen::operator()(ReverseIndex const& v)
 {
-    if (currentCursor().row == state_->margin_.vertical.from)
+    if (realCursorPosition().row == state_->margin_.vertical.from)
         state_->scrollDown(1);
     else
-        moveCursorTo(currentCursor().row - 1, currentCursor().column);
+        moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
 }
 
 void Screen::operator()(BackIndex const& v)
 {
-    if (currentCursor().column == state_->margin_.horizontal.from)
+    if (realCursorPosition().column == state_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
     else
-        moveCursorTo(currentCursor().row, currentCursor().column - 1);
+        moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
 }
 
 void Screen::operator()(ForwardIndex const& v)
 {
-    if (currentCursor().column == state_->margin_.horizontal.to)
+    if (realCursorPosition().column == state_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
     else
-        moveCursorTo(currentCursor().row, currentCursor().column + 1);
+        moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
 }
 
 void Screen::operator()(SetForegroundColor const& v)
@@ -1024,7 +1024,7 @@ void Screen::operator()(ScreenAlignmentPattern const&)
     state_->margin_.horizontal.to = size_.columns;
 
     // and moves the cursor to the home position
-    moveCursorTo(1, 1);
+    moveCursorTo({1, 1});
 
     // fills the complete screen area with a test pattern
     for (auto& line: state_->lines)

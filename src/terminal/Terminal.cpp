@@ -108,7 +108,7 @@ void Terminal::writeToScreen(char const* data, size_t size)
 Terminal::Cursor Terminal::cursor() const
 {
     lock_guard<mutex> _l{ screenLock_ };
-    return screen_.currentCursor();
+    return screen_.realCursor();
 }
 
 string Terminal::screenshot() const

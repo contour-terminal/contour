@@ -278,7 +278,7 @@ class Screen {
             };
     }
 
-    Cursor const& currentCursor() const noexcept
+    Cursor const& realCursor() const noexcept
     {
         return state_->cursor;
     }
@@ -300,11 +300,6 @@ class Screen {
     }
 
     void moveCursorTo(Coordinate to);
-
-    void moveCursorTo(cursor_pos_t row, cursor_pos_t col)
-    {
-        moveCursorTo({row, col});
-    }
 
     Cell const& at(cursor_pos_t row, cursor_pos_t col) const noexcept;
     Cell& at(cursor_pos_t row, cursor_pos_t col) noexcept;

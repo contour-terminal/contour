@@ -201,6 +201,8 @@ struct CursorNextLine {
 /// CPL - Cursor Previous Line.
 ///
 /// The active position is moved to the first character of the n-th preceding line.
+///
+/// NB: This is respecting margins (regardless of DECOM).
 struct CursorPreviousLine {
     /// This is the number of active position moved to the first character of the n-th preceding line.
     cursor_pos_t n;
