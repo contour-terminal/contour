@@ -90,20 +90,46 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             fillLineCount,
             [=]() { return Line{_newSize.columns, Cell{}}; });
     }
-    else
+    else if (_newSize.rows < numLines_)
     {
-        // TODO: shrink existing line count to _newSize.rows
-        // by splicing the diff count lines into savedLines bottom.
+        // Shrink existing line count to _newSize.rows
+        // by splicing the number of lines to be shrinked by into savedLines bottom.
+        auto const n = numLines_ - _newSize.rows;
+        savedLines.splice(
+            end(savedLines),
+            lines,
+            begin(lines),
+            next(begin(lines), n)
+        );
+        assert(lines.size() == _newSize.rows);
     }
 
     if (_newSize.columns > numColumns_)
     {
-        // TODO: Grow existing columns to _newSize.columns.
+        // Grow existing columns to _newSize.columns.
+        std::for_each(
+            begin(lines),
+            end(lines),
+            [=](auto& line) { line.resize(_newSize.columns); }
+        );
+        if (wrapPending)
+            cursor.column++;
+        wrapPending = false;
     }
     else if (_newSize.columns < numColumns_)
     {
-        // TODO: Shrink existing columns to _newSize.columns.
+        // Shrink existing columns to _newSize.columns.
+        // Nothing should be done, I think, as we preserve prior (now exceeding) content.
+        if (cursor.column == numColumns_)
+            wrapPending = true;
     }
+
+    // TODO: use `WindowSize size_;` as member instead.
+    numLines_ = _newSize.rows;
+    numColumns_ = _newSize.columns;
+
+    cursor = clampCoordinate(cursor);
+    updateCursorIterators();
 }
 
 void Screen::Buffer::moveCursorTo(Coordinate to)
@@ -439,6 +465,7 @@ void Screen::resize(WindowSize const& _newSize)
     primaryBuffer_.resize(_newSize);
     alternateBuffer_.resize(_newSize);
 
+    // TODO: use `WindowSize size_;` as member instead. :-)
     rowCount_ = _newSize.rows;
     columnCount_ = _newSize.columns;
 }
@@ -471,9 +498,10 @@ void Screen::render(Renderer const& render) const
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= state_->savedLines.size());
     string line;
     line.reserve(columnCount());
-    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory);
+    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
         if (cell.character)
             line += utf8::to_string(utf8::encode(cell.character));

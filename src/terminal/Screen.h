@@ -460,7 +460,7 @@ class Screen {
     /**
      * Returns the n'th saved line into the history scrollback buffer.
      *
-     * @param _lineNumberIntoHistory the 0-based offset into the history buffer.
+     * @param _lineNumberIntoHistory the 1-based offset into the history buffer.
      *
      * @returns the textual representation of the n'th line into the history.
      */

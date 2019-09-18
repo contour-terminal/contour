@@ -25,8 +25,103 @@ void logScreenText(Screen const& screen, string const& headline = "")
     else
         UNSCOPED_INFO(headline + ":");
 
-    for (size_t row = 1; row <= screen.rowCount(); ++row)
+    for (cursor_pos_t row = 1; row <= screen.rowCount(); ++row)
         UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
+}
+
+TEST_CASE("resize", "[screen]")
+{
+    auto screen = Screen{2, 2, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("AB\nCD");
+    REQUIRE("AB\nCD\n" == screen.renderText());
+    REQUIRE(2 == screen.currentCursor().column);
+    REQUIRE(2 == screen.currentCursor().row);
+
+    SECTION("no-op") {
+        screen.resize({2, 2});
+        REQUIRE("AB\nCD\n" == screen.renderText());
+    }
+
+    SECTION("grow lines") {
+        screen.resize({2, 3});
+        REQUIRE("AB\nCD\n  \n" == screen.renderText());
+        REQUIRE(2 == screen.currentCursor().column);
+        REQUIRE(2 == screen.currentCursor().row);
+
+        screen.write("EF");
+        REQUIRE("AB\nCD\nEF\n" == screen.renderText());
+        REQUIRE(2 == screen.currentCursor().column);
+        REQUIRE(3 == screen.currentCursor().row);
+    }
+
+    SECTION("shrink lines") {
+        screen.resize({2, 1});
+        REQUIRE("CD\n" == screen.renderText());
+        REQUIRE("AB" == screen.renderHistoryTextLine(1));
+        REQUIRE(2 == screen.currentCursor().column);
+        REQUIRE(1 == screen.currentCursor().row);
+    }
+
+    SECTION("grow columns") {
+        screen.resize({3, 2});
+        REQUIRE("AB \nCD \n" == screen.renderText());
+        REQUIRE(3 == screen.currentCursor().column);
+        REQUIRE(2 == screen.currentCursor().row);
+    }
+
+    SECTION("shrink columns") {
+        screen.resize({1, 2});
+        REQUIRE("A\nC\n" == screen.renderText());
+        REQUIRE(1 == screen.currentCursor().column);
+        REQUIRE(2 == screen.currentCursor().row);
+    }
+
+    SECTION("regrow columns") {
+        // 1.) grow
+        screen.resize({3, 2});
+
+        // 2.) fill
+        screen.write("Y\033[1;3HX");
+        REQUIRE("ABX\nCDY\n" == screen.renderText());
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(3 == screen.currentColumn());
+
+        // 3.) shrink
+        screen.resize({2, 2});
+        REQUIRE("AB\nCD\n" == screen.renderText());
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(2 == screen.currentColumn());
+
+        // 4.) regrow (and see if pre-filled data were retained)
+        screen.resize({3, 2});
+        REQUIRE("ABX\nCDY\n" == screen.renderText());
+        REQUIRE(1 == screen.currentRow());
+        REQUIRE(3 == screen.currentColumn());
+    }
+
+    SECTION("grow rows, grow columns") {
+        screen.resize({3, 3});
+        REQUIRE("AB \nCD \n   \n" == screen.renderText());
+        screen.write("1\n234");
+        REQUIRE("AB \nCD1\n234\n" == screen.renderText());
+    }
+
+    SECTION("grow rows, shrink columns") {
+        screen.resize({1, 3});
+        REQUIRE("A\nC\n \n" == screen.renderText());
+    }
+
+    SECTION("shrink rows, grow columns") {
+        screen.resize({3, 1});
+        REQUIRE("CD \n" == screen.renderText());
+    }
+
+    SECTION("shrink rows, shrink columns") {
+        screen.resize({1, 1});
+        REQUIRE("C\n" == screen.renderText());
+    }
+
+    // TODO: what do we want to do when re resize to {0, y}, {x, 0}, {0, 0}?
 }
 
 TEST_CASE("AppendChar", "[screen]")
@@ -377,7 +472,7 @@ TEST_CASE("ClearScrollbackBuffer", "[screen]")
     REQUIRE(1 == screen.currentColumn());
     REQUIRE(1 == screen.currentRow());
     REQUIRE(1 == screen.scrollbackLines().size());
-    REQUIRE("12345" == screen.renderHistoryTextLine(0));
+    REQUIRE("12345" == screen.renderHistoryTextLine(1));
 }
 
 TEST_CASE("EraseCharacters", "[screen]")
