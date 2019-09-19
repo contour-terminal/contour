@@ -90,7 +90,7 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             );
         }
         else
-            // cut below cursor by N
+            // Hard-cut below cursor by the number of lines to shrink.
             lines.resize(_newSize.rows);
 
         assert(lines.size() == _newSize.rows);
@@ -116,23 +116,12 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             wrapPending = true;
     }
 
-    // Adapt screen margin based on new window size.
-    if (margin_.horizontal == Range{1, size_.columns} && margin_.vertical == Range{1, size_.rows})
-    {
-        // full screen margins adapt implicitely to remain full-size
-        margin_ = Margin{
-            Range{1, _newSize.rows},
-            Range{1, _newSize.columns}
-        };
-    }
-    else
-    {
-        // clamp margin
-        margin_.horizontal.from = min(margin_.horizontal.from, _newSize.columns);
-        margin_.horizontal.to = min(margin_.horizontal.to, _newSize.columns);
-        margin_.vertical.from = min(margin_.vertical.from, _newSize.rows);
-        margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
-    }
+    // Reset margin to their default.
+    margin_ = Margin{
+        Range{1, _newSize.rows},
+        Range{1, _newSize.columns}
+    };
+    // TODO: find out what to do with DECOM mode. Reset it to?
 
     size_ = _newSize;
     cursor = clampCoordinate(cursor);
@@ -174,24 +163,19 @@ void Screen::Buffer::linefeed()
 {
     wrapPending = false;
 
-    if (cursor.row < size_.rows)
+    if (realCursorPosition().row == margin_.vertical.to)
     {
-        cursor.row++;
-        cursor.column = 1;
-        currentLine++;
-        currentColumn = begin(*currentLine);
+        scrollUp(1);
+        moveCursorTo({cursorPosition().row, 1});
     }
     else
     {
+        // using moveCursorTo() would embrace code reusage, but due to the fact that it's fully recalculating iterators,
+        // it may be faster to just incrementally update them.
+        // moveCursorTo({cursorPosition().row + 1, 1});
+        cursor.row++;
         cursor.column = 1;
-        savedLines.splice(
-           end(savedLines),
-           lines,
-           begin(lines)
-        );
-
-        lines.emplace_back(size_.columns, Cell{});
-        currentLine = prev(end(lines));
+        currentLine++;
         currentColumn = begin(*currentLine);
     }
 
