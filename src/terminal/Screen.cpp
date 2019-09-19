@@ -84,6 +84,8 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             prev(end(savedLines), rowsToTakeFromSavedLines),
             end(savedLines));
 
+        cursor.row += rowsToTakeFromSavedLines;
+
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
         generate_n(
             back_inserter(lines),
@@ -94,13 +96,21 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
     {
         // Shrink existing line count to _newSize.rows
         // by splicing the number of lines to be shrinked by into savedLines bottom.
-        auto const n = size_.rows - _newSize.rows;
-        savedLines.splice(
-            end(savedLines),
-            lines,
-            begin(lines),
-            next(begin(lines), n)
-        );
+        if (cursor.row == size_.rows)
+        {
+            auto const n = size_.rows - _newSize.rows;
+            savedLines.splice(
+                end(savedLines),
+                lines,
+                begin(lines),
+                next(begin(lines), n)
+            );
+            cursor.row = _newSize.rows;
+        }
+        else
+            // cut below cursor by N
+            lines.resize(_newSize.rows);
+
         assert(lines.size() == _newSize.rows);
     }
 
