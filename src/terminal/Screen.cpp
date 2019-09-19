@@ -55,23 +55,6 @@ string to_string(CharacterStyleMask _mask)
 
 void Screen::Buffer::resize(WindowSize const& _newSize)
 {
-    if (margin_.horizontal == Range{1, size_.columns} && margin_.vertical == Range{1, size_.rows})
-    {
-        // full screen margins adapt implicitely to remain full-size
-        margin_ = Margin{
-            Range{1, _newSize.rows},
-            Range{1, _newSize.columns}
-        };
-    }
-    else
-    {
-        // clamp margin
-        margin_.horizontal.from = min(margin_.horizontal.from, _newSize.columns);
-        margin_.horizontal.to = min(margin_.horizontal.to, _newSize.columns);
-        margin_.vertical.from = min(margin_.vertical.from, _newSize.rows);
-        margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
-    }
-
     if (_newSize.rows > size_.rows)
     {
         // Grow line count by splicing available lince from history back into buffer, if available,
@@ -105,7 +88,6 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
                 begin(lines),
                 next(begin(lines), n)
             );
-            cursor.row = _newSize.rows;
         }
         else
             // cut below cursor by N
@@ -134,10 +116,25 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             wrapPending = true;
     }
 
-    // TODO: use `WindowSize size_;` as member instead.
-    size_.rows = _newSize.rows;
-    size_.columns = _newSize.columns;
+    // Adapt screen margin based on new window size.
+    if (margin_.horizontal == Range{1, size_.columns} && margin_.vertical == Range{1, size_.rows})
+    {
+        // full screen margins adapt implicitely to remain full-size
+        margin_ = Margin{
+            Range{1, _newSize.rows},
+            Range{1, _newSize.columns}
+        };
+    }
+    else
+    {
+        // clamp margin
+        margin_.horizontal.from = min(margin_.horizontal.from, _newSize.columns);
+        margin_.horizontal.to = min(margin_.horizontal.to, _newSize.columns);
+        margin_.vertical.from = min(margin_.vertical.from, _newSize.rows);
+        margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
+    }
 
+    size_ = _newSize;
     cursor = clampCoordinate(cursor);
     updateCursorIterators();
 }
