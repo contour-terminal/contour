@@ -920,27 +920,26 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
 
     screen(SetTopBottomMargin{2, 4});
 
-    // test IND with cursor at bottom margin and full horizontal margins
-    screen(MoveCursorTo{4, 2});
-    screen(Index{});
-    logScreenText(screen, "IND while cursor at bottom margin");
-    REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
-    REQUIRE("12345\nABCDE\nFGHIJ\n     \nKLMNO\n" == screen.renderText());
+    SECTION("cursor at bottom margin and full horizontal margins") {
+        screen(MoveCursorTo{4, 2});
+        screen(Index{});
+        logScreenText(screen, "IND while cursor at bottom margin");
+        REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
+        REQUIRE("12345\nABCDE\nFGHIJ\n     \nKLMNO\n" == screen.renderText());
+    }
 
-    // (reset screen buffer)
-    screen(MoveCursorTo{1, 1});
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    SECTION("cursor at bottom margin and NOT full horizontal margins") {
+        screen(MoveCursorTo{1, 1});
+        screen(SetMode{Mode::LeftRightMargin, true});
+        screen(SetLeftRightMargin{2, 4});
+        screen(SetTopBottomMargin{2, 4});
+        screen(MoveCursorTo{4, 2}); // cursor at bottom margin
+        REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
 
-    // test IND with cursor at bottom margin and NOT full horizontal margins
-    screen(SetMode{Mode::LeftRightMargin, true});
-    screen(SetLeftRightMargin{2, 4});
-    screen(SetTopBottomMargin{2, 4});
-    screen(MoveCursorTo{4, 2}); // cursor at bottom margin
-    REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
-
-    screen(Index{});
-    CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderText());
-    REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
+        screen(Index{});
+        CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{4, 2});
+    }
 }
 
 TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
