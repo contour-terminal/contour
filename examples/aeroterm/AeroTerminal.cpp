@@ -48,12 +48,14 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
         )
     },
     window_{
-        _winSize.columns * regularFont_.maxAdvance(),
-        _winSize.rows * regularFont_.lineHeight(),
+        Window::Size{
+            _winSize.columns * regularFont_.maxAdvance(),
+            _winSize.rows * regularFont_.lineHeight()
+        },
         "aeroterm",
         bind(&AeroTerminal::onKey, this, _1, _2, _3, _4),
         bind(&AeroTerminal::onChar, this, _1),
-        bind(&AeroTerminal::onResize, this, _1, _2),
+        bind(&AeroTerminal::onResize, this),
         bind(&AeroTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
@@ -117,11 +119,16 @@ void AeroTerminal::onContentScale(float _xs, float _ys)
     // TODO: scale fontSize by factor _ys.
 }
 
-void AeroTerminal::onResize(unsigned _width, unsigned _height)
+void AeroTerminal::onResize()
 {
-    terminalView_.resize(_width, _height);
-    terminalView_.setProjection(glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)));
-    glViewport(0, 0, _width, _height);
+    terminalView_.resize(window_.width(), window_.height());
+    terminalView_.setProjection(
+        glm::ortho(
+            0.0f, static_cast<GLfloat>(window_.width()),
+            0.0f, static_cast<GLfloat>(window_.height())
+        )
+    );
+    glViewport(0, 0, window_.width(), window_.height());
     render();
 }
 
@@ -240,6 +247,11 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
+            keyHandled_ = true;
+        }
+        else if (_key == GLFW_KEY_ENTER && mods == terminal::Modifier::Alt)
+        {
+            window_.toggleFullScreen();
             keyHandled_ = true;
         }
         else if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())

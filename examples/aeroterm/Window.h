@@ -15,20 +15,25 @@
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include <glm/glm.hpp>
 
 #include <functional>
 #include <string>
 
 class Window {
   public:
+    struct Size {
+        unsigned width;
+        unsigned height;
+    };
     using OnKey = std::function<void(int, int, int, int)>;
     using OnChar = std::function<void(char32_t)>;
-    using OnResize = std::function<void(unsigned, unsigned)>;
+    using OnResize = std::function<void()>;
     using OnContentScale = std::function<void(float, float)>;
 
     static void init();
 
-    Window(unsigned _width, unsigned _height, std::string const& _title,
+    Window(Size const& _size, std::string const& _title,
            OnKey _onKey, OnChar _onChar, OnResize _onResize, OnContentScale _onContentScale);
     ~Window();
 
@@ -37,11 +42,14 @@ class Window {
     GLFWwindow* handle() const noexcept { return window_; }
     operator GLFWwindow* () noexcept { return window_; }
 
-    unsigned width() const noexcept { return width_; }
-    unsigned height() const noexcept { return height_; }
+    Size const& size() const noexcept { return size_; }
+    unsigned width() const noexcept { return size_.width; }
+    unsigned height() const noexcept { return size_.height; }
 
     static std::pair<float, float> primaryMonitorContentScale();
     std::pair<float, float> contentScale();
+
+    void toggleFullScreen();
 
   private:
     static void onContentScale(GLFWwindow* _window, float _xs, float _ys);
@@ -53,6 +61,10 @@ class Window {
     GLFWwindow* window_;
     unsigned width_;
     unsigned height_;
+    bool fullscreen_ = false;
+    Size size_;
+    Size lastSize_;
+    glm::ivec2 oldPosition_{1, 1};
     OnKey onKey_;
     OnChar onChar_;
     OnResize onResize_;

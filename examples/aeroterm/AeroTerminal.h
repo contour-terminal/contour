@@ -39,7 +39,7 @@ public:
 
 private:
     void render();
-    void onResize(unsigned _width, unsigned _height);
+    void onResize();
     void onKey(int _key, int _scanCode, int _action, int _mods);
     void onChar(char32_t _char);
     void onContentScale(float _xs, float _ys);

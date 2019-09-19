@@ -36,10 +36,9 @@ void Window::init()
         throw runtime_error{ "Could not initialize GLFW." };
 }
 
-Window::Window(unsigned _width, unsigned _height, string const& _title,
+Window::Window(Size const& _size, string const& _title,
                OnKey _onKey, OnChar _onChar, OnResize _onResize, OnContentScale _onContentScale) :
-    width_{ _width },
-    height_{ _height },
+    size_{ _size },
     onKey_{ move(_onKey) },
     onChar_{ move(_onChar) },
     onResize_{ move(_onResize) },
@@ -58,7 +57,7 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     //glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    window_ = glfwCreateWindow(_width, _height, _title.c_str(), nullptr, nullptr);
+    window_ = glfwCreateWindow(_size.width, _size.height, _title.c_str(), nullptr, nullptr);
     if (!window_)
     {
 #if (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3) || (GLFW_VERSION_MAJOR > 3)
@@ -78,7 +77,7 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     glfwSetWindowUserPointer(window_, this);
     glfwSetKeyCallback(window_, &Window::onKey);
     glfwSetCharCallback(window_, &Window::onChar);
-    glfwSetWindowSizeCallback(window_, &Window::onResize);
+    glfwSetFramebufferSizeCallback(window_, &Window::onResize);
 
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
@@ -89,7 +88,7 @@ Window::Window(unsigned _width, unsigned _height, string const& _title,
     glEnable(GL_DEPTH);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glViewport(0, 0, _width, _height);
+    glViewport(0, 0, _size.width, _size.height);
 }
 
 Window::~Window()
@@ -148,11 +147,10 @@ void Window::onResize(GLFWwindow* _window, int _width, int _height)
 {
     if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self)
     {
-        self->width_ = static_cast<unsigned>(_width);
-        self->height_ = static_cast<unsigned>(_height);
-
+        self->lastSize_ = self->size_;
+        self->size_ = Size{static_cast<unsigned>(_width), static_cast<unsigned>(_height)};
         if (self->onResize_)
-            self->onResize_(self->width_, self->height_);
+            self->onResize_();
     }
 }
 
@@ -198,4 +196,35 @@ pair<float, float> Window::contentScale()
 #else
     return { 1.0f, 1.0f };
 #endif
+}
+
+
+void Window::toggleFullScreen()
+{
+    fullscreen_ = !fullscreen_;
+    if (fullscreen_)
+    {
+        // Get top/left position of window in windowed mode.
+        glfwGetWindowPos(window_, &oldPosition_.x, &oldPosition_.y);
+
+        // Get current window pixel resolution.
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        GLFWvidmode const* vidMode = glfwGetVideoMode(monitor);
+
+        // Get into fullscreen of primary monitor.
+        glfwSetWindowMonitor(window_, monitor, 0, 0, vidMode->width, vidMode->height, GLFW_DONT_CARE);
+    }
+    else
+    {
+        // Get out of fullscreen into windowed mode of old settings.
+        glfwSetWindowMonitor(
+            window_,
+            nullptr,
+            oldPosition_.x,
+            oldPosition_.y,
+            lastSize_.width,
+            lastSize_.height,
+            GLFW_DONT_CARE
+        );
+    }
 }
