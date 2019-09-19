@@ -16,6 +16,7 @@
 #include <list>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace terminal {
 
@@ -190,7 +191,8 @@ enum class KeyMode {
 
 class InputGenerator {
   public:
-    using SequenceList = std::list<std::string>;
+    using Sequence = std::vector<char>;
+    using SequenceList = std::list<Sequence>;
 
     /// Changes the input mode for cursor keys.
     void setCursorKeysMode(KeyMode _mode);

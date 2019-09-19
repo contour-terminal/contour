@@ -219,6 +219,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
 
 void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
 {
+    keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
         terminal::Modifier const mods = makeModifier(_mods);
@@ -239,11 +240,13 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
-            return;
+            keyHandled_ = true;
         }
-
-        if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
+        else if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
+        {
             terminalView_.send(key.value(), mods);
+            keyHandled_ = true;
+        }
         else if (const char* cstr = glfwGetKeyName(_key, _scanCode);
                cstr != nullptr
             && mods.some() && mods != terminal::Modifier::Shift
@@ -252,12 +255,12 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
         {
             // allow only mods + alphanumerics
             terminalView_.send(*cstr, mods);
-            lastCharacter_ = *cstr; // remember character to avoid double-sending in onChar() callback.
+            keyHandled_ = true;
         }
         else if (_key == GLFW_KEY_SPACE)
         {
-            terminalView_.send(' ', mods);
-            lastCharacter_ = ' ';
+            terminalView_.send(L' ', mods);
+            keyHandled_ = true;
         }
         // else if (mods && mods != terminal::Modifier::Shift)
         //    cout << fmt::format(
@@ -269,13 +272,10 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
 
 void AeroTerminal::onChar(char32_t _char)
 {
-    if (_char != lastCharacter_)
-    {
-        printf("onChar: space\n");
+    if (!keyHandled_)
         terminalView_.send(_char, terminal::Modifier{});
-    }
 
-    lastCharacter_ = 0;
+    keyHandled_ = false;
 }
 
 void AeroTerminal::onScreenUpdate()

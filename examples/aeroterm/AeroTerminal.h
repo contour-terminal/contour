@@ -51,5 +51,5 @@ private:
     Font& regularFont_;
     Window window_;
     GLTerminal terminalView_;
-    unsigned int lastCharacter_ = 0;
+    bool keyHandled_ = false;
 };

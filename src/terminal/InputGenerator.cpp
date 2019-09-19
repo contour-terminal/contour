@@ -282,26 +282,35 @@ void InputGenerator::swap(SequenceList& _other)
 
 inline bool InputGenerator::emit(std::string _sequence)
 {
-    pendingSequences_.emplace_back(move(_sequence));
-    return true;
+    Sequence seq;
+    seq.reserve(_sequence.size());
+    for (auto const ch : _sequence)
+        seq.push_back(ch);
+    pendingSequences_.emplace_back(move(seq));
+     return true;
 }
 
 inline bool InputGenerator::emit(std::string_view _sequence)
 {
-    pendingSequences_.emplace_back(_sequence);
+    pendingSequences_.emplace_back(Sequence{begin(_sequence), end(_sequence)});
     return true;
 }
 
 inline bool InputGenerator::emit(char _asciiChar)
 {
-    pendingSequences_.emplace_back(string(1, _asciiChar));
+    pendingSequences_.emplace_back(Sequence(1, _asciiChar));
     return true;
 }
 
 template <typename T, size_t N>
 inline bool InputGenerator::emit(T(&_sequence)[N])
 {
-    pendingSequences_.emplace_back(string(_sequence));
+    Sequence seq;
+    seq.reserve(N - 1);
+    for (size_t i = 0; i < N - 1; ++i)
+        seq.push_back(_sequence[i]);
+    pendingSequences_.emplace_back(move(seq));
+    //pendingSequences_.emplace_back(Sequence(begin(_sequence), end(_sequence)));
     return true;
 }
 
