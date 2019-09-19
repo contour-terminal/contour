@@ -58,7 +58,7 @@ class OutputHandler {
 
     size_t parameterCount() const noexcept { return parameters_.size(); }
 
-    unsigned int param(unsigned int i) const noexcept
+    unsigned int param(size_t i) const noexcept
     {
         if (i < parameters_.size() && parameters_[i])
             return parameters_[i];
@@ -76,8 +76,10 @@ class OutputHandler {
     void setModeDEC(unsigned int mode, bool enable);
 
     void dispatchGraphicsRendition();
+
+    /// Parses color at given parameter offset @p i and returns new offset to continue processing parameters.
     template <typename T>
-    unsigned int parseColor(unsigned int i);
+    size_t parseColor(size_t i);
 
     template <typename T, typename... Args>
     void emit(Args&&... args)

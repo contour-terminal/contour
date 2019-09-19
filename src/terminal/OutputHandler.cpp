@@ -719,7 +719,7 @@ void OutputHandler::dispatchGraphicsRendition()
 }
 
 template <typename T>
-unsigned int OutputHandler::parseColor(unsigned int i)
+size_t OutputHandler::parseColor(size_t i)
 {
     if (i + 1 < parameterCount())
     {
