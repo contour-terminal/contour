@@ -77,6 +77,7 @@ int main(int argc, char const* argv[])
         flags.defineBool("log-invalid-output", 0, "Enables logging of invalid output sequences.");
         flags.defineBool("log-unsupported-output", 0, "Enables logging of unsupported output sequences.");
         flags.defineBool("log-trace-output", 0, "Enables logging of output trace.");
+        flags.defineBool("log-trace-input", 0, "Enables logging of input trace.");
         flags.defineNumber("font-size", 'S', "PIXELS", "Defines character font-size.", 12);
         flags.defineNumber("columns", 'C', "COUNT", "Defines number of text columns.", 130);
         flags.defineNumber("lines", 'L', "COUNT", "Defines number of text lines.", 25);
@@ -107,6 +108,9 @@ int main(int argc, char const* argv[])
 
             if (flags.getBool("log-raw-output"))
                 mask |= LogMask::RawOutput;
+
+            if (flags.getBool("log-trace-input"))
+                mask |= LogMask::TraceInput;
 
             if (flags.getBool("log-trace-output"))
                 mask |= LogMask::TraceOutput;

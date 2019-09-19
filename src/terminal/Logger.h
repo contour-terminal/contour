@@ -11,6 +11,10 @@ struct ParserErrorEvent {
     std::string reason;
 };
 
+struct TraceInputEvent {
+    std::string message;
+};
+
 struct RawInputEvent {
     std::string sequence;
 };
@@ -34,6 +38,7 @@ struct TraceOutputEvent {
 
 using LogEvent = std::variant<
     ParserErrorEvent,
+    TraceInputEvent,
     RawInputEvent,
     RawOutputEvent,
     InvalidOutputEvent,
@@ -61,6 +66,9 @@ namespace fmt {
             return std::visit(terminal::overloaded{
                 [&](ParserErrorEvent const& v) {
                     return format_to(ctx.out(), "Parser Error. {}", v.reason);
+                },
+                [&](TraceInputEvent const& v) {
+                    return format_to(ctx.out(), "Trace Input: {}", v.message);
                 },
                 [&](RawInputEvent const& v) {
                     return format_to(ctx.out(), "Raw Input: {}", v.sequence);
