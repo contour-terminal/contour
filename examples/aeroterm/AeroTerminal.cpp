@@ -245,24 +245,37 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
         if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
             terminalView_.send(key.value(), mods);
         else if (const char* cstr = glfwGetKeyName(_key, _scanCode);
-                cstr != nullptr && strlen(cstr) == 1
+               cstr != nullptr
             && mods.some() && mods != terminal::Modifier::Shift
+            && strlen(cstr) == 1
             && isalnum(*cstr))
         {
             // allow only mods + alphanumerics
             terminalView_.send(*cstr, mods);
+            lastCharacter_ = *cstr; // remember character to avoid double-sending in onChar() callback.
         }
-        //else if (mods && mods != terminal::Modifier::Shift)
-        //    logger_(UnsupportedInputMappingEvent{fmt::format(
+        else if (_key == GLFW_KEY_SPACE)
+        {
+            terminalView_.send(' ', mods);
+            lastCharacter_ = ' ';
+        }
+        // else if (mods && mods != terminal::Modifier::Shift)
+        //    cout << fmt::format(
         //        "key:{}, scanCode:{}, name:{} ({})",
-        //        _key, _scanCode, cstr, terminal::to_string(mods)
-        //    )});
+        //        _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(mods)
+        //    ) << endl;
     }
 }
 
 void AeroTerminal::onChar(char32_t _char)
 {
-    terminalView_.send(_char, terminal::Modifier{});
+    if (_char != lastCharacter_)
+    {
+        printf("onChar: space\n");
+        terminalView_.send(_char, terminal::Modifier{});
+    }
+
+    lastCharacter_ = 0;
 }
 
 void AeroTerminal::onScreenUpdate()
