@@ -275,42 +275,33 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
     return false;
 }
 
-void InputGenerator::swap(SequenceList& _other)
+void InputGenerator::swap(Sequence& _other)
 {
-    std::swap(pendingSequences_, _other);
+    std::swap(pendingSequence_, _other);
 }
 
 inline bool InputGenerator::emit(std::string _sequence)
 {
-    Sequence seq;
-    seq.reserve(_sequence.size());
-    for (auto const ch : _sequence)
-        seq.push_back(ch);
-    pendingSequences_.emplace_back(move(seq));
-     return true;
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
+    return true;
 }
 
 inline bool InputGenerator::emit(std::string_view _sequence)
 {
-    pendingSequences_.emplace_back(Sequence{begin(_sequence), end(_sequence)});
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
 inline bool InputGenerator::emit(char _asciiChar)
 {
-    pendingSequences_.emplace_back(Sequence(1, _asciiChar));
+    pendingSequence_.push_back(_asciiChar);
     return true;
 }
 
 template <typename T, size_t N>
 inline bool InputGenerator::emit(T(&_sequence)[N])
 {
-    Sequence seq;
-    seq.reserve(N - 1);
-    for (size_t i = 0; i < N - 1; ++i)
-        seq.push_back(_sequence[i]);
-    pendingSequences_.emplace_back(move(seq));
-    //pendingSequences_.emplace_back(Sequence(begin(_sequence), end(_sequence)));
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 

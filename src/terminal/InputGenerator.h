@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <list>
 #include <string>
 #include <variant>
 #include <vector>
@@ -192,7 +191,6 @@ enum class KeyMode {
 class InputGenerator {
   public:
     using Sequence = std::vector<char>;
-    using SequenceList = std::list<Sequence>;
 
     /// Changes the input mode for cursor keys.
     void setCursorKeysMode(KeyMode _mode);
@@ -213,7 +211,7 @@ class InputGenerator {
     //TODO: void generate(MouseMoveEvent _mouseMove);
 
     /// Swaps out the generated input control sequences.
-    void swap(SequenceList& _other);
+    void swap(Sequence& _other);
 
     bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
     bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
@@ -230,7 +228,7 @@ class InputGenerator {
   private:
     KeyMode cursorKeysMode_ = KeyMode::Normal;
     KeyMode numpadKeysMode_ = KeyMode::Normal;
-    SequenceList pendingSequences_{};
+    Sequence pendingSequence_{};
 };
 
 }  // namespace terminal

@@ -92,10 +92,7 @@ bool Terminal::send(Key _key, Modifier _modifier)
 void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
-
-    for (auto const& seq : pendingInput_)
-        write(seq.data(), seq.size());
-
+    write(pendingInput_.data(), pendingInput_.size());
     pendingInput_.clear();
 }
 
