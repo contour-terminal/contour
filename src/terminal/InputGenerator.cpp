@@ -275,33 +275,33 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
     return false;
 }
 
-void InputGenerator::swap(SequenceList& _other)
+void InputGenerator::swap(Sequence& _other)
 {
-    std::swap(pendingSequences_, _other);
+    std::swap(pendingSequence_, _other);
 }
 
 inline bool InputGenerator::emit(std::string _sequence)
 {
-    pendingSequences_.emplace_back(move(_sequence));
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
 inline bool InputGenerator::emit(std::string_view _sequence)
 {
-    pendingSequences_.emplace_back(_sequence);
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
 inline bool InputGenerator::emit(char _asciiChar)
 {
-    pendingSequences_.emplace_back(string(1, _asciiChar));
+    pendingSequence_.push_back(_asciiChar);
     return true;
 }
 
 template <typename T, size_t N>
 inline bool InputGenerator::emit(T(&_sequence)[N])
 {
-    pendingSequences_.emplace_back(string(_sequence));
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 

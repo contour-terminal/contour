@@ -28,6 +28,7 @@ enum class LogMask {
     InvalidOutput       = 0x08,
     UnsupportedOutput   = 0x10,
     TraceOutput         = 0x20,
+    TraceInput          = 0x40,
 };
 
 constexpr LogMask operator&(LogMask lhs, LogMask rhs) noexcept

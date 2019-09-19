@@ -221,6 +221,7 @@ void PseudoTerminal::resize(WindowSize const& _newWindowSize)
     if (result != S_OK)
         throw runtime_error{ GetLastErrorAsString() };
 #endif
+    size_ = _newWindowSize;
 }
 
 }  // namespace terminal

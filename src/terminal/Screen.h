@@ -266,22 +266,9 @@ class Screen {
             return true;
     }
 
-    Coordinate realCursorPosition() const noexcept { return state_->cursor; }
-
-    Coordinate cursorPosition() const noexcept {
-        if (!state_->cursorRestrictedToMargin)
-            return realCursorPosition();
-        else
-            return Coordinate{
-                state_->cursor.row - state_->margin_.vertical.from + 1,
-                state_->cursor.column - state_->margin_.horizontal.from + 1
-            };
-    }
-
-    Cursor const& realCursor() const noexcept
-    {
-        return state_->cursor;
-    }
+    Coordinate realCursorPosition() const noexcept { return state_->realCursorPosition(); }
+    Coordinate cursorPosition() const noexcept { return state_->cursorPosition(); }
+    Cursor const& realCursor() const noexcept { return state_->cursor; }
 
     Cell const& currentCell() const noexcept
     {
@@ -398,6 +385,18 @@ class Screen {
 
         void verifyState() const;
         void updateCursorIterators();
+
+        constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
+
+        constexpr Coordinate cursorPosition() const noexcept {
+            if (!cursorRestrictedToMargin)
+                return realCursorPosition();
+            else
+                return Coordinate{
+                    cursor.row - margin_.vertical.from + 1,
+                    cursor.column - margin_.horizontal.from + 1
+                };
+        }
 
         constexpr Coordinate origin() const noexcept {
             if (cursorRestrictedToMargin)

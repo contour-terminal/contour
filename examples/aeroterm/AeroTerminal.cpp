@@ -48,12 +48,14 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
         )
     },
     window_{
-        _winSize.columns * regularFont_.maxAdvance(),
-        _winSize.rows * regularFont_.lineHeight(),
+        Window::Size{
+            _winSize.columns * regularFont_.maxAdvance(),
+            _winSize.rows * regularFont_.lineHeight()
+        },
         "aeroterm",
         bind(&AeroTerminal::onKey, this, _1, _2, _3, _4),
         bind(&AeroTerminal::onChar, this, _1),
-        bind(&AeroTerminal::onResize, this, _1, _2),
+        bind(&AeroTerminal::onResize, this),
         bind(&AeroTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
@@ -117,11 +119,16 @@ void AeroTerminal::onContentScale(float _xs, float _ys)
     // TODO: scale fontSize by factor _ys.
 }
 
-void AeroTerminal::onResize(unsigned _width, unsigned _height)
+void AeroTerminal::onResize()
 {
-    glViewport(0, 0, _width, _height);
-    terminalView_.setProjection(glm::ortho(0.0f, static_cast<GLfloat>(_width), 0.0f, static_cast<GLfloat>(_height)));
-    terminalView_.resize(_width, _height);
+    terminalView_.resize(window_.width(), window_.height());
+    terminalView_.setProjection(
+        glm::ortho(
+            0.0f, static_cast<GLfloat>(window_.width()),
+            0.0f, static_cast<GLfloat>(window_.height())
+        )
+    );
+    glViewport(0, 0, window_.width(), window_.height());
     render();
 }
 
@@ -219,6 +226,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
 
 void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
 {
+    keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
         terminal::Modifier const mods = makeModifier(_mods);
@@ -239,30 +247,47 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
-            return;
+            keyHandled_ = true;
         }
-
-        if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
+        else if (_key == GLFW_KEY_ENTER && mods == terminal::Modifier::Alt)
+        {
+            window_.toggleFullScreen();
+            keyHandled_ = true;
+        }
+        else if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
+        {
             terminalView_.send(key.value(), mods);
+            keyHandled_ = true;
+        }
         else if (const char* cstr = glfwGetKeyName(_key, _scanCode);
-                cstr != nullptr && strlen(cstr) == 1
+               cstr != nullptr
             && mods.some() && mods != terminal::Modifier::Shift
+            && strlen(cstr) == 1
             && isalnum(*cstr))
         {
             // allow only mods + alphanumerics
             terminalView_.send(*cstr, mods);
+            keyHandled_ = true;
         }
-        //else if (mods && mods != terminal::Modifier::Shift)
-        //    logger_(UnsupportedInputMappingEvent{fmt::format(
+        else if (_key == GLFW_KEY_SPACE)
+        {
+            terminalView_.send(L' ', mods);
+            keyHandled_ = true;
+        }
+        // else if (mods && mods != terminal::Modifier::Shift)
+        //    cout << fmt::format(
         //        "key:{}, scanCode:{}, name:{} ({})",
-        //        _key, _scanCode, cstr, terminal::to_string(mods)
-        //    )});
+        //        _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(mods)
+        //    ) << endl;
     }
 }
 
 void AeroTerminal::onChar(char32_t _char)
 {
-    terminalView_.send(_char, terminal::Modifier{});
+    if (!keyHandled_)
+        terminalView_.send(_char, terminal::Modifier{});
+
+    keyHandled_ = false;
 }
 
 void AeroTerminal::onScreenUpdate()

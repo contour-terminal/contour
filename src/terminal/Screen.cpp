@@ -55,23 +55,6 @@ string to_string(CharacterStyleMask _mask)
 
 void Screen::Buffer::resize(WindowSize const& _newSize)
 {
-    if (margin_.horizontal == Range{1, size_.columns} && margin_.vertical == Range{1, size_.rows})
-    {
-        // full screen margins adapt implicitely to remain full-size
-        margin_ = Margin{
-            Range{1, _newSize.rows},
-            Range{1, _newSize.columns}
-        };
-    }
-    else
-    {
-        // clamp margin
-        margin_.horizontal.from = min(margin_.horizontal.from, _newSize.columns);
-        margin_.horizontal.to = min(margin_.horizontal.to, _newSize.columns);
-        margin_.vertical.from = min(margin_.vertical.from, _newSize.rows);
-        margin_.vertical.to = min(margin_.vertical.to, _newSize.rows);
-    }
-
     if (_newSize.rows > size_.rows)
     {
         // Grow line count by splicing available lince from history back into buffer, if available,
@@ -84,6 +67,8 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             prev(end(savedLines), rowsToTakeFromSavedLines),
             end(savedLines));
 
+        cursor.row += rowsToTakeFromSavedLines;
+
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
         generate_n(
             back_inserter(lines),
@@ -94,13 +79,20 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
     {
         // Shrink existing line count to _newSize.rows
         // by splicing the number of lines to be shrinked by into savedLines bottom.
-        auto const n = size_.rows - _newSize.rows;
-        savedLines.splice(
-            end(savedLines),
-            lines,
-            begin(lines),
-            next(begin(lines), n)
-        );
+        if (cursor.row == size_.rows)
+        {
+            auto const n = size_.rows - _newSize.rows;
+            savedLines.splice(
+                end(savedLines),
+                lines,
+                begin(lines),
+                next(begin(lines), n)
+            );
+        }
+        else
+            // Hard-cut below cursor by the number of lines to shrink.
+            lines.resize(_newSize.rows);
+
         assert(lines.size() == _newSize.rows);
     }
 
@@ -124,10 +116,14 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
             wrapPending = true;
     }
 
-    // TODO: use `WindowSize size_;` as member instead.
-    size_.rows = _newSize.rows;
-    size_.columns = _newSize.columns;
+    // Reset margin to their default.
+    margin_ = Margin{
+        Range{1, _newSize.rows},
+        Range{1, _newSize.columns}
+    };
+    // TODO: find out what to do with DECOM mode. Reset it to?
 
+    size_ = _newSize;
     cursor = clampCoordinate(cursor);
     updateCursorIterators();
 }
@@ -167,24 +163,19 @@ void Screen::Buffer::linefeed()
 {
     wrapPending = false;
 
-    if (cursor.row < size_.rows)
+    if (realCursorPosition().row == margin_.vertical.to)
     {
-        cursor.row++;
-        cursor.column = 1;
-        currentLine++;
-        currentColumn = begin(*currentLine);
+        scrollUp(1);
+        moveCursorTo({cursorPosition().row, 1});
     }
     else
     {
+        // using moveCursorTo() would embrace code reusage, but due to the fact that it's fully recalculating iterators,
+        // it may be faster to just incrementally update them.
+        // moveCursorTo({cursorPosition().row + 1, 1});
+        cursor.row++;
         cursor.column = 1;
-        savedLines.splice(
-           end(savedLines),
-           lines,
-           begin(lines)
-        );
-
-        lines.emplace_back(size_.columns, Cell{});
-        currentLine = prev(end(lines));
+        currentLine++;
         currentColumn = begin(*currentLine);
     }
 

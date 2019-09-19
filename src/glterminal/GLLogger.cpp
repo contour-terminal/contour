@@ -44,7 +44,7 @@ void GLLogger::keyPress(char32_t _char, Modifier _modifier)
 
 void GLLogger::keyTrace(string const& _message)
 {
-    //TODO: log(LogMask::Trace, _message);
+    log(TraceInputEvent{_message});
 }
 
 void GLLogger::log(LogEvent const& _event)
@@ -64,6 +64,9 @@ void GLLogger::log(LogEvent const& _event)
             },
             [&](UnsupportedOutputEvent const& v) {
                 return LogMask::UnsupportedOutput;
+            },
+            [&](TraceInputEvent const& v) {
+                return LogMask::TraceInput;
             },
             [&](TraceOutputEvent const& v) {
                 return LogMask::TraceOutput;

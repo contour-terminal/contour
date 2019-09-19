@@ -537,6 +537,28 @@ void OutputHandler::setModeDEC(unsigned int mode, bool enable)
         case 1015:
             emit<SendMouseEvents>(MouseProtocol::URXVT, enable);
             break;
+        case 1047:
+            emit<SetMode>(Mode::UseAlternateScreen, enable);
+            break;
+        case 1048:
+            if (enable)
+                emit<SaveCursor>();
+            else
+                emit<RestoreCursor>();
+            break;
+        case 1049:
+            if (enable)
+            {
+                emit<SaveCursor>();
+                emit<SetMode>(Mode::UseAlternateScreen, true);
+                emit<ClearScreen>();
+            }
+            else
+            {
+                emit<SetMode>(Mode::UseAlternateScreen, false);
+                emit<RestoreCursor>();
+            }
+            break;
         case 2004:
             emit<SetMode>(Mode::BracketedPaste, enable);
             break;
@@ -719,7 +741,7 @@ void OutputHandler::dispatchGraphicsRendition()
 }
 
 template <typename T>
-unsigned int OutputHandler::parseColor(unsigned int i)
+size_t OutputHandler::parseColor(size_t i)
 {
     if (i + 1 < parameterCount())
     {

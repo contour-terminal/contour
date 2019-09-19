@@ -29,7 +29,7 @@ class GLCursor {
     GLCursor(glm::ivec2 _size, glm::mat4 _transform,  CursorShape _shape, glm::vec3 const& _color);
     ~GLCursor();
 
-    void setTransform(glm::mat4 _mat); // Must projection matrix.
+    void setProjection(glm::mat4 _mat);
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);

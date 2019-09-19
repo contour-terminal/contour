@@ -77,7 +77,7 @@ class Terminal : public PseudoTerminal {
 
   private:
     InputGenerator inputGenerator_;
-    InputGenerator::SequenceList pendingInput_;
+    InputGenerator::Sequence pendingInput_;
     Screen screen_;
     Screen::Hook onScreenCommands_;
     std::mutex mutable screenLock_;
