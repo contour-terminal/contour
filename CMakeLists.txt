@@ -17,6 +17,7 @@ find_package(Threads)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
 option(LIBTERMINAL_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
+option(LIBTERMINAL_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
 option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(LIBTERMINAL_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(LIBTERMINAL_GLTERMINAL "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
@@ -46,6 +47,12 @@ if(LIBTERMINAL_TESTING AND LIBTERMINAL_EMBEDDED_CATCH2)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
 else()
     # master project must provide its own fmtlib
+endif()
+
+if(LIBTERMINAL_EMBEDDED_YAML_CPP)
+	add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/yaml-cpp")
+else()
+	# master project must provide its own fmtlib
 endif()
 
 # ----------------------------------------------------------------------------

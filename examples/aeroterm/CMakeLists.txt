@@ -12,7 +12,7 @@ if(LIBTERMINAL_GLTERMINAL AND glfw3_FOUND)
         Window.cpp Window.h
         main.cpp
     )
-    target_link_libraries(aeroterm PRIVATE GLEW::GLEW OpenGL::GL glm glfw glterminal)
+    target_link_libraries(aeroterm PRIVATE GLEW::GLEW OpenGL::GL glm glfw glterminal yaml-cpp)
 else()
     message(STATUS "-- Building Aero Terminal: no (missing prerequisites)")
 endif()
