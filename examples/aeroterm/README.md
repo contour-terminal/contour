@@ -61,6 +61,14 @@ logging:
     traceOutput: false
 ```
 
+## Keyboard Bindings
+
+| Shortcut                          | Action                 |
+|-----------------------------------|------------------------|
+| <kbd>CTRL</kbd>+<kbd>=</kbd>      | Increase font size     |
+| <kbd>CTRL</kbd>+<kbd>-</kbd>      | Decrease font size     |
+| <kbd>CTRL</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
+
 ## Installing from source
 
 ### Prerequisites Linux
