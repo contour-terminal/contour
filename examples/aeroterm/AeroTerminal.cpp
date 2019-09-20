@@ -31,6 +31,7 @@ using namespace std::placeholders;
 
 AeroTerminal::AeroTerminal(Config const& _config) :
     //loggingSink_{"aeroterm.log", ios::trunc},
+    config_{_config},
     logger_{_config.loggingMask, &cout},
     fontManager_{},
     regularFont_{
@@ -62,6 +63,10 @@ AeroTerminal::AeroTerminal(Config const& _config) :
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&AeroTerminal::onScreenUpdate, this),
         logger_
+    },
+    configFileChangeWatcher_{
+        _config.backingFilePath,
+        bind(&AeroTerminal::onConfigReload, this, _1)
     }
 {
     if (!regularFont_.isFixedWidth())
@@ -84,6 +89,9 @@ int AeroTerminal::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
+        if (configReloadPending_)
+            loadConfigValues();
+
         if (terminalView_.shouldRender())
             render();
 
@@ -285,4 +293,20 @@ void AeroTerminal::onChar(char32_t _char)
 void AeroTerminal::onScreenUpdate()
 {
     glfwPostEmptyEvent();
+}
+
+void AeroTerminal::onConfigReload(FileChangeWatcher::Event _event)
+{
+    configReloadPending_ = true;
+    glfwPostEmptyEvent();
+}
+
+void AeroTerminal::loadConfigValues()
+{
+    configReloadPending_ = false;
+    auto filePath = config_.backingFilePath.string();
+    loadConfigFromFile(config_, filePath);
+    logger_.setLogMask(config_.loggingMask);
+
+    // TODO...
 }

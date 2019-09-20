@@ -15,11 +15,13 @@
 
 #include "Config.h"
 #include "Window.h"
+#include "FileChangeWatcher.h"
 
 #include <glterminal/FontManager.h>
 #include <glterminal/GLLogger.h>
 #include <glterminal/GLTerminal.h>
 
+#include <filesystem>
 #include <string>
 
 class AeroTerminal {
@@ -36,6 +38,8 @@ private:
     void onChar(char32_t _char);
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
+    void onConfigReload(FileChangeWatcher::Event _event);
+    void loadConfigValues();
 
 private:
     Config config_;
@@ -45,4 +49,6 @@ private:
     Window window_;
     GLTerminal terminalView_;
     bool keyHandled_ = false;
+    bool configReloadPending_ = false;
+    FileChangeWatcher configFileChangeWatcher_;
 };

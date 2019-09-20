@@ -58,6 +58,8 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
 {
     YAML::Node doc = YAML::LoadFile(_fileName);
 
+    _config.backingFilePath = filesystem::path{_fileName};
+
     softLoadValue(doc, "shell", _config.shell);
 
     if (auto terminalSize = doc["terminalSize"]; terminalSize)

@@ -17,10 +17,13 @@
 #include <glterminal/GLLogger.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Process.h>
+#include <filesystem>
 #include <optional>
 #include <string>
 
 struct Config {
+    std::filesystem::path backingFilePath;
+
     std::string shell = terminal::Process::loginShell();
     terminal::WindowSize terminalSize = {80, 25};
     bool fullscreen = false;

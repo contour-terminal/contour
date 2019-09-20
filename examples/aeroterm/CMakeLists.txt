@@ -9,6 +9,7 @@ if(LIBTERMINAL_GLTERMINAL AND glfw3_FOUND)
     add_executable(aeroterm
         AeroTerminal.cpp AeroTerminal.h
         Config.cpp Config.h
+        FileChangeWatcher.cpp FileChangeWatcher.h
         Flags.cpp Flags.h
         Window.cpp Window.h
         main.cpp
