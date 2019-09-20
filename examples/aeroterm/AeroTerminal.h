@@ -13,26 +13,18 @@
  */
 #pragma once
 
+#include "Config.h"
+#include "Window.h"
+
 #include <glterminal/FontManager.h>
 #include <glterminal/GLLogger.h>
 #include <glterminal/GLTerminal.h>
-#include "Window.h"
 
 #include <string>
 
 class AeroTerminal {
 public:
-    AeroTerminal(
-        terminal::WindowSize const& _winSize,
-        unsigned short _fontSize,
-        std::string const& _fontFamily,
-        CursorShape _cursorShape,
-        glm::vec3 const& _cursorColor,
-        glm::vec4 const& _backgroundColor,
-        bool _backgroundBlur,
-        std::string const& _shell,
-        LogMask _logMask);
-
+    explicit AeroTerminal(Config const& _config);
     ~AeroTerminal();
 
     int main();
@@ -46,6 +38,7 @@ private:
     void onScreenUpdate();
 
 private:
+    Config config_;
     GLLogger logger_;
     FontManager fontManager_;
     Font& regularFont_;

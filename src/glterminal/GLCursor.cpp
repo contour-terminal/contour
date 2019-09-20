@@ -13,9 +13,38 @@
  */
 #include <glterminal/GLCursor.h>
 
+#include <stdexcept>
 #include <glm/gtc/matrix_transform.hpp>
 
 using namespace std;
+
+CursorShape makeCursorShape(string const& _name)
+{
+    if (_name == "block")
+        return CursorShape::Block;
+
+    if (_name == "underscore")
+        return CursorShape::Underscore;
+
+    if (_name == "beam")
+        return CursorShape::Beam;
+
+    throw runtime_error("Invalid cursor shape. Use one of block, underscore, beam.");
+}
+
+string to_string(CursorShape _value)
+{
+    switch (_value)
+    {
+        case CursorShape::Block:
+            return "block";
+        case CursorShape::Underscore:
+            return "underscroe";
+        case CursorShape::Beam:
+            return "beam";
+    }
+    return "block";
+}
 
 auto constexpr vertexShader = R"(
     #version 150 core

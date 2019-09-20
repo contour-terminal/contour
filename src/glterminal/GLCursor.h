@@ -17,12 +17,16 @@
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <memory>
+#include <string>
 
 enum class CursorShape {
     Block,
     Underscore,
     Beam,
 };
+
+CursorShape makeCursorShape(std::string const& _name);
+std::string to_string(CursorShape _value);
 
 class GLCursor {
   public:

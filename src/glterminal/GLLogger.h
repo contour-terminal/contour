@@ -47,6 +47,11 @@ constexpr LogMask& operator|=(LogMask& lhs, LogMask rhs) noexcept
     return lhs;
 }
 
+constexpr bool operator!=(LogMask lhs, unsigned rhs) noexcept
+{
+    return static_cast<unsigned>(lhs) != rhs;
+}
+
 /// glterm Logging endpoint.
 class GLLogger {
   public:

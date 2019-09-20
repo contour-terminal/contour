@@ -1,0 +1,29 @@
+# Example Aero Terminal Configuration File.
+
+shell: "ssh ubuntu-vm"
+
+terminalSize:
+    columns: 130
+    lines: 30
+
+fontSize: 14
+#fontFamily: "Fira Code, Ubuntu Mono, Consolas, monospace"
+fontFamily: "C:\\Users\\chris\\AppData\\Local\\Microsoft\\Windows\\Fonts\\FiraCode-Retina.ttf"
+tabWidth: 8
+
+cursor:
+    shape: "block"
+    blinking: true
+
+background:
+    opacity: 0.8
+    blur: false
+
+logging:
+    parseErrors: true
+    invalidOutput: true
+    unsupportedOutput: true
+    rawInput: false
+    rawOutput: false
+    traceInput: false
+    traceOutput: false

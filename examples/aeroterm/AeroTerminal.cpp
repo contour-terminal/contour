@@ -29,28 +29,20 @@
 using namespace std;
 using namespace std::placeholders;
 
-AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
-               unsigned short _fontSize,
-               std::string const& _fontFamily,
-               CursorShape _cursorShape,
-               glm::vec3 const& _cursorColor,
-               glm::vec4 const& _backgroundColor,
-               bool _backgroundBlur,
-               std::string const& _shell,
-               LogMask _logMask) :
+AeroTerminal::AeroTerminal(Config const& _config) :
     //loggingSink_{"aeroterm.log", ios::trunc},
-    logger_{_logMask, &cout},
+    logger_{_config.loggingMask, &cout},
     fontManager_{},
     regularFont_{
         fontManager_.load(
-            _fontFamily,
-            static_cast<unsigned>(_fontSize * Window::primaryMonitorContentScale().second)
+            _config.fontFamily,
+            static_cast<unsigned>(_config.fontSize * Window::primaryMonitorContentScale().second)
         )
     },
     window_{
         Window::Size{
-            _winSize.columns * regularFont_.maxAdvance(),
-            _winSize.rows * regularFont_.lineHeight()
+            _config.terminalSize.columns * regularFont_.maxAdvance(),
+            _config.terminalSize.rows * regularFont_.lineHeight()
         },
         "aeroterm",
         bind(&AeroTerminal::onKey, this, _1, _2, _3, _4),
@@ -59,14 +51,14 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
         bind(&AeroTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
-        _winSize,
+        _config.terminalSize,
         window_.width(),
         window_.height(),
         regularFont_,
-        _cursorShape,
-        _cursorColor,
-        _backgroundColor,
-        _shell,
+        _config.cursorShape,
+        glm::vec4{0.9, 0.9, 0.9, 1.0}, //TODO _config.colorPalette.cursor,
+        glm::vec4{0.1, 0.1, 0.1, _config.backgroundOpacity},
+        _config.shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&AeroTerminal::onScreenUpdate, this),
         logger_
@@ -75,7 +67,7 @@ AeroTerminal::AeroTerminal(terminal::WindowSize const& _winSize,
     if (!regularFont_.isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
 
-    if (_backgroundBlur)
+    if (_config.backgroundBlur)
     {
         if (!window_.enableBackgroundBlur())
             throw runtime_error{ "Could not enable background blur." };
