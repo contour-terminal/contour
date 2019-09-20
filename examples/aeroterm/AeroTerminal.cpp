@@ -305,9 +305,20 @@ void AeroTerminal::onConfigReload(FileChangeWatcher::Event _event)
 void AeroTerminal::loadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
-    loadConfigFromFile(config_, filePath);
+    auto newConfig = Config{};
+    loadConfigFromFile(newConfig, filePath);
 
-    logger_.setLogMask(config_.loggingMask);
+    logger_.setLogMask(newConfig.loggingMask);
 
-    // TODO...
+    if (newConfig.terminalSize != config_.terminalSize)
+    {
+        auto const width = newConfig.terminalSize.columns * regularFont_.maxAdvance();
+        auto const height = newConfig.terminalSize.rows * regularFont_.lineHeight();
+        terminalView_.setTerminalSize(config_.terminalSize);
+        window_.resize(width, height);
+    }
+
+    // TODO... (all the rest)
+
+    config_ = move(newConfig);
 }

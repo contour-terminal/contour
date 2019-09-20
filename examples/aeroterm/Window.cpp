@@ -198,6 +198,10 @@ pair<float, float> Window::contentScale()
 #endif
 }
 
+void Window::resize(unsigned _width, unsigned _height)
+{
+    glfwSetWindowSize(window_, _width, _height);
+}
 
 void Window::toggleFullScreen()
 {

@@ -43,6 +43,7 @@ class Window {
     operator GLFWwindow* () noexcept { return window_; }
 
     Size const& size() const noexcept { return size_; }
+    void resize(unsigned _width, unsigned _height);
     unsigned width() const noexcept { return size_.width; }
     unsigned height() const noexcept { return size_.height; }
 
