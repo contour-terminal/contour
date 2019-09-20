@@ -15,6 +15,7 @@
 
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
+#include <terminal/WindowSize.h>
 
 #include <atomic>
 #include <functional>
@@ -65,7 +66,8 @@ class GLTerminal {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
-    void setTerminalSize(terminal::WindowSize const& _newSize);
+    bool setFontSize(unsigned int _fontSize);
+    bool setTerminalSize(terminal::WindowSize const& _newSize);
 
     /// Sets the projection matrix used for translating rendering coordinates.
     void setProjection(glm::mat4 const& _projectionMatrix);

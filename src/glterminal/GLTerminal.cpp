@@ -52,8 +52,10 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
     regularFont_{ _regularFont },
     textShaper_{ _regularFont, _projectionMatrix },
     cellBackground_{
-        regularFont_.maxAdvance(),
-        regularFont_.lineHeight(),
+        glm::vec2{
+            regularFont_.maxAdvance(),
+            regularFont_.lineHeight()
+        },
         _projectionMatrix
     },
     cursor_{
@@ -115,7 +117,7 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
         static_cast<unsigned short>(_height / regularFont_.lineHeight())
     };
 
-    auto const computeMargin = [this](unsigned _width, unsigned _height, WindowSize const& ws)
+    auto const computeMargin = [this](WindowSize const& ws, unsigned _width, unsigned _height)
     {
         auto const usedHeight = ws.rows * regularFont_.lineHeight();
         auto const usedWidth = ws.columns * regularFont_.maxAdvance();
@@ -131,7 +133,7 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
     if (doResize)
         terminal_.resize(newSize);
 
-    margin_ = computeMargin(_width, _height, terminal_.size());
+    margin_ = computeMargin(newSize, _width, _height);
 
     if (doResize)
         cout << fmt::format(
@@ -143,13 +145,29 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
         );
 }
 
-void GLTerminal::setTerminalSize(terminal::WindowSize const& _newSize)
+bool GLTerminal::setFontSize(unsigned int _fontSize)
 {
-    if (terminal_.size() != _newSize)
-    {
-        terminal_.resize(_newSize);
-        margin_ = {0, 0};
-    }
+    if (_fontSize == regularFont_.fontSize())
+        return false;
+
+    regularFont_.setFontSize(_fontSize);
+    // TODO: other font styles
+    textShaper_.clearGlyphCache();
+    cellBackground_.resize(glm::ivec2{regularFont_.maxAdvance(), regularFont_.lineHeight()});
+    cursor_.resize(glm::ivec2{regularFont_.maxAdvance(), regularFont_.lineHeight()});
+    // TODO update margins?
+
+    return true;
+}
+
+bool GLTerminal::setTerminalSize(terminal::WindowSize const& _newSize)
+{
+    if (terminal_.size() == _newSize)
+        return false;
+
+    terminal_.resize(_newSize);
+    margin_ = {0, 0};
+    return true;
 }
 
 void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)

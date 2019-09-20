@@ -14,18 +14,44 @@
 #include <glterminal/CellBackground.h>
 #include <GL/glew.h>
 #include <glm/gtc/matrix_transform.hpp>
+#include <utility>
 
-CellBackground::CellBackground(unsigned _width, unsigned _height, glm::mat4 const& _projectionMatrix)
+using namespace std;
+
+auto constexpr vertexShader = R"(
+    // Vertex Shader
+    #version 150 core
+    in vec2 position;
+    uniform mat4 u_transform;
+    void main()
+    {
+        gl_Position = u_transform * vec4(position, 0.0, 1.0);
+    }
+)";
+
+auto constexpr fragmentShader = R"(
+    // Fragment Shader
+    #version 150 core
+    out vec4 outColor;
+    uniform vec4 u_backgroundColor;
+    void main()
+    {
+        outColor = u_backgroundColor;
+    }
+)";
+
+CellBackground::CellBackground(glm::ivec2 _size, glm::mat4 _projectionMatrix) :
+    projectionMatrix_{ move(_projectionMatrix) },
+    shader_{ vertexShader, fragmentShader },
+    transformLocation_{ shader_.uniformLocation("u_transform") },
+    colorLocation_{ shader_.uniformLocation("u_backgroundColor") }
 {
-    transformLocation_ = shader_.uniformLocation("transform");
-    projectionMatrix_ = _projectionMatrix;
-
     // setup background shader
     GLfloat const vertices[] = {
-        0.0f, 0.0f,                           // bottom left
-        (GLfloat)_width, 0.0f,                // bottom right
-        (GLfloat)_width, (GLfloat)_height,    // top right
-        0.0f, (GLfloat)_height                // top left
+        0.0f, 0.0f,                             // bottom left
+        (GLfloat) _size.x, 0.0f,                // bottom right
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y                 // top left
     };
 
     glGenBuffers(1, &vbo_);
@@ -36,7 +62,7 @@ CellBackground::CellBackground(unsigned _width, unsigned _height, glm::mat4 cons
     glBindVertexArray(vao_);
 
     // specify vertex data layout
-    auto posAttr = glGetAttribLocation(shader_, "position");
+    auto posAttr = shader_.attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
 }
@@ -52,13 +78,27 @@ void CellBackground::setProjection(glm::mat4 const& _projectionMatrix)
     projectionMatrix_ = _projectionMatrix;
 }
 
+void CellBackground::resize(glm::ivec2 _size)
+{
+    GLfloat const vertices[] = {
+        0.0f, 0.0f,                             // bottom left
+        (GLfloat) _size.x, 0.0f,                // bottom right
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y                 // top left
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
 void CellBackground::render(glm::ivec2 _pos, glm::vec4 const& _color)
 {
     shader_.use();
-    shader_.setVec4("backgroundColor", _color);
 
-    glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos[0], _pos[1], 0.0f));
+    glm::mat4 const translation = glm::translate(glm::mat4(1.0f), glm::vec3(_pos.x, _pos.y, 0.0f));
     shader_.setMat4(transformLocation_, projectionMatrix_ * translation);
+    shader_.setVec4(colorLocation_, _color);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_QUADS, 0, 4);

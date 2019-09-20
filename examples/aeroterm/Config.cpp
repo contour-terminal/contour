@@ -140,4 +140,3 @@ void saveConfigToFile(Config const& _config, std::string const& _fileName)
     auto ofs = ofstream{_fileName, ios::trunc};
     ofs << serializeYaml(_config);
 }
-

@@ -36,6 +36,8 @@ class GLTextShaper {
         glm::vec4 const& _color,
         FontStyle _style);
 
+    void clearGlyphCache();
+
   private:
     struct Glyph {
         GLuint textureID;

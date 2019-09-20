@@ -59,6 +59,8 @@ class Font {
 
     unsigned int fontSize() const noexcept { return fontSize_; }
 
+    void setFontSize(unsigned int _fontSize);
+
     unsigned int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
 
     unsigned int maxAdvance() const noexcept {

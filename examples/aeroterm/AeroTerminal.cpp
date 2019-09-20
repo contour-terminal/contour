@@ -58,7 +58,7 @@ AeroTerminal::AeroTerminal(Config const& _config) :
         regularFont_,
         _config.cursorShape,
         glm::vec4{0.9, 0.9, 0.9, 1.0}, //TODO _config.colorPalette.cursor,
-        glm::vec4{0.1, 0.1, 0.1, _config.backgroundOpacity},
+        glm::vec4{0.1, 0.1, 0.1, _config.backgroundOpacity}, // TODO: choose default-bg from ColorPalette.
         _config.shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&AeroTerminal::onScreenUpdate, this),
@@ -250,6 +250,16 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
             ofs << screenshot;
             keyHandled_ = true;
         }
+        else if (_key == GLFW_KEY_EQUAL && mods == (terminal::Modifier::Control + terminal::Modifier::Shift))
+        {
+            setFontSize(config_.fontSize + 1, true);
+            keyHandled_ = true;
+        }
+        else if (_key == GLFW_KEY_MINUS && mods == (terminal::Modifier::Control + terminal::Modifier::Shift) && config_.fontSize > 5)
+        {
+            setFontSize(config_.fontSize - 1, true);
+            keyHandled_ = true;
+        }
         else if (_key == GLFW_KEY_ENTER && mods == terminal::Modifier::Alt)
         {
             window_.toggleFullScreen();
@@ -283,6 +293,31 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
     }
 }
 
+bool AeroTerminal::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
+{
+    if (!terminalView_.setFontSize(static_cast<unsigned>(_fontSize * Window::primaryMonitorContentScale().second)))
+        return false;
+
+    if (_fontSize < 5) // Let's not be crazy.
+        return false;
+
+    config_.fontSize = _fontSize;
+    if (!window_.fullscreen())
+    {
+        // resize window
+        auto const width = config_.terminalSize.columns * regularFont_.maxAdvance();
+        auto const height = config_.terminalSize.rows * regularFont_.lineHeight();
+        if (_resizeWindowIfNeeded)
+            window_.resize(width, height);
+    }
+    else
+    {
+        // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
+        terminalView_.resize(window_.size().width, window_.size().height);
+    }
+    return true;
+}
+
 void AeroTerminal::onChar(char32_t _char)
 {
     if (!keyHandled_)
@@ -310,11 +345,17 @@ void AeroTerminal::loadConfigValues()
 
     logger_.setLogMask(newConfig.loggingMask);
 
-    if (newConfig.terminalSize != config_.terminalSize)
+    bool windowResizeRequired = false;
+    if (newConfig.fontSize != config_.fontSize)
+        windowResizeRequired |= setFontSize(newConfig.fontSize, false);
+
+    if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
+        windowResizeRequired |= terminalView_.setTerminalSize(config_.terminalSize);
+
+    if (windowResizeRequired && !window_.fullscreen())
     {
         auto const width = newConfig.terminalSize.columns * regularFont_.maxAdvance();
         auto const height = newConfig.terminalSize.rows * regularFont_.lineHeight();
-        terminalView_.setTerminalSize(config_.terminalSize);
         window_.resize(width, height);
     }
 

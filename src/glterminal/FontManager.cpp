@@ -117,6 +117,16 @@ Font& FontManager::load(string const& _fontPattern, unsigned int _fontSize)
     return fonts_.emplace(make_pair(filePath, Font{ ft_, filePath, _fontSize })).first->second;
 }
 
+void Font::setFontSize(unsigned int _fontSize)
+{
+    auto ec = FT_Set_Pixel_Sizes(face_, 0, static_cast<FT_UInt>(_fontSize));
+    if (ec)
+        throw runtime_error{ string{"Failed to set font pixel size. "} + freetypeErrorString(ec) };
+
+    fontSize_ = _fontSize;
+    loadGlyphByIndex(0);
+}
+
 // -------------------------------------------------------------------------------------------------------
 
 Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize) :

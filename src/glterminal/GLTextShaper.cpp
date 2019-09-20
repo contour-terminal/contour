@@ -197,3 +197,9 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
 
     return glyph;
 }
+
+void GLTextShaper::clearGlyphCache()
+{
+    for (auto& cache: cache_)
+        cache.clear();
+}

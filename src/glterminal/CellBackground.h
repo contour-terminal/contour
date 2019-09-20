@@ -23,46 +23,19 @@
 /// OpenGL Object for rendering character cell's background.
 class CellBackground {
   public:
-    CellBackground(unsigned _width, unsigned _height, glm::mat4 const& _projectionMatrix);
+    CellBackground(glm::ivec2 _size, glm::mat4 _projectionMatrix);
     ~CellBackground();
 
     void setProjection(glm::mat4 const& _projectionMatrix);
-    void render(glm::ivec2 _translation, glm::vec4 const& _color);
+    void render(glm::ivec2 _pos, glm::vec4 const& _color);
+    void resize(glm::ivec2 _size);
 
   private:
-    static std::string vertexShader()
-    {
-        return R"(
-            // Vertex Shader
-            #version 150 core
-            in vec2 position;
-            uniform mat4 transform;
-            void main()
-            {
-                gl_Position = transform * vec4(position, 0.0, 1.0);
-            }
-        )";
-    }
-
-    static std::string fragmentShader()
-    {
-        return R"(
-            // Fragment Shader
-            #version 150 core
-            out vec4 outColor;
-            uniform vec4 backgroundColor;
-            void main()
-            {
-                outColor = backgroundColor;
-            }
-        )";
-    }
-
-    Shader shader_{ vertexShader(), fragmentShader() };
+    glm::mat4 projectionMatrix_;
+    Shader shader_;
+    GLint const transformLocation_;
+    GLint const colorLocation_;
     GLuint vbo_{};
     GLuint vao_{};
-
-    GLint transformLocation_;
-    glm::mat4 projectionMatrix_;
 };
 

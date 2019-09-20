@@ -41,6 +41,7 @@ private:
     void onScreenUpdate();
     void onConfigReload(FileChangeWatcher::Event _event);
     void loadConfigValues();
+    bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
 
 private:
     Config config_;

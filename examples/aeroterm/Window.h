@@ -50,6 +50,7 @@ class Window {
     static std::pair<float, float> primaryMonitorContentScale();
     std::pair<float, float> contentScale();
 
+    bool fullscreen() const noexcept { return fullscreen_; }
     void toggleFullScreen();
 
   private:

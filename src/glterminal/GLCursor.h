@@ -33,20 +33,20 @@ class GLCursor {
     GLCursor(glm::ivec2 _size, glm::mat4 _transform,  CursorShape _shape, glm::vec3 const& _color);
     ~GLCursor();
 
-    void setProjection(glm::mat4 _mat);
+    void setProjection(glm::mat4 const& _mat);
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
 
     void setColor(glm::vec3 _color);
-    void setSize(glm::vec2 _size);
+    void resize(glm::ivec2 _size);
 
     void render(glm::ivec2 _pos);
 
   private:
     CursorShape shape_;
-    glm::mat4 transform_;
-    std::unique_ptr<Shader> shader_;
+    glm::mat4 projectionMatrix_;
+    Shader shader_;
     GLint const transformLocation_;
     GLint const colorLocation_;
     GLuint vbo_;

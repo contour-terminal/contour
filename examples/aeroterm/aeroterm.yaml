@@ -6,7 +6,7 @@ terminalSize:
     columns: 130
     lines: 30
 
-fontSize: 14
+fontSize: 12
 #fontFamily: "Fira Code, Ubuntu Mono, Consolas, monospace"
 fontFamily: "C:\\Users\\chris\\AppData\\Local\\Microsoft\\Windows\\Fonts\\FiraCode-Retina.ttf"
 tabWidth: 8

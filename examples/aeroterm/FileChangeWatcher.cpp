@@ -27,11 +27,12 @@ void FileChangeWatcher::watch()
             notifier_(Event::Erased);
 
         auto lwt = filesystem::last_write_time(filePath_);
-        if (lwt > lastWriteTime)
+        if (lwt != lastWriteTime)
         {
             lastWriteTime = lwt;
             notifier_(Event::Modified);
         }
+        this_thread::sleep_for(1s);
     }
 }
 

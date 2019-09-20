@@ -147,10 +147,13 @@ void Window::onResize(GLFWwindow* _window, int _width, int _height)
 {
     if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self)
     {
-        self->lastSize_ = self->size_;
-        self->size_ = Size{static_cast<unsigned>(_width), static_cast<unsigned>(_height)};
-        if (self->onResize_)
-            self->onResize_();
+        if (_width && _height)
+        {
+            self->lastSize_ = self->size_;
+            self->size_ = Size{static_cast<unsigned>(_width), static_cast<unsigned>(_height)};
+            if (self->onResize_)
+                self->onResize_();
+        }
     }
 }
 
