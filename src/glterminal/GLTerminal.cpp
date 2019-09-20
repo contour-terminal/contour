@@ -47,8 +47,6 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
                        glm::mat4 const& _projectionMatrix,
                        function<void()> _onScreenUpdate,
                        GLLogger& _logger) :
-    width_{ _width },
-    height_{ _height },
     logger_{ _logger },
     updated_{ false },
     regularFont_{ _regularFont },
@@ -117,9 +115,6 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
         static_cast<unsigned short>(_height / regularFont_.lineHeight())
     };
 
-    width_ = _width;
-    height_ = _height;
-
     auto const computeMargin = [this](unsigned _width, unsigned _height, WindowSize const& ws)
     {
         auto const usedHeight = ws.rows * regularFont_.lineHeight();
@@ -131,7 +126,7 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
         return Margin{leftMargin, bottomMargin};
     };
 
-    WindowSize oldSize = terminal_.size();
+    WindowSize const oldSize = terminal_.size();
     bool const doResize = newSize != oldSize; // terminal_.size();
     if (doResize)
         terminal_.resize(newSize);
@@ -146,6 +141,15 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
             margin_.left, margin_.bottom,
             regularFont_.maxAdvance(), regularFont_.lineHeight()
         );
+}
+
+void GLTerminal::setTerminalSize(terminal::WindowSize const& _newSize)
+{
+    if (terminal_.size() != _newSize)
+    {
+        terminal_.resize(_newSize);
+        margin_ = {0, 0};
+    }
 }
 
 void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)

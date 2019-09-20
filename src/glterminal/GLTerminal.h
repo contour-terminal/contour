@@ -122,9 +122,6 @@ class GLTerminal {
     };
     PendingDraw pendingDraw_;
 
-    unsigned width_;
-    unsigned height_;
-
     struct Margin {
         unsigned left{};
         unsigned bottom{};
