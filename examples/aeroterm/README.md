@@ -65,9 +65,9 @@ logging:
 
 | Shortcut                          | Action                 |
 |-----------------------------------|------------------------|
-| <kbd>CTRL</kbd>+<kbd>=</kbd>      | Increase font size     |
-| <kbd>CTRL</kbd>+<kbd>-</kbd>      | Decrease font size     |
-| <kbd>CTRL</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
+| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>=</kbd>      | Increase font size     |
+| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>-</kbd>      | Decrease font size     |
+| <kbd>ALT</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
 
 ## Installing from source
 
