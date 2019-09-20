@@ -47,6 +47,17 @@ constexpr LogMask& operator|=(LogMask& lhs, LogMask rhs) noexcept
     return lhs;
 }
 
+constexpr LogMask& operator&=(LogMask& lhs, LogMask rhs) noexcept
+{
+    lhs = static_cast<LogMask>(static_cast<unsigned>(lhs) & static_cast<unsigned>(rhs));
+    return lhs;
+}
+
+constexpr LogMask operator~(LogMask _mask) noexcept
+{
+    return static_cast<LogMask>(~static_cast<unsigned>(_mask));
+}
+
 constexpr bool operator!=(LogMask lhs, unsigned rhs) noexcept
 {
     return static_cast<unsigned>(lhs) != rhs;
@@ -57,6 +68,11 @@ class GLLogger {
   public:
     GLLogger(LogMask _mask, std::ostream* _sink);
     GLLogger() : GLLogger{LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput, nullptr} {}
+    GLLogger(GLLogger const&) = delete;
+    GLLogger(GLLogger&&) = default;
+    GLLogger& operator=(GLLogger const&) = delete;
+    GLLogger& operator=(GLLogger&&) = default;
+    ~GLLogger() = default;
 
     LogMask logMask() const noexcept { return logMask_; }
     void setLogMask(LogMask _level) { logMask_ = _level; }
