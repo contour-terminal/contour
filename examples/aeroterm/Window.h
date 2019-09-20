@@ -59,8 +59,6 @@ class Window {
 
   private:
     GLFWwindow* window_;
-    unsigned width_;
-    unsigned height_;
     bool fullscreen_ = false;
     Size size_;
     Size lastSize_;
