@@ -99,8 +99,11 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
         };
 
         for (auto const& mapping : mappings)
-            if (auto value = logging[mapping.first]; value.as<bool>())
-                _config.loggingMask |= mapping.second;
+            if (auto value = logging[mapping.first]; value)
+                if (value.as<bool>())
+                    _config.loggingMask |= mapping.second;
+                else
+                    _config.loggingMask &= ~mapping.second;
     }
 }
 

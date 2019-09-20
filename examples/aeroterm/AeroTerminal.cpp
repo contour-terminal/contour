@@ -89,7 +89,8 @@ int AeroTerminal::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
-        if (configReloadPending_)
+        bool reloadPending = configReloadPending_.load();
+        if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
             loadConfigValues();
 
         if (terminalView_.shouldRender())
@@ -297,15 +298,15 @@ void AeroTerminal::onScreenUpdate()
 
 void AeroTerminal::onConfigReload(FileChangeWatcher::Event _event)
 {
-    configReloadPending_ = true;
+    configReloadPending_.store(true);
     glfwPostEmptyEvent();
 }
 
 void AeroTerminal::loadConfigValues()
 {
-    configReloadPending_ = false;
     auto filePath = config_.backingFilePath.string();
     loadConfigFromFile(config_, filePath);
+
     logger_.setLogMask(config_.loggingMask);
 
     // TODO...

@@ -21,6 +21,7 @@
 #include <glterminal/GLLogger.h>
 #include <glterminal/GLTerminal.h>
 
+#include <atomic>
 #include <filesystem>
 #include <string>
 
@@ -49,6 +50,6 @@ private:
     Window window_;
     GLTerminal terminalView_;
     bool keyHandled_ = false;
-    bool configReloadPending_ = false;
+    std::atomic<bool> configReloadPending_ = false;
     FileChangeWatcher configFileChangeWatcher_;
 };
