@@ -600,7 +600,7 @@ void Screen::operator()(SendDeviceAttributes const& v)
 void Screen::operator()(SendTerminalId const& v)
 {
     // terminal protocol type
-    auto constexpr Pp = static_cast<unsigned>(VTType::VT220);
+    auto constexpr Pp = static_cast<unsigned>(VTType::VT420);
 
     // version number
     // TODO: (PACKAGE_VERSION_MAJOR * 100 + PACKAGE_VERSION_MINOR) * 100 + PACKAGE_VERSION_MICRO
