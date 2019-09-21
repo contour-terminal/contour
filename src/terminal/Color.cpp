@@ -41,7 +41,7 @@ string to_string(IndexedColor color)
         case IndexedColor::Default:
             return "DEFAULT";
     }
-    return fmt::format("{}", static_cast<unsigned>(color));
+    return fmt::format("IndexedColor:{}", static_cast<unsigned>(color));
 }
 
 string to_string(BrightColor color)
