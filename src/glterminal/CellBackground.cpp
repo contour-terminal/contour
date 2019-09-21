@@ -20,7 +20,7 @@ using namespace std;
 
 auto constexpr vertexShader = R"(
     // Vertex Shader
-    #version 150 core
+    #version 140
     in vec2 position;
     uniform mat4 u_transform;
     void main()
@@ -31,7 +31,7 @@ auto constexpr vertexShader = R"(
 
 auto constexpr fragmentShader = R"(
     // Fragment Shader
-    #version 150 core
+    #version 140
     out vec4 outColor;
     uniform vec4 u_backgroundColor;
     void main()

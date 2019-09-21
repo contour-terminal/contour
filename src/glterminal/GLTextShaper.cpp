@@ -58,7 +58,7 @@ GLTextShaper::~GLTextShaper()
 string const& GLTextShaper::vertexShaderCode()
 {
 	static string const code = R"(
-		#version 150 core
+		#version 140
         in vec4 vertex;
 		out vec2 TexCoords;
 
@@ -76,7 +76,7 @@ string const& GLTextShaper::vertexShaderCode()
 string const& GLTextShaper::fragmentShaderCode()
 {
 	static string const code = R"(
-		#version 150 core
+		#version 140
 		in vec2 TexCoords;
 		out vec4 color;
 
