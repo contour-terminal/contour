@@ -81,6 +81,8 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 dispatchCSI_ext();
             else if (intermediateCharacters_ == ">")
                 dispatchCSI_gt();
+            else
+                logUnsupportedCSI();
             return;
         case Action::Execute:
             executeControlFunction();
@@ -336,6 +338,7 @@ void OutputHandler::dispatchCSI()
             emit<MoveCursorTo>(param(0), param(1));
             break;
         case 'K':
+            setDefaultParameter(0);
             switch (param(0))
             {
                 case 0:
@@ -400,6 +403,7 @@ void OutputHandler::dispatchCSI()
                     logUnsupportedCSI();
                     break;
             }
+            break;
         case 'r':
         {
             setDefaultParameter(1);

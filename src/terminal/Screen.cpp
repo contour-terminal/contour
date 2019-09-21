@@ -243,7 +243,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             fill_n(
                 next(begin(*targetLine), margin.horizontal.from - 1),
                 margin.horizontal.length(),
-                Cell{}
+                Cell{{}, graphicsRendition}
             );
         }
     }
@@ -264,7 +264,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             generate_n(
                 back_inserter(lines),
                 n,
-                [this]() { return Line{size_.columns, Cell{}}; }
+                [this]() { return Line{size_.columns, Cell{{}, graphicsRendition}}; }
             );
         }
     }
@@ -284,7 +284,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 
         auto const e_i = margin.vertical.to - n;
         for (auto li = next(begin(lines), e_i); li != next(begin(lines), margin.vertical.to); ++li)
-            fill(begin(*li), end(*li), Cell{});
+            fill(begin(*li), end(*li), Cell{{}, graphicsRendition});
     }
 
     updateCursorIterators();
@@ -329,11 +329,11 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
             for_each(
                 next(begin(lines), _margin.vertical.from - 1),
                 next(begin(lines), _margin.vertical.from - 1 + n),
-                [_margin](Line& line) {
+                [_margin, this](Line& line) {
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
-                        Cell{}
+                        Cell{{}, graphicsRendition}
                     );
                 }
             );
@@ -344,11 +344,11 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
             for_each(
                 next(begin(lines), _margin.vertical.from - 1),
                 next(begin(lines), _margin.vertical.to),
-                [_margin](Line& line) {
+                [_margin, this](Line& line) {
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
-                        Cell{}
+                        Cell{{}, graphicsRendition}
                     );
                 }
             );
@@ -365,11 +365,11 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
         for_each(
             begin(lines),
             next(begin(lines), n),
-            [](Line& line) {
+            [this](Line& line) {
                 fill(
                     begin(line),
                     end(line),
-                    Cell{}
+                    Cell{{}, graphicsRendition}
                 );
             }
         );
@@ -386,11 +386,11 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
         for_each(
             next(begin(lines), _margin.vertical.from - 1),
             next(begin(lines), _margin.vertical.from - 1 + n),
-            [](Line& line) {
+            [this](Line& line) {
                 fill(
                     begin(line),
                     end(line),
-                    Cell{}
+                    Cell{{}, graphicsRendition}
                 );
             }
         );
@@ -615,20 +615,20 @@ void Screen::operator()(SendTerminalId const& v)
 void Screen::operator()(ClearToEndOfScreen const& v)
 {
     for (auto line = state_->currentLine; line != end(state_->lines); ++line)
-        fill(begin(*line), end(*line), Cell{});
+        fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 
 void Screen::operator()(ClearToBeginOfScreen const& v)
 {
     for (auto line = begin(state_->lines); line != next(state_->currentLine); ++line)
-        fill(begin(*line), end(*line), Cell{});
+        fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 
 void Screen::operator()(ClearScreen const& v)
 {
     // https://vt100.net/docs/vt510-rm/ED.html
     for (auto& line : state_->lines)
-        fill(begin(line), end(line), Cell{});
+        fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
 }
 
 void Screen::operator()(ClearScrollbackBuffer const& v)
