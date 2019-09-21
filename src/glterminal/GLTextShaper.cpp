@@ -58,8 +58,8 @@ GLTextShaper::~GLTextShaper()
 string const& GLTextShaper::vertexShaderCode()
 {
 	static string const code = R"(
-		#version 330 core
-		layout (location = 0) in vec4 vertex; // <vec2 pos, vec2 tex>
+		#version 150 core
+        in vec4 vertex;
 		out vec2 TexCoords;
 
 		uniform mat4 projection;
@@ -76,7 +76,7 @@ string const& GLTextShaper::vertexShaderCode()
 string const& GLTextShaper::fragmentShaderCode()
 {
 	static string const code = R"(
-		#version 330 core
+		#version 150 core
 		in vec2 TexCoords;
 		out vec4 color;
 
