@@ -217,6 +217,7 @@ class Screen {
     void operator()(ClearLine const& v);
     void operator()(CursorNextLine const& v);
     void operator()(CursorPreviousLine const& v);
+    void operator()(InsertCharacters const& v);
     void operator()(InsertLines const& v);
     void operator()(DeleteLines const& v);
     void operator()(DeleteCharacters const& v);
@@ -382,6 +383,7 @@ class Screen {
         void scrollUp(cursor_pos_t n, Margin const& margin);
         void scrollDown(cursor_pos_t n);
         void scrollDown(cursor_pos_t n, Margin const& margin);
+        void insertChars(cursor_pos_t n);
 
         void verifyState() const;
         void updateCursorIterators();

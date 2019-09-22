@@ -399,6 +399,25 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     updateCursorIterators();
 }
 
+void Screen::Buffer::insertChars(cursor_pos_t _n)
+{
+    auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
+    auto reverseMarginRight = next(currentLine->rbegin(), size_.columns - margin_.horizontal.to);
+    auto reverseCurrentColumn = next(currentLine->rbegin(), size_.columns - realCursorPosition().column + 1);
+
+    rotate(
+        reverseMarginRight,
+        next(reverseMarginRight, n),
+        reverseCurrentColumn
+    );
+    updateCursorIterators();
+    fill_n(
+        currentColumn,
+        n,
+        Cell{L' ', graphicsRendition}
+    );
+}
+
 void Screen::Buffer::updateCursorIterators()
 {
     // update iterators
@@ -691,6 +710,12 @@ void Screen::operator()(CursorPreviousLine const& v)
 {
     auto const n = min(v.n, cursorPosition().row - 1);
     state_->moveCursorTo({cursorPosition().row - n, 1});
+}
+
+void Screen::operator()(InsertCharacters const& v)
+{
+    if (isCursorInsideMargins())
+        state_->insertChars(v.n);
 }
 
 void Screen::operator()(InsertLines const& v)

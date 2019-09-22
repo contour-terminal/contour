@@ -441,6 +441,13 @@ void OutputHandler::dispatchCSI()
         case 'm':
             dispatchGraphicsRendition();
             break;
+        case '@':
+            setDefaultParameter(1);
+            if (parameterCount() == 1)
+                emit<InsertCharacters>(param(0));
+            else
+                logInvalidCSI();
+            break;
         default:
             logUnsupportedCSI();
             break;

@@ -312,6 +312,52 @@ TEST_CASE("ClearLine", "[screen]")
     CHECK("   " == screen.renderTextLine(1));
 }
 
+TEST_CASE("InsertCharacters", "[screen]")
+{
+    Screen screen{{5, 2}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("12345\n67890");
+    screen(SetMode{ Mode::LeftRightMargin, true });
+    screen(SetLeftRightMargin{2, 4});
+    REQUIRE("12345\n67890\n" == screen.renderText());
+
+    SECTION("outside margins: left") {
+        screen(MoveCursorTo{1, 1});
+        screen(InsertCharacters{ 1 });
+        REQUIRE("12345\n67890\n" == screen.renderText());
+    }
+
+    SECTION("outside margins: right") {
+        screen(MoveCursorTo{1, 5});
+        screen(InsertCharacters{ 1 });
+        REQUIRE("12345\n67890\n" == screen.renderText());
+    }
+
+    SECTION("inside margins") {
+        screen(MoveCursorTo{1, 3});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+
+        SECTION("no-op") {
+            screen(InsertCharacters{0});
+            REQUIRE(screen.renderText() == "12345\n67890\n");
+        }
+
+        SECTION("ICH-1") {
+            screen(InsertCharacters{1});
+            REQUIRE(screen.renderText() == "12 35\n67890\n");
+        }
+
+        SECTION("ICH-2") {
+            screen(InsertCharacters{2});
+            REQUIRE(screen.renderText() == "12  5\n67890\n");
+        }
+
+        SECTION("ICH-3-clamped") {
+            screen(InsertCharacters{3});
+            REQUIRE(screen.renderText() == "12  5\n67890\n");
+        }
+    }
+}
+
 TEST_CASE("InsertLines", "[screen]")
 {
     Screen screen{{4, 6}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};

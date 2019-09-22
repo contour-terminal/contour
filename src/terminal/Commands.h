@@ -283,6 +283,20 @@ struct ClearToBeginOfLine {};
 /// EL works inside or outside the scrolling margins.
 struct ClearLine {};
 
+/// ICH - Insert Character
+///
+/// This control function inserts one or more space (SP) characters starting at the cursor position.
+///
+/// The ICH sequence inserts Pn blank characters with the normal character attribute.
+/// The cursor remains at the beginning of the blank characters.
+/// Text between the cursor and right margin moves to the right.
+/// Characters scrolled past the right margin are lost. ICH has no effect outside the scrolling margins.
+struct InsertCharacters {
+    /// This is is the number of characters to insert.
+    cursor_pos_t n;
+};
+
+
 /// IL - Insert Line
 ///
 /// This control function inserts one or more blank lines, starting at the cursor.
@@ -551,6 +565,7 @@ using Command = std::variant<
     ForwardIndex,
     FullReset,
     Index,
+    InsertCharacters,
     InsertLines,
     Linefeed,
     MoveCursorBackward,
@@ -583,5 +598,7 @@ using Command = std::variant<
 >;
 
 std::string to_string(Command const& cmd);
+
+std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool _withParameters, bool _withComment);
 
 }  // namespace terminal
