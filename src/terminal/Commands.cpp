@@ -176,162 +176,151 @@ string to_string(MouseProtocol protocol)
     return fmt::format("<?MouseProtocol:{}>", static_cast<unsigned>(protocol));
 }
 
-string to_string(Command const& _command)
-{
-    using namespace std::string_literals;
+class MnemonicBuilder {
+  public:
+    MnemonicBuilder(bool _withParameters, bool _withComment) :
+        withParameters_{ _withParameters },
+        withComment_{ _withComment }
+        {}
 
-    return visit(
-        overloaded{
-            [&](Bell) { return "Bell"s; },
-            [&](Linefeed) { return "Linefeed"s; },
-            [&](Backspace) { return "Backspace"s; },
-            [&](FullReset) { return "FullReset"s; },
-            [&](DeviceStatusReport) { return "DeviceStatusReport"s; },
-            [&](ReportCursorPosition) { return "ReportCursorPosition"s; },
-            [&](ReportExtendedCursorPosition) { return "ReportExtendedCursorPosition"s; },
-            [&](SendDeviceAttributes) { return "SendDeviceAttributes"s; },
-            [&](SendTerminalId) { return "SendTerminalId"s; },
-            [&](ClearToEndOfScreen) { return "ClearToEndOfScreen"s; },
-            [&](ClearToBeginOfScreen) { return "ClearToBeginOfScreen"s; },
-            [&](ClearScreen) { return "ClearScreen"s; },
-            [&](ClearScrollbackBuffer) { return "ClearScrollbackBuffer"s; },
-            [&](ScrollUp const& v) { return format("ScrollUp({})", v.n); },
-            [&](ScrollDown const& v) { return format("ScrollDown({})", v.n); },
-            [&](ClearToEndOfLine) { return "ClearToEndOfLine"s; },
-            [&](ClearToBeginOfLine) { return "ClearToBeginOfLine"s; },
-            [&](ClearLine) { return "ClearLine"s; },
-            [&](CursorNextLine) { return "CursorNextLine"s; },
-            [&](CursorPreviousLine) { return "CursorPreviousLine"s; },
-            [&](InsertLines const& v) { return format("InsertLines({})", v.n); },
-            [&](DeleteLines const& v) { return format("DeleteLines({})", v.n); },
-            [&](DeleteCharacters const& v) { return format("DeleteCharacters({})", v.n); },
-            [&](EraseCharacters const& v) { return format("EraseCharacters({})", v.n); },
-            [&](MoveCursorUp const& v) { return format("MoveCursorUp({})", v.n); },
-            [&](MoveCursorDown const& v) { return format("MoveCursorDown({})", v.n); },
-            [&](MoveCursorForward const& v) { return format("MoveCursorForward({})", v.n); },
-            [&](MoveCursorBackward const& v) { return format("MoveCursorBackward({})", v.n); },
-            [&](MoveCursorToColumn const& v) { return format("MoveCursorToColumn({})", v.column); },
-            [&](MoveCursorToBeginOfLine) { return "MoveCursorToBeginOfLine"s; },
-            [&](MoveCursorTo const& v) { return format("MoveCursorTo({}, {})", v.row, v.column); },
-            [&](MoveCursorToLine const& v) { return format("MoveCursorLine({})", v.row); },
-            [&](MoveCursorToNextTab) { return "MoveCursorToNextTab"s; },
-            [&](SaveCursor) { return "SaveCursor"s; },
-            [&](RestoreCursor) { return "RestoreCursor"s; },
-            [&](SetForegroundColor const& v) { return format("SetForegroundColor({})", to_string(v.color)); },
-            [&](SetBackgroundColor const& v) { return format("SetBackgroundColor({})", to_string(v.color)); },
-            [&](SetGraphicsRendition const& v) { return format("SetGraphicsRendition({})", to_string(v.rendition)); },
-            [&](SetMode const& v) { return format("SetMode({}, {})", to_string(v.mode), v.enable); },
-            [&](SendMouseEvents const& v) {
-                return format("SendMouseEvents({}, {})", to_string(v.protocol), v.enable);
-            },
-            [&](AlternateKeypadMode const& v) { return format("AlternateKeypadMode({})", v.enable); },
-            [&](Index) { return format("Index()"); },
-            [&](ReverseIndex) { return format("ReverseIndex()"); },
-            [&](BackIndex) { return format("BackIndex()"); },
-            [&](ForwardIndex) { return format("ForwardIndex()"); },
-            [&](DesignateCharset const& v) {
-                return format("DesignateCharset({}, {})", to_string(v.table), to_string(v.charset));
-            },
-            [&](SingleShiftSelect const& v) { return format("SingleShiftSelect({})", to_string(v.table)); },
-            [&](SetTopBottomMargin const& v) { return format("SetTopBottomMargin({}, {})", v.top, v.bottom); },
-            [&](SetLeftRightMargin const& v) { return format("SetLeftRightMargin({}, {})", v.left, v.right); },
-            [&](ScreenAlignmentPattern const& v) { return format("ScreenAlignmentPattern()"); },
-            [&](AppendChar const& v) { return format("AppendChar({})", escape(utf8::to_string(utf8::encode(v.ch)))); },
-            [&](ChangeWindowTitle const& v) { return format("ChangeWindowTitle(\"{}\")", v.title); },
-            [&](ChangeIconName const& v) { return format("ChangeIconName(\"{}\")", v.name); },
-        },
-        _command);
-}
+    vector<string> build(vector<Command> const& _commands)
+    {
+        for (Command const& command : _commands)
+            visit(*this, command);
 
-struct MnemonicBuilder {
-    bool withParameters;
-    bool withComment;
-    stringstream out;
+        return result();
+    }
+
+    vector<string> result()
+    {
+        flushPendingText();
+        return result_;
+    }
+
+    void operator()(Bell const& v) { build("\\a"); }
+    void operator()(FullReset const& v) {} // TODO
+    void operator()(Linefeed const& v) { build("\\n"); }
+    void operator()(Backspace const& v) { build("\\b"); }
+    void operator()(DeviceStatusReport const& v) {} // TODO
+    void operator()(ReportCursorPosition const& v) { build("CPR", "Report cursor position"); }
+    void operator()(ReportExtendedCursorPosition const& v) { build("DECXCPR", "Report cursor position (extended)."); }
+    void operator()(SendDeviceAttributes const& v) {} // TODO
+    void operator()(SendTerminalId const& v) {} // TODO
+    void operator()(ClearToEndOfScreen const& v) { build("ED", "Clear to end of screen", 0); }
+    void operator()(ClearToBeginOfScreen const& v) { build("ED", "Clear to begin of screen", 1); }
+    void operator()(ClearScreen const& v) { build("ED", "Clear screen", 2); }
+    void operator()(ClearScrollbackBuffer const& v) { build("ED", "Clear scrollback buffer", 3); }
+    void operator()(EraseCharacters const& v) { build("ECH", "Erase characters", v.n); }
+    void operator()(ScrollUp const& v) { build("SU", "Scroll up", v.n); }
+    void operator()(ScrollDown const& v) { build("SD", "Scroll down", v.n); }
+    void operator()(ClearToEndOfLine const& v) { build("EL", "Clear to end of line", 0); }
+    void operator()(ClearToBeginOfLine const& v) { build("EL", "Clear to begin of line", 1); }
+    void operator()(ClearLine const& v)  { build("EL", "Clear line", 2); }
+    void operator()(CursorNextLine const& v) { build("CNL", "Cursor Next Line", v.n); }
+    void operator()(CursorPreviousLine const& v) { build("CNL", "Cursor Previous Line", v.n); }
+    void operator()(InsertCharacters const& v) { build("ICH", "Insert Characters", v.n); }
+    void operator()(InsertLines const& v) { build("IL", "Insert Lines", v.n); }
+    void operator()(DeleteLines const& v) { build("DL", "Delete Lines", v.n); }
+    void operator()(DeleteCharacters const& v) { build("DCH", "Delete characters", v.n); }
+    void operator()(MoveCursorUp const& v) { build("CUU", "Move cursor up", v.n); }
+    void operator()(MoveCursorDown const& v) { build("CUD", "Move cursor down", v.n); }
+    void operator()(MoveCursorForward const& v) { build("CUF", "Move cursor forward", v.n); }
+    void operator()(MoveCursorBackward const& v)  { build("CUB", "Move cursor backward", v.n); }
+    void operator()(MoveCursorToColumn const& v) { build("CHA", "Move cursor to column", v.column); }
+    void operator()(MoveCursorToBeginOfLine const& v) { build("\\r"); }
+    void operator()(MoveCursorTo const& v) { build("CUP", "Move cursor to position", v.row, v.column); }
+    void operator()(MoveCursorToLine const& v) { build("VPA", "Move cursor to line", v.row); }
+    void operator()(MoveCursorToNextTab const& v) { build("\\t"); }
+    void operator()(SaveCursor const& v) {} // TODO
+    void operator()(RestoreCursor const& v) {} // TODO
+    void operator()(Index const& v) { build("IND", "Moves cursor down (possibly scrolling)"); }
+    void operator()(ReverseIndex const& v) { build("RI", "Moves cursor up (possibly scrolling)"); }
+    void operator()(BackIndex const& v) { build("DECBI", "Moves cursor left (possibly scrolling)"); }
+    void operator()(ForwardIndex const& v) { build("DECFI", "Moves cursor right (possibly scrolling)"); }
+    void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Select foreground color to {}", to_string(v.color))); }
+    void operator()(SetBackgroundColor const& v) { build("SGR", fmt::format("Select background color to {}", to_string(v.color))); }
+    void operator()(SetGraphicsRendition const& v) { build("SGR", fmt::format("Select style rendition to {}", to_string(v.rendition))); }
+    void operator()(SetMode const& v) {
+        if (v.enable)
+            build("SM", fmt::format("Set mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
+        else
+            build("RM", fmt::format("Reset mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
+    }
+    void operator()(SetTopBottomMargin const& v) {
+        build("DECSTBM", "Set top/bottom margin.", v.top, v.bottom);
+    }
+    void operator()(SetLeftRightMargin const& v) {
+        build("DECSLRM", "Set left/right margin.", v.left, v.right);
+    }
+    void operator()(ScreenAlignmentPattern const& v) { build("DECALN", "Draw Screen Alignment Pattern."); }
+    void operator()(SendMouseEvents const& v) {} // TODO
+    void operator()(AlternateKeypadMode const& v) {} // TODO
+    void operator()(DesignateCharset const& v) {} // TODO
+    void operator()(SingleShiftSelect const& v) {} // TODO
+    void operator()(ChangeWindowTitle const& v) {} // TODO
+    void operator()(ChangeIconName const& v) {} // TODO
+    void operator()(AppendChar const& v) {
+        pendingText_ += utf8::to_string(utf8::encode(v.ch));
+    }
+
+  private:
+    bool withParameters_;
+    bool withComment_;
+    vector<string> result_;
+    string pendingText_;
+
+    void flushPendingText()
+    {
+        if (!pendingText_.empty())
+        {
+            result_.emplace_back(fmt::format("\"{}\"", escape(pendingText_)));
+            pendingText_.clear();
+        }
+    }
 
     void build(string_view _mnemonic,
                string_view _comment = {},
                vector<unsigned> _args = {})
     {
-        out <<_mnemonic;
-        if (withParameters & !_args.empty())
+        flushPendingText();
+        string out;
+        out += _mnemonic;
+        if (withParameters_ & !_args.empty())
         {
-            out << ' ' << _args[0];
+            out += ' ';
+            out += std::to_string(_args[0]);
             for (size_t i = 1; i < _args.size(); ++i)
-                out << ", " << _args[i];
+            {
+                out += ' ';
+                out += std::to_string(_args[i]);
+            }
         }
-        if (withComment && !_comment.empty())
-            out << "\t; " << _comment;
-        out << "\n";
+        if (withComment_ && !_comment.empty())
+        {
+            while (out.size() < 16)
+                out += ' ';
+            out += "; ";
+            out += _comment;
+        }
+        result_.emplace_back(move(out));
     }
 
-    void build(string_view _mnemonic, string_view _comment, unsigned _a1) { build(_mnemonic, _comment, {_a1}); }
-
-    void operator()(Bell const& v) { build("\\a"); }
-    void operator()(FullReset const& v);
-    void operator()(Linefeed const& v);
-    void operator()(Backspace const& v);
-    void operator()(DeviceStatusReport const& v);
-    void operator()(ReportCursorPosition const& v);
-    void operator()(ReportExtendedCursorPosition const& v);
-    void operator()(SendDeviceAttributes const& v);
-    void operator()(SendTerminalId const& v) {}
-    void operator()(ClearToEndOfScreen const& v) {
-        build("ED", "Clear to end of screen", 0);
-    }
-    void operator()(ClearToBeginOfScreen const& v) {
-        build("ED", "Clear to begin of screen", 1);
-    }
-    void operator()(ClearScreen const& v) {
-        build("ED", "Clear screen", 2);
-    }
-    void operator()(ClearScrollbackBuffer const& v) {
-        build("ED", "Clear scrollback buffer", 3);
-    }
-    void operator()(EraseCharacters const& v);
-    void operator()(ScrollUp const& v) {
-        build("SU", "Scroll up", v.n);
-    }
-    void operator()(ScrollDown const& v) {
-        build("SD", "Scroll down", v.n);
-    }
-    void operator()(ClearToEndOfLine const& v);
-    void operator()(ClearToBeginOfLine const& v);
-    void operator()(ClearLine const& v);
-    void operator()(CursorNextLine const& v);
-    void operator()(CursorPreviousLine const& v);
-    void operator()(InsertLines const& v);
-    void operator()(DeleteLines const& v);
-    void operator()(DeleteCharacters const& v);
-    void operator()(MoveCursorUp const& v);
-    void operator()(MoveCursorDown const& v);
-    void operator()(MoveCursorForward const& v);
-    void operator()(MoveCursorBackward const& v);
-    void operator()(MoveCursorToColumn const& v);
-    void operator()(MoveCursorToBeginOfLine const& v);
-    void operator()(MoveCursorTo const& v);
-    void operator()(MoveCursorToLine const& v);
-    void operator()(MoveCursorToNextTab const& v);
-    void operator()(SaveCursor const& v);
-    void operator()(RestoreCursor const& v);
-    void operator()(Index const& v);
-    void operator()(ReverseIndex const& v);
-    void operator()(BackIndex const& v);
-    void operator()(ForwardIndex const& v);
-    void operator()(SetForegroundColor const& v);
-    void operator()(SetBackgroundColor const& v);
-    void operator()(SetGraphicsRendition const& v);
-    void operator()(SetMode const& v);
-    void operator()(SetTopBottomMargin const& v);
-    void operator()(SetLeftRightMargin const& v);
-    void operator()(ScreenAlignmentPattern const& v);
-    void operator()(SendMouseEvents const& v);
-    void operator()(AlternateKeypadMode const& v);
-    void operator()(DesignateCharset const& v);
-    void operator()(SingleShiftSelect const& v);
-    void operator()(ChangeWindowTitle const& v);
-    void operator()(ChangeIconName const& v);
-    void operator()(AppendChar const& v);
+    void build(string_view _mnemonic, string_view _comment, unsigned _a1) { build(_mnemonic, _comment, vector{_a1}); }
+    void build(string_view _mnemonic, string_view _comment, unsigned _a1, unsigned _a2) { build(_mnemonic, _comment, vector{_a1, _a2}); }
 };
 
+vector<string> to_mnemonic(vector<Command> const& _commands, bool _withParameters, bool _withComment)
+{
+    return MnemonicBuilder{_withParameters, _withComment}.build(_commands);
+}
+
+string to_string(Command const& _command)
+{
+    auto const v = to_mnemonic(vector{_command}, true, false);
+    if (!v.empty())
+        return v.front();
+    else
+        return ""s;
+}
 
 }  // namespace terminal

@@ -623,8 +623,9 @@ void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _comma
 {
     logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
 
-    for (terminal::Command const& command : _commands)
-        logger_(TraceOutputEvent{ to_string(command) });
+    auto const mnemonics = to_mnemonic(_commands, true, true);
+    for (auto const& mnemonic : mnemonics)
+        logger_(TraceOutputEvent{ mnemonic });
 
     updated_.store(true);
 
