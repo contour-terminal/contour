@@ -30,9 +30,9 @@ using namespace std;
 using namespace std::placeholders;
 
 AeroTerminal::AeroTerminal(Config const& _config) :
-    //loggingSink_{"aeroterm.log", ios::trunc},
+    loggingSink_{_config.logFilePath.string(), ios::trunc},
     config_{_config},
-    logger_{_config.loggingMask, &cout},
+    logger_{_config.loggingMask, &loggingSink_},
     fontManager_{},
     regularFont_{
         fontManager_.load(

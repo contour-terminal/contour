@@ -52,6 +52,7 @@ background:
     blur: false
 
 logging:
+    file: "/path/to/aeroterm.log"
     parseErrors: true
     invalidOutput: true
     unsupportedOutput: true

@@ -95,6 +95,9 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
 
     if (auto logging = doc["logging"]; logging)
     {
+        if (auto filePath = logging["file"]; filePath)
+            _config.logFilePath = filesystem::path{filePath.as<string>()};
+
         auto constexpr mappings = array{
             pair{"parseErrors", LogMask::ParserError},
             pair{"invalidOutput", LogMask::InvalidOutput},

@@ -20,6 +20,7 @@ background:
     blur: false
 
 logging:
+    file: "/tmp/aeroterm.log"
     parseErrors: true
     invalidOutput: true
     unsupportedOutput: true

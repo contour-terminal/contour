@@ -23,6 +23,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 class AeroTerminal {
@@ -44,6 +45,7 @@ private:
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
 
 private:
+    std::ofstream loggingSink_;
     Config config_;
     GLLogger logger_;
     FontManager fontManager_;
