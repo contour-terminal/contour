@@ -27,6 +27,7 @@ optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
 {
     util::Flags flags;
     flags.defineBool("help", 'h', "Shows this help and quits.");
+    flags.defineBool("version", 'v', "Shows this version and exits.");
     flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", "aeroterm.yml");
 
     flags.parse(_argc, _argv);
@@ -38,6 +39,12 @@ optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
              << "  aeroterm [OPTIONS ...]\n"
              << "\n"
              << flags.helpText() << endl;
+        return {EXIT_SUCCESS};
+    }
+
+    if (flags.getBool("version"))
+    {
+        cout << fmt::format("Aero Terminal, version {}.{}.{}", 0, 1, 0) << endl; // TODO: get from CMake
         return {EXIT_SUCCESS};
     }
 
