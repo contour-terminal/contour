@@ -15,6 +15,7 @@
 #include <terminal/Commands.h>
 #include <terminal/UTF8.h>
 #include <terminal/Util.h>
+#include <sstream>
 
 using namespace std;
 using fmt::format;
@@ -241,5 +242,96 @@ string to_string(Command const& _command)
         },
         _command);
 }
+
+struct MnemonicBuilder {
+    bool withParameters;
+    bool withComment;
+    stringstream out;
+
+    void build(string_view _mnemonic,
+               string_view _comment = {},
+               vector<unsigned> _args = {})
+    {
+        out <<_mnemonic;
+        if (withParameters & !_args.empty())
+        {
+            out << ' ' << _args[0];
+            for (size_t i = 1; i < _args.size(); ++i)
+                out << ", " << _args[i];
+        }
+        if (withComment && !_comment.empty())
+            out << "\t; " << _comment;
+        out << "\n";
+    }
+
+    void build(string_view _mnemonic, string_view _comment, unsigned _a1) { build(_mnemonic, _comment, {_a1}); }
+
+    void operator()(Bell const& v) { build("\\a"); }
+    void operator()(FullReset const& v);
+    void operator()(Linefeed const& v);
+    void operator()(Backspace const& v);
+    void operator()(DeviceStatusReport const& v);
+    void operator()(ReportCursorPosition const& v);
+    void operator()(ReportExtendedCursorPosition const& v);
+    void operator()(SendDeviceAttributes const& v);
+    void operator()(SendTerminalId const& v) {}
+    void operator()(ClearToEndOfScreen const& v) {
+        build("ED", "Clear to end of screen", 0);
+    }
+    void operator()(ClearToBeginOfScreen const& v) {
+        build("ED", "Clear to begin of screen", 1);
+    }
+    void operator()(ClearScreen const& v) {
+        build("ED", "Clear screen", 2);
+    }
+    void operator()(ClearScrollbackBuffer const& v) {
+        build("ED", "Clear scrollback buffer", 3);
+    }
+    void operator()(EraseCharacters const& v);
+    void operator()(ScrollUp const& v) {
+        build("SU", "Scroll up", v.n);
+    }
+    void operator()(ScrollDown const& v) {
+        build("SD", "Scroll down", v.n);
+    }
+    void operator()(ClearToEndOfLine const& v);
+    void operator()(ClearToBeginOfLine const& v);
+    void operator()(ClearLine const& v);
+    void operator()(CursorNextLine const& v);
+    void operator()(CursorPreviousLine const& v);
+    void operator()(InsertLines const& v);
+    void operator()(DeleteLines const& v);
+    void operator()(DeleteCharacters const& v);
+    void operator()(MoveCursorUp const& v);
+    void operator()(MoveCursorDown const& v);
+    void operator()(MoveCursorForward const& v);
+    void operator()(MoveCursorBackward const& v);
+    void operator()(MoveCursorToColumn const& v);
+    void operator()(MoveCursorToBeginOfLine const& v);
+    void operator()(MoveCursorTo const& v);
+    void operator()(MoveCursorToLine const& v);
+    void operator()(MoveCursorToNextTab const& v);
+    void operator()(SaveCursor const& v);
+    void operator()(RestoreCursor const& v);
+    void operator()(Index const& v);
+    void operator()(ReverseIndex const& v);
+    void operator()(BackIndex const& v);
+    void operator()(ForwardIndex const& v);
+    void operator()(SetForegroundColor const& v);
+    void operator()(SetBackgroundColor const& v);
+    void operator()(SetGraphicsRendition const& v);
+    void operator()(SetMode const& v);
+    void operator()(SetTopBottomMargin const& v);
+    void operator()(SetLeftRightMargin const& v);
+    void operator()(ScreenAlignmentPattern const& v);
+    void operator()(SendMouseEvents const& v);
+    void operator()(AlternateKeypadMode const& v);
+    void operator()(DesignateCharset const& v);
+    void operator()(SingleShiftSelect const& v);
+    void operator()(ChangeWindowTitle const& v);
+    void operator()(ChangeIconName const& v);
+    void operator()(AppendChar const& v);
+};
+
 
 }  // namespace terminal
