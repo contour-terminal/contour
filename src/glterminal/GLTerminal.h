@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/Color.h>
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
 #include <terminal/WindowSize.h>
@@ -40,7 +41,8 @@ class GLTerminal {
                Font& _fontFamily,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
-               glm::vec4 const& _backgroundColor,
+               terminal::ColorProfile const& _colorProfile,
+               terminal::Opacity _backgroundOpacity,
                std::string const& _shell,
                glm::mat4 const& _projectionMatrix,
                std::function<void()> _onScreenUpdate,
@@ -87,7 +89,7 @@ class GLTerminal {
     /// The alive() test will fail after this call.
     void wait();
 
-    glm::vec4 const& defaultBackgroundColor() const noexcept { return defaultBackgroundColor_; }
+    terminal::ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
 
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
@@ -135,13 +137,13 @@ class GLTerminal {
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     std::atomic<bool> updated_;
 
+    terminal::ColorProfile const& colorProfile_;
+    terminal::Opacity backgroundOpacity_;
+
     Font& regularFont_;
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;
-
-    glm::vec4 defaultForegroundColor_;
-    glm::vec4 defaultBackgroundColor_;
 
     terminal::Terminal terminal_;
     terminal::Process process_;

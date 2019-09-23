@@ -15,6 +15,7 @@
 
 #include <glterminal/GLCursor.h>
 #include <glterminal/GLLogger.h>
+#include <terminal/Color.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Process.h>
 #include <filesystem>
@@ -33,11 +34,11 @@ struct Config {
     CursorShape cursorShape = CursorShape::Block;
     bool cursorBlinking = true;
     unsigned int tabWidth = 8;
-    float backgroundOpacity = 1.0; // value between 0.0 (fully transparent) and 1.0 (fully visible).
+    terminal::Opacity backgroundOpacity = terminal::Opacity::Opaque; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
     LogMask loggingMask;
 
-    // TODO: ColorPalette
+    terminal::ColorProfile colorProfile;
     // TODO: std::vector<KeyMapping>
 };
 

@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include "AeroTerminal.h"
+#include <terminal/Color.h>
 
 #include <iostream>
 #include <fstream>
@@ -52,14 +53,15 @@ AeroTerminal::AeroTerminal(Config const& _config) :
         bind(&AeroTerminal::onContentScale, this, _1, _2)
     },
     terminalView_{
-        _config.terminalSize,
+        config_.terminalSize,
         window_.width(),
         window_.height(),
         regularFont_,
-        _config.cursorShape,
-        glm::vec4{0.9, 0.9, 0.9, 1.0}, //TODO _config.colorPalette.cursor,
-        glm::vec4{0.1, 0.1, 0.1, _config.backgroundOpacity}, // TODO: choose default-bg from ColorPalette.
-        _config.shell,
+        config_.cursorShape,
+        glm::vec4{0.9, 0.9, 0.9, 1.0}, // TODO: make cursor color configurable (part of color profile?)
+        config_.colorProfile,
+        config_.backgroundOpacity,
+        config_.shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&AeroTerminal::onScreenUpdate, this),
         logger_
@@ -90,10 +92,14 @@ int AeroTerminal::main()
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
         bool reloadPending = configReloadPending_.load();
+        bool shouldRender = terminalView_.shouldRender();
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
+        {
             loadConfigValues();
+            shouldRender = true;
+        }
 
-        if (terminalView_.shouldRender())
+        if (shouldRender)
             render();
 
         glfwWaitEventsTimeout(0.5);
@@ -102,11 +108,19 @@ int AeroTerminal::main()
     return EXIT_SUCCESS;
 }
 
+inline glm::vec4 makeColor(terminal::RGBColor const& _color, terminal::Opacity _opacity)
+{
+    return glm::vec4{
+        _color.red / 255.0f,
+        _color.green / 255.0f,
+        _color.blue / 255.0f,
+        static_cast<float>(_opacity) / 255.0f};
+}
+
 void AeroTerminal::render()
 {
-    glm::vec4 const& bg = terminalView_.defaultBackgroundColor();
+    glm::vec4 const& bg = makeColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
     glClearColor(bg.r, bg.g, bg.b, bg.a);
-    //glClearColor(0.0f, 0.0f, 0.0f, 0.5f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     terminalView_.render();

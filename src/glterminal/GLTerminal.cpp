@@ -43,13 +43,16 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
                        Font& _regularFont,
                        CursorShape _cursorShape,
                        glm::vec3 const& _cursorColor,
-                       glm::vec4 const& _backgroundColor,
+                       terminal::ColorProfile const& _colorProfile,
+                       terminal::Opacity _backgroundOpacity,
                        string const& _shell,
                        glm::mat4 const& _projectionMatrix,
                        function<void()> _onScreenUpdate,
                        GLLogger& _logger) :
     logger_{ _logger },
     updated_{ false },
+    colorProfile_{ _colorProfile },
+    backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     textShaper_{ _regularFont, _projectionMatrix },
     cellBackground_{
@@ -68,8 +71,6 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
         _cursorShape,
         _cursorColor
     },
-    defaultForegroundColor_{ 0.9, 0.9, 0.9, 1.0 }, // TODO: pass in (ideally via both ColorPalette)
-    defaultBackgroundColor_{ _backgroundColor },
     terminal_{
         _winSize,
         [this](terminal::LogEvent const& _event) { logger_(_event); },
@@ -268,318 +269,6 @@ glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
     };
 }
 
-glm::vec4 makeColor(IndexedColor _indexedColor, glm::vec4 _defaultColor)
-{
-    auto const static values = array<glm::vec4, 256>{
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{128 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 128 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{128 / 255.0f, 128 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 128 / 255.0f, 1.0},
-        glm::vec4{128 / 255.0f, 0 / 255.0f, 128 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0},
-        glm::vec4{192 / 255.0f, 192 / 255.0f, 192 / 255.0f, 1.0},
-        glm::vec4{128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{0 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{95 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{135 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{175 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{215 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 0 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 95 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 135 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 175 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 215 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 0 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 95 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 135 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 175 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 215 / 255.0f, 1.0},
-        glm::vec4{255 / 255.0f, 255 / 255.0f, 255 / 255.0f, 1.0},
-        glm::vec4{8 / 255.0f, 8 / 255.0f, 8 / 255.0f, 1.0},
-        glm::vec4{18 / 255.0f, 18 / 255.0f, 18 / 255.0f, 1.0},
-        glm::vec4{28 / 255.0f, 28 / 255.0f, 28 / 255.0f, 1.0},
-        glm::vec4{38 / 255.0f, 38 / 255.0f, 38 / 255.0f, 1.0},
-        glm::vec4{48 / 255.0f, 48 / 255.0f, 48 / 255.0f, 1.0},
-        glm::vec4{58 / 255.0f, 58 / 255.0f, 58 / 255.0f, 1.0},
-        glm::vec4{68 / 255.0f, 68 / 255.0f, 68 / 255.0f, 1.0},
-        glm::vec4{78 / 255.0f, 78 / 255.0f, 78 / 255.0f, 1.0},
-        glm::vec4{88 / 255.0f, 88 / 255.0f, 88 / 255.0f, 1.0},
-        glm::vec4{98 / 255.0f, 98 / 255.0f, 98 / 255.0f, 1.0},
-        glm::vec4{108 / 255.0f, 108 / 255.0f, 108 / 255.0f, 1.0},
-        glm::vec4{118 / 255.0f, 118 / 255.0f, 118 / 255.0f, 1.0},
-        glm::vec4{128 / 255.0f, 128 / 255.0f, 128 / 255.0f, 1.0},
-        glm::vec4{138 / 255.0f, 138 / 255.0f, 138 / 255.0f, 1.0},
-        glm::vec4{148 / 255.0f, 148 / 255.0f, 148 / 255.0f, 1.0},
-        glm::vec4{158 / 255.0f, 158 / 255.0f, 158 / 255.0f, 1.0},
-        glm::vec4{168 / 255.0f, 168 / 255.0f, 168 / 255.0f, 1.0},
-        glm::vec4{178 / 255.0f, 178 / 255.0f, 178 / 255.0f, 1.0},
-        glm::vec4{188 / 255.0f, 188 / 255.0f, 188 / 255.0f, 1.0},
-        glm::vec4{198 / 255.0f, 198 / 255.0f, 198 / 255.0f, 1.0},
-        glm::vec4{208 / 255.0f, 208 / 255.0f, 208 / 255.0f, 1.0},
-        glm::vec4{218 / 255.0f, 218 / 255.0f, 218 / 255.0f, 1.0},
-        glm::vec4{228 / 255.0f, 228 / 255.0f, 228 / 255.0f, 1.0},
-        glm::vec4{238 / 255.0f, 238 / 255.0f, 238 / 255.0f, 1.0},
-    };
-    auto const index = static_cast<size_t>(_indexedColor);
-    if (index < 256)
-        return values[index];
-    else
-        return _defaultColor;
-}
-
-glm::vec4 applyColor(Color const& _color, glm::vec4 const& _defaultColor, float _opacity)
-{
-    using namespace terminal;
-    auto const opacity = _defaultColor[3] * _opacity;
-    auto const defaultColor = glm::vec4{ _defaultColor.r, _defaultColor.g, _defaultColor.b, _defaultColor.a * _opacity };
-    return visit(
-        overloaded{
-            [=](UndefinedColor) {
-                return defaultColor;
-            },
-            [=](DefaultColor) {
-                return defaultColor;
-            },
-            [=](IndexedColor color) {
-                return makeColor(color, defaultColor);
-            },
-            [=](BrightColor color) {
-                switch (color) {
-                    case BrightColor::Black:
-                        return glm::vec4{ 0, 0, 0, opacity };
-                    case BrightColor::Red:
-                        return glm::vec4{ 1, 0, 0, opacity };
-                    case BrightColor::Green:
-                        return glm::vec4{ 0, 1, 0, opacity };
-                    case BrightColor::Yellow:
-                        return glm::vec4{ 1, 1, 0, opacity };
-                    case BrightColor::Blue:
-                        return glm::vec4{ 92 / 255, 92 / 255, 1, opacity };
-                    case BrightColor::Magenta:
-                        return glm::vec4{ 1, 0, 1, opacity };
-                    case BrightColor::Cyan:
-                        return glm::vec4{ 0, 1, 1, opacity };
-                    case BrightColor::White:
-                        return glm::vec4{ 1, 1, 1, opacity };
-                }
-                return defaultColor;
-            },
-            [=](RGBColor color) {
-                return glm::vec4{ color.red / 255.0, color.green / 255.0, color.blue / 255.0, opacity };
-            },
-        },
-        _color
-    );
-}
-
 std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(Screen::GraphicsAttributes const& _attributes) const
 {
     float const opacity = [=]() {
@@ -591,11 +280,25 @@ std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(Screen::GraphicsAttribute
             return 1.0f;
     }();
 
+    auto const applyColor = [_attributes, this](Color const& _color, ColorTarget _target, float _opacity) -> glm::vec4
+    {
+        RGBColor const rgb = apply(colorProfile_, _color, _target, _attributes.styles & CharacterStyleMask::Bold);
+        glm::vec4 const rgba{
+            rgb.red / 255.0f,
+            rgb.green / 255.0f,
+            rgb.blue / 255.0f,
+            _opacity
+        };
+        return rgba;
+    };
+
+    float const backgroundOpacity = static_cast<float>(backgroundOpacity_) / 255.0f;
+
     return (_attributes.styles & CharacterStyleMask::Inverse)
-        ? pair{ applyColor(_attributes.backgroundColor, defaultBackgroundColor_, opacity),
-                applyColor(_attributes.foregroundColor, defaultForegroundColor_, opacity) }
-        : pair{ applyColor(_attributes.foregroundColor, defaultForegroundColor_, opacity),
-                applyColor(_attributes.backgroundColor, defaultBackgroundColor_, opacity) };
+        ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, backgroundOpacity),
+                applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity) }
+        : pair{ applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity),
+                applyColor(_attributes.backgroundColor, ColorTarget::Background, backgroundOpacity) };
 }
 
 void GLTerminal::wait()

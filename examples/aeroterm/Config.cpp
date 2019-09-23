@@ -17,6 +17,7 @@
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
 #include <glterminal/GLCursor.h>
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -81,7 +82,9 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
 
     if (auto background = doc["background"]; background)
     {
-        softLoadValue(background, "opacity", _config.backgroundOpacity);
+        if (auto opacity = background["opacity"]; opacity)
+            _config.backgroundOpacity =
+                (terminal::Opacity)(static_cast<unsigned>(255 * clamp(opacity.as<float>(), 0.0f, 1.0f)));
         softLoadValue(background, "blur", _config.backgroundBlur);
     }
 
@@ -91,6 +94,48 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
             _config.cursorShape = makeCursorShape(shape.as<string>());
 
         softLoadValue(cursor, "blinking", _config.cursorBlinking);
+    }
+
+    if (auto colors = doc["colors"]; colors)
+    {
+        using terminal::RGBColor;
+        if (auto def = colors["default"]; def)
+        {
+            if (auto fg = def["foreground"]; fg)
+                _config.colorProfile.defaultForeground = fg.as<string>();
+            if (auto bg = def["background"]; bg)
+                _config.colorProfile.defaultBackground = bg.as<string>();
+        }
+        auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
+            if (_node)
+            {
+                if (_node.IsMap())
+                {
+                    auto const assignColor = [&](size_t _index, string const& _name) {
+                        if (auto value = _node[_name]; value)
+                            _config.colorProfile.palette[_offset + _index] = value.as<string>();
+                    };
+                    assignColor(0, "black");
+                    assignColor(1, "red");
+                    assignColor(2, "green");
+                    assignColor(3, "yellow");
+                    assignColor(4, "blue");
+                    assignColor(5, "magenta");
+                    assignColor(6, "cyan");
+                    assignColor(7, "white");
+                }
+                else if (_node.IsSequence())
+                {
+                    for (size_t i = 0; i < _node.size() && i < 8; ++i)
+                        _config.colorProfile.palette[i] = _node[i].as<string>();
+                }
+            }
+        };
+
+        loadColorMap(colors["normal"], 0);
+        loadColorMap(colors["bright"], 8);
+        // TODO: color palette from 16..255
+        // TODO: dim colors (maybe put them into the palette at 256..(256+8)?)
     }
 
     if (auto logging = doc["logging"]; logging)
@@ -130,8 +175,10 @@ std::string serializeYaml(Config const& _config)
     root["fontSize"] = _config.fontSize;
     root["fontFamily"] = _config.fontFamily;
     root["tabWidth"] = _config.tabWidth;
-    root["background"]["opacity"] = _config.backgroundOpacity;
+    root["background"]["opacity"] = static_cast<float>(_config.backgroundOpacity) / 255.0f;
     root["background"]["blur"] = _config.backgroundBlur;
+
+    // TODO: colors
 
     root["cursor"]["shape"] = to_string(_config.cursorShape);
     root["cursor"]["blinking"] = _config.cursorBlinking;

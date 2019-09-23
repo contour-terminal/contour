@@ -15,8 +15,9 @@
 
 #include <fmt/format.h>
 
+#include <array>
 #include <cstdint>
-#include <cstdio>  // snprintf
+#include <initializer_list>
 #include <string>
 #include <variant>
 
@@ -61,7 +62,22 @@ struct RGBColor {
     uint8_t red;
     uint8_t green;
     uint8_t blue;
+
+    constexpr RGBColor() : red{0}, green{0}, blue{0} {}
+    constexpr RGBColor(uint8_t r, uint8_t g, uint8_t b) : red{r}, green{g}, blue{b} {}
+    constexpr RGBColor(uint32_t rgb) :
+        red{static_cast<uint8_t>((rgb >> 16) & 0xFF)},
+        green{static_cast<uint8_t>((rgb >> 8) & 0xFF)},
+        blue{static_cast<uint8_t>(rgb & 0xFF)}
+    {}
+
+    RGBColor& operator=(std::string const& _hexCode);
 };
+
+constexpr RGBColor operator "" _rgb(unsigned long long _value)
+{
+    return RGBColor{static_cast<uint32_t>(_value)};
+}
 
 constexpr bool operator==(RGBColor const& a, RGBColor const& b) noexcept
 {
@@ -75,7 +91,84 @@ constexpr bool operator!=(RGBColor const& a, RGBColor const& b) noexcept
 
 using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
 
-RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor);
+struct ColorProfile {
+    using Palette = std::array<RGBColor, 256>;
+
+    RGBColor const& normalColor(size_t _index) const noexcept {
+        assert(_index < 8);
+        return palette.at(_index);
+    }
+
+    RGBColor const& brightColor(size_t _index) const noexcept {
+        assert(_index < 8);
+        return palette.at(_index + 8);
+    }
+
+    RGBColor const& dimColor(size_t _index) const {
+        assert(_index < 8);
+        return palette.at(_index); // TODO
+    }
+
+    RGBColor const& indexedColor(size_t _index) const noexcept {
+        assert(_index < 256);
+        return palette.at(_index);
+    }
+
+    RGBColor defaultForeground = 0xD0D0D0;
+    RGBColor defaultBackground = 0x000000;
+
+    Palette palette = []() {
+        Palette colors;
+
+        // normal colors
+        colors[0] = 0x000000; // black
+        colors[1] = 0x800000; // red
+        colors[2] = 0x008000; // green
+        colors[3] = 0x808000; // yellow
+        colors[4] = 0x000080; // blue
+        colors[5] = 0x800080; // magenta
+        colors[6] = 0x008080; // cyan
+        colors[7] = 0xc0c0c0; // white
+
+        // bright colors
+        colors[8] = 0x808080;  // bright black (dark gray)
+        colors[9] = 0xff0000;  // bright red
+        colors[10] = 0x00ff00; // bright green
+        colors[11] = 0xffff00; // bright yellow
+        colors[12] = 0x0000ff; // bright blue
+        colors[13] = 0xff00ff; // bright magenta
+        colors[14] = 0x00ffff; // bright blue
+        colors[15] = 0xffffff; // bright white
+
+        // colors 16-231 are a 6x6x6 color cube
+        for (unsigned red = 0; red < 6; ++red)
+            for (unsigned green = 0; green < 6; ++green)
+                for (unsigned blue = 0; blue < 6; ++blue)
+                    colors[16 + (red * 36) + (green * 6) + blue] = RGBColor{
+                        static_cast<uint8_t>(red   ? (red   * 40 + 55) : 0),
+                        static_cast<uint8_t>(green ? (green * 40 + 55) : 0),
+                        static_cast<uint8_t>(blue  ? (blue  * 40 + 55) : 0)
+                    };
+
+        // colors 232-255 are a grayscale ramp, intentionally leaving out black and white
+        for (uint8_t gray = 0, level = gray * 10 + 8; gray < 24; ++gray, level = gray * 10 + 8)
+            colors[232 + gray] = RGBColor{level, level, level};
+
+        return colors;
+    }();
+};
+
+enum class ColorTarget {
+    Foreground,
+    Background,
+};
+
+enum class Opacity : uint8_t {
+    Transparent = 0x00,
+    Opaque = 0xFF
+};
+
+RGBColor const& apply(ColorProfile const& _colorProfile, Color const& _color, ColorTarget _target, bool _bright) noexcept;
 
 constexpr bool operator==(Color const& a, Color const& b) noexcept
 {

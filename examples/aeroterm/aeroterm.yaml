@@ -19,6 +19,9 @@ background:
     opacity: 0.8
     blur: false
 
+colors:
+    blue: "#2020C0"
+
 logging:
     file: "/tmp/aeroterm.log"
     parseErrors: true

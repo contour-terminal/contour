@@ -13,6 +13,7 @@
  */
 #include <terminal/Color.h>
 #include <terminal/Util.h>
+#include <cstdio>
 
 using namespace std;
 
@@ -68,6 +69,18 @@ string to_string(BrightColor color)
     return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
 }
 
+RGBColor& RGBColor::operator=(string const& _hexCode)
+{
+    if (_hexCode.size() == 7 && _hexCode[0] == '#')
+    {
+        char* eptr = nullptr;
+        uint32_t value = strtoul(_hexCode.c_str() + 1, &eptr, 16);
+        if (eptr && *eptr == '\0')
+            *this = RGBColor{value};
+    }
+    return *this;
+}
+
 string to_string(RGBColor const c)
 {
     char buf[16];
@@ -95,61 +108,27 @@ string to_string(Color const& c)
     return "?";
 }
 
-RGBColor toRGB(Color const& _color, RGBColor const& _defaultColor)
+RGBColor const& apply(ColorProfile const& _profile, Color const& _color, ColorTarget _target, bool _bright) noexcept
 {
     return visit(
         overloaded{
-            [=](UndefinedColor) {
-                return _defaultColor;
+            [&](UndefinedColor) -> RGBColor const& {
+                return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
             },
-            [=](DefaultColor) {
-                return _defaultColor;
+            [&](DefaultColor) -> RGBColor const& {
+                return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
             },
-            [=](IndexedColor color) {
-                switch (color) {
-                    case IndexedColor::Black:
-                        return RGBColor{ 0, 0, 0 };
-                    case IndexedColor::Red:
-                        return RGBColor{ 205, 0, 0 };
-                    case IndexedColor::Green:
-                        return RGBColor{ 0, 205, 0 };
-                    case IndexedColor::Yellow:
-                        return RGBColor{ 205, 205, 0 };
-                    case IndexedColor::Blue:
-                        return RGBColor{ 0, 0, 238 };
-                    case IndexedColor::Magenta:
-                        return RGBColor{ 205, 0, 205 };
-                    case IndexedColor::Cyan:
-                        return RGBColor{ 0, 205, 205 };
-                    case IndexedColor::White:
-                        return RGBColor{ 229, 229, 229 };
-                    case IndexedColor::Default:
-                        return _defaultColor;
-                }
-                return _defaultColor;
+            [&](IndexedColor color) -> RGBColor const& {
+                auto const index = static_cast<size_t>(color);
+                if (!_bright)
+                    return _profile.indexedColor(index);
+                else
+                    return _profile.brightColor(index);
             },
-            [=](BrightColor color) {
-                switch (color) {
-                    case BrightColor::Black:
-                        return RGBColor{ 0, 0, 0 };
-                    case BrightColor::Red:
-                        return RGBColor{ 255, 0, 0 };
-                    case BrightColor::Green:
-                        return RGBColor{ 0, 255, 0 };
-                    case BrightColor::Yellow:
-                        return RGBColor{ 255, 255, 0 };
-                    case BrightColor::Blue:
-                        return RGBColor{ 92, 92, 255 };
-                    case BrightColor::Magenta:
-                        return RGBColor{ 255, 0, 255 };
-                    case BrightColor::Cyan:
-                        return RGBColor{ 0, 255, 255 };
-                    case BrightColor::White:
-                        return RGBColor{ 255, 255, 255 };
-                }
-                return _defaultColor;
+            [&](BrightColor color) -> RGBColor const& {
+                return _profile.brightColor(static_cast<size_t>(color));
             },
-            [](RGBColor color) {
+            [](RGBColor const& color) -> RGBColor const& {
                 return color;
             },
         },
