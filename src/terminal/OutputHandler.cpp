@@ -164,7 +164,7 @@ void OutputHandler::executeControlFunction()
         case 0x08: // BS
             emit<Backspace>();
             break;
-        case 0x09: // VT
+        case 0x09: // TAB
             emit<MoveCursorToNextTab>();
             break;
         case 0x0A: // LF

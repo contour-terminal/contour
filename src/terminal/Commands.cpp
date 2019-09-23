@@ -74,8 +74,8 @@ string to_string(Mode m)
             return "Insert";
         case Mode::SendReceive:
             return "SendReceive";
-        case Mode::AutomaticLinefeed:
-            return "AutomaticLinefeed";
+        case Mode::AutomaticNewLine:
+            return "AutomaticNewLine";
         case Mode::UseApplicationCursorKeys:
             return "UseApplicationCursorKeys";
         case Mode::DesignateCharsetUSASCII:

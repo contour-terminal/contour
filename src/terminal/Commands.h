@@ -75,7 +75,7 @@ enum class Mode {
     KeyboardAction,
     Insert,
     SendReceive,
-    AutomaticLinefeed,
+    AutomaticNewLine,
     // }}}
 
     // {{{ DEC modes
@@ -135,7 +135,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::KeyboardAction: return "2";
         case Mode::Insert: return "4";
         case Mode::SendReceive: return "12";
-        case Mode::AutomaticLinefeed: return "20";
+        case Mode::AutomaticNewLine: return "20";
 
         // DEC set-mode
         case Mode::UseApplicationCursorKeys: return "?1";

@@ -159,26 +159,25 @@ Screen::Cell const& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col) con
     return const_cast<Buffer*>(this)->at(_row, _col);
 }
 
-void Screen::Buffer::linefeed()
+void Screen::Buffer::linefeed(cursor_pos_t _newColumn)
 {
     wrapPending = false;
 
     if (realCursorPosition().row == margin_.vertical.to)
     {
         scrollUp(1);
-        moveCursorTo({cursorPosition().row, 1});
+        moveCursorTo({cursorPosition().row, _newColumn});
     }
     else
     {
         // using moveCursorTo() would embrace code reusage, but due to the fact that it's fully recalculating iterators,
         // it may be faster to just incrementally update them.
-        // moveCursorTo({cursorPosition().row + 1, 1});
+        // moveCursorTo({cursorPosition().row + 1, margin_.horizontal.from});
         cursor.row++;
-        cursor.column = 1;
+        cursor.column = _newColumn;
         currentLine++;
-        currentColumn = begin(*currentLine);
+        currentColumn = next(begin(*currentLine), _newColumn - 1);
     }
-
     verifyState();
 }
 
@@ -189,7 +188,7 @@ void Screen::Buffer::appendChar(char32_t ch)
     if (wrapPending && autoWrap)
     {
         assert(cursor.column == size_.columns);
-        linefeed();
+        linefeed(margin_.horizontal.from);
     }
 
     *currentColumn = {ch, graphicsRendition};
@@ -561,6 +560,7 @@ std::string Screen::screenshot() const
             generator(SetBackgroundColor{ cell.attributes.backgroundColor });
             generator(AppendChar{ cell.character ? cell.character : L' ' });
         }
+        generator(MoveCursorToBeginOfLine{});
         generator(Linefeed{});
     }
 
@@ -583,7 +583,14 @@ void Screen::operator()(FullReset const& v)
 
 void Screen::operator()(Linefeed const& v)
 {
-    state_->linefeed();
+    // if (realCursorPosition().row == state_->margin_.vertical.to)
+    //     state_->scrollUp(1);
+    // else
+    //     moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
+    if (isModeEnabled(Mode::AutomaticNewLine))
+        state_->linefeed(state_->margin_.horizontal.from);
+    else
+        state_->linefeed(realCursorPosition().column);
 }
 
 void Screen::operator()(Backspace const& v)

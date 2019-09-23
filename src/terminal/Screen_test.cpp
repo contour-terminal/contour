@@ -32,7 +32,7 @@ void logScreenText(Screen const& screen, string const& headline = "")
 TEST_CASE("resize", "[screen]")
 {
     auto screen = Screen{{2, 2}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("AB\nCD");
+    screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
@@ -93,7 +93,7 @@ TEST_CASE("resize", "[screen]")
     SECTION("grow rows, grow columns") {
         screen.resize({3, 3});
         REQUIRE("AB \nCD \n   \n" == screen.renderText());
-        screen.write("1\n234");
+        screen.write("1\r\n234");
         REQUIRE("AB \nCD1\n234\n" == screen.renderText());
     }
 
@@ -174,8 +174,8 @@ TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
     REQUIRE("   " == screen.renderTextLine(2));
     REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
 
-    INFO("write LF");
-    screen.write("\n");
+    INFO("write CRLF");
+    screen.write("\r\n");
     logScreenText(screen, "after writing LF");
     REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
 
@@ -217,7 +217,7 @@ TEST_CASE("Linefeed", "[screen]")
         INFO(fmt::format("  line 1: '{}'", screen.renderTextLine(1)));
         INFO(fmt::format("  line 2: '{}'", screen.renderTextLine(2)));
 
-        screen.write("1\n2");
+        screen.write("1\r\n2");
 
         INFO("after writing '1\\n2':");
         INFO(fmt::format("  line 1: '{}'", screen.renderTextLine(1)));
@@ -226,7 +226,7 @@ TEST_CASE("Linefeed", "[screen]")
         REQUIRE("1 " == screen.renderTextLine(1));
         REQUIRE("2 " == screen.renderTextLine(2));
 
-        screen.write("\n3"); // line 3
+        screen.write("\r\n3"); // line 3
 
         INFO("After writing '\\n3':");
         INFO(fmt::format("  line 1: '{}'", screen.renderTextLine(1)));
@@ -241,7 +241,7 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
 {
     auto screen = Screen{{2, 2}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
 
-    screen.write("AB\nC");
+    screen.write("AB\r\nC");
     CHECK("AB" == screen.renderTextLine(1));
     CHECK("C " == screen.renderTextLine(2));
     screen(ClearToEndOfScreen{});
@@ -253,7 +253,7 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
 TEST_CASE("ClearToBeginOfScreen", "[screen]")
 {
     Screen screen{{2, 3}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("AB\nCD\nE");
+    screen.write("AB\r\nCD\r\nE");
 
     REQUIRE("AB" == screen.renderTextLine(1));
     REQUIRE("CD" == screen.renderTextLine(2));
@@ -272,7 +272,7 @@ TEST_CASE("ClearToBeginOfScreen", "[screen]")
 TEST_CASE("ClearScreen", "[screen]")
 {
     Screen screen{{2, 2}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("AB\nC");
+    screen.write("AB\r\nC");
     screen(ClearScreen{});
     CHECK("  " == screen.renderTextLine(1));
     CHECK("  " == screen.renderTextLine(2));
@@ -315,7 +315,7 @@ TEST_CASE("ClearLine", "[screen]")
 TEST_CASE("InsertCharacters", "[screen]")
 {
     Screen screen{{5, 2}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890");
+    screen.write("12345\r\n67890");
     screen(SetMode{ Mode::LeftRightMargin, true });
     screen(SetLeftRightMargin{2, 4});
     REQUIRE("12345\n67890\n" == screen.renderText());
@@ -361,13 +361,13 @@ TEST_CASE("InsertCharacters", "[screen]")
 TEST_CASE("InsertLines", "[screen]")
 {
     Screen screen{{4, 6}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP");
+    screen.write("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderText());
 
     SECTION("old") {
         Screen screen{{2, 3}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
 
-        screen.write("AB\nCD");
+        screen.write("AB\r\nCD");
         REQUIRE("AB" == screen.renderTextLine(1));
         REQUIRE("CD" == screen.renderTextLine(2));
         REQUIRE("  " == screen.renderTextLine(3));
@@ -390,7 +390,7 @@ TEST_CASE("DeleteLines", "[screen]")
 {
     Screen screen{{2, 3}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
 
-    screen.write("AB\nCD\nEF");
+    screen.write("AB\r\nCD\r\nEF");
     logScreenText(screen, "initial");
     REQUIRE("AB" == screen.renderTextLine(1));
     REQUIRE("CD" == screen.renderTextLine(2));
@@ -427,7 +427,7 @@ TEST_CASE("DeleteLines", "[screen]")
 TEST_CASE("DeleteCharacters", "[screen]")
 {
     Screen screen{{5, 2}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\033[1;2H");
+    screen.write("12345\r\n67890\033[1;2H");
     REQUIRE("12345\n67890\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
 
@@ -490,7 +490,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
 TEST_CASE("ClearScrollbackBuffer", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\033[H");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\r\nPQRST\033[H");
     REQUIRE("67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
     REQUIRE(1 == screen.scrollbackLines().size());
@@ -500,7 +500,7 @@ TEST_CASE("ClearScrollbackBuffer", "[screen]")
 TEST_CASE("EraseCharacters", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\033[H");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[H");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 
@@ -528,8 +528,8 @@ TEST_CASE("EraseCharacters", "[screen]")
 TEST_CASE("ScrollUp", "[screen]")
 {
     Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("ABC\n");
-    screen.write("DEF\n");
+    screen.write("ABC\r\n");
+    screen.write("DEF\r\n");
     screen.write("GHI");
     REQUIRE("ABC\nDEF\nGHI\n" == screen.renderText());
 
@@ -564,7 +564,7 @@ TEST_CASE("ScrollUp", "[screen]")
 TEST_CASE("ScrollDown", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
     SECTION("scroll fully inside margins") {
@@ -688,7 +688,7 @@ TEST_CASE("ScrollDown", "[screen]")
 TEST_CASE("MoveCursorUp", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO\033[3;2H");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[3;2H");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
 
@@ -840,7 +840,7 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 {
     Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
 
-    screen.write("\nAB");
+    screen.write("\r\nAB");
     REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
     screen(MoveCursorToBeginOfLine{});
@@ -850,7 +850,7 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
     SECTION("origin mode disabled") {
@@ -916,7 +916,7 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 TEST_CASE("Index_outside_margin", "[screen]")
 {
     Screen screen{{4, 6}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP");
+    screen.write("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     logScreenText(screen, "initial");
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderText());
     screen(SetTopBottomMargin{2, 4});
@@ -945,7 +945,7 @@ TEST_CASE("Index_outside_margin", "[screen]")
 TEST_CASE("Index_inside_margin", "[screen]")
 {
     Screen screen{{2, 6}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("11\n22\n33\n44\n55\n66");
+    screen.write("11\r\n22\r\n33\r\n44\r\n55\r\n66");
     logScreenText(screen, "initial setup");
 
     // test IND when cursor is within margin range (=> move cursor down)
@@ -960,7 +960,7 @@ TEST_CASE("Index_inside_margin", "[screen]")
 TEST_CASE("Index_at_bottom_margin", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial setup");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
@@ -991,7 +991,7 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
 TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
@@ -1023,7 +1023,7 @@ TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
@@ -1076,7 +1076,7 @@ TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {} };
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
@@ -1123,7 +1123,7 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 TEST_CASE("ScreenAlignmentPattern", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(SetTopBottomMargin{2, 4});
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
@@ -1148,7 +1148,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 TEST_CASE("CursorNextLine", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(MoveCursorTo{2, 3});
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
@@ -1193,7 +1193,7 @@ TEST_CASE("CursorNextLine", "[screen]")
 TEST_CASE("CursorPreviousLine", "[screen]")
 {
     Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{5, 5});
@@ -1245,7 +1245,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
         {}
     };
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(MoveCursorTo{2, 3});
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
@@ -1279,7 +1279,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
         {}
     };
-    screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(MoveCursorTo{2, 3});
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
@@ -1303,12 +1303,26 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     }
 }
 
+TEST_CASE("SetMode", "[screen]") {
+    SECTION("Auto NewLine Mode: Enabled") {
+        Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+        screen(SetMode{Mode::AutomaticNewLine, true});
+        screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
+        REQUIRE(screen.renderText() == "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n");
+    }
+
+    SECTION("Auto NewLine Mode: Disabled") {
+        Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+        screen.write("A\nB\nC");
+        REQUIRE(screen.renderText() == "A  \n B \n  C\n");
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
 // TODO: SetScrollingRegion
 
-// TODO: SetMode
 // TODO: SendMouseEvents
 // TODO: AlternateKeypadMode
 

@@ -372,7 +372,9 @@ class Screen {
         Line::iterator currentColumn{std::begin(*currentLine)};
 
         void appendChar(char32_t ch);
-        void linefeed();
+
+        // Applies LF but also moves cursor to given column @p _column.
+        void linefeed(cursor_pos_t _column);
 
         void resize(WindowSize const& _winSize);
         WindowSize const& size() const noexcept { return size_; }
