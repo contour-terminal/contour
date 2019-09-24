@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "AeroTerminal.h"
+#include "Contour.h"
 #include "Flags.h"
 #include "Config.h"
 
@@ -39,7 +39,7 @@ int main(int argc, char const* argv[])
         if (auto exitStatus = loadConfigFromCLI(config, argc, argv); exitStatus.has_value())
             return *exitStatus;
 
-        auto myterm = AeroTerminal{config};
+        auto myterm = Contour{config};
         return myterm.main();
     }
     catch (exception const& e)

@@ -5,5 +5,3 @@ add_executable(proxy_term proxy_term.cpp)
 target_link_libraries(proxy_term terminal Threads::Threads)
 
 add_executable(termbench termbench.cpp)
-
-add_subdirectory(aeroterm)

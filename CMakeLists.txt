@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.13)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Toolchain)
 
-project(libterminal VERSION "0.0.0" LANGUAGES CXX)
+project(contour VERSION "0.0.0" LANGUAGES CXX)
 
 set(MASTER_PROJECT OFF)
 if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
@@ -15,17 +15,18 @@ include(ClangTidy)
 find_package(Threads)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})
-option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(LIBTERMINAL_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(LIBTERMINAL_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(LIBTERMINAL_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(LIBTERMINAL_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(LIBTERMINAL_GLTERMINAL "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(LIBTERMINAL_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
+option(CONTOUR_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
+option(CONTOUR_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
+option(CONTOUR_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(CONTOUR_CLIENT "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(CONTOUR_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 
 # ----------------------------------------------------------------------------
 # code coverage
-if(LIBTERMINAL_COVERAGE AND NOT MSVC)
+
+if(CONTOUR_COVERAGE AND NOT MSVC)
     add_compile_options(-g --coverage)
     set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
     message("-- Code coverage: enabled")
@@ -34,22 +35,23 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
-# fmtlib
+# 3rdparty dependencies
 
-if(LIBTERMINAL_EMBEDDED_FMTLIB)
+if(CONTOUR_EMBEDDED_FMTLIB)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/fmt" EXCLUDE_FROM_ALL)
     add_definitions(-DFMT_USE_WINDOWS_H=0)
 else()
     # master project must provide its own fmtlib
 endif()
 
-if(LIBTERMINAL_TESTING AND LIBTERMINAL_EMBEDDED_CATCH2)
+set(LIBTERMINAL_TESTING ${CONTOUR_TESTING})
+if(CONTOUR_TESTING AND CONTOUR_EMBEDDED_CATCH2)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
 else()
     # master project must provide its own fmtlib
 endif()
 
-if(LIBTERMINAL_EMBEDDED_YAML_CPP)
+if(CONTOUR_EMBEDDED_YAML_CPP)
 	add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/yaml-cpp")
 else()
 	# master project must provide its own fmtlib
@@ -63,62 +65,9 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
-set(terminal_HEADERS
-    src/terminal/Color.h
-    src/terminal/Commands.h
-    src/terminal/InputGenerator.h
-    src/terminal/OutputGenerator.h
-    src/terminal/OutputHandler.h
-    src/terminal/Parser.h
-    src/terminal/Process.h
-    src/terminal/PseudoTerminal.h
-    src/terminal/Screen.h
-    src/terminal/Terminal.h
-    src/terminal/VTType.h
-    src/terminal/WindowSize.h
-)
-
-set(terminal_SOURCES
-    src/terminal/Color.cpp
-    src/terminal/Commands.cpp
-    src/terminal/InputGenerator.cpp
-    src/terminal/OutputGenerator.cpp
-    src/terminal/OutputHandler.cpp
-    src/terminal/Parser.cpp
-    src/terminal/Process.cpp
-    src/terminal/PseudoTerminal.cpp
-    src/terminal/Screen.cpp
-    src/terminal/Terminal.cpp
-    src/terminal/VTType.cpp
-)
-
-set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only Threads::Threads)
-if(UNIX)
-    list(APPEND LIBTERMINAL_LIBRARIES util)
-endif()
-
-add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
-target_include_directories(terminal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/src)
-target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
-
-# ----------------------------------------------------------------------------
-if(LIBTERMINAL_TESTING)
-    enable_testing()
-    add_executable(terminal_test
-        src/terminal/Parser_test.cpp
-        src/terminal/Screen_test.cpp
-        src/terminal/OutputHandler_test.cpp
-        #src/terminal/UTF8_test.cpp
-        src/terminal/terminal_test.cpp
-    )
-    target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
-    add_test(terminal_test ./terminal_test)
-endif(LIBTERMINAL_TESTING)
-
-if(LIBTERMINAL_GLTERMINAL)
-    add_subdirectory(src/glterminal)
-endif()
-
-if(LIBTERMINAL_EXAMPLES)
+add_subdirectory(src/terminal)
+add_subdirectory(src/glterminal)
+add_subdirectory(src/contour)
+if(CONTOUR_EXAMPLES)
     add_subdirectory(examples)
 endif()

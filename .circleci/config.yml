@@ -45,9 +45,9 @@ defaults:
         set -ex
         mkdir build
         cd build
-        CMAKE_OPTIONS=(-DCMAKE_CXX_COMPILER=$CXX -DLIBTERMINAL_COVERAGE=$COVERAGE)
+        CMAKE_OPTIONS=(-DCMAKE_CXX_COMPILER=$CXX -DCONTOUR_COVERAGE=$COVERAGE)
         test -n "${CMAKE_TOOLCHAIN_FILE}" && CMAKE_OPTIONS=(${CMAKE_OPTIONS[@]} -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
-        cmake .. -DCMAKE_BUILD_TYPE="Debug" "${CMAKE_OPTIONS[@]}"
+        cmake .. -DCMAKE_BUILD_TYPE="Release" "${CMAKE_OPTIONS[@]}"
         make -j3
 
   - test_x64_ubuntu1904: &test_x64_ubuntu1904

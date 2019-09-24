@@ -1,37 +1,97 @@
-# libterminal - A modern C++ terminal emulator library
-[![CircleCI](https://circleci.com/gh/christianparpart/libterminal.svg?style=svg)](https://circleci.com/gh/christianparpart/libterminal)
-[![codecov](https://codecov.io/gh/christianparpart/libterminal/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/libterminal)
+# Contour - A modern C++ Terminal Emulator
+[![CircleCI](https://circleci.com/gh/christianparpart/contour.svg?style=svg)](https://circleci.com/gh/christianparpart/contour)
+[![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
+
+![alt text](docs/contour-win32-acrylic-background.png "Screenshot")
 
 **IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
 
-## Milestone-1:
-- [x] Process: PTY-aware Process API
-- [x] Parser: parsing of VT100-VT520
-- [x] OutputHandler: basic VT output handling
-- [x] demo PTY client app that's just proxying all process data and performing a full screen redraw upon updates
-- [x] Process: Windows platform support
-- [x] Terminal: fully functioning Terminal API
-- [x] Screen buffer management done
-- [x] InputHandler: basic VT input handling
-- [x] example GUI terminal emulator: [Aero Terminal](https://github.com/christianparpart/libterminal/tree/master/examples/aeroterm)
-- [ ] ensure the following works almost perfect: bash, top, htop, mc, vim, tmux
-- [ ] => initial release 0.1.0
+## Purpose
 
-## Milestone-2:
-- [ ] Mouse support
-- [ ] OutputHandler: support most VT100-VT520 control functions & xterm extensions
-- [ ] Screen: support most VT100-VT520 control functions
-- [ ] Tests: almost complete unit tests
-- [ ] Unicode: multi codepoint grapheme support
-- [ ] Telemetry: control function usage counts, error counts, warning counts
-- [ ] examples/AeroTerm: Screen text selection and copy-to-clipboard support.
-- [ ] examples/AeroTerm: Paste support.
-- [ ] => release 0.2.0
+`contour` is a terminal emulator, for everyday use.
 
-### Users
+## Features
 
-* [contour](https://github.com/christianparpart/contour).
+* Available on all 3 major platforms, Windows, Linux, OS/X.
+* Font Ligatures Support (such as in Fira Code).
+* GPU-acelerated rendering.
+
+## CLI - Command Line Interface
+
+```txt
+Contour Terminal Emulator.
+
+Usage:
+  contour [OPTIONS ...]
+
+Options:
+  -h, --help                  Shows this help and quits.
+  -c, --config=PATH           Specifies path to config file to load from (and save to). [contour.yml]
+```
+
+## Example Configuration File
+
+```yaml
+shell: "ssh ubuntu-vm"
+
+terminalSize:
+    columns: 130
+    lines: 30
+
+fontSize: 12
+fontFamily: "Fira Code, Cascadia Code, Ubuntu Mono, Consolas, monospace"
+tabWidth: 8
+
+cursor:
+    shape: block
+    blinking: true
+
+background:
+    opacity: 0.9
+    blur: false
+
+logging:
+    file: "/path/to/contour.log"
+    parseErrors: true
+    invalidOutput: true
+    unsupportedOutput: true
+    rawInput: false
+    rawOutput: false
+    traceInput: false
+    traceOutput: false
+```
+
+## Keyboard Bindings
+
+| Shortcut                          | Action                 |
+|-----------------------------------|------------------------|
+| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>=</kbd>      | Increase font size     |
+| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>-</kbd>      | Decrease font size     |
+| <kbd>ALT</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
+
+## Installing from source
+
+### Prerequisites Linux
+
+This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compiler should do:
+
+```sh
+apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-dev libharfbuzz-dev
+```
+
+### Prerequisites Windows 10
+
+For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
+It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
+
+```psh
+vcpkg install freetype fontconfig glew glfw3 glm harfbuzz
+```
+
+### Prerequisites Mac OS/X
+
+Here be lions.
 
 # References
 

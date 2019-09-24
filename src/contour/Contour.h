@@ -26,14 +26,14 @@
 #include <fstream>
 #include <string>
 
-class AeroTerminal {
-public:
-    explicit AeroTerminal(Config const& _config);
-    ~AeroTerminal();
+class Contour {
+  public:
+    explicit Contour(Config const& _config);
+    ~Contour();
 
     int main();
 
-private:
+  private:
     void render();
     void onResize();
     void onKey(int _key, int _scanCode, int _action, int _mods);
@@ -44,7 +44,7 @@ private:
     void loadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
 
-private:
+  private:
     std::ofstream loggingSink_;
     Config config_;
     GLLogger logger_;

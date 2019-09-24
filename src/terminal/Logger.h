@@ -71,10 +71,10 @@ namespace fmt {
                     return format_to(ctx.out(), "Trace Input: {}", v.message);
                 },
                 [&](RawInputEvent const& v) {
-                    return format_to(ctx.out(), "Raw Input: {}", v.sequence);
+                    return format_to(ctx.out(), "Raw Input: \"{}\"", v.sequence);
                 },
                 [&](RawOutputEvent const& v) {
-                    return format_to(ctx.out(), "Raw Output: {}", v.sequence);
+                    return format_to(ctx.out(), "Raw Output: \"{}\"", v.sequence);
                 },
                 [&](InvalidOutputEvent const& v) {
                     return format_to(ctx.out(), "Invalid output sequence: {}. {}", v.sequence, v.reason);

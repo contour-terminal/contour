@@ -29,7 +29,7 @@ optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
     util::Flags flags;
     flags.defineBool("help", 'h', "Shows this help and quits.");
     flags.defineBool("version", 'v', "Shows this version and exits.");
-    flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", "aeroterm.yml");
+    flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", "contour.yml");
 
     flags.parse(_argc, _argv);
     if (flags.getBool("help"))
@@ -37,7 +37,7 @@ optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
         cout << "Aero Terminal Emulator.\n"
              << "\n"
              << "Usage:\n"
-             << "  aeroterm [OPTIONS ...]\n"
+             << "  contour [OPTIONS ...]\n"
              << "\n"
              << flags.helpText() << endl;
         return {EXIT_SUCCESS};

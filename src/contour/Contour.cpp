@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "AeroTerminal.h"
+#include "Contour.h"
 #include <terminal/Color.h>
 
 #include <iostream>
@@ -30,7 +30,7 @@
 using namespace std;
 using namespace std::placeholders;
 
-AeroTerminal::AeroTerminal(Config const& _config) :
+Contour::Contour(Config const& _config) :
     loggingSink_{_config.logFilePath.string(), ios::trunc},
     config_{_config},
     logger_{_config.loggingMask, &loggingSink_},
@@ -46,11 +46,11 @@ AeroTerminal::AeroTerminal(Config const& _config) :
             _config.terminalSize.columns * regularFont_.maxAdvance(),
             _config.terminalSize.rows * regularFont_.lineHeight()
         },
-        "aeroterm",
-        bind(&AeroTerminal::onKey, this, _1, _2, _3, _4),
-        bind(&AeroTerminal::onChar, this, _1),
-        bind(&AeroTerminal::onResize, this),
-        bind(&AeroTerminal::onContentScale, this, _1, _2)
+        "contour",
+        bind(&Contour::onKey, this, _1, _2, _3, _4),
+        bind(&Contour::onChar, this, _1),
+        bind(&Contour::onResize, this),
+        bind(&Contour::onContentScale, this, _1, _2)
     },
     terminalView_{
         config_.terminalSize,
@@ -63,12 +63,12 @@ AeroTerminal::AeroTerminal(Config const& _config) :
         config_.backgroundOpacity,
         config_.shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
-        bind(&AeroTerminal::onScreenUpdate, this),
+        bind(&Contour::onScreenUpdate, this),
         logger_
     },
     configFileChangeWatcher_{
         _config.backingFilePath,
-        bind(&AeroTerminal::onConfigReload, this, _1)
+        bind(&Contour::onConfigReload, this, _1)
     }
 {
     if (!loggingSink_.good())
@@ -86,11 +86,11 @@ AeroTerminal::AeroTerminal(Config const& _config) :
     glViewport(0, 0, window_.width(), window_.height());
 }
 
-AeroTerminal::~AeroTerminal()
+Contour::~Contour()
 {
 }
 
-int AeroTerminal::main()
+int Contour::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
@@ -120,7 +120,7 @@ inline glm::vec4 makeColor(terminal::RGBColor const& _color, terminal::Opacity _
         static_cast<float>(_opacity) / 255.0f};
 }
 
-void AeroTerminal::render()
+void Contour::render()
 {
     glm::vec4 const& bg = makeColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
     glClearColor(bg.r, bg.g, bg.b, bg.a);
@@ -131,13 +131,13 @@ void AeroTerminal::render()
     glfwSwapBuffers(window_);
 }
 
-void AeroTerminal::onContentScale(float _xs, float _ys)
+void Contour::onContentScale(float _xs, float _ys)
 {
     cout << fmt::format("Updated content scale to: {:.2f} by {:.2f}\n", _xs, _ys);
     // TODO: scale fontSize by factor _ys.
 }
 
-void AeroTerminal::onResize()
+void Contour::onResize()
 {
     terminalView_.resize(window_.width(), window_.height());
     terminalView_.setProjection(
@@ -242,7 +242,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
-void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
+void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
 {
     keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
@@ -300,7 +300,7 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
     }
 }
 
-bool AeroTerminal::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
+bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
 {
     if (!terminalView_.setFontSize(static_cast<unsigned>(_fontSize * Window::primaryMonitorContentScale().second)))
         return false;
@@ -325,7 +325,7 @@ bool AeroTerminal::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
     return true;
 }
 
-void AeroTerminal::onChar(char32_t _char)
+void Contour::onChar(char32_t _char)
 {
     if (!keyHandled_)
         terminalView_.send(_char, terminal::Modifier{});
@@ -333,18 +333,18 @@ void AeroTerminal::onChar(char32_t _char)
     keyHandled_ = false;
 }
 
-void AeroTerminal::onScreenUpdate()
+void Contour::onScreenUpdate()
 {
     glfwPostEmptyEvent();
 }
 
-void AeroTerminal::onConfigReload(FileChangeWatcher::Event _event)
+void Contour::onConfigReload(FileChangeWatcher::Event _event)
 {
     configReloadPending_.store(true);
     glfwPostEmptyEvent();
 }
 
-void AeroTerminal::loadConfigValues()
+void Contour::loadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
     auto newConfig = Config{};

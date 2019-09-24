@@ -23,7 +23,7 @@ add_library(glterminal
     Shader.cpp Shader.h
 )
 
-target_include_directories(glterminal PUBLIC "${CMAKE_SOURCE_DIR}/src")
+target_include_directories(glterminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
 set(GLTERMINAL_LIBRARIES GLEW::GLEW OpenGL::GL glm Freetype::Freetype terminal)
 if("${CMAKE_SYSTEM}" MATCHES "Linux")

@@ -7,8 +7,7 @@ terminalSize:
     lines: 30
 
 fontSize: 12
-#fontFamily: "Fira Code, Ubuntu Mono, Consolas, monospace"
-fontFamily: "C:\\Users\\chris\\AppData\\Local\\Microsoft\\Windows\\Fonts\\FiraCode-Retina.ttf"
+fontFamily: "Fira Code, Ubuntu Mono, Consolas, monospace"
 tabWidth: 8
 
 cursor:
@@ -23,7 +22,7 @@ colors:
     blue: "#2020C0"
 
 logging:
-    file: "/tmp/aeroterm.log"
+    file: "/tmp/contour.log"
     parseErrors: true
     invalidOutput: true
     unsupportedOutput: true
