@@ -301,7 +301,7 @@ inline bool InputGenerator::emit(char _asciiChar)
 template <typename T, size_t N>
 inline bool InputGenerator::emit(T(&_sequence)[N])
 {
-    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
+    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
     return true;
 }
 
