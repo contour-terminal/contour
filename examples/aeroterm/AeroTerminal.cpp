@@ -249,8 +249,6 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
     {
         terminal::Modifier const mods = makeModifier(_mods);
 
-        char const* keyName = glfwGetKeyName(_key, _scanCode);
-
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
