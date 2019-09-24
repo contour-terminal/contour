@@ -31,7 +31,7 @@ GLLogger::GLLogger(LogMask _logMask, std::ostream* _sink) :
 
 void GLLogger::keyPress(Key _key, Modifier _modifier)
 {
-    log(RawInputEvent{ fmt::format("key: {} {}", to_string(_key), to_string(_modifier)) });
+    log(TraceInputEvent{ fmt::format("key: {} {}", to_string(_key), to_string(_modifier)) });
 }
 
 void GLLogger::keyPress(char32_t _char, Modifier _modifier)
