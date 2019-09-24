@@ -120,10 +120,10 @@ RGBColor const& apply(ColorProfile const& _profile, Color const& _color, ColorTa
             },
             [&](IndexedColor color) -> RGBColor const& {
                 auto const index = static_cast<size_t>(color);
-                if (!_bright)
-                    return _profile.indexedColor(index);
-                else
+                if (_bright && index < 8)
                     return _profile.brightColor(index);
+                else
+                    return _profile.indexedColor(index);
             },
             [&](BrightColor color) -> RGBColor const& {
                 return _profile.brightColor(static_cast<size_t>(color));
