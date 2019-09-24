@@ -35,11 +35,10 @@ string to_string(CharacterStyleMask _mask)
     if (_mask & CharacterStyleMask::Bold)
         append("bold");
     if (_mask & CharacterStyleMask::Faint)
-        append("italic");
+        append("faint");
     if (_mask & CharacterStyleMask::Italic)
-        append("underline");
     if (_mask & CharacterStyleMask::Underline)
-        append("blinking");
+        append("underline");
     if (_mask & CharacterStyleMask::Blinking)
         append("blinking");
     if (_mask & CharacterStyleMask::Inverse)
