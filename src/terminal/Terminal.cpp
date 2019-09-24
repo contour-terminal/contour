@@ -134,4 +134,9 @@ void Terminal::wait()
     screenUpdateThread_.join();
 }
 
+void Terminal::setTabWidth(unsigned int _tabWidth)
+{
+    screen_.setTabWidth(_tabWidth);
+}
+
 }  // namespace terminal

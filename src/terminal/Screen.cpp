@@ -846,8 +846,7 @@ void Screen::operator()(MoveCursorToLine const& v)
 
 void Screen::operator()(MoveCursorToNextTab const& v)
 {
-    auto constexpr TabWidth = 8;
-    auto const n = 1 + TabWidth - state_->cursor.column % TabWidth;
+    auto const n = 1 + state_->tabWidth - state_->cursor.column % state_->tabWidth;
     (*this)(MoveCursorForward{n});
     // TODO: I guess something must remember when a \t was added, for proper move-back?
 }

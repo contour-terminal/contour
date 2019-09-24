@@ -68,6 +68,8 @@ class Terminal : public PseudoTerminal {
     /// Waits until process screen update thread has terminated.
     void wait();
 
+    void setTabWidth(unsigned int _tabWidth);
+
   private:
     void flushInput();
     void screenUpdateThread();

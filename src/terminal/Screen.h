@@ -365,6 +365,7 @@ class Screen {
         bool autoWrap{false};
         bool wrapPending{false};
         bool cursorRestrictedToMargin{false};
+        unsigned int tabWidth{8};
         GraphicsAttributes graphicsRendition{};
         std::stack<Save> saveStack{};
 
@@ -445,6 +446,13 @@ class Screen {
   public:
     Margin const& margin() const noexcept { return state_->margin_; }
     Buffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
+
+    void setTabWidth(unsigned int _value)
+    {
+        // TODO: Find out if we need to have that attribute per buffer or if having it across buffers is sufficient.
+        primaryBuffer_.tabWidth = _value;
+        alternateBuffer_.tabWidth = _value;
+    }
 
     /**
      * Returns the n'th saved line into the history scrollback buffer.

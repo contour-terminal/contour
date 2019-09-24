@@ -77,11 +77,13 @@ Contour::Contour(Config const& _config) :
     if (!regularFont_.isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
 
-    if (_config.backgroundBlur)
+    if (config_.backgroundBlur)
     {
         if (!window_.enableBackgroundBlur())
             throw runtime_error{ "Could not enable background blur." };
     }
+
+    terminalView_.setTabWidth(config_.tabWidth);
 
     glViewport(0, 0, window_.width(), window_.height());
 }
@@ -344,7 +346,7 @@ void Contour::onConfigReload(FileChangeWatcher::Event _event)
     glfwPostEmptyEvent();
 }
 
-bool  Contour::loadConfigValues()
+bool Contour::loadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
     auto newConfig = Config{};
@@ -360,6 +362,7 @@ bool  Contour::loadConfigValues()
     }
 
     logger_.setLogMask(newConfig.loggingMask);
+    terminalView_.setTabWidth(newConfig.tabWidth);
 
     bool windowResizeRequired = false;
     if (newConfig.fontSize != config_.fontSize)

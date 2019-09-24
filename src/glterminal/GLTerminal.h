@@ -90,6 +90,7 @@ class GLTerminal {
     void wait();
 
     terminal::ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
+    void setTabWidth(unsigned int _tabWidth);
 
   private:
     using cursor_pos_t = terminal::cursor_pos_t;

@@ -322,6 +322,11 @@ void GLTerminal::wait()
     alive_ = false;
 }
 
+void GLTerminal::setTabWidth(unsigned int _tabWidth)
+{
+    terminal_.setTabWidth(_tabWidth);
+}
+
 void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
     logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
