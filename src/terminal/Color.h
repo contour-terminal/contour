@@ -121,24 +121,24 @@ struct ColorProfile {
         Palette colors;
 
         // normal colors
-        colors[0] = 0x000000; // black
-        colors[1] = 0x800000; // red
-        colors[2] = 0x008000; // green
-        colors[3] = 0x808000; // yellow
-        colors[4] = 0x000080; // blue
-        colors[5] = 0x800080; // magenta
-        colors[6] = 0x008080; // cyan
-        colors[7] = 0xc0c0c0; // white
+        colors[0] = 0x000000_rgb; // black
+        colors[1] = 0x800000_rgb; // red
+        colors[2] = 0x008000_rgb; // green
+        colors[3] = 0x808000_rgb; // yellow
+        colors[4] = 0x000080_rgb; // blue
+        colors[5] = 0x800080_rgb; // magenta
+        colors[6] = 0x008080_rgb; // cyan
+        colors[7] = 0xc0c0c0_rgb; // white
 
         // bright colors
-        colors[8] = 0x808080;  // bright black (dark gray)
-        colors[9] = 0xff0000;  // bright red
-        colors[10] = 0x00ff00; // bright green
-        colors[11] = 0xffff00; // bright yellow
-        colors[12] = 0x0000ff; // bright blue
-        colors[13] = 0xff00ff; // bright magenta
-        colors[14] = 0x00ffff; // bright blue
-        colors[15] = 0xffffff; // bright white
+        colors[8] = 0x808080_rgb;  // bright black (dark gray)
+        colors[9] = 0xff0000_rgb;  // bright red
+        colors[10] = 0x00ff00_rgb; // bright green
+        colors[11] = 0xffff00_rgb; // bright yellow
+        colors[12] = 0x0000ff_rgb; // bright blue
+        colors[13] = 0xff00ff_rgb; // bright magenta
+        colors[14] = 0x00ffff_rgb; // bright blue
+        colors[15] = 0xffffff_rgb; // bright white
 
         // colors 16-231 are a 6x6x6 color cube
         for (unsigned red = 0; red < 6; ++red)
