@@ -295,10 +295,10 @@ std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(Screen::GraphicsAttribute
     float const backgroundOpacity = static_cast<float>(backgroundOpacity_) / 255.0f;
 
     return (_attributes.styles & CharacterStyleMask::Inverse)
-        ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, backgroundOpacity),
+        ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity),
                 applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity) }
         : pair{ applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity),
-                applyColor(_attributes.backgroundColor, ColorTarget::Background, backgroundOpacity) };
+                applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity) };
 }
 
 void GLTerminal::wait()
