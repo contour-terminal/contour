@@ -98,8 +98,8 @@ int Contour::main()
         bool shouldRender = terminalView_.shouldRender();
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
         {
-            loadConfigValues();
-            shouldRender = true;
+            if (loadConfigValues())
+                shouldRender = true;
         }
 
         if (shouldRender)
@@ -344,11 +344,20 @@ void Contour::onConfigReload(FileChangeWatcher::Event _event)
     glfwPostEmptyEvent();
 }
 
-void Contour::loadConfigValues()
+bool  Contour::loadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
     auto newConfig = Config{};
-    loadConfigFromFile(newConfig, filePath);
+    try
+    {
+        loadConfigFromFile(newConfig, filePath);
+    }
+    catch (exception const& e)
+    {
+        //logger_.log(ErrorEvent{e.what()});
+        cerr << "Failed to load configuration. " << e.what() << endl;
+        return false;
+    }
 
     logger_.setLogMask(newConfig.loggingMask);
 
@@ -369,4 +378,5 @@ void Contour::loadConfigValues()
     // TODO... (all the rest)
 
     config_ = move(newConfig);
+    return true;
 }

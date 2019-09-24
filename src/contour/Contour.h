@@ -41,7 +41,7 @@ class Contour {
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
     void onConfigReload(FileChangeWatcher::Event _event);
-    void loadConfigValues();
+    bool loadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
 
   private:
