@@ -112,8 +112,16 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
                 if (_node.IsMap())
                 {
                     auto const assignColor = [&](size_t _index, string const& _name) {
-                        if (auto value = _node[_name]; value)
-                            _config.colorProfile.palette[_offset + _index] = value.as<string>();
+                        if (auto nodeValue = _node[_name]; nodeValue)
+                        {
+                            if (auto const value = nodeValue.as<string>(); !value.empty())
+                            {
+                                if (value[0] == '#')
+                                    _config.colorProfile.palette[_offset + _index] = value;
+                                else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                                    _config.colorProfile.palette[_offset + _index] = nodeValue.as<unsigned long>();
+                            }
+                        }
                     };
                     assignColor(0, "black");
                     assignColor(1, "red");
@@ -127,7 +135,10 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
                 else if (_node.IsSequence())
                 {
                     for (size_t i = 0; i < _node.size() && i < 8; ++i)
-                        _config.colorProfile.palette[i] = _node[i].as<string>();
+                        if (_node.IsScalar())
+                            _config.colorProfile.palette[i] = _node[i].as<long>();
+                        else
+                            _config.colorProfile.palette[i] = _node[i].as<string>();
                 }
             }
         };
