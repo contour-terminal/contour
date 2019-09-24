@@ -289,7 +289,7 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
             terminalView_.send(*cstr, mods);
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_SPACE)
+        else if (_key == GLFW_KEY_SPACE && mods)
         {
             terminalView_.send(L' ', mods);
             keyHandled_ = true;
