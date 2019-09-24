@@ -23,12 +23,13 @@ namespace terminal {
 
 Terminal::Terminal(WindowSize _winSize, Logger _logger, Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
+    logger_{ _logger },
     inputGenerator_{},
     screen_{
         _winSize,
         bind(&Terminal::useApplicationCursorKeys, this, _1),
         bind(&Terminal::onScreenReply, this, _1),
-        move(_logger),
+        logger_,
         bind(&Terminal::onScreenCommands, this, _1)
     },
     onScreenCommands_{ move(_onScreenCommands) },
@@ -93,6 +94,7 @@ void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
     write(pendingInput_.data(), pendingInput_.size());
+    logger_(RawInputEvent{escape(begin(pendingInput_), end(pendingInput_))});
     pendingInput_.clear();
 }
 

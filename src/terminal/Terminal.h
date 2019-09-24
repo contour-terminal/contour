@@ -76,6 +76,7 @@ class Terminal : public PseudoTerminal {
     void onScreenCommands(std::vector<Command> const& commands);
 
   private:
+    Logger logger_;
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
     Screen screen_;

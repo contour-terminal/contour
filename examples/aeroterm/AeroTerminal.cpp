@@ -71,6 +71,9 @@ AeroTerminal::AeroTerminal(Config const& _config) :
         bind(&AeroTerminal::onConfigReload, this, _1)
     }
 {
+    if (!loggingSink_.good())
+        throw runtime_error{ "Failed to open log file." };
+
     if (!regularFont_.isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
 
@@ -247,14 +250,6 @@ void AeroTerminal::onKey(int _key, int _scanCode, int _action, int _mods)
         terminal::Modifier const mods = makeModifier(_mods);
 
         char const* keyName = glfwGetKeyName(_key, _scanCode);
-
-        logger_.keyTrace(fmt::format(
-            "key: {} {}, action:{}, mod:{:02X} ({})",
-            _key,
-            keyName ? keyName : "(null)",
-            _action,
-            static_cast<unsigned>(_mods),
-            terminal::to_string(mods)));
 
         // Screenshot: ALT+CTRL+S
         if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))

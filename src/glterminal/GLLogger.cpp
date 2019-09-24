@@ -37,14 +37,9 @@ void GLLogger::keyPress(Key _key, Modifier _modifier)
 void GLLogger::keyPress(char32_t _char, Modifier _modifier)
 {
     if (utf8::isASCII(_char) && isprint(_char))
-        log(RawInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_char), to_string(_modifier)) });
+        log(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_char), to_string(_modifier)) });
     else
-        log(RawInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_char), to_string(_modifier)) });
-}
-
-void GLLogger::keyTrace(string const& _message)
-{
-    log(TraceInputEvent{_message});
+        log(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_char), to_string(_modifier)) });
 }
 
 void GLLogger::log(LogEvent const& _event)

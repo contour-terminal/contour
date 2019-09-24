@@ -86,9 +86,6 @@ class GLLogger {
     void keyPress(terminal::Key _key, terminal::Modifier _modifier);
     void keyPress(char32_t _char, terminal::Modifier _modifier);
 
-    // trace endpoints
-    void keyTrace(std::string const& _message);
-
     void flush();
 
   private:
