@@ -94,8 +94,8 @@ colors: # Color scheme: Google Dark
 | <kbd>Alt</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
 | <kbd>Control</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases font size |
 | <kbd>Control</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases font size |
-| <kbd>Alt</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases transparency |
-| <kbd>Alt</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases transparency |
+| <kbd>Alt</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases background opacity |
+| <kbd>Alt</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases background opacity |
 
 ## Installing from source
 

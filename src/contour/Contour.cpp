@@ -265,9 +265,9 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
             break;
         case terminal::Modifier::Alt: // TODO: increase/decrease transparency
             if (vertical == VerticalDirection::Up)
-                --config_.backgroundOpacity;
-            else
                 ++config_.backgroundOpacity;
+            else
+                --config_.backgroundOpacity;
             terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
             screenDirty_ = true;
             glfwPostEmptyEvent();
