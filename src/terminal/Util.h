@@ -39,6 +39,8 @@ inline std::string escape(char32_t ch)
             return "\\r";
         case '\n':
             return "\\n";
+        case '"':
+            return "\\\"";
         default:
             if (ch <= 0xFF && std::isprint(ch))
                 return fmt::format("{}", static_cast<char>(ch));
