@@ -615,7 +615,8 @@ void Screen::operator()(ReportExtendedCursorPosition const& v)
 
 void Screen::operator()(SendDeviceAttributes const& v)
 {
-    reply("\033[{}c",
+    // See https://vt100.net/docs/vt510-rm/DA1.html
+    reply("\033[?64;{}c",
           to_params(DeviceAttributes::Columns132 | DeviceAttributes::SelectiveErase
                   | DeviceAttributes::UserDefinedKeys | DeviceAttributes::NationalReplacementCharacterSets
                   | DeviceAttributes::TechnicalCharacters | DeviceAttributes::AnsiColor
