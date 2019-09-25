@@ -24,7 +24,7 @@
 
 struct Config {
     std::filesystem::path backingFilePath;
-    std::filesystem::path logFilePath;
+    std::optional<std::filesystem::path> logFilePath;
 
     std::string shell = terminal::Process::loginShell();
     terminal::WindowSize terminalSize = {80, 25};

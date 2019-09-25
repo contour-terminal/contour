@@ -31,9 +31,12 @@ using namespace std;
 using namespace std::placeholders;
 
 Contour::Contour(Config const& _config) :
-    loggingSink_{_config.logFilePath.string(), ios::trunc},
     config_{_config},
-    logger_{_config.loggingMask, &loggingSink_},
+    logger_{
+        _config.logFilePath
+            ? GLLogger{_config.loggingMask, _config.logFilePath->string()}
+            : GLLogger{_config.loggingMask, &cout}
+    },
     fontManager_{},
     regularFont_{
         fontManager_.load(
@@ -361,7 +364,11 @@ bool Contour::loadConfigValues()
         return false;
     }
 
-    logger_.setLogMask(newConfig.loggingMask);
+    logger_ =
+        newConfig.logFilePath
+            ? GLLogger{newConfig.loggingMask, newConfig.logFilePath->string()}
+            : GLLogger{newConfig.loggingMask, &cout};
+
     terminalView_.setTabWidth(newConfig.tabWidth);
 
     bool windowResizeRequired = false;

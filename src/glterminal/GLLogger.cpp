@@ -19,12 +19,21 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <fstream>
 
 using namespace std;
 using namespace terminal;
 
+GLLogger::GLLogger(LogMask _logMask, std::filesystem::path _logfile) :
+    logMask_{ _logMask },
+    ownedSink_{ make_unique<ofstream>(_logfile.string(), ios::trunc) },
+    sink_{ ownedSink_.get() }
+{
+}
+
 GLLogger::GLLogger(LogMask _logMask, std::ostream* _sink) :
     logMask_{ _logMask },
+    ownedSink_{},
     sink_{ _sink }
 {
 }
