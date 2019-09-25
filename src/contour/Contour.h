@@ -17,6 +17,8 @@
 #include "Window.h"
 #include "FileChangeWatcher.h"
 
+#include <terminal/InputGenerator.h>
+
 #include <glterminal/FontManager.h>
 #include <glterminal/GLLogger.h>
 #include <glterminal/GLTerminal.h>
@@ -38,6 +40,7 @@ class Contour {
     void onResize();
     void onKey(int _key, int _scanCode, int _action, int _mods);
     void onChar(char32_t _char);
+    void onMouseScroll(double _xOffset, double _yOffset);
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
     void onConfigReload(FileChangeWatcher::Event _event);
@@ -55,4 +58,6 @@ class Contour {
     bool keyHandled_ = false;
     std::atomic<bool> configReloadPending_ = false;
     FileChangeWatcher configFileChangeWatcher_;
+    terminal::Modifier modifier_{};
+    bool screenDirty_ = true;
 };

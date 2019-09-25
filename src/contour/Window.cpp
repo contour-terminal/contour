@@ -37,10 +37,14 @@ void Window::init()
 }
 
 Window::Window(Size const& _size, string const& _title,
-               OnKey _onKey, OnChar _onChar, OnResize _onResize, OnContentScale _onContentScale) :
+               OnKey _onKey, OnChar _onChar,
+               OnMouseButton _onMouseButton, OnMouseScroll _onMouseScroll,
+               OnResize _onResize, OnContentScale _onContentScale) :
     size_{ _size },
     onKey_{ move(_onKey) },
     onChar_{ move(_onChar) },
+    onMouseButton_{ move(_onMouseButton) },
+    onMouseScroll_{ move(_onMouseScroll) },
     onResize_{ move(_onResize) },
     onContentScale_{ move(_onContentScale) }
 {
@@ -78,6 +82,8 @@ Window::Window(Size const& _size, string const& _title,
     glfwSetKeyCallback(window_, &Window::onKey);
     glfwSetCharCallback(window_, &Window::onChar);
     glfwSetFramebufferSizeCallback(window_, &Window::onResize);
+    glfwSetMouseButtonCallback(window_, &Window::onMouseButton);
+    glfwSetScrollCallback(window_, &Window::onMouseScroll);
 
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
@@ -155,6 +161,19 @@ void Window::onResize(GLFWwindow* _window, int _width, int _height)
                 self->onResize_();
         }
     }
+}
+
+void Window::onMouseButton(GLFWwindow* _window, int _button, int _action, int _mods)
+{
+    //TODO: printf("mouse: button: %d, action:%d, mods:%d\n", _button, _action, _mods);
+    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseButton_)
+        self->onMouseButton_(_button, _action, _mods);
+}
+
+void Window::onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset)
+{
+    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseScroll_)
+        self->onMouseScroll_(_xOffset, _yOffset);
 }
 
 void Window::onContentScale(GLFWwindow* _window, float _xs, float _ys)

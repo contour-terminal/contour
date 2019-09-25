@@ -28,13 +28,17 @@ class Window {
     };
     using OnKey = std::function<void(int, int, int, int)>;
     using OnChar = std::function<void(char32_t)>;
+    using OnMouseButton = std::function<void(int, int, int)>;
+    using OnMouseScroll = std::function<void(double, double)>;
     using OnResize = std::function<void()>;
     using OnContentScale = std::function<void(float, float)>;
 
     static void init();
 
     Window(Size const& _size, std::string const& _title,
-           OnKey _onKey, OnChar _onChar, OnResize _onResize, OnContentScale _onContentScale);
+           OnKey _onKey, OnChar _onChar,
+           OnMouseButton _onMouseButton, OnMouseScroll _onMouseScroll,
+           OnResize _onResize, OnContentScale _onContentScale);
     ~Window();
 
     bool enableBackgroundBlur();
@@ -58,6 +62,8 @@ class Window {
     static void onKey(GLFWwindow* _window, int _key, int _scanCode, int _action, int _mods);
     static void onChar(GLFWwindow* _window, unsigned int _char);
     static void onResize(GLFWwindow* _window, int _width, int _height);
+    static void onMouseButton(GLFWwindow* _window, int _button, int _action, int _mods);
+    static void onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset);
 
   private:
     GLFWwindow* window_;
@@ -67,6 +73,8 @@ class Window {
     glm::ivec2 oldPosition_{1, 1};
     OnKey onKey_;
     OnChar onChar_;
+    OnMouseButton onMouseButton_;
+    OnMouseScroll onMouseScroll_;
     OnResize onResize_;
     OnContentScale onContentScale_;
 };

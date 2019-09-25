@@ -91,6 +91,7 @@ class GLTerminal {
 
     terminal::ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
     void setTabWidth(unsigned int _tabWidth);
+    void setBackgroundOpacity(terminal::Opacity _opacity);
 
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
