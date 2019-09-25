@@ -52,6 +52,8 @@ Contour::Contour(Config const& _config) :
         "contour",
         bind(&Contour::onKey, this, _1, _2, _3, _4),
         bind(&Contour::onChar, this, _1),
+        {}, // TODO: onMouseButton
+        bind(&Contour::onMouseScroll, this, _1, _2),
         bind(&Contour::onResize, this),
         bind(&Contour::onContentScale, this, _1, _2)
     },
@@ -100,16 +102,17 @@ int Contour::main()
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
         bool reloadPending = configReloadPending_.load();
-        bool shouldRender = terminalView_.shouldRender();
+        if (terminalView_.shouldRender())
+            screenDirty_ = true;
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
         {
             if (loadConfigValues())
-                shouldRender = true;
+                screenDirty_ = true;
         }
 
-        if (shouldRender)
+        if (screenDirty_)
             render();
-
+        screenDirty_ = false;
         glfwWaitEventsTimeout(0.5);
     }
 
@@ -247,60 +250,91 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
+void Contour::onMouseScroll(double _xOffset, double _yOffset)
+{
+    enum class VerticalDirection { Up, Down };
+    VerticalDirection const vertical = _yOffset > 0.0 ? VerticalDirection::Up: VerticalDirection::Down;
+
+    switch (modifier_)
+    {
+        case terminal::Modifier::Control: // increase/decrease font size
+            if (vertical == VerticalDirection::Up)
+                setFontSize(config_.fontSize + 1, true);
+            else
+                setFontSize(config_.fontSize - 1, true);
+            break;
+        case terminal::Modifier::Alt: // TODO: increase/decrease transparency
+            if (vertical == VerticalDirection::Up)
+                --config_.backgroundOpacity;
+            else
+                ++config_.backgroundOpacity;
+            terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
+            screenDirty_ = true;
+            glfwPostEmptyEvent();
+            break;
+        case terminal::Modifier::None: // TODO: scroll in history
+            break;
+        default:
+            break;
+    }
+}
+
 void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
 {
+    // TODO: investigate how to handle when one of these state vars are true, and the window loses focus.
+    // They should be recaptured after focus gain again.
+    modifier_ = makeModifier(_mods);
+
     keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
-        terminal::Modifier const mods = makeModifier(_mods);
-
         // Screenshot: ALT+CTRL+S
-        if (_key == GLFW_KEY_S && mods == (terminal::Modifier::Control + terminal::Modifier::Alt))
+        if (_key == GLFW_KEY_S && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Alt))
         {
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_EQUAL && mods == (terminal::Modifier::Control + terminal::Modifier::Shift))
+        else if (_key == GLFW_KEY_EQUAL && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Shift))
         {
             setFontSize(config_.fontSize + 1, true);
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_MINUS && mods == (terminal::Modifier::Control + terminal::Modifier::Shift) && config_.fontSize > 5)
+        else if (_key == GLFW_KEY_MINUS && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Shift) && config_.fontSize > 5)
         {
             setFontSize(config_.fontSize - 1, true);
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_ENTER && mods == terminal::Modifier::Alt)
+        else if (_key == GLFW_KEY_ENTER && modifier_ == terminal::Modifier::Alt)
         {
             window_.toggleFullScreen();
             keyHandled_ = true;
         }
         else if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
         {
-            terminalView_.send(key.value(), mods);
+            terminalView_.send(key.value(), modifier_);
             keyHandled_ = true;
         }
         else if (const char* cstr = glfwGetKeyName(_key, _scanCode);
                cstr != nullptr
-            && mods.some() && mods != terminal::Modifier::Shift
+            && modifier_.some() && modifier_ != terminal::Modifier::Shift
             && strlen(cstr) == 1
             && isalnum(*cstr))
         {
             // allow only mods + alphanumerics
-            terminalView_.send(*cstr, mods);
+            terminalView_.send(*cstr, modifier_);
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_SPACE && mods)
+        else if (_key == GLFW_KEY_SPACE && modifier_)
         {
-            terminalView_.send(L' ', mods);
+            terminalView_.send(L' ', modifier_);
             keyHandled_ = true;
         }
-        // else if (mods && mods != terminal::Modifier::Shift)
+        // else if (modifier_ && modifier_ != terminal::Modifier::Shift)
         //    cout << fmt::format(
         //        "key:{}, scanCode:{}, name:{} ({})",
-        //        _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(mods)
+        //        _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
         //    ) << endl;
     }
 }
@@ -311,6 +345,9 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
         return false;
 
     if (_fontSize < 5) // Let's not be crazy.
+        return false;
+
+    if (_fontSize > 100)
         return false;
 
     config_.fontSize = _fontSize;

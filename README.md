@@ -60,15 +60,42 @@ logging:
     rawOutput: false
     traceInput: false
     traceOutput: false
+
+colors: # Color scheme: Google Dark
+    default:
+        background: '#1d1f21'
+        foreground: '#c5c8c6'
+    normal:
+        black:   '#1d1f21'
+        red:     '#cc342b'
+        green:   '#198844'
+        yellow:  '#fba922'
+        blue:    '#3971ed'
+        magenta: '#a36ac7'
+        cyan:    '#3971ed'
+        white:   '#c5c8c6'
+    bright:
+        black:   '#969896'
+        red:     '#cc342b'
+        green:   '#198844'
+        yellow:  '#fba922'
+        blue:    '#3971ed'
+        magenta: '#a36ac7'
+        cyan:    '#3971ed'
+        white:   '#ffffff'
 ```
 
 ## Keyboard Bindings
 
 | Shortcut                          | Action                 |
 |-----------------------------------|------------------------|
-| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>=</kbd>      | Increase font size     |
-| <kbd>CTRL</kbd>+<kbd>SHIFT</kbd>+<kbd>-</kbd>      | Decrease font size     |
-| <kbd>ALT</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
+| <kbd>Control</kbd>+<kbd>Shift</kbd>+<kbd>=</kbd>      | Increase font size     |
+| <kbd>Control</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd>      | Decrease font size     |
+| <kbd>Alt</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
+| <kbd>Control</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases font size |
+| <kbd>Control</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases font size |
+| <kbd>Alt</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases transparency |
+| <kbd>Alt</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases transparency |
 
 ## Installing from source
 

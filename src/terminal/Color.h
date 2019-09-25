@@ -20,6 +20,7 @@
 #include <initializer_list>
 #include <string>
 #include <variant>
+#include <utility>
 
 namespace terminal {
 
@@ -167,6 +168,16 @@ enum class Opacity : uint8_t {
     Transparent = 0x00,
     Opaque = 0xFF
 };
+
+constexpr Opacity& operator++(Opacity& _value) noexcept {
+    _value = static_cast<Opacity>(std::min(static_cast<int>(_value) + 16, 0xFF));
+    return _value;
+}
+
+constexpr Opacity& operator--(Opacity& _value) noexcept {
+    _value = static_cast<Opacity>(std::max(static_cast<int>(_value) - 16, 0));
+    return _value;
+}
 
 RGBColor const& apply(ColorProfile const& _colorProfile, Color const& _color, ColorTarget _target, bool _bright) noexcept;
 
