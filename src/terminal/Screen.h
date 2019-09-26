@@ -249,12 +249,13 @@ class Screen {
     void operator()(AlternateKeypadMode const& v);
     void operator()(DesignateCharset const& v);
     void operator()(SingleShiftSelect const& v);
+    void operator()(SoftTerminalReset const& v);
     void operator()(ChangeWindowTitle const& v);
     void operator()(ChangeIconName const& v);
     void operator()(AppendChar const& v);
 
     // reset screen
-    void reset();
+    void resetSoft();
     void resetHard();
 
     WindowSize const& size() const noexcept { return size_; }

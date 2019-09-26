@@ -251,6 +251,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](AppendChar const& v) { write(v.ch); },
         [&](ChangeIconName const& v) { write("\033]1;{}\x9c", v.name); },
         [&](ChangeWindowTitle const& v) { write("\033]2;{}\x9c", v.title); },
+        [&](SoftTerminalReset) { write("\033[!p"); },
     }, command);
 }
 

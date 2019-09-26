@@ -1101,6 +1101,11 @@ void Screen::operator()(SingleShiftSelect const& v)
     // TODO
 }
 
+void Screen::operator()(SoftTerminalReset const&)
+{
+    resetSoft();
+}
+
 void Screen::operator()(ChangeWindowTitle const& v)
 {
     // TODO
@@ -1118,17 +1123,39 @@ void Screen::operator()(AppendChar const& v)
 // }}}
 
 // {{{ others
-void Screen::reset()
+void Screen::resetSoft()
 {
-    primaryBuffer_ = Buffer{size_};
-    alternateBuffer_ = Buffer{size_};
-    state_ = &primaryBuffer_;
+    setMode(Mode::CursorRestrictedToMargin, false); // DECOM
+    setMode(Mode::AutoWrap, false); // DECAWM
+    setMode(Mode::Insert, false); // IRM
+    (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
+    (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
+    state_->graphicsRendition = {}; // SGR
+
+    // TODO:
+    // * DECTCEM
+    // * DECNRCM
+    // * KAM
+    // * DECNKM
+    // * DECCKM
+    // * G0, G1, G2, G3, GL, GR
+    // * DECSCA
+    // * DECSC
+    // * DECAUPSS
+    // * DECSASD
+    // * DECKPM
+    // * DECPCTERM
+
     // TODO: is this right? reverting to primary screen buffer?
 }
 
 void Screen::resetHard()
 {
-    reset(); // really?
+    // TODO
+    primaryBuffer_ = Buffer{size_};
+    alternateBuffer_ = Buffer{size_};
+    state_ = &primaryBuffer_;
+    resetSoft();
 }
 
 Screen::Cell const& Screen::at(cursor_pos_t rowNr, cursor_pos_t colNr) const noexcept

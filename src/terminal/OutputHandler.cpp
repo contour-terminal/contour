@@ -79,6 +79,8 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 dispatchCSI();
             else if (intermediateCharacters_ == "?")
                 dispatchCSI_ext();
+            else if (intermediateCharacters_ == "!")
+                dispatchCSI_excl();
             else if (intermediateCharacters_ == ">")
                 dispatchCSI_gt();
             else if (intermediateCharacters_ == "'")
@@ -271,6 +273,21 @@ void OutputHandler::dispatchCSI_singleQuote()
         default:
             logUnsupportedCSI();
             break;
+    }
+}
+
+void OutputHandler::dispatchCSI_excl()
+{
+    switch (currentChar())
+    {
+        case 'p':
+            if (parameterCount() == 0)
+                emit<SoftTerminalReset>();
+            else
+                logInvalidCSI();
+            break;
+        default:
+            logUnsupportedCSI();
     }
 }
 

@@ -188,6 +188,11 @@ struct Linefeed {};
 struct Backspace {};
 struct FullReset {};
 
+/// DECSTR - Soft Terminal Reset
+///
+/// See: https://vt100.net/docs/vt510-rm/DECSTR.html
+struct SoftTerminalReset {};
+
 /// CNL - Cursor Next Line.
 ///
 /// Move the cursor to the next line.
@@ -620,6 +625,7 @@ using Command = std::variant<
     SetLeftRightMargin,
     SetMode,
     SetTopBottomMargin,
+    SoftTerminalReset,
     SingleShiftSelect
 >;
 
