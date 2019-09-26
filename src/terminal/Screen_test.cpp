@@ -473,6 +473,45 @@ TEST_CASE("DeleteLines", "[screen]")
     }
 }
 
+TEST_CASE("DeleteColumns", "[screen]")
+{
+    Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    screen(SetMode{ Mode::LeftRightMargin, true });
+    screen(SetLeftRightMargin{2, 4});
+    screen(SetTopBottomMargin{2, 4});
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    SECTION("outside margin") {
+        screen(DeleteColumns{ 1 });
+        REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("inside margin") {
+        screen(MoveCursorTo{ 2, 3 });
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+
+        SECTION("DECDC-0") {
+            screen(DeleteColumns{ 0 });
+            REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+        }
+        SECTION("DECDC-1") {
+            screen(DeleteColumns{ 1 });
+            REQUIRE("12345\n679 0\nABD E\nFGI J\nKLMNO\n" == screen.renderText());
+        }
+        SECTION("DECDC-2") {
+            screen(DeleteColumns{ 2 });
+            REQUIRE("12345\n67  0\nAB  E\nFG  J\nKLMNO\n" == screen.renderText());
+        }
+        SECTION("DECDC-3-clamped") {
+            screen(DeleteColumns{ 4 });
+            REQUIRE("12345\n67  0\nAB  E\nFG  J\nKLMNO\n" == screen.renderText());
+        }
+    }
+}
+
 TEST_CASE("DeleteCharacters", "[screen]")
 {
     Screen screen{{5, 2}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};

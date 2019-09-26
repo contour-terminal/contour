@@ -309,6 +309,18 @@ struct InsertColumns {
     cursor_pos_t n;
 };
 
+/// DECDC - Delete Column
+///
+/// This control function deletes one or more columns in the scrolling region,
+/// starting with the column that has the cursor.
+///
+/// As columns are deleted, the remaining columns between the cursor and the right margin move to the left.
+/// The terminal adds blank columns with no visual character attributes at the right margin.
+/// DECDC has no effect outside the scrolling margins.
+struct DeleteColumns {
+    cursor_pos_t n;
+};
+
 /// IL - Insert Line
 ///
 /// This control function inserts one or more blank lines, starting at the cursor.
@@ -570,6 +582,7 @@ using Command = std::variant<
     CursorNextLine,
     CursorPreviousLine,
     DeleteCharacters,
+    DeleteColumns,
     DeleteLines,
     DesignateCharset,
     DeviceStatusReport,

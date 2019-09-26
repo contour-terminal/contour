@@ -397,6 +397,26 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     updateCursorIterators();
 }
 
+void Screen::Buffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
+{
+    auto line = next(begin(lines), _lineNo - 1);
+    auto column = next(begin(*line), realCursorPosition().column - 1);
+    auto rightMargin = next(begin(*line), margin_.horizontal.to);
+    auto const n = min(_n, static_cast<cursor_pos_t>(distance(column, rightMargin)));
+    rotate(
+        column,
+        next(column, n),
+        rightMargin
+    );
+    updateCursorIterators();
+    rightMargin = next(begin(*line), margin_.horizontal.to);
+    fill(
+        prev(rightMargin, n),
+        rightMargin,
+        Cell{L' ', {}}
+    );
+}
+
 /// Inserts @p _n characters at given line @p _lineNo.
 void Screen::Buffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 {
@@ -771,22 +791,14 @@ void Screen::operator()(DeleteLines const& v)
 void Screen::operator()(DeleteCharacters const& v)
 {
     if (isCursorInsideMargins() && v.n != 0)
-    {
-        auto rightMargin = next(begin(*state_->currentLine), state_->margin_.horizontal.to);
-        auto const n = min(v.n, static_cast<cursor_pos_t>(distance(state_->currentColumn, rightMargin)));
-        rotate(
-            state_->currentColumn,
-            next(state_->currentColumn, n),
-            rightMargin
-        );
-        state_->updateCursorIterators();
-        rightMargin = next(begin(*state_->currentLine), state_->margin_.horizontal.to);
-        fill(
-            prev(rightMargin, n),
-            rightMargin,
-            Cell{}
-        );
-    }
+        state_->deleteChars(realCursorPosition().row, v.n);
+}
+
+void Screen::operator()(DeleteColumns const& v)
+{
+    if (isCursorInsideMargins())
+        for (cursor_pos_t lineNo = state_->margin_.vertical.from; lineNo <= state_->margin_.vertical.to; ++lineNo)
+            state_->deleteChars(lineNo, v.n);
 }
 
 void Screen::operator()(MoveCursorUp const& v)

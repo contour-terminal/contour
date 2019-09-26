@@ -250,6 +250,15 @@ void OutputHandler::dispatchCSI_singleQuote()
 {
     switch (currentChar())
     {
+        case '~':
+            if (parameterCount() <= 1)
+            {
+                setDefaultParameter(1);
+                emit<DeleteColumns>(param(0));
+            }
+            else
+                logInvalidCSI();
+            break;
         case '}':
             if (parameterCount() <= 1)
             {
