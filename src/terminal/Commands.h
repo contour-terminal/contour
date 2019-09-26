@@ -296,6 +296,18 @@ struct InsertCharacters {
     cursor_pos_t n;
 };
 
+/// DECIC - Insert Column
+///
+/// This control function inserts one or more columns into the scrolling region,
+/// starting with the column that has the cursor.
+///
+/// As columns are inserted, the columns between the cursor and the right margin move to the right.
+/// DECIC inserts blank columns with no visual character attributes.
+/// DECIC has no effect outside the scrolling margins.
+struct InsertColumns {
+    /// This is the number of columns to insert. Default: Pn = 1.
+    cursor_pos_t n;
+};
 
 /// IL - Insert Line
 ///
@@ -566,6 +578,7 @@ using Command = std::variant<
     FullReset,
     Index,
     InsertCharacters,
+    InsertColumns,
     InsertLines,
     Linefeed,
     MoveCursorBackward,

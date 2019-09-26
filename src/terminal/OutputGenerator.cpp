@@ -151,6 +151,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](CursorNextLine const& v) { write("\033[{}E", v.n); },
         [&](CursorPreviousLine const& v) { write("\033[{}F", v.n); },
         [&](InsertCharacters const& v) { write("\033[{}@", v.n); },
+        [&](InsertColumns const& v) { write("\033[{}'}", v.n); },
         [&](InsertLines const& lines) { write("\033[{}L", lines.n); },
         [&](DeleteLines const& lines) { write("\033[{}M", lines.n); },
         [&](DeleteCharacters const& chars) { write("\033[{}P", chars.n); },

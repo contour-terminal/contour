@@ -81,6 +81,8 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 dispatchCSI_ext();
             else if (intermediateCharacters_ == ">")
                 dispatchCSI_gt();
+            else if (intermediateCharacters_ == "'")
+                dispatchCSI_singleQuote();
             else
                 logUnsupportedCSI();
             return;
@@ -241,6 +243,24 @@ void OutputHandler::dispatchESC()
             break;
         default:
             logUnsupported("ESC_Dispatch: '{}' {}", escape(currentChar()), escape(intermediateCharacters_));
+            break;
+    }
+}
+void OutputHandler::dispatchCSI_singleQuote()
+{
+    switch (currentChar())
+    {
+        case '}':
+            if (parameterCount() <= 1)
+            {
+                setDefaultParameter(1);
+                emit<InsertColumns>(param(0));
+            }
+            else
+                logInvalidCSI();
+            break;
+        default:
+            logUnsupportedCSI();
             break;
     }
 }

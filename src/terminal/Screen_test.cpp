@@ -312,6 +312,55 @@ TEST_CASE("ClearLine", "[screen]")
     CHECK("   " == screen.renderTextLine(1));
 }
 
+TEST_CASE("InsertColumns", "[screen]")
+{
+    Screen screen{{5, 5}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    screen(SetMode{ Mode::LeftRightMargin, true });
+    screen(SetLeftRightMargin{2, 4});
+    screen(SetTopBottomMargin{2, 4});
+
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    SECTION("outside margins: top left") {
+        screen(MoveCursorTo{1, 1});
+        screen(InsertColumns{ 1 });
+        REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("outside margins: bottom right") {
+        screen(MoveCursorTo{5, 5});
+        screen(InsertColumns{ 1 });
+        REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("inside margins") {
+        screen(MoveCursorTo{2, 3});
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+
+        SECTION("DECIC-0") {
+            screen(InsertColumns{0});
+            REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+        }
+
+        SECTION("DECIC-1") {
+            screen(InsertColumns{1});
+            REQUIRE("12345\n67 80\nAB CE\nFG HJ\nKLMNO\n" == screen.renderText());
+        }
+
+        SECTION("DECIC-2") {
+            screen(InsertColumns{2});
+            REQUIRE("12345\n67  0\nAB  E\nFG  J\nKLMNO\n" == screen.renderText());
+        }
+
+        SECTION("DECIC-3-clamped") {
+            screen(InsertColumns{3});
+            REQUIRE("12345\n67  0\nAB  E\nFG  J\nKLMNO\n" == screen.renderText());
+        }
+    }
+}
+
 TEST_CASE("InsertCharacters", "[screen]")
 {
     Screen screen{{5, 2}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};

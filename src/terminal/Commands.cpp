@@ -219,6 +219,7 @@ class MnemonicBuilder {
     void operator()(CursorNextLine const& v) { build("CNL", "Cursor Next Line", v.n); }
     void operator()(CursorPreviousLine const& v) { build("CNL", "Cursor Previous Line", v.n); }
     void operator()(InsertCharacters const& v) { build("ICH", "Insert Characters", v.n); }
+    void operator()(InsertColumns const& v) { build("DECIC", "Insert Columns", v.n); }
     void operator()(InsertLines const& v) { build("IL", "Insert Lines", v.n); }
     void operator()(DeleteLines const& v) { build("DL", "Delete Lines", v.n); }
     void operator()(DeleteCharacters const& v) { build("DCH", "Delete characters", v.n); }

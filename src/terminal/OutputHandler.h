@@ -71,6 +71,7 @@ class OutputHandler {
     void dispatchCSI();
     void dispatchCSI_ext();  // "\033[? ..."
     void dispatchCSI_gt();   // "\033[> ..."
+    void dispatchCSI_singleQuote(); // "\033[ ' ..."
 
     void setMode(unsigned int mode, bool enable);
     void setModeDEC(unsigned int mode, bool enable);
