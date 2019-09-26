@@ -92,6 +92,12 @@ string const& GLTextShaper::fragmentShaderCode()
 	return code;
 }
 
+void GLTextShaper::setFont(Font& _regularFont)
+{
+    regularFont_ = _regularFont;
+    clearGlyphCache();
+}
+
 void GLTextShaper::setProjection(glm::mat4 const& _projectionMatrix)
 {
 	shader_.use();
@@ -104,7 +110,7 @@ void GLTextShaper::render(
     glm::vec4 const& _color,
     FontStyle _style)
 {
-    Font& font = regularFont_; // TODO: respect _style
+    Font& font = regularFont_.get(); // TODO: respect _style
 
     font.render(_chars, glyphPositions_);
 

@@ -46,8 +46,8 @@ Contour::Contour(Config const& _config) :
     },
     window_{
         Window::Size{
-            _config.terminalSize.columns * regularFont_.maxAdvance(),
-            _config.terminalSize.rows * regularFont_.lineHeight()
+            _config.terminalSize.columns * regularFont_.get().maxAdvance(),
+            _config.terminalSize.rows * regularFont_.get().lineHeight()
         },
         "contour",
         bind(&Contour::onKey, this, _1, _2, _3, _4),
@@ -61,7 +61,7 @@ Contour::Contour(Config const& _config) :
         config_.terminalSize,
         window_.width(),
         window_.height(),
-        regularFont_,
+        regularFont_.get(),
         config_.cursorShape,
         glm::vec4{0.9, 0.9, 0.9, 1.0}, // TODO: make cursor color configurable (part of color profile?)
         config_.colorProfile,
@@ -79,7 +79,7 @@ Contour::Contour(Config const& _config) :
     if (!loggingSink_.good())
         throw runtime_error{ "Failed to open log file." };
 
-    if (!regularFont_.isFixedWidth())
+    if (!regularFont_.get().isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
 
     if (config_.backgroundBlur)
@@ -106,7 +106,7 @@ int Contour::main()
             screenDirty_ = true;
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
         {
-            if (loadConfigValues())
+            if (reloadConfigValues())
                 screenDirty_ = true;
         }
 
@@ -354,8 +354,8 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
     if (!window_.fullscreen())
     {
         // resize window
-        auto const width = config_.terminalSize.columns * regularFont_.maxAdvance();
-        auto const height = config_.terminalSize.rows * regularFont_.lineHeight();
+        auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
+        auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
         if (_resizeWindowIfNeeded)
             window_.resize(width, height);
     }
@@ -386,7 +386,7 @@ void Contour::onConfigReload(FileChangeWatcher::Event _event)
     glfwPostEmptyEvent();
 }
 
-bool Contour::loadConfigValues()
+bool Contour::reloadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
     auto newConfig = Config{};
@@ -396,7 +396,7 @@ bool Contour::loadConfigValues()
     }
     catch (exception const& e)
     {
-        //logger_.log(ErrorEvent{e.what()});
+        //TODO: logger_.error(e.what());
         cerr << "Failed to load configuration. " << e.what() << endl;
         return false;
     }
@@ -406,10 +406,19 @@ bool Contour::loadConfigValues()
             ? GLLogger{newConfig.loggingMask, newConfig.logFilePath->string()}
             : GLLogger{newConfig.loggingMask, &cout};
 
-    terminalView_.setTabWidth(newConfig.tabWidth);
-
     bool windowResizeRequired = false;
-    if (newConfig.fontSize != config_.fontSize)
+
+    terminalView_.setTabWidth(newConfig.tabWidth);
+    if (newConfig.fontFamily != config_.fontFamily)
+    {
+        regularFont_ = fontManager_.load(
+            newConfig.fontFamily,
+            static_cast<unsigned>(newConfig.fontSize * Window::primaryMonitorContentScale().second)
+        );
+        terminalView_.setFont(regularFont_.get());
+        windowResizeRequired = true;
+    }
+    else if (newConfig.fontSize != config_.fontSize)
         windowResizeRequired |= setFontSize(newConfig.fontSize, false);
 
     if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
@@ -417,8 +426,8 @@ bool Contour::loadConfigValues()
 
     if (windowResizeRequired && !window_.fullscreen())
     {
-        auto const width = newConfig.terminalSize.columns * regularFont_.maxAdvance();
-        auto const height = newConfig.terminalSize.rows * regularFont_.lineHeight();
+        auto const width = newConfig.terminalSize.columns * regularFont_.get().maxAdvance();
+        auto const height = newConfig.terminalSize.rows * regularFont_.get().lineHeight();
         window_.resize(width, height);
     }
 

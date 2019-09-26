@@ -38,7 +38,7 @@ class GLTerminal {
   public:
     GLTerminal(terminal::WindowSize const& _winSize,
                unsigned _width, unsigned _height,
-               Font& _fontFamily,
+               Font& _regularFont,
                CursorShape _cursorShape,
                glm::vec3 const& _cursorColor,
                terminal::ColorProfile const& _colorProfile,
@@ -68,6 +68,9 @@ class GLTerminal {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
+    Font const& regularFont() const noexcept { return regularFont_.get(); }
+
+    void setFont(Font& _font);
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(terminal::WindowSize const& _newSize);
 
@@ -142,7 +145,7 @@ class GLTerminal {
     terminal::ColorProfile const& colorProfile_;
     terminal::Opacity backgroundOpacity_;
 
-    Font& regularFont_;
+    std::reference_wrapper<Font> regularFont_;
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;

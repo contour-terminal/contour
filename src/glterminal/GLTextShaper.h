@@ -20,6 +20,7 @@
 #include <GL/glew.h>
 
 #include <array>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -28,6 +29,7 @@ class GLTextShaper {
     GLTextShaper(Font& _regularFont, glm::mat4 const& _projection);
     ~GLTextShaper();
 
+    void setFont(Font& _regularFont);
     void setProjection(glm::mat4 const& _projectionMatrix);
 
     void render(
@@ -57,7 +59,7 @@ class GLTextShaper {
 
   private:
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;
-    Font& regularFont_;
+    std::reference_wrapper<Font> regularFont_;
     std::vector<Font::GlyphPosition> glyphPositions_;
     GLuint vbo_;
     GLuint vao_;

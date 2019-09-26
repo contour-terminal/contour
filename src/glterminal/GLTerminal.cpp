@@ -54,18 +54,18 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
-    textShaper_{ _regularFont, _projectionMatrix },
+    textShaper_{ regularFont_.get(), _projectionMatrix },
     cellBackground_{
         glm::vec2{
-            regularFont_.maxAdvance(),
-            regularFont_.lineHeight()
+            regularFont_.get().maxAdvance(),
+            regularFont_.get().lineHeight()
         },
         _projectionMatrix
     },
     cursor_{
         glm::ivec2{
-            regularFont_.maxAdvance(),
-            regularFont_.lineHeight(),
+            regularFont_.get().maxAdvance(),
+            regularFont_.get().lineHeight(),
         },
         _projectionMatrix,
         _cursorShape,
@@ -115,14 +115,14 @@ std::string GLTerminal::screenshot() const
 void GLTerminal::resize(unsigned _width, unsigned _height)
 {
     auto const newSize = terminal::WindowSize{
-        static_cast<unsigned short>(_width / regularFont_.maxAdvance()),
-        static_cast<unsigned short>(_height / regularFont_.lineHeight())
+        static_cast<unsigned short>(_width / regularFont_.get().maxAdvance()),
+        static_cast<unsigned short>(_height / regularFont_.get().lineHeight())
     };
 
     auto const computeMargin = [this](WindowSize const& ws, unsigned _width, unsigned _height)
     {
-        auto const usedHeight = ws.rows * regularFont_.lineHeight();
-        auto const usedWidth = ws.columns * regularFont_.maxAdvance();
+        auto const usedHeight = ws.rows * regularFont_.get().lineHeight();
+        auto const usedWidth = ws.columns * regularFont_.get().maxAdvance();
         auto const freeHeight = _height - usedHeight;
         auto const freeWidth = _width - usedWidth;
         auto const bottomMargin = freeHeight / 2;
@@ -143,20 +143,28 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
             newSize.columns, newSize.rows,
             _width, _height,
             margin_.left, margin_.bottom,
-            regularFont_.maxAdvance(), regularFont_.lineHeight()
+            regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()
         );
+}
+
+void GLTerminal::setFont(Font& _font)
+{
+    auto const fontSize = regularFont_.get().fontSize();
+    regularFont_ = _font;
+    regularFont_.get().setFontSize(fontSize);
+    textShaper_.setFont(regularFont_.get());
 }
 
 bool GLTerminal::setFontSize(unsigned int _fontSize)
 {
-    if (_fontSize == regularFont_.fontSize())
+    if (_fontSize == regularFont_.get().fontSize())
         return false;
 
-    regularFont_.setFontSize(_fontSize);
+    regularFont_.get().setFontSize(_fontSize);
     // TODO: other font styles
     textShaper_.clearGlyphCache();
-    cellBackground_.resize(glm::ivec2{regularFont_.maxAdvance(), regularFont_.lineHeight()});
-    cursor_.resize(glm::ivec2{regularFont_.maxAdvance(), regularFont_.lineHeight()});
+    cellBackground_.resize(glm::ivec2{regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()});
+    cursor_.resize(glm::ivec2{regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()});
     // TODO update margins?
 
     return true;
@@ -264,8 +272,8 @@ void GLTerminal::renderCellGroup()
 glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
 {
     return glm::ivec2{
-        margin_.left + (col - 1) * regularFont_.maxAdvance(),
-        margin_.bottom + (terminal_.size().rows - row) * regularFont_.lineHeight()
+        margin_.left + (col - 1) * regularFont_.get().maxAdvance(),
+        margin_.bottom + (terminal_.size().rows - row) * regularFont_.get().lineHeight()
     };
 }
 

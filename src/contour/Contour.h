@@ -26,6 +26,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <string>
 
 class Contour {
@@ -44,15 +45,16 @@ class Contour {
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
     void onConfigReload(FileChangeWatcher::Event _event);
-    bool loadConfigValues();
+    bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
+    Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
 
   private:
     std::ofstream loggingSink_;
     Config config_;
     GLLogger logger_;
     FontManager fontManager_;
-    Font& regularFont_;
+    std::reference_wrapper<Font> regularFont_;
     Window window_;
     GLTerminal terminalView_;
     bool keyHandled_ = false;
