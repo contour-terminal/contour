@@ -78,6 +78,10 @@ void Terminal::screenUpdateThread()
 
 bool Terminal::send(char32_t _characterEvent, Modifier _modifier)
 {
+    // Early exit if KAM is enabled.
+    if (screen_.isModeEnabled(Mode::KeyboardAction))
+        return true;
+
     bool const success = inputGenerator_.generate(_characterEvent, _modifier);
     flushInput();
     return success;
@@ -85,6 +89,10 @@ bool Terminal::send(char32_t _characterEvent, Modifier _modifier)
 
 bool Terminal::send(Key _key, Modifier _modifier)
 {
+    // Early exit if KAM is enabled.
+    if (screen_.isModeEnabled(Mode::KeyboardAction))
+        return true;
+
     bool const success = inputGenerator_.generate(_key, _modifier);
     flushInput();
     return success;
