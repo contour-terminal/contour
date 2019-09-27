@@ -24,7 +24,7 @@
 using namespace std;
 using namespace terminal;
 
-GLLogger::GLLogger(LogMask _logMask, std::filesystem::path _logfile) :
+GLLogger::GLLogger(LogMask _logMask, FileSystem::path _logfile) :
     logMask_{ _logMask },
     ownedSink_{ make_unique<ofstream>(_logfile.string(), ios::trunc) },
     sink_{ ownedSink_.get() }

@@ -21,6 +21,8 @@
 
 #if defined(_MSC_VER)
 #include <Windows.h>
+#elif defined(__APPLE__)
+#include <util.h>
 #else
 #include <pty.h>
 #endif
@@ -34,7 +36,7 @@ class PseudoTerminal;
  */
 class [[nodiscard]] Process {
   public:
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 	using NativeHandle = pid_t;
 #else
 	using NativeHandle = HANDLE;
