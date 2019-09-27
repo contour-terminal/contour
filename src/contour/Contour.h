@@ -16,6 +16,7 @@
 #include "Config.h"
 #include "Window.h"
 #include "FileChangeWatcher.h"
+#include "IncludeFilesystem.h"
 
 #include <terminal/InputGenerator.h>
 
@@ -24,7 +25,6 @@
 #include <glterminal/GLTerminal.h>
 
 #include <atomic>
-#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <string>

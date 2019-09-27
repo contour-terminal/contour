@@ -22,7 +22,7 @@
 #include <string>
 #include <thread>
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 #include <unistd.h>
 #else
 #include <Windows.h>
@@ -33,7 +33,7 @@ using namespace std;
 
 namespace {
 
-#if !defined(__unix__)
+#if !defined(__unix__) && !defined(__APPLE__)
 	string GetLastErrorAsString()
 	{
 		DWORD errorMessageID = GetLastError();
@@ -73,7 +73,7 @@ namespace {
 
 	ssize_t writeToConsole(char const* _buf, size_t _size)
 	{
-	#if defined(__unix__)
+	#if defined(__unix__) || defined(__APPLE__)
 		return ::write(STDOUT_FILENO, _buf, _size);
 	#else
 		DWORD nwritten{};
@@ -104,7 +104,7 @@ int main()
 {
 	try
 	{
-		#if defined(__unix__)
+		#if defined(__unix__) || defined(__APPLE__)
 		vector<string> args = {"ping", "-c4", "localhost"};
 		#else
 		vector<string> args = {"ping", "localhost"};

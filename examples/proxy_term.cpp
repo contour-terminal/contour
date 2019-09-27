@@ -32,7 +32,7 @@
 
 #include <cstddef>
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <sys/select.h>
 #include <termios.h>
@@ -51,7 +51,7 @@ using namespace std;
 namespace {
     string getErrorString()
     {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         return strerror(errno);
 #else
         DWORD errorMessageID = GetLastError();
@@ -99,7 +99,7 @@ class ProxyTerm {
               terminal::WindowSize const& windowSize,
               string shell = terminal::Process::loginShell())
         : mode_{mode},
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
           tio_{setupTerminalSettings(STDIN_FILENO)},
 #endif
           logger_{ofstream{"trace.log", ios::trunc}},
@@ -131,7 +131,7 @@ class ProxyTerm {
         generator(terminal::SetMode{ terminal::Mode::VisibleCursor, true });
 
         // restore flags upon exit
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         tcsetattr(STDIN_FILENO, TCSANOW, &tio_);
 #endif
     }
@@ -182,7 +182,7 @@ class ProxyTerm {
 
     ssize_t readFromConsole(char* _buf, size_t _size)
     {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         return ::read(STDIN_FILENO, _buf, _size);
 #else
         DWORD size{ static_cast<DWORD>(_size) };
@@ -196,7 +196,7 @@ class ProxyTerm {
 
     ssize_t writeToConsole(char const* _buf, size_t _size)
     {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         return ::write(STDOUT_FILENO, _buf, _size);
 #else
         DWORD nwritten{};
@@ -286,7 +286,7 @@ class ProxyTerm {
             *logger_ << fmt::format(msg, forward<Args>(args)...) << endl;
     }
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     static termios getTerminalSettings(int fd)
     {
         termios tio;
@@ -355,7 +355,7 @@ class ProxyTerm {
 
   private:
     Mode const mode_;
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     termios tio_;
 #endif
     optional<ofstream> logger_;
