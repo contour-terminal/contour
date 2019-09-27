@@ -214,6 +214,10 @@ struct Bell {};
 struct Linefeed {};
 
 struct Backspace {};
+
+/// RIS - Reset to Initial State
+///
+/// See: https://vt100.net/docs/vt510-rm/RIS.html
 struct FullReset {};
 
 /// DECSTR - Soft Terminal Reset

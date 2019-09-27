@@ -198,7 +198,7 @@ class MnemonicBuilder {
     }
 
     void operator()(Bell const& v) { build("\\a"); }
-    void operator()(FullReset const& v) {} // TODO
+    void operator()(FullReset const& v) { build("RIS", "Reset to Initial state (hard reset)"); }
     void operator()(Linefeed const& v) { build("\\n"); }
     void operator()(Backspace const& v) { build("\\b"); }
     void operator()(DeviceStatusReport const& v) {} // TODO

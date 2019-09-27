@@ -1203,11 +1203,9 @@ void Screen::resetSoft()
 
 void Screen::resetHard()
 {
-    // TODO
     primaryBuffer_ = Buffer{size_};
     alternateBuffer_ = Buffer{size_};
     state_ = &primaryBuffer_;
-    resetSoft();
 }
 
 Screen::Cell const& Screen::at(cursor_pos_t rowNr, cursor_pos_t colNr) const noexcept
