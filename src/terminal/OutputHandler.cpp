@@ -378,8 +378,9 @@ void OutputHandler::dispatchCSI()
                     break;
             }
             break;
-        case 'H':  // fallthrough
-        case 'f':
+        case 'f': // HVP (deprecated, users are recommented to use CUP instead)
+            [[fallthrough]];
+        case 'H': // CUP
             setDefaultParameter(1);
             emit<MoveCursorTo>(param(0), param(1));
             break;
