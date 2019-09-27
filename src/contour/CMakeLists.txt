@@ -1,3 +1,5 @@
+include(FilesystemResolver)
+
 find_package(Freetype)
 find_package(OpenGL)
 find_package(GLEW)
@@ -13,4 +15,9 @@ add_executable(contour
 	main.cpp
 )
 
-target_link_libraries(contour PRIVATE GLEW::GLEW OpenGL::GL glm glfw glterminal yaml-cpp)
+set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw glterminal yaml-cpp)
+if(Boost_FILESYSTEM_FOUND)
+    list(APPEND contour_LIBRARIES ${Boost_FILESYSTEM_LIBRARY})
+endif()
+
+target_link_libraries(contour PRIVATE ${contour_LIBRARIES})

@@ -18,13 +18,14 @@
 #include <terminal/Color.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Process.h>
-#include <filesystem>
 #include <optional>
 #include <string>
+#include "IncludeFilesystem.h"
+
 
 struct Config {
-    std::filesystem::path backingFilePath;
-    std::optional<std::filesystem::path> logFilePath;
+    FileSystem::path backingFilePath;
+    std::optional<FileSystem::path> logFilePath;
 
     std::string shell = terminal::Process::loginShell();
     terminal::WindowSize terminalSize = {80, 25};

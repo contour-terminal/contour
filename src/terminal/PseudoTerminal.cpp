@@ -23,11 +23,18 @@
 #include <unordered_map>
 
 #if !defined(_MSC_VER)
+
+#if defined(__APPLE__)
+#include <util.h>
+#else
 #include <pty.h>
+#endif
+
 #include <utmp.h>
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #endif
 
@@ -36,7 +43,7 @@ using namespace std;
 namespace {
     string GetLastErrorAsString()
     {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         return strerror(errno);
 #else
         DWORD errorMessageID = GetLastError();
@@ -67,7 +74,7 @@ namespace terminal {
 
 WindowSize currentWindowSize()
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
 
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1)
@@ -90,7 +97,7 @@ WindowSize currentWindowSize()
 PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
     size_{ _windowSize }
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
     assert(_windowSize.rows <= numeric_limits<unsigned short>::max());
     assert(_windowSize.columns <= numeric_limits<unsigned short>::max());
@@ -100,8 +107,14 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
         0,
         0
     };
+    
+#if defined(__APPLE__)
+    winsize* wsa = const_cast<winsize*>(&ws);
+#else
+    winsize const* wsa = &ws;
+#endif
     // TODO: termios term{};
-    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, &ws) < 0)
+    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, wsa) < 0)
         throw runtime_error{ "Failed to open PTY. " + GetLastErrorAsString() };
 #else
     master_ = INVALID_HANDLE_VALUE;
@@ -148,7 +161,7 @@ PseudoTerminal::~PseudoTerminal()
 
 void PseudoTerminal::close()
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     if (master_ >= 0)
     {
         ::close(master_);
@@ -175,7 +188,7 @@ void PseudoTerminal::close()
 
 auto PseudoTerminal::read(char* buf, size_t size) -> ssize_t
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     return ::read(master_, buf, size);
 #else
     DWORD nread{};
@@ -188,7 +201,7 @@ auto PseudoTerminal::read(char* buf, size_t size) -> ssize_t
 
 auto PseudoTerminal::write(char const* buf, size_t size) -> ssize_t
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     return ::write(master_, buf, size);
 #else
     DWORD nwritten{};
@@ -206,7 +219,7 @@ WindowSize PseudoTerminal::size() const noexcept
 
 void PseudoTerminal::resize(WindowSize const& _newWindowSize)
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
     w.ws_col = _newWindowSize.columns;
     w.ws_row = _newWindowSize.rows;

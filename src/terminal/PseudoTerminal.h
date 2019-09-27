@@ -19,9 +19,12 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <cerrno>
 
 #if defined(_MSC_VER)
 #include <Windows.h>
+#elif defined(__APPLE__)
+#include <util.h>
 #else
 #include <pty.h>
 #endif
@@ -81,7 +84,7 @@ public:
 
 	/// @returns the native input handle of the master side.
 	IOHandle input() const noexcept {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 		return master_;
 #else
 		return input_;
@@ -90,14 +93,14 @@ public:
 
 	/// @returns the native output handle of the master side.
 	IOHandle output() const noexcept {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 		return master_;
 #else
 		return output_;
 #endif
 	}
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 	/// @returns the native PTY handle of the slave side (not available on Windows).
 	int slave() const noexcept { return slave_; }
 #endif
@@ -106,7 +109,7 @@ private:
 	PtyHandle master_;
     WindowSize size_;
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
 	PtyHandle slave_;
 #else
 	IOHandle input_;
