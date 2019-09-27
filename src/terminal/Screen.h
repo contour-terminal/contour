@@ -244,6 +244,7 @@ class Screen {
     void operator()(SetBackgroundColor const& v);
     void operator()(SetGraphicsRendition const& v);
     void operator()(SetMode const& v);
+    void operator()(RequestMode const& v);
     void operator()(SetTopBottomMargin const& v);
     void operator()(SetLeftRightMargin const& v);
     void operator()(ScreenAlignmentPattern const& v);

@@ -85,6 +85,30 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 dispatchCSI_gt();
             else if (intermediateCharacters_ == "'")
                 dispatchCSI_singleQuote();
+            else if (intermediateCharacters_ == "$")
+            {
+                if (currentChar_ == 'p')
+                {
+                    if (parameterCount() == 1)
+                        requestMode(param(0));
+                    else
+                        logInvalidCSI();
+                }
+                else
+                    logUnsupportedCSI();
+            }
+            else if (intermediateCharacters_ == "?$")
+            {
+                if (currentChar_ == 'p')
+                {
+                    if (parameterCount() == 1)
+                        requestModeDEC(param(0));
+                    else
+                        logInvalidCSI();
+                }
+                else
+                    logUnsupportedCSI();
+            }
             else
                 logUnsupportedCSI();
             return;
@@ -451,6 +475,12 @@ void OutputHandler::dispatchCSI()
                     break;
             }
             break;
+        case 'p': // DECRQM
+            if (parameterCount() == 1)
+                requestMode(param(0));
+            else
+                logInvalidCSI();
+            break;
         case 'r':
         {
             setDefaultParameter(1);
@@ -635,6 +665,82 @@ void OutputHandler::setModeDEC(unsigned int mode, bool enable)
         default:
             logUnsupported("set-mode (DEC) {}", param(0));
             break;
+    }
+}
+
+void OutputHandler::requestMode(unsigned int _mode)
+{
+    switch (_mode)
+    {
+        case 1: // GATM, Guarded area transfer
+        case 2: // KAM, Keyboard action
+        case 3: // CRM, Control representation
+        case 4: // IRM, Insert/replace
+        case 5: // SRTM, Status reporting transfer
+        case 7: // VEM, Vertical editing
+        case 10: // HEM, Horizontal editing
+        case 11: // PUM, Positioning unit
+        case 12: // SRM, Send/receive
+        case 13: // FEAM, Format effector action
+        case 14: // FETM, Format effector transfer
+        case 15: // MATM, Multiple area transfer
+        case 16: // TTM, Transfer termination
+        case 17: // SATM, Selected area transfer
+        case 18: // TSM, Tabulation stop
+        case 19: // EBM, Editing boundary
+        case 20: // LNM, Line feed/new line
+            logUnsupportedCSI();
+            break;
+        default:
+            logInvalidCSI();
+            break;
+    }
+}
+
+void OutputHandler::requestModeDEC(unsigned int _mode)
+{
+    switch (_mode)
+    {
+        case 1: // DECCKM, Cursor keys
+        case 2: // DECANM, ANSI
+        case 3: // DECCOLM, Column
+        case 4: // DECSCLM, Scrolling
+        case 5: // DECSCNM, Screen
+        case 6: // DECOM, Origin
+        case 7: // DECAWM, Autowrap
+        case 8: // DECARM, Autorepeat
+        case 18: // DECPFF, Print form feed
+        case 19: // DECPEX, Printer extent
+        case 25: // DECTCEM, Text cursor enable
+        case 34: // DECRLM, Cursor direction, right to left
+        case 35: // DECHEBM, Hebrew keyboard mapping
+        case 36: // DECHEM, Hebrew encoding mode
+        case 42: // DECNRCM, National replacement character set
+        case 57: // DECNAKB, Greek keyboard mapping
+        case 60: // DECHCCM*, Horizontal cursor coupling
+        case 61: // DECVCCM, Vertical cursor coupling
+        case 64: // DECPCCM, Page cursor coupling
+        case 66: // DECNKM, Numeric keypad
+        case 67: // DECBKM, Backarrow key
+        case 68: // DECKBUM, Keyboard usage
+        case 69: // DECVSSM / DECLRMM, Vertical split screen
+        case 73: // DECXRLM, Transmit rate limiting
+        case 81: // DECKPM, Key position
+        case 95: // DECNCSM, No clearing screen on column change
+        case 96: // DECRLCM, Cursor right to left
+        case 97: // DECCRTSM, CRT save
+        case 98: // DECARSM, Auto resize
+        case 99: // DECMCM, Modem control
+        case 100: // DECAAM, Auto answerback
+        case 101: // DECCANSM, Conceal answerback message
+        case 102: // DECNULM, Ignoring null
+        case 103: // DECHDPXM, Half-duplex
+        case 104: // DECESKM, Secondary keyboard language
+        case 106: // DECOSCNM, Overscan
+            logUnsupportedCSI();
+            break;
+        default:
+            logInvalidCSI();
     }
 }
 

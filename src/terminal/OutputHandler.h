@@ -76,6 +76,8 @@ class OutputHandler {
 
     void setMode(unsigned int mode, bool enable);
     void setModeDEC(unsigned int mode, bool enable);
+    void requestMode(unsigned int _mode);
+    void requestModeDEC(unsigned int _mode);
 
     void dispatchGraphicsRendition();
 

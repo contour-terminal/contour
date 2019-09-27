@@ -214,6 +214,12 @@ void OutputGenerator::operator()(Command const& command)
             }
         },
         [&](SetMode mode) { write("\033[{}{}", to_code(mode.mode), mode.enable ? 'h' : 'l'); },
+        [&](RequestMode v) {
+            if (isAnsiMode(v.mode))
+                write("\033[{}$p", to_code(v.mode));
+            else
+                write("\033[?{}$p", to_code(v.mode));
+        },
         [&](SetTopBottomMargin margin) { write("\033[{};{}r", margin.top, margin.bottom); },
         [&](SetLeftRightMargin margin) { write("\033[{};{}s", margin.left, margin.right); },
         [&](ScreenAlignmentPattern) { write("\033#8"); },

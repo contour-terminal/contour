@@ -128,6 +128,34 @@ enum class Mode {
     // }}}
 };
 
+constexpr bool isAnsiMode(Mode m) noexcept
+{
+    switch (m)
+    {
+        case Mode::KeyboardAction:
+        case Mode::Insert:
+        case Mode::SendReceive:
+        case Mode::AutomaticNewLine:
+            return true;
+        case Mode::UseApplicationCursorKeys:
+        case Mode::DesignateCharsetUSASCII:
+        case Mode::Columns132:
+        case Mode::SmoothScroll:
+        case Mode::ReverseVideo:
+        case Mode::CursorRestrictedToMargin:
+        case Mode::AutoWrap:
+        case Mode::ShowToolbar:
+        case Mode::BlinkingCursor:
+        case Mode::PrinterExtend:
+        case Mode::VisibleCursor:
+        case Mode::ShowScrollbar:
+        case Mode::UseAlternateScreen:
+        case Mode::LeftRightMargin:
+        case Mode::BracketedPaste:
+            return false;
+    }
+}
+
 constexpr std::string_view to_code(Mode m)
 {
     switch (m)
@@ -468,6 +496,13 @@ struct AppendChar { char32_t ch; };
 
 struct SetMode { Mode mode; bool enable; };
 
+/// DECRQM - Request Mode
+///
+/// The host sends this control function to find out if a particular mode is set or reset. The terminal responds with a report mode function (DECRPM—Report Mode - Terminal To Host).
+struct RequestMode {
+    Mode mode;
+};
+
 /// DECSTBM - Set Top and Bottom Margins
 ///
 /// This control function sets the top and bottom margins for the current page.
@@ -625,6 +660,7 @@ using Command = std::variant<
     MoveCursorUp,
     ReportCursorPosition,
     ReportExtendedCursorPosition,
+    RequestMode,
     RestoreCursor,
     ReverseIndex,
     SaveCursor,

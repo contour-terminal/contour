@@ -1467,6 +1467,26 @@ TEST_CASE("SetMode", "[screen]") {
     }
 }
 
+TEST_CASE("RequestMode", "[screen]")
+{
+    string reply;
+    Screen screen{{5, 5}, {},
+        [&](auto const& _reply) { reply += _reply; },
+        [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+
+    SECTION("ANSI modes") {
+        screen(SetMode{Mode::Insert, true}); // IRM
+        screen(RequestMode{Mode::Insert});
+        REQUIRE(reply == fmt::format("\033[{};1$y", to_code(Mode::Insert)));
+    }
+
+    SECTION("DEC modes") {
+        screen(SetMode{Mode::CursorRestrictedToMargin, true}); // DECOM
+        screen(RequestMode{Mode::CursorRestrictedToMargin});
+        REQUIRE(reply == fmt::format("\033[?{};1$y", to_code(Mode::CursorRestrictedToMargin)));
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition

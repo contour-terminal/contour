@@ -1075,6 +1075,26 @@ void Screen::operator()(SetMode const& v)
     }
 }
 
+void Screen::operator()(RequestMode const& v)
+{
+    enum class ModeResponse { // TODO: respect response 0, 3, 4.
+        NotRecognized = 0,
+        Set = 1,
+        Reset = 2,
+        PermanentlySet = 3,
+        PermanentlyReset = 4
+    };
+
+    ModeResponse const modeResponse = isModeEnabled(v.mode)
+        ? ModeResponse::Set
+        : ModeResponse::Reset;
+
+    if (isAnsiMode(v.mode))
+        reply("\033[{};{}$y", to_code(v.mode), static_cast<unsigned>(modeResponse));
+    else
+        reply("\033[?{};{}$y", to_code(v.mode), static_cast<unsigned>(modeResponse));
+}
+
 void Screen::operator()(SetTopBottomMargin const& margin)
 {
     if (auto const bottom = min(margin.bottom, state_->size_.rows); margin.top < bottom)
