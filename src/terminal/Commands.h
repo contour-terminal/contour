@@ -454,7 +454,10 @@ struct MoveCursorToLine {
     cursor_pos_t row;
 };
 
+/// DECSC - Save Cursor
 struct SaveCursor {};
+
+/// DECRS - Restore Cursor
 struct RestoreCursor {};
 
 struct SetForegroundColor { Color color; };

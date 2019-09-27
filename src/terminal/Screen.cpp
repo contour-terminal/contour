@@ -127,6 +127,60 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
     updateCursorIterators();
 }
 
+void Screen::Buffer::saveState()
+{
+    // https://vt100.net/docs/vt510-rm/DECSC.html
+
+    // TODO: character sets
+    // TODO: selective erase attribute
+    // TODO: SS2/SS3 states
+    savedStates.emplace(SavedState{
+        realCursorPosition(),
+        graphicsRendition,
+        autoWrap,
+        cursorRestrictedToMargin
+    });
+}
+
+void Screen::Buffer::restoreState()
+{
+    if (!savedStates.empty())
+    {
+        auto const& saved = savedStates.top();
+        moveCursorTo(saved.cursorPosition);
+        setMode(Mode::AutoWrap, saved.autowrap);
+        setMode(Mode::CursorRestrictedToMargin, saved.originMode);
+        savedStates.pop();
+    }
+}
+
+void Screen::Buffer::setMode(Mode _mode, bool _enable)
+{
+    if (_mode != Mode::UseAlternateScreen)
+    {
+        if (_enable)
+            enabledModes_.insert(_mode);
+        else if (auto i = enabledModes_.find(_mode); i != enabledModes_.end())
+            enabledModes_.erase(i);
+    }
+
+    // TODO: thse member variables aren't really needed anymore (are they?), remove them.
+    switch (_mode)
+    {
+        case Mode::AutoWrap:
+            autoWrap = _enable;
+            break;
+        case Mode::CursorRestrictedToMargin:
+            cursorRestrictedToMargin = _enable;
+            break;
+        case Mode::VisibleCursor:
+            cursor.visible = _enable;
+            break;
+        default:
+            break;
+    }
+}
+
 void Screen::Buffer::moveCursorTo(Coordinate to)
 {
     wrapPending = false;
@@ -487,7 +541,6 @@ Screen::Screen(WindowSize const& _size,
     primaryBuffer_{ _size },
     alternateBuffer_{ _size },
     state_{ &primaryBuffer_ },
-    enabledModes_{},
     size_{ _size }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
@@ -893,27 +946,12 @@ void Screen::operator()(MoveCursorToNextTab const& v)
 
 void Screen::operator()(SaveCursor const& v)
 {
-    // https://vt100.net/docs/vt510-rm/DECSC.html
-    // TODO: this doesn't just save the cursor, but:
-    // * cursor x,y
-    // * character attributes (SGR)
-    // * character sets
-    // * wrap flag
-    // * state of origin mode
-    // * selective erase attribute
-    // * SS2/SS3 states
-
-    // state_->saveStack.emplace(state_->cursor);
+    state_->saveState();
 }
 
 void Screen::operator()(RestoreCursor const& v)
 {
-    if (!state_->saveStack.empty())
-    {
-        auto& save = state_->saveStack.top();
-        state_->cursor = save.cursor;
-        state_->saveStack.pop();
-    }
+    state_->restoreState();
 }
 
 void Screen::operator()(Index const& v)
@@ -1018,7 +1056,8 @@ void Screen::operator()(SetGraphicsRendition const& v)
 
 void Screen::operator()(SetMode const& v)
 {
-    setMode(v.mode, v.enable);
+    state_->setMode(v.mode, v.enable);
+
     switch (v.mode)
     {
         case Mode::UseAlternateScreen:
@@ -1027,15 +1066,6 @@ void Screen::operator()(SetMode const& v)
             else
                 state_ = &primaryBuffer_;
             break;
-        case Mode::AutoWrap:
-            state_->autoWrap = v.enable;
-            break;
-        case Mode::CursorRestrictedToMargin:
-            state_->cursorRestrictedToMargin = v.enable;
-            break;
-        case Mode::VisibleCursor:
-            state_->cursor.visible = v.enable;
-            break;
         case Mode::UseApplicationCursorKeys:
             if (useApplicationCursorKeys_)
                 useApplicationCursorKeys_(v.enable);
@@ -1043,14 +1073,6 @@ void Screen::operator()(SetMode const& v)
         default:
             break;
     }
-}
-
-void Screen::setMode(Mode _mode, bool _enable)
-{
-    if (_enable)
-        enabledModes_.insert(_mode);
-    else if (auto i = enabledModes_.find(_mode); i != enabledModes_.end())
-        enabledModes_.erase(i);
 }
 
 void Screen::operator()(SetTopBottomMargin const& margin)
@@ -1137,9 +1159,9 @@ void Screen::operator()(AppendChar const& v)
 // {{{ others
 void Screen::resetSoft()
 {
-    setMode(Mode::CursorRestrictedToMargin, false); // DECOM
-    setMode(Mode::AutoWrap, false); // DECAWM
-    setMode(Mode::Insert, false); // IRM
+    (*this)(SetMode{Mode::CursorRestrictedToMargin, false}); // DECOM
+    (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
+    (*this)(SetMode{Mode::Insert, false}); // IRM
     (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
     (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
     state_->graphicsRendition = {}; // SGR

@@ -1046,8 +1046,21 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 // TODO: HideCursor
 // TODO: ShowCursor
 
-// TODO: SaveCursor
-// TODO: RestoreCursor
+TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
+{
+    Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    screen(SetMode{Mode::AutoWrap, false});
+    screen(SaveCursor{});
+
+    screen(MoveCursorTo{3, 3});
+    screen(SetMode{Mode::AutoWrap, true});
+    screen(SetMode{Mode::CursorRestrictedToMargin, true});
+
+    screen(RestoreCursor{});
+    CHECK(screen.cursorPosition() == Coordinate{1, 1});
+    CHECK(screen.isModeEnabled(Mode::AutoWrap) == false);
+    CHECK(screen.isModeEnabled(Mode::CursorRestrictedToMargin) == false);
+}
 
 TEST_CASE("Index_outside_margin", "[screen]")
 {

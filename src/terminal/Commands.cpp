@@ -235,8 +235,8 @@ class MnemonicBuilder {
     void operator()(MoveCursorTo const& v) { build("CUP", "Move cursor to position", v.row, v.column); }
     void operator()(MoveCursorToLine const& v) { build("VPA", "Move cursor to line", v.row); }
     void operator()(MoveCursorToNextTab const& v) { build("\\t"); }
-    void operator()(SaveCursor const& v) {} // TODO
-    void operator()(RestoreCursor const& v) {} // TODO
+    void operator()(SaveCursor const& v) { build("DECSC", "Save cursor"); }
+    void operator()(RestoreCursor const& v) { build("DECRC", "Restore cursor"); }
     void operator()(Index const& v) { build("IND", "Moves cursor down (possibly scrolling)"); }
     void operator()(ReverseIndex const& v) { build("RI", "Moves cursor up (possibly scrolling)"); }
     void operator()(BackIndex const& v) { build("DECBI", "Moves cursor left (possibly scrolling)"); }

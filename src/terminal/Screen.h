@@ -303,13 +303,18 @@ class Screen {
     bool isPrimaryScreen() const noexcept { return state_ == &primaryBuffer_; }
     bool isAlternateScreen() const noexcept { return state_ == &alternateBuffer_; }
 
-    bool isModeEnabled(Mode m) const noexcept { return enabledModes_.find(m) != enabledModes_.end(); }
+    bool isModeEnabled(Mode m) const noexcept
+    {
+        if (m == Mode::UseAlternateScreen)
+            return isAlternateScreen();
+        else
+            return state_->enabledModes_.find(m) != end(state_->enabledModes_);
+    }
+
     bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::CursorRestrictedToMargin); }
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(Mode::LeftRightMargin); }
 
   private:
-    void setMode(Mode mode, bool enable);
-
     // interactive replies
     void reply(std::string const& message)
     {
@@ -345,10 +350,14 @@ class Screen {
         using Lines = std::list<Line>;
 
         // Savable states for DECSC & DECRC
-        struct Save {
-            Cursor cursor;
+        struct SavedState {
+            Coordinate cursorPosition;
             GraphicsAttributes graphicsRendition{};
-            bool blinking = false;
+            // TODO: CharacterSet for GL and GR
+            bool autowrap = false;
+            bool originMode = false;
+            // TODO: Selective Erase Attribute (DECSCA)
+            // TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
         };
 
         explicit Buffer(WindowSize const& _size)
@@ -364,6 +373,7 @@ class Screen {
 
         WindowSize size_;
         Margin margin_;
+        std::set<Mode> enabledModes_{};
         Cursor cursor{};
         Lines lines;
         Lines savedLines{};
@@ -372,7 +382,7 @@ class Screen {
         bool cursorRestrictedToMargin{false};
         unsigned int tabWidth{8};
         GraphicsAttributes graphicsRendition{};
-        std::stack<Save> saveStack{};
+        std::stack<SavedState> savedStates{};
 
         Lines::iterator currentLine{std::begin(lines)};
         Line::iterator currentColumn{std::begin(*currentLine)};
@@ -395,7 +405,11 @@ class Screen {
         void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
         void insertColumns(cursor_pos_t _n);
 
+        void setMode(Mode _mode, bool _enable);
+
         void verifyState() const;
+        void saveState();
+        void restoreState();
         void updateCursorIterators();
 
         constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
@@ -482,8 +496,6 @@ class Screen {
     Buffer primaryBuffer_;
     Buffer alternateBuffer_;
     Buffer* state_;
-
-    std::set<Mode> enabledModes_{};
 
     WindowSize size_;
 };
