@@ -882,6 +882,54 @@ TEST_CASE("MoveCursorBackward", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 }
 
+TEST_CASE("HorizontalPositionAbsolute", "[screen]")
+{
+    Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    // no-op
+    screen(HorizontalPositionAbsolute{1});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    // in-range
+    screen(HorizontalPositionAbsolute{3});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+
+    screen(HorizontalPositionAbsolute{2});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+
+    // overflow
+    screen(HorizontalPositionAbsolute{5});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3 /*clamped*/});
+}
+
+TEST_CASE("HorizontalPositionRelative", "[screen]")
+{
+    Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    SECTION("no-op") {
+        screen(HorizontalPositionRelative{0});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+    }
+
+    SECTION("HPR-1") {
+        screen(HorizontalPositionRelative{1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+    }
+
+    SECTION("HPR-3 (to right border)") {
+        screen(HorizontalPositionRelative{screen.size().columns});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+    }
+
+    SECTION("HPR-overflow") {
+        screen(HorizontalPositionRelative{screen.size().columns + 1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+    }
+}
+
+
 TEST_CASE("MoveCursorToColumn", "[screen]")
 {
     Screen screen{{3, 3}, {}, {}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }, {}};

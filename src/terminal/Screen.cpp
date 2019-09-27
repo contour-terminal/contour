@@ -801,6 +801,18 @@ void Screen::operator()(DeleteColumns const& v)
             state_->deleteChars(lineNo, v.n);
 }
 
+void Screen::operator()(HorizontalPositionAbsolute const& v)
+{
+    // HPA: We only care about column-mode (not pixel/inches) for now.
+    (*this)(MoveCursorToColumn{v.n});
+}
+
+void Screen::operator()(HorizontalPositionRelative const& v)
+{
+    // HPR: We only care about column-mode (not pixel/inches) for now.
+    (*this)(MoveCursorForward{v.n});
+}
+
 void Screen::operator()(MoveCursorUp const& v)
 {
     auto const n = min(v.n, cursorPosition().row - state_->margin_.vertical.from);
@@ -1145,8 +1157,6 @@ void Screen::resetSoft()
     // * DECSASD
     // * DECKPM
     // * DECPCTERM
-
-    // TODO: is this right? reverting to primary screen buffer?
 }
 
 void Screen::resetHard()

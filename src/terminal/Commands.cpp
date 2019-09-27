@@ -224,6 +224,8 @@ class MnemonicBuilder {
     void operator()(DeleteLines const& v) { build("DL", "Delete Lines", v.n); }
     void operator()(DeleteCharacters const& v) { build("DCH", "Delete characters", v.n); }
     void operator()(DeleteColumns const& v) { build("DECDC", "Delete columns", v.n); }
+    void operator()(HorizontalPositionAbsolute const& v) { build("HPA", "Horizontal Position Absolute", v.n); }
+    void operator()(HorizontalPositionRelative const& v) { build("HPR", "HOrizontal Position Relative", v.n); }
     void operator()(MoveCursorUp const& v) { build("CUU", "Move cursor up", v.n); }
     void operator()(MoveCursorDown const& v) { build("CUD", "Move cursor down", v.n); }
     void operator()(MoveCursorForward const& v) { build("CUF", "Move cursor forward", v.n); }

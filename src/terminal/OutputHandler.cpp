@@ -494,6 +494,18 @@ void OutputHandler::dispatchCSI()
             else
                 logInvalidCSI();
             break;
+        case '`': // HPA
+            if (parameterCount() == 1)
+                emit<HorizontalPositionAbsolute>(param(0));
+            else
+                logInvalidCSI();
+            break;
+        case 'a': // HPR
+            if (parameterCount() == 1)
+                emit<HorizontalPositionRelative>(param(0));
+            else
+                logInvalidCSI();
+            break;
         default:
             logUnsupportedCSI();
             break;

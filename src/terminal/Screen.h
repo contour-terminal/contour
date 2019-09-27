@@ -223,6 +223,8 @@ class Screen {
     void operator()(DeleteLines const& v);
     void operator()(DeleteCharacters const& v);
     void operator()(DeleteColumns const& v);
+    void operator()(HorizontalPositionAbsolute const& v);
+    void operator()(HorizontalPositionRelative const& v);
     void operator()(MoveCursorUp const& v);
     void operator()(MoveCursorDown const& v);
     void operator()(MoveCursorForward const& v);

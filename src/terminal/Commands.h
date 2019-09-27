@@ -365,6 +365,16 @@ struct DeleteCharacters {
     cursor_pos_t n;
 };
 
+// HPA - Horizontal Position Absolute.
+struct HorizontalPositionAbsolute {
+    cursor_pos_t n;
+};
+
+// HPR - Horizontal Position Relative.
+struct HorizontalPositionRelative {
+    cursor_pos_t n;
+};
+
 /// CUU - Cursor Up.
 /// Moves the cursor up a specified number of lines in the same column.
 /// The cursor stops at the top margin.
@@ -599,6 +609,8 @@ using Command = std::variant<
     InsertColumns,
     InsertLines,
     Linefeed,
+    HorizontalPositionAbsolute,
+    HorizontalPositionRelative,
     MoveCursorBackward,
     MoveCursorDown,
     MoveCursorForward,
