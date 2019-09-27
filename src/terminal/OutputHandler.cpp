@@ -272,6 +272,7 @@ void OutputHandler::dispatchESC()
             break;
     }
 }
+
 void OutputHandler::dispatchCSI_singleQuote()
 {
     switch (currentChar())
