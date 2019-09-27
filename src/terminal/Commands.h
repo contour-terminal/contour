@@ -121,7 +121,7 @@ enum class Mode {
 
     ShowToolbar,
     BlinkingCursor,
-    VisibleCursor,
+    VisibleCursor, // DECTCEM
     ShowScrollbar,
     UseAlternateScreen,
     BracketedPaste,
@@ -154,6 +154,7 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::BracketedPaste:
             return false;
     }
+    return false; // Should never be reached.
 }
 
 constexpr std::string_view to_code(Mode m)

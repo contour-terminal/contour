@@ -1179,26 +1179,25 @@ void Screen::operator()(AppendChar const& v)
 // {{{ others
 void Screen::resetSoft()
 {
+    (*this)(SetGraphicsRendition{GraphicsRendition::Reset}); // SGR
+    (*this)(MoveCursorTo{1, 1}); // DECSC (Save cursor state)
+    (*this)(SetMode{Mode::VisibleCursor, true}); // DECTCEM (Text cursor enable)
     (*this)(SetMode{Mode::CursorRestrictedToMargin, false}); // DECOM
+    (*this)(SetMode{Mode::KeyboardAction, false}); // KAM
     (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
     (*this)(SetMode{Mode::Insert, false}); // IRM
+    (*this)(SetMode{Mode::UseApplicationCursorKeys, false}); // DECCKM (Cursor keys)
     (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
     (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
-    state_->graphicsRendition = {}; // SGR
 
-    // TODO:
-    // * DECTCEM
-    // * DECNRCM
-    // * KAM
-    // * DECNKM
-    // * DECCKM
-    // * G0, G1, G2, G3, GL, GR
-    // * DECSCA
-    // * DECSC
-    // * DECAUPSS
-    // * DECSASD
-    // * DECKPM
-    // * DECPCTERM
+    // TODO: DECNKM (Numeric keypad)
+    // TODO: DECSCA (Select character attribute)
+    // TODO: DECNRCM (National replacement character set)
+    // TODO: GL, GR (G0, G1, G2, G3)
+    // TODO: DECAUPSS (Assign user preference supplemental set)
+    // TODO: DECSASD (Select active status display)
+    // TODO: DECKPM (Keyboard position mode)
+    // TODO: DECPCTERM (PCTerm mode)
 }
 
 void Screen::resetHard()

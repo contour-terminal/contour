@@ -205,7 +205,6 @@ void GLTerminal::render()
     terminal_.render(bind(&GLTerminal::fillCellGroup, this, _1, _2, _3));
     renderCellGroup();
 
-    // TODO: only render when visible
     if (terminal_.cursor().visible)
         cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
 }
