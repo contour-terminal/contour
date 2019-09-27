@@ -149,7 +149,7 @@ void Screen::Buffer::restoreState()
         auto const& saved = savedStates.top();
         moveCursorTo(saved.cursorPosition);
         setMode(Mode::AutoWrap, saved.autowrap);
-        setMode(Mode::CursorRestrictedToMargin, saved.originMode);
+        setMode(Mode::Origin, saved.originMode);
         savedStates.pop();
     }
 }
@@ -170,7 +170,7 @@ void Screen::Buffer::setMode(Mode _mode, bool _enable)
         case Mode::AutoWrap:
             autoWrap = _enable;
             break;
-        case Mode::CursorRestrictedToMargin:
+        case Mode::Origin:
             cursorRestrictedToMargin = _enable;
             break;
         case Mode::VisibleCursor:
@@ -1182,7 +1182,7 @@ void Screen::resetSoft()
     (*this)(SetGraphicsRendition{GraphicsRendition::Reset}); // SGR
     (*this)(MoveCursorTo{1, 1}); // DECSC (Save cursor state)
     (*this)(SetMode{Mode::VisibleCursor, true}); // DECTCEM (Text cursor enable)
-    (*this)(SetMode{Mode::CursorRestrictedToMargin, false}); // DECOM
+    (*this)(SetMode{Mode::Origin, false}); // DECOM
     (*this)(SetMode{Mode::KeyboardAction, false}); // KAM
     (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
     (*this)(SetMode{Mode::Insert, false}); // IRM

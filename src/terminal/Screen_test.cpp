@@ -659,7 +659,7 @@ TEST_CASE("ScrollDown", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetLeftRightMargin{2, 4});
         screen(SetTopBottomMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
 
         SECTION("SD 1") {
             screen(ScrollDown{1});
@@ -1010,7 +1010,7 @@ TEST_CASE("MoveCursorTo", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetLeftRightMargin{2, 4});
         screen(SetTopBottomMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
 
         SECTION("move to origin") {
             screen(MoveCursorTo{1, 1});
@@ -1054,12 +1054,12 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 
     screen(MoveCursorTo{3, 3});
     screen(SetMode{Mode::AutoWrap, true});
-    screen(SetMode{Mode::CursorRestrictedToMargin, true});
+    screen(SetMode{Mode::Origin, true});
 
     screen(RestoreCursor{});
     CHECK(screen.cursorPosition() == Coordinate{1, 1});
     CHECK(screen.isModeEnabled(Mode::AutoWrap) == false);
-    CHECK(screen.isModeEnabled(Mode::CursorRestrictedToMargin) == false);
+    CHECK(screen.isModeEnabled(Mode::Origin) == false);
 }
 
 TEST_CASE("Index_outside_margin", "[screen]")
@@ -1319,7 +1319,7 @@ TEST_CASE("CursorNextLine", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetLeftRightMargin{2, 4});
         screen(SetTopBottomMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
         screen(MoveCursorTo{1, 2});
 
         SECTION("normal-1") {
@@ -1363,7 +1363,7 @@ TEST_CASE("CursorPreviousLine", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetLeftRightMargin{2, 4});
         screen(SetTopBottomMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
         screen(MoveCursorTo{3, 3});
         REQUIRE(screen.cursorPosition() == Coordinate{3, 3});
 
@@ -1410,7 +1410,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetTopBottomMargin{2, 4});
         screen(SetLeftRightMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
         screen(MoveCursorTo{3, 2});
 
         screen(ReportCursorPosition{});
@@ -1444,7 +1444,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         screen(SetMode{Mode::LeftRightMargin, true});
         screen(SetTopBottomMargin{2, 4});
         screen(SetLeftRightMargin{2, 4});
-        screen(SetMode{Mode::CursorRestrictedToMargin, true});
+        screen(SetMode{Mode::Origin, true});
         screen(MoveCursorTo{3, 2});
 
         screen(ReportExtendedCursorPosition{});
@@ -1481,9 +1481,9 @@ TEST_CASE("RequestMode", "[screen]")
     }
 
     SECTION("DEC modes") {
-        screen(SetMode{Mode::CursorRestrictedToMargin, true}); // DECOM
-        screen(RequestMode{Mode::CursorRestrictedToMargin});
-        REQUIRE(reply == fmt::format("\033[?{};1$y", to_code(Mode::CursorRestrictedToMargin)));
+        screen(SetMode{Mode::Origin, true}); // DECOM
+        screen(RequestMode{Mode::Origin});
+        REQUIRE(reply == fmt::format("\033[?{};1$y", to_code(Mode::Origin)));
     }
 }
 

@@ -312,7 +312,7 @@ class Screen {
             return state_->enabledModes_.find(m) != end(state_->enabledModes_);
     }
 
-    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::CursorRestrictedToMargin); }
+    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::Origin); }
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(Mode::LeftRightMargin); }
 
   private:
