@@ -86,8 +86,8 @@ string to_string(Mode m)
             return "SmoothScroll";
         case Mode::ReverseVideo:
             return "ReverseVideo";
-        case Mode::CursorRestrictedToMargin:
-            return "CursorRestrictedToMargin";
+        case Mode::Origin:
+            return "Origin";
         case Mode::AutoWrap:
             return "AutoWrap";
         case Mode::PrinterExtend:

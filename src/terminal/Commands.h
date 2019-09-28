@@ -102,7 +102,7 @@ enum class Mode {
      * The starting point for line numbers is independent of the margins.
      * The cursor can move outside of the margins.
      */
-    CursorRestrictedToMargin,
+    Origin,
 
     /**
      * DECAWM - Autowrap Mode.
@@ -122,7 +122,7 @@ enum class Mode {
 
     ShowToolbar,
     BlinkingCursor,
-    VisibleCursor,
+    VisibleCursor, // DECTCEM
     ShowScrollbar,
     UseAlternateScreen,
     BracketedPaste,
@@ -143,7 +143,7 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::Columns132:
         case Mode::SmoothScroll:
         case Mode::ReverseVideo:
-        case Mode::CursorRestrictedToMargin:
+        case Mode::Origin:
         case Mode::AutoWrap:
         case Mode::ShowToolbar:
         case Mode::BlinkingCursor:
@@ -155,6 +155,7 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::BracketedPaste:
             return false;
     }
+    return false; // Should never be reached.
 }
 
 constexpr std::string_view to_code(Mode m)
@@ -172,7 +173,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::Columns132: return "?3";
         case Mode::SmoothScroll: return "?4";
         case Mode::ReverseVideo: return "?5";
-        case Mode::CursorRestrictedToMargin: return "?6";
+        case Mode::Origin: return "?6";
         case Mode::AutoWrap: return "?7";
         case Mode::ShowToolbar: return "?10";
         case Mode::BlinkingCursor: return "?12";

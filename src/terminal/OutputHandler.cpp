@@ -582,7 +582,7 @@ void OutputHandler::setModeDEC(unsigned int mode, bool enable)
             emit<SetMode>(Mode::ReverseVideo, enable);
             break;
         case 6:
-            emit<SetMode>(Mode::CursorRestrictedToMargin, enable);
+            emit<SetMode>(Mode::Origin, enable);
             break;
         case 7:
             emit<SetMode>(Mode::AutoWrap, enable);
