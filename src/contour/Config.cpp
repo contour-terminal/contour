@@ -62,11 +62,25 @@ void softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
         _store = value.as<T>();
 }
 
+void createFileIfNotExists(FileSystem::path const& _path)
+{
+    FileSystemError errorCode;
+    auto const& status = FileSystem::status(_path, errorCode);
+    if (!FileSystem::is_regular_file(status))
+    {
+        ofstream file(_path.string(), ios_base::out);
+        if (!file.good())
+            throw runtime_error{ string("Unable to create config file. ") + (errorCode ? errorCode.message() : "") };
+        file.close();
+    }
+}
+
 void loadConfigFromFile(Config& _config, std::string const& _fileName)
 {
-    YAML::Node doc = YAML::LoadFile(_fileName);
-
     _config.backingFilePath = FileSystem::path{_fileName};
+    createFileIfNotExists(_config.backingFilePath);
+
+    YAML::Node doc = YAML::LoadFile(_fileName);
 
     softLoadValue(doc, "shell", _config.shell);
 
