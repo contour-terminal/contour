@@ -13,9 +13,11 @@
  */
 #pragma once
 
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
+#include <terminal/Util.h>
 
 namespace terminal {
 
@@ -29,8 +31,13 @@ class Modifier {
         Meta = 8,
     };
 
-    constexpr Modifier() : mask_{} {}
     constexpr Modifier(Key _key) : mask_{static_cast<unsigned>(_key)} {}
+
+    constexpr Modifier() = default;
+	constexpr Modifier(Modifier&&) = default;
+	constexpr Modifier(Modifier const&) = default;
+	constexpr Modifier& operator=(Modifier&&) = default;
+	constexpr Modifier& operator=(Modifier const&) = default;
 
     constexpr unsigned value() const noexcept { return mask_; }
 
@@ -50,8 +57,20 @@ class Modifier {
     }
 
   private:
-    unsigned mask_;
+    unsigned mask_ = 0;
 };
+
+constexpr bool operator<(Modifier _lhs, Modifier _rhs) noexcept
+{
+    return _lhs.value() < _rhs.value();
+}
+
+constexpr bool operator==(Modifier _lhs, Modifier _rhs) noexcept
+{
+    return _lhs.value() == _rhs.value();
+}
+
+std::optional<Modifier::Key> parseModifierKey(std::string const& _key);
 
 constexpr bool operator!(Modifier _modifier) noexcept
 {
@@ -166,6 +185,8 @@ enum class Key {
     Numpad_9,
 };
 
+std::optional<Key> parseKey(std::string const& _name);
+
 std::string to_string(Key _key);
 
 struct MouseMoveEvent {
@@ -173,7 +194,7 @@ struct MouseMoveEvent {
     int column;
 };
 
-enum class MouseButtonEvent {
+enum class MouseButton {
     Left,
     Right,
     Middle,
@@ -181,12 +202,60 @@ enum class MouseButtonEvent {
     WheelDown,
 };
 
-using MouseEvent = std::variant<MouseButtonEvent, MouseMoveEvent>;
+using MouseEvent = std::variant<MouseButton, MouseMoveEvent>;
 
 enum class KeyMode {
     Normal,
     Application
 };
+
+struct KeyInputEvent {
+	Modifier modifier{};
+	Key key{};
+};
+
+struct MouseInputEvent {
+    Modifier modifier{};
+    MouseButton mouse{};
+};
+
+using InputEvent = std::variant<KeyInputEvent, MouseInputEvent>;
+
+constexpr Modifier modifier(InputEvent _event) noexcept
+{
+    return std::visit(overloaded{
+        [](KeyInputEvent _keyInput) { return _keyInput.modifier; },
+        [](MouseInputEvent _mouseInput) { return _mouseInput.modifier; },
+    }, _event);
+}
+
+constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
+{
+    if (modifier(_lhs) < modifier(_rhs))
+        return true;
+
+    if (modifier(_lhs) == modifier(_rhs))
+    {
+        if (std::holds_alternative<KeyInputEvent>(_lhs) && std::holds_alternative<KeyInputEvent>(_rhs))
+            return std::get<KeyInputEvent>(_lhs).key < std::get<KeyInputEvent>(_rhs).key;
+        if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
+            return std::get<MouseInputEvent>(_lhs).mouse < std::get<MouseInputEvent>(_rhs).mouse;
+    }
+
+    return false;
+}
+
+constexpr bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
+{
+    if (modifier(_lhs) == modifier(_rhs))
+    {
+        if (std::holds_alternative<KeyInputEvent>(_lhs) && std::holds_alternative<KeyInputEvent>(_rhs))
+            return std::get<KeyInputEvent>(_lhs).key == std::get<KeyInputEvent>(_rhs).key;
+        if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
+            return std::get<MouseInputEvent>(_lhs).mouse == std::get<MouseInputEvent>(_rhs).mouse;
+    }
+    return false;
+}
 
 class InputGenerator {
   public:
@@ -205,7 +274,7 @@ class InputGenerator {
     bool generate(Key _key, Modifier _modifier);
 
     /// Generates input sequence for a mouse button press event.
-    //TODO: void generate(MouseButtonEvent _mouseButton, Modifier _modifier);
+    //TODO: void generate(MouseButton _mouseButton, Modifier _modifier);
 
     /// Generates input sequence for a mouse move event.
     //TODO: void generate(MouseMoveEvent _mouseMove);
@@ -232,3 +301,29 @@ class InputGenerator {
 };
 
 }  // namespace terminal
+
+namespace std {
+	template<>
+	struct hash<terminal::KeyInputEvent> {
+		constexpr size_t operator()(terminal::KeyInputEvent const& _input) const noexcept {
+			return (1 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.key) & 0xFF);
+		}
+	};
+
+	template<>
+	struct hash<terminal::MouseInputEvent> {
+		constexpr size_t operator()(terminal::MouseInputEvent const& _input) const noexcept {
+			return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.mouse) & 0xFF);
+		}
+	};
+
+	template<>
+	struct hash<terminal::InputEvent> {
+		constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
+            return visit(terminal::overloaded{
+                [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
+                [](terminal::MouseInputEvent ev) { return hash<terminal::MouseInputEvent>{}(ev); },
+            }, _input);
+		}
+	};
+}

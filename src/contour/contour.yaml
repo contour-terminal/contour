@@ -18,6 +18,14 @@ background:
     opacity: 0.8
     blur: false
 
+input_mapping:
+    - { mods: [Alt, Control],   key: S,            action: ScreenshotVT }
+    - { mods: [Control, Shift], mouse: WheelUp,    action: IncreaseFontSize }
+    - { mods: [Control, Shift], mouse: WheelDown,  action: DecreaseFontSize }
+    - { mods: [Control, Shift], key: Equal,        action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: Minus,        action: DecreaseFontSize }
+    - { mods: Alt,           key: Enter,        action: ToggleFullscreen }
+
 # Google dark
 colors_google_dark: &colors_google_dark
      # Default colors

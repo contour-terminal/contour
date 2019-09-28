@@ -22,6 +22,24 @@
 #include <string>
 #include "IncludeFilesystem.h"
 
+enum class Action {
+	ToggleFullscreen,
+	ScreenshotVT,
+	IncreaseFontSize,
+	DecreaseFontSize,
+	IncreaseOpacity,
+	DecreaseOpacity,
+	// Quit
+	// CloseTab
+	// OpenTab
+	// FocusNextTab
+	// FocusPreviousTab
+	// CopySelection
+	// PasteSelection
+	// PasteClipboard
+};
+
+using InputMapping = std::unordered_map<terminal::InputEvent, Action>;
 
 struct Config {
     FileSystem::path backingFilePath;
@@ -39,8 +57,8 @@ struct Config {
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
     LogMask loggingMask;
 
-    terminal::ColorProfile colorProfile;
-    // TODO: std::vector<KeyMapping>
+    terminal::ColorProfile colorProfile{};
+    InputMapping inputMapping{};
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);

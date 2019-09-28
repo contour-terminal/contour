@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 
 #include <fmt/format.h>
@@ -303,6 +304,72 @@ inline bool InputGenerator::emit(T(&_sequence)[N])
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
     return true;
+}
+
+optional<Modifier::Key> parseModifierKey(string const& _key)
+{
+	if (_key == "ALT")
+		return Modifier::Key::Alt;
+	if (_key == "CONTROL")
+		return Modifier::Key::Control;
+	if (_key == "SHIFT")
+		return Modifier::Key::Shift;
+	if (_key == "META")
+		return Modifier::Key::Meta;
+	return nullopt;
+}
+
+optional<Key> parseKey(string const& _name)
+{
+    using P = pair<string, Key>;
+	auto static const mapping = unordered_map<string, Key>{
+		P{ "Enter", Key::Enter },
+		P{ "Backspace", Key::Backspace },
+		P{ "Tab", Key::Tab },
+		P{ "Escape", Key::Escape },
+		P{ "F1", Key::F1 },
+		P{ "F2", Key::F2 },
+		P{ "F3", Key::F3 },
+		P{ "F4", Key::F4 },
+		P{ "F5", Key::F5 },
+		P{ "F6", Key::F6 },
+		P{ "F7", Key::F7 },
+		P{ "F8", Key::F8 },
+		P{ "F9", Key::F9 },
+		P{ "F10", Key::F10 },
+		P{ "F11", Key::F11 },
+		P{ "F12", Key::F12 },
+		P{ "DownArrow", Key::DownArrow },
+		P{ "LeftArrow", Key::LeftArrow },
+		P{ "RightArrow", Key::RightArrow },
+		P{ "UpArrow", Key::UpArrow },
+		P{ "Insert", Key::Insert },
+		P{ "Delete", Key::Delete },
+		P{ "Home", Key::Home },
+		P{ "End", Key::End },
+		P{ "PageUp", Key::PageUp },
+		P{ "PageDown", Key::PageDown },
+		P{ "Numpad_NumLock", Key::Numpad_NumLock },
+		P{ "Numpad_Divide", Key::Numpad_Divide },
+		P{ "Numpad_Multiply", Key::Numpad_Multiply },
+		P{ "Numpad_Subtract", Key::Numpad_Subtract },
+		P{ "Numpad_CapsLock", Key::Numpad_CapsLock },
+		P{ "Numpad_Add", Key::Numpad_Add },
+		P{ "Numpad_Decimal", Key::Numpad_Decimal },
+		P{ "Numpad_Enter", Key::Numpad_Enter },
+		P{ "Numpad_Equal", Key::Numpad_Equal },
+		P{ "Numpad_0", Key::Numpad_0 },
+		P{ "Numpad_1", Key::Numpad_1 },
+		P{ "Numpad_2", Key::Numpad_2 },
+		P{ "Numpad_3", Key::Numpad_3 },
+		P{ "Numpad_4", Key::Numpad_4 },
+		P{ "Numpad_5", Key::Numpad_5 },
+		P{ "Numpad_6", Key::Numpad_6 },
+		P{ "Numpad_7", Key::Numpad_7 },
+		P{ "Numpad_8", Key::Numpad_8 },
+		P{ "Numpad_9", Key::Numpad_9 }
+    };
+    return nullopt;
 }
 
 } // namespace terminal

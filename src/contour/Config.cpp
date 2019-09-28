@@ -14,6 +14,7 @@
 #include "Config.h"
 #include "Flags.h"
 #include <terminal/Process.h>
+#include <terminal/InputGenerator.h>
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
 #include <glterminal/GLCursor.h>
@@ -73,6 +74,48 @@ void createFileIfNotExists(FileSystem::path const& _path)
             throw runtime_error{ string("Unable to create config file. ") + (errorCode ? errorCode.message() : "") };
         file.close();
     }
+}
+
+void parseInputMapping(Config& _config, YAML::Node const& _mapping)
+{
+	using namespace terminal;
+
+	// Examples:
+    //     { mods: [Alt, Control],   key: S,            action: ScreenshotVT }
+    //     { mods: [Control, Shift], mouse: WheelDown,  action: DecreaseFontSize }
+
+	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
+		if (!_node)
+			return nullopt;
+		else if (_node.IsScalar())
+			return parseModifierKey(_node.as<string>());
+		else if (_node.IsSequence())
+		{
+			terminal::Modifier mods;
+			for (size_t i = 0; i < _node.size(); ++i)
+			{
+				if (!_node[i].IsScalar())
+					return nullopt;
+				else if (auto const mod = parseModifierKey(_node.as<string>()); mod)
+					mods |= *mod;
+				else
+					return nullopt;
+			}
+			return mods;
+		}
+		else
+			return nullopt;
+	};
+
+	auto const parseKey = [&](YAML::Node const& _node) -> optional<terminal::Key> {
+		return nullopt;
+	};
+
+	auto const parseAction = [&](YAML::Node const& _node) -> optional<Action> {
+		return nullopt;
+	};
+
+	auto const mods = parseModifier(_mapping["mods"]);
 }
 
 void loadConfigFromFile(Config& _config, std::string const& _fileName)
@@ -162,6 +205,11 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
         // TODO: color palette from 16..255
         // TODO: dim colors (maybe put them into the palette at 256..(256+8)?)
     }
+
+	if (auto mapping = doc["input_mapping"]; mapping)
+		if (mapping.IsSequence())
+			for (size_t i = 0; i < mapping.size(); ++i)
+				parseInputMapping(_config, mapping[i]);
 
     if (auto logging = doc["logging"]; logging)
     {
