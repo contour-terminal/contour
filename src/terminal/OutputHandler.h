@@ -114,6 +114,7 @@ class OutputHandler {
     char32_t currentChar_{};
     std::vector<Command> commands_{};
 
+	char leaderSymbol_ = 0;
     std::string intermediateCharacters_{};
     std::vector<unsigned int> parameters_{0};
     unsigned int defaultParameter_ = 0;

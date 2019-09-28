@@ -97,6 +97,11 @@ class Parser {
          */
         Collect,
 
+		/**
+		 * Collects the leading private marker, such as the '?' in `CSI ? Ps h`
+		 */
+		CollectLeader,
+
         /**
          * This action collects the characters of a parameter string for a control sequence or
          * device control sequence and builds a list of parameters. The characters processed by this
@@ -456,6 +461,8 @@ constexpr std::string_view to_string(Parser::Action action)
             return "Clear";
         case Parser::Action::Collect:
             return "Collect";
+        case Parser::Action::CollectLeader:
+            return "CollectLeader";
         case Parser::Action::Param:
             return "Param";
         case Parser::Action::ESC_Dispatch:

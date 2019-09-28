@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/OutputHandler.h>
+#include <terminal/Instructions.h>
 
 #include <terminal/Commands.h>
 #include <terminal/Util.h>
@@ -56,12 +57,16 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
     switch (action)
     {
         case Action::Clear:
+			leaderSymbol_ = 0;
             intermediateCharacters_.clear();
             parameters_.resize(1);
             parameters_[0] = 0;
             defaultParameter_ = 0;
             private_ = false;
             return;
+		case Action::CollectLeader:
+			leaderSymbol_ = static_cast<char>(currentChar());
+			return;
         case Action::Collect:
             intermediateCharacters_.push_back(static_cast<char>(currentChar())); // cast OK, because non-ASCII wouldn't be valid collected chars
             return;
@@ -75,42 +80,7 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 parameters_.back() = parameters_.back() * 10 + (currentChar() - U'0');
             return;
         case Action::CSI_Dispatch:
-            if (intermediateCharacters_.empty())
-                dispatchCSI();
-            else if (intermediateCharacters_ == "?")
-                dispatchCSI_ext();
-            else if (intermediateCharacters_ == "!")
-                dispatchCSI_excl();
-            else if (intermediateCharacters_ == ">")
-                dispatchCSI_gt();
-            else if (intermediateCharacters_ == "'")
-                dispatchCSI_singleQuote();
-            else if (intermediateCharacters_ == "$")
-            {
-                if (currentChar_ == 'p')
-                {
-                    if (parameterCount() == 1)
-                        requestMode(param(0));
-                    else
-                        logInvalidCSI();
-                }
-                else
-                    logUnsupportedCSI();
-            }
-            else if (intermediateCharacters_ == "?$")
-            {
-                if (currentChar_ == 'p')
-                {
-                    if (parameterCount() == 1)
-                        requestModeDEC(param(0));
-                    else
-                        logInvalidCSI();
-                }
-                else
-                    logUnsupportedCSI();
-            }
-            else
-                logUnsupportedCSI();
+			dispatchCSI();
             return;
         case Action::Execute:
             executeControlFunction();
@@ -273,85 +243,6 @@ void OutputHandler::dispatchESC()
     }
 }
 
-void OutputHandler::dispatchCSI_singleQuote()
-{
-    switch (currentChar())
-    {
-        case '~':
-            if (parameterCount() <= 1)
-            {
-                setDefaultParameter(1);
-                emit<DeleteColumns>(param(0));
-            }
-            else
-                logInvalidCSI();
-            break;
-        case '}':
-            if (parameterCount() <= 1)
-            {
-                setDefaultParameter(1);
-                emit<InsertColumns>(param(0));
-            }
-            else
-                logInvalidCSI();
-            break;
-        default:
-            logUnsupportedCSI();
-            break;
-    }
-}
-
-void OutputHandler::dispatchCSI_excl()
-{
-    switch (currentChar())
-    {
-        case 'p':
-            if (parameterCount() == 0)
-                emit<SoftTerminalReset>();
-            else
-                logInvalidCSI();
-            break;
-        default:
-            logUnsupportedCSI();
-    }
-}
-
-void OutputHandler::dispatchCSI_gt()
-{
-    switch (currentChar())
-    {
-        case 'c':
-            // Send Secondary DA
-            if (param(0) == 0)
-                emit<SendTerminalId>();
-            else
-                logInvalidCSI();
-            break;
-        default:
-            logUnsupportedCSI();
-            break;
-    }
-}
-void OutputHandler::dispatchCSI_ext()
-{
-    switch (currentChar())
-    {
-        case '6':
-            emit<ReportExtendedCursorPosition>();
-            break;
-        case 'h':
-            for (size_t i = 0; i < parameterCount(); ++i)
-                setModeDEC(param(i), true);
-            break;
-        case 'l':
-            for (size_t i = 0; i < parameterCount(); ++i)
-                setModeDEC(param(i), false);
-            break;
-        default:
-            logUnsupportedCSI();
-    }
-}
-
 void OutputHandler::dispatchCSI()
 {
     // logDebug("dispatch CSI: {} {} {}", intermediateCharacters_,
@@ -360,50 +251,43 @@ void OutputHandler::dispatchCSI()
     //         [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
     //     static_cast<char>(currentChar()));
 
-#if 0
-    // TODO: some sandbox test code.
-    char leaderSym{};
-    char followerSym{};
-    switch (InstructionDef::makeId(leaderSym, followerSym, static_cast<char>(currentChar())))
+    char const followerSym = intermediateCharacters_.size() == 1
+		? intermediateCharacters_[0]
+		: 0;
+
+    switch (InstructionDef::makeId(leaderSymbol_, followerSym, static_cast<char>(currentChar())))
     {
+        case 'f': // HVP (deprecated, users are recommented to use CUP instead)
+            [[fallthrough]];
         case CUP:
-            //emit<MoveCursorUp>(param(0));
-            break;
-        case CUD:
-            //emit<MoveCursorDown>(param(0));
-            break;
-        default:
-            break;
-    }
-    // end
-#endif
-    switch (currentChar())
-    {
-        case 'A':
+            setDefaultParameter(1);
+            emit<MoveCursorTo>(param(0), param(1));
+			break;
+        case CUU:
             setDefaultParameter(1);
             emit<MoveCursorUp>(param(0));
-            break;
-        case 'B':
+			break;
+        case CUD:
             setDefaultParameter(1);
             emit<MoveCursorDown>(param(0));
-            break;
-        case 'C':
+			break;
+        case CUF:
             setDefaultParameter(1);
             emit<MoveCursorForward>(param(0));
             break;
-        case 'D':
+        case CUB:
             setDefaultParameter(1);
             emit<MoveCursorBackward>(param(0));
             break;
-        case 'F':
+        case CPL:
             setDefaultParameter(1);
             emit<CursorPreviousLine>(param(0));
             break;
-        case 'G':
+        case CHA:
             setDefaultParameter(1);
             emit<MoveCursorToColumn>(param(0));
             break;
-        case 'J':
+		case ED:
             switch (param(0))
             {
                 case 0:
@@ -419,14 +303,8 @@ void OutputHandler::dispatchCSI()
                     emit<ClearScrollbackBuffer>();
                     break;
             }
-            break;
-        case 'f': // HVP (deprecated, users are recommented to use CUP instead)
-            [[fallthrough]];
-        case 'H': // CUP
-            setDefaultParameter(1);
-            emit<MoveCursorTo>(param(0), param(1));
-            break;
-        case 'K':
+			break;
+        case EL:
             setDefaultParameter(0);
             switch (param(0))
             {
@@ -444,42 +322,42 @@ void OutputHandler::dispatchCSI()
                     break;
             }
             break;
-        case 'L':
+        case IL:
             setDefaultParameter(1);
             emit<InsertLines>(param(0));
             break;
-        case 'M':
+        case DL:
             setDefaultParameter(1);
             emit<DeleteLines>(param(0));
             break;
-        case 'P':
+        case DCH:
             setDefaultParameter(1);
             emit<DeleteCharacters>(param(0));
             break;
-        case 'S':
+        case SU:
             setDefaultParameter(1);
             emit<ScrollUp>(param(0));
             break;
-        case 'T':
+        case SD:
             setDefaultParameter(1);
             emit<ScrollDown>(param(0));
             break;
-        case 'X':
+        case ECH:
             setDefaultParameter(1);
             emit<EraseCharacters>(param(0));
             break;
-        case 'c':
+        case DA1:
             // Send Primary DA
             if (param(0) == 0)
                 emit<SendDeviceAttributes>();
             else
                 logInvalidCSI();
             break;
-        case 'd':
+        case VPA:
             setDefaultParameter(1);
             emit<MoveCursorToLine>(param(0));
             break;
-        case 'n':
+        case CPR:
             switch (param(0))
             {
                 case 5:
@@ -493,13 +371,19 @@ void OutputHandler::dispatchCSI()
                     break;
             }
             break;
-        case 'p': // DECRQM
+		case DECRQM:
             if (parameterCount() == 1)
                 requestMode(param(0));
             else
                 logInvalidCSI();
             break;
-        case 'r':
+		case DECRQM_ANSI:
+			if (parameterCount() == 1)
+				requestMode(param(0));
+			else
+				logInvalidCSI();
+			break;
+        case DECSTBM:
         {
             setDefaultParameter(1);
             auto const top = param(0);
@@ -510,7 +394,7 @@ void OutputHandler::dispatchCSI()
             emit<SetTopBottomMargin>(top, bottom);
             break;
         }
-        case 's':
+        case DECSLRM:
         {
             if (parameterCount() != 2)
                 logInvalidCSI();
@@ -525,33 +409,75 @@ void OutputHandler::dispatchCSI()
             }
             break;
         }
-        case 'h':  // set mode
+		case SM:
             for (size_t i = 0; i < parameterCount(); ++i)
                 setMode(param(i), true);
             break;
-        case 'l':  // reset mode
+		case DECSM:
+            for (size_t i = 0; i < parameterCount(); ++i)
+                setModeDEC(param(i), true);
+            break;
+		case RM:
             for (size_t i = 0; i < parameterCount(); ++i)
                 setMode(param(i), false);
             break;
-        case 'm':
+		case DECRM:
+            for (size_t i = 0; i < parameterCount(); ++i)
+                setModeDEC(param(i), false);
+            break;
+		case SGR:
             dispatchGraphicsRendition();
             break;
-        case '@':
+        case ICH:
             setDefaultParameter(1);
             if (parameterCount() == 1)
                 emit<InsertCharacters>(param(0));
             else
                 logInvalidCSI();
             break;
-        case '`': // HPA
+		case HPA:
             if (parameterCount() == 1)
                 emit<HorizontalPositionAbsolute>(param(0));
             else
                 logInvalidCSI();
             break;
-        case 'a': // HPR
+		case HPR:
             if (parameterCount() == 1)
                 emit<HorizontalPositionRelative>(param(0));
+            else
+                logInvalidCSI();
+            break;
+		case DECXCPR:
+            emit<ReportExtendedCursorPosition>();
+            break;
+		case DECSTR:
+            if (parameterCount() == 0)
+                emit<SoftTerminalReset>();
+            else
+                logInvalidCSI();
+            break;
+		case DA2:
+            // Send Secondary DA
+            if (param(0) == 0)
+                emit<SendTerminalId>();
+            else
+                logInvalidCSI();
+            break;
+		case DECDC:
+            if (parameterCount() <= 1)
+            {
+                setDefaultParameter(1);
+                emit<DeleteColumns>(param(0));
+            }
+            else
+                logInvalidCSI();
+            break;
+		case DECIC:
+            if (parameterCount() <= 1)
+            {
+                setDefaultParameter(1);
+                emit<InsertColumns>(param(0));
+            }
             else
                 logInvalidCSI();
             break;

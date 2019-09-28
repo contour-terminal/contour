@@ -165,7 +165,7 @@ ParserTable constexpr ParserTable::get()
     t.transition(State::DCS_Entry, State::DCS_Ignore, 0x3A);
     t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, Range{0x30, 0x39});
     t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, 0x3B);
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::Collect, Range{0x3C, 0x3F});
+    t.transition(State::DCS_Entry, State::DCS_Param, Action::CollectLeader, Range{0x3C, 0x3F});
     t.transition(State::DCS_Entry, State::DCS_PassThrough, Range{0x40, 0x7E});
 
     // DCS_Ignore
@@ -210,7 +210,7 @@ ParserTable constexpr ParserTable::get()
     t.transition(State::CSI_Entry, State::CSI_Ignore, 0x3A);
     t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, Range{0x30, 0x39});
     t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, 0x3B);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Collect, Range{0x3C, 0x3F});
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::CollectLeader, Range{0x3C, 0x3F});
 
     // CSI_Param
     t.event(State::CSI_Param, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
