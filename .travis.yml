@@ -18,5 +18,5 @@ before_install:
   - if [[ "${TRAVIS_OS_NAME}" == "osx" ]]; then brew install freetype fontconfig glew glfw3 glm harfbuzz; fi
 
 script:
-  - cmake . -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_CONTRIB=OFF -dYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF
+  - cmake . -DCMAKE_BUILD_TYPE=Release -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF
   - make all
