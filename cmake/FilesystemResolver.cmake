@@ -12,7 +12,7 @@ else()
 endif()
 
 if(NOT FILESYSTEM_FOUND)
-    include(FindBoost)    
+    include(FindBoost)
     find_package(Boost 1.6 COMPONENTS filesystem REQUIRED)
     if(Boost_FOUND)
         include_directories( ${Boost_INCLUDE_DIRS} )
