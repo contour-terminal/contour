@@ -1,7 +1,8 @@
 #pragma once
 
+#include "IncludeFilesystem.h"
+
 #include <functional>
-#include <filesystem>
 #include <thread>
 
 class FileChangeWatcher {
@@ -12,7 +13,7 @@ class FileChangeWatcher {
     };
     using Notifier = std::function<void(Event)>;
 
-    FileChangeWatcher(std::filesystem::path _filePath, Notifier _notifier);
+    FileChangeWatcher(FileSystem::path _filePath, Notifier _notifier);
     ~FileChangeWatcher();
 
     // stop watching on that file early
@@ -22,7 +23,7 @@ class FileChangeWatcher {
     void watch();
 
   private:
-    std::filesystem::path filePath_;
+    FileSystem::path filePath_;
     Notifier notifier_;
     bool exit_;
     std::thread watcher_;

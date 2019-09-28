@@ -66,7 +66,7 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
 {
     YAML::Node doc = YAML::LoadFile(_fileName);
 
-    _config.backingFilePath = filesystem::path{_fileName};
+    _config.backingFilePath = FileSystem::path{_fileName};
 
     softLoadValue(doc, "shell", _config.shell);
 
@@ -152,7 +152,7 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
     if (auto logging = doc["logging"]; logging)
     {
         if (auto filePath = logging["file"]; filePath)
-            _config.logFilePath = {filesystem::path{filePath.as<string>()}};
+            _config.logFilePath = {FileSystem::path{filePath.as<string>()}};
 
         auto constexpr mappings = array{
             pair{"parseErrors", LogMask::ParserError},

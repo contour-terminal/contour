@@ -18,7 +18,7 @@
 
 #include <cctype>
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 #define HAVE_FONTCONFIG
 #endif
 

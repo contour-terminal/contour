@@ -4,7 +4,7 @@
 
 using namespace std;
 
-FileChangeWatcher::FileChangeWatcher(filesystem::path _filePath, Notifier _notifier) :
+FileChangeWatcher::FileChangeWatcher(FileSystem::path _filePath, Notifier _notifier) :
     filePath_{ move(_filePath) },
     notifier_{ move(_notifier) },
     exit_{ false },
@@ -20,13 +20,13 @@ FileChangeWatcher::~FileChangeWatcher()
 
 void FileChangeWatcher::watch()
 {
-    filesystem::file_time_type lastWriteTime = filesystem::last_write_time(filePath_);
+    auto lastWriteTime = FileSystem::last_write_time(filePath_);
     while (!exit_)
     {
-        if (!filesystem::exists(filePath_))
+        if (!FileSystem::exists(filePath_))
             notifier_(Event::Erased);
 
-        auto lwt = filesystem::last_write_time(filePath_);
+        auto lwt = FileSystem::last_write_time(filePath_);
         if (lwt != lastWriteTime)
         {
             lastWriteTime = lwt;

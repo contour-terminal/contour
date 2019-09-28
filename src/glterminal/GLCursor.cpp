@@ -59,9 +59,10 @@ auto constexpr vertexShader = R"(
 auto constexpr fragmentShader = R"(
     #version 140
     uniform vec3 u_color;
+    out vec4 outColor;
     void main()
     {
-        gl_FragColor = vec4(u_color, 1.0);
+        outColor = vec4(u_color, 1.0);
     }
 )";
 

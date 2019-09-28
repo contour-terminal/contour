@@ -15,6 +15,7 @@
 #include <terminal/PseudoTerminal.h>
 
 #include <cassert>
+#include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -35,7 +36,7 @@ using namespace std;
 namespace {
     string getLastErrorAsString()
     {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
         return strerror(errno);
 #else
         DWORD errorMessageID = GetLastError();
@@ -114,7 +115,7 @@ Process::Process(
     vector<string> const& _args,
     Environment const& _env)
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     pid_ = fork();
     switch (pid_)
     {
@@ -169,7 +170,7 @@ Process::Process(
 
 Process::~Process()
 {
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     if (pid_ != -1)
         (void) wait();
 #else
@@ -186,7 +187,7 @@ optional<Process::ExitStatus> Process::checkStatus() const
     if (exitStatus_.has_value())
         return exitStatus_;
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     assert(pid_ != -1);
     int status = 0;
     if (waitpid(pid_, &status, WNOHANG) == -1)
@@ -220,7 +221,7 @@ Process::ExitStatus Process::wait()
     if (exitStatus_.has_value())
         return exitStatus_.value();
 
-#if defined(__unix__)
+#if defined(__unix__) || defined(__APPLE__)
     assert(pid_ != -1);
     int status = 0;
     if (waitpid(pid_, &status, 0) == -1)

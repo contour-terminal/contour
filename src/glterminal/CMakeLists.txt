@@ -3,7 +3,7 @@ find_package(OpenGL REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
-if("${CMAKE_SYSTEM}" MATCHES "Linux")
+if("${CMAKE_SYSTEM}" MATCHES "Linux" OR APPLE)
 	#find_package(fontconfig)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
@@ -26,7 +26,7 @@ add_library(glterminal
 target_include_directories(glterminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
 set(GLTERMINAL_LIBRARIES GLEW::GLEW OpenGL::GL glm Freetype::Freetype terminal)
-if("${CMAKE_SYSTEM}" MATCHES "Linux")
+if("${CMAKE_SYSTEM}" MATCHES "Linux" OR APPLE)
     list(APPEND GLTERMINAL_LIBRARIES fontconfig)
     list(APPEND GLTERMINAL_LIBRARIES PkgConfig::harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Windows")

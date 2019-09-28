@@ -13,10 +13,11 @@
  */
 #pragma once
 
+#include "IncludeFilesystem.h"
+
 #include <terminal/InputGenerator.h>
 #include <terminal/Logger.h>
 
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -68,7 +69,7 @@ constexpr bool operator!=(LogMask lhs, unsigned rhs) noexcept
 /// glterm Logging endpoint.
 class GLLogger {
   public:
-    GLLogger(LogMask _mask, std::filesystem::path _logfile);
+    GLLogger(LogMask _mask, FileSystem::path _logfile);
     GLLogger(LogMask _mask, std::ostream* _sink);
     GLLogger() : GLLogger{LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput, nullptr} {}
     GLLogger(GLLogger const&) = delete;
