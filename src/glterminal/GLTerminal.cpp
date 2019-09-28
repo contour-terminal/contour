@@ -276,7 +276,7 @@ glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
     };
 }
 
-std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(Screen::GraphicsAttributes const& _attributes) const
+std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
 {
     float const opacity = [=]() {
         if (_attributes.styles & CharacterStyleMask::Hidden)

@@ -115,18 +115,27 @@ constexpr bool operator!(CharacterStyleMask a) noexcept
 	return a.mask() == 0;
 }
 
-/**
- * Terminal Screen.
- *
- * Implements the all Command types and applies all instruction
- * to an internal screen buffer, maintaining width, height, and history,
- * allowing the object owner to control which part of the screen (or history)
- * to be viewn.
- */
-class Screen {
-  public:
-    using Hook = std::function<void(std::vector<Command> const& commands)>;
 
+struct Margin {
+	struct Range {
+		unsigned int from;
+		unsigned int to;
+
+		constexpr unsigned int length() const noexcept { return to - from + 1; }
+		constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
+		constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
+
+		constexpr bool contains(unsigned int _value) const noexcept { return from <= _value && _value <= to; }
+	};
+
+	Range vertical{}; // top-bottom
+	Range horizontal{}; // left-right
+};
+
+/**
+ * Screen Buffer, managing a single screen buffer.
+ */
+struct ScreenBuffer {
     /// Character graphics rendition information.
     struct GraphicsAttributes {
         Color foregroundColor{DefaultColor{}};
@@ -140,6 +149,9 @@ class Screen {
         GraphicsAttributes attributes{};
     };
 
+	using Line = std::vector<Cell>;
+	using Lines = std::list<Line>;
+
     struct Cursor : public Coordinate {
         bool visible = true;
 
@@ -150,6 +162,135 @@ class Screen {
         }
     };
 
+	// Savable states for DECSC & DECRC
+	struct SavedState {
+		Coordinate cursorPosition;
+		GraphicsAttributes graphicsRendition{};
+		// TODO: CharacterSet for GL and GR
+		bool autowrap = false;
+		bool originMode = false;
+		// TODO: Selective Erase Attribute (DECSCA)
+		// TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
+	};
+
+	explicit ScreenBuffer(WindowSize const& _size)
+		: size_{ _size },
+		  margin_{
+			  {1, _size.rows},
+			  {1, _size.columns}
+		  },
+		  lines{ _size.rows, Line{_size.columns, Cell{}} }
+	{
+		verifyState();
+	}
+
+	WindowSize size_;
+	Margin margin_;
+	std::set<Mode> enabledModes_{};
+	Cursor cursor{};
+	Lines lines;
+	Lines savedLines{};
+	bool autoWrap{false};
+	bool wrapPending{false};
+	bool cursorRestrictedToMargin{false};
+	unsigned int tabWidth{8};
+	GraphicsAttributes graphicsRendition{};
+	std::stack<SavedState> savedStates{};
+
+	Lines::iterator currentLine{std::begin(lines)};
+	Line::iterator currentColumn{std::begin(*currentLine)};
+
+	void appendChar(char32_t ch);
+
+	// Applies LF but also moves cursor to given column @p _column.
+	void linefeed(cursor_pos_t _column);
+
+	void resize(WindowSize const& _winSize);
+	WindowSize const& size() const noexcept { return size_; }
+	[[deprecated]] cursor_pos_t numLines() const noexcept { return size_.rows; }
+	[[deprecated]] cursor_pos_t numColumns() const noexcept { return size_.columns; }
+
+	void scrollUp(cursor_pos_t n);
+	void scrollUp(cursor_pos_t n, Margin const& margin);
+	void scrollDown(cursor_pos_t n);
+	void scrollDown(cursor_pos_t n, Margin const& margin);
+	void deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n);
+	void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
+	void insertColumns(cursor_pos_t _n);
+
+	void setMode(Mode _mode, bool _enable);
+
+	void verifyState() const;
+	void saveState();
+	void restoreState();
+	void updateCursorIterators();
+
+	constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
+
+	constexpr Coordinate cursorPosition() const noexcept {
+		if (!cursorRestrictedToMargin)
+			return realCursorPosition();
+		else
+			return Coordinate{
+				cursor.row - margin_.vertical.from + 1,
+				cursor.column - margin_.horizontal.from + 1
+			};
+	}
+
+	constexpr Coordinate origin() const noexcept {
+		if (cursorRestrictedToMargin)
+			return {margin_.vertical.from, margin_.horizontal.from};
+		else
+			return {1, 1};
+	}
+
+	Cell& at(cursor_pos_t row, cursor_pos_t col);
+	Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
+
+	/// Retrieves the cell at given cursor, respecting origin mode.
+	Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col);
+
+	/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
+	Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
+	{
+		if (!cursorRestrictedToMargin)
+			return pos;
+		else
+			return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
+	}
+
+	/// Clamps given coordinates, respecting DECOM (Origin Mode).
+	Coordinate clampCoordinate(Coordinate const& to) const noexcept
+	{
+		if (!cursorRestrictedToMargin)
+			return {
+				std::clamp(to.row, cursor_pos_t{ 1 }, size_.rows),
+				std::clamp(to.column, cursor_pos_t{ 1 }, size_.columns)
+			};
+		else
+			return {
+				std::clamp(to.row, cursor_pos_t{ 1 }, margin_.vertical.to),
+				std::clamp(to.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
+			};
+	}
+
+	void moveCursorTo(Coordinate to);
+};
+
+/**
+ * Terminal Screen.
+ *
+ * Implements the all Command types and applies all instruction
+ * to an internal screen buffer, maintaining width, height, and history,
+ * allowing the object owner to control which part of the screen (or history)
+ * to be viewn.
+ */
+class Screen {
+  public:
+    using Hook = std::function<void(std::vector<Command> const& commands)>;
+
+	using Cell = ScreenBuffer::Cell;
+	using Cursor = ScreenBuffer::Cursor;
     using Reply = std::function<void(std::string const&)>;
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
     using ModeSwitchCallback = std::function<void(bool)>;
@@ -329,145 +470,9 @@ class Screen {
         reply(fmt::format(fmt, std::forward<Args>(args)...));
     }
 
-    struct Range {
-        unsigned int from;
-        unsigned int to;
-
-        constexpr unsigned int length() const noexcept { return to - from + 1; }
-        constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
-        constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
-
-        constexpr bool contains(unsigned int _value) const noexcept { return from <= _value && _value <= to; }
-    };
-
-    struct Margin {
-        Range vertical{}; // top-bottom
-        Range horizontal{}; // left-right
-    };
-
-  private:
-    struct Buffer {
-        using Line = std::vector<Cell>;
-        using Lines = std::list<Line>;
-
-        // Savable states for DECSC & DECRC
-        struct SavedState {
-            Coordinate cursorPosition;
-            GraphicsAttributes graphicsRendition{};
-            // TODO: CharacterSet for GL and GR
-            bool autowrap = false;
-            bool originMode = false;
-            // TODO: Selective Erase Attribute (DECSCA)
-            // TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
-        };
-
-        explicit Buffer(WindowSize const& _size)
-            : size_{ _size },
-              margin_{
-                  {1, _size.rows},
-                  {1, _size.columns}
-              },
-              lines{ _size.rows, Line{_size.columns, Cell{}} }
-        {
-            verifyState();
-        }
-
-        WindowSize size_;
-        Margin margin_;
-        std::set<Mode> enabledModes_{};
-        Cursor cursor{};
-        Lines lines;
-        Lines savedLines{};
-        bool autoWrap{false};
-        bool wrapPending{false};
-        bool cursorRestrictedToMargin{false};
-        unsigned int tabWidth{8};
-        GraphicsAttributes graphicsRendition{};
-        std::stack<SavedState> savedStates{};
-
-        Lines::iterator currentLine{std::begin(lines)};
-        Line::iterator currentColumn{std::begin(*currentLine)};
-
-        void appendChar(char32_t ch);
-
-        // Applies LF but also moves cursor to given column @p _column.
-        void linefeed(cursor_pos_t _column);
-
-        void resize(WindowSize const& _winSize);
-        WindowSize const& size() const noexcept { return size_; }
-        [[deprecated]] cursor_pos_t numLines() const noexcept { return size_.rows; }
-        [[deprecated]] cursor_pos_t numColumns() const noexcept { return size_.columns; }
-
-        void scrollUp(cursor_pos_t n);
-        void scrollUp(cursor_pos_t n, Margin const& margin);
-        void scrollDown(cursor_pos_t n);
-        void scrollDown(cursor_pos_t n, Margin const& margin);
-        void deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n);
-        void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
-        void insertColumns(cursor_pos_t _n);
-
-        void setMode(Mode _mode, bool _enable);
-
-        void verifyState() const;
-        void saveState();
-        void restoreState();
-        void updateCursorIterators();
-
-        constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
-
-        constexpr Coordinate cursorPosition() const noexcept {
-            if (!cursorRestrictedToMargin)
-                return realCursorPosition();
-            else
-                return Coordinate{
-                    cursor.row - margin_.vertical.from + 1,
-                    cursor.column - margin_.horizontal.from + 1
-                };
-        }
-
-        constexpr Coordinate origin() const noexcept {
-            if (cursorRestrictedToMargin)
-                return {margin_.vertical.from, margin_.horizontal.from};
-            else
-                return {1, 1};
-        }
-
-        Cell& at(cursor_pos_t row, cursor_pos_t col);
-        Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
-
-        /// Retrieves the cell at given cursor, respecting origin mode.
-        Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col);
-
-		/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
-		Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
-		{
-			if (!cursorRestrictedToMargin)
-				return pos;
-			else
-				return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
-		}
-
-		/// Clamps given coordinates, respecting DECOM (Origin Mode).
-		Coordinate clampCoordinate(Coordinate const& to) const noexcept
-		{
-			if (!cursorRestrictedToMargin)
-				return {
-					std::clamp(to.row, cursor_pos_t{ 1 }, size_.rows),
-					std::clamp(to.column, cursor_pos_t{ 1 }, size_.columns)
-				};
-			else
-				return {
-					std::clamp(to.row, cursor_pos_t{ 1 }, margin_.vertical.to),
-					std::clamp(to.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
-				};
-		}
-
-		void moveCursorTo(Coordinate to);
-    };
-
   public:
     Margin const& margin() const noexcept { return state_->margin_; }
-    Buffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
+    ScreenBuffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
 
     void setTabWidth(unsigned int _value)
     {
@@ -494,21 +499,21 @@ class Screen {
     OutputHandler handler_;
     Parser parser_;
 
-    Buffer primaryBuffer_;
-    Buffer alternateBuffer_;
-    Buffer* state_;
+    ScreenBuffer primaryBuffer_;
+    ScreenBuffer alternateBuffer_;
+    ScreenBuffer* state_;
 
     WindowSize size_;
 };
 
-constexpr bool operator==(Screen::GraphicsAttributes const& a, Screen::GraphicsAttributes const& b) noexcept
+constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
 {
     return a.backgroundColor == b.backgroundColor
         && a.foregroundColor == b.foregroundColor
         && a.styles == b.styles;
 }
 
-constexpr bool operator==(Screen::Cell const& a, Screen::Cell const& b) noexcept
+constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) noexcept
 {
     return a.character == b.character && a.attributes == b.attributes;
 }

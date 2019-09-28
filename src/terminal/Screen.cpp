@@ -52,7 +52,7 @@ string to_string(CharacterStyleMask _mask)
     return out;
 }
 
-void Screen::Buffer::resize(WindowSize const& _newSize)
+void ScreenBuffer::resize(WindowSize const& _newSize)
 {
     if (_newSize.rows > size_.rows)
     {
@@ -117,8 +117,8 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
 
     // Reset margin to their default.
     margin_ = Margin{
-        Range{1, _newSize.rows},
-        Range{1, _newSize.columns}
+		Margin::Range{1, _newSize.rows},
+        Margin::Range{1, _newSize.columns}
     };
     // TODO: find out what to do with DECOM mode. Reset it to?
 
@@ -127,7 +127,7 @@ void Screen::Buffer::resize(WindowSize const& _newSize)
     updateCursorIterators();
 }
 
-void Screen::Buffer::saveState()
+void ScreenBuffer::saveState()
 {
     // https://vt100.net/docs/vt510-rm/DECSC.html
 
@@ -142,7 +142,7 @@ void Screen::Buffer::saveState()
     });
 }
 
-void Screen::Buffer::restoreState()
+void ScreenBuffer::restoreState()
 {
     if (!savedStates.empty())
     {
@@ -154,7 +154,7 @@ void Screen::Buffer::restoreState()
     }
 }
 
-void Screen::Buffer::setMode(Mode _mode, bool _enable)
+void ScreenBuffer::setMode(Mode _mode, bool _enable)
 {
     if (_mode != Mode::UseAlternateScreen)
     {
@@ -181,14 +181,14 @@ void Screen::Buffer::setMode(Mode _mode, bool _enable)
     }
 }
 
-void Screen::Buffer::moveCursorTo(Coordinate to)
+void ScreenBuffer::moveCursorTo(Coordinate to)
 {
     wrapPending = false;
     cursor = clampCoordinate(toRealCoordinate(to));
     updateCursorIterators();
 }
 
-Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
+Screen::Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
 {
     if (cursorRestrictedToMargin)
     {
@@ -198,7 +198,7 @@ Screen::Cell& Screen::Buffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
     return at(row, col);
 }
 
-Screen::Cell& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col)
+Screen::Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
 {
     assert(_row >= 1 && _row <= size_.rows);
     assert(_col >= 1 && _col <= size_.columns);
@@ -207,12 +207,12 @@ Screen::Cell& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col)
     return (*next(begin(lines), _row - 1))[_col - 1];
 }
 
-Screen::Cell const& Screen::Buffer::at(cursor_pos_t _row, cursor_pos_t _col) const
+Screen::Cell const& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col) const
 {
-    return const_cast<Buffer*>(this)->at(_row, _col);
+    return const_cast<ScreenBuffer*>(this)->at(_row, _col);
 }
 
-void Screen::Buffer::linefeed(cursor_pos_t _newColumn)
+void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
 {
     wrapPending = false;
 
@@ -234,7 +234,7 @@ void Screen::Buffer::linefeed(cursor_pos_t _newColumn)
     verifyState();
 }
 
-void Screen::Buffer::appendChar(char32_t ch)
+void ScreenBuffer::appendChar(char32_t ch)
 {
     verifyState();
 
@@ -258,14 +258,14 @@ void Screen::Buffer::appendChar(char32_t ch)
     }
 }
 
-void Screen::Buffer::scrollUp(cursor_pos_t v_n)
+void ScreenBuffer::scrollUp(cursor_pos_t v_n)
 {
     scrollUp(v_n, margin_);
 }
 
-void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
+void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 {
-    if (margin.horizontal != Range{1, size_.columns})
+    if (margin.horizontal != Margin::Range{1, size_.columns})
     {
         // a full "inside" scroll-up
         auto const marginHeight = margin.vertical.length();
@@ -299,7 +299,7 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             );
         }
     }
-    else if (margin.vertical == Range{1, size_.rows})
+    else if (margin.vertical == Margin::Range{1, size_.rows})
     {
         // full-screen scroll-up
         auto const n = min(v_n, size_.rows);
@@ -342,17 +342,17 @@ void Screen::Buffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
     updateCursorIterators();
 }
 
-void Screen::Buffer::scrollDown(cursor_pos_t v_n)
+void ScreenBuffer::scrollDown(cursor_pos_t v_n)
 {
     scrollDown(v_n, margin_);
 }
 
-void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
+void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
 {
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
 
-    if (_margin.horizontal != Range{1, size_.columns})
+    if (_margin.horizontal != Margin::Range{1, size_.columns})
     {
         // full "inside" scroll-down
         if (n < marginHeight)
@@ -406,7 +406,7 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
             );
         }
     }
-    else if (_margin.vertical == Range{1, size_.rows})
+    else if (_margin.vertical == Margin::Range{1, size_.rows})
     {
         rotate(
             begin(lines),
@@ -451,7 +451,7 @@ void Screen::Buffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     updateCursorIterators();
 }
 
-void Screen::Buffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
+void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 {
     auto line = next(begin(lines), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
@@ -472,7 +472,7 @@ void Screen::Buffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 }
 
 /// Inserts @p _n characters at given line @p _lineNo.
-void Screen::Buffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
+void ScreenBuffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 {
     auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
     auto line = next(begin(lines), _lineNo - 1);
@@ -493,13 +493,13 @@ void Screen::Buffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
     );
 }
 
-void Screen::Buffer::insertColumns(cursor_pos_t _n)
+void ScreenBuffer::insertColumns(cursor_pos_t _n)
 {
     for (cursor_pos_t lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
         insertChars(lineNo, _n);
 }
 
-void Screen::Buffer::updateCursorIterators()
+void ScreenBuffer::updateCursorIterators()
 {
     // update iterators
     currentLine = next(begin(lines), cursor.row - 1);
@@ -508,7 +508,7 @@ void Screen::Buffer::updateCursorIterators()
     verifyState();
 }
 
-void Screen::Buffer::verifyState() const
+void ScreenBuffer::verifyState() const
 {
     assert(size_.rows == lines.size());
 
@@ -1202,8 +1202,8 @@ void Screen::resetSoft()
 
 void Screen::resetHard()
 {
-    primaryBuffer_ = Buffer{size_};
-    alternateBuffer_ = Buffer{size_};
+    primaryBuffer_ = ScreenBuffer{size_};
+    alternateBuffer_ = ScreenBuffer{size_};
     state_ = &primaryBuffer_;
 }
 

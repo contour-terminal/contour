@@ -99,8 +99,8 @@ class GLTerminal {
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
-    using GraphicsAttributes = terminal::Screen::GraphicsAttributes;
-    using Cell = terminal::Screen::Cell;
+    using GraphicsAttributes = terminal::ScreenBuffer::GraphicsAttributes;
+    using Cell = terminal::ScreenBuffer::Cell;
 
     /// Renders and then clears current cell group if current @p _cell cannot be appended, or appends to current cell group otherwise.
     void fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
