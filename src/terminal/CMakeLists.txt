@@ -11,6 +11,7 @@ if(MSVC)
 endif()
 
 set(terminal_HEADERS
+    Instructions.h
     Color.h
     Commands.h
     InputGenerator.h

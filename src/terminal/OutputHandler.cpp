@@ -360,6 +360,23 @@ void OutputHandler::dispatchCSI()
     //         [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
     //     static_cast<char>(currentChar()));
 
+#if 0
+    // TODO: some sandbox test code.
+    char leaderSym{};
+    char followerSym{};
+    switch (InstructionDef::makeId(leaderSym, followerSym, static_cast<char>(currentChar())))
+    {
+        case CUP:
+            //emit<MoveCursorUp>(param(0));
+            break;
+        case CUD:
+            //emit<MoveCursorDown>(param(0));
+            break;
+        default:
+            break;
+    }
+    // end
+#endif
     switch (currentChar())
     {
         case 'A':
