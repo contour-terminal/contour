@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/OutputHandler.h>
-#include <terminal/Instructions.h>
+#include <terminal/ControlFunctionDef.h>
 
 #include <terminal/Commands.h>
 #include <terminal/Util.h>
@@ -255,9 +255,10 @@ void OutputHandler::dispatchCSI()
 		? intermediateCharacters_[0]
 		: 0;
 
-    switch (InstructionDef::makeId(leaderSymbol_, followerSym, static_cast<char>(currentChar())))
+    switch (ControlFunctionDef::makeId(leaderSymbol_, followerSym, static_cast<char>(currentChar())))
     {
-        case 'f': // HVP (deprecated, users are recommented to use CUP instead)
+        case HVP:
+            // deprecated, use CUP instead.
             [[fallthrough]];
         case CUP:
             setDefaultParameter(1);

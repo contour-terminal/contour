@@ -11,9 +11,9 @@ if(MSVC)
 endif()
 
 set(terminal_HEADERS
-    Instructions.h
     Color.h
     Commands.h
+    ControlFunctionDef.h
     InputGenerator.h
     OutputGenerator.h
     OutputHandler.h
@@ -29,6 +29,7 @@ set(terminal_HEADERS
 set(terminal_SOURCES
     Color.cpp
     Commands.cpp
+    ControlFunctionDef.cpp
     InputGenerator.cpp
     OutputGenerator.cpp
     OutputHandler.cpp
