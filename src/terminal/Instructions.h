@@ -54,8 +54,8 @@ constexpr InstructionDef DCH{std::nullopt, std::nullopt, 'P', VTType::VT100, "DC
 constexpr InstructionDef DECDC{'\'', std::nullopt, '~', VTType::VT100, "DECDC", "Delete column"};
 constexpr InstructionDef DECIC{'\'', std::nullopt, '}', VTType::VT100, "DECIC", "Insert column"};
 constexpr InstructionDef DECRM{'?', std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode"};
-constexpr InstructionDef DECRQM_ANSI{std::nullopt, std::nullopt, 'p', VTType::VT100, "DECRQM", "Request ANSI-mode"};
-constexpr InstructionDef DECRQM{'?', std::nullopt, 'p', VTType::VT100, "DECRQM_ANSI", "Request DEC-mode"};
+constexpr InstructionDef DECRQM_ANSI{std::nullopt, '$', 'p', VTType::VT100, "DECRQM_ANSI", "Request ANSI-mode"};
+constexpr InstructionDef DECRQM{'?', '$', 'p', VTType::VT100, "DECRQM", "Request DEC-mode"};
 constexpr InstructionDef DECSLRM{std::nullopt, std::nullopt, 's', VTType::VT100, "DECSLRM", "Set left/right margin"};
 constexpr InstructionDef DECSM{'?', std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode"};
 constexpr InstructionDef DECSTBM{std::nullopt, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin"};
