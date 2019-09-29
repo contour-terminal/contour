@@ -308,67 +308,74 @@ inline bool InputGenerator::emit(T(&_sequence)[N])
 
 optional<Modifier::Key> parseModifierKey(string const& _key)
 {
-	if (_key == "ALT")
+    auto const key = toUpper(_key);
+	if (key == "ALT")
 		return Modifier::Key::Alt;
-	if (_key == "CONTROL")
+	if (key == "CONTROL")
 		return Modifier::Key::Control;
-	if (_key == "SHIFT")
+	if (key == "SHIFT")
 		return Modifier::Key::Shift;
-	if (_key == "META")
+	if (key == "META")
 		return Modifier::Key::Meta;
 	return nullopt;
 }
 
 optional<Key> parseKey(string const& _name)
 {
-    using P = pair<string, Key>;
-	auto static const mapping = unordered_map<string, Key>{
-		P{ "Enter", Key::Enter },
-		P{ "Backspace", Key::Backspace },
-		P{ "Tab", Key::Tab },
-		P{ "Escape", Key::Escape },
-		P{ "F1", Key::F1 },
-		P{ "F2", Key::F2 },
-		P{ "F3", Key::F3 },
-		P{ "F4", Key::F4 },
-		P{ "F5", Key::F5 },
-		P{ "F6", Key::F6 },
-		P{ "F7", Key::F7 },
-		P{ "F8", Key::F8 },
-		P{ "F9", Key::F9 },
-		P{ "F10", Key::F10 },
-		P{ "F11", Key::F11 },
-		P{ "F12", Key::F12 },
-		P{ "DownArrow", Key::DownArrow },
-		P{ "LeftArrow", Key::LeftArrow },
-		P{ "RightArrow", Key::RightArrow },
-		P{ "UpArrow", Key::UpArrow },
-		P{ "Insert", Key::Insert },
-		P{ "Delete", Key::Delete },
-		P{ "Home", Key::Home },
-		P{ "End", Key::End },
-		P{ "PageUp", Key::PageUp },
-		P{ "PageDown", Key::PageDown },
-		P{ "Numpad_NumLock", Key::Numpad_NumLock },
-		P{ "Numpad_Divide", Key::Numpad_Divide },
-		P{ "Numpad_Multiply", Key::Numpad_Multiply },
-		P{ "Numpad_Subtract", Key::Numpad_Subtract },
-		P{ "Numpad_CapsLock", Key::Numpad_CapsLock },
-		P{ "Numpad_Add", Key::Numpad_Add },
-		P{ "Numpad_Decimal", Key::Numpad_Decimal },
-		P{ "Numpad_Enter", Key::Numpad_Enter },
-		P{ "Numpad_Equal", Key::Numpad_Equal },
-		P{ "Numpad_0", Key::Numpad_0 },
-		P{ "Numpad_1", Key::Numpad_1 },
-		P{ "Numpad_2", Key::Numpad_2 },
-		P{ "Numpad_3", Key::Numpad_3 },
-		P{ "Numpad_4", Key::Numpad_4 },
-		P{ "Numpad_5", Key::Numpad_5 },
-		P{ "Numpad_6", Key::Numpad_6 },
-		P{ "Numpad_7", Key::Numpad_7 },
-		P{ "Numpad_8", Key::Numpad_8 },
-		P{ "Numpad_9", Key::Numpad_9 }
+	auto static constexpr mappings = array{
+		pair{ "Enter"sv, Key::Enter },
+		pair{ "Backspace"sv, Key::Backspace },
+		pair{ "Tab"sv, Key::Tab },
+		pair{ "Escape"sv, Key::Escape },
+		pair{ "F1"sv, Key::F1 },
+		pair{ "F2"sv, Key::F2 },
+		pair{ "F3"sv, Key::F3 },
+		pair{ "F4"sv, Key::F4 },
+		pair{ "F5"sv, Key::F5 },
+		pair{ "F6"sv, Key::F6 },
+		pair{ "F7"sv, Key::F7 },
+		pair{ "F8"sv, Key::F8 },
+		pair{ "F9"sv, Key::F9 },
+		pair{ "F10"sv, Key::F10 },
+		pair{ "F11"sv, Key::F11 },
+		pair{ "F12"sv, Key::F12 },
+		pair{ "DownArrow"sv, Key::DownArrow },
+		pair{ "LeftArrow"sv, Key::LeftArrow },
+		pair{ "RightArrow"sv, Key::RightArrow },
+		pair{ "UpArrow"sv, Key::UpArrow },
+		pair{ "Insert"sv, Key::Insert },
+		pair{ "Delete"sv, Key::Delete },
+		pair{ "Home"sv, Key::Home },
+		pair{ "End"sv, Key::End },
+		pair{ "PageUp"sv, Key::PageUp },
+		pair{ "PageDown"sv, Key::PageDown },
+		pair{ "Numpad_NumLock"sv, Key::Numpad_NumLock },
+		pair{ "Numpad_Divide"sv, Key::Numpad_Divide },
+		pair{ "Numpad_Multiply"sv, Key::Numpad_Multiply },
+		pair{ "Numpad_Subtract"sv, Key::Numpad_Subtract },
+		pair{ "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
+		pair{ "Numpad_Add"sv, Key::Numpad_Add },
+		pair{ "Numpad_Decimal"sv, Key::Numpad_Decimal },
+		pair{ "Numpad_Enter"sv, Key::Numpad_Enter },
+		pair{ "Numpad_Equal"sv, Key::Numpad_Equal },
+		pair{ "Numpad_0"sv, Key::Numpad_0 },
+		pair{ "Numpad_1"sv, Key::Numpad_1 },
+		pair{ "Numpad_2"sv, Key::Numpad_2 },
+		pair{ "Numpad_3"sv, Key::Numpad_3 },
+		pair{ "Numpad_4"sv, Key::Numpad_4 },
+		pair{ "Numpad_5"sv, Key::Numpad_5 },
+		pair{ "Numpad_6"sv, Key::Numpad_6 },
+		pair{ "Numpad_7"sv, Key::Numpad_7 },
+		pair{ "Numpad_8"sv, Key::Numpad_8 },
+		pair{ "Numpad_9"sv, Key::Numpad_9 }
     };
+
+    auto const name = toLower(_name);
+
+    for (auto const mapping: mappings)
+        if (name == toLower(mapping.first))
+            return mapping.second;
+
     return nullopt;
 }
 

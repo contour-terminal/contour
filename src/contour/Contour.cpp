@@ -259,24 +259,59 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
     {
         case terminal::Modifier::Control: // increase/decrease font size
             if (vertical == VerticalDirection::Up)
-                setFontSize(config_.fontSize + 1, true);
+                handleAction(Action::IncreaseFontSize);
             else
-                setFontSize(config_.fontSize - 1, true);
+                handleAction(Action::DecreaseFontSize);
             break;
         case terminal::Modifier::Alt: // TODO: increase/decrease transparency
             if (vertical == VerticalDirection::Up)
-                ++config_.backgroundOpacity;
+                handleAction(Action::IncreaseOpacity);
             else
-                --config_.backgroundOpacity;
-            terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
-            screenDirty_ = true;
-            glfwPostEmptyEvent();
+                handleAction(Action::DecreaseOpacity);
             break;
         case terminal::Modifier::None: // TODO: scroll in history
             break;
         default:
             break;
     }
+}
+
+void Contour::handleAction(Action _action)
+{
+    switch (_action)
+    {
+        case Action::ToggleFullscreen:
+            window_.toggleFullScreen();
+            break;
+        case Action::IncreaseFontSize:
+            setFontSize(config_.fontSize + 1, true);
+            break;
+        case Action::DecreaseFontSize:
+            setFontSize(config_.fontSize - 1, true);
+            break;
+        case Action::IncreaseOpacity:
+            ++config_.backgroundOpacity;
+            terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
+            screenDirty_ = true;
+            glfwPostEmptyEvent();
+            break;
+        case Action::DecreaseOpacity:
+            --config_.backgroundOpacity;
+            terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
+            screenDirty_ = true;
+            glfwPostEmptyEvent();
+            break;
+        case Action::ScreenshotVT:
+        {
+            auto const screenshot = terminalView_.screenshot();
+            ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
+            ofs << screenshot;
+            break;
+        }
+
+    }
+
+    keyHandled_ = true;
 }
 
 void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
@@ -288,36 +323,16 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
     keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
-        // Screenshot: ALT+CTRL+S
-        if (_key == GLFW_KEY_S && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Alt))
+        if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
         {
-            auto const screenshot = terminalView_.screenshot();
-            ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
-            ofs << screenshot;
+            auto const inputEvent = terminal::KeyInputEvent{modifier_, key.value()};
+            if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
+                handleAction(mapping->second);
+            else
+                terminalView_.send(key.value(), modifier_);
             keyHandled_ = true;
         }
-        else if (_key == GLFW_KEY_EQUAL && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Shift))
-        {
-            setFontSize(config_.fontSize + 1, true);
-            keyHandled_ = true;
-        }
-        else if (_key == GLFW_KEY_MINUS && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Shift) && config_.fontSize > 5)
-        {
-            setFontSize(config_.fontSize - 1, true);
-            keyHandled_ = true;
-        }
-        else if (_key == GLFW_KEY_ENTER && modifier_ == terminal::Modifier::Alt)
-        {
-            window_.toggleFullScreen();
-            keyHandled_ = true;
-        }
-        else if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
-        {
-            terminalView_.send(key.value(), modifier_);
-            keyHandled_ = true;
-        }
-        else if (const char* cstr = glfwGetKeyName(_key, _scanCode);
-               cstr != nullptr
+        else if (const char* cstr = glfwGetKeyName(_key, _scanCode); cstr != nullptr
             && modifier_.some() && modifier_ != terminal::Modifier::Shift
             && strlen(cstr) == 1
             && isalnum(*cstr))

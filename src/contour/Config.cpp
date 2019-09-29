@@ -13,15 +13,20 @@
  */
 #include "Config.h"
 #include "Flags.h"
-#include <terminal/Process.h>
+
+#include <glterminal/GLCursor.h>
 #include <terminal/InputGenerator.h>
+#include <terminal/Process.h>
+
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
-#include <glterminal/GLCursor.h>
+
 #include <algorithm>
-#include <iostream>
+#include <array>
 #include <fstream>
+#include <iostream>
 #include <sstream>
+#include <utility>
 
 using namespace std;
 
@@ -80,13 +85,24 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
 
-	// Examples:
-    //     { mods: [Alt, Control],   key: S,            action: ScreenshotVT }
-    //     { mods: [Control, Shift], mouse: WheelDown,  action: DecreaseFontSize }
+    #if 0 // Example:
+    input_mapping:
+        - { mods: [Alt], key: Enter, action: ToggleFullscreen }
+        - { mods: [Control, Alt],   key: S,   action: ScreenshotVT }
+        - { mods: [Control, Shift], key: "+", action: IncreaseFontSize }
+        - { mods: [Control, Shift], key: "-", action: DecreaseFontSize }
+        - { mods: [Control], mouse: WheelUp, action: IncreaseFontSize }
+        - { mods: [Control], mouse: WheelDown, action: DecreaseFontSize }
+        - { mods: [Alt], mouse: WheelUp, action: IncreaseOpacity }
+        - { mods: [Alt], mouse: WheelDown, action: DecreaseOpacity }
+        - [ mods: [Control, Shift], key: V, action: PastClipboard }
+        - { mods: [Control, Shift], key: C, action: CopySelection }
+        - { mods: [Shift], mouse: RightClick, action: PasteSelection }
+    #endif
 
 	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
 		if (!_node)
-			return nullopt;
+			return Modifier::None;
 		else if (_node.IsScalar())
 			return parseModifierKey(_node.as<string>());
 		else if (_node.IsSequence())
@@ -96,7 +112,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 			{
 				if (!_node[i].IsScalar())
 					return nullopt;
-				else if (auto const mod = parseModifierKey(_node.as<string>()); mod)
+				else if (auto const mod = parseModifierKey(_node[i].as<string>()); mod)
 					mods |= *mod;
 				else
 					return nullopt;
@@ -107,15 +123,48 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 			return nullopt;
 	};
 
-	auto const parseKey = [&](YAML::Node const& _node) -> optional<terminal::Key> {
-		return nullopt;
+    // TODO: also handle char inputs
+	auto const parseKey = [&](YAML::Node const& _node) -> pair<optional<terminal::Key>, bool> {
+        if (!_node.IsScalar())
+            return make_pair(nullopt, true);
+        else if (auto const key = terminal::parseKey(_node.as<string>()); key.has_value())
+            return make_pair(key.value(), true);
+        else
+            return make_pair(nullopt, false);
 	};
 
 	auto const parseAction = [&](YAML::Node const& _node) -> optional<Action> {
+        if (!_node.IsScalar())
+            return nullopt;
+
+        auto constexpr mappings = array{
+            pair{"ToggleFullscreen"sv, Action::ToggleFullscreen},
+            pair{"IncreaseFontSize"sv, Action::IncreaseFontSize},
+            pair{"DecreaseFontSize"sv, Action::DecreaseFontSize},
+            pair{"IncreaseOpacity"sv, Action::IncreaseOpacity},
+            pair{"DecreaseOpacity"sv, Action::DecreaseOpacity},
+            pair{"ScreenshotVT"sv, Action::ScreenshotVT},
+        };
+
+        auto const name = toLower(_node.as<string>());
+        for (auto const& mapping : mappings)
+            if (name == toLower(mapping.first))
+                return mapping.second;
+
 		return nullopt;
 	};
 
 	auto const mods = parseModifier(_mapping["mods"]);
+    auto const [key, keyOk] = parseKey(_mapping["key"]);
+    auto const action = parseAction(_mapping["action"]);
+    if (mods && keyOk && action)
+    {
+        if (key)
+        {
+            auto const inputEvent = InputEvent{KeyInputEvent{mods.value(), key.value()}};
+            _config.inputMapping[inputEvent] = action.value();
+        }
+    }
 }
 
 void loadConfigFromFile(Config& _config, std::string const& _fileName)

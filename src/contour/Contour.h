@@ -48,6 +48,7 @@ class Contour {
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
     Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
+    void handleAction(Action _action);
 
   private:
     std::ofstream loggingSink_;
