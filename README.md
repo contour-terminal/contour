@@ -119,7 +119,7 @@ vcpkg install freetype fontconfig glew glfw3 glm harfbuzz
 ### Prerequisites Mac OS/X
 
 ```psh
-brew install freetype fontconfig glew glfw3 glm harfbuzz
+brew install freetype fontconfig glew glfw3 glm harfbuzz boost
 ```
 
 
