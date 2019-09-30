@@ -148,8 +148,10 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 
         auto const name = toLower(_node.as<string>());
         for (auto const& mapping : mappings)
+        {
             if (name == toLower(mapping.first))
                 return mapping.second;
+        }
 
 		return nullopt;
 	};
