@@ -63,7 +63,7 @@ Contour::Contour(Config const& _config) :
         window_.height(),
         regularFont_.get(),
         config_.cursorShape,
-        glm::vec4{0.9, 0.9, 0.9, 1.0}, // TODO: make cursor color configurable (part of color profile?)
+        glm::vec3{0.9, 0.9, 0.9}, // TODO: make cursor color configurable (part of color profile?)
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,

@@ -1,11 +1,11 @@
 #pragma once
 
-#if !defined(__has_include) || __has_include(<filesystem>)
+#if (!defined(__has_include) || __has_include(<filesystem>)) && !defined(__APPLE__)
     #include <filesystem>
     #include <system_error>
     namespace FileSystem = std::filesystem;
     typedef std::error_code FileSystemError;
-#elif __has_include(<experimental/filesystem>)
+#elif __has_include(<experimental/filesystem>) && !defined(__APPLE__)
     #include <experimental/filesystem>
     #include <system_error>
     namespace FileSystem = std::experimental::filesystem;
