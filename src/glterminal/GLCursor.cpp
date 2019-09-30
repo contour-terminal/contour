@@ -58,11 +58,11 @@ auto constexpr vertexShader = R"(
 
 auto constexpr fragmentShader = R"(
     #version 140
-    uniform vec3 u_color;
+    vec3 color;
     out vec4 outColor;
     void main()
     {
-        outColor = vec4(u_color, 1.0);
+        outColor = vec4(color, 1.0);
     }
 )";
 
@@ -71,7 +71,7 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
     projectionMatrix_{ move(_transform) },
     shader_{ vertexShader, fragmentShader },
     transformLocation_{ shader_.uniformLocation("u_transform") },
-    colorLocation_{ shader_.uniformLocation("u_color") },
+    colorLocation_{ shader_.attributeLocation("color") },
     vbo_{},
     vao_{}
 {
