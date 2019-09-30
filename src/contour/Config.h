@@ -20,6 +20,8 @@
 #include <terminal/Process.h>
 #include <optional>
 #include <string>
+#include <unordered_map>
+
 #include "IncludeFilesystem.h"
 
 enum class Action {
