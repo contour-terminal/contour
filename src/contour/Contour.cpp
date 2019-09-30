@@ -63,7 +63,7 @@ Contour::Contour(Config const& _config) :
         window_.height(),
         regularFont_.get(),
         config_.cursorShape,
-        glm::vec4{0.9, 0.9, 0.9, 1.0}, // TODO: make cursor color configurable (part of color profile?)
+        glm::vec3{0.9, 0.9, 0.9}, // TODO: make cursor color configurable (part of color profile?)
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,
@@ -289,7 +289,7 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
         // Screenshot: ALT+CTRL+S
-        if (_key == GLFW_KEY_S && modifier_ == (terminal::Modifier::Control + terminal::Modifier::Alt))
+        if (_key == GLFW_KEY_S && modifier_ == (terminal::Modifier::Meta + terminal::Modifier::Alt))
         {
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
