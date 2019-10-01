@@ -32,11 +32,11 @@ auto constexpr vertexShader = R"(
 auto constexpr fragmentShader = R"(
     // Fragment Shader
     #version 140
+    uniform vec4 u_color;
     out vec4 outColor;
-    uniform vec4 u_backgroundColor;
     void main()
     {
-        outColor = u_backgroundColor;
+        outColor = u_color;
     }
 )";
 
@@ -44,14 +44,17 @@ CellBackground::CellBackground(glm::ivec2 _size, glm::mat4 _projectionMatrix) :
     projectionMatrix_{ move(_projectionMatrix) },
     shader_{ vertexShader, fragmentShader },
     transformLocation_{ shader_.uniformLocation("u_transform") },
-    colorLocation_{ shader_.uniformLocation("u_backgroundColor") }
+    colorLocation_{ shader_.uniformLocation("u_color") }
 {
     // setup background shader
     GLfloat const vertices[] = {
         0.0f, 0.0f,                             // bottom left
         (GLfloat) _size.x, 0.0f,                // bottom right
         (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-        0.0f, (GLfloat) _size.y                 // top left
+
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y,                // top left
+        0.0f, 0.0f                              // bottom left
     };
 
     glGenBuffers(1, &vbo_);
@@ -65,8 +68,8 @@ CellBackground::CellBackground(glm::ivec2 _size, glm::mat4 _projectionMatrix) :
     auto posAttr = shader_.attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
-}
 
+}
 CellBackground::~CellBackground()
 {
     glDeleteBuffers(1, &vbo_);
@@ -84,7 +87,10 @@ void CellBackground::resize(glm::ivec2 _size)
         0.0f, 0.0f,                             // bottom left
         (GLfloat) _size.x, 0.0f,                // bottom right
         (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-        0.0f, (GLfloat) _size.y                 // top left
+
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y,                // top left
+        0.0f, 0.0f                              // bottom left
     };
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -101,5 +107,5 @@ void CellBackground::render(glm::ivec2 _pos, glm::vec4 const& _color)
     shader_.setVec4(colorLocation_, _color);
 
     glBindVertexArray(vao_);
-    glDrawArrays(GL_QUADS, 0, 4);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }

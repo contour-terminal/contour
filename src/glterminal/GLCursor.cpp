@@ -58,11 +58,11 @@ auto constexpr vertexShader = R"(
 
 auto constexpr fragmentShader = R"(
     #version 140
-    vec3 color;
+    uniform vec3 u_color;
     out vec4 outColor;
     void main()
     {
-        outColor = vec4(color, 1.0);
+        outColor = vec4(u_color, 1.0);
     }
 )";
 
@@ -71,7 +71,7 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
     projectionMatrix_{ move(_transform) },
     shader_{ vertexShader, fragmentShader },
     transformLocation_{ shader_.uniformLocation("u_transform") },
-    colorLocation_{ shader_.attributeLocation("color") },
+    colorLocation_{ shader_.uniformLocation("u_color") },
     vbo_{},
     vao_{}
 {
@@ -81,10 +81,13 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
     // setup vertices
     //TODO: call setSize(_size); instead
     GLfloat const vertices[] = {
-        0.0f, 0.0f,                           // bottom left
-        (GLfloat)_size.x, 0.0f,               // bottom right
-        (GLfloat)_size.x, (GLfloat)_size.y,   // top right
-        0.0f, (GLfloat)_size.y                // top left
+        0.0f, 0.0f,                             // bottom left
+        (GLfloat) _size.x, 0.0f,                // bottom right
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y,                // top left
+        0.0f, 0.0f                              // bottom left
     };
 
     glGenBuffers(1, &vbo_);
@@ -128,7 +131,10 @@ void GLCursor::resize(glm::ivec2 _size)
         0.0f, 0.0f,                             // bottom left
         (GLfloat) _size.x, 0.0f,                // bottom right
         (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-        0.0f, (GLfloat) _size.y                 // top left
+
+        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+        0.0f, (GLfloat) _size.y,                // top left
+        0.0f, 0.0f                              // bottom left
     };
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -144,6 +150,6 @@ void GLCursor::render(glm::ivec2 _pos)
     shader_.setMat4(transformLocation_, projectionMatrix_ * translation);
 
     glBindVertexArray(vao_);
-    glDrawArrays(GL_QUADS, 0, 4);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
