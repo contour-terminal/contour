@@ -55,8 +55,7 @@ class GLTerminal {
 
     ~GLTerminal();
 
-    bool send(char32_t _characterEvent, terminal::Modifier _modifier);
-    bool send(terminal::Key _key, terminal::Modifier _modifier);
+    bool send(terminal::InputEvent const& _inputEvent);
 
     /// Takes a screenshot of the current screen buffer in VT sequence format.
     std::string screenshot() const;

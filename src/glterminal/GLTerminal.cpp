@@ -95,17 +95,24 @@ bool GLTerminal::alive() const
     return alive_;
 }
 
-bool GLTerminal::send(char32_t _characterEvent, terminal::Modifier _modifier)
+bool GLTerminal::send(terminal::InputEvent const& _inputEvent)
 {
-    logger_.keyPress(_characterEvent, _modifier);
-    return terminal_.send(_characterEvent, _modifier);
+    return visit(overloaded{
+        [&](KeyInputEvent const& _key) -> bool {
+            logger_.keyPress(_key.key, _key.modifier);
+            return terminal_.send(_inputEvent);
+        },
+        [&](CharInputEvent const& _char) -> bool {
+            logger_.keyPress(_char.value, _char.modifier);
+            return terminal_.send(_inputEvent);
+        },
+        [&](MouseInputEvent const& _mouse) -> bool {
+            // TODO:
+            return false;
+        },
+    }, _inputEvent);
 }
 
-bool GLTerminal::send(terminal::Key _key, terminal::Modifier _modifier)
-{
-    logger_.keyPress(_key, _modifier);
-    return terminal_.send(_key, _modifier);
-}
 
 std::string GLTerminal::screenshot() const
 {

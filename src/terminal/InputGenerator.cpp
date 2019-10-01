@@ -238,6 +238,15 @@ void InputGenerator::setNumpadKeysMode(KeyMode _mode)
     numpadKeysMode_ = _mode;
 }
 
+bool InputGenerator::generate(InputEvent const& _inputEvent)
+{
+    return visit(overloaded{
+        [&](KeyInputEvent const& _key) { return generate(_key.key, _key.modifier); },
+        [&](CharInputEvent const& _chr) { return generate(_chr.value, _chr.modifier); },
+        [&](MouseInputEvent const& _mouse) { return false /*TODO: generate(_mouse.mouse, _mouse.modifier)*/; },
+    }, _inputEvent);
+}
+
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
     if (_modifier.control() && _characterEvent == L' ')

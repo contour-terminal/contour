@@ -42,12 +42,8 @@ class Terminal : public PseudoTerminal {
     explicit Terminal(WindowSize _winSize, Logger _logger = {}, Hook _onScreenCommands = {});
     ~Terminal() override;
 
-    // Keyboard input handling
-    bool send(char32_t _characterEvent, Modifier _modifier = Modifier::None);
-    bool send(Key _key, Modifier _modifier = Modifier::None);
-    //TODO: bool send(MouseButtonEvent _mouseButton, Modifier _modifier = Modifier::None);
-    //TODO: bool send(MouseMoveEvent _mouseMove = Modifier::None);
-    //TODO: void send(Signal _signalNumber = Modifier::None);
+    // Sends given input event to connected slave.
+    bool send(InputEvent _inputEvent);
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);

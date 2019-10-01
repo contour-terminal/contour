@@ -210,21 +210,27 @@ enum class KeyMode {
 };
 
 struct KeyInputEvent {
-	Modifier modifier{};
 	Key key{};
+	Modifier modifier{};
+};
+
+struct CharInputEvent {
+    char32_t value{};
+    Modifier modifier{};
 };
 
 struct MouseInputEvent {
-    Modifier modifier{};
     MouseButton mouse{};
+    Modifier modifier{};
 };
 
-using InputEvent = std::variant<KeyInputEvent, MouseInputEvent>;
+using InputEvent = std::variant<KeyInputEvent, CharInputEvent, MouseInputEvent>;
 
 constexpr Modifier modifier(InputEvent _event) noexcept
 {
     return std::visit(overloaded{
         [](KeyInputEvent _keyInput) { return _keyInput.modifier; },
+        [](CharInputEvent _charInput) { return _charInput.modifier; },
         [](MouseInputEvent _mouseInput) { return _mouseInput.modifier; },
     }, _event);
 }
@@ -238,8 +244,11 @@ constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcep
     {
         if (std::holds_alternative<KeyInputEvent>(_lhs) && std::holds_alternative<KeyInputEvent>(_rhs))
             return std::get<KeyInputEvent>(_lhs).key < std::get<KeyInputEvent>(_rhs).key;
+        if (std::holds_alternative<CharInputEvent>(_lhs) && std::holds_alternative<CharInputEvent>(_rhs))
+            return std::get<CharInputEvent>(_lhs).value < std::get<CharInputEvent>(_rhs).value;
         if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
             return std::get<MouseInputEvent>(_lhs).mouse < std::get<MouseInputEvent>(_rhs).mouse;
+        return _lhs.index() < _rhs.index();
     }
 
     return false;
@@ -251,6 +260,8 @@ constexpr bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexce
     {
         if (std::holds_alternative<KeyInputEvent>(_lhs) && std::holds_alternative<KeyInputEvent>(_rhs))
             return std::get<KeyInputEvent>(_lhs).key == std::get<KeyInputEvent>(_rhs).key;
+        if (std::holds_alternative<CharInputEvent>(_lhs) && std::holds_alternative<CharInputEvent>(_rhs))
+            return std::get<CharInputEvent>(_lhs).value == std::get<CharInputEvent>(_rhs).value;
         if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
             return std::get<MouseInputEvent>(_lhs).mouse == std::get<MouseInputEvent>(_rhs).mouse;
     }
@@ -266,6 +277,9 @@ class InputGenerator {
 
     /// Changes the input mode for numpad keys.
     void setNumpadKeysMode(KeyMode _mode);
+
+    /// Generates input sequences for given input event.
+    bool generate(InputEvent const& _inputEvent);
 
     /// Generates input sequence for a pressed character.
     bool generate(char32_t _characterEvent, Modifier _modifier);
@@ -311,9 +325,16 @@ namespace std {
 	};
 
 	template<>
+	struct hash<terminal::CharInputEvent> {
+		constexpr size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
+			return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.value) & 0xFF);
+		}
+	};
+
+	template<>
 	struct hash<terminal::MouseInputEvent> {
 		constexpr size_t operator()(terminal::MouseInputEvent const& _input) const noexcept {
-			return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.mouse) & 0xFF);
+			return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.mouse) & 0xFF);
 		}
 	};
 
@@ -322,6 +343,7 @@ namespace std {
 		constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
             return visit(terminal::overloaded{
                 [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
+                [](terminal::CharInputEvent ev) { return hash<terminal::CharInputEvent>{}(ev); },
                 [](terminal::MouseInputEvent ev) { return hash<terminal::MouseInputEvent>{}(ev); },
             }, _input);
 		}
