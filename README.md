@@ -17,6 +17,25 @@
 * Font Ligatures Support (such as in Fira Code).
 * GPU-acelerated rendering.
 
+## Mission Statement
+
+The following is an incomplete list of features that contour does or will support.
+
+* [x] Available on all three major platforms (Linux, OS/X, Windows 10)
+* [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
+* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
+* [x] Runtime configuration reload
+* [x] Font Ligatures Support (such as in Fira Code)
+* [x] GPU-accelerated rendering
+* [x] 256-color and Truecolor support
+* [ ] Key binding customization
+* [ ] History Search
+* [ ] Activity/Inactivity/Bell System Notification
+* [ ] Color Schemes
+* [ ] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+* [ ] Shell Integration (inspired by iTerm2)
+* [ ] Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
+
 ## CLI - Command Line Interface
 
 ```txt
