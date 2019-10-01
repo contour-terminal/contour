@@ -1,6 +1,6 @@
-# Example Aero Terminal Configuration File.
+# Example Contour Configuration File.
 
-shell: "ssh ubuntu-vm"
+# shell: "ssh ubuntu-vm"
 
 terminalSize:
     columns: 130
@@ -19,12 +19,14 @@ background:
     blur: false
 
 input_mapping:
+    - { mods: Alt,              key: Enter,        action: ToggleFullscreen }
     - { mods: [Alt, Control],   key: S,            action: ScreenshotVT }
-    - { mods: [Control, Shift], mouse: WheelUp,    action: IncreaseFontSize }
-    - { mods: [Control, Shift], mouse: WheelDown,  action: DecreaseFontSize }
     - { mods: [Control, Shift], key: Equal,        action: IncreaseFontSize }
     - { mods: [Control, Shift], key: Minus,        action: DecreaseFontSize }
-    - { mods: Alt,           key: Enter,        action: ToggleFullscreen }
+    - { mods: [Control, Shift], mouse: WheelUp,    action: IncreaseFontSize }
+    - { mods: [Control, Shift], mouse: WheelDown,  action: DecreaseFontSize }
+    - { mods: [Alt],            mouse: WheelUp,    action: IncreaseOpacity }
+    - { mods: [Alt],            mouse: WheelDown,  action: DecreaseOpacity }
 
 # Google dark
 colors_google_dark: &colors_google_dark

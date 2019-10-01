@@ -13,11 +13,13 @@
  */
 #include "Contour.h"
 #include <terminal/Color.h>
+#include <terminal/InputGenerator.h>
 
 #include <iostream>
 #include <fstream>
 #include <cstdio>
 #include <cctype>
+#include <utility>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -158,72 +160,61 @@ void Contour::onResize()
     render();
 }
 
-optional<terminal::Key> glfwKeyToTerminalKey(int _key)
+optional<terminal::Key> glfwFunctionKeyToTerminalKey(int _key)
 {
     using terminal::Key;
 
     static auto constexpr mapping = array{
-        make_pair(GLFW_KEY_ESCAPE, Key::Escape),
-        make_pair(GLFW_KEY_ENTER, Key::Enter),
-        make_pair(GLFW_KEY_TAB, Key::Tab),
-        make_pair(GLFW_KEY_BACKSPACE, Key::Backspace),
-        make_pair(GLFW_KEY_INSERT, Key::Insert),
-        make_pair(GLFW_KEY_DELETE, Key::Delete),
-        make_pair(GLFW_KEY_RIGHT, Key::RightArrow),
-        make_pair(GLFW_KEY_LEFT, Key::LeftArrow),
-        make_pair(GLFW_KEY_DOWN, Key::DownArrow),
-        make_pair(GLFW_KEY_UP, Key::UpArrow),
-        make_pair(GLFW_KEY_PAGE_DOWN, Key::PageDown),
-        make_pair(GLFW_KEY_PAGE_UP, Key::PageUp),
-        make_pair(GLFW_KEY_HOME, Key::Home),
-        make_pair(GLFW_KEY_END, Key::End),
+        pair{GLFW_KEY_ESCAPE, Key::Escape},
+        pair{GLFW_KEY_ENTER, Key::Enter},
+        pair{GLFW_KEY_TAB, Key::Tab},
+        pair{GLFW_KEY_BACKSPACE, Key::Backspace},
+        pair{GLFW_KEY_INSERT, Key::Insert},
+        pair{GLFW_KEY_DELETE, Key::Delete},
+        pair{GLFW_KEY_RIGHT, Key::RightArrow},
+        pair{GLFW_KEY_LEFT, Key::LeftArrow},
+        pair{GLFW_KEY_DOWN, Key::DownArrow},
+        pair{GLFW_KEY_UP, Key::UpArrow},
+        pair{GLFW_KEY_PAGE_DOWN, Key::PageDown},
+        pair{GLFW_KEY_PAGE_UP, Key::PageUp},
+        pair{GLFW_KEY_HOME, Key::Home},
+        pair{GLFW_KEY_END, Key::End},
         // TODO: some of those below...
         //#define GLFW_KEY_CAPS_LOCK          280
         //#define GLFW_KEY_SCROLL_LOCK        281
         //#define GLFW_KEY_NUM_LOCK           282
         //#define GLFW_KEY_PRINT_SCREEN       283
         //#define GLFW_KEY_PAUSE              284
-        make_pair(GLFW_KEY_F1, Key::F1),
-        make_pair(GLFW_KEY_F2, Key::F2),
-        make_pair(GLFW_KEY_F3, Key::F3),
-        make_pair(GLFW_KEY_F4, Key::F4),
-        make_pair(GLFW_KEY_F5, Key::F5),
-        make_pair(GLFW_KEY_F6, Key::F6),
-        make_pair(GLFW_KEY_F7, Key::F7),
-        make_pair(GLFW_KEY_F8, Key::F8),
-        make_pair(GLFW_KEY_F9, Key::F9),
-        make_pair(GLFW_KEY_F10, Key::F10),
-        make_pair(GLFW_KEY_F11, Key::F11),
-        make_pair(GLFW_KEY_F12, Key::F12),
+        pair{GLFW_KEY_F1, Key::F1},
+        pair{GLFW_KEY_F2, Key::F2},
+        pair{GLFW_KEY_F3, Key::F3},
+        pair{GLFW_KEY_F4, Key::F4},
+        pair{GLFW_KEY_F5, Key::F5},
+        pair{GLFW_KEY_F6, Key::F6},
+        pair{GLFW_KEY_F7, Key::F7},
+        pair{GLFW_KEY_F8, Key::F8},
+        pair{GLFW_KEY_F9, Key::F9},
+        pair{GLFW_KEY_F10, Key::F10},
+        pair{GLFW_KEY_F11, Key::F11},
+        pair{GLFW_KEY_F12, Key::F12},
         // todo: F13..F25
-        make_pair(GLFW_KEY_KP_0, Key::Numpad_0),
-        make_pair(GLFW_KEY_KP_1, Key::Numpad_1),
-        make_pair(GLFW_KEY_KP_2, Key::Numpad_2),
-        make_pair(GLFW_KEY_KP_3, Key::Numpad_3),
-        make_pair(GLFW_KEY_KP_4, Key::Numpad_4),
-        make_pair(GLFW_KEY_KP_5, Key::Numpad_5),
-        make_pair(GLFW_KEY_KP_6, Key::Numpad_6),
-        make_pair(GLFW_KEY_KP_7, Key::Numpad_7),
-        make_pair(GLFW_KEY_KP_8, Key::Numpad_8),
-        make_pair(GLFW_KEY_KP_9, Key::Numpad_9),
-        make_pair(GLFW_KEY_KP_DECIMAL, Key::Numpad_Decimal),
-        make_pair(GLFW_KEY_KP_DIVIDE, Key::Numpad_Divide),
-        make_pair(GLFW_KEY_KP_MULTIPLY, Key::Numpad_Multiply),
-        make_pair(GLFW_KEY_KP_SUBTRACT, Key::Numpad_Subtract),
-        make_pair(GLFW_KEY_KP_ADD, Key::Numpad_Add),
-        make_pair(GLFW_KEY_KP_ENTER, Key::Numpad_Enter),
-        make_pair(GLFW_KEY_KP_EQUAL, Key::Numpad_Equal),
-        #if 0
-        #define GLFW_KEY_LEFT_SHIFT         340
-        #define GLFW_KEY_LEFT_CONTROL       341
-        #define GLFW_KEY_LEFT_ALT           342
-        #define GLFW_KEY_LEFT_SUPER         343
-        #define GLFW_KEY_RIGHT_SHIFT        344
-        #define GLFW_KEY_RIGHT_CONTROL      345
-        #define GLFW_KEY_RIGHT_ALT          346
-        #define GLFW_KEY_RIGHT_SUPER        347
-        #define GLFW_KEY_MENU               348
-        #endif
+        pair{GLFW_KEY_KP_0, Key::Numpad_0},
+        pair{GLFW_KEY_KP_1, Key::Numpad_1},
+        pair{GLFW_KEY_KP_2, Key::Numpad_2},
+        pair{GLFW_KEY_KP_3, Key::Numpad_3},
+        pair{GLFW_KEY_KP_4, Key::Numpad_4},
+        pair{GLFW_KEY_KP_5, Key::Numpad_5},
+        pair{GLFW_KEY_KP_6, Key::Numpad_6},
+        pair{GLFW_KEY_KP_7, Key::Numpad_7},
+        pair{GLFW_KEY_KP_8, Key::Numpad_8},
+        pair{GLFW_KEY_KP_9, Key::Numpad_9},
+        pair{GLFW_KEY_KP_DECIMAL, Key::Numpad_Decimal},
+        pair{GLFW_KEY_KP_DIVIDE, Key::Numpad_Divide},
+        pair{GLFW_KEY_KP_MULTIPLY, Key::Numpad_Multiply},
+        pair{GLFW_KEY_KP_SUBTRACT, Key::Numpad_Subtract},
+        pair{GLFW_KEY_KP_ADD, Key::Numpad_Add},
+        pair{GLFW_KEY_KP_ENTER, Key::Numpad_Enter},
+        pair{GLFW_KEY_KP_EQUAL, Key::Numpad_Equal},
     };
 
     if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key; }); i != end(mapping))
@@ -259,15 +250,15 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
     {
         case terminal::Modifier::Control: // increase/decrease font size
             if (vertical == VerticalDirection::Up)
-                handleAction(Action::IncreaseFontSize);
+                executeAction(Action::IncreaseFontSize);
             else
-                handleAction(Action::DecreaseFontSize);
+                executeAction(Action::DecreaseFontSize);
             break;
         case terminal::Modifier::Alt: // TODO: increase/decrease transparency
             if (vertical == VerticalDirection::Up)
-                handleAction(Action::IncreaseOpacity);
+                executeAction(Action::IncreaseOpacity);
             else
-                handleAction(Action::DecreaseOpacity);
+                executeAction(Action::DecreaseOpacity);
             break;
         case terminal::Modifier::None: // TODO: scroll in history
             break;
@@ -276,7 +267,7 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
     }
 }
 
-void Contour::handleAction(Action _action)
+void Contour::executeAction(Action _action)
 {
     switch (_action)
     {
@@ -314,6 +305,72 @@ void Contour::handleAction(Action _action)
     keyHandled_ = true;
 }
 
+optional<terminal::InputEvent> makeInputEvent(int _key, terminal::Modifier _mods)
+{
+    using terminal::InputEvent;
+    using terminal::CharInputEvent;
+    using terminal::KeyInputEvent;
+
+    // function keys
+    if (auto const key = glfwFunctionKeyToTerminalKey(_key))
+        return InputEvent{KeyInputEvent{key.value(), _mods}};
+
+    // printable keys
+    switch (_key)
+    {
+        case GLFW_KEY_SPACE: return CharInputEvent{' ', _mods};
+        case GLFW_KEY_APOSTROPHE: return CharInputEvent{'\'', _mods};
+        case GLFW_KEY_COMMA: return CharInputEvent{',', _mods};
+        case GLFW_KEY_MINUS: return CharInputEvent{'-', _mods};
+        case GLFW_KEY_PERIOD: return CharInputEvent{'.', _mods};
+        case GLFW_KEY_SLASH: return CharInputEvent{'/', _mods};
+        case GLFW_KEY_0: return CharInputEvent{'0', _mods};
+        case GLFW_KEY_1: return CharInputEvent{'1', _mods};
+        case GLFW_KEY_2: return CharInputEvent{'2', _mods};
+        case GLFW_KEY_3: return CharInputEvent{'3', _mods};
+        case GLFW_KEY_4: return CharInputEvent{'4', _mods};
+        case GLFW_KEY_5: return CharInputEvent{'5', _mods};
+        case GLFW_KEY_6: return CharInputEvent{'6', _mods};
+        case GLFW_KEY_7: return CharInputEvent{'7', _mods};
+        case GLFW_KEY_8: return CharInputEvent{'8', _mods};
+        case GLFW_KEY_9: return CharInputEvent{'9', _mods};
+        case GLFW_KEY_SEMICOLON: return CharInputEvent{';', _mods};
+        case GLFW_KEY_EQUAL: return CharInputEvent{'=', _mods};
+        case GLFW_KEY_A: return CharInputEvent{'a', _mods};
+        case GLFW_KEY_B: return CharInputEvent{'b', _mods};
+        case GLFW_KEY_C: return CharInputEvent{'c', _mods};
+        case GLFW_KEY_D: return CharInputEvent{'d', _mods};
+        case GLFW_KEY_E: return CharInputEvent{'e', _mods};
+        case GLFW_KEY_F: return CharInputEvent{'f', _mods};
+        case GLFW_KEY_G: return CharInputEvent{'g', _mods};
+        case GLFW_KEY_H: return CharInputEvent{'h', _mods};
+        case GLFW_KEY_I: return CharInputEvent{'i', _mods};
+        case GLFW_KEY_J: return CharInputEvent{'j', _mods};
+        case GLFW_KEY_K: return CharInputEvent{'k', _mods};
+        case GLFW_KEY_L: return CharInputEvent{'l', _mods};
+        case GLFW_KEY_M: return CharInputEvent{'m', _mods};
+        case GLFW_KEY_N: return CharInputEvent{'n', _mods};
+        case GLFW_KEY_O: return CharInputEvent{'o', _mods};
+        case GLFW_KEY_P: return CharInputEvent{'p', _mods};
+        case GLFW_KEY_Q: return CharInputEvent{'q', _mods};
+        case GLFW_KEY_R: return CharInputEvent{'r', _mods};
+        case GLFW_KEY_S: return CharInputEvent{'s', _mods};
+        case GLFW_KEY_T: return CharInputEvent{'t', _mods};
+        case GLFW_KEY_U: return CharInputEvent{'u', _mods};
+        case GLFW_KEY_V: return CharInputEvent{'v', _mods};
+        case GLFW_KEY_W: return CharInputEvent{'w', _mods};
+        case GLFW_KEY_X: return CharInputEvent{'x', _mods};
+        case GLFW_KEY_Y: return CharInputEvent{'y', _mods};
+        case GLFW_KEY_Z: return CharInputEvent{'z', _mods};
+        case GLFW_KEY_LEFT_BRACKET: return CharInputEvent{'[', _mods};
+        case GLFW_KEY_BACKSLASH: return CharInputEvent{'\\', _mods};
+        case GLFW_KEY_RIGHT_BRACKET: return CharInputEvent{']', _mods};
+        case GLFW_KEY_GRAVE_ACCENT: return CharInputEvent{'`', _mods};
+    }
+
+    return nullopt;
+}
+
 void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
 {
     // TODO: investigate how to handle when one of these state vars are true, and the window loses focus.
@@ -321,36 +378,44 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
     modifier_ = makeModifier(_mods);
 
     keyHandled_ = false;
-    if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
+    if (_action == GLFW_PRESS)//XXX || _action == GLFW_REPEAT)
     {
-        if (auto const key = glfwKeyToTerminalKey(_key); key.has_value())
+        if (auto const inputEvent = makeInputEvent(_key, modifier_); inputEvent.has_value())
         {
-            auto const inputEvent = terminal::KeyInputEvent{modifier_, key.value()};
-            if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
-                handleAction(mapping->second);
-            else
-                terminalView_.send(key.value(), modifier_);
-            keyHandled_ = true;
+            if (auto const mapping = config_.inputMapping.find(inputEvent.value()); mapping != end(config_.inputMapping))
+            {
+                executeAction(mapping->second);
+                keyHandled_ = true;
+            }
+            else if (!holds_alternative<terminal::CharInputEvent>(inputEvent.value()) || modifier_ != terminal::Modifier::Shift)
+            {
+                terminalView_.send(inputEvent.value());
+                keyHandled_ = true;
+            }
         }
-        else if (const char* cstr = glfwGetKeyName(_key, _scanCode); cstr != nullptr
-            && modifier_.some() && modifier_ != terminal::Modifier::Shift
-            && strlen(cstr) == 1
-            && isalnum(*cstr))
+        else if (modifier_ && modifier_ != terminal::Modifier::Shift)
         {
-            // allow only mods + alphanumerics
-            terminalView_.send(*cstr, modifier_);
-            keyHandled_ = true;
+            char const* cstr = glfwGetKeyName(_key, _scanCode);
+            cout << fmt::format(
+                "key:{}, scanCode:{}, name:{} ({})",
+                _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
+            ) << endl;
         }
-        else if (_key == GLFW_KEY_SPACE && modifier_)
-        {
-            terminalView_.send(L' ', modifier_);
-            keyHandled_ = true;
-        }
-        // else if (modifier_ && modifier_ != terminal::Modifier::Shift)
-        //    cout << fmt::format(
-        //        "key:{}, scanCode:{}, name:{} ({})",
-        //        _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
-        //    ) << endl;
+    }
+}
+
+void Contour::onChar(char32_t _char)
+{
+    if (!keyHandled_)
+    {
+        auto const inputEvent = terminal::CharInputEvent{_char, modifier_};
+
+        if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
+            executeAction(mapping->second);
+        else
+            terminalView_.send(terminal::CharInputEvent{_char, terminal::Modifier{}});
+
+        keyHandled_ = false;
     }
 }
 
@@ -380,14 +445,6 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
         terminalView_.resize(window_.size().width, window_.size().height);
     }
     return true;
-}
-
-void Contour::onChar(char32_t _char)
-{
-    if (!keyHandled_)
-        terminalView_.send(_char, terminal::Modifier{});
-
-    keyHandled_ = false;
 }
 
 void Contour::onScreenUpdate()

@@ -13,6 +13,7 @@
  */
 #include "Config.h"
 #include "Flags.h"
+#include "IncludeFilesystem.h"
 
 #include <glterminal/GLCursor.h>
 #include <terminal/InputGenerator.h>
@@ -100,39 +101,6 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         - { mods: [Shift], mouse: RightClick, action: PasteSelection }
     #endif
 
-	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
-		if (!_node)
-			return Modifier::None;
-		else if (_node.IsScalar())
-			return parseModifierKey(_node.as<string>());
-		else if (_node.IsSequence())
-		{
-			terminal::Modifier mods;
-			for (size_t i = 0; i < _node.size(); ++i)
-			{
-				if (!_node[i].IsScalar())
-					return nullopt;
-				else if (auto const mod = parseModifierKey(_node[i].as<string>()); mod)
-					mods |= *mod;
-				else
-					return nullopt;
-			}
-			return mods;
-		}
-		else
-			return nullopt;
-	};
-
-    // TODO: also handle char inputs
-	auto const parseKey = [&](YAML::Node const& _node) -> pair<optional<terminal::Key>, bool> {
-        if (!_node.IsScalar())
-            return make_pair(nullopt, true);
-        else if (auto const key = terminal::parseKey(_node.as<string>()); key.has_value())
-            return make_pair(key.value(), true);
-        else
-            return make_pair(nullopt, false);
-	};
-
 	auto const parseAction = [&](YAML::Node const& _node) -> optional<Action> {
         if (!_node.IsScalar())
             return nullopt;
@@ -156,15 +124,68 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 		return nullopt;
 	};
 
-	auto const mods = parseModifier(_mapping["mods"]);
-    auto const [key, keyOk] = parseKey(_mapping["key"]);
-    auto const action = parseAction(_mapping["action"]);
-    if (mods && keyOk && action)
-    {
-        if (key)
+	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
+		if (!_node)
+			return Modifier::None;
+		else if (_node.IsScalar())
+			return parseModifierKey(_node.as<string>());
+		else if (_node.IsSequence())
+		{
+			terminal::Modifier mods;
+			for (size_t i = 0; i < _node.size(); ++i)
+			{
+				if (!_node[i].IsScalar())
+					return nullopt;
+				else if (auto const mod = parseModifierKey(_node[i].as<string>()); mod)
+					mods |= *mod;
+				else
+					return nullopt;
+			}
+			return mods;
+		}
+		else
+			return nullopt;
+	};
+
+	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods) -> pair<optional<terminal::InputEvent>, bool> {
+        if (!_node)
+            return make_pair(nullopt, false);
+        else if (!_node.IsScalar())
+            return make_pair(nullopt, true);
+        else if (auto const key = terminal::parseKey(_node.as<string>()); key.has_value())
+            return make_pair(KeyInputEvent{key.value(), _mods}, true);
+        else
         {
-            auto const inputEvent = InputEvent{KeyInputEvent{mods.value(), key.value()}};
-            _config.inputMapping[inputEvent] = action.value();
+            auto const name = toLower(_node.as<string>());
+
+            if (name == "space")
+                return make_pair(terminal::CharInputEvent{' ', _mods}, true);
+            if (name == "equal")
+                return make_pair(terminal::CharInputEvent{'=', _mods}, true);
+            if (name == "minus")
+                return make_pair(terminal::CharInputEvent{'-', _mods}, true);
+            if (name.size() == 1)
+                return make_pair(terminal::CharInputEvent{static_cast<char32_t>(tolower(name[0])), _mods}, true);
+        }
+
+        return make_pair(nullopt, false);
+	};
+
+    auto const action = parseAction(_mapping["action"]);
+	auto const mods = parseModifier(_mapping["mods"]);
+    if (action && mods)
+    {
+        if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
+        {
+            _config.inputMapping[keyEvent.value()] = action.value();
+        }
+        // else if (auto const [mouseEvent, ok] = parseMouse(_mapping["mouse"]); ok)
+        // {
+        //     // TODO
+        // }
+        else
+        {
+            // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
         }
     }
 }
