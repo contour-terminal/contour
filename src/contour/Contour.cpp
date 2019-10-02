@@ -138,7 +138,7 @@ void Contour::render()
 
     terminalView_.render();
 
-    glfwSwapBuffers(window_);
+    window_.swapBuffers();
 }
 
 void Contour::onContentScale(float _xs, float _ys)

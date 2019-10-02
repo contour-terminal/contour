@@ -56,6 +56,7 @@ class Window {
 
     bool fullscreen() const noexcept { return fullscreen_; }
     void toggleFullScreen();
+    void swapBuffers() { glfwSwapBuffers(window_); }
 
   private:
     static void onContentScale(GLFWwindow* _window, float _xs, float _ys);
