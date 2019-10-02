@@ -13,3 +13,13 @@
  */
 #define CATCH_CONFIG_MAIN
 #include <catch2/catch.hpp>
+#include <ground/StringUtils.h>
+
+TEST_CASE("parseEscapedString", "[strings]")
+{
+    CHECK(ground::parseEscaped("") == "");
+    CHECK(ground::parseEscaped("Text") == "Text");
+    CHECK(ground::parseEscaped("\033") == "\033");
+    CHECK(ground::parseEscaped("\x1b") == "\x1b");
+    CHECK(ground::parseEscaped("Hello\x20World") == "Hello World");
+}
