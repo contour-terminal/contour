@@ -18,12 +18,11 @@
 #include <terminal/Color.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Process.h>
+#include <ground/stdfs.h>
 #include <optional>
 #include <string>
 #include <variant>
 #include <unordered_map>
-
-#include "IncludeFilesystem.h"
 
 namespace actions {
     struct ToggleFullScreen{};

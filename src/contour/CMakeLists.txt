@@ -9,7 +9,6 @@ find_package(glm CONFIG)
 add_executable(contour
 	Contour.cpp Contour.h
 	Config.cpp Config.h
-	FileChangeWatcher.cpp FileChangeWatcher.h
 	Flags.cpp Flags.h
 	Window.cpp Window.h
 	main.cpp

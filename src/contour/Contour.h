@@ -15,8 +15,8 @@
 
 #include "Config.h"
 #include "Window.h"
-#include "FileChangeWatcher.h"
-#include "IncludeFilesystem.h"
+#include <ground/FileChangeWatcher.h>
+#include <ground/stdfs.h>
 
 #include <terminal/InputGenerator.h>
 
@@ -44,7 +44,7 @@ class Contour {
     void onMouseScroll(double _xOffset, double _yOffset);
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
-    void onConfigReload(FileChangeWatcher::Event _event);
+    void onConfigReload(ground::FileChangeWatcher::Event _event);
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
     Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
@@ -60,7 +60,7 @@ class Contour {
     TerminalView terminalView_;
     bool keyHandled_ = false;
     std::atomic<bool> configReloadPending_ = false;
-    FileChangeWatcher configFileChangeWatcher_;
+    ground::FileChangeWatcher configFileChangeWatcher_;
     terminal::Modifier modifier_{};
     bool screenDirty_ = true;
 };

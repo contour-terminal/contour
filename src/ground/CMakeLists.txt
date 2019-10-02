@@ -9,6 +9,8 @@ endif()
 
 add_library(ground STATIC
     StringUtils.cpp StringUtils.h
+    FileChangeWatcher.cpp FileChangeWatcher.h
+    stdfs.h
 )
 
 target_include_directories(ground PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)

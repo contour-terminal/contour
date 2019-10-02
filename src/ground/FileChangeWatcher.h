@@ -1,9 +1,11 @@
 #pragma once
 
-#include "IncludeFilesystem.h"
+#include <ground/stdfs.h>
 
 #include <functional>
 #include <thread>
+
+namespace ground {
 
 class FileChangeWatcher {
   public:
@@ -28,3 +30,5 @@ class FileChangeWatcher {
     bool exit_;
     std::thread watcher_;
 };
+
+} // namespace ground

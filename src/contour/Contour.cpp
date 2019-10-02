@@ -450,7 +450,7 @@ void Contour::onScreenUpdate()
     glfwPostEmptyEvent();
 }
 
-void Contour::onConfigReload(FileChangeWatcher::Event _event)
+void Contour::onConfigReload(ground::FileChangeWatcher::Event _event)
 {
     configReloadPending_.store(true);
     glfwPostEmptyEvent();

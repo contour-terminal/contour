@@ -1,8 +1,10 @@
-#include "FileChangeWatcher.h"
+#include <ground/FileChangeWatcher.h>
 #include <thread>
 #include <chrono>
 
 using namespace std;
+
+namespace ground {
 
 FileChangeWatcher::FileChangeWatcher(FileSystem::path _filePath, Notifier _notifier) :
     filePath_{ move(_filePath) },
@@ -40,3 +42,5 @@ void FileChangeWatcher::stop()
 {
     exit_ = true;
 }
+
+} // namespace ground

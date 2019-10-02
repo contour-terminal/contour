@@ -14,7 +14,7 @@
 #include "Config.h"
 #include "Flags.h"
 
-#include "IncludeFilesystem.h"
+#include <ground/stdfs.h>
 #include <ground/StringUtils.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal/InputGenerator.h>
