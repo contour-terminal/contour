@@ -77,6 +77,8 @@ constexpr ControlFunctionDef SM {std::nullopt, std::nullopt, 'h', VTType::VT100,
 constexpr ControlFunctionDef SU {std::nullopt, std::nullopt, 'S', VTType::VT100, "SU",  "Scroll up (pan down)"};
 constexpr ControlFunctionDef VPA{std::nullopt, std::nullopt, 'd', VTType::VT100, "VPA", "Vertical Position Absolute"};
 
+constexpr ControlFunctionDef WINMANIP{std::nullopt, std::nullopt, 't', VTType::VT100, "WINMANIP", "Window Manipulation"};
+
 ControlFunctionDef const* controlFunctionById(uint32_t _id) noexcept;
 
 } // namespace terminal

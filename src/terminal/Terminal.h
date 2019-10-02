@@ -42,6 +42,7 @@ class Terminal : public PseudoTerminal {
     explicit Terminal(
         WindowSize _winSize,
         std::function<void()> _changeWindowTitleCallback = {},
+        std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
         Logger _logger = {},
         Hook _onScreenCommands = {});
     ~Terminal() override;
@@ -85,7 +86,7 @@ class Terminal : public PseudoTerminal {
     InputGenerator::Sequence pendingInput_;
     Screen screen_;
     Screen::Hook onScreenCommands_;
-    std::mutex mutable screenLock_;
+    std::recursive_mutex mutable screenLock_;
     std::thread screenUpdateThread_;
 };
 

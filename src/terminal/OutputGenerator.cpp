@@ -260,6 +260,15 @@ void OutputGenerator::operator()(Command const& command)
         [&](ChangeIconName const& v) { write("\033]1;{}\x9c", v.title); },
         [&](ChangeWindowTitle const& v) { write("\033]2;{}\x9c", v.title); },
         [&](SoftTerminalReset) { write("\033[!p"); },
+        [&](ResizeWindow const& v) {
+            write("\033[{};{};{}t",
+                v.unit == ResizeWindow::Unit::Pixels ? 4 : 8,
+                v.height,
+                v.width
+            );
+        },
+        [&](SaveWindowTitle const& v) { write("\033[22;0;0t"); },
+        [&](RestoreWindowTitle const& v) { write("\033[23;0;0t"); },
     }, command);
 }
 

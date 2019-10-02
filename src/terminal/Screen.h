@@ -294,6 +294,7 @@ class Screen {
     using Reply = std::function<void(std::string const&)>;
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
     using ModeSwitchCallback = std::function<void(bool)>;
+    using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
 
   public:
     /**
@@ -308,6 +309,7 @@ class Screen {
     Screen(WindowSize const& _size,
            ModeSwitchCallback _useApplicationCursorKeys,
            std::function<void()> _onWindowTitleChanged,
+           ResizeWindowCallback _resizeWindow,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
@@ -318,10 +320,10 @@ class Screen {
            Reply _reply,
            Logger _logger,
            Hook _onCommands) :
-        Screen{_size, move(_useApplicationCursorKeys), {}, move(_reply), move(_logger), move(_onCommands)} {}
+        Screen{_size, move(_useApplicationCursorKeys), {}, {}, move(_reply), move(_logger), move(_onCommands)} {}
 
     explicit Screen(WindowSize const& _size) :
-        Screen{_size, {}, {}, {}, {}, {}} {}
+        Screen{_size, {}, {}, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -405,6 +407,9 @@ class Screen {
     void operator()(SoftTerminalReset const& v);
     void operator()(ChangeWindowTitle const& v);
     void operator()(ChangeIconName const& v);
+    void operator()(ResizeWindow const& v);
+    void operator()(SaveWindowTitle const& v);
+    void operator()(RestoreWindowTitle const& v);
     void operator()(AppendChar const& v);
 
     // reset screen
@@ -505,6 +510,7 @@ class Screen {
     Logger const logger_;
     ModeSwitchCallback useApplicationCursorKeys_;
     std::function<void()> onWindowTitleChanged_;
+    ResizeWindowCallback resizeWindow_;
     Reply const reply_;
 
     OutputHandler handler_;
@@ -516,6 +522,7 @@ class Screen {
 
     WindowSize size_;
     std::string windowTitle_;
+    std::stack<std::string> savedWindowTitles_{};
 };
 
 constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept

@@ -43,6 +43,9 @@ class Window {
 
     bool enableBackgroundBlur();
 
+    /// Retrieves current window's maximum screen size.
+    Size screenSize();
+
     GLFWwindow* handle() const noexcept { return window_; }
     operator GLFWwindow* () noexcept { return window_; }
 

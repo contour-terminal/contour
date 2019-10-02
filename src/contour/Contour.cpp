@@ -72,6 +72,7 @@ Contour::Contour(Config const& _config) :
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),
+        bind(&Contour::doResize, this, _1, _2, _3),
         logger_
     },
     configFileChangeWatcher_{
@@ -112,6 +113,15 @@ int Contour::main()
         {
             if (reloadConfigValues())
                 screenDirty_ = true;
+        }
+
+        if (resizePending_)
+        {
+            terminalView_.setTerminalSize(config_.terminalSize);
+            auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
+            auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
+            window_.resize(width, height);
+            screenDirty_ = true;
         }
 
         if (screenDirty_)
@@ -467,6 +477,51 @@ void Contour::onWindowTitleChanged()
     glfwPostEmptyEvent();
 }
 
+void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
+{
+    if (window_.fullscreen())
+    {
+        cerr << "Application request to resize window in full screen mode denied." << endl;
+    }
+    else if (_inPixels)
+    {
+        if (_width == 0 && _height == 0)
+        {
+            auto const screenSize = window_.screenSize();
+            _width = screenSize.width;
+            _height = screenSize.height;
+        }
+        else
+        {
+            if (!_width)
+                _width = window_.size().width;
+
+            if (!_height)
+                _height = window_.size().height;
+        }
+        config_.terminalSize.columns = _width / regularFont_.get().maxAdvance();
+        config_.terminalSize.rows = _height / regularFont_.get().lineHeight();
+        resizePending_ = true;
+    }
+    else
+    {
+        if (_width == 0 && _height == 0)
+            window_.resize(_width, _height);
+        else
+        {
+            if (!_width)
+                _width = config_.terminalSize.columns;
+
+            if (!_height)
+                _height = config_.terminalSize.rows;
+
+            config_.terminalSize.columns = _width;
+            config_.terminalSize.rows = _height;
+            resizePending_ = true;
+        }
+    }
+}
+
 void Contour::onConfigReload(ground::FileChangeWatcher::Event _event)
 {
     configReloadPending_.store(true);
@@ -518,6 +573,7 @@ bool Contour::reloadConfigValues()
         window_.resize(width, height);
     }
 
+    // TODO: key bindings
     // TODO... (all the rest)
 
     config_ = move(newConfig);

@@ -482,6 +482,49 @@ void OutputHandler::dispatchCSI()
             else
                 logInvalidCSI();
             break;
+        case WINMANIP:
+            setDefaultParameter(0);
+            if (parameterCount() == 3)
+            {
+                switch (param(0))
+                {
+                    case 4:
+                        emit<ResizeWindow>(param(2), param(1), ResizeWindow::Unit::Pixels);
+                        break;
+                    case 8:
+                        emit<ResizeWindow>(param(2), param(1), ResizeWindow::Unit::Characters);
+                        break;
+                    case 22:
+                        emit<SaveWindowTitle>();
+                        break;
+                    case 23:
+                        emit<RestoreWindowTitle>();
+                        break;
+                    default:
+                        logUnsupportedCSI();
+                        break;
+                }
+            }
+            else if (parameterCount() == 1)
+            {
+                switch (param(0))
+                {
+                    case 4:
+                        // this means, resize to full display size
+                        emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Pixels);
+                        break;
+                    case 8:
+                        // i.e. full display size
+                        emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Characters);
+                        break;
+                    default:
+                        logUnsupportedCSI();
+                        break;
+                }
+            }
+            else
+                logInvalidCSI();
+            break;
         default:
             logUnsupportedCSI();
             break;

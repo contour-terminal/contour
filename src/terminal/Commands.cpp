@@ -241,6 +241,23 @@ class MnemonicBuilder {
     void operator()(ReverseIndex const& v) { build("RI", "Moves cursor up (possibly scrolling)"); }
     void operator()(BackIndex const& v) { build("DECBI", "Moves cursor left (possibly scrolling)"); }
     void operator()(ForwardIndex const& v) { build("DECFI", "Moves cursor right (possibly scrolling)"); }
+    void operator()(SaveWindowTitle const& v) {
+        build("WINMANIP", "Saves window title on stack.", 22, 0, 0);
+    }
+    void operator()(ResizeWindow const& v) {
+        switch (v.unit)
+        {
+            case ResizeWindow::Unit::Pixels:
+                build("WINMANIP", "Resize window", 4, v.height, v.width);
+                break;
+            case ResizeWindow::Unit::Characters:
+                build("WINMANIP", "Resize window", 8, v.height, v.width);
+                break;
+        }
+    }
+    void operator()(RestoreWindowTitle const& v) {
+        build("WINMANIP", "Restores window title from stack.", 23, 0, 0);
+    }
     void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Select foreground color to {}", to_string(v.color))); }
     void operator()(SetBackgroundColor const& v) { build("SGR", fmt::format("Select background color to {}", to_string(v.color))); }
     void operator()(SetGraphicsRendition const& v) { build("SGR", fmt::format("Select style rendition to {}", to_string(v.rendition))); }
@@ -315,6 +332,7 @@ class MnemonicBuilder {
 
     void build(string_view _mnemonic, string_view _comment, unsigned _a1) { build(_mnemonic, _comment, vector{_a1}); }
     void build(string_view _mnemonic, string_view _comment, unsigned _a1, unsigned _a2) { build(_mnemonic, _comment, vector{_a1, _a2}); }
+    void build(string_view _mnemonic, string_view _comment, unsigned _a1, unsigned _a2, unsigned _a3) { build(_mnemonic, _comment, vector{_a1, _a2, _a3}); }
 };
 
 vector<string> to_mnemonic(vector<Command> const& _commands, bool _withParameters, bool _withComment)

@@ -231,6 +231,17 @@ void Window::resize(unsigned _width, unsigned _height)
     glfwSetWindowSize(window_, _width, _height);
 }
 
+Window::Size Window::screenSize()
+{
+    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    GLFWvidmode const* vidMode = glfwGetVideoMode(monitor);
+
+    assert(vidMode->width > 0);
+    assert(vidMode->height > 0);
+
+    return Size{static_cast<unsigned>(vidMode->width), static_cast<unsigned>(vidMode->height)};
+}
+
 void Window::toggleFullScreen()
 {
     fullscreen_ = !fullscreen_;

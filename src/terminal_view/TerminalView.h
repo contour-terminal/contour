@@ -47,6 +47,7 @@ class TerminalView {
                  glm::mat4 const& _projectionMatrix,
                  std::function<void()> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
+                 std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                  GLLogger& _logger);
 
     TerminalView(TerminalView const&) = delete;

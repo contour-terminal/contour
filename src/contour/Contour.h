@@ -45,6 +45,7 @@ class Contour {
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
     void onWindowTitleChanged();
+    void doResize(unsigned _width, unsigned _height, bool _inPixels);
     void onConfigReload(ground::FileChangeWatcher::Event _event);
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
@@ -65,4 +66,5 @@ class Contour {
     terminal::Modifier modifier_{};
     bool screenDirty_ = true;
     bool titleDirty_ = true;
+    bool resizePending_ = false;
 };

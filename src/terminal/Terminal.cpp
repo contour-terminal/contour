@@ -23,6 +23,7 @@ namespace terminal {
 
 Terminal::Terminal(WindowSize _winSize,
                    std::function<void()> _onWindowTitleChanged,
+                   std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                    Logger _logger,
                    Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
@@ -32,6 +33,7 @@ Terminal::Terminal(WindowSize _winSize,
         _winSize,
         bind(&Terminal::useApplicationCursorKeys, this, _1),
         move(_onWindowTitleChanged),
+        move(_resizeWindow),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
         bind(&Terminal::onScreenCommands, this, _1)
@@ -72,7 +74,7 @@ void Terminal::screenUpdateThread()
         if (auto const n = read(buf, sizeof(buf)); n != -1)
         {
             //log("outputThread.data: {}", terminal::escape(buf, buf + n));
-            lock_guard<mutex> _l{ screenLock_ };
+            lock_guard<decltype(screenLock_)> _l{ screenLock_ };
             screen_.write(buf, n);
         }
         else
@@ -101,31 +103,31 @@ void Terminal::flushInput()
 
 void Terminal::writeToScreen(char const* data, size_t size)
 {
-    lock_guard<mutex> _l{ screenLock_ };
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.write(data, size);
 }
 
 Terminal::Cursor Terminal::cursor() const
 {
-    lock_guard<mutex> _l{ screenLock_ };
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     return screen_.realCursor();
 }
 
 string Terminal::screenshot() const
 {
-    lock_guard<mutex> _l{ screenLock_ };
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     return screen_.screenshot();
 }
 
 void Terminal::render(Screen::Renderer const& renderer) const
 {
-    lock_guard<mutex> _l{ screenLock_ };
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.render(renderer);
 }
 
 void Terminal::resize(WindowSize const& _newWindowSize)
 {
-    lock_guard<mutex> _l{ screenLock_ };
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.resize(_newWindowSize);
     PseudoTerminal::resize(_newWindowSize);
 }

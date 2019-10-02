@@ -530,6 +530,7 @@ void ScreenBuffer::verifyState() const
 Screen::Screen(WindowSize const& _size,
                ModeSwitchCallback _useApplicationCursorKeys,
                function<void()> _onWindowTitleChanged,
+               ResizeWindowCallback _resizeWindow,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
@@ -537,6 +538,7 @@ Screen::Screen(WindowSize const& _size,
     logger_{ _logger },
     useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
     onWindowTitleChanged_{ move(_onWindowTitleChanged) },
+    resizeWindow_{ move(_resizeWindow) },
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
@@ -1168,6 +1170,29 @@ void Screen::operator()(ChangeWindowTitle const& v)
 
     if (onWindowTitleChanged_)
         onWindowTitleChanged_();
+}
+
+void Screen::operator()(SaveWindowTitle const& v)
+{
+    savedWindowTitles_.push(windowTitle_);
+}
+
+void Screen::operator()(RestoreWindowTitle const& v)
+{
+    if (!savedWindowTitles_.empty())
+    {
+        windowTitle_ = savedWindowTitles_.top();
+        savedWindowTitles_.pop();
+
+        if (onWindowTitleChanged_)
+            onWindowTitleChanged_();
+    }
+}
+
+void Screen::operator()(ResizeWindow const& v)
+{
+    if (resizeWindow_)
+        resizeWindow_(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels);
 }
 
 void Screen::operator()(ChangeIconName const& v)

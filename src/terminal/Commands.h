@@ -629,6 +629,23 @@ struct ChangeWindowTitle { std::string title; };
 /// See: https://unix.stackexchange.com/questions/234136/in-xterm-what-is-icon-name
 struct ChangeIconName { std::string title; };
 
+/// Resizes window to given dimension.
+///
+/// `CSI 4 ; height ; width t` and `CSI 8 ; height ; width t`
+///
+/// A height/width value of 0 means "current value" unless both are 0,
+/// that means full screen dimensions are to be used.
+struct ResizeWindow {
+    enum class Unit { Characters, Pixels };
+
+    unsigned int width;
+    unsigned int height;
+    Unit unit;
+};
+
+struct SaveWindowTitle {};
+struct RestoreWindowTitle {};
+
 using Command = std::variant<
     AppendChar,
 
@@ -655,13 +672,13 @@ using Command = std::variant<
     EraseCharacters,
     ForwardIndex,
     FullReset,
+    HorizontalPositionAbsolute,
+    HorizontalPositionRelative,
     Index,
     InsertCharacters,
     InsertColumns,
     InsertLines,
     Linefeed,
-    HorizontalPositionAbsolute,
-    HorizontalPositionRelative,
     MoveCursorBackward,
     MoveCursorDown,
     MoveCursorForward,
@@ -674,9 +691,12 @@ using Command = std::variant<
     ReportCursorPosition,
     ReportExtendedCursorPosition,
     RequestMode,
+    ResizeWindow,
     RestoreCursor,
+    RestoreWindowTitle,
     ReverseIndex,
     SaveCursor,
+    SaveWindowTitle,
     ScreenAlignmentPattern,
     ScrollDown,
     ScrollUp,
@@ -689,8 +709,8 @@ using Command = std::variant<
     SetLeftRightMargin,
     SetMode,
     SetTopBottomMargin,
-    SoftTerminalReset,
-    SingleShiftSelect
+    SingleShiftSelect,
+    SoftTerminalReset
 >;
 
 std::string to_string(Command const& cmd);
