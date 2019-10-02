@@ -71,6 +71,7 @@ Contour::Contour(Config const& _config) :
         config_.shell,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&Contour::onScreenUpdate, this),
+        bind(&Contour::onWindowTitleChanged, this),
         logger_
     },
     configFileChangeWatcher_{
@@ -103,9 +104,10 @@ int Contour::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
-        bool reloadPending = configReloadPending_.load();
         if (terminalView_.shouldRender())
             screenDirty_ = true;
+
+        bool reloadPending = configReloadPending_.load();
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
         {
             if (reloadConfigValues())
@@ -113,8 +115,17 @@ int Contour::main()
         }
 
         if (screenDirty_)
+        {
             render();
-        screenDirty_ = false;
+            screenDirty_ = false;
+        }
+
+        if (titleDirty_)
+        {
+            glfwSetWindowTitle(window_, terminalView_.windowTitle().c_str());
+            titleDirty_ = false;
+        }
+
         glfwWaitEventsTimeout(0.5);
     }
 
@@ -447,6 +458,12 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
 
 void Contour::onScreenUpdate()
 {
+    glfwPostEmptyEvent();
+}
+
+void Contour::onWindowTitleChanged()
+{
+    titleDirty_ = true;
     glfwPostEmptyEvent();
 }
 

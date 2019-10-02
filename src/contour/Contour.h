@@ -44,6 +44,7 @@ class Contour {
     void onMouseScroll(double _xOffset, double _yOffset);
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
+    void onWindowTitleChanged();
     void onConfigReload(ground::FileChangeWatcher::Event _event);
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
@@ -63,4 +64,5 @@ class Contour {
     ground::FileChangeWatcher configFileChangeWatcher_;
     terminal::Modifier modifier_{};
     bool screenDirty_ = true;
+    bool titleDirty_ = true;
 };

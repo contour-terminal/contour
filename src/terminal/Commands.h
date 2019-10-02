@@ -618,9 +618,16 @@ struct ForwardIndex {};
 /// DECALN sets the margins to the extremes of the page, and moves the cursor to the home position.
 struct ScreenAlignmentPattern {};
 
-// OSC commands:
+/// Changes the Window's title to given title.
 struct ChangeWindowTitle { std::string title; };
-struct ChangeIconName { std::string name; };
+
+/// Sets icon name to given title.
+///
+/// That is, the title also being displayed right next to the iconified window,
+/// such as in twm.
+///
+/// See: https://unix.stackexchange.com/questions/234136/in-xterm-what-is-icon-name
+struct ChangeIconName { std::string title; };
 
 using Command = std::variant<
     AppendChar,

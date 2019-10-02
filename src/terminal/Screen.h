@@ -307,12 +307,21 @@ class Screen {
      */
     Screen(WindowSize const& _size,
            ModeSwitchCallback _useApplicationCursorKeys,
+           std::function<void()> _onWindowTitleChanged,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
+    // TODO: remove me again (and provide a simple ctor for unit testing)
+    Screen(WindowSize const& _size,
+           ModeSwitchCallback _useApplicationCursorKeys,
+           Reply _reply,
+           Logger _logger,
+           Hook _onCommands) :
+        Screen{_size, move(_useApplicationCursorKeys), {}, move(_reply), move(_logger), move(_onCommands)} {}
+
     explicit Screen(WindowSize const& _size) :
-        Screen{_size, {}, {}, {}, {}} {}
+        Screen{_size, {}, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -456,21 +465,6 @@ class Screen {
     bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::Origin); }
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(Mode::LeftRightMargin); }
 
-  private:
-    // interactive replies
-    void reply(std::string const& message)
-    {
-        if (reply_)
-            reply_(message);
-    }
-
-    template <typename... Args>
-    void reply(std::string const& fmt, Args&&... args)
-    {
-        reply(fmt::format(fmt, std::forward<Args>(args)...));
-    }
-
-  public:
     Margin const& margin() const noexcept { return state_->margin_; }
     ScreenBuffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
 
@@ -490,10 +484,27 @@ class Screen {
      */
     std::string renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const;
 
+    std::string const& windowTitle() const noexcept { return windowTitle_; }
+
+  private:
+    // interactive replies
+    void reply(std::string const& message)
+    {
+        if (reply_)
+            reply_(message);
+    }
+
+    template <typename... Args>
+    void reply(std::string const& fmt, Args&&... args)
+    {
+        reply(fmt::format(fmt, std::forward<Args>(args)...));
+    }
+
   private:
     Hook const onCommands_;
     Logger const logger_;
     ModeSwitchCallback useApplicationCursorKeys_;
+    std::function<void()> onWindowTitleChanged_;
     Reply const reply_;
 
     OutputHandler handler_;
@@ -504,6 +515,7 @@ class Screen {
     ScreenBuffer* state_;
 
     WindowSize size_;
+    std::string windowTitle_;
 };
 
 constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept

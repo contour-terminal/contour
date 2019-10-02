@@ -39,7 +39,11 @@ class Terminal : public PseudoTerminal {
   public:
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
-    explicit Terminal(WindowSize _winSize, Logger _logger = {}, Hook _onScreenCommands = {});
+    explicit Terminal(
+        WindowSize _winSize,
+        std::function<void()> _changeWindowTitleCallback = {},
+        Logger _logger = {},
+        Hook _onScreenCommands = {});
     ~Terminal() override;
 
     // Sends given input event to connected slave.
@@ -55,6 +59,8 @@ class Terminal : public PseudoTerminal {
 
     /// @returns the current Cursor state.
     Cursor cursor() const;
+
+    std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
 
     /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
     std::string screenshot() const;

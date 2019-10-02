@@ -37,16 +37,17 @@ class Font;
 class TerminalView {
   public:
     TerminalView(terminal::WindowSize const& _winSize,
-               unsigned _width, unsigned _height,
-               Font& _regularFont,
-               CursorShape _cursorShape,
-               glm::vec3 const& _cursorColor,
-               terminal::ColorProfile const& _colorProfile,
-               terminal::Opacity _backgroundOpacity,
-               std::string const& _shell,
-               glm::mat4 const& _projectionMatrix,
-               std::function<void()> _onScreenUpdate,
-               GLLogger& _logger);
+                 unsigned _width, unsigned _height,
+                 Font& _regularFont,
+                 CursorShape _cursorShape,
+                 glm::vec3 const& _cursorColor,
+                 terminal::ColorProfile const& _colorProfile,
+                 terminal::Opacity _backgroundOpacity,
+                 std::string const& _shell,
+                 glm::mat4 const& _projectionMatrix,
+                 std::function<void()> _onScreenUpdate,
+                 std::function<void()> _onWindowTitleChanged,
+                 GLLogger& _logger);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -94,6 +95,8 @@ class TerminalView {
     terminal::ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
     void setTabWidth(unsigned int _tabWidth);
     void setBackgroundOpacity(terminal::Opacity _opacity);
+
+    std::string const& windowTitle() const noexcept { return terminal_.windowTitle(); }
 
   private:
     using cursor_pos_t = terminal::cursor_pos_t;

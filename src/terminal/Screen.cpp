@@ -529,12 +529,14 @@ void ScreenBuffer::verifyState() const
 
 Screen::Screen(WindowSize const& _size,
                ModeSwitchCallback _useApplicationCursorKeys,
+               function<void()> _onWindowTitleChanged,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
-    useApplicationCursorKeys_{ _useApplicationCursorKeys },
+    useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
+    onWindowTitleChanged_{ move(_onWindowTitleChanged) },
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
@@ -1162,7 +1164,10 @@ void Screen::operator()(SoftTerminalReset const&)
 
 void Screen::operator()(ChangeWindowTitle const& v)
 {
-    // TODO
+    windowTitle_ = v.title;
+
+    if (onWindowTitleChanged_)
+        onWindowTitleChanged_();
 }
 
 void Screen::operator()(ChangeIconName const& v)
