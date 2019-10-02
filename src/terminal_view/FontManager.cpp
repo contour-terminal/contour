@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <glterminal/FontManager.h>
+#include <terminal_view/FontManager.h>
 
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>

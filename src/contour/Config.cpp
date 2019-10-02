@@ -16,7 +16,7 @@
 
 #include "IncludeFilesystem.h"
 #include <ground/StringUtils.h>
-#include <glterminal/GLCursor.h>
+#include <terminal_view/GLCursor.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
 

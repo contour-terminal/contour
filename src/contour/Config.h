@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <glterminal/GLCursor.h>
-#include <glterminal/GLLogger.h>
+#include <terminal_view/GLCursor.h>
+#include <terminal_view/GLLogger.h>
 #include <terminal/Color.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Process.h>

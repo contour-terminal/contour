@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <glterminal/GLLogger.h>
+#include <terminal_view/GLLogger.h>
 
 #include <terminal/UTF8.h>
 #include <terminal/Util.h>

@@ -15,7 +15,7 @@
 #include "Flags.h"
 #include "Config.h"
 
-#include <glterminal/GLLogger.h>
+#include <terminal_view/GLLogger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/OutputGenerator.h>
 #include <terminal/Terminal.h>

@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <glterminal/GLTextShaper.h>
-#include <glterminal/FontManager.h>
+#include <terminal_view/GLTextShaper.h>
+#include <terminal_view/FontManager.h>
 
 #include <GL/glew.h>
 

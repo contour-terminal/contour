@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <glterminal/GLTerminal.h>
-#include <glterminal/GLLogger.h>
-#include <glterminal/FontManager.h>
+#include <terminal_view/TerminalView.h>
+#include <terminal_view/GLLogger.h>
+#include <terminal_view/FontManager.h>
 
 #include <terminal/Util.h>
 
@@ -37,7 +37,7 @@ auto const envvars = terminal::Process::Environment{
     {"TERMCAP", ""}
 };
 
-GLTerminal::GLTerminal(WindowSize const& _winSize,
+TerminalView::TerminalView(WindowSize const& _winSize,
                        unsigned _width,
                        unsigned _height,
                        Font& _regularFont,
@@ -74,7 +74,7 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
     terminal_{
         _winSize,
         [this](terminal::LogEvent const& _event) { logger_(_event); },
-        bind(&GLTerminal::onScreenUpdateHook, this, _1),
+        bind(&TerminalView::onScreenUpdateHook, this, _1),
     },
     process_{ terminal_, _shell, {_shell}, envvars },
     processExitWatcher_{ [this]() { wait(); }},
@@ -84,18 +84,18 @@ GLTerminal::GLTerminal(WindowSize const& _winSize,
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
-GLTerminal::~GLTerminal()
+TerminalView::~TerminalView()
 {
     wait();
     processExitWatcher_.join();
 }
 
-bool GLTerminal::alive() const
+bool TerminalView::alive() const
 {
     return alive_;
 }
 
-bool GLTerminal::send(terminal::InputEvent const& _inputEvent)
+bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 {
     return visit(overloaded{
         [&](KeyInputEvent const& _key) -> bool {
@@ -114,12 +114,12 @@ bool GLTerminal::send(terminal::InputEvent const& _inputEvent)
 }
 
 
-std::string GLTerminal::screenshot() const
+std::string TerminalView::screenshot() const
 {
     return terminal_.screenshot();
 }
 
-void GLTerminal::resize(unsigned _width, unsigned _height)
+void TerminalView::resize(unsigned _width, unsigned _height)
 {
     auto const newSize = terminal::WindowSize{
         static_cast<unsigned short>(_width / regularFont_.get().maxAdvance()),
@@ -154,7 +154,7 @@ void GLTerminal::resize(unsigned _width, unsigned _height)
         );
 }
 
-void GLTerminal::setFont(Font& _font)
+void TerminalView::setFont(Font& _font)
 {
     auto const fontSize = regularFont_.get().fontSize();
     regularFont_ = _font;
@@ -162,7 +162,7 @@ void GLTerminal::setFont(Font& _font)
     textShaper_.setFont(regularFont_.get());
 }
 
-bool GLTerminal::setFontSize(unsigned int _fontSize)
+bool TerminalView::setFontSize(unsigned int _fontSize)
 {
     if (_fontSize == regularFont_.get().fontSize())
         return false;
@@ -177,7 +177,7 @@ bool GLTerminal::setFontSize(unsigned int _fontSize)
     return true;
 }
 
-bool GLTerminal::setTerminalSize(terminal::WindowSize const& _newSize)
+bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
 {
     if (terminal_.size() == _newSize)
         return false;
@@ -187,14 +187,14 @@ bool GLTerminal::setTerminalSize(terminal::WindowSize const& _newSize)
     return true;
 }
 
-void GLTerminal::setProjection(glm::mat4 const& _projectionMatrix)
+void TerminalView::setProjection(glm::mat4 const& _projectionMatrix)
 {
     cellBackground_.setProjection(_projectionMatrix);
     textShaper_.setProjection(_projectionMatrix);
     cursor_.setProjection(_projectionMatrix);
 }
 
-bool GLTerminal::shouldRender()
+bool TerminalView::shouldRender()
 {
     bool current = updated_.load();
 
@@ -207,16 +207,16 @@ bool GLTerminal::shouldRender()
     return true;
 }
 
-void GLTerminal::render()
+void TerminalView::render()
 {
-    terminal_.render(bind(&GLTerminal::fillCellGroup, this, _1, _2, _3));
+    terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3));
     renderCellGroup();
 
     if (terminal_.cursor().visible)
         cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
 }
 
-void GLTerminal::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)
+void TerminalView::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)
 {
     if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes)
         pendingDraw_.text.push_back(_cell.character);
@@ -229,7 +229,7 @@ void GLTerminal::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos
     }
 }
 
-void GLTerminal::renderCellGroup()
+void TerminalView::renderCellGroup()
 {
     auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
     auto const textStyle = FontStyle::Regular;
@@ -275,7 +275,7 @@ void GLTerminal::renderCellGroup()
     );
 }
 
-glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
+glm::ivec2 TerminalView::makeCoords(cursor_pos_t col, cursor_pos_t row) const
 {
     return glm::ivec2{
         margin_.left + (col - 1) * regularFont_.get().maxAdvance(),
@@ -283,7 +283,7 @@ glm::ivec2 GLTerminal::makeCoords(cursor_pos_t col, cursor_pos_t row) const
     };
 }
 
-std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
+std::pair<glm::vec4, glm::vec4> TerminalView::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
 {
     float const opacity = [=]() {
         if (_attributes.styles & CharacterStyleMask::Hidden)
@@ -315,7 +315,7 @@ std::pair<glm::vec4, glm::vec4> GLTerminal::makeColors(ScreenBuffer::GraphicsAtt
                 applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity) };
 }
 
-void GLTerminal::wait()
+void TerminalView::wait()
 {
     if (!alive_)
         return;
@@ -336,17 +336,17 @@ void GLTerminal::wait()
     alive_ = false;
 }
 
-void GLTerminal::setTabWidth(unsigned int _tabWidth)
+void TerminalView::setTabWidth(unsigned int _tabWidth)
 {
     terminal_.setTabWidth(_tabWidth);
 }
 
-void GLTerminal::setBackgroundOpacity(terminal::Opacity _opacity)
+void TerminalView::setBackgroundOpacity(terminal::Opacity _opacity)
 {
     backgroundOpacity_ = _opacity;
 }
 
-void GLTerminal::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
+void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
     logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
 

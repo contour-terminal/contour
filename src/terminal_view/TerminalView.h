@@ -23,20 +23,20 @@
 #include <string>
 #include <vector>
 
-#include <glterminal/CellBackground.h>
-#include <glterminal/FontManager.h>
-#include <glterminal/GLCursor.h>
-#include <glterminal/GLLogger.h>
-#include <glterminal/GLTextShaper.h>
+#include <terminal_view/CellBackground.h>
+#include <terminal_view/FontManager.h>
+#include <terminal_view/GLCursor.h>
+#include <terminal_view/GLLogger.h>
+#include <terminal_view/GLTextShaper.h>
 
 #include <glm/matrix.hpp>
 
 class Font;
 
 /// OpenGL-Terminal Object.
-class GLTerminal {
+class TerminalView {
   public:
-    GLTerminal(terminal::WindowSize const& _winSize,
+    TerminalView(terminal::WindowSize const& _winSize,
                unsigned _width, unsigned _height,
                Font& _regularFont,
                CursorShape _cursorShape,
@@ -48,12 +48,12 @@ class GLTerminal {
                std::function<void()> _onScreenUpdate,
                GLLogger& _logger);
 
-    GLTerminal(GLTerminal const&) = delete;
-    GLTerminal(GLTerminal&&) = delete;
-    GLTerminal& operator=(GLTerminal const&) = delete;
-    GLTerminal& operator=(GLTerminal&&) = delete;
+    TerminalView(TerminalView const&) = delete;
+    TerminalView(TerminalView&&) = delete;
+    TerminalView& operator=(TerminalView const&) = delete;
+    TerminalView& operator=(TerminalView&&) = delete;
 
-    ~GLTerminal();
+    ~TerminalView();
 
     bool send(terminal::InputEvent const& _inputEvent);
 

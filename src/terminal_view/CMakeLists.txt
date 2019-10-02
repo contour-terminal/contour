@@ -17,28 +17,28 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     find_package(harfbuzz CONFIG REQUIRED)
 endif()
 
-add_library(glterminal
+add_library(terminal_view
     CellBackground.cpp CellBackground.h
     FontManager.cpp FontManager.h
     GLCursor.cpp GLCursor.h
     GLLogger.cpp GLLogger.h
     GLTextShaper.cpp GLTextShaper.h
-    GLTerminal.cpp GLTerminal.h
     Shader.cpp Shader.h
+    TerminalView.cpp TerminalView.h
 )
 
-target_include_directories(glterminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(terminal_view PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
-set(GLTERMINAL_LIBRARIES GLEW::GLEW OpenGL::GL glm Freetype::Freetype terminal)
+set(TERMINAL_VIEW_LIBRARIES GLEW::GLEW OpenGL::GL glm Freetype::Freetype terminal)
 if(APPLE)
-    list(APPEND GLTERMINAL_LIBRARIES PkgConfig::fontconfig)
-    list(APPEND GLTERMINAL_LIBRARIES PkgConfig::harfbuzz)
+    list(APPEND TERMINAL_VIEW_LIBRARIES PkgConfig::fontconfig)
+    list(APPEND TERMINAL_VIEW_LIBRARIES PkgConfig::harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Linux" OR APPLE)
-    list(APPEND GLTERMINAL_LIBRARIES fontconfig)
-    list(APPEND GLTERMINAL_LIBRARIES PkgConfig::harfbuzz)
+    list(APPEND TERMINAL_VIEW_LIBRARIES fontconfig)
+    list(APPEND TERMINAL_VIEW_LIBRARIES PkgConfig::harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
-    list(APPEND GLTERMINAL_LIBRARIES harfbuzz::harfbuzz)
+    list(APPEND TERMINAL_VIEW_LIBRARIES harfbuzz::harfbuzz)
     #list(APPEND GLTERM_LIBRARIES unofficial::fontconfig::fontconfig)
 endif()
 
-target_link_libraries(glterminal PUBLIC ${GLTERMINAL_LIBRARIES})
+target_link_libraries(terminal_view PUBLIC ${TERMINAL_VIEW_LIBRARIES})

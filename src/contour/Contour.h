@@ -20,9 +20,9 @@
 
 #include <terminal/InputGenerator.h>
 
-#include <glterminal/FontManager.h>
-#include <glterminal/GLLogger.h>
-#include <glterminal/GLTerminal.h>
+#include <terminal_view/FontManager.h>
+#include <terminal_view/GLLogger.h>
+#include <terminal_view/TerminalView.h>
 
 #include <atomic>
 #include <fstream>
@@ -57,7 +57,7 @@ class Contour {
     FontManager fontManager_;
     std::reference_wrapper<Font> regularFont_;
     Window window_;
-    GLTerminal terminalView_;
+    TerminalView terminalView_;
     bool keyHandled_ = false;
     std::atomic<bool> configReloadPending_ = false;
     FileChangeWatcher configFileChangeWatcher_;
