@@ -65,6 +65,7 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
+add_subdirectory(src/ground)
 add_subdirectory(src/terminal)
 add_subdirectory(src/glterminal)
 add_subdirectory(src/contour)

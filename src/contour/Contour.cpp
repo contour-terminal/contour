@@ -250,15 +250,15 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
     {
         case terminal::Modifier::Control: // increase/decrease font size
             if (vertical == VerticalDirection::Up)
-                executeAction(Action::IncreaseFontSize);
+                executeAction(actions::IncreaseFontSize{});
             else
-                executeAction(Action::DecreaseFontSize);
+                executeAction(actions::DecreaseFontSize{});
             break;
         case terminal::Modifier::Alt: // TODO: increase/decrease transparency
             if (vertical == VerticalDirection::Up)
-                executeAction(Action::IncreaseOpacity);
+                executeAction(actions::IncreaseOpacity{});
             else
-                executeAction(Action::DecreaseOpacity);
+                executeAction(actions::DecreaseOpacity{});
             break;
         case terminal::Modifier::None: // TODO: scroll in history
             break;
@@ -269,40 +269,38 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
 
 void Contour::executeAction(Action _action)
 {
-    switch (_action)
-    {
-        case Action::ToggleFullscreen:
+    visit(terminal::overloaded{
+        [&](actions::ToggleFullScreen) {
             window_.toggleFullScreen();
-            break;
-        case Action::IncreaseFontSize:
+        },
+        [&](actions::IncreaseFontSize) {
             setFontSize(config_.fontSize + 1, true);
-            break;
-        case Action::DecreaseFontSize:
+        },
+        [&](actions::DecreaseFontSize) {
             setFontSize(config_.fontSize - 1, true);
-            break;
-        case Action::IncreaseOpacity:
+        },
+        [&](actions::IncreaseOpacity) {
             ++config_.backgroundOpacity;
             terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
             screenDirty_ = true;
             glfwPostEmptyEvent();
-            break;
-        case Action::DecreaseOpacity:
+        },
+        [&](actions::DecreaseOpacity) {
             --config_.backgroundOpacity;
             terminalView_.setBackgroundOpacity(config_.backgroundOpacity);
             screenDirty_ = true;
             glfwPostEmptyEvent();
-            break;
-        case Action::ScreenshotVT:
-        {
+        },
+        [&](actions::ScreenshotVT) {
             auto const screenshot = terminalView_.screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
-            break;
+        },
+        [&](actions::SendChars const& chars) {
+            for (auto const ch : chars.chars)
+                terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None});
         }
-
-    }
-
-    keyHandled_ = true;
+    }, _action);
 }
 
 optional<terminal::InputEvent> makeInputEvent(int _key, terminal::Modifier _mods)
@@ -378,7 +376,7 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
     modifier_ = makeModifier(_mods);
 
     keyHandled_ = false;
-    if (_action == GLFW_PRESS)//XXX || _action == GLFW_REPEAT)
+    if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
         if (auto const inputEvent = makeInputEvent(_key, modifier_); inputEvent.has_value())
         {
@@ -393,14 +391,14 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
                 keyHandled_ = true;
             }
         }
-        else if (modifier_ && modifier_ != terminal::Modifier::Shift)
-        {
-            char const* cstr = glfwGetKeyName(_key, _scanCode);
-            cout << fmt::format(
-                "key:{}, scanCode:{}, name:{} ({})",
-                _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
-            ) << endl;
-        }
+        // else if (modifier_ && modifier_ != terminal::Modifier::Shift) // Debug print unhandled characters
+        // {
+        //     char const* cstr = glfwGetKeyName(_key, _scanCode);
+        //     cerr << fmt::format(
+        //         "key:{}, scanCode:{}, name:{} ({})",
+        //         _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
+        //     ) << endl;
+        // }
     }
 }
 

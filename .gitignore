@@ -19,5 +19,8 @@
 # Never accidentally add any screenshot files.
 *.vt
 
+# NVIDIA Nsight Graphics (Debugger, project files)
+*.nsight-gfxproj
+
 # OS X
 .DS_Store

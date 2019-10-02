@@ -13,8 +13,9 @@
  */
 #include "Config.h"
 #include "Flags.h"
-#include "IncludeFilesystem.h"
 
+#include "IncludeFilesystem.h"
+#include <ground/StringUtils.h>
 #include <glterminal/GLCursor.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
@@ -101,17 +102,17 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         - { mods: [Shift], mouse: RightClick, action: PasteSelection }
     #endif
 
-	auto const parseAction = [&](YAML::Node const& _node) -> optional<Action> {
-        if (!_node.IsScalar())
+	auto const parseAction = [&](YAML::Node const& _node, YAML::Node const& _chars) -> optional<Action> {
+        if (!_node || !_node.IsScalar())
             return nullopt;
 
-        auto constexpr mappings = array{
-            pair{"ToggleFullscreen"sv, Action::ToggleFullscreen},
-            pair{"IncreaseFontSize"sv, Action::IncreaseFontSize},
-            pair{"DecreaseFontSize"sv, Action::DecreaseFontSize},
-            pair{"IncreaseOpacity"sv, Action::IncreaseOpacity},
-            pair{"DecreaseOpacity"sv, Action::DecreaseOpacity},
-            pair{"ScreenshotVT"sv, Action::ScreenshotVT},
+        auto static const mappings = array{
+            pair{"ToggleFullscreen"sv, Action{actions::ToggleFullScreen{}}},
+            pair{"IncreaseFontSize"sv, Action{actions::IncreaseFontSize{}}},
+            pair{"DecreaseFontSize"sv, Action{actions::DecreaseFontSize{}}},
+            pair{"IncreaseOpacity"sv, Action{actions::IncreaseOpacity{}}},
+            pair{"DecreaseOpacity"sv, Action{actions::DecreaseOpacity{}}},
+            pair{"ScreenshotVT"sv, Action{actions::ScreenshotVT{}}},
         };
 
         auto const name = toLower(_node.as<string>());
@@ -119,6 +120,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         {
             if (name == toLower(mapping.first))
                 return mapping.second;
+        }
+
+        if (name == "sendchars")
+        {
+            if (!_chars || !_chars.IsScalar())
+                return nullopt;
+
+            return actions::SendChars{ground::parseEscaped(_chars.as<string>())};
         }
 
 		return nullopt;
@@ -158,12 +167,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         {
             auto const name = toLower(_node.as<string>());
 
+            // TODO: decide which of the symbolic once I want to provide, actually.
             if (name == "space")
                 return make_pair(terminal::CharInputEvent{' ', _mods}, true);
             if (name == "equal")
                 return make_pair(terminal::CharInputEvent{'=', _mods}, true);
             if (name == "minus")
                 return make_pair(terminal::CharInputEvent{'-', _mods}, true);
+
             if (name.size() == 1)
                 return make_pair(terminal::CharInputEvent{static_cast<char32_t>(tolower(name[0])), _mods}, true);
         }
@@ -171,7 +182,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         return make_pair(nullopt, false);
 	};
 
-    auto const action = parseAction(_mapping["action"]);
+    auto const action = parseAction(_mapping["action"], _mapping["chars"]);
 	auto const mods = parseModifier(_mapping["mods"]);
     if (action && mods)
     {

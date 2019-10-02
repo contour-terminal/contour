@@ -15,7 +15,7 @@ add_executable(contour
 	main.cpp
 )
 
-set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw glterminal yaml-cpp)
+set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw glterminal ground yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
     list(APPEND contour_LIBRARIES ${Boost_FILESYSTEM_LIBRARY})
 endif()

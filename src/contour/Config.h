@@ -20,17 +20,19 @@
 #include <terminal/Process.h>
 #include <optional>
 #include <string>
+#include <variant>
 #include <unordered_map>
 
 #include "IncludeFilesystem.h"
 
-enum class Action {
-	ToggleFullscreen,
-	ScreenshotVT,
-	IncreaseFontSize,
-	DecreaseFontSize,
-	IncreaseOpacity,
-	DecreaseOpacity,
+namespace actions {
+    struct ToggleFullScreen{};
+    struct ScreenshotVT{};
+    struct IncreaseFontSize{};
+    struct DecreaseFontSize{};
+    struct IncreaseOpacity{};
+    struct DecreaseOpacity{};
+    struct SendChars{ std::string chars; };
 	// Quit
 	// CloseTab
 	// OpenTab
@@ -39,7 +41,17 @@ enum class Action {
 	// CopySelection
 	// PasteSelection
 	// PasteClipboard
-};
+}
+
+using Action = std::variant<
+    actions::ToggleFullScreen,
+    actions::ScreenshotVT,
+    actions::IncreaseFontSize,
+    actions::DecreaseFontSize,
+    actions::IncreaseOpacity,
+    actions::DecreaseOpacity,
+    actions::SendChars
+>;
 
 using InputMapping = std::unordered_map<terminal::InputEvent, Action>;
 
