@@ -1,4 +1,5 @@
 #include <ground/StringUtils.h>
+#include <cstdlib>
 
 using namespace std;
 
@@ -10,7 +11,7 @@ string parseEscaped(string const& _value) {
 
     enum class State { Text, Escape, Octal1, Octal2, Hex1, Hex2 };
     State state = State::Text;
-    char buf[3];
+    char buf[3] = {};
 
     for (size_t i = 0; i < _value.size(); ++i)
     {
@@ -41,6 +42,7 @@ string parseEscaped(string const& _value) {
                 break;
             case State::Octal2:
                 buf[1] = _value[i];
+				out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
                 state = State::Text;
                 break;
             case State::Hex1:
@@ -49,6 +51,7 @@ string parseEscaped(string const& _value) {
                 break;
             case State::Hex2:
                 buf[1] = _value[i];
+				out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
                 state = State::Text;
                 break;
         }
