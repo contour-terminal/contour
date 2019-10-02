@@ -329,6 +329,47 @@ optional<Modifier::Key> parseModifierKey(string const& _key)
 	return nullopt;
 }
 
+optional<variant<Key, char32_t>> parseKeyOrChar(string const& _name)
+{
+    if (auto const key = parseKey(_name); key.has_value())
+        return key.value();
+
+    if (_name.size() == 1)
+    {
+        if (isdigit(_name[0]))
+            return static_cast<char32_t>(_name[0]);
+
+        if (isalpha(_name[0]))
+            return static_cast<char32_t>(tolower(_name[0]));
+    }
+
+    auto constexpr namedChars = array{
+        pair{"APOSTROPHE"sv, '\''},
+        pair{"ADD"sv, '+'},
+        pair{"BACKSLASH"sv, 'x'},
+        pair{"COMMA"sv, ','},
+        pair{"DECIMAL"sv, '.'},
+        pair{"DIVIDE"sv, '/'},
+        pair{"EQUAL"sv, '='},
+        pair{"LEFT_BRACKET"sv, '['},
+        pair{"MINUS"sv, '-'},
+        pair{"MULTIPLY"sv, '*'},
+        pair{"PERIOD"sv, '.'},
+        pair{"RIGHT_BRACKET"sv, ']'},
+        pair{"SEMICOLON"sv, ';'},
+        pair{"SLASH"sv, '/'},
+        pair{"SUBTRACT"sv, '-'},
+        pair{"SPACE"sv, ' '}
+    };
+
+    auto const name = toUpper(_name);
+    for (auto const& mapping: namedChars)
+        if (name == mapping.first)
+            return mapping.second;
+
+    return nullopt;
+}
+
 optional<Key> parseKey(string const& _name)
 {
 	auto static constexpr mappings = array{

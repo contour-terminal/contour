@@ -83,6 +83,14 @@ void createFileIfNotExists(FileSystem::path const& _path)
     }
 }
 
+std::variant<terminal::Key, char32_t> parseKey(std::string const& _name)
+{
+    if (auto const key = terminal::parseKey(_name); key.has_value())
+        return key.value();
+
+    return {};
+}
+
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
@@ -161,22 +169,16 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             return make_pair(nullopt, false);
         else if (!_node.IsScalar())
             return make_pair(nullopt, true);
-        else if (auto const key = terminal::parseKey(_node.as<string>()); key.has_value())
-            return make_pair(KeyInputEvent{key.value(), _mods}, true);
-        else
+        else if (auto const input = terminal::parseKeyOrChar(_node.as<string>()); input.has_value())
         {
-            auto const name = toLower(_node.as<string>());
-
-            // TODO: decide which of the symbolic once I want to provide, actually.
-            if (name == "space")
-                return make_pair(terminal::CharInputEvent{' ', _mods}, true);
-            if (name == "equal")
-                return make_pair(terminal::CharInputEvent{'=', _mods}, true);
-            if (name == "minus")
-                return make_pair(terminal::CharInputEvent{'-', _mods}, true);
-
-            if (name.size() == 1)
-                return make_pair(terminal::CharInputEvent{static_cast<char32_t>(tolower(name[0])), _mods}, true);
+            return make_pair(terminal::InputEvent{visit(terminal::overloaded{
+                [&](terminal::Key _key) -> terminal::InputEvent {
+                    return terminal::KeyInputEvent{_key, _mods};
+                },
+                [&](char32_t _ch) -> terminal::InputEvent {
+                    return terminal::CharInputEvent{static_cast<char32_t>(tolower(_ch)), _mods};
+                }
+            }, input.value())}, true);
         }
 
         return make_pair(nullopt, false);

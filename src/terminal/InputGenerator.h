@@ -13,11 +13,13 @@
  */
 #pragma once
 
+#include <terminal/Util.h>
+
 #include <optional>
 #include <string>
 #include <variant>
 #include <vector>
-#include <terminal/Util.h>
+#include <utility>
 
 namespace terminal {
 
@@ -186,6 +188,7 @@ enum class Key {
 };
 
 std::optional<Key> parseKey(std::string const& _name);
+std::optional<std::variant<Key, char32_t>> parseKeyOrChar(std::string const& _name);
 
 std::string to_string(Key _key);
 
