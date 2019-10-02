@@ -1142,11 +1142,16 @@ void Screen::operator()(ScreenAlignmentPattern const&)
 void Screen::operator()(SendMouseEvents const& v)
 {
     // TODO
+    cerr << fmt::format("TODO: SendMouseEvents({}, {})",
+                        to_string(v.protocol),
+                        v.enable ? "enable" : "disable")
+         << endl;
 }
 
 void Screen::operator()(AlternateKeypadMode const& v)
 {
     // TODO
+    cerr << "TODO: AlternateKeypadMode." << endl;
 }
 
 void Screen::operator()(DesignateCharset const& v)
