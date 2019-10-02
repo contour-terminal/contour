@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.13)
 #project(libground VERSION "0.0.0" LANGUAGES CXX)
 
+include(FilesystemResolver)
+
 option(LIBGROUND_TESTING "Enables building of unittests for libground [default: ON]" ON)
 
 if(MSVC)
@@ -12,8 +14,11 @@ add_library(ground STATIC
     FileChangeWatcher.cpp FileChangeWatcher.h
     stdfs.h
 )
-
 target_include_directories(ground PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+
+if(Boost_FILESYSTEM_FOUND)
+    target_link_libraries(ground PRIVATE ${Boost_FILESYSTEM_LIBRARY})
+endif()
 
 # ----------------------------------------------------------------------------
 if(LIBGROUND_TESTING)
