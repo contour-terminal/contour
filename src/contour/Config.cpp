@@ -223,6 +223,17 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
     softLoadValue(doc, "fontFamily", _config.fontFamily);
     softLoadValue(doc, "tabWidth", _config.tabWidth);
 
+    if (auto history = doc["history"]; history)
+    {
+        if (auto limit = history["limit"]; limit)
+        {
+            if (limit.as<int>() < 0)
+                _config.maxHistoryLineCount = nullopt;
+            else
+                _config.maxHistoryLineCount = limit.as<size_t>();
+        }
+    }
+
     if (auto background = doc["background"]; background)
     {
         if (auto opacity = background["opacity"]; opacity)
@@ -336,6 +347,10 @@ std::string serializeYaml(Config const& _config)
     root["tabWidth"] = _config.tabWidth;
     root["background"]["opacity"] = static_cast<float>(_config.backgroundOpacity) / 255.0f;
     root["background"]["blur"] = _config.backgroundBlur;
+
+    root["history"]["limit"] = _config.maxHistoryLineCount.has_value()
+        ? static_cast<int64_t>(_config.maxHistoryLineCount.value())
+        : -1ll;
 
     // TODO: colors
 

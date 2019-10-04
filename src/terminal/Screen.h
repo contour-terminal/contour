@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <functional>
 #include <list>
+#include <optional>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -147,8 +148,9 @@ struct ScreenBuffer {
 		// TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
 	};
 
-	explicit ScreenBuffer(WindowSize const& _size)
+	ScreenBuffer(WindowSize const& _size, std::optional<size_t> _maxHistoryLineCount)
 		: size_{ _size },
+          maxHistoryLineCount_{ move(_maxHistoryLineCount) },
 		  margin_{
 			  {1, _size.rows},
 			  {1, _size.columns}
@@ -159,6 +161,7 @@ struct ScreenBuffer {
 	}
 
 	WindowSize size_;
+    std::optional<size_t> maxHistoryLineCount_;
 	Margin margin_;
 	std::set<Mode> enabledModes_{};
 	Cursor cursor{};
@@ -192,6 +195,7 @@ struct ScreenBuffer {
 
 	void setMode(Mode _mode, bool _enable);
 
+    void clampSavedLines();
 	void verifyState() const;
 	void saveState();
 	void restoreState();
@@ -279,6 +283,7 @@ class Screen {
      * @param _onCommands hook to the commands being executed by the screen.
      */
     Screen(WindowSize const& _size,
+           std::optional<size_t> _maxHistoryLineCount,
            ModeSwitchCallback _useApplicationCursorKeys,
            std::function<void()> _onWindowTitleChanged,
            ResizeWindowCallback _resizeWindow,
@@ -288,7 +293,9 @@ class Screen {
            Hook _onCommands);
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, {}, {}, {}, {}, {}, move(_logger), {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, move(_logger), {}} {}
+
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -486,7 +493,8 @@ class Screen {
     ScreenBuffer* state_;
 
     WindowSize size_;
-    std::string windowTitle_;
+    std::optional<size_t> maxHistoryLineCount_;
+    std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 };
 

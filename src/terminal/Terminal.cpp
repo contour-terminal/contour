@@ -22,8 +22,9 @@ using namespace std::placeholders;
 namespace terminal {
 
 Terminal::Terminal(WindowSize _winSize,
-                   std::function<void()> _onWindowTitleChanged,
-                   std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+                   optional<size_t> _maxHistoryLineCount,
+                   function<void()> _onWindowTitleChanged,
+                   function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                    Logger _logger,
                    Hook _onScreenCommands)
   : PseudoTerminal{ _winSize },
@@ -31,6 +32,7 @@ Terminal::Terminal(WindowSize _winSize,
     inputGenerator_{},
     screen_{
         _winSize,
+        _maxHistoryLineCount,
         bind(&Terminal::useApplicationCursorKeys, this, _1),
         move(_onWindowTitleChanged),
         move(_resizeWindow),
@@ -47,6 +49,11 @@ Terminal::Terminal(WindowSize _winSize,
 Terminal::~Terminal()
 {
     //wait();
+}
+
+void Terminal::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
+{
+    screen_.setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
 void Terminal::useApplicationCursorKeys(bool _enable)

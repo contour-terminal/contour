@@ -40,19 +40,20 @@ auto const envvars = terminal::Process::Environment{
 };
 
 TerminalView::TerminalView(WindowSize const& _winSize,
-                       unsigned _width,
-                       unsigned _height,
-                       Font& _regularFont,
-                       CursorShape _cursorShape,
-                       glm::vec3 const& _cursorColor,
-                       terminal::ColorProfile const& _colorProfile,
-                       terminal::Opacity _backgroundOpacity,
-                       string const& _shell,
-                       glm::mat4 const& _projectionMatrix,
-                       function<void()> _onScreenUpdate,
-                       function<void()> _onWindowTitleChanged,
-                       function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                       GLLogger& _logger) :
+                           optional<size_t> _maxHistoryLineCount,
+                           unsigned _width,
+                           unsigned _height,
+                           Font& _regularFont,
+                           CursorShape _cursorShape,
+                           glm::vec3 const& _cursorColor,
+                           terminal::ColorProfile const& _colorProfile,
+                           terminal::Opacity _backgroundOpacity,
+                           string const& _shell,
+                           glm::mat4 const& _projectionMatrix,
+                           function<void()> _onScreenUpdate,
+                           function<void()> _onWindowTitleChanged,
+                           function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+                           GLLogger& _logger) :
     logger_{ _logger },
     updated_{ false },
     colorProfile_{ _colorProfile },
@@ -77,6 +78,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
     },
     terminal_{
         _winSize,
+        move(_maxHistoryLineCount),
         move(_onWindowTitleChanged),
         move(_resizeWindow),
         [this](terminal::LogEvent const& _event) { logger_(_event); },
@@ -99,6 +101,11 @@ TerminalView::~TerminalView()
 bool TerminalView::alive() const
 {
     return alive_;
+}
+
+void TerminalView::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
+{
+    terminal_.setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
 bool TerminalView::send(terminal::InputEvent const& _inputEvent)

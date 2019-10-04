@@ -87,6 +87,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
                 begin(lines),
                 next(begin(lines), n)
             );
+            clampSavedLines();
         }
         else
             // Hard-cut below cursor by the number of lines to shrink.
@@ -312,6 +313,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 begin(lines),
                 next(begin(lines), n)
             );
+            clampSavedLines();
 
             generate_n(
                 back_inserter(lines),
@@ -508,6 +510,13 @@ void ScreenBuffer::updateCursorIterators()
     verifyState();
 }
 
+void ScreenBuffer::clampSavedLines()
+{
+    if (maxHistoryLineCount_.has_value())
+        while (savedLines.size() > maxHistoryLineCount_.value())
+            savedLines.pop_front();
+}
+
 void ScreenBuffer::verifyState() const
 {
     assert(size_.rows == lines.size());
@@ -528,6 +537,7 @@ void ScreenBuffer::verifyState() const
 // ==================================================================================
 
 Screen::Screen(WindowSize const& _size,
+               optional<size_t> _maxHistoryLineCount,
                ModeSwitchCallback _useApplicationCursorKeys,
                function<void()> _onWindowTitleChanged,
                ResizeWindowCallback _resizeWindow,
@@ -544,12 +554,23 @@ Screen::Screen(WindowSize const& _size,
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
-    primaryBuffer_{ _size },
-    alternateBuffer_{ _size },
+    primaryBuffer_{ _size, _maxHistoryLineCount },
+    alternateBuffer_{ _size, nullopt },
     state_{ &primaryBuffer_ },
-    size_{ _size }
+    size_{ _size },
+    maxHistoryLineCount_ { _maxHistoryLineCount }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
+}
+
+void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
+{
+    maxHistoryLineCount_ = _maxHistoryLineCount;
+
+    primaryBuffer_.maxHistoryLineCount_ = _maxHistoryLineCount;
+    primaryBuffer_.clampSavedLines();
+
+    // Alternate buffer does not have a history usually (and for now we keep it that way).
 }
 
 void Screen::resize(WindowSize const& _newSize)
@@ -1234,8 +1255,8 @@ void Screen::resetSoft()
 
 void Screen::resetHard()
 {
-    primaryBuffer_ = ScreenBuffer{size_};
-    alternateBuffer_ = ScreenBuffer{size_};
+    primaryBuffer_ = ScreenBuffer{size_, maxHistoryLineCount_};
+    alternateBuffer_ = ScreenBuffer{size_, nullopt};
     state_ = &primaryBuffer_;
 }
 

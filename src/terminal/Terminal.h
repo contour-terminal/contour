@@ -41,11 +41,14 @@ class Terminal : public PseudoTerminal {
 
     explicit Terminal(
         WindowSize _winSize,
+        std::optional<size_t> _maxHistoryLineCount = std::nullopt,
         std::function<void()> _changeWindowTitleCallback = {},
         std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
         Logger _logger = {},
         Hook _onScreenCommands = {});
     ~Terminal() override;
+
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
 
     // Sends given input event to connected slave.
     bool send(InputEvent _inputEvent);

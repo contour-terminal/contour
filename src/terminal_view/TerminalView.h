@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,7 @@ class Font;
 class TerminalView {
   public:
     TerminalView(terminal::WindowSize const& _winSize,
+                 std::optional<size_t> _maxHistoryLineCount,
                  unsigned _width, unsigned _height,
                  Font& _regularFont,
                  CursorShape _cursorShape,
@@ -56,6 +58,8 @@ class TerminalView {
     TerminalView& operator=(TerminalView&&) = delete;
 
     ~TerminalView();
+
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
 
     bool send(terminal::InputEvent const& _inputEvent);
 

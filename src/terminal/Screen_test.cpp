@@ -1389,6 +1389,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
     string reply;
     Screen screen{
         {5, 5},
+        nullopt, // history line count (infinite)
         {}, // useAppCursorKeys
         {}, // onWindowTitleChanged
         {}, // resizeWindow
@@ -1426,6 +1427,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     string reply;
     Screen screen{
         {5, 5},
+        nullopt, // history line count (infinite)
         {}, // useAppCursorKeys
         {}, // onWindowTitleChanged
         {}, // resizeWindow
@@ -1478,6 +1480,7 @@ TEST_CASE("RequestMode", "[screen]")
     string reply;
     Screen screen{
         {5, 5},
+        nullopt, // history line count (infinite)
         {}, // useAppCursorKeys
         {}, // onWindowTitleChanged
         {}, // resizeWindow

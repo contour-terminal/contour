@@ -62,6 +62,7 @@ Contour::Contour(Config const& _config) :
     },
     terminalView_{
         config_.terminalSize,
+        config_.maxHistoryLineCount,
         window_.width(),
         window_.height(),
         regularFont_.get(),
@@ -556,6 +557,8 @@ bool Contour::reloadConfigValues()
         auto const height = newConfig.terminalSize.rows * regularFont_.get().lineHeight();
         window_.resize(width, height);
     }
+
+    terminalView_.setMaxHistoryLineCount(newConfig.maxHistoryLineCount);
 
     // TODO: cursor shape
     // TODO: cursor blinking
