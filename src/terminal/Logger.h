@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ground/overloaded.h>
 #include <terminal/Util.h>
 #include <functional>
 #include <string>
@@ -63,7 +64,7 @@ namespace fmt {
         auto format(const terminal::LogEvent& ev, FormatContext& ctx)
         {
             using namespace terminal;
-            return std::visit(terminal::overloaded{
+            return std::visit(overloaded{
                 [&](ParserErrorEvent const& v) {
                     return format_to(ctx.out(), "Parser Error. {}", v.reason);
                 },

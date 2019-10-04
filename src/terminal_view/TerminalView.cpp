@@ -17,6 +17,8 @@
 
 #include <terminal/Util.h>
 
+#include <ground/overloaded.h>
+
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 

@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <ground/overloaded.h>
 #include <terminal/Util.h>
 
 #include <optional>
@@ -317,7 +318,7 @@ namespace std {
 	template<>
 	struct hash<terminal::InputEvent> {
 		constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
-            return visit(terminal::overloaded{
+            return visit(overloaded{
                 [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
                 [](terminal::CharInputEvent ev) { return hash<terminal::CharInputEvent>{}(ev); },
                 [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },

@@ -73,36 +73,11 @@ constexpr bool operator==(CharacterStyleMask a, CharacterStyleMask b) noexcept
 	return a.mask() == b.mask();
 }
 
-// constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask b) noexcept
-// {
-// 	return CharacterStyleMask{a.mask() | b.mask()};
-// }
-//
-// constexpr CharacterStyleMask operator|(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
-// {
-// 	return CharacterStyleMask{a.mask() | static_cast<unsigned>(b)};
-// }
-//
-// constexpr CharacterStyleMask operator~(CharacterStyleMask a) noexcept
-// {
-// 	return CharacterStyleMask{~a.mask()};
-// }
-
 constexpr CharacterStyleMask& operator|=(CharacterStyleMask& a, CharacterStyleMask b) noexcept
 {
     a = a | b;
 	return a;
 }
-
-// constexpr CharacterStyleMask operator&(CharacterStyleMask a, CharacterStyleMask b) noexcept
-// {
-//     return CharacterStyleMask{a.mask() & b.mask()};
-// }
-//
-// constexpr CharacterStyleMask operator&(CharacterStyleMask a, CharacterStyleMask::Mask b) noexcept
-// {
-//     return CharacterStyleMask{a.mask() & static_cast<unsigned>(b)};
-// }
 
 constexpr CharacterStyleMask& operator&=(CharacterStyleMask& a, CharacterStyleMask b) noexcept
 {
@@ -114,7 +89,6 @@ constexpr bool operator!(CharacterStyleMask a) noexcept
 {
 	return a.mask() == 0;
 }
-
 
 struct Margin {
 	struct Range {
@@ -207,8 +181,6 @@ struct ScreenBuffer {
 
 	void resize(WindowSize const& _winSize);
 	WindowSize const& size() const noexcept { return size_; }
-	[[deprecated]] cursor_pos_t numLines() const noexcept { return size_.rows; }
-	[[deprecated]] cursor_pos_t numColumns() const noexcept { return size_.columns; }
 
 	void scrollUp(cursor_pos_t n);
 	void scrollUp(cursor_pos_t n, Margin const& margin);

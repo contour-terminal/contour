@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <ground/overloaded.h>
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>

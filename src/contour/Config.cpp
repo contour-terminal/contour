@@ -14,6 +14,7 @@
 #include "Config.h"
 #include "Flags.h"
 
+#include <ground/overloaded.h>
 #include <ground/stdfs.h>
 #include <ground/StringUtils.h>
 #include <terminal_view/GLCursor.h>
@@ -171,7 +172,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             return make_pair(nullopt, true);
         else if (auto const input = terminal::parseKeyOrChar(_node.as<string>()); input.has_value())
         {
-            return make_pair(terminal::InputEvent{visit(terminal::overloaded{
+            return make_pair(terminal::InputEvent{visit(overloaded{
                 [&](terminal::Key _key) -> terminal::InputEvent {
                     return terminal::KeyInputEvent{_key, _mods};
                 },

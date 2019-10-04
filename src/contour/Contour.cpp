@@ -14,6 +14,7 @@
 #include "Contour.h"
 #include <terminal/Color.h>
 #include <terminal/InputGenerator.h>
+#include <ground/overloaded.h>
 
 #include <iostream>
 #include <fstream>
@@ -264,7 +265,7 @@ constexpr terminal::Modifier makeModifier(int _mods)
 
 void Contour::executeAction(Action _action)
 {
-    visit(terminal::overloaded{
+    visit(overloaded{
         [&](actions::ToggleFullScreen) {
             window_.toggleFullScreen();
         },
