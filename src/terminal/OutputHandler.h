@@ -110,6 +110,8 @@ class OutputHandler {
         logUnsupported(fmt::format(msg, std::forward<Args>(args)...));
     }
 
+    std::string sequenceString(std::string const& _prefix) const;
+
   private:
     char32_t currentChar_{};
     std::vector<Command> commands_{};

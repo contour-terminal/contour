@@ -21,6 +21,7 @@
 
 #include <numeric>
 #include <optional>
+#include <sstream>
 
 namespace terminal {
 
@@ -48,6 +49,25 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
         default:
             return nullopt;
     }
+}
+
+string OutputHandler::sequenceString(string const& _prefix) const
+{
+    stringstream sstr;
+    sstr << _prefix;
+    if (leaderSymbol_)
+        sstr << ' ' << leaderSymbol_;
+
+    sstr << accumulate(
+        begin(parameters_), end(parameters_), string{},
+        [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); });
+
+    if (!intermediateCharacters_.empty())
+        sstr << ' ' << intermediateCharacters_;
+
+    sstr << ' ' << static_cast<char>(currentChar());
+
+    return sstr.str();
 }
 
 void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_t _currentChar)
@@ -126,17 +146,14 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                         break;
                     case '3':  // this is X-specific ;-(
                     default:
-                        // unsupported / unknown
-                        logUnsupported("Action: {} {} \"{}\"", to_string(action), escape(currentChar()),
-                                       escape(intermediateCharacters_));
+                    {
+                        log<InvalidOutputEvent>("Invalid operating system command. {}", sequenceString("OSC"));
                         break;
                 }
             }
             else
             {
-                // unsupported / unknown
-                logUnsupported("Action: {} {} \"{}\"", to_string(action), escape(currentChar()),
-                               escape(intermediateCharacters_));
+                log<UnsupportedOutputEvent>("Unsupported or invalid operating system command. {}", sequenceString("OSC"));
             }
             intermediateCharacters_.clear();
             break;
@@ -959,14 +976,7 @@ void OutputHandler::logUnsupported(std::string_view const& msg) const
 
 void OutputHandler::logUnsupportedCSI() const
 {
-    auto const seq = fmt::format(
-        "CSI {} {} {}",
-        intermediateCharacters_,
-        accumulate(
-            begin(parameters_), end(parameters_), string{},
-            [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); }),
-        static_cast<char>(currentChar()));
-    log<UnsupportedOutputEvent>("Unsupported CSI sequence {}.", seq);
+    log<UnsupportedOutputEvent>("Unsupported CSI sequence {}.", sequenceString("CSI"));
 }
 
 void OutputHandler::logInvalidESC(std::string const& message) const
@@ -976,14 +986,7 @@ void OutputHandler::logInvalidESC(std::string const& message) const
 
 void OutputHandler::logInvalidCSI(std::string const& message) const
 {
-    auto const seq = fmt::format(
-        "CSI {} {} {}",
-        intermediateCharacters_,
-        accumulate(
-            begin(parameters_), end(parameters_), string{},
-            [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); }),
-        static_cast<char>(currentChar()));
-    log<InvalidOutputEvent>("Invalid CSI sequence {}. {}", seq, message);
+    log<InvalidOutputEvent>("Invalid CSI sequence {}. {}", sequenceString("CSI"), message);
 }
 
 }  // namespace terminal
