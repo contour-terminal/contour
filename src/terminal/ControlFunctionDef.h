@@ -51,24 +51,24 @@ constexpr ControlFunctionDef CUU{std::nullopt, std::nullopt, 'A', VTType::VT100,
 constexpr ControlFunctionDef DA1{std::nullopt, std::nullopt, 'c', VTType::VT100, "DA1", "Send primary device attributes"};
 constexpr ControlFunctionDef DA2{'>', std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes"};
 constexpr ControlFunctionDef DCH{std::nullopt, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters"};
-constexpr ControlFunctionDef DECDC{'\'', std::nullopt, '~', VTType::VT100, "DECDC", "Delete column"};
-constexpr ControlFunctionDef DECIC{'\'', std::nullopt, '}', VTType::VT100, "DECIC", "Insert column"};
+constexpr ControlFunctionDef DECDC{'\'', std::nullopt, '~', VTType::VT420, "DECDC", "Delete column"};
+constexpr ControlFunctionDef DECIC{'\'', std::nullopt, '}', VTType::VT420, "DECIC", "Insert column"};
 constexpr ControlFunctionDef DECRM{'?', std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode"};
 constexpr ControlFunctionDef DECRQM_ANSI{std::nullopt, '$', 'p', VTType::VT100, "DECRQM_ANSI", "Request ANSI-mode"};
 constexpr ControlFunctionDef DECRQM{'?', '$', 'p', VTType::VT100, "DECRQM", "Request DEC-mode"};
-constexpr ControlFunctionDef DECSLRM{std::nullopt, std::nullopt, 's', VTType::VT100, "DECSLRM", "Set left/right margin"};
+constexpr ControlFunctionDef DECSLRM{std::nullopt, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin"};
 constexpr ControlFunctionDef DECSM{'?', std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode"};
 constexpr ControlFunctionDef DECSTBM{std::nullopt, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin"};
 constexpr ControlFunctionDef DECSTR{'!', std::nullopt, 'p', VTType::VT100, "DECSTR", "Soft terminal reset"};
 constexpr ControlFunctionDef DECXCPR{std::nullopt, std::nullopt, '6', VTType::VT100, "DECXCPR", "Request extended cursor position"};
 constexpr ControlFunctionDef DL {std::nullopt, std::nullopt, 'M', VTType::VT100, "DL",  "Delete lines"};
-constexpr ControlFunctionDef ECH{std::nullopt, std::nullopt, 'X', VTType::VT100, "ECH", "Erase characters"};
+constexpr ControlFunctionDef ECH{std::nullopt, std::nullopt, 'X', VTType::VT420, "ECH", "Erase characters"};
 constexpr ControlFunctionDef ED {std::nullopt, std::nullopt, 'J', VTType::VT100, "ED",  "Erase in display"};
 constexpr ControlFunctionDef EL {std::nullopt, std::nullopt, 'K', VTType::VT100, "EL",  "Erase in line"};
 constexpr ControlFunctionDef HPA{std::nullopt, std::nullopt, '`', VTType::VT100, "HPA", "Horizontal position absolute"};
 constexpr ControlFunctionDef HPR{std::nullopt, std::nullopt, 'a', VTType::VT100, "HPR", "Horizontal position relative"};
 constexpr ControlFunctionDef HVP{std::nullopt, std::nullopt, 'f', VTType::VT100, "HVP", "Horizontal and vertical position"};
-constexpr ControlFunctionDef ICH{std::nullopt, std::nullopt, '@', VTType::VT100, "ICH", "Insert character"};
+constexpr ControlFunctionDef ICH{std::nullopt, std::nullopt, '@', VTType::VT420, "ICH", "Insert character"};
 constexpr ControlFunctionDef IL {std::nullopt, std::nullopt, 'L', VTType::VT100, "IL",  "Insert lines"};
 constexpr ControlFunctionDef RM {std::nullopt, std::nullopt, 'l', VTType::VT100, "RM",  "Reset mode"};
 constexpr ControlFunctionDef SD {std::nullopt, std::nullopt, 'T', VTType::VT100, "SD",  "Scroll down (pan up)"};
@@ -77,7 +77,8 @@ constexpr ControlFunctionDef SM {std::nullopt, std::nullopt, 'h', VTType::VT100,
 constexpr ControlFunctionDef SU {std::nullopt, std::nullopt, 'S', VTType::VT100, "SU",  "Scroll up (pan down)"};
 constexpr ControlFunctionDef VPA{std::nullopt, std::nullopt, 'd', VTType::VT100, "VPA", "Vertical Position Absolute"};
 
-constexpr ControlFunctionDef WINMANIP{std::nullopt, std::nullopt, 't', VTType::VT100, "WINMANIP", "Window Manipulation"};
+// xterm extensions
+constexpr ControlFunctionDef WINMANIP{std::nullopt, std::nullopt, 't', VTType::VT525, "WINMANIP", "Window Manipulation"};
 
 ControlFunctionDef const* controlFunctionById(uint32_t _id) noexcept;
 
