@@ -139,13 +139,6 @@ class Decoder {
     char32_t character_{};
 };
 
-template <class... Ts>
-struct overloaded : Ts... {
-    using Ts::operator()...;
-};
-template <class... Ts>
-overloaded(Ts...)->overloaded<Ts...>;
-
 inline std::u32string decode(char const* begin, char const* end)
 {
     std::u32string out;
