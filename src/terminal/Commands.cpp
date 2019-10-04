@@ -282,7 +282,6 @@ class MnemonicBuilder {
     void operator()(DesignateCharset const& v) {} // TODO
     void operator()(SingleShiftSelect const& v) {} // TODO
     void operator()(ChangeWindowTitle const& v) {} // TODO
-    void operator()(ChangeIconName const& v) {} // TODO
     void operator()(SoftTerminalReset) { build("DECSTR", "Soft terminal reset."); }
     void operator()(AppendChar const& v) {
         pendingText_ += utf8::to_string(utf8::encode(v.ch));

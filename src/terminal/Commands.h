@@ -621,14 +621,6 @@ struct ScreenAlignmentPattern {};
 /// Changes the Window's title to given title.
 struct ChangeWindowTitle { std::string title; };
 
-/// Sets icon name to given title.
-///
-/// That is, the title also being displayed right next to the iconified window,
-/// such as in twm.
-///
-/// See: https://unix.stackexchange.com/questions/234136/in-xterm-what-is-icon-name
-struct ChangeIconName { std::string title; };
-
 /// Resizes window to given dimension.
 ///
 /// `CSI 4 ; height ; width t` and `CSI 8 ; height ; width t`
@@ -653,7 +645,6 @@ using Command = std::variant<
     BackIndex,
     Backspace,
     Bell,
-    ChangeIconName,
     ChangeWindowTitle,
     ClearLine,
     ClearScreen,

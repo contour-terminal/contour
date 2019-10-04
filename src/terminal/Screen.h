@@ -406,7 +406,6 @@ class Screen {
     void operator()(SingleShiftSelect const& v);
     void operator()(SoftTerminalReset const& v);
     void operator()(ChangeWindowTitle const& v);
-    void operator()(ChangeIconName const& v);
     void operator()(ResizeWindow const& v);
     void operator()(SaveWindowTitle const& v);
     void operator()(RestoreWindowTitle const& v);

@@ -1499,7 +1499,6 @@ TEST_CASE("RequestMode", "[screen]")
 // TODO: SingleShiftSelect
 
 // TODO: ChangeWindowTitle
-// TODO: ChangeIconName
 
 // TODO: Bell
 // TODO: FullReset

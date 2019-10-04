@@ -1200,11 +1200,6 @@ void Screen::operator()(ResizeWindow const& v)
         resizeWindow_(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels);
 }
 
-void Screen::operator()(ChangeIconName const& v)
-{
-    // TODO
-}
-
 void Screen::operator()(AppendChar const& v)
 {
     state_->appendChar(v.ch);

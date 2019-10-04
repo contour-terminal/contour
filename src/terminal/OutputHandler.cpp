@@ -136,19 +136,19 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                 {
                     case '0':
                         emit<ChangeWindowTitle>(value);
-                        emit<ChangeIconName>(value);
-                        break;
-                    case '1':
-                        emit<ChangeIconName>(value);
                         break;
                     case '2':
                         emit<ChangeWindowTitle>(value);
                         break;
-                    case '3':  // this is X-specific ;-(
+                    case '1': // change X11 resource
+                    case '3': // change icon name (also X11 specific)
+                        log<UnsupportedOutputEvent>("Invalid operating system command. {}", sequenceString("OSC"));
+                        break;
                     default:
                     {
                         log<InvalidOutputEvent>("Invalid operating system command. {}", sequenceString("OSC"));
                         break;
+                    }
                 }
             }
             else
