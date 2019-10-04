@@ -556,9 +556,12 @@ bool Contour::reloadConfigValues()
         window_.resize(width, height);
     }
 
-    // TODO: key bindings
-    // TODO... (all the rest)
+    // TODO: cursor shape
+    // TODO: cursor blinking
+    // TODO: tab width
+    // TODO: background blur
 
     config_ = move(newConfig);
+
     return true;
 }
