@@ -92,40 +92,7 @@ constexpr Modifier operator+(Modifier::Key _lhs, Modifier::Key _rhs) noexcept
 /// @returns CSI parameter for given function key modifier
 constexpr size_t makeVirtualTerminalParam(Modifier _modifier) noexcept
 {
-    switch (_modifier) {
-        case Modifier::Key::Shift:
-            return 2;
-        case Modifier::Key::Alt:
-            return 3;
-        case Modifier::Key::Shift + Modifier::Key::Alt:
-            return 4;
-        case Modifier::Key::Control:
-            return 5;
-        case Modifier::Key::Shift + Modifier::Key::Control:
-            return 6;
-        case Modifier::Key::Alt + Modifier::Key::Control:
-            return 7;
-        case Modifier::Key::Shift + Modifier::Key::Alt + Modifier::Key::Control:
-            return 8;
-        case Modifier::Key::Meta:
-            return 9;
-        case Modifier::Key::Meta + Modifier::Key::Shift:
-            return 10;
-        case Modifier::Key::Meta + Modifier::Key::Alt:
-            return 11;
-        case Modifier::Key::Meta + Modifier::Key::Alt + Modifier::Key::Shift:
-            return 12;
-        case Modifier::Key::Meta + Modifier::Key::Control:
-            return 13;
-        case Modifier::Key::Meta + Modifier::Key::Control + Modifier::Key::Shift:
-            return 14;
-        case Modifier::Key::Meta + Modifier::Key::Control + Modifier::Key::Alt:
-            return 15;
-        case Modifier::Key::Meta + Modifier::Key::Control + Modifier::Key::Alt + Modifier::Key::Shift:
-            return 16;
-        default:
-            return 0;
-    }
+    return 1 + _modifier.value();
 }
 
 std::string to_string(Modifier _modifier);
