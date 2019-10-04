@@ -287,8 +287,6 @@ struct ScreenBuffer {
  */
 class Screen {
   public:
-    using Hook = std::function<void(std::vector<Command> const& commands)>;
-
 	using Cell = ScreenBuffer::Cell;
 	using Cursor = ScreenBuffer::Cursor;
     using Reply = std::function<void(std::string const&)>;
@@ -296,6 +294,7 @@ class Screen {
     using ModeSwitchCallback = std::function<void(bool)>;
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
+    using Hook = std::function<void(std::vector<Command> const& commands)>;
 
   public:
     /**
@@ -316,16 +315,8 @@ class Screen {
            Logger _logger,
            Hook _onCommands);
 
-    // TODO: remove me again (and provide a simple ctor for unit testing)
-    Screen(WindowSize const& _size,
-           ModeSwitchCallback _useApplicationCursorKeys,
-           Reply _reply,
-           Logger _logger,
-           Hook _onCommands) :
-        Screen{_size, move(_useApplicationCursorKeys), {}, {}, {}, move(_reply), move(_logger), move(_onCommands)} {}
-
-    explicit Screen(WindowSize const& _size) :
-        Screen{_size, {}, {}, {}, {}, {}, {}, {}} {}
+    Screen(WindowSize const& _size, Logger _logger) :
+        Screen{_size, {}, {}, {}, {}, {}, move(_logger), {}} {}
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
