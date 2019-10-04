@@ -165,6 +165,28 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 			return nullopt;
 	};
 
+    auto const parseMouseEvent = [](YAML::Node const& _node, Modifier _mods) -> pair<optional<MousePressEvent>, bool> {
+        if (!_node)
+            return make_pair(nullopt, true);
+        else if (!_node.IsScalar())
+            return make_pair(nullopt, false);
+        else
+        {
+            auto constexpr static mappings = array{
+                pair{"WHEELUP"sv, terminal::MouseButton::WheelUp},
+                pair{"WHEELDOWN"sv, terminal::MouseButton::WheelDown},
+                pair{"LEFT"sv, terminal::MouseButton::Left},
+                pair{"MIDDLE"sv, terminal::MouseButton::Middle},
+                pair{"RIGHT"sv, terminal::MouseButton::Right},
+            };
+            auto const name = toUpper(_node.as<string>());
+            for (auto const& mapping: mappings)
+                if (name == mapping.first)
+                    return make_pair(MousePressEvent{mapping.second, _mods}, true);
+            return make_pair(nullopt, true);
+        }
+    };
+
 	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods) -> pair<optional<terminal::InputEvent>, bool> {
         if (!_node)
             return make_pair(nullopt, false);
@@ -191,12 +213,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     {
         if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
         {
-            _config.inputMapping[keyEvent.value()] = action.value();
+            if (keyEvent.has_value())
+                _config.inputMapping[keyEvent.value()] = action.value();
         }
-        // else if (auto const [mouseEvent, ok] = parseMouse(_mapping["mouse"]); ok)
-        // {
-        //     // TODO
-        // }
+        else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
+        {
+            if (mouseEvent.has_value())
+                _config.inputMapping[mouseEvent.value()] = action.value();
+        }
         else
         {
             // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
