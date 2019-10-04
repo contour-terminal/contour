@@ -71,7 +71,15 @@ struct Config {
     LogMask loggingMask;
 
     terminal::ColorProfile colorProfile{};
-    InputMapping inputMapping{};
+    InputMapping inputMapping = InputMapping{
+        {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
+        {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
+        {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Control}, actions::IncreaseFontSize{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
+    };
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);
