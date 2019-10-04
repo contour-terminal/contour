@@ -34,6 +34,7 @@ Terminal::Terminal(WindowSize _winSize,
         bind(&Terminal::useApplicationCursorKeys, this, _1),
         move(_onWindowTitleChanged),
         move(_resizeWindow),
+        bind(&InputGenerator::setApplicationKeypadMode, &inputGenerator_, _1),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
         bind(&Terminal::onScreenCommands, this, _1)

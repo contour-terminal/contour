@@ -225,10 +225,10 @@ void OutputHandler::dispatchESC()
             emit<ForwardIndex>();
             break;
         case '=':
-            emit<AlternateKeypadMode>(true);
+            emit<ApplicationKeypadMode>(true);
             break;
         case '>':
-            emit<AlternateKeypadMode>(false);
+            emit<ApplicationKeypadMode>(false);
             break;
         case 'D':
             emit<Index>();

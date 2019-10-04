@@ -569,7 +569,15 @@ unsigned to_code(MouseProtocol protocol);
 
 struct SendMouseEvents { MouseProtocol protocol; bool enable; };
 
-struct AlternateKeypadMode { bool enable; };
+/// DECKPAM - Keypad Application Mode: ESC =
+/// DECKPNM - Keypad Numeric Mode: ESC >
+///
+/// Enables (DECKPAM) or disables (DECKPNM) sending application keys when pressing keypad keys.
+///
+/// See:
+/// - https://vt100.net/docs/vt510-rm/DECKPAM.html
+/// - https://vt100.net/docs/vt510-rm/DECKPNM.html
+struct ApplicationKeypadMode { bool enable; };
 
 struct DesignateCharset { CharsetTable table; Charset charset; };
 
@@ -641,7 +649,7 @@ struct RestoreWindowTitle {};
 using Command = std::variant<
     AppendChar,
 
-    AlternateKeypadMode,
+    ApplicationKeypadMode,
     BackIndex,
     Backspace,
     Bell,

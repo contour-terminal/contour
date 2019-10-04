@@ -238,6 +238,17 @@ void InputGenerator::setNumpadKeysMode(KeyMode _mode)
     numpadKeysMode_ = _mode;
 }
 
+void InputGenerator::setApplicationKeypadMode(bool _enable)
+{
+    // cerr << "InputGenerator.setApplicationKeypadMode: "
+    //      << (_enable ? "enable" : "disable") << endl;
+
+    if (_enable)
+        numpadKeysMode_ = KeyMode::Application;
+    else
+        numpadKeysMode_ = KeyMode::Normal; // aka. Numeric
+}
+
 bool InputGenerator::generate(InputEvent const& _inputEvent)
 {
     return visit(overloaded{

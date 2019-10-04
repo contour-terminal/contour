@@ -278,7 +278,7 @@ class MnemonicBuilder {
     }
     void operator()(ScreenAlignmentPattern const& v) { build("DECALN", "Draw Screen Alignment Pattern."); }
     void operator()(SendMouseEvents const& v) {} // TODO
-    void operator()(AlternateKeypadMode const& v) {} // TODO
+    void operator()(ApplicationKeypadMode const& v) {} // TODO
     void operator()(DesignateCharset const& v) {} // TODO
     void operator()(SingleShiftSelect const& v) {} // TODO
     void operator()(ChangeWindowTitle const& v) {} // TODO

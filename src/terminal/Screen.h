@@ -295,6 +295,7 @@ class Screen {
     using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
     using ModeSwitchCallback = std::function<void(bool)>;
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
+    using SetApplicationKeypadMode = std::function<void(bool)>;
 
   public:
     /**
@@ -310,6 +311,7 @@ class Screen {
            ModeSwitchCallback _useApplicationCursorKeys,
            std::function<void()> _onWindowTitleChanged,
            ResizeWindowCallback _resizeWindow,
+           SetApplicationKeypadMode _setApplicationkeypadMode,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
@@ -320,10 +322,10 @@ class Screen {
            Reply _reply,
            Logger _logger,
            Hook _onCommands) :
-        Screen{_size, move(_useApplicationCursorKeys), {}, {}, move(_reply), move(_logger), move(_onCommands)} {}
+        Screen{_size, move(_useApplicationCursorKeys), {}, {}, {}, move(_reply), move(_logger), move(_onCommands)} {}
 
     explicit Screen(WindowSize const& _size) :
-        Screen{_size, {}, {}, {}, {}, {}, {}} {}
+        Screen{_size, {}, {}, {}, {}, {}, {}, {}} {}
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -401,7 +403,7 @@ class Screen {
     void operator()(SetLeftRightMargin const& v);
     void operator()(ScreenAlignmentPattern const& v);
     void operator()(SendMouseEvents const& v);
-    void operator()(AlternateKeypadMode const& v);
+    void operator()(ApplicationKeypadMode const& v);
     void operator()(DesignateCharset const& v);
     void operator()(SingleShiftSelect const& v);
     void operator()(SoftTerminalReset const& v);
@@ -510,6 +512,7 @@ class Screen {
     ModeSwitchCallback useApplicationCursorKeys_;
     std::function<void()> onWindowTitleChanged_;
     ResizeWindowCallback resizeWindow_;
+    SetApplicationKeypadMode setApplicationkeypadMode_;
     Reply const reply_;
 
     OutputHandler handler_;

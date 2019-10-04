@@ -531,6 +531,7 @@ Screen::Screen(WindowSize const& _size,
                ModeSwitchCallback _useApplicationCursorKeys,
                function<void()> _onWindowTitleChanged,
                ResizeWindowCallback _resizeWindow,
+               SetApplicationKeypadMode _setApplicationkeypadMode,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
@@ -539,6 +540,7 @@ Screen::Screen(WindowSize const& _size,
     useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
     onWindowTitleChanged_{ move(_onWindowTitleChanged) },
     resizeWindow_{ move(_resizeWindow) },
+    setApplicationkeypadMode_{ move(_setApplicationkeypadMode) },
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
@@ -1148,10 +1150,10 @@ void Screen::operator()(SendMouseEvents const& v)
          << endl;
 }
 
-void Screen::operator()(AlternateKeypadMode const& v)
+void Screen::operator()(ApplicationKeypadMode const& v)
 {
-    // TODO
-    cerr << "TODO: AlternateKeypadMode." << endl;
+    if (setApplicationkeypadMode_)
+        setApplicationkeypadMode_(v.enable);
 }
 
 void Screen::operator()(DesignateCharset const& v)

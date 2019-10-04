@@ -285,6 +285,14 @@ class InputGenerator {
     /// Changes the input mode for numpad keys.
     void setNumpadKeysMode(KeyMode _mode);
 
+    void setApplicationKeypadMode(bool _enable);
+
+    bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
+    bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
+
+    bool numericKeypad() const noexcept { return numpadKeysMode_ == KeyMode::Normal; }
+    bool applicationKeypad() const noexcept { return !numericKeypad(); }
+
     /// Generates input sequences for given input event.
     bool generate(InputEvent const& _inputEvent);
 
@@ -302,12 +310,6 @@ class InputGenerator {
 
     /// Swaps out the generated input control sequences.
     void swap(Sequence& _other);
-
-    bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
-    bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
-
-    bool numericKeypad() const noexcept { return numpadKeysMode_ == KeyMode::Normal; }
-    bool applicationKeypad() const noexcept { return !numericKeypad(); }
 
   private:
     inline bool emit(std::string _sequence);

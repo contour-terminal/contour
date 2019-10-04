@@ -224,7 +224,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](SetLeftRightMargin margin) { write("\033[{};{}s", margin.left, margin.right); },
         [&](ScreenAlignmentPattern) { write("\033#8"); },
         [&](SendMouseEvents v) { write("\033[?{}{}", to_code(v.protocol), v.enable ? 'h' : 'l'); },
-        [&](AlternateKeypadMode v) { write("\033{}", v.enable ? '=' : '>'); },
+        [&](ApplicationKeypadMode v) { write("\033{}", v.enable ? '=' : '>'); },
         [&](Index) { write("\033D"); },
         [&](ReverseIndex) { write("\033M"); },
         [&](ForwardIndex) { write("\0339"); },
