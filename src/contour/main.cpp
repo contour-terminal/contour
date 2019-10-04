@@ -20,7 +20,6 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/Terminal.h>
 #include <terminal/Process.h>
-#include <terminal/UTF8.h>
 #include <terminal/Util.h>
 
 #include <iostream>

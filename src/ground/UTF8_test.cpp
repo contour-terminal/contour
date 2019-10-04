@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/UTF8.h>
+#include <ground/UTF8.h>
 #include <catch2/catch.hpp>
 #include <fmt/format.h>
 #include <cstdlib>

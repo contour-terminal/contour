@@ -57,7 +57,6 @@ if(LIBTERMINAL_TESTING)
         Parser_test.cpp
         Screen_test.cpp
         OutputHandler_test.cpp
-        #UTF8_test.cpp
         terminal_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)

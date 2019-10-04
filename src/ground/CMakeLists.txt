@@ -14,6 +14,7 @@ add_library(ground STATIC
     FileChangeWatcher.cpp FileChangeWatcher.h
     overloaded.h
     stdfs.h
+    UTF8.h
 )
 target_include_directories(ground PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
@@ -26,6 +27,7 @@ if(LIBGROUND_TESTING)
     enable_testing()
     add_executable(ground_test
         StringUtils_test.cpp
+        #UTF8_test.cpp
     )
     target_link_libraries(ground_test fmt::fmt-header-only Catch2::Catch2 ground)
     add_test(ground_test ./ground_test)

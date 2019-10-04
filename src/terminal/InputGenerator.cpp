@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/InputGenerator.h>
-#include <terminal/UTF8.h>
+#include <ground/UTF8.h>
 
 #include <algorithm>
 #include <array>

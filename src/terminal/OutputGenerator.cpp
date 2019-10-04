@@ -13,7 +13,6 @@
  */
 #include <terminal/Color.h>
 #include <terminal/OutputGenerator.h>
-#include <terminal/UTF8.h>
 #include <terminal/Util.h>
 #include <ground/overloaded.h>
 

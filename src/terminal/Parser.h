@@ -15,7 +15,7 @@
 
 #include <terminal/Commands.h>
 #include <terminal/Logger.h>
-#include <terminal/UTF8.h>
+#include <ground/UTF8.h>
 
 #include <cstdint>
 #include <functional>

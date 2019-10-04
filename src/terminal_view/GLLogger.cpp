@@ -13,8 +13,8 @@
  */
 #include <terminal_view/GLLogger.h>
 
-#include <terminal/UTF8.h>
 #include <terminal/Util.h>
+#include <ground/UTF8.h>
 
 #include <ground/overloaded.h>
 
