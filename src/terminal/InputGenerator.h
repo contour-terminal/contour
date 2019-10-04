@@ -192,21 +192,6 @@ std::optional<std::variant<Key, char32_t>> parseKeyOrChar(std::string const& _na
 
 std::string to_string(Key _key);
 
-struct MouseMoveEvent {
-    int row;
-    int column;
-};
-
-enum class MouseButton {
-    Left,
-    Right,
-    Middle,
-    WheelUp,
-    WheelDown,
-};
-
-using MouseEvent = std::variant<MouseButton, MouseMoveEvent>;
-
 enum class KeyMode {
     Normal,
     Application
@@ -222,19 +207,38 @@ struct CharInputEvent {
     Modifier modifier{};
 };
 
-struct MouseInputEvent {
-    MouseButton mouse{};
+struct MouseMoveEvent {
+    int row;
+    int column;
+};
+
+enum class MouseButton {
+    Left,
+    Right,
+    Middle,
+    WheelUp,
+    WheelDown,
+};
+
+struct MousePressEvent {
+    MouseButton button;
     Modifier modifier{};
 };
 
-using InputEvent = std::variant<KeyInputEvent, CharInputEvent, MouseInputEvent>;
+using MouseEvent = std::variant<MouseButton, MouseMoveEvent>;
+
+using InputEvent = std::variant<
+    KeyInputEvent,
+    CharInputEvent,
+    MousePressEvent
+>;
 
 constexpr Modifier modifier(InputEvent _event) noexcept
 {
     return std::visit(overloaded{
         [](KeyInputEvent _keyInput) { return _keyInput.modifier; },
         [](CharInputEvent _charInput) { return _charInput.modifier; },
-        [](MouseInputEvent _mouseInput) { return _mouseInput.modifier; },
+        [](MousePressEvent _mouseInput) { return _mouseInput.modifier; },
     }, _event);
 }
 
@@ -249,8 +253,8 @@ constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcep
             return std::get<KeyInputEvent>(_lhs).key < std::get<KeyInputEvent>(_rhs).key;
         if (std::holds_alternative<CharInputEvent>(_lhs) && std::holds_alternative<CharInputEvent>(_rhs))
             return std::get<CharInputEvent>(_lhs).value < std::get<CharInputEvent>(_rhs).value;
-        if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
-            return std::get<MouseInputEvent>(_lhs).mouse < std::get<MouseInputEvent>(_rhs).mouse;
+        if (std::holds_alternative<MousePressEvent>(_lhs) && std::holds_alternative<MousePressEvent>(_rhs))
+            return std::get<MousePressEvent>(_lhs).button < std::get<MousePressEvent>(_rhs).button;
         return _lhs.index() < _rhs.index();
     }
 
@@ -265,8 +269,8 @@ constexpr bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexce
             return std::get<KeyInputEvent>(_lhs).key == std::get<KeyInputEvent>(_rhs).key;
         if (std::holds_alternative<CharInputEvent>(_lhs) && std::holds_alternative<CharInputEvent>(_rhs))
             return std::get<CharInputEvent>(_lhs).value == std::get<CharInputEvent>(_rhs).value;
-        if (std::holds_alternative<MouseInputEvent>(_lhs) && std::holds_alternative<MouseInputEvent>(_rhs))
-            return std::get<MouseInputEvent>(_lhs).mouse == std::get<MouseInputEvent>(_rhs).mouse;
+        if (std::holds_alternative<MousePressEvent>(_lhs) && std::holds_alternative<MousePressEvent>(_rhs))
+            return std::get<MousePressEvent>(_lhs).button == std::get<MousePressEvent>(_rhs).button;
     }
     return false;
 }
@@ -335,9 +339,9 @@ namespace std {
 	};
 
 	template<>
-	struct hash<terminal::MouseInputEvent> {
-		constexpr size_t operator()(terminal::MouseInputEvent const& _input) const noexcept {
-			return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.mouse) & 0xFF);
+	struct hash<terminal::MousePressEvent> {
+		constexpr size_t operator()(terminal::MousePressEvent const& _input) const noexcept {
+			return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.button) & 0xFF);
 		}
 	};
 
@@ -347,7 +351,7 @@ namespace std {
             return visit(terminal::overloaded{
                 [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
                 [](terminal::CharInputEvent ev) { return hash<terminal::CharInputEvent>{}(ev); },
-                [](terminal::MouseInputEvent ev) { return hash<terminal::MouseInputEvent>{}(ev); },
+                [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },
             }, _input);
 		}
 	};

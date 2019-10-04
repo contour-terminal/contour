@@ -110,9 +110,9 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             logger_.keyPress(_char.value, _char.modifier);
             return terminal_.send(_inputEvent);
         },
-        [&](MouseInputEvent const& _mouse) -> bool {
-            // TODO:
-            return false;
+        [&](MousePressEvent const& _mouse) -> bool {
+            // TODO: anything else? logging?
+            return terminal_.send(_inputEvent);
         },
     }, _inputEvent);
 }

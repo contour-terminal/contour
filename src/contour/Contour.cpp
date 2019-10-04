@@ -262,32 +262,6 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
-void Contour::onMouseScroll(double _xOffset, double _yOffset)
-{
-    enum class VerticalDirection { Up, Down };
-    VerticalDirection const vertical = _yOffset > 0.0 ? VerticalDirection::Up: VerticalDirection::Down;
-
-    switch (modifier_)
-    {
-        case terminal::Modifier::Control: // increase/decrease font size
-            if (vertical == VerticalDirection::Up)
-                executeAction(actions::IncreaseFontSize{});
-            else
-                executeAction(actions::DecreaseFontSize{});
-            break;
-        case terminal::Modifier::Alt: // TODO: increase/decrease transparency
-            if (vertical == VerticalDirection::Up)
-                executeAction(actions::IncreaseOpacity{});
-            else
-                executeAction(actions::DecreaseOpacity{});
-            break;
-        case terminal::Modifier::None: // TODO: scroll in history
-            break;
-        default:
-            break;
-    }
-}
-
 void Contour::executeAction(Action _action)
 {
     visit(terminal::overloaded{
@@ -436,6 +410,15 @@ void Contour::onChar(char32_t _char)
 
         keyHandled_ = false;
     }
+}
+
+void Contour::onMouseScroll(double _xOffset, double _yOffset)
+{
+    auto const button = _yOffset > 0.0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+    auto const inputEvent = terminal::MousePressEvent{button, modifier_};
+
+    if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
+        executeAction(mapping->second);
 }
 
 bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
