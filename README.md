@@ -28,7 +28,7 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] Font Ligatures Support (such as in Fira Code)
 * [x] GPU-accelerated rendering
 * [x] 256-color and Truecolor support
-* [ ] Key binding customization
+* [x] Key binding customization
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
 * [ ] Color Schemes
