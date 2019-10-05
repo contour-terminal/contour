@@ -84,14 +84,6 @@ void createFileIfNotExists(FileSystem::path const& _path)
     }
 }
 
-std::variant<terminal::Key, char32_t> parseKey(std::string const& _name)
-{
-    if (auto const key = terminal::parseKey(_name); key.has_value())
-        return key.value();
-
-    return {};
-}
-
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
