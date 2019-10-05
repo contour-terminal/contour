@@ -298,10 +298,10 @@ void Contour::executeAction(Action _action)
                 terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None});
         },
         [this](actions::ScrollUp) {
-            screenDirty_ = terminalView_.scrollUp(1) || screenDirty_;
+            screenDirty_ = terminalView_.scrollUp(config_.historyScrollMultiplier) || screenDirty_;
         },
         [this](actions::ScrollDown) {
-            screenDirty_ = terminalView_.scrollDown(1) || screenDirty_;
+            screenDirty_ = terminalView_.scrollDown(config_.historyScrollMultiplier) || screenDirty_;
         },
         [this](actions::ScrollPageUp) {
             screenDirty_ = terminalView_.scrollUp(config_.terminalSize.rows / 2) || screenDirty_;

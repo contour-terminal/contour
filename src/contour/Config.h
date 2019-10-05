@@ -73,6 +73,7 @@ struct Config {
     std::string shell = terminal::Process::loginShell();
     terminal::WindowSize terminalSize = {80, 25};
     std::optional<size_t> maxHistoryLineCount = {8000};
+    size_t historyScrollMultiplier = 3;
     bool autoScrollOnUpdate = true;
     bool fullscreen = false;
     unsigned short fontSize = 12;

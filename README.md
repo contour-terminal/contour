@@ -62,6 +62,11 @@ fontSize: 12
 fontFamily: "Fira Code, Cascadia Code, Ubuntu Mono, Consolas, monospace"
 tabWidth: 8
 
+history:
+    limit: 8000
+    scrollMultiplier: 3
+    autoScrollOnUpdate: true
+
 cursor:
     shape: block
     blinking: true
@@ -102,19 +107,27 @@ colors: # Color scheme: Google Dark
         magenta: '#a36ac7'
         cyan:    '#3971ed'
         white:   '#ffffff'
+
+input_mapping:
+    - { mods: [Control],        key: Divide,        action: SendChars, chars: "echo \"Hello, World\"" }
+    - { mods: [Alt],            key: H,             action: SendChars, chars: "\"Hello, World\"" }
+    - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
+    - { mods: [Control, Alt],   key: "S",           action: ScreenshotVT }
+    - { mods: [Control, Shift], key: "+",           action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: "-",           action: DecreaseFontSize }
+    - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
+    - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
+    - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
+    - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
+    - { mods: [],               mouse: WheelUp,     action: ScrollUp }
+    - { mods: [],               mouse: WheelDown,   action: ScrollDown }
+    - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
+    - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
+    - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
+    - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
+    - { mods: [Control],        key: Home,          action: ScrollToTop }
+    - { mods: [Control],        key: End,           action: ScrollToBottom }
 ```
-
-## Keyboard Bindings
-
-| Shortcut                          | Action                 |
-|-----------------------------------|------------------------|
-| <kbd>Control</kbd>+<kbd>Shift</kbd>+<kbd>=</kbd>      | Increase font size     |
-| <kbd>Control</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd>      | Decrease font size     |
-| <kbd>Alt</kbd>+<kbd>Enter</kbd>  | Toggle fullscreen mode |
-| <kbd>Control</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases font size |
-| <kbd>Control</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases font size |
-| <kbd>Alt</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases background opacity |
-| <kbd>Alt</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases background opacity |
 
 ## Installing from source
 

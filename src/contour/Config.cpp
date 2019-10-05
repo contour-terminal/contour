@@ -258,6 +258,7 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
         }
 
         softLoadValue(history, "autoScrollOnUpdate", _config.autoScrollOnUpdate);
+        softLoadValue(history, "scrollMultiplier", _config.historyScrollMultiplier);
     }
 
     if (auto background = doc["background"]; background)
@@ -377,6 +378,8 @@ std::string serializeYaml(Config const& _config)
     root["history"]["limit"] = _config.maxHistoryLineCount.has_value()
         ? static_cast<int64_t>(_config.maxHistoryLineCount.value())
         : -1ll;
+    root["history"]["autoScrollOnUpdate"] = _config.autoScrollOnUpdate;
+    root["history"]["scrollMultiplier"] = _config.historyScrollMultiplier;
 
     // TODO: colors
 
