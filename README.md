@@ -109,8 +109,6 @@ colors: # Color scheme: Google Dark
         white:   '#ffffff'
 
 input_mapping:
-    - { mods: [Control],        key: Divide,        action: SendChars, chars: "echo \"Hello, World\"" }
-    - { mods: [Alt],            key: H,             action: SendChars, chars: "\"Hello, World\"" }
     - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
     - { mods: [Control, Alt],   key: "S",           action: ScreenshotVT }
     - { mods: [Control, Shift], key: "+",           action: IncreaseFontSize }
