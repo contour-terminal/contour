@@ -220,13 +220,57 @@ bool TerminalView::shouldRender()
     return true;
 }
 
+bool TerminalView::scrollUp(size_t _numLines)
+{
+    if (auto const newOffset = min(scrollOffset_ + _numLines, terminal_.historyLineCount()); newOffset != scrollOffset_)
+    {
+        scrollOffset_ = newOffset;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool TerminalView::scrollDown(size_t _numLines)
+{
+    if (auto const newOffset = scrollOffset_ >= _numLines ? scrollOffset_ - _numLines : 0; newOffset != scrollOffset_)
+    {
+        scrollOffset_ = newOffset;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool TerminalView::scrollToTop()
+{
+    if (auto top = terminal_.historyLineCount(); top != scrollOffset_)
+    {
+        scrollOffset_ = top;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool TerminalView::scrollToBottom()
+{
+    if (scrollOffset_ != 0)
+    {
+        scrollOffset_ = 0;
+        return true;
+    }
+    else
+        return false;
+}
+
 void TerminalView::render()
 {
-    terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3));
+    terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3), scrollOffset_);
     renderCellGroup();
 
-    if (terminal_.cursor().visible)
-        cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row));
+    if (terminal_.cursor().visible && scrollOffset_ + terminal_.cursor().row <= terminal_.size().rows)
+        cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row + static_cast<cursor_pos_t>(scrollOffset_)));
 }
 
 void TerminalView::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)

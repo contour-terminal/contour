@@ -56,6 +56,11 @@ void Terminal::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount
     screen_.setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
+size_t Terminal::historyLineCount() const noexcept
+{
+    return screen_.historyLineCount();
+}
+
 void Terminal::useApplicationCursorKeys(bool _enable)
 {
     auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
@@ -127,10 +132,10 @@ string Terminal::screenshot() const
     return screen_.screenshot();
 }
 
-void Terminal::render(Screen::Renderer const& renderer) const
+void Terminal::render(Screen::Renderer const& renderer, size_t _scrollOffset) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    screen_.render(renderer);
+    screen_.render(renderer, _scrollOffset);
 }
 
 void Terminal::resize(WindowSize const& _newWindowSize)

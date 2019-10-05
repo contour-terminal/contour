@@ -32,6 +32,12 @@ namespace actions {
     struct IncreaseOpacity{};
     struct DecreaseOpacity{};
     struct SendChars{ std::string chars; };
+    struct ScrollUp{};
+    struct ScrollDown{};
+    struct ScrollPageUp{};
+    struct ScrollPageDown{};
+    struct ScrollToTop{};
+    struct ScrollToBottom{};
 	// Quit
 	// CloseTab
 	// OpenTab
@@ -49,7 +55,13 @@ using Action = std::variant<
     actions::DecreaseFontSize,
     actions::IncreaseOpacity,
     actions::DecreaseOpacity,
-    actions::SendChars
+    actions::SendChars,
+    actions::ScrollUp,
+    actions::ScrollDown,
+    actions::ScrollPageUp,
+    actions::ScrollPageDown,
+    actions::ScrollToTop,
+    actions::ScrollToBottom
 >;
 
 using InputMapping = std::unordered_map<terminal::InputEvent, Action>;
@@ -61,6 +73,7 @@ struct Config {
     std::string shell = terminal::Process::loginShell();
     terminal::WindowSize terminalSize = {80, 25};
     std::optional<size_t> maxHistoryLineCount = {8000};
+    bool autoScrollOnUpdate = true;
     bool fullscreen = false;
     unsigned short fontSize = 12;
     std::string fontFamily = "Fira Code, Ubuntu Mono, Consolas, monospace";
@@ -80,6 +93,14 @@ struct Config {
         {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
         {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
         {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::None}, actions::ScrollUp{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::None}, actions::ScrollDown{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
+        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
+        {terminal::KeyInputEvent{terminal::Key::PageUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
+        {terminal::KeyInputEvent{terminal::Key::PageDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
+        {terminal::KeyInputEvent{terminal::Key::Home, terminal::Modifier::Control}, actions::ScrollToTop{}},
+        {terminal::KeyInputEvent{terminal::Key::End, terminal::Modifier::Control}, actions::ScrollToBottom{}},
     };
 };
 

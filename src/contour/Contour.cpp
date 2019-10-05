@@ -296,6 +296,24 @@ void Contour::executeAction(Action _action)
         [&](actions::SendChars const& chars) {
             for (auto const ch : chars.chars)
                 terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None});
+        },
+        [this](actions::ScrollUp) {
+            screenDirty_ = terminalView_.scrollUp(1) || screenDirty_;
+        },
+        [this](actions::ScrollDown) {
+            screenDirty_ = terminalView_.scrollDown(1) || screenDirty_;
+        },
+        [this](actions::ScrollPageUp) {
+            screenDirty_ = terminalView_.scrollUp(config_.terminalSize.rows / 2) || screenDirty_;
+        },
+        [this](actions::ScrollPageDown) {
+            screenDirty_ = terminalView_.scrollDown(config_.terminalSize.rows / 2) || screenDirty_;
+        },
+        [this](actions::ScrollToTop) {
+            screenDirty_ = terminalView_.scrollToTop() || screenDirty_;
+        },
+        [this](actions::ScrollToBottom) {
+            screenDirty_ = terminalView_.scrollToBottom() || screenDirty_;
         }
     }, _action);
 }
@@ -453,6 +471,9 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
 
 void Contour::onScreenUpdate()
 {
+    if (config_.autoScrollOnUpdate && terminalView_.scrollOffset())
+        terminalView_.scrollToBottom();
+
     glfwPostEmptyEvent();
 }
 

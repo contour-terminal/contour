@@ -49,6 +49,7 @@ class Terminal : public PseudoTerminal {
     ~Terminal() override;
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
+    size_t historyLineCount() const noexcept;
 
     // Sends given input event to connected slave.
     bool send(InputEvent _inputEvent);
@@ -57,7 +58,7 @@ class Terminal : public PseudoTerminal {
     void writeToScreen(char const* data, size_t size);
 
     /// Thread-safe access to screen data for rendering
-    void render(Screen::Renderer const& renderer) const;
+    void render(Screen::Renderer const& renderer, size_t _scrollOffset = 0) const;
 
     using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 

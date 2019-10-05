@@ -296,6 +296,7 @@ class Screen {
         Screen{_size, std::nullopt, {}, {}, {}, {}, {}, move(_logger), {}} {}
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
+    size_t historyLineCount() const noexcept;
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -304,7 +305,7 @@ class Screen {
     void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
 
     /// Renders the full screen by passing every grid cell to the callback.
-    void render(Renderer const& _renderer) const;
+    void render(Renderer const& _renderer, size_t _scrollOffset = 0) const;
 
     /// Renders a single text line.
     std::string renderTextLine(cursor_pos_t _row) const;

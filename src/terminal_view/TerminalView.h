@@ -103,6 +103,12 @@ class TerminalView {
 
     std::string const& windowTitle() const noexcept { return terminal_.windowTitle(); }
 
+    size_t scrollOffset() const noexcept { return scrollOffset_; }
+    bool scrollUp(size_t _numLines);
+    bool scrollDown(size_t _numLines);
+    bool scrollToTop();
+    bool scrollToBottom();
+
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
@@ -162,4 +168,6 @@ class TerminalView {
     std::thread processExitWatcher_;
 
     std::function<void()> onScreenUpdate_;
+
+    size_t scrollOffset_ = 0;
 };

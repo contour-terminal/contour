@@ -114,6 +114,12 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             pair{"IncreaseOpacity"sv, Action{actions::IncreaseOpacity{}}},
             pair{"DecreaseOpacity"sv, Action{actions::DecreaseOpacity{}}},
             pair{"ScreenshotVT"sv, Action{actions::ScreenshotVT{}}},
+            pair{"ScrollUp"sv, Action{actions::ScrollUp{}}},
+            pair{"ScrollDown"sv, Action{actions::ScrollDown{}}},
+            pair{"ScrollPageUp"sv, Action{actions::ScrollPageUp{}}},
+            pair{"ScrollPageDown"sv, Action{actions::ScrollPageDown{}}},
+            pair{"ScrollToTop"sv, Action{actions::ScrollToTop{}}},
+            pair{"ScrollToBottom"sv, Action{actions::ScrollToBottom{}}},
         };
 
         auto const name = toLower(_node.as<string>());
@@ -130,6 +136,8 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 
             return actions::SendChars{ground::parseEscaped(_chars.as<string>())};
         }
+
+        cerr << "Unknown action: '" << _node.as<string>() << '\'' << endl;
 
 		return nullopt;
 	};
@@ -248,6 +256,8 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
             else
                 _config.maxHistoryLineCount = limit.as<size_t>();
         }
+
+        softLoadValue(history, "autoScrollOnUpdate", _config.autoScrollOnUpdate);
     }
 
     if (auto background = doc["background"]; background)

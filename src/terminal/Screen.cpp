@@ -573,6 +573,11 @@ void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
     // Alternate buffer does not have a history usually (and for now we keep it that way).
 }
 
+size_t Screen::historyLineCount() const noexcept
+{
+    return state_->savedLines.size();
+}
+
 void Screen::resize(WindowSize const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
@@ -600,11 +605,35 @@ void Screen::write(char const * _data, size_t _size)
         onCommands_(handler_.commands());
 }
 
-void Screen::render(Renderer const& render) const
+void Screen::render(Renderer const& _render, size_t _scrollOffset) const
 {
-    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
-        for (cursor_pos_t col = 1; col <= size_.columns; ++col)
-            render(row, col, at(row, col));
+    if (!_scrollOffset)
+    {
+        for (cursor_pos_t row = 1; row <= size_.rows; ++row)
+            for (cursor_pos_t col = 1; col <= size_.columns; ++col)
+                _render(row, col, at(row, col));
+    }
+    else
+    {
+        _scrollOffset = min(_scrollOffset, state_->savedLines.size());
+        auto const historyLineCount = min(size_.rows, static_cast<unsigned int>(_scrollOffset));
+        auto const mainLineCount = size_.rows - historyLineCount;
+
+        cursor_pos_t rowNumber = 1;
+        for (auto line = prev(end(state_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
+        {
+            auto column = begin(*line);
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+                _render(rowNumber, colNumber, *column);
+        }
+
+        for (auto line = begin(state_->lines); line != next(begin(state_->lines), mainLineCount); ++line, ++rowNumber)
+        {
+            auto column = begin(*line);
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+                _render(rowNumber, colNumber, *column);
+        }
+    }
 }
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const

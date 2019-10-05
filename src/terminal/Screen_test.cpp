@@ -1503,6 +1503,48 @@ TEST_CASE("RequestMode", "[screen]")
     }
 }
 
+TEST_CASE("render into history")
+{
+    Screen screen{{5, 2}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    REQUIRE("FGHIJ\nKLMNO\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 5});
+
+    string renderedText;
+    renderedText.resize(2 * 6);
+    auto const renderer = [&](auto rowNumber, auto columnNumber, Screen::Cell const& cell) {
+        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.character);
+        if (columnNumber == 5)
+            renderedText[(rowNumber - 1) * 6 + (columnNumber)] = '\n';
+    };
+
+    SECTION("main area") {
+        screen.render(renderer, 0);
+        REQUIRE("FGHIJ\nKLMNO\n" == screen.renderText());
+    }
+
+    SECTION("1 line into history") {
+        screen.render(renderer, 1);
+        REQUIRE("ABCDE\nFGHIJ\n" == renderedText);
+    }
+
+    SECTION("2 lines into history") {
+        screen.render(renderer, 2);
+        REQUIRE("67890\nABCDE\n" == renderedText);
+    }
+
+    SECTION("3 lines into history") {
+        screen.render(renderer, 3);
+        REQUIRE("12345\n67890\n" == renderedText);
+    }
+
+    SECTION("4 lines into history (1 clamped)") {
+        screen.render(renderer, 4);
+        REQUIRE("12345\n67890\n" == renderedText);
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
