@@ -28,7 +28,7 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] Font Ligatures Support (such as in Fira Code)
 * [x] GPU-accelerated rendering
 * [x] 256-color and Truecolor support
-* [ ] Key binding customization
+* [x] Key binding customization
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
 * [ ] Color Schemes
@@ -115,6 +115,14 @@ colors: # Color scheme: Google Dark
 | <kbd>Control</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases font size |
 | <kbd>Alt</kbd>+<kbd>Mouse Wheel Up</kbd> | Increases background opacity |
 | <kbd>Alt</kbd>+<kbd>Mouse Wheel Down</kbd> | Decreases background opacity |
+|                  <kbd>Mouse Wheel Up</kbd> | Scroll history up |
+|                  <kbd>Mouse Wheel Down</kbd> | Scroll history down |
+| <kbd>Shift</kbd>+<kbd>Mouse Wheel Up</kbd> | Scroll history up by half a page |
+| <kbd>Shift</kbd>+<kbd>Mouse Wheel Down</kbd> | Scroll history down by half a page |
+| <kbd>Shift</kbd>+<kbd>PageUp</kbd> | Scroll history up by half a page |
+| <kbd>Shift</kbd>+<kbd>PageDown</kbd> | Scroll history down by half a page |
+| <kbd>Control</kbd>+<kbd>Home</kbd> | Scroll history to top |
+| <kbd>Control</kbd>+<kbd>End</kbd> | Scroll history to bottom |
 
 ## Installing from source
 
