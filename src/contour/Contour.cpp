@@ -63,8 +63,6 @@ Contour::Contour(Config const& _config) :
     terminalView_{
         config_.terminalSize,
         config_.maxHistoryLineCount,
-        window_.width(),
-        window_.height(),
         regularFont_.get(),
         config_.cursorShape,
         glm::vec3{0.9, 0.9, 0.9}, // TODO: make cursor color configurable (part of color profile?)

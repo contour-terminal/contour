@@ -41,8 +41,6 @@ auto const envvars = terminal::Process::Environment{
 
 TerminalView::TerminalView(WindowSize const& _winSize,
                            optional<size_t> _maxHistoryLineCount,
-                           unsigned _width,
-                           unsigned _height,
                            Font& _regularFont,
                            CursorShape _cursorShape,
                            glm::vec3 const& _cursorColor,
