@@ -32,6 +32,7 @@ namespace actions {
     struct IncreaseOpacity{};
     struct DecreaseOpacity{};
     struct SendChars{ std::string chars; };
+    struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
     struct ScrollUp{};
     struct ScrollDown{};
     struct ScrollPageUp{};
@@ -56,6 +57,7 @@ using Action = std::variant<
     actions::IncreaseOpacity,
     actions::DecreaseOpacity,
     actions::SendChars,
+    actions::WriteScreen,
     actions::ScrollUp,
     actions::ScrollDown,
     actions::ScrollPageUp,
@@ -64,7 +66,10 @@ using Action = std::variant<
     actions::ScrollToBottom
 >;
 
-using InputMapping = std::unordered_map<terminal::InputEvent, Action>;
+struct InputMapping {
+    terminal::InputEvent input;
+    Action action;
+};
 
 struct Config {
     FileSystem::path backingFilePath;
@@ -86,7 +91,7 @@ struct Config {
     LogMask loggingMask;
 
     terminal::ColorProfile colorProfile{};
-    InputMapping inputMapping = InputMapping{
+    std::vector<InputMapping> inputMappings{
         {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
         {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
         {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},

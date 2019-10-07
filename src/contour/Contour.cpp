@@ -262,9 +262,30 @@ constexpr terminal::Modifier makeModifier(int _mods)
     return mods;
 }
 
-void Contour::executeAction(Action _action)
+void Contour::executeInput(terminal::InputEvent const& _inputEvent)
+{
+    for (InputMapping const& mapping : config_.inputMappings)
+    {
+        if (_inputEvent == mapping.input)
+        {
+            executeAction(mapping.action);
+            keyHandled_ = true;
+        }
+    }
+
+    if (!keyHandled_ && (!holds_alternative<terminal::CharInputEvent>(_inputEvent) || modifier_ != terminal::Modifier::Shift))
+    {
+        terminalView_.send(_inputEvent);
+        keyHandled_ = true;
+    }
+}
+
+void Contour::executeAction(Action const& _action)
 {
     visit(overloaded{
+        [this](actions::WriteScreen const& _write) {
+            terminalView_.writeToScreen(_write.chars);
+        },
         [&](actions::ToggleFullScreen) {
             window_.toggleFullScreen();
         },
@@ -393,17 +414,8 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
     {
         if (auto const inputEvent = makeInputEvent(_key, modifier_); inputEvent.has_value())
         {
-            if (auto const mapping = config_.inputMapping.find(inputEvent.value()); mapping != end(config_.inputMapping))
-            {
-                executeAction(mapping->second);
-                keyHandled_ = true;
+            executeInput(inputEvent.value());
             }
-            else if (!holds_alternative<terminal::CharInputEvent>(inputEvent.value()) || modifier_ != terminal::Modifier::Shift)
-            {
-                terminalView_.send(inputEvent.value());
-                keyHandled_ = true;
-            }
-        }
         // else if (modifier_ && modifier_ != terminal::Modifier::Shift) // Debug print unhandled characters
         // {
         //     char const* cstr = glfwGetKeyName(_key, _scanCode);
@@ -419,21 +431,20 @@ void Contour::onChar(char32_t _char)
 {
     if (!keyHandled_)
     {
-        auto const inputEvent = terminal::CharInputEvent{_char, modifier_};
-
-        if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
-            executeAction(mapping->second);
-        else
-            terminalView_.send(terminal::CharInputEvent{_char, terminal::Modifier{}});
-
-        keyHandled_ = false;
+        //executeInput(terminal::CharInputEvent{_char, modifier_});
+        terminalView_.send(terminal::CharInputEvent{_char, modifier_});
+        keyHandled_ = true;
     }
-}
+
+    }
 
 void Contour::onMouseScroll(double _xOffset, double _yOffset)
 {
     auto const button = _yOffset > 0.0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
-    auto const inputEvent = terminal::MousePressEvent{button, modifier_};
+    executeInput(terminal::MousePressEvent{button, modifier_});
+}
+
+void Contour::onMouseButton(int _button, int _action, int _mods)
 
     if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
         executeAction(mapping->second);

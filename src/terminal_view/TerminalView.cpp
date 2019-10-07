@@ -106,6 +106,11 @@ void TerminalView::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineC
     terminal_.setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
+void TerminalView::writeToScreen(std::string_view const& _text)
+{
+    terminal_.writeToScreen(_text.data(), _text.size());
+}
+
 bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 {
     return visit(overloaded{

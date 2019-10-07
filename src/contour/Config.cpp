@@ -137,6 +137,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             return actions::SendChars{ground::parseEscaped(_chars.as<string>())};
         }
 
+        if (name == "writescreen")
+        {
+            if (!_chars || !_chars.IsScalar())
+                return nullopt;
+
+            return actions::WriteScreen{_chars.as<string>()};
+        }
+
         cerr << "Unknown action: '" << _node.as<string>() << '\'' << endl;
 
 		return nullopt;
@@ -214,12 +222,12 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
         {
             if (keyEvent.has_value())
-                _config.inputMapping[keyEvent.value()] = action.value();
+                _config.inputMappings.emplace_back(InputMapping{keyEvent.value(), action.value()});
         }
         else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
         {
             if (mouseEvent.has_value())
-                _config.inputMapping[mouseEvent.value()] = action.value();
+                _config.inputMappings.emplace_back(InputMapping{mouseEvent.value(), action.value()});
         }
         else
         {
