@@ -270,6 +270,7 @@ class Screen {
     using ModeSwitchCallback = std::function<void(bool)>;
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
+    using SetBracketedPaste = std::function<void(bool)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
   public:
@@ -288,12 +289,13 @@ class Screen {
            std::function<void()> _onWindowTitleChanged,
            ResizeWindowCallback _resizeWindow,
            SetApplicationKeypadMode _setApplicationkeypadMode,
+           SetBracketedPaste _setBracketedPaste,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, move(_logger), {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, move(_logger), {}} {}
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
@@ -484,6 +486,7 @@ class Screen {
     std::function<void()> onWindowTitleChanged_;
     ResizeWindowCallback resizeWindow_;
     SetApplicationKeypadMode setApplicationkeypadMode_;
+    SetBracketedPaste setBracketedPaste_;
     Reply const reply_;
 
     OutputHandler handler_;

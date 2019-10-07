@@ -37,6 +37,7 @@ Terminal::Terminal(WindowSize _winSize,
         move(_onWindowTitleChanged),
         move(_resizeWindow),
         bind(&InputGenerator::setApplicationKeypadMode, &inputGenerator_, _1),
+        bind(&InputGenerator::setBracketedPaste, &inputGenerator_, _1),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
         bind(&Terminal::onScreenCommands, this, _1)
@@ -104,6 +105,12 @@ bool Terminal::send(InputEvent _inputEvent)
     bool const success = inputGenerator_.generate(_inputEvent);
     flushInput();
     return success;
+}
+
+void Terminal::sendPaste(string_view const& _text)
+{
+    inputGenerator_.generatePaste(_text);
+    flushInput();
 }
 
 void Terminal::flushInput()

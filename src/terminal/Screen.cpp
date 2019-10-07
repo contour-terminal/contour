@@ -542,6 +542,7 @@ Screen::Screen(WindowSize const& _size,
                function<void()> _onWindowTitleChanged,
                ResizeWindowCallback _resizeWindow,
                SetApplicationKeypadMode _setApplicationkeypadMode,
+               SetBracketedPaste _setBracketedPaste,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
@@ -551,6 +552,7 @@ Screen::Screen(WindowSize const& _size,
     onWindowTitleChanged_{ move(_onWindowTitleChanged) },
     resizeWindow_{ move(_resizeWindow) },
     setApplicationkeypadMode_{ move(_setApplicationkeypadMode) },
+    setBracketedPaste_{ move(_setBracketedPaste) },
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
@@ -1125,6 +1127,10 @@ void Screen::operator()(SetMode const& v)
         case Mode::UseApplicationCursorKeys:
             if (useApplicationCursorKeys_)
                 useApplicationCursorKeys_(v.enable);
+            break;
+        case Mode::BracketedPaste:
+            if (setBracketedPaste_)
+                setBracketedPaste_(v.enable);
             break;
         default:
             break;

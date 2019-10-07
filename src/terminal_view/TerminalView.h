@@ -62,6 +62,9 @@ class TerminalView {
 
     bool send(terminal::InputEvent const& _inputEvent);
 
+    /// Sends verbatim text to application.
+    void sendPaste(std::string_view const& _text);
+
     void writeToScreen(std::string_view const& _text);
 
     /// Takes a screenshot of the current screen buffer in VT sequence format.

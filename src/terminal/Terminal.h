@@ -54,6 +54,9 @@ class Terminal : public PseudoTerminal {
     // Sends given input event to connected slave.
     bool send(InputEvent _inputEvent);
 
+    /// Sends verbatim text in bracketed mode to application.
+    void sendPaste(std::string_view const& _text);
+
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
 

@@ -129,6 +129,10 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
     }, _inputEvent);
 }
 
+void TerminalView::sendPaste(std::string_view const& _text)
+{
+    terminal_.sendPaste(_text);
+}
 
 std::string TerminalView::screenshot() const
 {

@@ -261,6 +261,9 @@ class InputGenerator {
     bool numericKeypad() const noexcept { return numpadKeysMode_ == KeyMode::Normal; }
     bool applicationKeypad() const noexcept { return !numericKeypad(); }
 
+    bool bracketedPaste() const noexcept { return bracketedPaste_; }
+    void setBracketedPaste(bool _enable) { bracketedPaste_ = _enable; }
+
     /// Generates input sequences for given input event.
     bool generate(InputEvent const& _inputEvent);
 
@@ -269,6 +272,9 @@ class InputGenerator {
 
     /// Generates input sequence for a pressed special key.
     bool generate(Key _key, Modifier _modifier);
+
+    /// Generates input sequence for bracketed paste text.
+    void generatePaste(std::string_view const& _text);
 
     /// Generates input sequence for a mouse button press event.
     //TODO: void generate(MouseButton _mouseButton, Modifier _modifier);
@@ -288,6 +294,7 @@ class InputGenerator {
   private:
     KeyMode cursorKeysMode_ = KeyMode::Normal;
     KeyMode numpadKeysMode_ = KeyMode::Normal;
+    bool bracketedPaste_ = false;
     Sequence pendingSequence_{};
 };
 

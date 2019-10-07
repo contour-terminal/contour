@@ -296,6 +296,17 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
     return false;
 }
 
+void InputGenerator::generatePaste(std::string_view const& _text)
+{
+    if (bracketedPaste_)
+        emit("\033[200~"sv);
+
+    emit(_text);
+
+    if (bracketedPaste_)
+        emit("\033[201~"sv);
+}
+
 void InputGenerator::swap(Sequence& _other)
 {
     std::swap(pendingSequence_, _other);

@@ -333,6 +333,10 @@ void Contour::executeAction(Action const& _action)
         },
         [this](actions::ScrollToBottom) {
             screenDirty_ = terminalView_.scrollToBottom() || screenDirty_;
+        },
+        [this](actions::CopySelection) {
+        [this](actions::PasteClipboard) {
+            terminalView_.sendPaste(glfwGetClipboardString(window_));
         }
     }, _action);
 }

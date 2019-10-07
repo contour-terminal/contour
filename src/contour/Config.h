@@ -39,6 +39,8 @@ namespace actions {
     struct ScrollPageDown{};
     struct ScrollToTop{};
     struct ScrollToBottom{};
+	struct PasteClipboard{};
+
 	// Quit
 	// CloseTab
 	// OpenTab
