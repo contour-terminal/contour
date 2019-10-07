@@ -114,11 +114,11 @@ void TerminalView::writeToScreen(std::string_view const& _text)
 bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 {
     return visit(overloaded{
-        [&](KeyInputEvent const& _key) -> bool {
+        [this, &_inputEvent](KeyInputEvent const& _key) -> bool {
             logger_.keyPress(_key.key, _key.modifier);
             return terminal_.send(_inputEvent);
         },
-        [&](CharInputEvent const& _char) -> bool {
+        [this, &_inputEvent](CharInputEvent const& _char) -> bool {
             logger_.keyPress(_char.value, _char.modifier);
             return terminal_.send(_inputEvent);
         },
