@@ -424,8 +424,9 @@ class Screen {
 
     void moveCursorTo(Coordinate to);
 
-    Cell const& at(cursor_pos_t row, cursor_pos_t col) const noexcept;
-    Cell& at(cursor_pos_t row, cursor_pos_t col) noexcept;
+    Cell const& absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const;
+
+    Cell const& at(cursor_pos_t _row, cursor_pos_t _col) const noexcept;
 
     /// Retrieves the cell at given cursor, respecting origin mode.
     Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return state_->withOriginAt(row, col); }

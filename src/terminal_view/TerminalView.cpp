@@ -122,11 +122,53 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             logger_.keyPress(_char.value, _char.modifier);
             return terminal_.send(_inputEvent);
         },
-        [&](MousePressEvent const& _mouse) -> bool {
+        [this](MousePressEvent const& _mouse) -> bool {
             // TODO: anything else? logging?
-            return terminal_.send(_inputEvent);
+            if (_mouse.button == MouseButton::Left)
+            {
+                if (_mouse.modifier == Modifier::None)
+                    selector_ = make_unique<LinearSelector>(absoluteCoordinate(currentMousePosition_));
+                // else if (_mouse.modifier == Modifier::Alt)
+                //     selector_ = make_unique<BlockSelector>(absoluteCoordinate(currentMousePosition_));
+            }
+            //return terminal_.send(_inputEvent);
+            return true;
+        },
+        [this](MouseMoveEvent const& _mouseMove) -> bool {
+            // receives column/row coordinates in pixels (not character cells)
+            auto const cellWidth = static_cast<int>(regularFont().maxAdvance());
+            auto const cellHeight = static_cast<int>(regularFont().lineHeight());
+
+            auto const col = 1 + (_mouseMove.column - static_cast<int>(margin_.left)) / cellWidth;
+            auto const row = 1 + (_mouseMove.row - static_cast<int>(margin_.bottom)) / cellHeight;
+
+            auto const newPosition = terminal::Coordinate{
+                static_cast<cursor_pos_t>(max(row, 0)),
+                static_cast<cursor_pos_t>(max(col, 0))
+            };
+
+            if (currentMousePosition_ != newPosition)
+            {
+                //printf("mouse position: %d, %d; %d, %d\n", _mouseMove.row, _mouseMove.column, row, col);
+                currentMousePosition_ = newPosition;
+
+                if (selector_ && selector_->active())
+                    selector_->extend(absoluteCoordinate(newPosition));
+            }
+            return true;
+        },
+        [this](MouseReleaseEvent const& _mouseRelease) -> bool {
+            if (selector_)
+                selector_->stop();
+
+            return true;
         },
     }, _inputEvent);
+}
+
+Coordinate TerminalView::absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept
+{
+    return terminal_.absoluteCoordinate(_viewportCoordinate, scrollOffset_);
 }
 
 void TerminalView::sendPaste(std::string_view const& _text)
@@ -422,4 +464,10 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
 
     if (onScreenUpdate_)
         onScreenUpdate_();
+}
+
+void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
+{
+    if (selector_)
+        selector_->copy(terminal_, scrollOffset_, _render);
 }

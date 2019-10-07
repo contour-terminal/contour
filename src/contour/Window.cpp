@@ -36,15 +36,21 @@ void Window::init()
         throw runtime_error{ "Could not initialize GLFW." };
 }
 
-Window::Window(Size const& _size, string const& _title,
-               OnKey _onKey, OnChar _onChar,
-               OnMouseButton _onMouseButton, OnMouseScroll _onMouseScroll,
-               OnResize _onResize, OnContentScale _onContentScale) :
+Window::Window(Size const& _size,
+               string const& _title,
+               OnKey _onKey,
+               OnChar _onChar,
+               OnMouseScroll _onMouseScroll,
+               OnMouseButton _onMouseButton,
+               OnMousePosition _onMousePosition,
+               OnResize _onResize,
+               OnContentScale _onContentScale) :
     size_{ _size },
     onKey_{ move(_onKey) },
     onChar_{ move(_onChar) },
-    onMouseButton_{ move(_onMouseButton) },
     onMouseScroll_{ move(_onMouseScroll) },
+    onMouseButton_{ move(_onMouseButton) },
+    onMousePosition_{ move(_onMousePosition) },
     onResize_{ move(_onResize) },
     onContentScale_{ move(_onContentScale) }
 {
@@ -88,8 +94,9 @@ Window::Window(Size const& _size, string const& _title,
     glfwSetKeyCallback(window_, &Window::onKey);
     glfwSetCharCallback(window_, &Window::onChar);
     glfwSetFramebufferSizeCallback(window_, &Window::onResize);
-    glfwSetMouseButtonCallback(window_, &Window::onMouseButton);
     glfwSetScrollCallback(window_, &Window::onMouseScroll);
+    glfwSetMouseButtonCallback(window_, &Window::onMouseButton);
+    glfwSetCursorPosCallback(window_, &Window::onMousePosition);
 
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
@@ -169,6 +176,12 @@ void Window::onResize(GLFWwindow* _window, int _width, int _height)
     }
 }
 
+void Window::onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset)
+{
+    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseScroll_)
+        self->onMouseScroll_(_xOffset, _yOffset);
+}
+
 void Window::onMouseButton(GLFWwindow* _window, int _button, int _action, int _mods)
 {
     //TODO: printf("mouse: button: %d, action:%d, mods:%d\n", _button, _action, _mods);
@@ -176,10 +189,10 @@ void Window::onMouseButton(GLFWwindow* _window, int _button, int _action, int _m
         self->onMouseButton_(_button, _action, _mods);
 }
 
-void Window::onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset)
+void Window::onMousePosition(GLFWwindow* _window, double _x, double _y)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseScroll_)
-        self->onMouseScroll_(_xOffset, _yOffset);
+    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMousePosition_)
+        self->onMousePosition_(_x, _y);
 }
 
 void Window::onContentScale(GLFWwindow* _window, float _xs, float _ys)

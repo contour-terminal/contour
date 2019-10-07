@@ -254,7 +254,9 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
     return visit(overloaded{
         [&](KeyInputEvent const& _key) { return generate(_key.key, _key.modifier); },
         [&](CharInputEvent const& _chr) { return generate(_chr.value, _chr.modifier); },
-        [&](MousePressEvent const& _mouse) { return false /*TODO: generate(_mouse.button, _mouse.modifier)*/; },
+        [&](MousePressEvent const& _mousePress) { return false /*TODO: generate(_mouse.button, _mouse.modifier)*/; },
+        [&](MouseMoveEvent const& _mouseMove) { return false; /* TODO */ },
+        [&](MouseReleaseEvent const& _mouseRelease) { return false; /* TODO */ },
     }, _inputEvent);
 }
 
@@ -266,7 +268,7 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
         return emit(tolower(_characterEvent) - 'a' + 1);
     else if (!_modifier.control() && utf8::isASCII(_characterEvent))
         return emit(static_cast<char>(_characterEvent));
-    else if (!_modifier)
+    else if (!_modifier || _modifier == Modifier::Shift)
         return emit(utf8::to_string(utf8::encode(_characterEvent)));
     else
         return false;

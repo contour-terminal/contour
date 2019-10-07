@@ -120,6 +120,8 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             pair{"ScrollPageDown"sv, Action{actions::ScrollPageDown{}}},
             pair{"ScrollToTop"sv, Action{actions::ScrollToTop{}}},
             pair{"ScrollToBottom"sv, Action{actions::ScrollToBottom{}}},
+            pair{"CopySelection"sv, Action{actions::CopySelection{}}},
+            pair{"PasteSelection"sv, Action{actions::PasteSelection{}}},
             pair{"PasteClipboard"sv, Action{actions::PasteClipboard{}}},
         };
 

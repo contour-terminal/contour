@@ -23,6 +23,7 @@ add_library(terminal_view
     GLCursor.cpp GLCursor.h
     GLLogger.cpp GLLogger.h
     GLTextShaper.cpp GLTextShaper.h
+    Selector.cpp Selector.h
     Shader.cpp Shader.h
     TerminalView.cpp TerminalView.h
 )

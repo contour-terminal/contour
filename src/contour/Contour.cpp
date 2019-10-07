@@ -55,8 +55,9 @@ Contour::Contour(Config const& _config) :
         "contour",
         bind(&Contour::onKey, this, _1, _2, _3, _4),
         bind(&Contour::onChar, this, _1),
-        {}, // TODO: onMouseButton
         bind(&Contour::onMouseScroll, this, _1, _2),
+        bind(&Contour::onMouseButton, this, _1, _2, _3),
+        bind(&Contour::onMousePosition, this, _1, _2),
         bind(&Contour::onResize, this),
         bind(&Contour::onContentScale, this, _1, _2)
     },
@@ -335,10 +336,42 @@ void Contour::executeAction(Action const& _action)
             screenDirty_ = terminalView_.scrollToBottom() || screenDirty_;
         },
         [this](actions::CopySelection) {
+            string const text = extractSelectionText();
+            glfwSetClipboardString(window_, text.c_str());
+        },
+        [this](actions::PasteSelection) {
+            string const text = extractSelectionText();
+            terminalView_.sendPaste(string_view{text});
+        },
         [this](actions::PasteClipboard) {
             terminalView_.sendPaste(glfwGetClipboardString(window_));
         }
     }, _action);
+}
+
+string Contour::extractSelectionText() const
+{
+    using namespace terminal;
+    cursor_pos_t lastColumn = 0;
+    string text;
+    string currentLine;
+
+    terminalView_.renderSelection([&](cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell) {
+        if (_col <= lastColumn)
+        {
+            text += currentLine;
+            text += '\n';
+            cout << "Copy: \"" << currentLine << '"' << endl;
+            currentLine.clear();
+        }
+        if (_cell.character)
+            currentLine += utf8::to_string(utf8::encode(_cell.character));
+        lastColumn = _col;
+    });
+    text += currentLine;
+    cout << "Copy: \"" << currentLine << '"' << endl;
+
+    return text;
 }
 
 optional<terminal::InputEvent> makeInputEvent(int _key, terminal::Modifier _mods)
@@ -419,7 +452,7 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
         if (auto const inputEvent = makeInputEvent(_key, modifier_); inputEvent.has_value())
         {
             executeInput(inputEvent.value());
-            }
+        }
         // else if (modifier_ && modifier_ != terminal::Modifier::Shift) // Debug print unhandled characters
         // {
         //     char const* cstr = glfwGetKeyName(_key, _scanCode);
@@ -439,8 +472,7 @@ void Contour::onChar(char32_t _char)
         terminalView_.send(terminal::CharInputEvent{_char, modifier_});
         keyHandled_ = true;
     }
-
-    }
+}
 
 void Contour::onMouseScroll(double _xOffset, double _yOffset)
 {
@@ -449,9 +481,39 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
 }
 
 void Contour::onMouseButton(int _button, int _action, int _mods)
+{
+    auto const static makeMouseButton = [](int _button) -> terminal::MouseButton {
+        switch (_button)
+        {
+            case GLFW_MOUSE_BUTTON_RIGHT:
+                return terminal::MouseButton::Right;
+            case GLFW_MOUSE_BUTTON_MIDDLE:
+                return terminal::MouseButton::Middle;
+            case GLFW_MOUSE_BUTTON_LEFT:
+            default: // d'oh
+                return terminal::MouseButton::Left;
+        }
+    };
 
-    if (auto const mapping = config_.inputMapping.find(inputEvent); mapping != end(config_.inputMapping))
-        executeAction(mapping->second);
+    auto const mouseButton = makeMouseButton(_button);
+
+
+    if (_action == GLFW_PRESS)
+    {
+        executeInput(terminal::MousePressEvent{mouseButton, modifier_});
+    }
+    else if (_action == GLFW_RELEASE)
+    {
+        if (_button == GLFW_MOUSE_BUTTON_LEFT)
+        {
+            terminalView_.send(terminal::MouseReleaseEvent{mouseButton});
+        }
+    }
+}
+
+void Contour::onMousePosition(double _x, double _y)
+{
+    terminalView_.send(terminal::MouseMoveEvent{static_cast<int>(_y), static_cast<int>(_x)});
 }
 
 bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)

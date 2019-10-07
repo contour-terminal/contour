@@ -63,10 +63,15 @@ class Terminal : public PseudoTerminal {
     /// Thread-safe access to screen data for rendering
     void render(Screen::Renderer const& renderer, size_t _scrollOffset = 0) const;
 
+    Screen::Cell const& absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const;
+
     using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 
     /// @returns the current Cursor state.
     Cursor cursor() const;
+
+    /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
+    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
 
     std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
 

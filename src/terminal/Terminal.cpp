@@ -145,6 +145,12 @@ void Terminal::render(Screen::Renderer const& renderer, size_t _scrollOffset) co
     screen_.render(renderer, _scrollOffset);
 }
 
+Screen::Cell const& Terminal::absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const
+{
+    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+    return screen_.absoluteAt(_row, _col);
+}
+
 void Terminal::resize(WindowSize const& _newWindowSize)
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
@@ -160,6 +166,14 @@ void Terminal::wait()
 void Terminal::setTabWidth(unsigned int _tabWidth)
 {
     screen_.setTabWidth(_tabWidth);
+}
+
+Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept
+{
+    // TODO: unit test case me BEFORE merge, yo !
+    auto const row = screen_.historyLineCount() - min(_scrollOffset, screen_.historyLineCount()) + _viewportCoordinate.row;
+    auto const col = _viewportCoordinate.column;
+    return {static_cast<cursor_pos_t>(row), col};
 }
 
 }  // namespace terminal

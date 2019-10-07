@@ -1506,6 +1506,38 @@ TEST_CASE("RequestMode", "[screen]")
     }
 }
 
+TEST_CASE("peek into history")
+{
+    Screen screen{{3, 2}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
+    screen.write("123\r\n456\r\nABC\r\nDEF");
+
+    REQUIRE("ABC\nDEF\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+
+    // first line in history
+    CHECK(screen.absoluteAt(1, 1).character == '1');
+    CHECK(screen.absoluteAt(1, 2).character == '2');
+    CHECK(screen.absoluteAt(1, 3).character == '3');
+
+    // second line in history
+    CHECK(screen.absoluteAt(2, 1).character == '4');
+    CHECK(screen.absoluteAt(2, 2).character == '5');
+    CHECK(screen.absoluteAt(2, 3).character == '6');
+
+    // first line on screen buffer
+    CHECK(screen.absoluteAt(3, 1).character == 'A');
+    CHECK(screen.absoluteAt(3, 2).character == 'B');
+    CHECK(screen.absoluteAt(3, 3).character == 'C');
+
+    // second line on screen buffer
+    CHECK(screen.absoluteAt(4, 1).character == 'D');
+    CHECK(screen.absoluteAt(4, 2).character == 'E');
+    CHECK(screen.absoluteAt(4, 3).character == 'F');
+
+    // too big row number
+    CHECK_THROWS(screen.absoluteAt(5, 1));
+}
+
 TEST_CASE("render into history")
 {
     Screen screen{{5, 2}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};

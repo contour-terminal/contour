@@ -18,19 +18,21 @@
 #include <terminal/Terminal.h>
 #include <terminal/WindowSize.h>
 
-#include <atomic>
-#include <functional>
-#include <optional>
-#include <string>
-#include <vector>
-
 #include <terminal_view/CellBackground.h>
 #include <terminal_view/FontManager.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLLogger.h>
 #include <terminal_view/GLTextShaper.h>
+#include <terminal_view/Selector.h>
 
 #include <glm/matrix.hpp>
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
 class Font;
 
@@ -93,6 +95,9 @@ class TerminalView {
     /// Renders the screen buffer to the current OpenGL screen.
     void render();
 
+    /// Renders only the selected text.
+    void renderSelection(terminal::Screen::Renderer _render) const;
+
     /// Checks if there is still a slave connected to the PTY.
     bool alive() const;
 
@@ -126,6 +131,9 @@ class TerminalView {
 
     glm::ivec2 makeCoords(cursor_pos_t col, cursor_pos_t row) const;
     std::pair<glm::vec4, glm::vec4> makeColors(GraphicsAttributes const& _attributes) const;
+
+    /// @returns the coordinates with origin being at the top of the history.
+    terminal::Coordinate absoluteCoordinate(terminal::Coordinate _viewportCoordinate) const noexcept;
 
   private:
     bool alive_ = true;
@@ -174,4 +182,7 @@ class TerminalView {
     std::function<void()> onScreenUpdate_;
 
     size_t scrollOffset_ = 0;
+    terminal::Coordinate currentMousePosition_{0, 0};
+
+    std::unique_ptr<Selector> selector_;
 };

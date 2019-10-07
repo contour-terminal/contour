@@ -31,10 +31,27 @@ struct Coordinate {
     cursor_pos_t column = 1;
 };
 
+constexpr void swap(Coordinate& a, Coordinate& b) noexcept
+{
+    Coordinate const c = a;
+    a = b;
+    b = c;
+}
+
 // Prints Coordinate as human readable text to given stream (used for debugging & unit testing).
 inline std::ostream& operator<<(std::ostream& _os, Coordinate const& _coord)
 {
     return _os << "{" << _coord.row << ", " << _coord.column << "}";
+}
+
+constexpr inline bool operator<(Coordinate const& a, Coordinate const& b) noexcept
+{
+    if (a.row < b.row)
+        return true;
+    else if (a.row == b.row)
+        return a.column < b.column;
+    else
+        return false;
 }
 
 constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
@@ -717,3 +734,21 @@ std::string to_string(Command const& cmd);
 std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool _withParameters, bool _withComment);
 
 }  // namespace terminal
+
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::Coordinate> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::Coordinate& coord, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({}, {})", coord.row, coord.column);
+        }
+    };
+}

@@ -42,6 +42,8 @@ class Contour {
     void onKey(int _key, int _scanCode, int _action, int _mods);
     void onChar(char32_t _char);
     void onMouseScroll(double _xOffset, double _yOffset);
+    void onMouseButton(int _button, int _action, int _mods);
+    void onMousePosition(double _x, double _y);
     void onContentScale(float _xs, float _ys);
     void onScreenUpdate();
     void onWindowTitleChanged();
@@ -52,6 +54,7 @@ class Contour {
     Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
     void executeInput(terminal::InputEvent const& _inputEvent);
     void executeAction(Action const& _action);
+    std::string extractSelectionText() const;
 
   private:
     std::ofstream loggingSink_;
