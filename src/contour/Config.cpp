@@ -77,10 +77,9 @@ void createFileIfNotExists(FileSystem::path const& _path)
     auto const& status = FileSystem::status(_path, errorCode);
     if (!FileSystem::is_regular_file(status))
     {
-        ofstream file(_path.string(), ios_base::out);
-        if (!file.good())
-            throw runtime_error{ string("Unable to create config file. ") + (errorCode ? errorCode.message() : "") };
-        file.close();
+        Config freshConfig{};
+        freshConfig.inputMappings = Config::defaultInputMappings();
+        saveConfigToFile(freshConfig, _path.string());
     }
 }
 
@@ -416,6 +415,12 @@ std::string serializeYaml(Config const& _config)
 
 void saveConfigToFile(Config const& _config, std::string const& _fileName)
 {
+    FileSystemError errorCode;
+    auto const& status = FileSystem::status(_fileName, errorCode);
+
     auto ofs = ofstream{_fileName, ios::trunc};
-    ofs << serializeYaml(_config);
+    if (!ofs.good())
+        throw runtime_error{ string("Unable to create config file. ") + (errorCode ? errorCode.message() : "") };
+
+     ofs << serializeYaml(_config);
 }
