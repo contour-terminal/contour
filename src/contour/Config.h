@@ -93,7 +93,11 @@ struct Config {
     LogMask loggingMask;
 
     terminal::ColorProfile colorProfile{};
-    std::vector<InputMapping> inputMappings{
+    std::vector<InputMapping> inputMappings;
+
+    static std::vector<InputMapping> defaultInputMappings()
+    {
+        return {
         {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
         {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
         {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},
@@ -110,6 +114,7 @@ struct Config {
         {terminal::KeyInputEvent{terminal::Key::Home, terminal::Modifier::Control}, actions::ScrollToTop{}},
         {terminal::KeyInputEvent{terminal::Key::End, terminal::Modifier::Control}, actions::ScrollToBottom{}},
     };
+    }
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);

@@ -340,9 +340,13 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
     }
 
 	if (auto mapping = doc["input_mapping"]; mapping)
+    {
 		if (mapping.IsSequence())
 			for (size_t i = 0; i < mapping.size(); ++i)
 				parseInputMapping(_config, mapping[i]);
+    }
+    else
+        _config.inputMappings = Config::defaultInputMappings();
 
     if (auto logging = doc["logging"]; logging)
     {
