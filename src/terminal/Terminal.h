@@ -65,13 +65,13 @@ class Terminal : public PseudoTerminal {
 
     Screen::Cell const& absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const;
 
+    /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
+    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
+
     using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 
     /// @returns the current Cursor state.
     Cursor cursor() const;
-
-    /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
-    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
 
     std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
 

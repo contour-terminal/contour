@@ -17,7 +17,8 @@
 using namespace std;
 using namespace terminal;
 
-Selector::Selector(Coordinate const& _from) :
+Selector::Selector(WindowSize const& _viewport, Coordinate const& _from) :
+    viewport_{_viewport},
     from_{_from},
     to_{_from}
 {
@@ -40,13 +41,21 @@ bool Selector::extend(Coordinate const& _to)
 void Selector::stop()
 {
     active_ = false;
-    cerr << fmt::format("Selector range: from {} to {}.", from_, to_) << endl;
+}
+
+void Selector::copy(Terminal const& _source, Renderer _render) const
+{
+    for (Range const& range : ranges())
+        for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
+            _render(range.line, col, _source.absoluteAt(range.line, col));
 }
 
 // ==========================================================================
 
-void LinearSelector::copy(Terminal const& _source, size_t _scrollOffset, Renderer _render) const
+vector<Selector::Range> LinearSelector::ranges() const
 {
+    vector<Range> result;
+
     auto const [from, to] = [this]() {
         if (to_ < from_)
             return pair{to_, from_};
@@ -55,41 +64,31 @@ void LinearSelector::copy(Terminal const& _source, size_t _scrollOffset, Rendere
     }();
 
     auto const numLines = to.row - from.row + 1;
+    result.reserve(numLines);
 
     switch (numLines)
     {
         case 1:
-            for (cursor_pos_t colOffset = 0; colOffset < to.column - from.column; ++colOffset)
-                _render(1, colOffset + 1, _source.absoluteAt(from.row, from.column + colOffset));
+            result.emplace_back(Range{from.row, from.column, to.column});
             break;
         case 2:
             // Render first line partial from selected column to end.
-            for (cursor_pos_t colOffset = 0; colOffset < _source.size().columns - from.column; ++colOffset)
-                _render(1, colOffset + 1, _source.absoluteAt(from.row, from.column + colOffset));
-
+            result.emplace_back(Range{from.row, from.column, viewport_.columns});
             // Render last (second) line partial from beginning to last selected column.
-            for (cursor_pos_t colOffset = 0; colOffset < to.column; ++colOffset)
-                _render(2, colOffset + 1, _source.absoluteAt(to.row, colOffset + 1));
+            result.emplace_back(Range{to.row, 1, to.column});
             break;
         default:
             // Render first line partial from selected column to end.
-            for (cursor_pos_t colOffset = 0; colOffset < _source.size().columns - from.column; ++colOffset)
-                _render(1, colOffset + 1, _source.absoluteAt(from.row, from.column + colOffset));
+            result.emplace_back(Range{from.row, from.column, viewport_.columns});
 
             // Render inner full.
-            for (cursor_pos_t lineOffset = 1; lineOffset < numLines - 1; ++lineOffset)
-                for (cursor_pos_t colOffset = 0; colOffset < _source.size().columns; ++colOffset)
-                    _render(
-                        lineOffset + 1,
-                        colOffset + 1,
-                        _source.absoluteAt(from.row + lineOffset, colOffset + 1)
-                    );
+            for (cursor_pos_t lineOffset = from.row + 1; lineOffset < to.row; ++lineOffset)
+                result.emplace_back(Range{lineOffset, 1, viewport_.columns});
 
             // Render last (second) line partial from beginning to last selected column.
-            for (cursor_pos_t colOffset = 0; colOffset < to.column; ++colOffset)
-                _render(numLines, colOffset + 1, _source.absoluteAt(to.row, colOffset + 1));
+            result.emplace_back(Range{to.row, 1, to.column});
+            break;
     }
+
+    return result;
 }
-
-// ==========================================================================
-

@@ -16,7 +16,10 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/Screen.h> // Coordinate
 #include <terminal/Terminal.h>
+
 #include <functional>
+#include <vector>
+#include <utility>
 
 /**
  * Selector API.
@@ -35,7 +38,7 @@
  */
 class Selector {
   protected:
-    explicit Selector(terminal::Coordinate const& _from);
+    Selector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _from);
 
   public:
     using Renderer = terminal::Screen::Renderer;
@@ -65,10 +68,19 @@ class Selector {
     /// the selection accordingly.
     void slice(int _offset);
 
+    struct Range {
+        terminal::cursor_pos_t line;
+        terminal::cursor_pos_t fromColumn;
+        terminal::cursor_pos_t toColumn;
+    };
+
+    virtual std::vector<Range> ranges() const = 0;
+
     // Returns the text contents from the selected area from @p _source.
-    virtual void copy(terminal::Terminal const& _source, size_t _scrollOffset, Renderer _render) const = 0;
+    void copy(terminal::Terminal const& _source, Renderer _render) const;
 
   protected:
+    terminal::WindowSize const viewport_;
     terminal::Coordinate from_{};
     terminal::Coordinate to_{};
 
@@ -81,9 +93,10 @@ class Selector {
 /// Usually triggered by single left-click.
 class LinearSelector : public Selector {
   public:
-    explicit LinearSelector(terminal::Coordinate const& _start) : Selector{_start} {}
+    LinearSelector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _start) :
+        Selector{_viewport, _start} {}
 
-    void copy(terminal::Terminal const& _source, size_t _scrollOffset, Renderer _render) const override;
+    std::vector<Range> ranges() const override;
 };
 
 /// Selects full lines.
@@ -91,7 +104,7 @@ class LinearSelector : public Selector {
 /// Usually triggered by double left-click.
 class FullLineSelector : public Selector {
   public:
-    void copy(terminal::Terminal const& _source, size_t _scrollOffset, Renderer _render) const override;
+    std::vector<Range> ranges() const override;
 };
 
 /// Selects a rectangular block of equal-width partial lines.
@@ -99,5 +112,7 @@ class FullLineSelector : public Selector {
 /// Usually triggered by Alt + single left-click.
 class BlockSelector : public Selector {
   public:
-    void copy(terminal::Terminal const& _source, size_t _scrollOffset, Renderer _render) const override;
+    std::vector<Range> ranges() const override;
 };
+
+// TODO: make extraction method `ranges()` free standing, and eliminate vtable in Selector if possible

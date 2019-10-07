@@ -54,7 +54,7 @@ class Contour {
     Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
     void executeInput(terminal::InputEvent const& _inputEvent);
     void executeAction(Action const& _action);
-    std::string extractSelectionText() const;
+    std::string extractSelectionText();
 
   private:
     std::ofstream loggingSink_;

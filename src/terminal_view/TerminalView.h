@@ -98,6 +98,9 @@ class TerminalView {
     /// Renders only the selected text.
     void renderSelection(terminal::Screen::Renderer _render) const;
 
+    /// Clears selection, if any currently present.
+    void clearSelection();
+
     /// Checks if there is still a slave connected to the PTY.
     bool alive() const;
 
@@ -134,6 +137,9 @@ class TerminalView {
 
     /// @returns the coordinates with origin being at the top of the history.
     terminal::Coordinate absoluteCoordinate(terminal::Coordinate _viewportCoordinate) const noexcept;
+
+    /// Tests whether given absolute line number [1..num] is within scrolling region
+    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
 
   private:
     bool alive_ = true;

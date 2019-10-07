@@ -265,20 +265,40 @@ constexpr terminal::Modifier makeModifier(int _mods)
 
 void Contour::executeInput(terminal::InputEvent const& _inputEvent)
 {
+    bool handled = false;
     for (InputMapping const& mapping : config_.inputMappings)
     {
         if (_inputEvent == mapping.input)
         {
             executeAction(mapping.action);
-            keyHandled_ = true;
+            handled = true;
         }
     }
 
-    if (!keyHandled_ && (!holds_alternative<terminal::CharInputEvent>(_inputEvent) || modifier_ != terminal::Modifier::Shift))
-    {
-        terminalView_.send(_inputEvent);
-        keyHandled_ = true;
-    }
+    visit(overloaded{
+        [&](terminal::KeyInputEvent const&) {
+            if (!handled)
+                if (modifier_ != terminal::Modifier::Shift)
+                    terminalView_.send(_inputEvent);
+            keyHandled_ = true;
+        },
+        [&](terminal::CharInputEvent const&) {
+            if (!handled && modifier_ != terminal::Modifier::Shift)
+            {
+                terminalView_.send(_inputEvent);
+                keyHandled_ = true;
+            }
+        },
+        [&](terminal::MousePressEvent const&) {
+            terminalView_.send(_inputEvent);
+        },
+        [&](terminal::MouseMoveEvent const&) {
+            terminalView_.send(_inputEvent);
+        },
+        [&](terminal::MouseReleaseEvent const&) {
+            terminalView_.send(_inputEvent);
+        }
+    }, _inputEvent);
 }
 
 void Contour::executeAction(Action const& _action)
@@ -349,7 +369,7 @@ void Contour::executeAction(Action const& _action)
     }, _action);
 }
 
-string Contour::extractSelectionText() const
+string Contour::extractSelectionText()
 {
     using namespace terminal;
     cursor_pos_t lastColumn = 0;
@@ -370,6 +390,8 @@ string Contour::extractSelectionText() const
     });
     text += currentLine;
     cout << "Copy: \"" << currentLine << '"' << endl;
+
+    terminalView_.clearSelection();
 
     return text;
 }
@@ -497,17 +519,13 @@ void Contour::onMouseButton(int _button, int _action, int _mods)
 
     auto const mouseButton = makeMouseButton(_button);
 
-
     if (_action == GLFW_PRESS)
     {
         executeInput(terminal::MousePressEvent{mouseButton, modifier_});
     }
     else if (_action == GLFW_RELEASE)
     {
-        if (_button == GLFW_MOUSE_BUTTON_LEFT)
-        {
-            terminalView_.send(terminal::MouseReleaseEvent{mouseButton});
-        }
+        terminalView_.send(terminal::MouseReleaseEvent{mouseButton});
     }
 }
 

@@ -116,7 +116,13 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
     return visit(overloaded{
         [this, &_inputEvent](KeyInputEvent const& _key) -> bool {
             logger_.keyPress(_key.key, _key.modifier);
-            return terminal_.send(_inputEvent);
+            if (selector_ && _key.key == terminal::Key::Escape)
+            {
+                clearSelection();
+                return true;
+            }
+            else
+                return terminal_.send(_inputEvent);
         },
         [this, &_inputEvent](CharInputEvent const& _char) -> bool {
             logger_.keyPress(_char.value, _char.modifier);
@@ -127,7 +133,10 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             if (_mouse.button == MouseButton::Left)
             {
                 if (_mouse.modifier == Modifier::None)
-                    selector_ = make_unique<LinearSelector>(absoluteCoordinate(currentMousePosition_));
+                {
+                    selector_ = make_unique<LinearSelector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
+                    updated_.store(true);
+                }
                 // else if (_mouse.modifier == Modifier::Alt)
                 //     selector_ = make_unique<BlockSelector>(absoluteCoordinate(currentMousePosition_));
             }
@@ -153,7 +162,10 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
                 currentMousePosition_ = newPosition;
 
                 if (selector_ && selector_->active())
+                {
                     selector_->extend(absoluteCoordinate(newPosition));
+                    updated_.store(true);
+                }
             }
             return true;
         },
@@ -207,6 +219,9 @@ void TerminalView::resize(unsigned _width, unsigned _height)
     margin_ = computeMargin(newSize, _width, _height);
 
     if (doResize)
+    {
+        clearSelection();
+
         cout << fmt::format(
             "Resized to {}x{} ({}x{}) (margin: {}x{}) (CharBox: {}x{})\n",
             newSize.columns, newSize.rows,
@@ -214,6 +229,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
             margin_.left, margin_.bottom,
             regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()
         );
+    }
 }
 
 void TerminalView::setFont(Font& _font)
@@ -320,7 +336,29 @@ void TerminalView::render()
 
     if (terminal_.cursor().visible && scrollOffset_ + terminal_.cursor().row <= terminal_.size().rows)
         cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row + static_cast<cursor_pos_t>(scrollOffset_)));
+
+    if (selector_)
+    {
+        auto constexpr color = glm::vec4{0.8, 0.8, 0.8, 0.75};
+        for (Selector::Range const& range : selector_->ranges())
+        {
+            if (isAbsoluteLineVisible(range.line))
+            {
+                cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(terminal_.historyLineCount() - scrollOffset_);
+
+                for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
+                    cellBackground_.render(makeCoords(col, row), color);
+            }
+        }
+    }
 }
+
+bool TerminalView::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
+{
+    return _row >= terminal_.historyLineCount() - scrollOffset_
+        && _row <= terminal_.historyLineCount() - scrollOffset_ + terminal_.size().rows;
+}
+
 
 void TerminalView::fillCellGroup(terminal::cursor_pos_t _row, terminal::cursor_pos_t _col, terminal::Screen::Cell const& _cell)
 {
@@ -469,5 +507,11 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
 void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
 {
     if (selector_)
-        selector_->copy(terminal_, scrollOffset_, _render);
+        selector_->copy(terminal_, _render);
+}
+
+void TerminalView::clearSelection()
+{
+    selector_.reset();
+    updated_.store(true);
 }
