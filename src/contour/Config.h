@@ -91,7 +91,7 @@ struct Config {
     unsigned int tabWidth = 8;
     terminal::Opacity backgroundOpacity = terminal::Opacity::Opaque; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
-    LogMask loggingMask;
+    LogMask loggingMask = LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput;
 
     terminal::ColorProfile colorProfile{};
     std::vector<InputMapping> inputMappings;
@@ -99,25 +99,25 @@ struct Config {
     static std::vector<InputMapping> defaultInputMappings()
     {
         return {
-        {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
-        {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
-        {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Control}, actions::IncreaseFontSize{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::None}, actions::ScrollUp{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::None}, actions::ScrollDown{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
-        {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
-        {terminal::KeyInputEvent{terminal::Key::PageUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
-        {terminal::KeyInputEvent{terminal::Key::PageDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
-        {terminal::KeyInputEvent{terminal::Key::Home, terminal::Modifier::Control}, actions::ScrollToTop{}},
-        {terminal::KeyInputEvent{terminal::Key::End, terminal::Modifier::Control}, actions::ScrollToBottom{}},
+            {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
+            {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
+            {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Control}, actions::IncreaseFontSize{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::None}, actions::ScrollUp{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::None}, actions::ScrollDown{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
+            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
+            {terminal::KeyInputEvent{terminal::Key::PageUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
+            {terminal::KeyInputEvent{terminal::Key::PageDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
+            {terminal::KeyInputEvent{terminal::Key::Home, terminal::Modifier::Control}, actions::ScrollToTop{}},
+            {terminal::KeyInputEvent{terminal::Key::End, terminal::Modifier::Control}, actions::ScrollToBottom{}},
             {terminal::CharInputEvent{'c', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::CopySelection{}},
             {terminal::CharInputEvent{'v', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::PasteClipboard{}},
             {terminal::MousePressEvent{terminal::MouseButton::Middle, terminal::Modifier::None}, actions::PasteSelection{}},
-    };
+        };
     }
 };
 
