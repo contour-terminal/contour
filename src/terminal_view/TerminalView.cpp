@@ -331,6 +331,16 @@ bool TerminalView::scrollToBottom()
         return false;
 }
 
+inline glm::vec4 makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
+{
+    return glm::vec4{
+        _rgb.red / 255.0,
+        _rgb.green / 255.0,
+        _rgb.blue / 255.0,
+        static_cast<unsigned>(_opacity) / 255.0
+    };
+}
+
 void TerminalView::render()
 {
     terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3), scrollOffset_);
@@ -341,7 +351,7 @@ void TerminalView::render()
 
     if (selector_ && selector_->state() != Selector::State::Waiting)
     {
-        auto constexpr color = glm::vec4{0.8, 0.8, 0.8, 0.75}; // TODO: fetch from config
+        auto const color = makeColor(colorProfile_.selection, static_cast<terminal::Opacity>(0xC0));
         auto const ranges = linear(*selector_);
         for (Selector::Range const& range : ranges)
         {

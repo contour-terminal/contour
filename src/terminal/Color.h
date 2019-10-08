@@ -117,6 +117,7 @@ struct ColorProfile {
 
     RGBColor defaultForeground = 0xD0D0D0;
     RGBColor defaultBackground = 0x000000;
+    RGBColor selection = 0x707070;
 
     Palette palette = []() {
         Palette colors;

@@ -297,6 +297,12 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
             if (auto bg = def["background"]; bg)
                 _config.colorProfile.defaultBackground = bg.as<string>();
         }
+
+        if (auto selection = colors["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
+        {
+            _config.colorProfile.selection = selection.as<string>();
+        }
+
         auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
             if (_node)
             {
