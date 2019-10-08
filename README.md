@@ -22,13 +22,13 @@
 The following is an incomplete list of features that contour does or will support.
 
 * [x] Available on all three major platforms (Linux, OS/X, Windows 10)
-* [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
-* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
 * [x] Runtime configuration reload
 * [x] Font Ligatures Support (such as in Fira Code)
 * [x] GPU-accelerated rendering
 * [x] 256-color and Truecolor support
 * [x] Key binding customization
+* [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
+* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
 * [ ] Color Schemes
@@ -155,15 +155,15 @@ brew install freetype fontconfig glew glfw3 glm harfbuzz boost
 
 # References
 
-- [VT510](https://vt100.net/docs/vt510-rm/): VT510 Manual, see Chapter 5.
-- [ECMA-35](http://www.ecma-international.org/publications/standards/Ecma-035.htm):
+* [VT510](https://vt100.net/docs/vt510-rm/): VT510 Manual, see Chapter 5.
+* [ECMA-35](http://www.ecma-international.org/publications/standards/Ecma-035.htm):
     Character Code Structure and Extension Techniques
-- [ECMA-43](http://www.ecma-international.org/publications/standards/Ecma-043.htm):
+* [ECMA-43](http://www.ecma-international.org/publications/standards/Ecma-043.htm):
     8-bit Coded Character Set Structure and Rules
-- [ECMA-48](http://www.ecma-international.org/publications/standards/Ecma-048.htm):
+* [ECMA-48](http://www.ecma-international.org/publications/standards/Ecma-048.htm):
     Control Functions for Coded Character Sets
-- [ISO/IEC 8613-6](https://www.iso.org/standard/22943.html):
+* [ISO/IEC 8613-6](https://www.iso.org/standard/22943.html):
     Character content architectures
-- [xterm](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html): xterm control sequences
-- [console\_codes](http://man.he.net/man4/console_codes) Linux console codes
-- [Summary of ANSI standards for ASCII terminals](http://www.inwap.com/pdp10/ansicode.txt)
+* [xterm](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html): xterm control sequences
+* [console\_codes](http://man.he.net/man4/console_codes) Linux console codes
+* [Summary of ANSI standards for ASCII terminals](http://www.inwap.com/pdp10/ansicode.txt)
