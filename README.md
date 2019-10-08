@@ -2,6 +2,7 @@
 [![CircleCI](https://circleci.com/gh/christianparpart/contour.svg?style=svg)](https://circleci.com/gh/christianparpart/contour)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
+[Build](https://github.com/christianparpart/contour/workflows/.github/workflows/linux.yml/badge.svg)
 
 ![alt text](docs/contour-win32-acrylic-background.png "Screenshot")
 

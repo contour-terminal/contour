@@ -3,8 +3,14 @@ include(FilesystemResolver)
 find_package(Freetype)
 find_package(OpenGL)
 find_package(GLEW)
-find_package(glfw3 CONFIG)
 find_package(glm CONFIG)
+
+set(GLFW_VER 3.2)
+if("${CMAKE_SYSTEM}" MATCHES "Windows")
+	set(GLFW_VER 3.3)
+endif()
+
+find_package(glfw3 ${GLFW_VER} CONFIG REQUIRED)
 
 add_executable(contour
 	Contour.cpp Contour.h

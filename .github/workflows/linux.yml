@@ -1,0 +1,47 @@
+name: Ubuntu Linux
+
+on:
+  push:
+    branches:
+      - master
+      - wip
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: "initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt install -y "g++-9" \
+                  libfreetype6-dev libglew-dev libglfw3-dev libglm-dev \
+                  libfontconfig1-dev libharfbuzz-dev
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          cd build && cmake .. \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
+            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+            -DYAML_CPP_INSTALL=OFF
+        # run: |
+        #   cmake . \
+        #         -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-8 \
+        #         -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+        #         -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+        #         -DYAML_CPP_INSTALL=OFF \
+        #         -B build/
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: libground"
+        run: ./build/src/ground/ground_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test

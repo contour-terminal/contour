@@ -1,0 +1,45 @@
+name: MacOS
+
+on:
+  push:
+    branches:
+      - master
+      - wip
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: "Initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: "some debug prints"
+        run: |
+          set -x
+          ls -hl "/Applications/"
+          find /Applications -name SDKs
+          find /Applications -name OpenGL.framework
+      - name: "Install dependencies"
+        run: |
+          set -ex
+          brew update
+          brew install freetype fontconfig glew glfw3 glm harfbuzz boost pkg-config
+      - name: "Create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: |
+          cmake . \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+                -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+                -DYAML_CPP_INSTALL=OFF \
+                -B build/
+      - name: "Build"
+        run: cmake --build build/
+      - name: "test: libground"
+        run: ./build/src/ground/ground_test
+      - name: "test: libterminal"
+        run: ./src/terminal/terminal_test

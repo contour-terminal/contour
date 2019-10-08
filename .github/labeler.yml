@@ -1,0 +1,8 @@
+frontend:
+  - src/frontend/*.cpp
+  - src/frontend/*.h
+libterminal:
+  - src/terminal/*.cpp
+  - src/terminal/*.h
+test:
+  - src/**/*_test.cpp
