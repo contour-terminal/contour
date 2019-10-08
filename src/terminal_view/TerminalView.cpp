@@ -128,19 +128,30 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             logger_.keyPress(_char.value, _char.modifier);
             return terminal_.send(_inputEvent);
         },
-        [this](MousePressEvent const& _mouse) -> bool {
+        [this, &_inputEvent](MousePressEvent const& _mouse) -> bool {
             // TODO: anything else? logging?
             if (_mouse.button == MouseButton::Left)
             {
+                chrono::system_clock::time_point const now = chrono::system_clock::now();
+                double const diff_ms = std::chrono::duration<double, std::milli> (now - lastClick_).count();
+                lastClick_ = now;
+                speedClicks_ = diff_ms >= 10.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
+
                 if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Alt)
                 {
-                    selectionMode_ = _mouse.modifier == Modifier::Alt ? SelectionMode::Rectangular : SelectionMode::Linear;
+                    if (speedClicks_ >= 3)
+                        selectionMode_ = SelectionMode::Line;
+                    else if (_mouse.modifier == Modifier::Alt)
+                        selectionMode_ = SelectionMode::Rectangular;
+                    else
+                        selectionMode_ = SelectionMode::Linear;
+
                     selector_ = make_unique<Selector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
                     updated_.store(true);
+                    return true;
                 }
             }
-            //return terminal_.send(_inputEvent);
-            return true;
+            return terminal_.send(_inputEvent);
         },
         [this](MouseMoveEvent const& _mouseMove) -> bool {
             // receives column/row coordinates in pixels (not character cells)
@@ -522,8 +533,7 @@ vector<Selector::Range> TerminalView::selection() const
         switch (selectionMode_)
         {
             case SelectionMode::Line:
-                // TODO
-                [[fallthrough]];
+                return lines(*selector_);
             case SelectionMode::Linear:
                 return linear(*selector_);
             case SelectionMode::Rectangular:

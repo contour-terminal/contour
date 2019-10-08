@@ -28,6 +28,7 @@
 #include <glm/matrix.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -195,4 +196,8 @@ class TerminalView {
     enum class SelectionMode { Linear, Line, Rectangular };
     SelectionMode selectionMode_;
     std::unique_ptr<Selector> selector_;
+
+    // helpers for detecting double/tripple clicks
+    std::chrono::system_clock::time_point lastClick_{};
+    unsigned int speedClicks_ = 0;
 };

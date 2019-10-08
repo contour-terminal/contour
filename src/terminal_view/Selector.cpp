@@ -57,7 +57,8 @@ void copy(vector<Selector::Range> const& _ranges,
 
 // ==========================================================================
 
-vector<Selector::Range> linear(Selector const& _selector)
+tuple<vector<Selector::Range>, terminal::Coordinate const, terminal::Coordinate const>
+prepare(Selector const& _selector)
 {
     vector<Selector::Range> result;
 
@@ -69,30 +70,53 @@ vector<Selector::Range> linear(Selector const& _selector)
     }();
 
     auto const numLines = to.row - from.row + 1;
-    result.reserve(numLines);
+    result.resize(numLines);
 
-    switch (numLines)
+    return {move(result), from, to};
+}
+
+vector<Selector::Range> linear(Selector const& _selector)
+{
+    auto [result, from, to] = prepare(_selector);
+
+    switch (result.size())
     {
         case 1:
-            result.emplace_back(Selector::Range{from.row, from.column, to.column});
+            result[0] = Selector::Range{from.row, from.column, to.column};
             break;
         case 2:
             // Render first line partial from selected column to end.
-            result.emplace_back(Selector::Range{from.row, from.column, _selector.viewport().columns});
+            result[0] = Selector::Range{from.row, from.column, _selector.viewport().columns};
             // Render last (second) line partial from beginning to last selected column.
-            result.emplace_back(Selector::Range{to.row, 1, to.column});
+            result[1] = Selector::Range{to.row, 1, to.column};
             break;
         default:
             // Render first line partial from selected column to end.
-            result.emplace_back(Selector::Range{from.row, from.column, _selector.viewport().columns});
+            result[0] = Selector::Range{from.row, from.column, _selector.viewport().columns};
 
             // Render inner full.
-            for (cursor_pos_t lineOffset = from.row + 1; lineOffset < to.row; ++lineOffset)
-                result.emplace_back(Selector::Range{lineOffset, 1, _selector.viewport().columns});
+            for (size_t n = 1; n < result.size(); ++n)
+                result[n] = Selector::Range{from.row + static_cast<cursor_pos_t>(n), 1, _selector.viewport().columns};
 
             // Render last (second) line partial from beginning to last selected column.
-            result.emplace_back(Selector::Range{to.row, 1, to.column});
+            result[result.size() - 1] = Selector::Range{to.row, 1, to.column};
             break;
+    }
+
+    return result;
+}
+
+vector<Selector::Range> lines(Selector const& _selector)
+{
+    auto [result, from, to] = prepare(_selector);
+
+    for (auto row = from.row; row <= to.row; ++row)
+    {
+        result.emplace_back(Selector::Range{
+            row,
+            1,
+            _selector.viewport().columns
+        });
     }
 
     return result;
@@ -100,17 +124,7 @@ vector<Selector::Range> linear(Selector const& _selector)
 
 vector<Selector::Range> rectangular(Selector const& _selector)
 {
-    vector<Selector::Range> result;
-
-    auto const [from, to] = [&]() {
-        if (_selector.to() < _selector.from())
-            return pair{_selector.to(), _selector.from()};
-        else
-            return pair{_selector.from(), _selector.to()};
-    }();
-
-    auto const numLines = to.row - from.row + 1;
-    result.reserve(numLines);
+    auto [result, from, to] = prepare(_selector);
 
     for (auto row = from.row; row <= to.row; ++row)
     {

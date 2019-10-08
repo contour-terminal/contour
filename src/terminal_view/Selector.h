@@ -103,7 +103,7 @@ class Selector {
 std::vector<Selector::Range> linear(Selector const& _selector);
 
 /// Constructs a vector of ranges for a full-line selection strategy.
-std::vector<Selector::Range> fullLine(Selector const& _selector);
+std::vector<Selector::Range> lines(Selector const& _selector);
 
 /// Constructs a vector of ranges for a rectangular selection strategy.
 std::vector<Selector::Range> rectangular(Selector const& _selector);
