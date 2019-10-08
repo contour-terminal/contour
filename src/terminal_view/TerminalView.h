@@ -142,7 +142,7 @@ class TerminalView {
     /// Tests whether given absolute line number [1..num] is within scrolling region
     bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
 
-    std::vector<Selector::Range> TerminalView::selection() const;
+    std::vector<Selector::Range> selection() const;
 
   private:
     bool alive_ = true;

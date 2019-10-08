@@ -437,12 +437,9 @@ std::string serializeYaml(Config const& _config)
 
 void saveConfigToFile(Config const& _config, std::string const& _fileName)
 {
-    FileSystemError errorCode;
-    auto const& status = FileSystem::status(_fileName, errorCode);
-
     auto ofs = ofstream{_fileName, ios::trunc};
     if (!ofs.good())
-        throw runtime_error{ string("Unable to create config file. ") + (errorCode ? errorCode.message() : "") };
+        throw runtime_error{ "Unable to create config file." };
 
      ofs << serializeYaml(_config);
 }
