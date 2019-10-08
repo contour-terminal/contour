@@ -26,41 +26,46 @@ Selector::Selector(WindowSize const& _viewport, Coordinate const& _from) :
 
 void Selector::restart(Coordinate const& _from)
 {
-    active_ = true;
+    state_ = State::Waiting;
     from_ = to_ = _from;
 }
 
 bool Selector::extend(Coordinate const& _to)
 {
-    assert(active_ && "In order extend a selection, the selector must be active (started).");
+    assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
+    state_ = State::InProgress;
     to_ = _to;
 
-    return false; // TODO: indicates whether or not a scroll action must take place.
+    // TODO: indicates whether or not a scroll action must take place.
+    return false;
 }
 
 void Selector::stop()
 {
-    active_ = false;
+    if (state_ == State::InProgress)
+        state_ = State::Complete;
 }
 
-void Selector::copy(Terminal const& _source, Renderer _render) const
+void copy(vector<Selector::Range> const& _ranges,
+          Terminal const& _source,
+          Selector::Renderer _render)
 {
-    for (Range const& range : ranges())
-        for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
+    for (auto const& range : _ranges)
+        for (auto col = range.fromColumn; col <= range.toColumn; ++col)
             _render(range.line, col, _source.absoluteAt(range.line, col));
 }
 
 // ==========================================================================
 
-vector<Selector::Range> LinearSelector::ranges() const
+vector<Selector::Range> linear(Selector const& _selector)
 {
-    vector<Range> result;
+    vector<Selector::Range> result;
 
-    auto const [from, to] = [this]() {
-        if (to_ < from_)
-            return pair{to_, from_};
+    auto const [from, to] = [&]() {
+        if (_selector.to() < _selector.from())
+            return pair{_selector.to(), _selector.from()};
         else
-            return pair{from_, to_};
+            return pair{_selector.from(), _selector.to()};
     }();
 
     auto const numLines = to.row - from.row + 1;
@@ -69,24 +74,24 @@ vector<Selector::Range> LinearSelector::ranges() const
     switch (numLines)
     {
         case 1:
-            result.emplace_back(Range{from.row, from.column, to.column});
+            result.emplace_back(Selector::Range{from.row, from.column, to.column});
             break;
         case 2:
             // Render first line partial from selected column to end.
-            result.emplace_back(Range{from.row, from.column, viewport_.columns});
+            result.emplace_back(Selector::Range{from.row, from.column, _selector.viewport().columns});
             // Render last (second) line partial from beginning to last selected column.
-            result.emplace_back(Range{to.row, 1, to.column});
+            result.emplace_back(Selector::Range{to.row, 1, to.column});
             break;
         default:
             // Render first line partial from selected column to end.
-            result.emplace_back(Range{from.row, from.column, viewport_.columns});
+            result.emplace_back(Selector::Range{from.row, from.column, _selector.viewport().columns});
 
             // Render inner full.
             for (cursor_pos_t lineOffset = from.row + 1; lineOffset < to.row; ++lineOffset)
-                result.emplace_back(Range{lineOffset, 1, viewport_.columns});
+                result.emplace_back(Selector::Range{lineOffset, 1, _selector.viewport().columns});
 
             // Render last (second) line partial from beginning to last selected column.
-            result.emplace_back(Range{to.row, 1, to.column});
+            result.emplace_back(Selector::Range{to.row, 1, to.column});
             break;
     }
 

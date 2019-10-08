@@ -37,17 +37,22 @@
  * This is achieved by using absolute coordinates from the top history line.
  */
 class Selector {
-  protected:
-    Selector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _from);
-
   public:
+    enum class State {
+        /// Inactive, but waiting for the selection to be started (by moving the cursor).
+        Waiting,
+        /// Active, with selection in progress.
+        InProgress,
+        /// Inactive, with selection available.
+        Complete,
+    };
+
     using Renderer = terminal::Screen::Renderer;
 
-    virtual ~Selector() = default;
+    Selector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _from);
 
-    bool active() const noexcept { return active_; }
-
-    // TODO: maybe make Coordinate's members signed, whereas negative row values represent saved (history) lines?
+    /// Tests whether the a selection is currently in progress.
+    constexpr State state() const noexcept { return state_; }
 
     /// Starts or restarts a selection.
     ///
@@ -72,47 +77,32 @@ class Selector {
         terminal::cursor_pos_t line;
         terminal::cursor_pos_t fromColumn;
         terminal::cursor_pos_t toColumn;
+
+        constexpr terminal::cursor_pos_t length() const noexcept { return toColumn - fromColumn + 1; }
     };
 
-    virtual std::vector<Range> ranges() const = 0;
+    constexpr terminal::WindowSize const& viewport() const noexcept { return viewport_; }
+    constexpr terminal::Coordinate const& from() const noexcept { return from_; }
+    constexpr terminal::Coordinate const& to() const noexcept { return to_; }
 
-    // Returns the text contents from the selected area from @p _source.
-    void copy(terminal::Terminal const& _source, Renderer _render) const;
-
-  protected:
+  private:
     terminal::WindowSize const viewport_;
     terminal::Coordinate from_{};
     terminal::Coordinate to_{};
-
-  private:
-    bool active_{true};
+    State state_{State::Waiting};
 };
 
-/// Linearly selects lines. Inner lines are always full, first and last line can be partial.
-///
-/// Usually triggered by single left-click.
-class LinearSelector : public Selector {
-  public:
-    LinearSelector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _start) :
-        Selector{_viewport, _start} {}
+/// Constructs a vector of ranges for a linear selection strategy.
+std::vector<Selector::Range> linear(Selector const& _selector);
 
-    std::vector<Range> ranges() const override;
-};
+/// Constructs a vector of ranges for a full-line selection strategy.
+std::vector<Selector::Range> fullLine(Selector const& _selector);
 
-/// Selects full lines.
-///
-/// Usually triggered by double left-click.
-class FullLineSelector : public Selector {
-  public:
-    std::vector<Range> ranges() const override;
-};
+/// Constructs a vector of ranges for a rectangular selection strategy.
+std::vector<Selector::Range> block(Selector const& _selector);
 
-/// Selects a rectangular block of equal-width partial lines.
-///
-/// Usually triggered by Alt + single left-click.
-class BlockSelector : public Selector {
-  public:
-    std::vector<Range> ranges() const override;
-};
-
-// TODO: make extraction method `ranges()` free standing, and eliminate vtable in Selector if possible
+/// Renders (extracts) the selected ranges from given @p _source and passes
+/// each cell linearly into @p _render.
+void copy(std::vector<Selector::Range> const& _ranges,
+          terminal::Terminal /*TODO: should be Screen*/ const& _source,
+          terminal::Screen::Renderer _render);

@@ -134,7 +134,7 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             {
                 if (_mouse.modifier == Modifier::None)
                 {
-                    selector_ = make_unique<LinearSelector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
+                    selector_ = make_unique<Selector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
                     updated_.store(true);
                 }
                 // else if (_mouse.modifier == Modifier::Alt)
@@ -156,22 +156,24 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
                 static_cast<cursor_pos_t>(max(col, 0))
             };
 
-            if (currentMousePosition_ != newPosition)
-            {
-                //printf("mouse position: %d, %d; %d, %d\n", _mouseMove.row, _mouseMove.column, row, col);
-                currentMousePosition_ = newPosition;
+            //printf("mouse position: %d, %d; %d, %d\n", _mouseMove.row, _mouseMove.column, row, col);
+            currentMousePosition_ = newPosition;
 
-                if (selector_ && selector_->active())
-                {
-                    selector_->extend(absoluteCoordinate(newPosition));
-                    updated_.store(true);
-                }
+            if (selector_ && selector_->state() != Selector::State::Complete)
+            {
+                selector_->extend(absoluteCoordinate(newPosition));
+                updated_.store(true);
             }
             return true;
         },
         [this](MouseReleaseEvent const& _mouseRelease) -> bool {
             if (selector_)
-                selector_->stop();
+            {
+                if (selector_->state() == Selector::State::InProgress)
+                    selector_->stop();
+                else
+                    selector_.reset();
+            }
 
             return true;
         },
@@ -337,10 +339,11 @@ void TerminalView::render()
     if (terminal_.cursor().visible && scrollOffset_ + terminal_.cursor().row <= terminal_.size().rows)
         cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row + static_cast<cursor_pos_t>(scrollOffset_)));
 
-    if (selector_)
+    if (selector_ && selector_->state() != Selector::State::Waiting)
     {
-        auto constexpr color = glm::vec4{0.8, 0.8, 0.8, 0.75};
-        for (Selector::Range const& range : selector_->ranges())
+        auto constexpr color = glm::vec4{0.8, 0.8, 0.8, 0.75}; // TODO: fetch from config
+        auto const ranges = linear(*selector_);
+        for (Selector::Range const& range : ranges)
         {
             if (isAbsoluteLineVisible(range.line))
             {
@@ -507,7 +510,7 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
 void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
 {
     if (selector_)
-        selector_->copy(terminal_, _render);
+        copy(linear(*selector_), terminal_, _render);
 }
 
 void TerminalView::clearSelection()
