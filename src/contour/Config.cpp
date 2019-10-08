@@ -395,17 +395,30 @@ std::string serializeYaml(Config const& _config)
     root["background"]["opacity"] = static_cast<float>(_config.backgroundOpacity) / 255.0f;
     root["background"]["blur"] = _config.backgroundBlur;
 
+    // history
     root["history"]["limit"] = _config.maxHistoryLineCount.has_value()
         ? static_cast<int64_t>(_config.maxHistoryLineCount.value())
         : -1ll;
     root["history"]["autoScrollOnUpdate"] = _config.autoScrollOnUpdate;
     root["history"]["scrollMultiplier"] = _config.historyScrollMultiplier;
 
-    // TODO: colors
+    // colors
+    root["colors"]["default"]["foreground"] = to_string(_config.colorProfile.defaultForeground);
+    root["colors"]["default"]["background"] = to_string(_config.colorProfile.defaultBackground);
+    root["colors"]["selection"] = to_string(_config.colorProfile.selection);
 
+    constexpr auto names = array{"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
+    for (size_t i = 0; i < names.size(); ++i)
+    {
+        root["colors"]["normal"][names[i]] = to_string(_config.colorProfile.normalColor(i));
+        root["colors"]["bright"][names[i]] = to_string(_config.colorProfile.brightColor(i));
+    }
+
+    // cursor
     root["cursor"]["shape"] = to_string(_config.cursorShape);
     root["cursor"]["blinking"] = _config.cursorBlinking;
 
+    // logging
     root["logging"]["parseErrors"] = (_config.loggingMask & LogMask::ParserError) != 0;
     root["logging"]["invalidOutput"] = (_config.loggingMask & LogMask::InvalidOutput) != 0;
     root["logging"]["unsupportedOutput"] = (_config.loggingMask & LogMask::UnsupportedOutput) != 0;
@@ -413,6 +426,9 @@ std::string serializeYaml(Config const& _config)
     root["logging"]["rawOutput"] = (_config.loggingMask & LogMask::RawOutput) != 0;
     root["logging"]["traceInput"] = (_config.loggingMask & LogMask::TraceInput) != 0;
     root["logging"]["traceOutput"] = (_config.loggingMask & LogMask::TraceOutput) != 0;
+
+    // input mapping
+    // TODO
 
     ostringstream os;
     os << root;// TODO: returns LF? if not, endl it.

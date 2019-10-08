@@ -91,8 +91,8 @@ RGBColor& RGBColor::operator=(string const& _hexCode)
 
 string to_string(RGBColor const c)
 {
-    char buf[16];
-    auto n = snprintf(buf, sizeof(buf), "%u.%u.%u", c.red, c.green, c.blue);
+    char buf[9];
+    auto n = snprintf(buf, sizeof(buf), "0x%02X%02X%02X", c.red, c.green, c.blue);
     return string(buf, n);
 }
 
