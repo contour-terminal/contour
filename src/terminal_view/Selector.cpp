@@ -97,3 +97,29 @@ vector<Selector::Range> linear(Selector const& _selector)
 
     return result;
 }
+
+vector<Selector::Range> rectangular(Selector const& _selector)
+{
+    vector<Selector::Range> result;
+
+    auto const [from, to] = [&]() {
+        if (_selector.to() < _selector.from())
+            return pair{_selector.to(), _selector.from()};
+        else
+            return pair{_selector.from(), _selector.to()};
+    }();
+
+    auto const numLines = to.row - from.row + 1;
+    result.reserve(numLines);
+
+    for (auto row = from.row; row <= to.row; ++row)
+    {
+        result.emplace_back(Selector::Range{
+            row,
+            from.column,
+            to.column
+        });
+    }
+
+    return result;
+}

@@ -132,13 +132,12 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
             // TODO: anything else? logging?
             if (_mouse.button == MouseButton::Left)
             {
-                if (_mouse.modifier == Modifier::None)
+                if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Alt)
                 {
+                    selectionMode_ = _mouse.modifier == Modifier::Alt ? SelectionMode::Rectangular : SelectionMode::Linear;
                     selector_ = make_unique<Selector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
                     updated_.store(true);
                 }
-                // else if (_mouse.modifier == Modifier::Alt)
-                //     selector_ = make_unique<BlockSelector>(absoluteCoordinate(currentMousePosition_));
             }
             //return terminal_.send(_inputEvent);
             return true;
@@ -352,8 +351,7 @@ void TerminalView::render()
     if (selector_ && selector_->state() != Selector::State::Waiting)
     {
         auto const color = makeColor(colorProfile_.selection, static_cast<terminal::Opacity>(0xC0));
-        auto const ranges = linear(*selector_);
-        for (Selector::Range const& range : ranges)
+        for (Selector::Range const& range : selection())
         {
             if (isAbsoluteLineVisible(range.line))
             {
@@ -517,10 +515,27 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
         onScreenUpdate_();
 }
 
-void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
+vector<Selector::Range> TerminalView::selection() const
 {
     if (selector_)
-        copy(linear(*selector_), terminal_, _render);
+    {
+        switch (selectionMode_)
+        {
+            case SelectionMode::Line:
+                // TODO
+                [[fallthrough]];
+            case SelectionMode::Linear:
+                return linear(*selector_);
+            case SelectionMode::Rectangular:
+                return rectangular(*selector_);
+        }
+    }
+    return {};
+}
+
+void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
+{
+    copy(selection(), terminal_, _render);
 }
 
 void TerminalView::clearSelection()

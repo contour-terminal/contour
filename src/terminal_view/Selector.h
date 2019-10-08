@@ -35,6 +35,13 @@
  * to move the screen contents up, then also the selection's begin (and extend) is being moved up.
  *
  * This is achieved by using absolute coordinates from the top history line.
+ *
+ * Requires:
+ * - WindowSize
+ * - Coordinate
+ * - cursor_pos_t
+ * - Screen::Cell
+ * - Renderer
  */
 class Selector {
   public:
@@ -99,7 +106,7 @@ std::vector<Selector::Range> linear(Selector const& _selector);
 std::vector<Selector::Range> fullLine(Selector const& _selector);
 
 /// Constructs a vector of ranges for a rectangular selection strategy.
-std::vector<Selector::Range> block(Selector const& _selector);
+std::vector<Selector::Range> rectangular(Selector const& _selector);
 
 /// Renders (extracts) the selected ranges from given @p _source and passes
 /// each cell linearly into @p _render.
