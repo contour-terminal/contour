@@ -221,9 +221,9 @@ pair<float, float> Window::primaryMonitorContentScale()
     float ys{};
     glfwGetMonitorContentScale(glfwGetPrimaryMonitor(), &xs, &ys);
 
-	// XXX do not allow content scaling below 1.0
-	xs = max(xs, 1.0f);
-	ys = max(ys, 1.0f);
+    // XXX do not allow content scaling below 1.0
+    xs = max(xs, 1.0f);
+    ys = max(ys, 1.0f);
 
     return { xs, ys };
 #else
@@ -238,9 +238,9 @@ pair<float, float> Window::contentScale()
     float ys{};
     glfwGetWindowContentScale(window_, &xs, &ys);
 
-	// XXX do not allow content scaling below 1.0
-	xs = max(xs, 1.0f);
-	ys = max(ys, 1.0f);
+    // XXX do not allow content scaling below 1.0
+    xs = max(xs, 1.0f);
+    ys = max(ys, 1.0f);
 
     return { xs, ys };
 #else

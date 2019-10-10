@@ -690,9 +690,9 @@ bool Contour::reloadConfigValues()
         windowResizeRequired = true;
     }
     else if (newConfig.fontSize != config_.fontSize)
-	{
+    {
         windowResizeRequired |= setFontSize(newConfig.fontSize, false);
-	}
+    }
 
     if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
         windowResizeRequired |= terminalView_.setTerminalSize(config_.terminalSize);

@@ -110,7 +110,7 @@ vector<Selector::Range> lines(Selector const& _selector)
 {
     auto [result, from, to] = prepare(_selector);
 
-	for (cursor_pos_t row = 0; row < result.size(); ++row)
+    for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
         result[row] = Selector::Range{
             from.row + row,
@@ -126,7 +126,7 @@ vector<Selector::Range> rectangular(Selector const& _selector)
 {
     auto [result, from, to] = prepare(_selector);
 
-	for (cursor_pos_t row = 0; row < result.size(); ++row)
+    for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
         result[row] = Selector::Range{
             from.row + row,
