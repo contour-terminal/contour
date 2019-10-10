@@ -566,7 +566,7 @@ void Contour::onMousePosition(double _x, double _y)
 
 bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
 {
-    if (!terminalView_.setFontSize(static_cast<unsigned>(_fontSize * Window::primaryMonitorContentScale().second)))
+    if (!terminalView_.setFontSize(static_cast<unsigned>(_fontSize * window_.contentScale().second)))
         return false;
 
     if (_fontSize < 5) // Let's not be crazy.
@@ -684,13 +684,15 @@ bool Contour::reloadConfigValues()
     {
         regularFont_ = fontManager_.load(
             newConfig.fontFamily,
-            static_cast<unsigned>(newConfig.fontSize * Window::primaryMonitorContentScale().second)
+            static_cast<unsigned>(newConfig.fontSize * window_.contentScale().second)
         );
         terminalView_.setFont(regularFont_.get());
         windowResizeRequired = true;
     }
     else if (newConfig.fontSize != config_.fontSize)
+	{
         windowResizeRequired |= setFontSize(newConfig.fontSize, false);
+	}
 
     if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
         windowResizeRequired |= terminalView_.setTerminalSize(config_.terminalSize);
