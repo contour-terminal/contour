@@ -110,13 +110,13 @@ vector<Selector::Range> lines(Selector const& _selector)
 {
     auto [result, from, to] = prepare(_selector);
 
-    for (auto row = from.row; row <= to.row; ++row)
+	for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
-        result.emplace_back(Selector::Range{
-            row,
+        result[row] = Selector::Range{
+            from.row + row,
             1,
             _selector.viewport().columns
-        });
+        };
     }
 
     return result;
@@ -126,13 +126,13 @@ vector<Selector::Range> rectangular(Selector const& _selector)
 {
     auto [result, from, to] = prepare(_selector);
 
-    for (auto row = from.row; row <= to.row; ++row)
+	for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
-        result.emplace_back(Selector::Range{
-            row,
+        result[row] = Selector::Range{
+            from.row + row,
             from.column,
             to.column
-        });
+        };
     }
 
     return result;

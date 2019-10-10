@@ -137,11 +137,11 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
                 lastClick_ = now;
                 speedClicks_ = diff_ms >= 10.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
 
-                if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Alt)
+                if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Control)
                 {
                     if (speedClicks_ >= 3)
                         selectionMode_ = SelectionMode::Line;
-                    else if (_mouse.modifier == Modifier::Alt)
+                    else if (_mouse.modifier == Modifier::Control)
                         selectionMode_ = SelectionMode::Rectangular;
                     else
                         selectionMode_ = SelectionMode::Linear;
