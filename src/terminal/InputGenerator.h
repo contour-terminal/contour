@@ -37,10 +37,10 @@ class Modifier {
     constexpr Modifier(Key _key) : mask_{static_cast<unsigned>(_key)} {}
 
     constexpr Modifier() = default;
-	constexpr Modifier(Modifier&&) = default;
-	constexpr Modifier(Modifier const&) = default;
-	constexpr Modifier& operator=(Modifier&&) = default;
-	constexpr Modifier& operator=(Modifier const&) = default;
+    constexpr Modifier(Modifier&&) = default;
+    constexpr Modifier(Modifier const&) = default;
+    constexpr Modifier& operator=(Modifier&&) = default;
+    constexpr Modifier& operator=(Modifier const&) = default;
 
     constexpr unsigned value() const noexcept { return mask_; }
 
@@ -60,15 +60,15 @@ class Modifier {
     }
 
 
-	constexpr void enable(Key _key) noexcept
-	{
-		mask_ |= _key;
-	}
+    constexpr void enable(Key _key) noexcept
+    {
+        mask_ |= _key;
+    }
 
-	constexpr void disable(Key _key) noexcept
-	{
-		mask_ &= ~static_cast<unsigned>(_key);
-	}
+    constexpr void disable(Key _key) noexcept
+    {
+        mask_ &= ~static_cast<unsigned>(_key);
+    }
 
   private:
     unsigned mask_ = 0;
@@ -177,8 +177,8 @@ enum class KeyMode {
 };
 
 struct KeyInputEvent {
-	Key key{};
-	Modifier modifier{};
+    Key key{};
+    Modifier modifier{};
 };
 
 struct CharInputEvent {
@@ -326,44 +326,44 @@ class InputGenerator {
 }  // namespace terminal
 
 namespace std {
-	template<>
-	struct hash<terminal::KeyInputEvent> {
-		constexpr size_t operator()(terminal::KeyInputEvent const& _input) const noexcept {
-			return (1 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.key) & 0xFF);
-		}
-	};
+    template<>
+    struct hash<terminal::KeyInputEvent> {
+        constexpr size_t operator()(terminal::KeyInputEvent const& _input) const noexcept {
+            return (1 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.key) & 0xFF);
+        }
+    };
 
-	template<>
-	struct hash<terminal::CharInputEvent> {
-		constexpr size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
-			return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.value) & 0xFF);
-		}
-	};
+    template<>
+    struct hash<terminal::CharInputEvent> {
+        constexpr size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
+            return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.value) & 0xFF);
+        }
+    };
 
-	template<>
-	struct hash<terminal::MousePressEvent> {
-		constexpr size_t operator()(terminal::MousePressEvent const& _input) const noexcept {
-			return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.button) & 0xFF);
-		}
-	};
+    template<>
+    struct hash<terminal::MousePressEvent> {
+        constexpr size_t operator()(terminal::MousePressEvent const& _input) const noexcept {
+            return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.button) & 0xFF);
+        }
+    };
 
-	template<>
-	struct hash<terminal::MouseMoveEvent> {
-		constexpr size_t operator()(terminal::MouseMoveEvent const& _input) const noexcept {
-			return (4 << 16) | (_input.row << 8) | (_input.column & 0xFF);
-		}
-	};
+    template<>
+    struct hash<terminal::MouseMoveEvent> {
+        constexpr size_t operator()(terminal::MouseMoveEvent const& _input) const noexcept {
+            return (4 << 16) | (_input.row << 8) | (_input.column & 0xFF);
+        }
+    };
 
-	template<>
-	struct hash<terminal::MouseReleaseEvent> {
-		constexpr size_t operator()(terminal::MouseReleaseEvent const& _input) const noexcept {
-			return (5 << 16) | (static_cast<unsigned>(_input.button) & 0xFF);
-		}
-	};
+    template<>
+    struct hash<terminal::MouseReleaseEvent> {
+        constexpr size_t operator()(terminal::MouseReleaseEvent const& _input) const noexcept {
+            return (5 << 16) | (static_cast<unsigned>(_input.button) & 0xFF);
+        }
+    };
 
-	template<>
-	struct hash<terminal::InputEvent> {
-		constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
+    template<>
+    struct hash<terminal::InputEvent> {
+        constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
             return visit(overloaded{
                 [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
                 [](terminal::CharInputEvent ev) { return hash<terminal::CharInputEvent>{}(ev); },
@@ -371,6 +371,6 @@ namespace std {
                 [](terminal::MouseMoveEvent ev) { return hash<terminal::MouseMoveEvent>{}(ev); },
                 [](terminal::MouseReleaseEvent ev) { return hash<terminal::MouseReleaseEvent>{}(ev); },
             }, _input);
-		}
-	};
+        }
+    };
 }
