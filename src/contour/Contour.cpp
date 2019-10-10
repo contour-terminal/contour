@@ -462,15 +462,41 @@ optional<terminal::InputEvent> makeInputEvent(int _key, terminal::Modifier _mods
     return nullopt;
 }
 
+static void updateModifier(terminal::Modifier& _modifier, int _glfwKey, bool _enable)
+{
+    static auto constexpr mappings = array{
+        pair{GLFW_KEY_LEFT_SHIFT, terminal::Modifier::Shift},
+        pair{GLFW_KEY_LEFT_CONTROL, terminal::Modifier::Control},
+        pair{GLFW_KEY_LEFT_ALT, terminal::Modifier::Alt},
+        pair{GLFW_KEY_LEFT_SUPER, terminal::Modifier::Meta},
+        pair{GLFW_KEY_RIGHT_SHIFT, terminal::Modifier::Shift},
+        pair{GLFW_KEY_RIGHT_CONTROL, terminal::Modifier::Control},
+        pair{GLFW_KEY_RIGHT_ALT, terminal::Modifier::Alt},
+        pair{GLFW_KEY_RIGHT_SUPER, terminal::Modifier::Meta},
+    };
+
+    for (auto const& mapping : mappings)
+    {
+        if (mapping.first == _glfwKey)
+        {
+            if (_enable)
+                _modifier.enable(mapping.second);
+            else
+                _modifier.disable(mapping.second);
+            break;
+        }
+    }
+}
+
 void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
 {
-    // TODO: investigate how to handle when one of these state vars are true, and the window loses focus.
-    // They should be recaptured after focus gain again.
-    modifier_ = makeModifier(_mods);
+    //modifier_ = makeModifier(_mods);
 
     keyHandled_ = false;
     if (_action == GLFW_PRESS || _action == GLFW_REPEAT)
     {
+        updateModifier(modifier_, _key, true);
+
         if (auto const inputEvent = makeInputEvent(_key, modifier_); inputEvent.has_value())
         {
             executeInput(inputEvent.value());
@@ -483,6 +509,10 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
         //         _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
         //     ) << endl;
         // }
+    }
+    else if (_action == GLFW_RELEASE)
+    {
+        updateModifier(modifier_, _key, false);
     }
 }
 

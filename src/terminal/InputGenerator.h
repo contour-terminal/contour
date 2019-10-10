@@ -59,6 +59,17 @@ class Modifier {
         return *this;
     }
 
+
+	constexpr void enable(Key _key) noexcept
+	{
+		mask_ |= _key;
+	}
+
+	constexpr void disable(Key _key) noexcept
+	{
+		mask_ &= ~static_cast<unsigned>(_key);
+	}
+
   private:
     unsigned mask_ = 0;
 };
