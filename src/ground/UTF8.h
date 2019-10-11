@@ -155,6 +155,11 @@ inline std::u32string decode(char const* begin, char const* end)
     return out;
 }
 
+inline std::u32string decode(std::string const& _u8string)
+{
+    return decode(&_u8string[0], &_u8string[0] + _u8string.size());
+}
+
 // UTF8-representation of Unicode character.
 struct Bytes : public std::vector<uint8_t> {
     explicit Bytes(uint8_t b0) {
