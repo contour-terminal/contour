@@ -21,19 +21,24 @@ using namespace terminal;
 
 TEST_CASE("Selector.Linear")
 {
-    auto screen = Screen{{5, 5}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
-    screen.write("12 45\r\n678 0\r\nA CDE\r\nFGHIJ\r\nKLMNO");
+    auto screen = Screen{{3, 11}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.write(
+		"12345,67890"s +
+		"ab,cdefg,hi"s +
+		"12345,67890"s
+	);
 
 	SECTION("forward single-line") {
 		auto selector = Selector{
 			Selector::Mode::Linear,
 			bind(&Screen::absoluteAt, screen, _1),
-			U" ,",
+			U",",
 			screen.size().rows + static_cast<cursor_pos_t>(screen.historyLineCount()),
 			screen.size(),
 			Coordinate{2, 2}
 		};
 		selector.extend(Coordinate{2, 4});
+		// selected area "b,cdefg,hi\n1234"
 		// TODO
 	}
 }
