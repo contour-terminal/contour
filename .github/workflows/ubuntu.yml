@@ -20,6 +20,7 @@ jobs:
         run: |
           set -ex
           cat /etc/apt/sources.list
+		  sudo apt -q update
           sudo apt install -y "g++-9" \
                   libfreetype6-dev libglew-dev libglfw3-dev libglm-dev \
                   libfontconfig1-dev libharfbuzz-dev
