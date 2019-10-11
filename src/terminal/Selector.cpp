@@ -19,13 +19,13 @@ using namespace std;
 namespace terminal {
 
 Selector::Selector(Mode _mode,
-				   Getter _getter,
+				   GetCellAt _getCellAt,
 				   std::u32string const& _wordDelimiters,
 				   cursor_pos_t _totalRowCount,
 				   WindowSize const& _viewport,
 				   Coordinate const& _from) :
 	mode_{_mode},
-	getter_{move(_getter)},
+	getCellAt_{move(_getCellAt)},
 	wordDelimiters_{_wordDelimiters},
 	totalRowCount_{_totalRowCount},
 	viewport_{_viewport},
@@ -142,33 +142,6 @@ void Selector::stop()
         state_ = State::Complete;
 }
 
-
-vector<Selector::Range> Selector::selection() const
-{
-	switch (mode_)
-	{
-		case Mode::FullLine:
-			return lines(*this);
-		case Mode::Linear:
-		case Mode::LinearWordWise:
-			return linear(*this);
-		case Mode::Rectangular:
-			return rectangular(*this);
-	}
-	return {};
-}
-
-void copy(vector<Selector::Range> const& _ranges,
-          Terminal const& _source,
-          Selector::Renderer _render)
-{
-    for (auto const& range : _ranges)
-        for (auto col = range.fromColumn; col <= range.toColumn; ++col)
-            _render(range.line, col, _source.absoluteAt({range.line, col}));
-}
-
-// ==========================================================================
-
 tuple<vector<Selector::Range>, Coordinate const, Coordinate const> prepare(Selector const& _selector)
 {
     vector<Selector::Range> result;
@@ -186,60 +159,82 @@ tuple<vector<Selector::Range>, Coordinate const, Coordinate const> prepare(Selec
     return {move(result), from, to};
 }
 
-vector<Selector::Range> linear(Selector const& _selector)
+vector<Selector::Range> Selector::selection() const
 {
-    auto [result, from, to] = prepare(_selector);
+	switch (mode_)
+	{
+		case Mode::FullLine:
+			return lines();
+		case Mode::Linear:
+		case Mode::LinearWordWise:
+			return linear();
+		case Mode::Rectangular:
+			return rectangular();
+	}
+	return {};
+}
+
+void Selector::render(Selector::Renderer _render)
+{
+    for (auto const& range : selection())
+        for (auto col = range.fromColumn; col <= range.toColumn; ++col)
+            _render(range.line, col, at({range.line, col}));
+}
+
+vector<Selector::Range> Selector::linear() const
+{
+    auto [result, from, to] = prepare(*this);
 
     switch (result.size())
     {
         case 1:
-            result[0] = Selector::Range{from.row, from.column, to.column};
+            result[0] = Range{from.row, from.column, to.column};
             break;
         case 2:
             // Render first line partial from selected column to end.
-            result[0] = Selector::Range{from.row, from.column, _selector.viewport().columns};
+            result[0] = Range{from.row, from.column, viewport().columns};
             // Render last (second) line partial from beginning to last selected column.
-            result[1] = Selector::Range{to.row, 1, to.column};
+            result[1] = Range{to.row, 1, to.column};
             break;
         default:
             // Render first line partial from selected column to end.
-            result[0] = Selector::Range{from.row, from.column, _selector.viewport().columns};
+            result[0] = Range{from.row, from.column, viewport().columns};
 
             // Render inner full.
             for (size_t n = 1; n < result.size(); ++n)
-                result[n] = Selector::Range{from.row + static_cast<cursor_pos_t>(n), 1, _selector.viewport().columns};
+                result[n] = Range{from.row + static_cast<cursor_pos_t>(n), 1, viewport().columns};
 
             // Render last (second) line partial from beginning to last selected column.
-            result[result.size() - 1] = Selector::Range{to.row, 1, to.column};
+            result[result.size() - 1] = Range{to.row, 1, to.column};
             break;
     }
 
     return result;
 }
 
-vector<Selector::Range> lines(Selector const& _selector)
+vector<Selector::Range> Selector::lines() const
 {
-    auto [result, from, to] = prepare(_selector);
+    auto [result, from, to] = prepare(*this);
 
     for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
-        result[row] = Selector::Range{
+        result[row] = Range{
             from.row + row,
             1,
-            _selector.viewport().columns
+            viewport().columns
         };
     }
 
     return result;
 }
 
-vector<Selector::Range> rectangular(Selector const& _selector)
+vector<Selector::Range> Selector::rectangular() const
 {
-    auto [result, from, to] = prepare(_selector);
+    auto [result, from, to] = prepare(*this);
 
     for (cursor_pos_t row = 0; row < result.size(); ++row)
     {
-        result[row] = Selector::Range{
+        result[row] = Range{
             from.row + row,
             from.column,
             to.column

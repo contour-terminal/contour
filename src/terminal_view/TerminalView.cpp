@@ -564,7 +564,8 @@ vector<Selector::Range> TerminalView::selection() const
 
 void TerminalView::renderSelection(terminal::Screen::Renderer _render) const
 {
-    copy(selection(), terminal_, _render);
+	if (selector_)
+		selector_->render(_render);
 }
 
 void TerminalView::clearSelection()

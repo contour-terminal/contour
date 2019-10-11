@@ -62,10 +62,10 @@ class Selector {
 
     using Renderer = Screen::Renderer;
     enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
-	using Getter = std::function<Screen::Cell const&(Coordinate const&)>;
+	using GetCellAt = std::function<Screen::Cell const&(Coordinate const&)>;
 
     Selector(Mode _mode,
-			 Getter _getter,
+			 GetCellAt _at,
 			 std::u32string const& _wordDelimiters,
 			 cursor_pos_t _totalRowCount,
 			 WindowSize const& _viewport,
@@ -104,6 +104,18 @@ class Selector {
 	/// Retrieves a vector of ranges (with one range per line) of selected cells.
 	std::vector<Range> selection() const;
 
+	/// Constructs a vector of ranges for a linear selection strategy.
+	std::vector<Range> linear() const;
+
+	/// Constructs a vector of ranges for a full-line selection strategy.
+	std::vector<Range> lines() const;
+
+	/// Constructs a vector of ranges for a rectangular selection strategy.
+	std::vector<Range> rectangular() const;
+
+	/// Renders the current selection into @p _render.
+	void render(Renderer _render);
+
   private:
 	bool isWordWiseSelection() const noexcept
 	{
@@ -116,7 +128,7 @@ class Selector {
 		}
 	}
 
-	Screen::Cell const& at(Coordinate const& _coord) const { return getter_(_coord); }
+	Screen::Cell const& at(Coordinate const& _coord) const { return getCellAt_(_coord); }
 
 	void extendSelectionBackward();
 	void extendSelectionForward();
@@ -124,7 +136,7 @@ class Selector {
   private:
     State state_{State::Waiting};
 	Mode mode_;
-	Getter getter_;
+	GetCellAt getCellAt_;
 	std::u32string wordDelimiters_;
 	cursor_pos_t totalRowCount_;
     WindowSize const viewport_;
@@ -132,21 +144,6 @@ class Selector {
     Coordinate from_{};
     Coordinate to_{};
 };
-
-/// Constructs a vector of ranges for a linear selection strategy.
-std::vector<Selector::Range> linear(Selector const& _selector);
-
-/// Constructs a vector of ranges for a full-line selection strategy.
-std::vector<Selector::Range> lines(Selector const& _selector);
-
-/// Constructs a vector of ranges for a rectangular selection strategy.
-std::vector<Selector::Range> rectangular(Selector const& _selector);
-
-/// Renders (extracts) the selected ranges from given @p _source and passes
-/// each cell linearly into @p _render.
-void copy(std::vector<Selector::Range> const& _ranges,
-          Terminal /*TODO: should be Screen*/ const& _source,
-          Screen::Renderer _render);
 
 } // namespace terminal
 
