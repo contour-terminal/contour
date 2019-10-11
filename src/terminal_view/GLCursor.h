@@ -21,6 +21,7 @@
 
 enum class CursorShape {
     Block,
+	Rectangle,
     Underscore,
     Bar,
 };
@@ -55,4 +56,6 @@ class GLCursor {
     GLint const colorLocation_;
     GLuint vbo_;
     GLuint vao_;
+	GLenum drawMode_;
+	GLsizei drawCount_;
 };

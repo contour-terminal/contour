@@ -88,6 +88,7 @@ class TerminalView {
     bool setTerminalSize(terminal::WindowSize const& _newSize);
 
 	void setCursorColor(terminal::RGBColor const& _color);
+	void setCursorShape(CursorShape _shape);
 
     /// Sets the projection matrix used for translating rendering coordinates.
     void setProjection(glm::mat4 const& _projectionMatrix);

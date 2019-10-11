@@ -546,6 +546,11 @@ void TerminalView::setCursorColor(terminal::RGBColor const& _color)
 	cursor_.setColor(makeColor(_color));
 }
 
+void TerminalView::setCursorShape(CursorShape _shape)
+{
+	cursor_.setShape(_shape);
+}
+
 void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
 {
     logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });

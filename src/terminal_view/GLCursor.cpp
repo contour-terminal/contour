@@ -28,6 +28,9 @@ CursorShape makeCursorShape(string const& _name)
     if (name == "block")
         return CursorShape::Block;
 
+    if (name == "rectangle")
+        return CursorShape::Rectangle;
+
     if (name == "underscore")
         return CursorShape::Underscore;
 
@@ -43,6 +46,8 @@ string to_string(CursorShape _value)
     {
         case CursorShape::Block:
             return "block";
+		case CursorShape::Rectangle:
+			return "rectangle";
         case CursorShape::Underscore:
             return "underscroe";
         case CursorShape::Bar:
@@ -72,14 +77,12 @@ auto constexpr fragmentShader = R"(
 )";
 
 
-std::vector<float> getTriangles(glm::ivec2 _size, CursorShape _shape)
+pair<GLenum, vector<float>> getTriangles(glm::ivec2 _size, CursorShape _shape)
 {
-	constexpr auto thickness = 1.0f;
-
 	switch (_shape)
 	{
 		case CursorShape::Block:
-			return vector{
+			return {GL_TRIANGLES, vector{
 				0.0f, 0.0f,                             // bottom left
 				(GLfloat) _size.x, 0.0f,                // bottom right
 				(GLfloat) _size.x, (GLfloat) _size.y,   // top right
@@ -87,30 +90,31 @@ std::vector<float> getTriangles(glm::ivec2 _size, CursorShape _shape)
 				(GLfloat) _size.x, (GLfloat) _size.y,   // top right
 				0.0f, (GLfloat) _size.y,                // top left
 				0.0f, 0.0f                              // bottom left
-			};
+			}};
+		case CursorShape::Rectangle:
+			return {GL_LINE_STRIP, {
+				0.0f, 0.0f,                             // bottom left
+				(GLfloat) _size.x, 0.0f,                // bottom right
+
+				(GLfloat) _size.x, (GLfloat) _size.y,   // top right
+				0.0f, (GLfloat) _size.y,                // top left
+
+				0.0f, 0.0f                              // bottom left
+			}};
 		case CursorShape::Underscore:
-			return vector{
+			return {GL_LINES, vector{
 				0.0f, 0.0f,                             // bottom left
 				(GLfloat) _size.x, 0.0f,                // bottom right
-				(GLfloat) _size.x, thickness,           // top right
-
-				(GLfloat) _size.x, thickness,           // top right
-				0.0f, thickness,                        // top left
-				0.0f, 0.0f                              // bottom left
-			};
+			}};
 		case CursorShape::Bar:
-			return vector{
+			return {GL_LINES, vector{
 				0.0f, 0.0f,                             // bottom left
-				(GLfloat) thickness, 0.0f,              // bottom right
-				(GLfloat) thickness, (GLfloat) _size.y, // top right
-
-				(GLfloat) thickness, (GLfloat) _size.y, // top right
 				0.0f, (GLfloat) _size.y,                // top left
-				0.0f, 0.0f                              // bottom left
-			};
+			}};
 			break;
 	}
-	return {};
+	assert(!"Should not have reached here.");
+	return {GL_TRIANGLES, {}};
 }
 
 GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, glm::vec3 const& _color) :
@@ -127,11 +131,9 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
 
     // --------------------------------------------------------------------
     // setup vertices
-	auto const vertices = getTriangles(size_, shape_);
-
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 12 * sizeof(GLfloat), nullptr, GL_STATIC_DRAW);
 
     glGenVertexArrays(1, &vao_);
     glBindVertexArray(vao_);
@@ -140,6 +142,8 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
     auto const posAttr = shader_.attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
+
+	setShape(shape_);
 }
 
 GLCursor::~GLCursor()
@@ -173,7 +177,9 @@ void GLCursor::resize(glm::ivec2 _size)
 
 void GLCursor::updateShape()
 {
-	auto const vertices = getTriangles(size_, shape_);
+	auto [drawMode, vertices] = getTriangles(size_, shape_);
+	drawMode_ = drawMode;
+	drawCount_ = vertices.size() / 2; // vertex count = array element size divided by dimension (2)
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(GLfloat), &vertices[0]);
@@ -188,6 +194,6 @@ void GLCursor::render(glm::ivec2 _pos)
     shader_.setMat4(transformLocation_, projectionMatrix_ * translation);
 
     glBindVertexArray(vao_);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glDrawArrays(drawMode_, 0, drawCount_);
 }
 

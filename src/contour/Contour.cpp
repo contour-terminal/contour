@@ -717,7 +717,9 @@ bool Contour::reloadConfigValues()
 	if (newConfig.colorProfile.cursor != config_.colorProfile.cursor)
 		terminalView_.setCursorColor(newConfig.colorProfile.cursor);
 
-    // TODO: cursor shape
+	if (newConfig.cursorShape != config_.cursorShape)
+		terminalView_.setCursorShape(newConfig.cursorShape);
+
     // TODO: cursor blinking
     // TODO: tab width
     // TODO: background blur
