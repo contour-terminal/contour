@@ -126,8 +126,8 @@ input_mapping:
     - { mods: [Shift],          key: DownArrow,     action: ScrollOneDown }
     - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
-    - { mods: [Control],        key: Home,          action: ScrollToTop }
-    - { mods: [Control],        key: End,           action: ScrollToBottom }
+    - { mods: [Shift],          key: Home,          action: ScrollToTop }
+    - { mods: [Shift],          key: End,           action: ScrollToBottom }
 ```
 
 ## Installing from source
