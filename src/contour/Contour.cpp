@@ -67,7 +67,6 @@ Contour::Contour(Config const& _config) :
         config_.wordDelimiters,
         regularFont_.get(),
         config_.cursorShape,
-        glm::vec3{0.9, 0.9, 0.9}, // TODO: make cursor color configurable (part of color profile?)
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,
@@ -714,6 +713,9 @@ bool Contour::reloadConfigValues()
     }
 
     terminalView_.setMaxHistoryLineCount(newConfig.maxHistoryLineCount);
+
+	if (newConfig.colorProfile.cursor != config_.colorProfile.cursor)
+		terminalView_.setCursorColor(newConfig.colorProfile.cursor);
 
     // TODO: cursor shape
     // TODO: cursor blinking

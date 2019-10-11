@@ -303,9 +303,10 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
         }
 
         if (auto selection = colors["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
-        {
             _config.colorProfile.selection = selection.as<string>();
-        }
+
+		if (auto cursor = colors["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
+			_config.colorProfile.cursor = cursor.as<string>();
 
         auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
             if (_node)

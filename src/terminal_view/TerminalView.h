@@ -45,7 +45,6 @@ class TerminalView {
                  std::string const& _wordDelimiters,
                  Font& _regularFont,
                  CursorShape _cursorShape,
-                 glm::vec3 const& _cursorColor,
                  terminal::ColorProfile const& _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
@@ -87,6 +86,8 @@ class TerminalView {
     void setFont(Font& _font);
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(terminal::WindowSize const& _newSize);
+
+	void setCursorColor(terminal::RGBColor const& _color);
 
     /// Sets the projection matrix used for translating rendering coordinates.
     void setProjection(glm::mat4 const& _projectionMatrix);

@@ -40,13 +40,21 @@ auto const envvars = terminal::Process::Environment{
     {"TERMCAP", ""}
 };
 
+inline glm::vec4 makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
+{
+    return glm::vec4{
+        _rgb.red / 255.0,
+        _rgb.green / 255.0,
+        _rgb.blue / 255.0,
+        static_cast<unsigned>(_opacity) / 255.0
+    };
+}
 
 TerminalView::TerminalView(WindowSize const& _winSize,
                            optional<size_t> _maxHistoryLineCount,
                            std::string const& _wordDelimiters,
                            Font& _regularFont,
                            CursorShape _cursorShape,
-                           glm::vec3 const& _cursorColor,
                            terminal::ColorProfile const& _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
@@ -76,7 +84,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
         },
         _projectionMatrix,
         _cursorShape,
-        _cursorColor
+        makeColor(colorProfile_.cursor)
     },
     terminal_{
         _winSize,
@@ -369,16 +377,6 @@ bool TerminalView::scrollToBottom()
         return false;
 }
 
-inline glm::vec4 makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
-{
-    return glm::vec4{
-        _rgb.red / 255.0,
-        _rgb.green / 255.0,
-        _rgb.blue / 255.0,
-        static_cast<unsigned>(_opacity) / 255.0
-    };
-}
-
 void TerminalView::render()
 {
     terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3), scrollOffset_);
@@ -541,6 +539,11 @@ void TerminalView::setTabWidth(unsigned int _tabWidth)
 void TerminalView::setBackgroundOpacity(terminal::Opacity _opacity)
 {
     backgroundOpacity_ = _opacity;
+}
+
+void TerminalView::setCursorColor(terminal::RGBColor const& _color)
+{
+	cursor_.setColor(makeColor(_color));
 }
 
 void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)
