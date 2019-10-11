@@ -29,14 +29,7 @@ TEST_CASE("Selector.Linear")
 	);
 
 	SECTION("forward single-line") {
-		auto selector = Selector{
-			Selector::Mode::Linear,
-			bind(&Screen::absoluteAt, screen, _1),
-			U",",
-			screen.size().rows + static_cast<cursor_pos_t>(screen.historyLineCount()),
-			screen.size(),
-			Coordinate{2, 2}
-		};
+		auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 2}};
 		selector.extend(Coordinate{2, 4});
 		// selected area "b,cdefg,hi\n1234"
 		// TODO

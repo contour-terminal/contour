@@ -71,6 +71,22 @@ class Selector {
 			 WindowSize const& _viewport,
 			 Coordinate const& _from);
 
+	/// Convenience constructor when access to Screen is available.
+    Selector(Mode _mode,
+			 std::u32string const& _wordDelimiters,
+			 Screen const& _screen,
+			 Coordinate const& _from) :
+		Selector{
+			_mode,
+			std::bind(&Screen::absoluteAt, _screen, std::placeholders::_1),
+			_wordDelimiters,
+			_screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
+			_screen.size(),
+			_from
+		}
+	{
+	}
+
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
 
