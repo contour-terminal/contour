@@ -32,6 +32,7 @@
 #include <utility>
 
 using namespace std;
+using namespace ground;
 
 optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
 {
@@ -138,7 +139,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             if (!_chars || !_chars.IsScalar())
                 return nullopt;
 
-            return actions::SendChars{ground::parseEscaped(_chars.as<string>())};
+            return actions::SendChars{parseEscaped(_chars.as<string>())};
         }
 
         if (name == "writescreen")

@@ -72,32 +72,4 @@ inline std::string escape(std::string const& s)
     return escape(begin(s), end(s));
 }
 
-template <typename String>
-inline std::string toLower(String const& _value)
-{
-    std::string result;
-    result.reserve(_value.size());
-    std::transform(
-        begin(_value),
-        end(_value),
-        back_inserter(result),
-        [](auto ch) { return std::tolower(ch); }
-    );
-    return result;
-}
-
-template <typename String>
-inline std::string toUpper(String const& _value)
-{
-    std::string result;
-    result.reserve(_value.size());
-    std::transform(
-        begin(_value),
-        end(_value),
-        back_inserter(result),
-        [](auto ch) { return std::toupper(ch); }
-    );
-    return result;
-}
-
 }  // namespace terminal

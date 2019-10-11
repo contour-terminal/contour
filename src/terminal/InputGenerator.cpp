@@ -13,6 +13,7 @@
  */
 #include <terminal/InputGenerator.h>
 #include <ground/UTF8.h>
+#include <ground/StringUtils.h>
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,7 @@
 #include <fmt/format.h>
 
 using namespace std;
+using namespace ground;
 
 #define ESC "\x1B"
 #define CSI "\x1B["
