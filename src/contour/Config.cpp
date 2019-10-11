@@ -113,6 +113,8 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             pair{"IncreaseOpacity"sv, Action{actions::IncreaseOpacity{}}},
             pair{"DecreaseOpacity"sv, Action{actions::DecreaseOpacity{}}},
             pair{"ScreenshotVT"sv, Action{actions::ScreenshotVT{}}},
+            pair{"ScrollOneUp"sv, Action{actions::ScrollOneUp{}}},
+            pair{"ScrollOneDown"sv, Action{actions::ScrollOneDown{}}},
             pair{"ScrollUp"sv, Action{actions::ScrollUp{}}},
             pair{"ScrollDown"sv, Action{actions::ScrollDown{}}},
             pair{"ScrollPageUp"sv, Action{actions::ScrollPageUp{}}},

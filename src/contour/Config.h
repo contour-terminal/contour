@@ -33,6 +33,8 @@ namespace actions {
     struct DecreaseOpacity{};
     struct SendChars{ std::string chars; };
     struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
+    struct ScrollOneUp{};
+    struct ScrollOneDown{};
     struct ScrollUp{};
     struct ScrollDown{};
     struct ScrollPageUp{};
@@ -58,6 +60,8 @@ using Action = std::variant<
     actions::DecreaseOpacity,
     actions::SendChars,
     actions::WriteScreen,
+    actions::ScrollOneUp,
+    actions::ScrollOneDown,
     actions::ScrollUp,
     actions::ScrollDown,
     actions::ScrollPageUp,
@@ -108,6 +112,8 @@ struct Config {
             {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
             {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
             {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
+            {terminal::KeyInputEvent{terminal::Key::UpArrow, terminal::Modifier::Shift}, actions::ScrollOneUp{}},
+            {terminal::KeyInputEvent{terminal::Key::DownArrow, terminal::Modifier::Shift}, actions::ScrollOneDown{}},
             {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::None}, actions::ScrollUp{}},
             {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::None}, actions::ScrollDown{}},
             {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},

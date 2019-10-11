@@ -338,6 +338,12 @@ void Contour::executeAction(Action const& _action)
             for (auto const ch : chars.chars)
                 terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None});
         },
+        [this](actions::ScrollOneUp) {
+            screenDirty_ = terminalView_.scrollUp(1) || screenDirty_;
+        },
+        [this](actions::ScrollOneDown) {
+            screenDirty_ = terminalView_.scrollDown(1) || screenDirty_;
+        },
         [this](actions::ScrollUp) {
             screenDirty_ = terminalView_.scrollUp(config_.historyScrollMultiplier) || screenDirty_;
         },
