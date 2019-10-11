@@ -145,10 +145,10 @@ void Terminal::render(Screen::Renderer const& renderer, size_t _scrollOffset) co
     screen_.render(renderer, _scrollOffset);
 }
 
-Screen::Cell const& Terminal::absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const
+Screen::Cell const& Terminal::absoluteAt(Coordinate const& _coord) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    return screen_.absoluteAt(_row, _col);
+    return screen_.absoluteAt(_coord);
 }
 
 void Terminal::resize(WindowSize const& _newWindowSize)

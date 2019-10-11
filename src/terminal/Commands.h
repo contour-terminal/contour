@@ -64,6 +64,16 @@ constexpr inline bool operator!=(Coordinate const& a, Coordinate const& b) noexc
     return !(a == b);
 }
 
+constexpr inline bool operator>(Coordinate const& a, Coordinate const& b) noexcept
+{
+    if (a.row > b.row)
+        return true;
+    if (a.row == b.row)
+        return a.column > b.column;
+    else
+        return false;
+}
+
 enum class GraphicsRendition {
     Reset = 0,              //!< Reset any rendition (style as well as foreground / background coloring).
 

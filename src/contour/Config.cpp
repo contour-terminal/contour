@@ -256,6 +256,7 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
     softLoadValue(doc, "fontSize", _config.fontSize);
     softLoadValue(doc, "fontFamily", _config.fontFamily);
     softLoadValue(doc, "tabWidth", _config.tabWidth);
+    softLoadValue(doc, "wordDelimiters", _config.wordDelimiters);
 
     if (auto history = doc["history"]; history)
     {

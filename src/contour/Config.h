@@ -93,6 +93,8 @@ struct Config {
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
     LogMask loggingMask = LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput;
 
+    std::string wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82";
+
     terminal::ColorProfile colorProfile{};
     std::vector<InputMapping> inputMappings;
 

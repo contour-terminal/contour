@@ -11,33 +11,129 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/Selector.h>
+#include <terminal/Selector.h>
 #include <terminal/Terminal.h>
 
 using namespace std;
-using namespace terminal;
 
-Selector::Selector(WindowSize const& _viewport, Coordinate const& _from) :
-    viewport_{_viewport},
-    from_{_from},
-    to_{_from}
+namespace terminal {
+
+Selector::Selector(Mode _mode,
+				   Getter _getter,
+				   std::u32string const& _wordDelimiters,
+				   cursor_pos_t _totalRowCount,
+				   WindowSize const& _viewport,
+				   Coordinate const& _from) :
+	mode_{_mode},
+	getter_{move(_getter)},
+	wordDelimiters_{_wordDelimiters},
+	totalRowCount_{_totalRowCount},
+	viewport_{_viewport},
+	start_{_from},
+	from_{_from},
+	to_{_from}
 {
+	if (_mode == Mode::FullLine)
+	{
+		extend({from_.row, 1u});
+		swapDirection();
+		extend({from_.row, viewport_.columns});
+	}
+	else if (isWordWiseSelection())
+	{
+		state_ = State::InProgress;
+		extendSelectionBackward();
+		swapDirection();
+		extendSelectionForward();
+	}
 }
 
-void Selector::restart(Coordinate const& _from)
-{
-    state_ = State::Waiting;
-    from_ = to_ = _from;
-}
-
-bool Selector::extend(Coordinate const& _to)
+bool Selector::extend(Coordinate const& _coord)
 {
     assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
+
     state_ = State::InProgress;
-    to_ = _to;
+
+	if (!isWordWiseSelection())
+		to_ = _coord;
+
+	else if (_coord > start_)
+	{
+		to_ = _coord;
+		extendSelectionForward();
+	}
+	else
+	{
+		to_ = _coord;
+		extendSelectionBackward();
+		swapDirection();
+		to_ = start_;
+		extendSelectionForward();
+	}
 
     // TODO: indicates whether or not a scroll action must take place.
     return false;
+}
+
+void Selector::extendSelectionBackward()
+{
+    auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
+        auto const& cell = at(_coord);
+        return !cell.character || wordDelimiters_.find(cell.character) != wordDelimiters_.npos;
+    };
+
+    auto last = to_;
+    auto current = last;
+    for (;;) {
+        if (current.column > 1)
+            current.column--;
+        else if (current.row > 1)
+        {
+            current.row--;
+            current.column = viewport_.columns;
+        }
+        else
+            break;
+
+        if (isWordDelimiterAt(current))
+            break;
+        last = current;
+    }
+
+    if (to_ < from_)
+    {
+        swapDirection();
+		to_ = last;
+    }
+    else
+        to_ = last;
+}
+
+void Selector::extendSelectionForward()
+{
+    auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
+        auto const& cell = at(_coord);
+        return !cell.character || wordDelimiters_.find(cell.character) != wordDelimiters_.npos;
+    };
+
+    auto last = to_;
+    auto current = last;
+    for (;;) {
+        if (current.column < viewport_.columns)
+            current.column++;
+        else if (current.row < totalRowCount_)
+        {
+            current.row++;
+            current.column = 1;
+        }
+        else
+            break;
+
+        if (isWordDelimiterAt(current))
+            break;
+        last = current;
+    }
+	to_ = last;
 }
 
 void Selector::stop()
@@ -46,19 +142,34 @@ void Selector::stop()
         state_ = State::Complete;
 }
 
+
+vector<Selector::Range> Selector::selection() const
+{
+	switch (mode_)
+	{
+		case Mode::FullLine:
+			return lines(*this);
+		case Mode::Linear:
+		case Mode::LinearWordWise:
+			return linear(*this);
+		case Mode::Rectangular:
+			return rectangular(*this);
+	}
+	return {};
+}
+
 void copy(vector<Selector::Range> const& _ranges,
           Terminal const& _source,
           Selector::Renderer _render)
 {
     for (auto const& range : _ranges)
         for (auto col = range.fromColumn; col <= range.toColumn; ++col)
-            _render(range.line, col, _source.absoluteAt(range.line, col));
+            _render(range.line, col, _source.absoluteAt({range.line, col}));
 }
 
 // ==========================================================================
 
-tuple<vector<Selector::Range>, terminal::Coordinate const, terminal::Coordinate const>
-prepare(Selector const& _selector)
+tuple<vector<Selector::Range>, Coordinate const, Coordinate const> prepare(Selector const& _selector)
 {
     vector<Selector::Range> result;
 
@@ -137,3 +248,5 @@ vector<Selector::Range> rectangular(Selector const& _selector)
 
     return result;
 }
+
+} // namespace terminal

@@ -63,7 +63,7 @@ class Terminal : public PseudoTerminal {
     /// Thread-safe access to screen data for rendering
     void render(Screen::Renderer const& renderer, size_t _scrollOffset = 0) const;
 
-    Screen::Cell const& absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const;
+    Screen::Cell const& absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;

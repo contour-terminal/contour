@@ -64,6 +64,7 @@ Contour::Contour(Config const& _config) :
     terminalView_{
         config_.terminalSize,
         config_.maxHistoryLineCount,
+        config_.wordDelimiters,
         regularFont_.get(),
         config_.cursorShape,
         glm::vec3{0.9, 0.9, 0.9}, // TODO: make cursor color configurable (part of color profile?)
@@ -696,6 +697,8 @@ bool Contour::reloadConfigValues()
 
     if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
         windowResizeRequired |= terminalView_.setTerminalSize(config_.terminalSize);
+
+    terminalView_.setWordDelimiters(newConfig.wordDelimiters);
 
     if (windowResizeRequired && !window_.fullscreen())
     {

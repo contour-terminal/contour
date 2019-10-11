@@ -17,9 +17,13 @@
 #include <terminal/Screen.h> // Coordinate
 #include <terminal/Terminal.h>
 
+#include <fmt/format.h>
+
 #include <functional>
 #include <vector>
 #include <utility>
+
+namespace terminal {
 
 /**
  * Selector API.
@@ -35,13 +39,6 @@
  * to move the screen contents up, then also the selection's begin (and extend) is being moved up.
  *
  * This is achieved by using absolute coordinates from the top history line.
- *
- * Requires:
- * - WindowSize
- * - Coordinate
- * - cursor_pos_t
- * - Screen::Cell
- * - Renderer
  */
 class Selector {
   public:
@@ -54,24 +51,35 @@ class Selector {
         Complete,
     };
 
-    using Renderer = terminal::Screen::Renderer;
+    struct Range {
+        cursor_pos_t line;
+        cursor_pos_t fromColumn;
+        cursor_pos_t toColumn;
 
-    Selector(terminal::WindowSize const& _viewport, terminal::Coordinate const& _from);
+        constexpr cursor_pos_t length() const noexcept { return toColumn - fromColumn + 1; }
+    };
+
+
+    using Renderer = Screen::Renderer;
+    enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
+	using Getter = std::function<Screen::Cell const&(Coordinate const&)>;
+
+    Selector(Mode _mode,
+			 Getter _getter,
+			 std::u32string const& _wordDelimiters,
+			 cursor_pos_t _totalRowCount,
+			 WindowSize const& _viewport,
+			 Coordinate const& _from);
 
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
-
-    /// Starts or restarts a selection.
-    ///
-    /// @param _from determines the absolute coordinate into the Screen
-    void restart(terminal::Coordinate const& _from);
 
     /// @todo Should be able to handle negative (or 0) and overflow coordinates,
     ///       which should potentially adjust the screen's view (aka. modifying scrolling offset).
     ///
     /// @retval true TerminalView requires scrolling offset adjustments.
     /// @retval false TerminalView's scrolling offset does not need adjustments.
-    bool extend(terminal::Coordinate const& _to);
+    bool extend(Coordinate const& _to);
 
     /// Marks the selection as completed.
     void stop();
@@ -80,23 +88,49 @@ class Selector {
     /// the selection accordingly.
     void slice(int _offset);
 
-    struct Range {
-        terminal::cursor_pos_t line;
-        terminal::cursor_pos_t fromColumn;
-        terminal::cursor_pos_t toColumn;
+    constexpr WindowSize const& viewport() const noexcept { return viewport_; }
+    constexpr Coordinate const& from() const noexcept { return from_; }
+    constexpr Coordinate const& to() const noexcept { return to_; }
 
-        constexpr terminal::cursor_pos_t length() const noexcept { return toColumn - fromColumn + 1; }
-    };
+    /// Tests whether selection is upwards.
+    constexpr bool negativeSelection() const noexcept { return to_ < from_; }
+    constexpr bool singleLineSelection() const noexcept { return from_.row == to_.row; }
 
-    constexpr terminal::WindowSize const& viewport() const noexcept { return viewport_; }
-    constexpr terminal::Coordinate const& from() const noexcept { return from_; }
-    constexpr terminal::Coordinate const& to() const noexcept { return to_; }
+    constexpr void swapDirection() noexcept
+    {
+        swap(from_, to_);
+    }
+
+	/// Retrieves a vector of ranges (with one range per line) of selected cells.
+	std::vector<Range> selection() const;
 
   private:
-    terminal::WindowSize const viewport_;
-    terminal::Coordinate from_{};
-    terminal::Coordinate to_{};
+	bool isWordWiseSelection() const noexcept
+	{
+		switch (mode_)
+		{
+			case Mode::LinearWordWise:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	Screen::Cell const& at(Coordinate const& _coord) const { return getter_(_coord); }
+
+	void extendSelectionBackward();
+	void extendSelectionForward();
+
+  private:
     State state_{State::Waiting};
+	Mode mode_;
+	Getter getter_;
+	std::u32string wordDelimiters_;
+	cursor_pos_t totalRowCount_;
+    WindowSize const viewport_;
+    Coordinate start_{};
+    Coordinate from_{};
+    Coordinate to_{};
 };
 
 /// Constructs a vector of ranges for a linear selection strategy.
@@ -111,5 +145,26 @@ std::vector<Selector::Range> rectangular(Selector const& _selector);
 /// Renders (extracts) the selected ranges from given @p _source and passes
 /// each cell linearly into @p _render.
 void copy(std::vector<Selector::Range> const& _ranges,
-          terminal::Terminal /*TODO: should be Screen*/ const& _source,
-          terminal::Screen::Renderer _render);
+          Terminal /*TODO: should be Screen*/ const& _source,
+          Screen::Renderer _render);
+
+} // namespace terminal
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::Selector> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::Selector& _selector, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({} .. {}; state: {})",
+                    _selector.from(), _selector.to(), static_cast<int>(_selector.state()));
+        }
+    };
+}
+

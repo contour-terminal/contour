@@ -15,6 +15,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
+#include <terminal/Selector.h>
 #include <terminal/Terminal.h>
 #include <terminal/WindowSize.h>
 
@@ -23,7 +24,6 @@
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLLogger.h>
 #include <terminal_view/GLTextShaper.h>
-#include <terminal_view/Selector.h>
 
 #include <glm/matrix.hpp>
 
@@ -42,6 +42,7 @@ class TerminalView {
   public:
     TerminalView(terminal::WindowSize const& _winSize,
                  std::optional<size_t> _maxHistoryLineCount,
+                 std::string const& _wordDelimiters,
                  Font& _regularFont,
                  CursorShape _cursorShape,
                  glm::vec3 const& _cursorColor,
@@ -82,6 +83,7 @@ class TerminalView {
 
     Font const& regularFont() const noexcept { return regularFont_.get(); }
 
+    void setWordDelimiters(std::string const& _wordDelimiters);
     void setFont(Font& _font);
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(terminal::WindowSize const& _newSize);
@@ -142,7 +144,7 @@ class TerminalView {
     /// Tests whether given absolute line number [1..num] is within scrolling region
     bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
 
-    std::vector<Selector::Range> selection() const;
+    std::vector<terminal::Selector::Range> selection() const;
 
   private:
     bool alive_ = true;
@@ -179,6 +181,7 @@ class TerminalView {
     terminal::ColorProfile const& colorProfile_;
     terminal::Opacity backgroundOpacity_;
 
+    std::u32string wordDelimiters_;
     std::reference_wrapper<Font> regularFont_;
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
@@ -193,9 +196,7 @@ class TerminalView {
     size_t scrollOffset_ = 0;
     terminal::Coordinate currentMousePosition_{0, 0};
 
-    enum class SelectionMode { Linear, Line, Rectangular };
-    SelectionMode selectionMode_;
-    std::unique_ptr<Selector> selector_;
+    std::unique_ptr<terminal::Selector> selector_;
 
     // helpers for detecting double/tripple clicks
     std::chrono::system_clock::time_point lastClick_{};

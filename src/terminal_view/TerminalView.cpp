@@ -18,6 +18,7 @@
 #include <terminal/Util.h>
 
 #include <ground/overloaded.h>
+#include <ground/UTF8.h>
 
 #include <GL/glew.h>
 #include <glm/glm.hpp>
@@ -39,8 +40,10 @@ auto const envvars = terminal::Process::Environment{
     {"TERMCAP", ""}
 };
 
+
 TerminalView::TerminalView(WindowSize const& _winSize,
                            optional<size_t> _maxHistoryLineCount,
+                           std::string const& _wordDelimiters,
                            Font& _regularFont,
                            CursorShape _cursorShape,
                            glm::vec3 const& _cursorColor,
@@ -56,6 +59,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
     updated_{ false },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
+    wordDelimiters_{ utf8::decode(_wordDelimiters) },
     regularFont_{ _regularFont },
     textShaper_{ regularFont_.get(), _projectionMatrix },
     cellBackground_{
@@ -130,6 +134,10 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
         },
         [this, &_inputEvent](MousePressEvent const& _mouse) -> bool {
             // TODO: anything else? logging?
+
+			if (terminal_.send(_inputEvent))
+				return true;
+
             if (_mouse.button == MouseButton::Left)
             {
                 chrono::system_clock::time_point const now = chrono::system_clock::now();
@@ -139,19 +147,32 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 
                 if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Control)
                 {
-                    if (speedClicks_ >= 3)
-                        selectionMode_ = SelectionMode::Line;
-                    else if (_mouse.modifier == Modifier::Control)
-                        selectionMode_ = SelectionMode::Rectangular;
-                    else
-                        selectionMode_ = SelectionMode::Linear;
+					Selector::Mode const selectionMode = [](int _speedClicks, Modifier _modifier) {
+						if (_speedClicks == 3)
+							return Selector::Mode::FullLine;
+						else if (_modifier == Modifier::Control)
+							return Selector::Mode::Rectangular;
+						else if (_speedClicks == 2)
+							return Selector::Mode::LinearWordWise;
+						else
+							return Selector::Mode::Linear;
+					}(speedClicks_, _mouse.modifier);
 
-                    selector_ = make_unique<Selector>(terminal_.size(), absoluteCoordinate(currentMousePosition_));
-                    updated_.store(true);
+					selector_ = make_unique<Selector>(
+						selectionMode,
+						bind(&Terminal::absoluteAt, &terminal_, _1),
+						wordDelimiters_,
+						terminal_.size().rows + terminal_.historyLineCount(),
+						terminal_.size(),
+						absoluteCoordinate(currentMousePosition_)
+					);
+					updated_.store(true);
+					cout << fmt::format("start-selection: {}\n", *selector_);
+
                     return true;
                 }
             }
-            return terminal_.send(_inputEvent);
+            return false;
         },
         [this](MouseMoveEvent const& _mouseMove) -> bool {
             // receives column/row coordinates in pixels (not character cells)
@@ -171,9 +192,10 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 
             if (selector_ && selector_->state() != Selector::State::Complete)
             {
-                selector_->extend(absoluteCoordinate(newPosition));
+				selector_->extend(absoluteCoordinate(newPosition));
                 updated_.store(true);
             }
+
             return true;
         },
         [this](MouseReleaseEvent const& _mouseRelease) -> bool {
@@ -244,6 +266,11 @@ void TerminalView::resize(unsigned _width, unsigned _height)
     }
 }
 
+void TerminalView::setWordDelimiters(string const& _wordDelimiters)
+{
+    wordDelimiters_ = utf8::decode(_wordDelimiters);
+}
+
 void TerminalView::setFont(Font& _font)
 {
     auto const fontSize = regularFont_.get().fontSize();
@@ -276,6 +303,7 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
     margin_ = {0, 0};
     return true;
 }
+
 
 void TerminalView::setProjection(glm::mat4 const& _projectionMatrix)
 {
@@ -529,18 +557,9 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
 vector<Selector::Range> TerminalView::selection() const
 {
     if (selector_)
-    {
-        switch (selectionMode_)
-        {
-            case SelectionMode::Line:
-                return lines(*selector_);
-            case SelectionMode::Linear:
-                return linear(*selector_);
-            case SelectionMode::Rectangular:
-                return rectangular(*selector_);
-        }
-    }
-    return {};
+		return selector_->selection();
+	else
+		return {};
 }
 
 void TerminalView::renderSelection(terminal::Screen::Renderer _render) const

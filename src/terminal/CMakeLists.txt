@@ -21,6 +21,7 @@ set(terminal_HEADERS
     Process.h
     PseudoTerminal.h
     Screen.h
+	Selector.h
     Terminal.h
     VTType.h
     WindowSize.h
@@ -37,6 +38,7 @@ set(terminal_SOURCES
     Process.cpp
     PseudoTerminal.cpp
     Screen.cpp
+	Selector.cpp
     Terminal.cpp
     VTType.cpp
 )
@@ -57,6 +59,7 @@ if(LIBTERMINAL_TESTING)
         Parser_test.cpp
         Screen_test.cpp
         OutputHandler_test.cpp
+		Selector_test.cpp
         terminal_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
