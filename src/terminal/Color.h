@@ -172,12 +172,12 @@ enum class Opacity : uint8_t {
 };
 
 constexpr Opacity& operator++(Opacity& _value) noexcept {
-    _value = static_cast<Opacity>(std::min(static_cast<int>(_value) + 16, 0xFF));
+    _value = static_cast<Opacity>(std::min(static_cast<int>(_value) + 15, 0xFF));
     return _value;
 }
 
 constexpr Opacity& operator--(Opacity& _value) noexcept {
-    _value = static_cast<Opacity>(std::max(static_cast<int>(_value) - 16, 0));
+    _value = static_cast<Opacity>(std::max(static_cast<int>(_value) - 15, 0));
     return _value;
 }
 
