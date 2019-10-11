@@ -195,11 +195,13 @@ ParserTable constexpr ParserTable::get()
     t.transition(State::DCS_Param, State::DCS_PassThrough, Range{0x40, 0x7E});
 
     // OSC_String
+	// (xterm extension to also allow BEL (0x07) as OSC terminator)
     t.entry(State::OSC_String, Action::OSC_Start);
-    t.event(State::OSC_String, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
+    t.event(State::OSC_String, Action::Ignore, Range{0x00, 0x06}, Range{0x08, 0x17}, 0x19, Range{0x1C, 0x1F});
     t.event(State::OSC_String, Action::OSC_Put, Range{0x20, 0x7F});
     t.exit(State::OSC_String, Action::OSC_End);
     t.transition(State::OSC_String, State::Ground, 0x9C);
+    t.transition(State::OSC_String, State::Ground, 0x07);
 
     // CSI_Entry
     t.entry(State::CSI_Entry, Action::Clear);

@@ -369,15 +369,17 @@ void Parser::handleViaSwitch()
             break;
 
         case State::OSC_String:
+			// (xterm extension to also allow BEL (0x07) as OSC terminator)
+			if (currentChar() == 0x07 || currentChar() == 0x9C)
+			{
+                invokeAction(ActionClass::Event, Action::Unhook);
+                transitionTo(State::Ground);
+			}
+			// NB: isExecuteChar() also tests for 0x07 (range-check)
             if (isExecuteChar(currentChar()))
                 invokeAction(ActionClass::Event, Action::Ignore);
             else if (includes(Range{0x20, 0x7F}, currentChar()))
                 invokeAction(ActionClass::Event, Action::OSC_Put);
-            else if (currentChar() == 0x9C)
-            {
-                invokeAction(ActionClass::Leave, Action::OSC_End);
-                transitionTo(State::Ground);
-            }
             else
                 logInvalidInput();
             break;
