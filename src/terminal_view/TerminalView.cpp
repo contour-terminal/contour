@@ -500,7 +500,10 @@ std::pair<glm::vec4, glm::vec4> TerminalView::makeColors(ScreenBuffer::GraphicsA
         return rgba;
     };
 
-    float const backgroundOpacity = static_cast<float>(backgroundOpacity_) / 255.0f;
+    float const backgroundOpacity =
+		holds_alternative<DefaultColor>(_attributes.backgroundColor)
+			? static_cast<float>(backgroundOpacity_) / 255.0f
+			: 1.0f;
 
     return (_attributes.styles & CharacterStyleMask::Inverse)
         ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity),
