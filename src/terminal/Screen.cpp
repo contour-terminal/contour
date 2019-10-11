@@ -1295,12 +1295,12 @@ void Screen::resetHard()
     state_ = &primaryBuffer_;
 }
 
-Screen::Cell const& Screen::absoluteAt(cursor_pos_t _rowNr, cursor_pos_t _colNr) const
+Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
 {
-    if (_rowNr <= state_->savedLines.size())
-        return *next(begin(*next(begin(state_->savedLines), _rowNr - 1)), _colNr - 1);
-    else if (auto const rowNr = _rowNr - static_cast<cursor_pos_t>(state_->savedLines.size()); rowNr <= size_.rows)
-        return at(rowNr, _colNr);
+    if (_coord.row <= state_->savedLines.size())
+        return *next(begin(*next(begin(state_->savedLines), _coord.row - 1)), _coord.column - 1);
+    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(state_->savedLines.size()); rowNr <= size_.rows)
+        return at(rowNr, _coord.column);
     else
         throw invalid_argument{"Row number exceeds boundaries."};
 }

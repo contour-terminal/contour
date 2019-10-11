@@ -424,7 +424,7 @@ class Screen {
 
     void moveCursorTo(Coordinate to);
 
-    Cell const& absoluteAt(cursor_pos_t _row, cursor_pos_t _col) const;
+    Cell const& absoluteAt(Coordinate const& _coord) const;
 
     Cell const& at(cursor_pos_t _row, cursor_pos_t _col) const noexcept;
 
