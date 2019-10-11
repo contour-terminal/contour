@@ -12,22 +12,27 @@
  * limitations under the License.
  */
 #include <terminal_view/GLCursor.h>
+#include <ground/StringUtils.h>
 
 #include <stdexcept>
+#include <vector>
+
 #include <glm/gtc/matrix_transform.hpp>
 
 using namespace std;
 
 CursorShape makeCursorShape(string const& _name)
 {
-    if (_name == "block")
+	auto const name = ground::toLower(_name);
+
+    if (name == "block")
         return CursorShape::Block;
 
-    if (_name == "underscore")
+    if (name == "underscore")
         return CursorShape::Underscore;
 
-    if (_name == "beam")
-        return CursorShape::Beam;
+    if (name == "bar")
+        return CursorShape::Bar;
 
     throw runtime_error("Invalid cursor shape. Use one of block, underscore, beam.");
 }
@@ -40,8 +45,8 @@ string to_string(CursorShape _value)
             return "block";
         case CursorShape::Underscore:
             return "underscroe";
-        case CursorShape::Beam:
-            return "beam";
+        case CursorShape::Bar:
+            return "bar";
     }
     return "block";
 }
@@ -66,8 +71,51 @@ auto constexpr fragmentShader = R"(
     }
 )";
 
+
+std::vector<float> getTriangles(glm::ivec2 _size, CursorShape _shape)
+{
+	constexpr auto thickness = 1.0f;
+
+	switch (_shape)
+	{
+		case CursorShape::Block:
+			return vector{
+				0.0f, 0.0f,                             // bottom left
+				(GLfloat) _size.x, 0.0f,                // bottom right
+				(GLfloat) _size.x, (GLfloat) _size.y,   // top right
+
+				(GLfloat) _size.x, (GLfloat) _size.y,   // top right
+				0.0f, (GLfloat) _size.y,                // top left
+				0.0f, 0.0f                              // bottom left
+			};
+		case CursorShape::Underscore:
+			return vector{
+				0.0f, 0.0f,                             // bottom left
+				(GLfloat) _size.x, 0.0f,                // bottom right
+				(GLfloat) _size.x, thickness,           // top right
+
+				(GLfloat) _size.x, thickness,           // top right
+				0.0f, thickness,                        // top left
+				0.0f, 0.0f                              // bottom left
+			};
+		case CursorShape::Bar:
+			return vector{
+				0.0f, 0.0f,                             // bottom left
+				(GLfloat) thickness, 0.0f,              // bottom right
+				(GLfloat) thickness, (GLfloat) _size.y, // top right
+
+				(GLfloat) thickness, (GLfloat) _size.y, // top right
+				0.0f, (GLfloat) _size.y,                // top left
+				0.0f, 0.0f                              // bottom left
+			};
+			break;
+	}
+	return {};
+}
+
 GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, glm::vec3 const& _color) :
     shape_{ _shape },
+	size_{ _size },
     projectionMatrix_{ move(_transform) },
     shader_{ vertexShader, fragmentShader },
     transformLocation_{ shader_.uniformLocation("u_transform") },
@@ -79,20 +127,11 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
 
     // --------------------------------------------------------------------
     // setup vertices
-    //TODO: call setSize(_size); instead
-    GLfloat const vertices[] = {
-        0.0f, 0.0f,                             // bottom left
-        (GLfloat) _size.x, 0.0f,                // bottom right
-        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-
-        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-        0.0f, (GLfloat) _size.y,                // top left
-        0.0f, 0.0f                              // bottom left
-    };
+	auto const vertices = getTriangles(size_, shape_);
 
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), &vertices[0], GL_STATIC_DRAW);
 
     glGenVertexArrays(1, &vao_);
     glBindVertexArray(vao_);
@@ -116,7 +155,8 @@ void GLCursor::setProjection(glm::mat4 const& _mat)
 
 void GLCursor::setShape(CursorShape _shape)
 {
-    // TODO: update shaper parameters to reflect new shape (by changing vertices?)
+	shape_ = _shape;
+	updateShape();
 }
 
 void GLCursor::setColor(glm::vec3 _color)
@@ -127,18 +167,16 @@ void GLCursor::setColor(glm::vec3 _color)
 
 void GLCursor::resize(glm::ivec2 _size)
 {
-    GLfloat const vertices[] = {
-        0.0f, 0.0f,                             // bottom left
-        (GLfloat) _size.x, 0.0f,                // bottom right
-        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
+	size_ = _size;
+	updateShape();
+}
 
-        (GLfloat) _size.x, (GLfloat) _size.y,   // top right
-        0.0f, (GLfloat) _size.y,                // top left
-        0.0f, 0.0f                              // bottom left
-    };
+void GLCursor::updateShape()
+{
+	auto const vertices = getTriangles(size_, shape_);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(GLfloat), &vertices[0]);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 

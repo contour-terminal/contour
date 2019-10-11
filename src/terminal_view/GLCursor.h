@@ -22,7 +22,7 @@
 enum class CursorShape {
     Block,
     Underscore,
-    Beam,
+    Bar,
 };
 
 CursorShape makeCursorShape(std::string const& _name);
@@ -44,7 +44,11 @@ class GLCursor {
     void render(glm::ivec2 _pos);
 
   private:
+	void updateShape();
+
+  private:
     CursorShape shape_;
+	glm::ivec2 size_;
     glm::mat4 projectionMatrix_;
     Shader shader_;
     GLint const transformLocation_;
