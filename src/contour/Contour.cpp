@@ -135,25 +135,10 @@ int Contour::main()
                 screenDirty_ = true;
         }
 
-        if (resizePending_)
-        {
-            terminalView_.setTerminalSize(config_.terminalSize);
-            auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
-            auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
-            window_.resize(width, height);
-            screenDirty_ = true;
-        }
-
         if (screenDirty_)
         {
             render();
             screenDirty_ = false;
-        }
-
-        if (titleDirty_)
-        {
-            glfwSetWindowTitle(window_, terminalView_.windowTitle().c_str());
-            titleDirty_ = false;
         }
 
 		// The wait timeout is determined by the interval of a blinking cursor.
@@ -635,12 +620,12 @@ void Contour::onScreenUpdate()
 
 void Contour::onWindowTitleChanged()
 {
-    titleDirty_ = true;
-    glfwPostEmptyEvent();
+	post([this]() { glfwSetWindowTitle(window_, terminalView_.windowTitle().c_str()); });
 }
 
 void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
 {
+	bool resizePending = false;
     if (window_.fullscreen())
     {
         cerr << "Application request to resize window in full screen mode denied." << endl;
@@ -663,7 +648,7 @@ void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
         }
         config_.terminalSize.columns = _width / regularFont_.get().maxAdvance();
         config_.terminalSize.rows = _height / regularFont_.get().lineHeight();
-        resizePending_ = true;
+        resizePending = true;
     }
     else
     {
@@ -679,9 +664,20 @@ void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
 
             config_.terminalSize.columns = _width;
             config_.terminalSize.rows = _height;
-            resizePending_ = true;
+            resizePending = true;
         }
     }
+
+	if (resizePending)
+	{
+		post([this]() {
+            terminalView_.setTerminalSize(config_.terminalSize);
+            auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
+            auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
+            window_.resize(width, height);
+            screenDirty_ = true;
+		});
+	}
 }
 
 void Contour::onConfigReload(ground::FileChangeWatcher::Event _event)

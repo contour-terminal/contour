@@ -74,8 +74,6 @@ class Contour {
     ground::FileChangeWatcher configFileChangeWatcher_;
     terminal::Modifier modifier_{};
     bool screenDirty_ = true;
-    bool titleDirty_ = true;
-    bool resizePending_ = false;
 
 	std::mutex queuedCallsLock_;
 	std::deque<std::function<void()>> queuedCalls_;
