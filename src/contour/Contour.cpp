@@ -76,6 +76,7 @@ Contour::Contour(Config const& _config) :
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),
         bind(&Contour::doResize, this, _1, _2, _3),
+		bind(&Contour::post, this, _1),
         logger_
     },
     configFileChangeWatcher_{
@@ -104,11 +105,25 @@ Contour::~Contour()
 {
 }
 
+void Contour::post(std::function<void()> _fn)
+{
+	auto lg = lock_guard{queuedCallsLock_};
+	queuedCalls_.emplace_back(move(_fn));
+    glfwPostEmptyEvent();
+}
+
 int Contour::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
 		now_ = chrono::steady_clock::now();
+
+		{
+			auto lg = lock_guard{queuedCallsLock_};
+			auto calls = decltype(queuedCalls_){};
+			swap(queuedCalls_, calls);
+			for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
+		}
 
         if (terminalView_.shouldRender(now_))
             screenDirty_ = true;

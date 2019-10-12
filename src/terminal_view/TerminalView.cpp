@@ -64,6 +64,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
                            function<void()> _onScreenUpdate,
                            function<void()> _onWindowTitleChanged,
                            function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+						   std::function<void(std::function<void()>)> _post,
                            GLLogger& _logger) :
     logger_{ _logger },
     updated_{ false },
@@ -101,7 +102,8 @@ TerminalView::TerminalView(WindowSize const& _winSize,
     },
     process_{ terminal_, _shell, {_shell}, envvars },
     processExitWatcher_{ [this]() { wait(); }},
-    onScreenUpdate_{ move(_onScreenUpdate) }
+    onScreenUpdate_{ move(_onScreenUpdate) },
+	post_{ move(_post) }
 {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

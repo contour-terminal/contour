@@ -28,6 +28,7 @@
 #include <chrono>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <string>
 
 class Contour {
@@ -36,6 +37,8 @@ class Contour {
     ~Contour();
 
     int main();
+
+	void post(std::function<void()> _fn);
 
   private:
     void render();
@@ -73,4 +76,7 @@ class Contour {
     bool screenDirty_ = true;
     bool titleDirty_ = true;
     bool resizePending_ = false;
+
+	std::mutex queuedCallsLock_;
+	std::deque<std::function<void()>> queuedCalls_;
 };

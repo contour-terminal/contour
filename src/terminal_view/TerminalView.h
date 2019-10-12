@@ -53,6 +53,7 @@ class TerminalView {
                  std::function<void()> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+				 std::function<void(std::function<void()>)> _post,
                  GLLogger& _logger);
 
     TerminalView(TerminalView const&) = delete;
@@ -155,6 +156,12 @@ class TerminalView {
 
     std::vector<terminal::Selector::Range> selection() const;
 
+	void post(std::function<void()> _fn)
+	{
+		if (post_)
+			post_(move(_fn));
+	}
+
   private:
     bool alive_ = true;
 
@@ -213,4 +220,6 @@ class TerminalView {
     // helpers for detecting double/tripple clicks
     std::chrono::steady_clock::time_point lastClick_{};
     unsigned int speedClicks_ = 0;
+
+	std::function<void(std::function<void()>)> post_;
 };
