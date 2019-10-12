@@ -306,21 +306,29 @@ void OutputHandler::dispatchCSI()
             emit<MoveCursorToColumn>(param(0));
             break;
 		case ED:
-            switch (param(0))
-            {
-                case 0:
-                    emit<ClearToEndOfScreen>();
-                    break;
-                case 1:
-                    emit<ClearToBeginOfScreen>();
-                    break;
-                case 2:
-                    emit<ClearScreen>();
-                    break;
-                case 3:
-                    emit<ClearScrollbackBuffer>();
-                    break;
-            }
+			if (parameterCount() == 0)
+				emit<ClearToEndOfScreen>();
+			else
+			{
+				for (size_t i = 0; i < parameterCount(); ++i)
+				{
+					switch (param(i))
+					{
+						case 0:
+							emit<ClearToEndOfScreen>();
+							break;
+						case 1:
+							emit<ClearToBeginOfScreen>();
+							break;
+						case 2:
+							emit<ClearScreen>();
+							break;
+						case 3:
+							emit<ClearScrollbackBuffer>();
+							break;
+					}
+				}
+			}
 			break;
         case EL:
             setDefaultParameter(0);
