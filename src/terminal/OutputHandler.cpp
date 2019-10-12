@@ -58,7 +58,7 @@ string OutputHandler::sequenceString(string const& _prefix) const
     if (leaderSymbol_)
         sstr << ' ' << leaderSymbol_;
 
-    sstr << accumulate(
+    sstr << ' ' << accumulate(
         begin(parameters_), end(parameters_), string{},
         [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); });
 
@@ -142,18 +142,18 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                         break;
                     case '1': // change X11 resource
                     case '3': // change icon name (also X11 specific)
-                        log<UnsupportedOutputEvent>("Invalid operating system command. {}", sequenceString("OSC"));
+                        log<UnsupportedOutputEvent>(sequenceString("OSC"));
                         break;
                     default:
                     {
-                        log<InvalidOutputEvent>("Invalid operating system command. {}", sequenceString("OSC"));
+                        log<InvalidOutputEvent>(sequenceString("OSC"));
                         break;
                     }
                 }
             }
             else
             {
-                log<UnsupportedOutputEvent>("Unsupported or invalid operating system command. {}", sequenceString("OSC"));
+                log<UnsupportedOutputEvent>(sequenceString("OSC"));
             }
             intermediateCharacters_.clear();
             break;
@@ -1006,22 +1006,28 @@ size_t OutputHandler::parseColor(size_t i)
 
 void OutputHandler::logUnsupported(std::string_view const& msg) const
 {
-    log<UnsupportedOutputEvent>("Unsupported: {}", msg);
+    log<UnsupportedOutputEvent>(msg);
 }
 
 void OutputHandler::logUnsupportedCSI() const
 {
-    log<UnsupportedOutputEvent>("Unsupported CSI sequence {}.", sequenceString("CSI"));
+    log<UnsupportedOutputEvent>(sequenceString("CSI"));
 }
 
 void OutputHandler::logInvalidESC(std::string const& message) const
 {
-    log<InvalidOutputEvent>("Invalid escape sequence. ESC {} {}. {}", intermediateCharacters_, char(currentChar_), message);
+	if (message.empty())
+    	log<InvalidOutputEvent>("{}.", sequenceString("ESC"));
+	else
+    	log<InvalidOutputEvent>("{} ({})", sequenceString("ESC"), message);
 }
 
 void OutputHandler::logInvalidCSI(std::string const& message) const
 {
-    log<InvalidOutputEvent>("Invalid CSI sequence {}. {}", sequenceString("CSI"), message);
+	if (message.empty())
+		log<InvalidOutputEvent>("{}", sequenceString("CSI"));
+	else
+		log<InvalidOutputEvent>("{} ({})", sequenceString("CSI"), message);
 }
 
 }  // namespace terminal
