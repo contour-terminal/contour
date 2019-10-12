@@ -162,7 +162,7 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent, chrono::steady_
 
             if (_mouse.button == MouseButton::Left)
             {
-				double const diff_ms = (_now - lastClick_).count() * 1000.0;
+				double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
                 lastClick_ = _now;
                 speedClicks_ = diff_ms >= 10.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
 
