@@ -183,7 +183,7 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent, chrono::steady_
 						selectionMode,
 						bind(&Terminal::absoluteAt, &terminal_, _1),
 						wordDelimiters_,
-						terminal_.size().rows + terminal_.historyLineCount(),
+						terminal_.size().rows + static_cast<cursor_pos_t>(terminal_.historyLineCount()),
 						terminal_.size(),
 						absoluteCoordinate(currentMousePosition_)
 					);
