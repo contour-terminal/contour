@@ -670,6 +670,42 @@ struct ResizeWindow {
     Unit unit;
 };
 
+enum class CursorDisplay { Steady, Blink };
+
+inline std::string to_string(CursorDisplay _v)
+{
+	switch (_v)
+	{
+		case CursorDisplay::Steady:
+			return "Steady";
+		case CursorDisplay::Blink:
+			return "Blink";
+	}
+	return "";
+}
+
+enum class CursorStyle { Block, Underline };
+
+inline std::string to_string(CursorStyle _v)
+{
+	switch (_v)
+	{
+		case CursorStyle::Block:
+			return "Block";
+		case CursorStyle::Underline:
+			return "Underline";
+	}
+	return "";
+}
+
+/// DECSCUSR - Set Cursor Style
+///
+/// Select the style of the cursor on the screen.
+struct SetCursorStyle {
+	CursorDisplay display;
+	CursorStyle style;
+};
+
 struct SaveWindowTitle {};
 struct RestoreWindowTitle {};
 
@@ -730,6 +766,7 @@ using Command = std::variant<
     SendMouseEvents,
     SendTerminalId,
     SetBackgroundColor,
+	SetCursorStyle,
     SetForegroundColor,
     SetGraphicsRendition,
     SetLeftRightMargin,

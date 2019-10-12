@@ -271,6 +271,7 @@ class Screen {
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
     using SetBracketedPaste = std::function<void(bool)>;
+	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorStyle)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
   public:
@@ -290,12 +291,13 @@ class Screen {
            ResizeWindowCallback _resizeWindow,
            SetApplicationKeypadMode _setApplicationkeypadMode,
            SetBracketedPaste _setBracketedPaste,
+		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
            Logger _logger,
            Hook _onCommands);
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, move(_logger), {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), {}} {}
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
@@ -369,6 +371,7 @@ class Screen {
     void operator()(ForwardIndex const& v);
     void operator()(SetForegroundColor const& v);
     void operator()(SetBackgroundColor const& v);
+    void operator()(SetCursorStyle const& v);
     void operator()(SetGraphicsRendition const& v);
     void operator()(SetMode const& v);
     void operator()(RequestMode const& v);
@@ -488,6 +491,7 @@ class Screen {
     ResizeWindowCallback resizeWindow_;
     SetApplicationKeypadMode setApplicationkeypadMode_;
     SetBracketedPaste setBracketedPaste_;
+	OnSetCursorStyle setCursorStyle_;
     Reply const reply_;
 
     OutputHandler handler_;

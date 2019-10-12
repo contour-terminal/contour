@@ -543,6 +543,7 @@ Screen::Screen(WindowSize const& _size,
                ResizeWindowCallback _resizeWindow,
                SetApplicationKeypadMode _setApplicationkeypadMode,
                SetBracketedPaste _setBracketedPaste,
+			   OnSetCursorStyle _setCursorStyle,
                Reply reply,
                Logger _logger,
                Hook onCommands) :
@@ -553,6 +554,7 @@ Screen::Screen(WindowSize const& _size,
     resizeWindow_{ move(_resizeWindow) },
     setApplicationkeypadMode_{ move(_setApplicationkeypadMode) },
     setBracketedPaste_{ move(_setBracketedPaste) },
+	setCursorStyle_{ move(_setCursorStyle) },
     reply_{ move(reply) },
     handler_{ _size.rows, _logger },
     parser_{ ref(handler_), _logger },
@@ -1052,6 +1054,12 @@ void Screen::operator()(SetForegroundColor const& v)
 void Screen::operator()(SetBackgroundColor const& v)
 {
     state_->graphicsRendition.backgroundColor = v.color;
+}
+
+void Screen::operator()(SetCursorStyle const& v)
+{
+	if (setCursorStyle_)
+		setCursorStyle_(v.display, v.style);
 }
 
 void Screen::operator()(SetGraphicsRendition const& v)

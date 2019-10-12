@@ -395,6 +395,33 @@ void OutputHandler::dispatchCSI()
             else
                 logInvalidCSI();
             break;
+		case DECSCUSR:
+			setDefaultParameter(1);
+			if (parameterCount() <= 1)
+			{
+				switch (param(0))
+				{
+					case 0:
+					case 1:
+						emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Block);
+						break;
+					case 2:
+						emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Block);
+						break;
+					case 3:
+						emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Underline);
+						break;
+					case 4:
+						emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Underline);
+						break;
+					default:
+						logInvalidCSI();
+						break;
+				}
+			}
+			else
+				logInvalidCSI();
+			break;
 		case DECRQM_ANSI:
 			if (parameterCount() == 1)
 				requestMode(param(0));

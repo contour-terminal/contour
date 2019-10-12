@@ -145,6 +145,8 @@ class TerminalView {
     void renderCellGroup();
     void onScreenUpdateHook(std::vector<terminal::Command> const& _commands);
 
+	void onSetCursorStyle(terminal::CursorDisplay _display, terminal::CursorStyle _style);
+
     glm::ivec2 makeCoords(cursor_pos_t col, cursor_pos_t row) const;
     std::pair<glm::vec4, glm::vec4> makeColors(GraphicsAttributes const& _attributes) const;
 

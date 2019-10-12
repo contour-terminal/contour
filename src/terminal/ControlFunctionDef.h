@@ -56,6 +56,7 @@ constexpr ControlFunctionDef DECIC{'\'', std::nullopt, '}', VTType::VT420, "DECI
 constexpr ControlFunctionDef DECRM{'?', std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode"};
 constexpr ControlFunctionDef DECRQM_ANSI{std::nullopt, '$', 'p', VTType::VT100, "DECRQM_ANSI", "Request ANSI-mode"};
 constexpr ControlFunctionDef DECRQM{'?', '$', 'p', VTType::VT100, "DECRQM", "Request DEC-mode"};
+constexpr ControlFunctionDef DECSCUSR{std::nullopt, ' ', 'q', VTType::VT100, "DECSCUSR", "Set Cursor Style"};
 constexpr ControlFunctionDef DECSLRM{std::nullopt, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin"};
 constexpr ControlFunctionDef DECSM{'?', std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode"};
 constexpr ControlFunctionDef DECSTBM{std::nullopt, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin"};

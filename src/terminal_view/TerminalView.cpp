@@ -97,6 +97,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
         move(_maxHistoryLineCount),
         move(_onWindowTitleChanged),
         move(_resizeWindow),
+		bind(&TerminalView::onSetCursorStyle, this, _1, _2),
         [this](terminal::LogEvent const& _event) { logger_(_event); },
         bind(&TerminalView::onScreenUpdateHook, this, _1),
     },
@@ -586,6 +587,31 @@ void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _com
 
     if (onScreenUpdate_)
         onScreenUpdate_();
+}
+
+void TerminalView::onSetCursorStyle(CursorDisplay _display, CursorStyle _style)
+{
+	switch (_display)
+	{
+		case CursorDisplay::Steady:
+			setCursorBlinking(false);
+			break;
+		case CursorDisplay::Blink:
+			setCursorBlinking(true);
+			break;
+	}
+
+	switch (_style)
+	{
+		case CursorStyle::Block:
+			post([this]() { setCursorShape(CursorShape::Block); });
+			break;
+		case CursorStyle::Underline:
+			post([this]() { setCursorShape(CursorShape::Underscore); });
+			break;
+		default:
+			break;
+	}
 }
 
 vector<Selector::Range> TerminalView::selection() const

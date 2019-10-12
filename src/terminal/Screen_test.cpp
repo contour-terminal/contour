@@ -1395,6 +1395,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
         {} // commands
@@ -1434,6 +1435,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
         {} // commands
@@ -1488,6 +1490,7 @@ TEST_CASE("RequestMode", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
         {} // commands

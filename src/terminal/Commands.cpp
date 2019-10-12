@@ -269,6 +269,7 @@ class MnemonicBuilder {
     void operator()(RequestMode const& v) {
         build("DECRQM", fmt::format("Reuqest mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
     }
+    void operator()(SetCursorStyle const& v) { build("DECSCUSR", fmt::format("Select cursor style to {} {}", to_string(v.display), to_string(v.style))); }
     void operator()(SetTopBottomMargin const& v) {
         build("DECSTBM", "Set top/bottom margin.", v.top, v.bottom);
     }

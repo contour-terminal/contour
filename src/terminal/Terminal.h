@@ -44,6 +44,7 @@ class Terminal : public PseudoTerminal {
         std::optional<size_t> _maxHistoryLineCount = std::nullopt,
         std::function<void()> _changeWindowTitleCallback = {},
         std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
+		Screen::OnSetCursorStyle _setCursorStyle = {},
         Logger _logger = {},
         Hook _onScreenCommands = {});
     ~Terminal() override;
