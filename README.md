@@ -1,8 +1,8 @@
 # Contour - A modern C++ Terminal Emulator
 [![CircleCI](https://circleci.com/gh/christianparpart/contour.svg?style=svg)](https://circleci.com/gh/christianparpart/contour)
+![Build](https://github.com/christianparpart/contour/workflows/Ubuntu/badge.svg)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
-![Build](https://github.com/christianparpart/contour/workflows/Ubuntu/badge.svg)
 
 ![alt text](docs/contour-win32-acrylic-background.png "Screenshot")
 
@@ -28,12 +28,12 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] GPU-accelerated rendering
 * [x] 256-color and Truecolor support
 * [x] Key binding customization
+* [x] Color Schemes
+* [ ] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 * [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
-* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
-* [ ] Color Schemes
-* [ ] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
 * [ ] Shell Integration (inspired by iTerm2)
 * [ ] Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
 
@@ -60,7 +60,7 @@ terminalSize:
     lines: 30
 
 fontSize: 12
-fontFamily: "Fira Code, Cascadia Code, Ubuntu Mono, Consolas, monospace"
+fontFamily: "Fira Code, Hack, Cascadia Code, Ubuntu Mono, Consolas, monospace"
 tabWidth: 8
 
 history:
@@ -87,6 +87,8 @@ logging:
     traceOutput: false
 
 colors: # Color scheme: Google Dark
+    cursor: '#b0b030'
+    selection: '#30c0c0'
     default:
         background: '#1d1f21'
         foreground: '#c5c8c6'
