@@ -45,6 +45,7 @@ class TerminalView {
                  std::string const& _wordDelimiters,
                  Font& _regularFont,
                  CursorShape _cursorShape,
+				 bool _cursorBlinking,
                  terminal::ColorProfile const& _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
@@ -63,7 +64,7 @@ class TerminalView {
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
 
-    bool send(terminal::InputEvent const& _inputEvent);
+    bool send(terminal::InputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
 
     /// Sends verbatim text to application.
     void sendPaste(std::string_view const& _text);
@@ -87,18 +88,24 @@ class TerminalView {
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(terminal::WindowSize const& _newSize);
 
+	std::chrono::duration<double, std::milli> cursorBlinkInterval() const noexcept
+	{
+		return std::chrono::duration<double, std::milli>{500.0};
+	}
+
 	void setCursorColor(terminal::RGBColor const& _color);
 	void setCursorShape(CursorShape _shape);
+	void setCursorBlinking(bool _blinking);
 
     /// Sets the projection matrix used for translating rendering coordinates.
     void setProjection(glm::mat4 const& _projectionMatrix);
 
     /// Checks if a render() method should be called by checking the dirty bit,
     /// and if so, clears the dirty bit and returns true, false otherwise.
-    bool shouldRender();
+    bool shouldRender(std::chrono::steady_clock::time_point const& _now);
 
     /// Renders the screen buffer to the current OpenGL screen.
-    void render();
+    void render(std::chrono::steady_clock::time_point const& _now);
 
     /// Renders only the selected text.
     void renderSelection(terminal::Screen::Renderer _render) const;
@@ -174,7 +181,6 @@ class TerminalView {
         unsigned bottom{};
     };
     Margin margin_{};
-
     GLLogger& logger_;
 
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
@@ -187,7 +193,11 @@ class TerminalView {
     std::reference_wrapper<Font> regularFont_;
     GLTextShaper textShaper_;
     CellBackground cellBackground_;
+
     GLCursor cursor_;
+	bool cursorBlinking_;
+	unsigned cursorBlinkState_;
+	std::chrono::steady_clock::time_point lastCursorBlink_;
 
     terminal::Terminal terminal_;
     terminal::Process process_;
@@ -201,6 +211,6 @@ class TerminalView {
     std::unique_ptr<terminal::Selector> selector_;
 
     // helpers for detecting double/tripple clicks
-    std::chrono::system_clock::time_point lastClick_{};
+    std::chrono::steady_clock::time_point lastClick_{};
     unsigned int speedClicks_ = 0;
 };

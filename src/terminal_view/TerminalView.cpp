@@ -24,6 +24,7 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <chrono>
 #include <iostream>
 #include <utility>
 
@@ -55,6 +56,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
                            std::string const& _wordDelimiters,
                            Font& _regularFont,
                            CursorShape _cursorShape,
+						   bool _cursorBlinking,
                            terminal::ColorProfile const& _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
@@ -86,6 +88,9 @@ TerminalView::TerminalView(WindowSize const& _winSize,
         _cursorShape,
         makeColor(colorProfile_.cursor)
     },
+	cursorBlinking_{ _cursorBlinking },
+	cursorBlinkState_{ 1 },
+    lastCursorBlink_{ chrono::steady_clock::now() },
     terminal_{
         _winSize,
         move(_maxHistoryLineCount),
@@ -123,10 +128,10 @@ void TerminalView::writeToScreen(std::string_view const& _text)
     terminal_.writeToScreen(_text.data(), _text.size());
 }
 
-bool TerminalView::send(terminal::InputEvent const& _inputEvent)
+bool TerminalView::send(terminal::InputEvent const& _inputEvent, chrono::steady_clock::time_point _now)
 {
     return visit(overloaded{
-        [this, &_inputEvent](KeyInputEvent const& _key) -> bool {
+        [this, _now, &_inputEvent](KeyInputEvent const& _key) -> bool {
             logger_.keyPress(_key.key, _key.modifier);
             if (selector_ && _key.key == terminal::Key::Escape)
             {
@@ -134,13 +139,19 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
                 return true;
             }
             else
+			{
+				cursorBlinkState_ = 1;
+				lastCursorBlink_ = _now;
                 return terminal_.send(_inputEvent);
+			}
         },
-        [this, &_inputEvent](CharInputEvent const& _char) -> bool {
+        [this, _now, &_inputEvent](CharInputEvent const& _char) -> bool {
+			cursorBlinkState_ = 1;
+			lastCursorBlink_ = _now;
             logger_.keyPress(_char.value, _char.modifier);
             return terminal_.send(_inputEvent);
         },
-        [this, &_inputEvent](MousePressEvent const& _mouse) -> bool {
+        [this, _now, &_inputEvent](MousePressEvent const& _mouse) -> bool {
             // TODO: anything else? logging?
 
 			if (terminal_.send(_inputEvent))
@@ -148,9 +159,8 @@ bool TerminalView::send(terminal::InputEvent const& _inputEvent)
 
             if (_mouse.button == MouseButton::Left)
             {
-                chrono::system_clock::time_point const now = chrono::system_clock::now();
-                double const diff_ms = std::chrono::duration<double, std::milli> (now - lastClick_).count();
-                lastClick_ = now;
+				double const diff_ms = (_now - lastClick_).count() * 1000.0;
+                lastClick_ = _now;
                 speedClicks_ = diff_ms >= 10.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
 
                 if (_mouse.modifier == Modifier::None || _mouse.modifier == Modifier::Control)
@@ -320,17 +330,11 @@ void TerminalView::setProjection(glm::mat4 const& _projectionMatrix)
     cursor_.setProjection(_projectionMatrix);
 }
 
-bool TerminalView::shouldRender()
+bool TerminalView::shouldRender(chrono::steady_clock::time_point const& _now)
 {
-    bool current = updated_.load();
-
-    if (!current)
-        return false;
-
-    if (!std::atomic_compare_exchange_weak(&updated_, &current, false))
-        return false;
-
-    return true;
+	return updated_.load() || (
+		cursorBlinking_ &&
+		chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_) >= cursorBlinkInterval());
 }
 
 bool TerminalView::scrollUp(size_t _numLines)
@@ -377,13 +381,25 @@ bool TerminalView::scrollToBottom()
         return false;
 }
 
-void TerminalView::render()
+void TerminalView::render(chrono::steady_clock::time_point const& _now)
 {
+	updated_.store(false);
+
     terminal_.render(bind(&TerminalView::fillCellGroup, this, _1, _2, _3), scrollOffset_);
     renderCellGroup();
 
-    if (terminal_.cursor().visible && scrollOffset_ + terminal_.cursor().row <= terminal_.size().rows)
-        cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row + static_cast<cursor_pos_t>(scrollOffset_)));
+	{
+		auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
+		if (diff >= cursorBlinkInterval())
+		{
+			lastCursorBlink_ = _now;
+			cursorBlinkState_ = (cursorBlinkState_ + 1) % 2;
+		}
+
+		if (!cursorBlinking_ || cursorBlinkState_)
+			if (terminal_.cursor().visible && scrollOffset_ + terminal_.cursor().row <= terminal_.size().rows)
+				cursor_.render(makeCoords(terminal_.cursor().column, terminal_.cursor().row + static_cast<cursor_pos_t>(scrollOffset_)));
+	}
 
     if (selector_ && selector_->state() != Selector::State::Waiting)
     {
@@ -549,6 +565,11 @@ void TerminalView::setCursorColor(terminal::RGBColor const& _color)
 void TerminalView::setCursorShape(CursorShape _shape)
 {
 	cursor_.setShape(_shape);
+}
+
+void TerminalView::setCursorBlinking(bool _blinking)
+{
+	cursorBlinking_ = _blinking;
 }
 
 void TerminalView::onScreenUpdateHook(std::vector<terminal::Command> const& _commands)

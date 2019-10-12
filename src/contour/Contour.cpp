@@ -16,10 +16,11 @@
 #include <terminal/InputGenerator.h>
 #include <ground/overloaded.h>
 
-#include <iostream>
-#include <fstream>
-#include <cstdio>
 #include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <fstream>
+#include <iostream>
 #include <utility>
 
 #include <GL/glew.h>
@@ -67,6 +68,7 @@ Contour::Contour(Config const& _config) :
         config_.wordDelimiters,
         regularFont_.get(),
         config_.cursorShape,
+		config_.cursorBlinking,
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,
@@ -106,7 +108,9 @@ int Contour::main()
 {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
-        if (terminalView_.shouldRender())
+		now_ = chrono::steady_clock::now();
+
+        if (terminalView_.shouldRender(now_))
             screenDirty_ = true;
 
         bool reloadPending = configReloadPending_.load();
@@ -137,7 +141,8 @@ int Contour::main()
             titleDirty_ = false;
         }
 
-        glfwWaitEventsTimeout(0.5);
+		// The wait timeout is determined by the interval of a blinking cursor.
+		glfwWaitEventsTimeout(chrono::duration<double>(terminalView_.cursorBlinkInterval()).count());
     }
 
     return EXIT_SUCCESS;
@@ -158,7 +163,7 @@ void Contour::render()
     glClearColor(bg.r, bg.g, bg.b, bg.a);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    terminalView_.render();
+    terminalView_.render(now_);
 
     window_.swapBuffers();
 }
@@ -179,6 +184,8 @@ void Contour::onResize()
         )
     );
     glViewport(0, 0, window_.width(), window_.height());
+
+	now_ = chrono::steady_clock::now();
     render();
 }
 
@@ -279,24 +286,24 @@ void Contour::executeInput(terminal::InputEvent const& _inputEvent)
         [&](terminal::KeyInputEvent const&) {
             if (!handled)
                 if (modifier_ != terminal::Modifier::Shift)
-                    terminalView_.send(_inputEvent);
+                    terminalView_.send(_inputEvent, now_);
             keyHandled_ = true;
         },
         [&](terminal::CharInputEvent const&) {
             if (!handled && modifier_ != terminal::Modifier::Shift)
             {
-                terminalView_.send(_inputEvent);
+                terminalView_.send(_inputEvent, now_);
                 keyHandled_ = true;
             }
         },
         [&](terminal::MousePressEvent const&) {
-            terminalView_.send(_inputEvent);
+            terminalView_.send(_inputEvent, now_);
         },
         [&](terminal::MouseMoveEvent const&) {
-            terminalView_.send(_inputEvent);
+            terminalView_.send(_inputEvent, now_);
         },
         [&](terminal::MouseReleaseEvent const&) {
-            terminalView_.send(_inputEvent);
+            terminalView_.send(_inputEvent, now_);
         }
     }, _inputEvent);
 }
@@ -333,9 +340,9 @@ void Contour::executeAction(Action const& _action)
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
         },
-        [&](actions::SendChars const& chars) {
+        [this](actions::SendChars const& chars) {
             for (auto const ch : chars.chars)
-                terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None});
+                terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None}, now_);
         },
         [this](actions::ScrollOneUp) {
             screenDirty_ = terminalView_.scrollUp(1) || screenDirty_;
@@ -526,8 +533,9 @@ void Contour::onChar(char32_t _char)
 {
     if (!keyHandled_)
     {
+		now_ = chrono::steady_clock::now();
         //executeInput(terminal::CharInputEvent{_char, modifier_});
-        terminalView_.send(terminal::CharInputEvent{_char, modifier_});
+        terminalView_.send(terminal::CharInputEvent{_char, modifier_}, now_);
         keyHandled_ = true;
     }
 }
@@ -540,6 +548,8 @@ void Contour::onMouseScroll(double _xOffset, double _yOffset)
 
 void Contour::onMouseButton(int _button, int _action, int _mods)
 {
+	now_ = chrono::steady_clock::now();
+
     auto const static makeMouseButton = [](int _button) -> terminal::MouseButton {
         switch (_button)
         {
@@ -561,13 +571,15 @@ void Contour::onMouseButton(int _button, int _action, int _mods)
     }
     else if (_action == GLFW_RELEASE)
     {
-        terminalView_.send(terminal::MouseReleaseEvent{mouseButton});
+        terminalView_.send(terminal::MouseReleaseEvent{mouseButton}, now_);
     }
 }
 
 void Contour::onMousePosition(double _x, double _y)
 {
-    terminalView_.send(terminal::MouseMoveEvent{static_cast<int>(_y), static_cast<int>(_x)});
+	now_ = chrono::steady_clock::now();
+
+    terminalView_.send(terminal::MouseMoveEvent{static_cast<int>(_y), static_cast<int>(_x)}, now_);
 }
 
 bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
@@ -720,7 +732,9 @@ bool Contour::reloadConfigValues()
 	if (newConfig.cursorShape != config_.cursorShape)
 		terminalView_.setCursorShape(newConfig.cursorShape);
 
-    // TODO: cursor blinking
+	if (newConfig.cursorBlinking != config_.cursorBlinking)
+		terminalView_.setCursorBlinking(newConfig.cursorBlinking);
+
     // TODO: tab width
     // TODO: background blur
 

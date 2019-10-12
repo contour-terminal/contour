@@ -38,8 +38,8 @@ class GLCursor {
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
-
     void setColor(glm::vec3 _color);
+
     void resize(glm::ivec2 _size);
 
     void render(glm::ivec2 _pos);

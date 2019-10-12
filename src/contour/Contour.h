@@ -25,6 +25,7 @@
 #include <terminal_view/TerminalView.h>
 
 #include <atomic>
+#include <chrono>
 #include <fstream>
 #include <functional>
 #include <string>
@@ -57,6 +58,7 @@ class Contour {
     std::string extractSelectionText();
 
   private:
+	std::chrono::steady_clock::time_point now_;
     std::ofstream loggingSink_;
     Config config_;
     GLLogger logger_;
