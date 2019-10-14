@@ -61,13 +61,13 @@ string to_sequence(FunctionDef const& _func, HandlerContext const& _ctx)
 
 namespace {
 	constexpr FunctionDef ESC(
-		std::optional<char> _follower, char _final, VTType _vt,
+		std::optional<char> _leader, char _final, VTType _vt,
 		std::string_view _mnemonic, std::string_view _comment) noexcept
 	{
 		return FunctionDef{
 			FunctionType::ESC,
+			_leader,
 			std::nullopt,
-			_follower,
 			_final,
 			_vt,
 			_mnemonic,
@@ -484,27 +484,61 @@ namespace {
 				return HandlerResult::Invalid;
 		}
 	}
-
 }
 
 FunctionHandlerMap functions(VTType _vt)
 {
-	// TODO: ESC codes
-#if 0
-	constexpr auto DECBI = ESC(std::nullopt, '6', VTType::VT100, "DECBI", "Back Index");
-	constexpr auto DECFI = ESC(std::nullopt, '9', VTType::VT100, "DECFI", "Forward Index");
-	constexpr auto DECKPAM = ESC(std::nullopt, '=', VTType::VT100, "DECKPAM", "Keypad Application Mode");
-	constexpr auto DECKPNM = ESC(std::nullopt, '>', VTType::VT100, "DECKPNM", "Keypad Numeric Mode");
-	constexpr auto DECRS = ESC(std::nullopt, '8', VTType::VT100, "DECRS", "Restore Cursor");
-	constexpr auto DECSC = ESC(std::nullopt, '7', VTType::VT100, "DECSC", "Save Cursor");
-	constexpr auto IND = ESC(std::nullopt, 'D', VTType::VT100, "IND", "Index");
-	constexpr auto RI = ESC(std::nullopt, 'M', VTType::VT100, "RI", "Reverse Index");
-	constexpr auto RIS = ESC(std::nullopt, 'c', VTType::VT100, "RIS", "Reset to Initial State (Hard Reset)");
-	constexpr auto SS2 = ESC(std::nullopt, 'N', VTType::VT220, "SS2", "Single Shift Select (G2 Character Set)");
-	constexpr auto SS3 = ESC(std::nullopt, 'O', VTType::VT220, "SS3", "Single Shift Select (G3 Character Set)");
-#endif
-
 	auto const static allFunctions = vector<pair<FunctionDef, FunctionHandler>>{
+		// CSI =======================================================================================
+		{
+			ESC('#', '8', VTType::VT100, "DECALN", "Screen Alignment Pattern"),
+			[](auto& _ctx) { return _ctx.template emit<ScreenAlignmentPattern>(); }
+		},
+		{
+			ESC(std::nullopt, '6', VTType::VT100, "DECBI", "Back Index"),
+			[](auto& _ctx) { return _ctx.template emit<BackIndex>(); }
+		},
+		{
+			ESC(std::nullopt, '9', VTType::VT100, "DECFI", "Forward Index"),
+			[](auto& _ctx) { return _ctx.template emit<ForwardIndex>(); }
+		},
+		{
+			ESC(std::nullopt, '=', VTType::VT100, "DECKPAM", "Keypad Application Mode"),
+			[](auto& _ctx) { return _ctx.template emit<ApplicationKeypadMode>(true); }
+		},
+		{
+			ESC(std::nullopt, '>', VTType::VT100, "DECKPNM", "Keypad Numeric Mode"),
+			[](auto& _ctx) { return _ctx.template emit<ApplicationKeypadMode>(false); }
+		},
+		{
+			ESC(std::nullopt, '8', VTType::VT100, "DECRS", "Restore Cursor"),
+			[](auto& _ctx) { return _ctx.template emit<RestoreCursor>(); }
+		},
+		{
+			ESC(std::nullopt, '7', VTType::VT100, "DECSC", "Save Cursor"),
+			[](auto& _ctx) { return _ctx.template emit<SaveCursor>(); }
+		},
+		{
+			ESC(std::nullopt, 'D', VTType::VT100, "IND", "Index"),
+			[](auto& _ctx) { return _ctx.template emit<Index>(); }
+		},
+		{
+			ESC(std::nullopt, 'M', VTType::VT100, "RI", "Reverse Index"),
+			[](auto& _ctx) { return _ctx.template emit<ReverseIndex>(); }
+		},
+		{
+			ESC(std::nullopt, 'c', VTType::VT100, "RIS", "Reset to Initial State (Hard Reset)"),
+			[](auto& _ctx) { return _ctx.template emit<FullReset>(); }
+		},
+		{
+			ESC(std::nullopt, 'N', VTType::VT220, "SS2", "Single Shift Select (G2 Character Set)"),
+			[](auto& _ctx) { return _ctx.template emit<SingleShiftSelect>(CharsetTable::G2); }
+		},
+		{
+			ESC(std::nullopt, 'O', VTType::VT220, "SS3", "Single Shift Select (G3 Character Set)"),
+			[](auto& _ctx) { return _ctx.template emit<SingleShiftSelect>(CharsetTable::G3); }
+		},
+		// CSI =======================================================================================
 		{
 			CSI(std::nullopt, std::nullopt, 'G', VTType::VT100, "CHA", "Move cursor to column"),
 			[](auto& _ctx) { return _ctx.template emit<MoveCursorToColumn>(_ctx.param_or(0, FunctionParam{1})); }

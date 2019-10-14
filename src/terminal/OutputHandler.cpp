@@ -216,54 +216,17 @@ void OutputHandler::executeControlFunction(char _c0)
 
 void OutputHandler::dispatchESC(char _finalChar)
 {
-    switch (_finalChar)
-    {
-        case '6':
-            emit<BackIndex>();
-            break;
-        case '7':
-            emit<SaveCursor>();
-            break;
-        case '8':
-            emit<RestoreCursor>();
-            break;
-        case '9':
-            emit<ForwardIndex>();
-            break;
-        case '=':
-            emit<ApplicationKeypadMode>(true);
-            break;
-        case '>':
-            emit<ApplicationKeypadMode>(false);
-            break;
-        case 'D':
-            emit<Index>();
-            break;
-        case 'M':
-            emit<ReverseIndex>();
-            break;
-        case 'N':  // SS2: Single Shift Select of G2 Character Set
-            emit<SingleShiftSelect>(CharsetTable::G2);
-            break;
-        case 'O':  // SS3: Single Shift Select of G3 Character Set
-            emit<SingleShiftSelect>(CharsetTable::G3);
-            break;
-        case 'A':
-            emit<DesignateCharset>(CharsetTable::G0, Charset::UK);
-            break;
-        case 'B':
-            emit<DesignateCharset>(CharsetTable::G0, Charset::USASCII);
-            break;
-        case 'K':
-            emit<DesignateCharset>(CharsetTable::G0, Charset::German);
-            break;
-        case 'c':
-            emit<FullReset>();
-            break;
-        default:
-            logUnsupported("ESC_Dispatch: '{}' {}", escape(_finalChar), escape(intermediateCharacters_));
-            break;
-    }
+    char const leaderSym = intermediateCharacters_.size() == 1
+		? intermediateCharacters_[0]
+		: 0;
+
+	auto const funcId = FunctionDef::makeId(
+		FunctionType::ESC, leaderSym, 0, static_cast<char>(_finalChar));
+
+	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
+		funcMap->second.second(*this);
+	else
+		logInvalidESC(_finalChar, "Unknown final character");
 }
 
 void OutputHandler::dispatchCSI(char _finalChar)
