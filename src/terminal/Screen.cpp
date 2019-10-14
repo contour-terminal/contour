@@ -1185,9 +1185,13 @@ void Screen::operator()(SetLeftRightMargin const& margin)
 {
     if (isModeEnabled(Mode::LeftRightMargin))
     {
-        if (auto const right = min(margin.right, state_->size_.columns); margin.left + 1 < right)
+		auto const right = margin.right.has_value()
+			? min(margin.right.value(), size_.columns)
+			: size_.columns;
+		auto const left = margin.left.value_or(1);
+		if (left + 1 < right)
         {
-            state_->margin_.horizontal.from = margin.left;
+            state_->margin_.horizontal.from = left;
             state_->margin_.horizontal.to = right;
             state_->moveCursorTo({1, 1});
         }

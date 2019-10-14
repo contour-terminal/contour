@@ -277,7 +277,10 @@ class MnemonicBuilder {
 			build("DECSTBM", "Set top/bottom margin.", v.top.value_or(1));
     }
     void operator()(SetLeftRightMargin const& v) {
-        build("DECSLRM", "Set left/right margin.", v.left, v.right);
+		if (v.right.has_value())
+        	build("DECSLRM", "Set left/right margin.", v.left.value_or(1), v.right.value());
+		else
+			build("DECSLRM", "Set left/right margin.", v.left.value_or(1));
     }
     void operator()(ScreenAlignmentPattern const& v) { build("DECALN", "Draw Screen Alignment Pattern."); }
     void operator()(SendMouseEvents const& v) {} // TODO

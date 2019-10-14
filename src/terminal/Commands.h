@@ -574,8 +574,8 @@ struct SetTopBottomMargin {
 /// * Available in: VT Level 4 mode only
 /// * Default: Margins are at the left and right page borders.
 struct SetLeftRightMargin {
-    cursor_pos_t left;
-    cursor_pos_t right;
+    std::optional<cursor_pos_t> left;
+    std::optional<cursor_pos_t> right;
 };
 
 enum class MouseProtocol {

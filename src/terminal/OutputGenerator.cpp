@@ -254,7 +254,16 @@ void OutputGenerator::operator()(Command const& command)
 			else
 				write("\033[{};{}r", margin.top.value(), margin.bottom.value());
 		},
-        [&](SetLeftRightMargin margin) { write("\033[{};{}s", margin.left, margin.right); },
+        [&](SetLeftRightMargin margin) {
+			if (!margin.left && !margin.right)
+				write("\033[s");
+			else if (!margin.right)
+				write("\033[{}s", *margin.left);
+			else if (!margin.left)
+				write("\033[;{}s", *margin.right);
+			else
+				write("\033[{};{}s", *margin.left, *margin.right);
+		},
         [&](ScreenAlignmentPattern) { write("\033#8"); },
         [&](SendMouseEvents v) { write("\033[?{}{}", to_code(v.protocol), v.enable ? 'h' : 'l'); },
         [&](ApplicationKeypadMode v) { write("\033{}", v.enable ? '=' : '>'); },

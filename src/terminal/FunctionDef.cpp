@@ -654,8 +654,8 @@ FunctionHandlerMap functions(VTType _vt)
 					return HandlerResult::Unsupported;
 				else
 				{
-					auto const left = _ctx.param_or(0, FunctionParam{1});
-					auto const right = _ctx.param_or(1, FunctionParam{1});
+					auto const left = _ctx.param_opt(0);
+					auto const right = _ctx.param_opt(1);
 					return _ctx.emit<SetLeftRightMargin>(left, right);
 				}
 			}
