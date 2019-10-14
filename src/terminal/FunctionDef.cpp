@@ -73,7 +73,7 @@ namespace {
 			_mnemonic,
 			_comment
 		};
-	};
+	}
 
 	constexpr FunctionDef CSI(
 		std::optional<char> _leader, std::optional<char> _follower, char _final,
@@ -106,7 +106,7 @@ namespace {
 			case 2:  // (AM) Keyboard Action Mode
 				return HandlerResult::Unsupported;
 			case 4:  // (IRM) Insert Mode
-				return _ctx.emit<SetMode>(Mode::Insert, _enable);
+				return _ctx.template emit<SetMode>(Mode::Insert, _enable);
 			case 12:  // (SRM) Send/Receive Mode
 			case 20:  // (LNM) Automatic Newline
 			default:
@@ -119,75 +119,75 @@ namespace {
 		switch (_ctx.param(_modeIndex))
 		{
 			case 1:
-				return _ctx.emit<SetMode>(Mode::UseApplicationCursorKeys, _enable);
+				return _ctx.template emit<SetMode>(Mode::UseApplicationCursorKeys, _enable);
 			case 2:
-				return _ctx.emit<SetMode>(Mode::DesignateCharsetUSASCII, _enable);
+				return _ctx.template emit<SetMode>(Mode::DesignateCharsetUSASCII, _enable);
 			case 3:
-				return _ctx.emit<SetMode>(Mode::Columns132, _enable);
+				return _ctx.template emit<SetMode>(Mode::Columns132, _enable);
 			case 4:
-				return _ctx.emit<SetMode>(Mode::SmoothScroll, _enable);
+				return _ctx.template emit<SetMode>(Mode::SmoothScroll, _enable);
 			case 5:
-				return _ctx.emit<SetMode>(Mode::ReverseVideo, _enable);
+				return _ctx.template emit<SetMode>(Mode::ReverseVideo, _enable);
 			case 6:
-				return _ctx.emit<SetMode>(Mode::Origin, _enable);
+				return _ctx.template emit<SetMode>(Mode::Origin, _enable);
 			case 7:
-				return _ctx.emit<SetMode>(Mode::AutoWrap, _enable);
+				return _ctx.template emit<SetMode>(Mode::AutoWrap, _enable);
 			case 9:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::X10, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::X10, _enable);
 			case 10:
-				return _ctx.emit<SetMode>(Mode::ShowToolbar, _enable);
+				return _ctx.template emit<SetMode>(Mode::ShowToolbar, _enable);
 			case 12:
-				return _ctx.emit<SetMode>(Mode::BlinkingCursor, _enable);
+				return _ctx.template emit<SetMode>(Mode::BlinkingCursor, _enable);
 			case 19:
-				return _ctx.emit<SetMode>(Mode::PrinterExtend, _enable);
+				return _ctx.template emit<SetMode>(Mode::PrinterExtend, _enable);
 			case 25:
-				return _ctx.emit<SetMode>(Mode::VisibleCursor, _enable);
+				return _ctx.template emit<SetMode>(Mode::VisibleCursor, _enable);
 			case 30:
-				return _ctx.emit<SetMode>(Mode::ShowScrollbar, _enable);
+				return _ctx.template emit<SetMode>(Mode::ShowScrollbar, _enable);
 			case 47:
-				return _ctx.emit<SetMode>(Mode::UseAlternateScreen, _enable);
+				return _ctx.template emit<SetMode>(Mode::UseAlternateScreen, _enable);
 			case 69:
-				return _ctx.emit<SetMode>(Mode::LeftRightMargin, _enable);
+				return _ctx.template emit<SetMode>(Mode::LeftRightMargin, _enable);
 			case 1000:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::VT200, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::VT200, _enable);
 			case 1001:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::VT200_Highlight, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::VT200_Highlight, _enable);
 			case 1002:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::ButtonEvent, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::ButtonEvent, _enable);
 			case 1003:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::AnyEvent, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::AnyEvent, _enable);
 			case 1004:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::FocusEvent, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::FocusEvent, _enable);
 			case 1005:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::Extended, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::Extended, _enable);
 			case 1006:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::SGR, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::SGR, _enable);
 			case 1007:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::AlternateScroll, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::AlternateScroll, _enable);
 			case 1015:
-				return _ctx.emit<SendMouseEvents>(MouseProtocol::URXVT, _enable);
+				return _ctx.template emit<SendMouseEvents>(MouseProtocol::URXVT, _enable);
 			case 1047:
-				return _ctx.emit<SetMode>(Mode::UseAlternateScreen, _enable);
+				return _ctx.template emit<SetMode>(Mode::UseAlternateScreen, _enable);
 			case 1048:
 				if (_enable)
-					return _ctx.emit<SaveCursor>();
+					return _ctx.template emit<SaveCursor>();
 				else
-					return _ctx.emit<RestoreCursor>();
+					return _ctx.template emit<RestoreCursor>();
 			case 1049:
 				if (_enable)
 				{
-					_ctx.emit<SaveCursor>();
-					_ctx.emit<SetMode>(Mode::UseAlternateScreen, true);
-					_ctx.emit<ClearScreen>();
+					_ctx.template emit<SaveCursor>();
+					_ctx.template emit<SetMode>(Mode::UseAlternateScreen, true);
+					_ctx.template emit<ClearScreen>();
 				}
 				else
 				{
-					_ctx.emit<SetMode>(Mode::UseAlternateScreen, false);
-					_ctx.emit<RestoreCursor>();
+					_ctx.template emit<SetMode>(Mode::UseAlternateScreen, false);
+					_ctx.template emit<RestoreCursor>();
 				}
 				return HandlerResult::Ok;
 			case 2004:
-				return _ctx.emit<SetMode>(Mode::BracketedPaste, _enable);
+				return _ctx.template emit<SetMode>(Mode::BracketedPaste, _enable);
 			default:
 				return HandlerResult::Unsupported;
 		}
@@ -208,7 +208,7 @@ namespace {
 					++i;
 					auto const value = _ctx.param(i);
 					if (i <= 255)
-						_ctx.emit<T>(static_cast<IndexedColor>(value));
+						_ctx.template emit<T>(static_cast<IndexedColor>(value));
 					else
 						;//TODO: _ctx.logInvalidCSI("Invalid color indexing.");
 				}
@@ -224,7 +224,7 @@ namespace {
 					auto const b = _ctx.param(i + 3);
 					i += 3;
 					if (r <= 255 && g <= 255 && b <= 255)
-						_ctx.emit<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+						_ctx.template emit<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
 					else
 						; // TODO: _ctx.logInvalidCSI("RGB color out of range.");
 				}
@@ -247,162 +247,162 @@ namespace {
 			switch (_ctx.param(i))
 			{
 				case 0:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Reset);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Reset);
 				case 1:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Bold);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Bold);
 					break;
 				case 2:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Faint);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Faint);
 					break;
 				case 3:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Italic);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Italic);
 					break;
 				case 4:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Underline);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Underline);
 					break;
 				case 5:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Blinking);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Blinking);
 					break;
 				case 7:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Inverse);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Inverse);
 					break;
 				case 8:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Hidden);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Hidden);
 					break;
 				case 9:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::CrossedOut);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::CrossedOut);
 					break;
 				case 21:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
 					break;
 				case 22:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::Normal);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Normal);
 					break;
 				case 23:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoItalic);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoItalic);
 					break;
 				case 24:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
 					break;
 				case 25:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoBlinking);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoBlinking);
 					break;
 				case 27:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoInverse);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoInverse);
 					break;
 				case 28:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoHidden);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoHidden);
 					break;
 				case 29:
-					_ctx.emit<SetGraphicsRendition>(GraphicsRendition::NoCrossedOut);
+					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::NoCrossedOut);
 					break;
 				case 30:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Black);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Black);
 					break;
 				case 31:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Red);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Red);
 					break;
 				case 32:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Green);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Green);
 					break;
 				case 33:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Yellow);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Yellow);
 					break;
 				case 34:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Blue);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Blue);
 					break;
 				case 35:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Magenta);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Magenta);
 					break;
 				case 36:
-					_ctx.emit<SetForegroundColor>(IndexedColor::Cyan);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::Cyan);
 					break;
 				case 37:
-					_ctx.emit<SetForegroundColor>(IndexedColor::White);
+					_ctx.template emit<SetForegroundColor>(IndexedColor::White);
 					break;
 				case 38:
 					i = parseColor<SetForegroundColor>(_ctx, i);
 					break;
 				case 39:
-					_ctx.emit<SetForegroundColor>(DefaultColor{});
+					_ctx.template emit<SetForegroundColor>(DefaultColor{});
 					break;
 				case 40:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Black);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Black);
 					break;
 				case 41:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Red);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Red);
 					break;
 				case 42:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Green);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Green);
 					break;
 				case 43:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Yellow);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Yellow);
 					break;
 				case 44:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Blue);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Blue);
 					break;
 				case 45:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Magenta);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Magenta);
 					break;
 				case 46:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::Cyan);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::Cyan);
 					break;
 				case 47:
-					_ctx.emit<SetBackgroundColor>(IndexedColor::White);
+					_ctx.template emit<SetBackgroundColor>(IndexedColor::White);
 					break;
 				case 48:
 					i = parseColor<SetBackgroundColor>(_ctx, i);
 					break;
 				case 49:
-					_ctx.emit<SetBackgroundColor>(DefaultColor{});
+					_ctx.template emit<SetBackgroundColor>(DefaultColor{});
 					break;
 				case 90:
-					_ctx.emit<SetForegroundColor>(BrightColor::Black);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Black);
 					break;
 				case 91:
-					_ctx.emit<SetForegroundColor>(BrightColor::Red);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Red);
 					break;
 				case 92:
-					_ctx.emit<SetForegroundColor>(BrightColor::Green);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Green);
 					break;
 				case 93:
-					_ctx.emit<SetForegroundColor>(BrightColor::Yellow);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Yellow);
 					break;
 				case 94:
-					_ctx.emit<SetForegroundColor>(BrightColor::Blue);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Blue);
 					break;
 				case 95:
-					_ctx.emit<SetForegroundColor>(BrightColor::Magenta);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Magenta);
 					break;
 				case 96:
-					_ctx.emit<SetForegroundColor>(BrightColor::Cyan);
+					_ctx.template emit<SetForegroundColor>(BrightColor::Cyan);
 					break;
 				case 97:
-					_ctx.emit<SetForegroundColor>(BrightColor::White);
+					_ctx.template emit<SetForegroundColor>(BrightColor::White);
 					break;
 				case 100:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Black);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Black);
 					break;
 				case 101:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Red);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Red);
 					break;
 				case 102:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Green);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Green);
 					break;
 				case 103:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Yellow);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Yellow);
 					break;
 				case 104:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Blue);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Blue);
 					break;
 				case 105:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Magenta);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Magenta);
 					break;
 				case 106:
-					_ctx.emit<SetBackgroundColor>(BrightColor::Cyan);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::Cyan);
 					break;
 				case 107:
-					_ctx.emit<SetBackgroundColor>(BrightColor::White);
+					_ctx.template emit<SetBackgroundColor>(BrightColor::White);
 					break;
 				default:
 					// TODO: _ctx.logInvalidCSI("Invalid SGR number: {}", _ctx.param(i));;
@@ -490,6 +490,7 @@ namespace {
 FunctionHandlerMap functions(VTType _vt)
 {
 	// TODO: ESC codes
+#if 0
 	constexpr auto DECBI = ESC(std::nullopt, '6', VTType::VT100, "DECBI", "Back Index");
 	constexpr auto DECFI = ESC(std::nullopt, '9', VTType::VT100, "DECFI", "Forward Index");
 	constexpr auto DECKPAM = ESC(std::nullopt, '=', VTType::VT100, "DECKPAM", "Keypad Application Mode");
@@ -501,19 +502,20 @@ FunctionHandlerMap functions(VTType _vt)
 	constexpr auto RIS = ESC(std::nullopt, 'c', VTType::VT100, "RIS", "Reset to Initial State (Hard Reset)");
 	constexpr auto SS2 = ESC(std::nullopt, 'N', VTType::VT220, "SS2", "Single Shift Select (G2 Character Set)");
 	constexpr auto SS3 = ESC(std::nullopt, 'O', VTType::VT220, "SS3", "Single Shift Select (G3 Character Set)");
+#endif
 
 	auto const static allFunctions = vector<pair<FunctionDef, FunctionHandler>>{
 		{
 			CSI(std::nullopt, std::nullopt, 'G', VTType::VT100, "CHA", "Move cursor to column"),
-			[](auto& _ctx) { return _ctx.emit<MoveCursorToColumn>(_ctx.param_or(0, FunctionParam{1})); }
+			[](auto& _ctx) { return _ctx.template emit<MoveCursorToColumn>(_ctx.param_or(0, FunctionParam{1})); }
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'E', VTType::VT100, "CNL", "Move cursor to next line"),
-			[](auto& _ctx) { return _ctx.emit<CursorNextLine>(_ctx.param_or(0, FunctionParam{1})); }
+			[](auto& _ctx) { return _ctx.template emit<CursorNextLine>(_ctx.param_or(0, FunctionParam{1})); }
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'F', VTType::VT100, "CPL", "Move cursor to previous line"),
-			[](auto& _ctx) { return _ctx.emit<CursorPreviousLine>(_ctx.param_or(0, FunctionParam{1})); }
+			[](auto& _ctx) { return _ctx.template emit<CursorPreviousLine>(_ctx.param_or(0, FunctionParam{1})); }
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'n', VTType::VT100, "CPR", "Request Cursor position"),
@@ -525,9 +527,9 @@ FunctionHandlerMap functions(VTType _vt)
 					switch (_ctx.param(0))
 					{
 						case 5:
-							return _ctx.emit<DeviceStatusReport>();
+							return _ctx.template emit<DeviceStatusReport>();
 						case 6:
-							return _ctx.emit<ReportCursorPosition>();
+							return _ctx.template emit<ReportCursorPosition>();
 						default:
 							return HandlerResult::Unsupported;
 					}
@@ -537,36 +539,36 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, 'D', VTType::VT100, "CUB", "Move cursor backward"),
 			[](auto& _ctx) {
-				return _ctx.emit<MoveCursorBackward>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<MoveCursorBackward>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'B', VTType::VT100, "CUD", "Move cursor down"),
 			[](auto& _ctx) {
-				return _ctx.emit<MoveCursorDown>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<MoveCursorDown>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'C', VTType::VT100, "CUF", "Move cursor forward"),
 			[](auto& _ctx) {
-				return _ctx.emit<MoveCursorForward>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<MoveCursorForward>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'H', VTType::VT100, "CUP", "Move cursor to position"),
 			[](auto& _ctx) {
-				return _ctx.emit<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
+				return _ctx.template emit<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'A', VTType::VT100, "CUU", "Move cursor up"),
-			[](auto& _ctx) { return _ctx.emit<MoveCursorUp>(_ctx.param_or(0, FunctionParam{1})); }
+			[](auto& _ctx) { return _ctx.template emit<MoveCursorUp>(_ctx.param_or(0, FunctionParam{1})); }
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'c', VTType::VT100, "DA1", "Send primary device attributes"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1 && _ctx.param_or(0, FunctionParam{0}))
-					return _ctx.emit<SendDeviceAttributes>();
+					return _ctx.template emit<SendDeviceAttributes>();
 				else
 					return HandlerResult::Invalid;
 			}
@@ -575,7 +577,7 @@ FunctionHandlerMap functions(VTType _vt)
 			CSI('>', std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1 && _ctx.param_or(0, FunctionParam{0}))
-					return _ctx.emit<SendTerminalId>();
+					return _ctx.template emit<SendTerminalId>();
 				else
 					return HandlerResult::Invalid;
 			}
@@ -584,7 +586,7 @@ FunctionHandlerMap functions(VTType _vt)
 			CSI(std::nullopt, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1)
-					return _ctx.emit<DeleteCharacters>(_ctx.param_or(0, FunctionParam{1}));
+					return _ctx.template emit<DeleteCharacters>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -593,7 +595,7 @@ FunctionHandlerMap functions(VTType _vt)
 			CSI('\'', std::nullopt, '~', VTType::VT420, "DECDC", "Delete column"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1)
-					return _ctx.emit<DeleteColumns>(_ctx.param_or(0, FunctionParam{1}));
+					return _ctx.template emit<DeleteColumns>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -602,7 +604,7 @@ FunctionHandlerMap functions(VTType _vt)
 			CSI('\'', std::nullopt, '}', VTType::VT420, "DECIC", "Insert column"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1)
-					return _ctx.emit<InsertColumns>(_ctx.param_or(0, FunctionParam{1}));
+					return _ctx.template emit<InsertColumns>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -642,13 +644,13 @@ FunctionHandlerMap functions(VTType _vt)
 					{
 						case 0:
 						case 1:
-							return _ctx.emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Block);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Block);
 						case 2:
-							return _ctx.emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Block);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Block);
 						case 3:
-							return _ctx.emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Underline);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Underline);
 						case 4:
-							return _ctx.emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Underline);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Underline);
 						default:
 							return HandlerResult::Invalid;
 					}
@@ -668,7 +670,7 @@ FunctionHandlerMap functions(VTType _vt)
 				{
 					auto const left = _ctx.param_opt(0);
 					auto const right = _ctx.param_opt(1);
-					return _ctx.emit<SetLeftRightMargin>(left, right);
+					return _ctx.template emit<SetLeftRightMargin>(left, right);
 				}
 			}
 		},
@@ -685,14 +687,14 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx) {
 				auto const top = _ctx.param_opt(0);
 				auto const bottom = _ctx.param_opt(1);
-				return _ctx.emit<SetTopBottomMargin>(top, bottom);
+				return _ctx.template emit<SetTopBottomMargin>(top, bottom);
 			}
 		},
 		{
 			CSI('!', std::nullopt, 'p', VTType::VT100, "DECSTR", "Soft terminal reset"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() == 0)
-					return _ctx.emit<SoftTerminalReset>();
+					return _ctx.template emit<SoftTerminalReset>();
 				else
 	                return HandlerResult::Invalid;
 			}
@@ -700,26 +702,26 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, '6', VTType::VT100, "DECXCPR", "Request extended cursor position"),
 			[](auto& _ctx) {
-				return _ctx.emit<ReportExtendedCursorPosition>();
+				return _ctx.template emit<ReportExtendedCursorPosition>();
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'M', VTType::VT100, "DL",  "Delete lines"),
 			[](auto& _ctx) {
-				return _ctx.emit<DeleteLines>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<DeleteLines>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'X', VTType::VT420, "ECH", "Erase characters"),
 			[](auto& _ctx) {
-				return _ctx.emit<EraseCharacters>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<EraseCharacters>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'J', VTType::VT100, "ED",  "Erase in display"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() == 0)
-					return _ctx.emit<ClearToEndOfScreen>();
+					return _ctx.template emit<ClearToEndOfScreen>();
 				else
 				{
 					for (size_t i = 0; i < _ctx.parameterCount(); ++i)
@@ -727,16 +729,16 @@ FunctionHandlerMap functions(VTType _vt)
 						switch (_ctx.param(i))
 						{
 							case 0:
-								_ctx.emit<ClearToEndOfScreen>();
+								_ctx.template emit<ClearToEndOfScreen>();
 								break;
 							case 1:
-								_ctx.emit<ClearToBeginOfScreen>();
+								_ctx.template emit<ClearToBeginOfScreen>();
 								break;
 							case 2:
-								_ctx.emit<ClearScreen>();
+								_ctx.template emit<ClearScreen>();
 								break;
 							case 3:
-								_ctx.emit<ClearScrollbackBuffer>();
+								_ctx.template emit<ClearScrollbackBuffer>();
 								break;
 						}
 					}
@@ -750,11 +752,11 @@ FunctionHandlerMap functions(VTType _vt)
 				switch (_ctx.param_or(0, FunctionParam{0}))
 				{
 					case 0:
-						return _ctx.emit<ClearToEndOfLine>();
+						return _ctx.template emit<ClearToEndOfLine>();
 					case 1:
-						return _ctx.emit<ClearToBeginOfLine>();
+						return _ctx.template emit<ClearToBeginOfLine>();
 					case 2:
-						return _ctx.emit<ClearLine>();
+						return _ctx.template emit<ClearLine>();
 					default:
 						return HandlerResult::Invalid;
 				}
@@ -765,7 +767,7 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx)
 			{
 				if (_ctx.parameterCount() == 1)
-					return _ctx.emit<HorizontalPositionAbsolute>(_ctx.param(0));
+					return _ctx.template emit<HorizontalPositionAbsolute>(_ctx.param(0));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -775,7 +777,7 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx)
 			{
 				if (_ctx.parameterCount() == 1)
-					return _ctx.emit<HorizontalPositionRelative>(_ctx.param(0));
+					return _ctx.template emit<HorizontalPositionRelative>(_ctx.param(0));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -785,7 +787,7 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx)
 			{
 				// deprecated, use equivalent CUP instead.
-				return _ctx.emit<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
+				return _ctx.template emit<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
 			}
 		},
 		{
@@ -793,7 +795,7 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx)
 			{
 				if (_ctx.parameterCount() <= 1)
-                	return _ctx.emit<InsertCharacters>(_ctx.param_or(0, FunctionParam{1}));
+                	return _ctx.template emit<InsertCharacters>(_ctx.param_or(0, FunctionParam{1}));
             	else
 	                return HandlerResult::Invalid;
 			}
@@ -803,7 +805,7 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx)
 			{
 				if (_ctx.parameterCount() <= 1)
-					return _ctx.emit<InsertLines>(_ctx.param_or(0, FunctionParam{1}));
+					return _ctx.template emit<InsertLines>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -819,7 +821,7 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, 'T', VTType::VT100, "SD",  "Scroll down (pan up)"),
 			[](auto& _ctx) {
-				return _ctx.emit<ScrollDown>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<ScrollDown>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
@@ -837,14 +839,14 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, 'S', VTType::VT100, "SU",  "Scroll up (pan down)"),
 			[](auto& _ctx) {
-				return _ctx.emit<ScrollUp>(_ctx.param_or(0, FunctionParam{1}));
+				return _ctx.template emit<ScrollUp>(_ctx.param_or(0, FunctionParam{1}));
 			}
 		},
 		{
 			CSI(std::nullopt, std::nullopt, 'd', VTType::VT100, "VPA", "Vertical Position Absolute"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1)
-					return _ctx.emit<MoveCursorToLine>(_ctx.param_or(0, FunctionParam{1}));
+					return _ctx.template emit<MoveCursorToLine>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
 			}
@@ -857,13 +859,13 @@ FunctionHandlerMap functions(VTType _vt)
 					switch (_ctx.param(0))
 					{
 						case 4:
-							return _ctx.emit<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Pixels);
+							return _ctx.template emit<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Pixels);
 						case 8:
-							return _ctx.emit<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Characters);
+							return _ctx.template emit<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Characters);
 						case 22:
-							return _ctx.emit<SaveWindowTitle>();
+							return _ctx.template emit<SaveWindowTitle>();
 						case 23:
-							return _ctx.emit<RestoreWindowTitle>();
+							return _ctx.template emit<RestoreWindowTitle>();
 						default:
 							return HandlerResult::Unsupported;
 					}
@@ -874,10 +876,10 @@ FunctionHandlerMap functions(VTType _vt)
 					{
 						case 4:
 							// this means, resize to full display size
-							return _ctx.emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Pixels);
+							return _ctx.template emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Pixels);
 						case 8:
 							// i.e. full display size
-							return _ctx.emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Characters);
+							return _ctx.template emit<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Characters);
 						default:
 							return HandlerResult::Unsupported;
 					}
