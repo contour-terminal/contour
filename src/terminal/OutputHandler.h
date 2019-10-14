@@ -15,6 +15,7 @@
 
 #include <terminal/Logger.h>
 #include <terminal/Parser.h>
+#include <terminal/FunctionDef.h>
 
 #include <string>
 #include <string_view>
@@ -29,12 +30,7 @@ class OutputHandler {
 
     size_t constexpr static MaxParameters = 16;
 
-    OutputHandler(unsigned int _rows, Logger _logger)
-        : rowCount_{_rows},
-          logger_{std::move(_logger)}
-    {
-        parameters_.reserve(MaxParameters);
-    }
+    OutputHandler(unsigned int _rows, Logger _logger);
 
     void updateRowCount(unsigned int rows)
     {
@@ -125,6 +121,8 @@ class OutputHandler {
     unsigned int rowCount_;
 
     Logger const logger_;
+
+	FunctionHandlerMap functionMapper_;
 };
 
 }  // namespace terminal

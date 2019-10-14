@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/OutputHandler.h>
-#include <terminal/ControlFunctionDef.h>
+#include <terminal/FunctionDef.h>
 
 #include <terminal/Commands.h>
 #include <terminal/Util.h>
@@ -49,6 +49,14 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
         default:
             return nullopt;
     }
+}
+
+OutputHandler::OutputHandler(unsigned int _rows, Logger _logger) :
+	rowCount_{_rows},
+	logger_{std::move(_logger)},
+	functionMapper_{functions(VTType::VT525)}
+{
+	parameters_.reserve(MaxParameters);
 }
 
 string OutputHandler::sequenceString(string const& _prefix) const
@@ -272,7 +280,25 @@ void OutputHandler::dispatchCSI()
 		? intermediateCharacters_[0]
 		: 0;
 
-    switch (ControlFunctionDef::makeId(leaderSymbol_, followerSym, static_cast<char>(currentChar())))
+	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(currentChar()));
+#if 1
+	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
+	{
+		auto const result = funcMap->second.second(HandlerContext{parameters_, intermediateCharacters_, commands_});
+		switch (result)
+		{
+			case HandlerResult::Unsupported:
+				logUnsupportedCSI();
+				break;
+			case HandlerResult::Invalid:
+				logInvalidCSI();
+				break;
+			case HandlerResult::Ok:
+				break;
+		}
+	}
+#else
+    switch (funcId)
     {
         case HVP:
             // deprecated, use CUP instead.
@@ -581,6 +607,7 @@ void OutputHandler::dispatchCSI()
             logUnsupportedCSI();
             break;
     }
+#endif
 }
 
 void OutputHandler::setMode(unsigned int mode, bool enable)
