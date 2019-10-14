@@ -17,15 +17,15 @@ jobs:
     - name: "Initialize sub modules"
       run: git submodule update --init --recursive
     - name: "Install dependencies"
-      run: vcpkg install freetype fontconfig glew glfw3 glm harfbuzz
+      run: vcpkg install freetype fontconfig glew glfw3 glm harfbuzz --triplet x64-windows
     - name: "create build directory"
       run: mkdir build
     - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+      run: cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
     - name: "Build"
       run: cmake --build build/
     - name: "test: libground"
-      run: ./build/src/ground/ground_test.exe
+      run: .\build\src\ground\Debug\ground_test.exe
     - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test.exe
+      run: .\build\src\terminal\Debug\terminal_test.exe
 
