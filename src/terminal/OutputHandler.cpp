@@ -58,7 +58,7 @@ OutputHandler::OutputHandler(Logger _logger) :
 	parameters_.reserve(MaxParameters);
 }
 
-string OutputHandler::sequenceString(string const& _prefix) const
+string OutputHandler::sequenceString(char _finalChar, string const& _prefix) const
 {
     stringstream sstr;
     sstr << _prefix;
@@ -72,68 +72,67 @@ string OutputHandler::sequenceString(string const& _prefix) const
     if (!intermediateCharacters_.empty())
         sstr << ' ' << intermediateCharacters_;
 
-    sstr << ' ' << static_cast<char>(currentChar());
+    sstr << ' ' << _finalChar;
 
     return sstr.str();
 }
 
-void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_t _currentChar)
+void OutputHandler::invokeAction(ActionClass _actionClass, Action _action, char32_t _currentChar)
 {
     currentChar_ = _currentChar;
 
-    switch (action)
+    switch (_action)
     {
         case Action::Clear:
 			leaderSymbol_ = 0;
             intermediateCharacters_.clear();
             parameters_.resize(1);
             parameters_[0] = 0;
-            defaultParameter_ = 0;
             private_ = false;
             return;
 		case Action::CollectLeader:
-			leaderSymbol_ = static_cast<char>(currentChar());
+			leaderSymbol_ = static_cast<char>(_currentChar);
 			return;
         case Action::Collect:
-            intermediateCharacters_.push_back(static_cast<char>(currentChar())); // cast OK, because non-ASCII wouldn't be valid collected chars
+            intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, because non-ASCII wouldn't be valid collected chars
             return;
         case Action::Print:
-            emit<AppendChar>(currentChar());
+            emit<AppendChar>(_currentChar);
             return;
         case Action::Param:
-            if (currentChar() == ';')
+            if (_currentChar == ';')
                 parameters_.push_back(0);
             else
-                parameters_.back() = parameters_.back() * 10 + (currentChar() - U'0');
+                parameters_.back() = parameters_.back() * 10 + (_currentChar - U'0');
             return;
         case Action::CSI_Dispatch:
-			dispatchCSI();
+			dispatchCSI(static_cast<char>(_currentChar));
             return;
         case Action::Execute:
-            executeControlFunction();
+            executeControlFunction(static_cast<char>(_currentChar));
             return;
         case Action::ESC_Dispatch:
             if (intermediateCharacters_.empty())
-                dispatchESC();
-            else if (intermediateCharacters_ == "#" && currentChar() == '8')
+                dispatchESC(static_cast<char>(_currentChar));
+            else if (intermediateCharacters_ == "#" && _currentChar == '8')
                 emit<ScreenAlignmentPattern>();
-            else if (intermediateCharacters_ == "(" && currentChar_ == 'B')
+            else if (intermediateCharacters_ == "(" && _currentChar == 'B')
                 logUnsupported("Designate Character Set US-ASCII.");
-            else if (currentChar_ == '0')
+            else if (_currentChar == '0')
             {
                 if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
                     emit<DesignateCharset>(*g, Charset::Special);
                 else
-                    logInvalidESC(fmt::format("Invalid charset table identifier: {}", escape(intermediateCharacters_[0])));
+                    logInvalidESC(static_cast<char>(_currentChar), fmt::format("Invalid charset table identifier: {}", escape(intermediateCharacters_[0])));
             }
             else
-                logInvalidESC();
+                logInvalidESC(static_cast<char>(_currentChar));
             return;
         case Action::OSC_Start:
             // no need, we inline OSC_Put and OSC_End's actions
             break;
         case Action::OSC_Put:
-            intermediateCharacters_.push_back(static_cast<char>(currentChar())); // cast OK, becuase only ASCII's allowed (I think) TODO: check that fact
+            intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, becuase only ASCII's allowed (I think) TODO: check that fact
             break;
         case Action::OSC_End:
             if (intermediateCharacters_.size() > 1 && intermediateCharacters_[1] == ';')
@@ -149,25 +148,25 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
                         break;
                     case '1': // change X11 resource
                     case '3': // change icon name (also X11 specific)
-                        log<UnsupportedOutputEvent>(sequenceString("OSC"));
+                        log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
                         break;
                     default:
                     {
-                        log<InvalidOutputEvent>(sequenceString("OSC"));
+                        log<InvalidOutputEvent>("OSC " + intermediateCharacters_);
                         break;
                     }
                 }
             }
             else
             {
-                log<UnsupportedOutputEvent>(sequenceString("OSC"));
+                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             }
             intermediateCharacters_.clear();
             break;
         case Action::Hook:
         case Action::Put:
         case Action::Unhook:
-            logUnsupported("Action: {} {} \"{}\"", to_string(action), escape(currentChar()),
+            logUnsupported("Action: {} {} \"{}\"", to_string(_action), escape(_currentChar),
                            escape(intermediateCharacters_));
             return;
         case Action::Ignore:
@@ -176,9 +175,9 @@ void OutputHandler::invokeAction(ActionClass actionClass, Action action, char32_
     }
 }
 
-void OutputHandler::executeControlFunction()
+void OutputHandler::executeControlFunction(char _c0)
 {
-    switch (currentChar())
+    switch (_c0)
     {
         case 0x07: // BEL
             emit<Bell>();
@@ -210,14 +209,14 @@ void OutputHandler::executeControlFunction()
             emit<RestoreCursor>();
             break;
         default:
-            logUnsupported("ESC C0 or C1 control function: {}", escape(currentChar()));
+            logUnsupported("ESC C0 or C1 control function: {}", escape(_c0));
             break;
     }
 }
 
-void OutputHandler::dispatchESC()
+void OutputHandler::dispatchESC(char _finalChar)
 {
-    switch (currentChar())
+    switch (_finalChar)
     {
         case '6':
             emit<BackIndex>();
@@ -262,35 +261,29 @@ void OutputHandler::dispatchESC()
             emit<FullReset>();
             break;
         default:
-            logUnsupported("ESC_Dispatch: '{}' {}", escape(currentChar()), escape(intermediateCharacters_));
+            logUnsupported("ESC_Dispatch: '{}' {}", escape(_finalChar), escape(intermediateCharacters_));
             break;
     }
 }
 
-void OutputHandler::dispatchCSI()
+void OutputHandler::dispatchCSI(char _finalChar)
 {
-    // logDebug("dispatch CSI: {} {} {}", intermediateCharacters_,
-    //     accumulate(
-    //         begin(parameters_), end(parameters_), string{},
-    //         [](auto a, auto p) { return !a.empty() ? fmt::format("{}, {}", a, p) : std::to_string(p); }),
-    //     static_cast<char>(currentChar()));
-
     char const followerSym = intermediateCharacters_.size() == 1
 		? intermediateCharacters_[0]
 		: 0;
 
-	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(currentChar()));
+	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(_finalChar));
 
 	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
 	{
-		auto const result = funcMap->second.second(HandlerContext{parameters_, intermediateCharacters_, commands_});
+		auto const result = funcMap->second.second(*this);
 		switch (result)
 		{
 			case HandlerResult::Unsupported:
-				logUnsupportedCSI();
+				logUnsupportedCSI(_finalChar);
 				break;
 			case HandlerResult::Invalid:
-				logInvalidCSI();
+				logInvalidCSI(_finalChar);
 				break;
 			case HandlerResult::Ok:
 				break;
@@ -303,25 +296,25 @@ void OutputHandler::logUnsupported(std::string_view const& msg) const
     log<UnsupportedOutputEvent>(msg);
 }
 
-void OutputHandler::logUnsupportedCSI() const
+void OutputHandler::logUnsupportedCSI(char _finalChar) const
 {
-    log<UnsupportedOutputEvent>(sequenceString("CSI"));
+    log<UnsupportedOutputEvent>(sequenceString(_finalChar, "CSI"));
 }
 
-void OutputHandler::logInvalidESC(std::string const& message) const
+void OutputHandler::logInvalidESC(char _finalChar, std::string const& message) const
 {
 	if (message.empty())
-    	log<InvalidOutputEvent>("{}.", sequenceString("ESC"));
+    	log<InvalidOutputEvent>("{}.", sequenceString(_finalChar, "ESC"));
 	else
-    	log<InvalidOutputEvent>("{} ({})", sequenceString("ESC"), message);
+    	log<InvalidOutputEvent>("{} ({})", sequenceString(_finalChar, "ESC"), message);
 }
 
-void OutputHandler::logInvalidCSI(std::string const& message) const
+void OutputHandler::logInvalidCSI(char _finalChar, std::string const& message) const
 {
 	if (message.empty())
-		log<InvalidOutputEvent>("{}", sequenceString("CSI"));
+		log<InvalidOutputEvent>("{}", sequenceString(_finalChar, "CSI"));
 	else
-		log<InvalidOutputEvent>("{} ({})", sequenceString("CSI"), message);
+		log<InvalidOutputEvent>("{} ({})", sequenceString(_finalChar, "CSI"), message);
 }
 
 }  // namespace terminal

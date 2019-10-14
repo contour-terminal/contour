@@ -48,7 +48,7 @@ string to_sequence(FunctionDef const& _func, HandlerContext const& _ctx)
         sstr << ' ' << *_func.leaderSymbol;
 
     sstr << ' ' << accumulate(
-        begin(_ctx.parameters), end(_ctx.parameters), string{},
+        begin(_ctx.parameters()), end(_ctx.parameters()), string{},
         [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); });
 
 	if (_func.followerSymbol)
@@ -74,6 +74,17 @@ namespace {
 			_comment
 		};
 	};
+
+	constexpr FunctionDef CSI(
+		std::optional<char> _leader, std::optional<char> _follower, char _final,
+		VTType _vt, std::string_view _mnemonic, std::string_view _comment) noexcept
+	{
+		return FunctionDef{
+			FunctionType::CSI,
+			_leader, _follower, _final, _vt,
+			_mnemonic, _comment
+		};
+	}
 
 	constexpr FunctionDef OSC(char _leader, std::string_view _mnemonic, std::string_view _comment) noexcept
 	{
@@ -182,6 +193,7 @@ namespace {
 		}
 	}
 
+	/// Parses color at given parameter offset @p i and returns new offset to continue processing parameters.
 	template <typename T>
 	size_t parseColor(HandlerContext& _ctx, size_t i)
 	{

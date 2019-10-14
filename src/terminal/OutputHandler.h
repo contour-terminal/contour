@@ -23,76 +23,38 @@
 
 namespace terminal {
 
-class OutputHandler {
+class OutputHandler : private HandlerContext {
   public:
     using ActionClass = Parser::ActionClass;
     using Action = Parser::Action;
 
-    size_t constexpr static MaxParameters = 16;
-
     explicit OutputHandler(Logger _logger);
 
-    void invokeAction(ActionClass actionClass, Action action, char32_t currentChar);
+    void invokeAction(ActionClass _actionClass, Action _action, char32_t _finalChar);
 
-    void operator()(ActionClass actionClass, Action action, char32_t currentChar)
+    void operator()(ActionClass _actionClass, Action _action, char32_t _finalChar)
     {
-        return invokeAction(actionClass, action, currentChar);
+        return invokeAction(_actionClass, _action, _finalChar);
     }
 
     std::vector<Command>& commands() noexcept { return commands_; }
     std::vector<Command> const& commands() const noexcept { return commands_; }
 
   private:
-    char32_t currentChar() const noexcept { return currentChar_; }
-
-    void setDefaultParameter(unsigned int value) noexcept { defaultParameter_ = value; }
-
-    size_t parameterCount() const noexcept { return parameters_.size(); }
-
-    unsigned int param(size_t i) const noexcept
-    {
-        if (i < parameters_.size() && parameters_[i])
-            return parameters_[i];
-        else
-            return defaultParameter_;
-    }
-
-    void executeControlFunction();
-    void dispatchESC();
-    void dispatchCSI();
-    void dispatchCSI_ext();  // "\033[? ..."
-    void dispatchCSI_excl(); // "\033[! ..."
-    void dispatchCSI_gt();   // "\033[> ..."
-    void dispatchCSI_singleQuote(); // "\033[ ' ..."
-
-    void setMode(unsigned int mode, bool enable);
-    void setModeDEC(unsigned int mode, bool enable);
-    void requestMode(unsigned int _mode);
-    void requestModeDEC(unsigned int _mode);
-
-    void dispatchGraphicsRendition();
-
-    /// Parses color at given parameter offset @p i and returns new offset to continue processing parameters.
-    template <typename T>
-    size_t parseColor(size_t i);
-
-    template <typename T, typename... Args>
-    void emit(Args&&... args)
-    {
-        commands_.emplace_back(T{std::forward<Args>(args)...});
-        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
-    }
+    void executeControlFunction(char _c0);
+    void dispatchESC(char _finalChar);
+    void dispatchCSI(char _finalChar);
 
     template <typename Event, typename... Args>
-    void log(std::string_view const& msg, Args... args) const
+    void log(std::string_view const& msg, Args&&... args) const
     {
         if (logger_)
-            logger_(Event{ fmt::format(msg, args...) });
+            logger_(Event{ fmt::format(msg, std::forward<Args>(args)...) });
     }
 
-    void logInvalidESC(std::string const& message = "") const;
-    void logInvalidCSI(std::string const& message = "") const;
-    void logUnsupportedCSI() const;
+    void logInvalidESC(char _finalChar, std::string const& message = "") const;
+    void logInvalidCSI(char _finalChar, std::string const& message = "") const;
+    void logUnsupportedCSI(char _finalChar) const;
     void logUnsupported(std::string_view const& msg) const;
 
     template <typename... Args>
@@ -101,16 +63,12 @@ class OutputHandler {
         logUnsupported(fmt::format(msg, std::forward<Args>(args)...));
     }
 
-    std::string sequenceString(std::string const& _prefix) const;
+    std::string sequenceString(char _finalChar, std::string const& _prefix) const;
 
   private:
     char32_t currentChar_{};
-    std::vector<Command> commands_{};
 
 	char leaderSymbol_ = 0;
-    std::string intermediateCharacters_{};
-    std::vector<unsigned int> parameters_{0};
-    unsigned int defaultParameter_ = 0;
     bool private_ = false;
 
     Logger const logger_;
