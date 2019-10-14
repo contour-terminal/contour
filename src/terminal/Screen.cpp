@@ -1165,11 +1165,17 @@ void Screen::operator()(RequestMode const& v)
         reply("\033[?{};{}$y", to_code(v.mode), static_cast<unsigned>(modeResponse));
 }
 
-void Screen::operator()(SetTopBottomMargin const& margin)
+void Screen::operator()(SetTopBottomMargin const& _margin)
 {
-    if (auto const bottom = min(margin.bottom, state_->size_.rows); margin.top < bottom)
+	auto const bottom = _margin.bottom.has_value()
+		? min(_margin.bottom.value(), size_.rows)
+		: size_.rows;
+
+	auto const top = _margin.top.value_or(1);
+
+	if (top < bottom)
     {
-        state_->margin_.vertical.from = margin.top;
+        state_->margin_.vertical.from = top;
         state_->margin_.vertical.to = bottom;
         state_->moveCursorTo({1, 1});
     }

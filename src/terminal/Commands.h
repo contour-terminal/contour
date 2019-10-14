@@ -16,6 +16,7 @@
 #include <terminal/Color.h>
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -550,11 +551,11 @@ struct RequestMode {
 struct SetTopBottomMargin {
     /// The line number for the top margin.
     /// Default: 1
-    cursor_pos_t top;
+    std::optional<cursor_pos_t> top;
 
     /// The line number for the bottom margin.
     /// Default: current number of lines per screen
-    cursor_pos_t bottom;
+    std::optional<cursor_pos_t> bottom;
 };
 
 /// DECSLRM - Set Left and Right Margins.

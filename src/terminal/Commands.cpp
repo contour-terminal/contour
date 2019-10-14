@@ -271,7 +271,10 @@ class MnemonicBuilder {
     }
     void operator()(SetCursorStyle const& v) { build("DECSCUSR", fmt::format("Select cursor style to {} {}", to_string(v.display), to_string(v.style))); }
     void operator()(SetTopBottomMargin const& v) {
-        build("DECSTBM", "Set top/bottom margin.", v.top, v.bottom);
+		if (v.bottom.has_value())
+	        build("DECSTBM", "Set top/bottom margin.", v.top.value_or(1), v.bottom.value());
+		else
+			build("DECSTBM", "Set top/bottom margin.", v.top.value_or(1));
     }
     void operator()(SetLeftRightMargin const& v) {
         build("DECSLRM", "Set left/right margin.", v.left, v.right);

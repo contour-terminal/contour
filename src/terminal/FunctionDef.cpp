@@ -671,8 +671,8 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin"),
 			[](auto& _ctx) {
-				auto const top = _ctx.param_or(0, 1);
-				auto const bottom = _ctx.param_or(1, 5000); // TODO(get it right, use optional<>s) ...rowCount_);
+				auto const top = _ctx.param_opt(0);
+				auto const bottom = _ctx.param_opt(1);
 				return _ctx.emit<SetTopBottomMargin>(top, bottom);
 			}
 		},

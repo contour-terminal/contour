@@ -244,7 +244,16 @@ void OutputGenerator::operator()(Command const& command)
             else
                 write("\033[?{}$p", to_code(v.mode));
         },
-        [&](SetTopBottomMargin margin) { write("\033[{};{}r", margin.top, margin.bottom); },
+        [&](SetTopBottomMargin margin) {
+			if (!margin.top.has_value() && !margin.bottom.has_value())
+				write("\033[r");
+			else if (!margin.bottom.has_value())
+				write("\033[{}r", margin.top.value());
+			else if (!margin.top.has_value())
+				write("\033[;{}r", margin.bottom.value());
+			else
+				write("\033[{};{}r", margin.top.value(), margin.bottom.value());
+		},
         [&](SetLeftRightMargin margin) { write("\033[{};{}s", margin.left, margin.right); },
         [&](ScreenAlignmentPattern) { write("\033#8"); },
         [&](SendMouseEvents v) { write("\033[?{}{}", to_code(v.protocol), v.enable ? 'h' : 'l'); },
