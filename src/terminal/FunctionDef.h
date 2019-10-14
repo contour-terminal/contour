@@ -80,12 +80,17 @@ struct HandlerContext {
 
 	size_t parameterCount() const noexcept { return parameters.size(); }
 
-	FunctionParam param_or(size_t _index, FunctionParam _defaultValue) const noexcept
+	std::optional<FunctionParam> param_opt(size_t _index) const noexcept
 	{
 		if (_index < parameters.size() && parameters[_index])
-			return parameters[_index];
+			return {parameters[_index]};
 		else
-			return _defaultValue;
+			return std::nullopt;
+	}
+
+	FunctionParam param_or(size_t _index, FunctionParam _defaultValue) const noexcept
+	{
+		return param_opt(_index).value_or(_defaultValue);
 	}
 
     unsigned int param(size_t _index) const noexcept
