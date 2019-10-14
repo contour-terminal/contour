@@ -30,12 +30,7 @@ class OutputHandler {
 
     size_t constexpr static MaxParameters = 16;
 
-    OutputHandler(unsigned int _rows, Logger _logger);
-
-    void updateRowCount(unsigned int rows)
-    {
-        rowCount_ = rows;
-    }
+    explicit OutputHandler(Logger _logger);
 
     void invokeAction(ActionClass actionClass, Action action, char32_t currentChar);
 
@@ -117,8 +112,6 @@ class OutputHandler {
     std::vector<unsigned int> parameters_{0};
     unsigned int defaultParameter_ = 0;
     bool private_ = false;
-
-    unsigned int rowCount_;
 
     Logger const logger_;
 

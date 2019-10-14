@@ -19,13 +19,9 @@
 using namespace std;
 using namespace terminal;
 
-constexpr size_t RowCount = 25;
-
 TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
 {
-    auto output = OutputHandler{
-            RowCount,
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = OutputHandler{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{ref(output)};
 
     parser.parseFragment("\xC3\xB6");  // ö
@@ -42,7 +38,6 @@ TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
 TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
 {
     auto output = OutputHandler{
-            RowCount,
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
@@ -65,7 +60,6 @@ TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
 TEST_CASE("set_g1_special", "[OutputHandler]")
 {
     auto output = OutputHandler{
-            RowCount,
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
@@ -82,7 +76,6 @@ TEST_CASE("set_g1_special", "[OutputHandler]")
 TEST_CASE("color_fg_indexed", "[OutputHandler]")
 {
     auto output = OutputHandler{
-            RowCount,
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
@@ -101,7 +94,6 @@ TEST_CASE("color_fg_indexed", "[OutputHandler]")
 TEST_CASE("color_bg_indexed", "[OutputHandler]")
 {
     auto output = OutputHandler{
-            RowCount,
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
