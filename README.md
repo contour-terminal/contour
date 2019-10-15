@@ -17,7 +17,7 @@
 
 * Available on all 3 major platforms, Windows, Linux, OS/X.
 * Font Ligatures Support (such as in Fira Code).
-* GPU-acelerated rendering.
+* GPU-accelerated rendering.
 
 ## Mission Statement
 
@@ -114,9 +114,9 @@ colors: # Color scheme: Google Dark
 
 input_mapping:
     - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
-    - { mods: [Control, Alt],   key: "S",           action: ScreenshotVT }
-    - { mods: [Control, Shift], key: "+",           action: IncreaseFontSize }
-    - { mods: [Control, Shift], key: "-",           action: DecreaseFontSize }
+    - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
+    - { mods: [Control, Shift], key: Equal,         action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
     - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
     - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }

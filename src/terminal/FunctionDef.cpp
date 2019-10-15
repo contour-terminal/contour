@@ -489,7 +489,7 @@ namespace {
 FunctionHandlerMap functions(VTType _vt)
 {
 	auto const static allFunctions = vector<pair<FunctionDef, FunctionHandler>>{
-		// CSI =======================================================================================
+		// ESC =======================================================================================
 		{
 			ESC('#', '8', VTType::VT100, "DECALN", "Screen Alignment Pattern"),
 			[](auto& _ctx) { return _ctx.template emit<ScreenAlignmentPattern>(); }
