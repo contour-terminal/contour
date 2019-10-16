@@ -11,7 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "Window.h"
+
+#include "UIWindow.h"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -24,28 +25,32 @@
 #if defined(_WIN32)
 #include <Windows.h>
 #include <dwmapi.h>
-
 #define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
 #endif
+
+#if defined(__unix__)
+#define GLFW_EXPOSE_NATIVE_X11
+#endif
+
+#include <GLFW/glfw3native.h>
 
 using namespace std;
 
-void Window::init()
+void UIWindow::init()
 {
     if (!glfwInit())
         throw runtime_error{ "Could not initialize GLFW." };
 }
 
-Window::Window(Size const& _size,
-               string const& _title,
-               OnKey _onKey,
-               OnChar _onChar,
-               OnMouseScroll _onMouseScroll,
-               OnMouseButton _onMouseButton,
-               OnMousePosition _onMousePosition,
-               OnResize _onResize,
-               OnContentScale _onContentScale) :
+UIWindow::UIWindow(Size const& _size,
+            	   string const& _title,
+                   OnKey _onKey,
+                   OnChar _onChar,
+                   OnMouseScroll _onMouseScroll,
+                   OnMouseButton _onMouseButton,
+                   OnMousePosition _onMousePosition,
+                   OnResize _onResize,
+                   OnContentScale _onContentScale) :
     size_{ _size },
     onKey_{ move(_onKey) },
     onChar_{ move(_onChar) },
@@ -92,16 +97,16 @@ Window::Window(Size const& _size,
         throw runtime_error{ string{"Could not initialize GLEW. "} +((char*)glewGetErrorString(e)) };
 
     glfwSetWindowUserPointer(window_, this);
-    glfwSetKeyCallback(window_, &Window::onKey);
-    glfwSetCharCallback(window_, &Window::onChar);
-    glfwSetFramebufferSizeCallback(window_, &Window::onResize);
-    glfwSetScrollCallback(window_, &Window::onMouseScroll);
-    glfwSetMouseButtonCallback(window_, &Window::onMouseButton);
-    glfwSetCursorPosCallback(window_, &Window::onMousePosition);
+    glfwSetKeyCallback(window_, &UIWindow::onKey);
+    glfwSetCharCallback(window_, &UIWindow::onChar);
+    glfwSetFramebufferSizeCallback(window_, &UIWindow::onResize);
+    glfwSetScrollCallback(window_, &UIWindow::onMouseScroll);
+    glfwSetMouseButtonCallback(window_, &UIWindow::onMouseButton);
+    glfwSetCursorPosCallback(window_, &UIWindow::onMousePosition);
 
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     glfwSetInputMode(window_, GLFW_LOCK_KEY_MODS, GLFW_TRUE);
-    glfwSetWindowContentScaleCallback(window_, &Window::onContentScale);
+    glfwSetWindowContentScaleCallback(window_, &UIWindow::onContentScale);
 #endif
 
     glEnable(GL_BLEND);
@@ -111,12 +116,12 @@ Window::Window(Size const& _size,
     glViewport(0, 0, _size.width, _size.height);
 }
 
-Window::~Window()
+UIWindow::~UIWindow()
 {
     glfwTerminate();
 }
 
-bool Window::enableBackgroundBlur()
+bool UIWindow::enableBackgroundBlur()
 {
 #if defined(_WIN32)
     // Awesome hack with the noteworty links:
@@ -163,9 +168,9 @@ bool Window::enableBackgroundBlur()
 #endif
 }
 
-void Window::onResize(GLFWwindow* _window, int _width, int _height)
+void UIWindow::onResize(GLFWwindow* _window, int _width, int _height)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self)
     {
         if (_width && _height)
         {
@@ -177,44 +182,44 @@ void Window::onResize(GLFWwindow* _window, int _width, int _height)
     }
 }
 
-void Window::onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset)
+void UIWindow::onMouseScroll(GLFWwindow* _window, double _xOffset, double _yOffset)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseScroll_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onMouseScroll_)
         self->onMouseScroll_(_xOffset, _yOffset);
 }
 
-void Window::onMouseButton(GLFWwindow* _window, int _button, int _action, int _mods)
+void UIWindow::onMouseButton(GLFWwindow* _window, int _button, int _action, int _mods)
 {
     //TODO: printf("mouse: button: %d, action:%d, mods:%d\n", _button, _action, _mods);
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMouseButton_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onMouseButton_)
         self->onMouseButton_(_button, _action, _mods);
 }
 
-void Window::onMousePosition(GLFWwindow* _window, double _x, double _y)
+void UIWindow::onMousePosition(GLFWwindow* _window, double _x, double _y)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onMousePosition_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onMousePosition_)
         self->onMousePosition_(_x, _y);
 }
 
-void Window::onContentScale(GLFWwindow* _window, float _xs, float _ys)
+void UIWindow::onContentScale(GLFWwindow* _window, float _xs, float _ys)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onContentScale_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onContentScale_)
         self->onContentScale_(_xs, _ys);
 }
 
-void Window::onKey(GLFWwindow* _window, int _key, int _scanCode, int _action, int _mods)
+void UIWindow::onKey(GLFWwindow* _window, int _key, int _scanCode, int _action, int _mods)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onKey_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onKey_)
         self->onKey_(_key, _scanCode, _action, _mods);
 }
 
-void Window::onChar(GLFWwindow* _window, unsigned int _char)
+void UIWindow::onChar(GLFWwindow* _window, unsigned int _char)
 {
-    if (auto self = reinterpret_cast<Window*>(glfwGetWindowUserPointer(_window)); self && self->onChar_)
+    if (auto self = reinterpret_cast<UIWindow*>(glfwGetWindowUserPointer(_window)); self && self->onChar_)
         self->onChar_(char32_t{ _char });
 }
 
-pair<float, float> Window::primaryMonitorContentScale()
+pair<float, float> UIWindow::primaryMonitorContentScale()
 {
     init();
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
@@ -232,7 +237,7 @@ pair<float, float> Window::primaryMonitorContentScale()
 #endif
 }
 
-pair<float, float> Window::contentScale()
+pair<float, float> UIWindow::contentScale()
 {
 #if (GLFW_VERSION_MAJOR >= 4) || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 3)
     float xs{};
@@ -249,12 +254,12 @@ pair<float, float> Window::contentScale()
 #endif
 }
 
-void Window::resize(unsigned _width, unsigned _height)
+void UIWindow::resize(unsigned _width, unsigned _height)
 {
     glfwSetWindowSize(window_, _width, _height);
 }
 
-Window::Size Window::screenSize()
+UIWindow::Size UIWindow::screenSize()
 {
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
     GLFWvidmode const* vidMode = glfwGetVideoMode(monitor);
@@ -265,7 +270,7 @@ Window::Size Window::screenSize()
     return Size{static_cast<unsigned>(vidMode->width), static_cast<unsigned>(vidMode->height)};
 }
 
-void Window::toggleFullScreen()
+void UIWindow::toggleFullScreen()
 {
     fullscreen_ = !fullscreen_;
     if (fullscreen_)

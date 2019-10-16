@@ -14,7 +14,7 @@
 #pragma once
 
 #include "Config.h"
-#include "Window.h"
+#include "UIWindow.h"
 #include <ground/FileChangeWatcher.h>
 #include <ground/stdfs.h>
 
@@ -67,7 +67,7 @@ class Contour {
     GLLogger logger_;
     FontManager fontManager_;
     std::reference_wrapper<Font> regularFont_;
-    Window window_;
+    UIWindow window_;
     TerminalView terminalView_;
     bool keyHandled_ = false;
     std::atomic<bool> configReloadPending_ = false;

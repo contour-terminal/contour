@@ -45,11 +45,11 @@ Contour::Contour(Config const& _config) :
     regularFont_{
         fontManager_.load(
             _config.fontFamily,
-            static_cast<unsigned>(_config.fontSize * Window::primaryMonitorContentScale().second)
+            static_cast<unsigned>(_config.fontSize * UIWindow::primaryMonitorContentScale().second)
         )
     },
     window_{
-        Window::Size{
+        UIWindow::Size{
             _config.terminalSize.columns * regularFont_.get().maxAdvance(),
             _config.terminalSize.rows * regularFont_.get().lineHeight()
         },
@@ -140,6 +140,7 @@ int Contour::main()
             render();
             screenDirty_ = false;
         }
+
 
 		// The wait timeout is determined by the interval of a blinking cursor.
 		glfwWaitEventsTimeout(chrono::duration<double>(terminalView_.cursorBlinkInterval()).count());

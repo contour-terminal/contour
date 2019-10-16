@@ -20,7 +20,7 @@
 #include <functional>
 #include <string>
 
-class Window {
+class UIWindow {
   public:
     struct Size {
         unsigned width;
@@ -36,16 +36,16 @@ class Window {
 
     static void init();
 
-    Window(Size const& _size,
-           std::string const& _title,
-           OnKey _onKey,
-           OnChar _onChar,
-           OnMouseScroll _onMouseScroll,
-           OnMouseButton _onMouseButton,
-           OnMousePosition _onMousePosition,
-           OnResize _onResize,
-           OnContentScale _onContentScale);
-    ~Window();
+    UIWindow(Size const& _size,
+             std::string const& _title,
+             OnKey _onKey,
+             OnChar _onChar,
+             OnMouseScroll _onMouseScroll,
+             OnMouseButton _onMouseButton,
+             OnMousePosition _onMousePosition,
+             OnResize _onResize,
+             OnContentScale _onContentScale);
+    ~UIWindow();
 
     bool enableBackgroundBlur();
 

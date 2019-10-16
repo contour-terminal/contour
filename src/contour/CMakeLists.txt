@@ -1,9 +1,9 @@
 include(FilesystemResolver)
 
-find_package(Freetype)
-find_package(OpenGL)
-find_package(GLEW)
-find_package(glm CONFIG)
+find_package(Freetype REQUIRED)
+find_package(OpenGL REQUIRED)
+find_package(GLEW REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 set(GLFW_VER 3.2)
 if("${CMAKE_SYSTEM}" MATCHES "Windows")
@@ -16,7 +16,7 @@ add_executable(contour
 	Contour.cpp Contour.h
 	Config.cpp Config.h
 	Flags.cpp Flags.h
-	Window.cpp Window.h
+	UIWindow.cpp UIWindow.h
 	main.cpp
 )
 
