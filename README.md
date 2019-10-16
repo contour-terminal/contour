@@ -18,6 +18,7 @@
 * Available on all 3 major platforms, Windows, Linux, OS/X.
 * Font Ligatures Support (such as in Fira Code).
 * GPU-accelerated rendering.
+* Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 
 ## Mission Statement
 
@@ -142,6 +143,14 @@ This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compile
 ```sh
 apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-dev libharfbuzz-dev
 ```
+
+To enable blur-behind feature on transparent background, you'll need the following packages:
+
+```sh
+apt install libx11-dev
+```
+
+And set pass `-DCONTOUR_BLUR_PLATFORM_KWIN_X11=ON` to cmake when configuring the project.
 
 ### Prerequisites Windows 10
 

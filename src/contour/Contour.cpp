@@ -92,7 +92,7 @@ Contour::Contour(Config const& _config) :
 
     if (config_.backgroundBlur)
     {
-        if (!window_.enableBackgroundBlur())
+        if (!window_.enableBackgroundBlur(true))
             throw runtime_error{ "Could not enable background blur." };
     }
 
@@ -128,6 +128,7 @@ int Contour::main()
         if (terminalView_.shouldRender(now_))
             screenDirty_ = true;
 
+		// TODO: move into channeled function (queued calls)
         bool reloadPending = configReloadPending_.load();
         if (reloadPending && atomic_compare_exchange_strong(&configReloadPending_, &reloadPending, false))
         {
@@ -747,8 +748,11 @@ bool Contour::reloadConfigValues()
 	if (newConfig.cursorBlinking != config_.cursorBlinking)
 		terminalView_.setCursorBlinking(newConfig.cursorBlinking);
 
-    // TODO: tab width
     // TODO: background blur
+	if (newConfig.backgroundBlur != config_.backgroundBlur)
+		window_.enableBackgroundBlur(newConfig.backgroundBlur);
+
+    // TODO: tab width
 
     config_ = move(newConfig);
 

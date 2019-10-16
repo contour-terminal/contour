@@ -28,7 +28,9 @@
 #define GLFW_EXPOSE_NATIVE_WIN32
 #endif
 
-#if defined(__unix__)
+#if defined(CONTOUR_BLUR_PLATFORM_KWIN_X11)
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
 #define GLFW_EXPOSE_NATIVE_X11
 #endif
 
@@ -121,7 +123,7 @@ UIWindow::~UIWindow()
     glfwTerminate();
 }
 
-bool UIWindow::enableBackgroundBlur()
+bool UIWindow::enableBackgroundBlur(bool _enable)
 {
 #if defined(_WIN32)
     // Awesome hack with the noteworty links:
@@ -153,18 +155,37 @@ bool UIWindow::enableBackgroundBlur()
             const pSetWindowCompositionAttribute SetWindowCompositionAttribute = (pSetWindowCompositionAttribute)GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {
-                ACCENTPOLICY policy = { 3, 0, 0, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
-                WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
-                BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
-                success = rs != FALSE;
+				if (_enable)
+				{
+					ACCENTPOLICY policy = { 3, 0, 0, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
+					WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
+					BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
+					success = rs != FALSE;
+				}
+				else
+				{
+					success = false; // TODO: how to disable me again?
+				}
             }
             FreeLibrary(hModule);
         }
     }
     return success;
+#elif defined(CONTOUR_BLUR_PLATFORM_KWIN_X11)
+	Display* const display = glfwGetX11Display();
+	Window const window = glfwGetX11Window(window_);
+	Atom const blurBehindRegion = XInternAtom(display, "_KDE_NET_WM_BLUR_BEHIND_REGION", False);
+	if (_enable)
+		XChangeProperty(display, window, blurBehindRegion, XA_CARDINAL, 32, PropModeReplace, 0, 0);
+	else
+		XDeleteProperty(display, window, blurBehindRegion);
+	return true;
 #else
-    // Get me working on Linux (and OS/X), please.
-    return false;
+	if (_enable)
+		// Get me working on Linux (and OS/X), please.
+    	return false;
+	else
+		return true;
 #endif
 }
 

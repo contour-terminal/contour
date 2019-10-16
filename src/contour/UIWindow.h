@@ -47,7 +47,7 @@ class UIWindow {
              OnContentScale _onContentScale);
     ~UIWindow();
 
-    bool enableBackgroundBlur();
+    bool enableBackgroundBlur(bool _enable);
 
     /// Retrieves current window's maximum screen size.
     Size screenSize();
