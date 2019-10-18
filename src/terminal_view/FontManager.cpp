@@ -28,6 +28,8 @@
 
 using namespace std;
 
+namespace terminal::view {
+
 static string freetypeErrorString(FT_Error _errorCode)
 {
     #undef __FTERRORS_H__
@@ -244,3 +246,5 @@ void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _
         advance += pos[i].x_advance >> 6;
     }
 }
+
+} // namespace terminal::view

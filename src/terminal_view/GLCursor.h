@@ -19,6 +19,8 @@
 #include <memory>
 #include <string>
 
+namespace terminal::view {
+
 enum class CursorShape {
     Block,
 	Rectangle,
@@ -59,3 +61,5 @@ class GLCursor {
 	GLenum drawMode_;
 	GLsizei drawCount_;
 };
+
+} // namespace terminal::view

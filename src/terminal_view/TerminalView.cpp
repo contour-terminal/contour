@@ -30,7 +30,8 @@
 
 using namespace std;
 using namespace std::placeholders;
-using namespace terminal;
+
+namespace terminal::view {
 
 auto const envvars = terminal::Process::Environment{
     {"TERM", "xterm-256color"},
@@ -633,3 +634,5 @@ void TerminalView::clearSelection()
     selector_.reset();
     updated_.store(true);
 }
+
+} // namespace terminal::view

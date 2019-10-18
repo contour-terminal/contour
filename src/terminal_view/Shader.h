@@ -18,6 +18,8 @@
 #include <GL/glew.h>
 #include <glm/matrix.hpp>
 
+namespace terminal::view {
+
 class Shader
 {
 public:
@@ -55,3 +57,5 @@ private:
 private:
     unsigned int id_{};
 };
+
+} // namespace terminal::view

@@ -20,6 +20,8 @@
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 
+namespace terminal::view {
+
 /// OpenGL Object for rendering character cell's background.
 class CellBackground {
   public:
@@ -39,3 +41,4 @@ class CellBackground {
     GLuint vao_{};
 };
 
+} // namespace terminal::view

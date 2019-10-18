@@ -55,7 +55,7 @@ class Contour {
     void onConfigReload(ground::FileChangeWatcher::Event _event);
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
-    Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
+    terminal::view::Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
     void executeInput(terminal::InputEvent const& _inputEvent);
     void executeAction(Action const& _action);
     std::string extractSelectionText();
@@ -64,11 +64,11 @@ class Contour {
 	std::chrono::steady_clock::time_point now_;
     std::ofstream loggingSink_;
     Config config_;
-    GLLogger logger_;
-    FontManager fontManager_;
-    std::reference_wrapper<Font> regularFont_;
+    terminal::view::GLLogger logger_;
+    terminal::view::FontManager fontManager_;
+    std::reference_wrapper<terminal::view::Font> regularFont_;
     UIWindow window_;
-    TerminalView terminalView_;
+    terminal::view::TerminalView terminalView_;
     bool keyHandled_ = false;
     std::atomic<bool> configReloadPending_ = false;
     ground::FileChangeWatcher configFileChangeWatcher_;

@@ -22,6 +22,8 @@
 #include <memory>
 #include <string>
 
+namespace terminal::view {
+
 enum class LogMask {
     None  = 0,
 
@@ -97,3 +99,5 @@ class GLLogger {
     std::unique_ptr<std::ostream> ownedSink_;
     std::ostream* sink_;
 };
+
+} // namespace terminal::view

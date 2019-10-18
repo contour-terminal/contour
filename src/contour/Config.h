@@ -90,12 +90,15 @@ struct Config {
     bool fullscreen = false;
     unsigned short fontSize = 12;
     std::string fontFamily = "Fira Code, Ubuntu Mono, Consolas, monospace";
-    CursorShape cursorShape = CursorShape::Block;
+    terminal::view::CursorShape cursorShape = terminal::view::CursorShape::Block;
     bool cursorBlinking = true;
     unsigned int tabWidth = 8;
     terminal::Opacity backgroundOpacity = terminal::Opacity::Opaque; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
-    LogMask loggingMask = LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput;
+    terminal::view::LogMask loggingMask =
+		terminal::view::LogMask::ParserError |
+		terminal::view::LogMask::InvalidOutput |
+		terminal::view::LogMask::UnsupportedOutput;
 
     std::string wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82";
 

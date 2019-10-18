@@ -18,6 +18,8 @@
 
 using namespace std;
 
+namespace terminal::view {
+
 auto constexpr vertexShader = R"(
     // Vertex Shader
     #version 140
@@ -109,3 +111,5 @@ void CellBackground::render(glm::ivec2 _pos, glm::vec4 const& _color)
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 }
+
+} // namespace terminal::view

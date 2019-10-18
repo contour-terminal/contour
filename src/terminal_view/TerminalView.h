@@ -35,6 +35,8 @@
 #include <string>
 #include <vector>
 
+namespace terminal::view {
+
 class Font;
 
 /// OpenGL-Terminal Object.
@@ -225,3 +227,5 @@ class TerminalView {
 
 	std::function<void(std::function<void()>)> post_;
 };
+
+} // namespace terminal::view

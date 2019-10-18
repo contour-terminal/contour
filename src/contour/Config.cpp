@@ -286,7 +286,7 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
     if (auto cursor = doc["cursor"]; cursor)
     {
         if (auto shape = cursor["shape"]; shape)
-            _config.cursorShape = makeCursorShape(shape.as<string>());
+            _config.cursorShape = terminal::view::makeCursorShape(shape.as<string>());
 
         softLoadValue(cursor, "blinking", _config.cursorBlinking);
     }
@@ -365,6 +365,8 @@ void loadConfigFromFile(Config& _config, std::string const& _fileName)
         if (auto filePath = logging["file"]; filePath)
             _config.logFilePath = {FileSystem::path{filePath.as<string>()}};
 
+		using terminal::view::LogMask;
+
         auto constexpr mappings = array{
             pair{"parseErrors", LogMask::ParserError},
             pair{"invalidOutput", LogMask::InvalidOutput},
@@ -424,6 +426,7 @@ std::string serializeYaml(Config const& _config)
     root["cursor"]["blinking"] = _config.cursorBlinking;
 
     // logging
+	using terminal::view::LogMask;
     root["logging"]["parseErrors"] = (_config.loggingMask & LogMask::ParserError) != 0;
     root["logging"]["invalidOutput"] = (_config.loggingMask & LogMask::InvalidOutput) != 0;
     root["logging"]["unsupportedOutput"] = (_config.loggingMask & LogMask::UnsupportedOutput) != 0;
