@@ -125,6 +125,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             pair{"CopySelection"sv, Action{actions::CopySelection{}}},
             pair{"PasteSelection"sv, Action{actions::PasteSelection{}}},
             pair{"PasteClipboard"sv, Action{actions::PasteClipboard{}}},
+			pair{"NewTerminal"sv, Action{actions::NewTerminal{}}},
         };
 
         auto const name = toLower(_node.as<string>());

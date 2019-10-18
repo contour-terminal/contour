@@ -1,0 +1,48 @@
+shell: /bin/bash
+terminalSize:
+  columns: 80
+  lines: 25
+fontSize: 12
+fontFamily: Fira Code, Ubuntu Mono, Consolas, monospace
+tabWidth: 8
+background:
+  opacity: 1
+  blur: false
+history:
+  limit: 8000
+  autoScrollOnUpdate: true
+  scrollMultiplier: 3
+colors:
+  default:
+    foreground: 0xD0D0D0
+    background: 0x000000
+  selection: 0x707070
+  normal:
+    black: 0x000000
+    red: 0x800000
+    green: 0x008000
+    yellow: 0x808000
+    blue: 0x000080
+    magenta: 0x800080
+    cyan: 0x008080
+    white: 0xC0C0C0
+  bright:
+    black: 0x808080
+    red: 0xFF0000
+    green: 0x00FF00
+    yellow: 0xFFFF00
+    blue: 0x0000FF
+    magenta: 0xFF00FF
+    cyan: 0x00FFFF
+    white: 0xFFFFFF
+cursor:
+  shape: block
+  blinking: true
+logging:
+  parseErrors: true
+  invalidOutput: true
+  unsupportedOutput: true
+  rawInput: false
+  rawOutput: false
+  traceInput: false
+  traceOutput: false

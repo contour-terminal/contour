@@ -38,7 +38,7 @@ int main(int argc, char const* argv[])
         if (auto exitStatus = loadConfigFromCLI(config, argc, argv); exitStatus.has_value())
             return *exitStatus;
 
-        auto myterm = Contour{config};
+        auto myterm = Contour{argv[0], config};
         return myterm.main();
     }
     catch (exception const& e)

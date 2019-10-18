@@ -33,7 +33,7 @@
 
 class Contour {
   public:
-    explicit Contour(Config const& _config);
+    explicit Contour(std::string _programPath, Config const& _config);
     ~Contour();
 
     int main();
@@ -60,8 +60,11 @@ class Contour {
     void executeAction(Action const& _action);
     std::string extractSelectionText();
 
+	void spawnNewTerminal();
+
   private:
 	std::chrono::steady_clock::time_point now_;
+	std::string programPath_;
     std::ofstream loggingSink_;
     Config config_;
     terminal::view::GLLogger logger_;

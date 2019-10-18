@@ -44,6 +44,7 @@ namespace actions {
 	struct PasteClipboard{};
 	struct CopySelection{};
 	struct PasteSelection{};
+	struct NewTerminal{};
 	// Quit
 	// CloseTab
 	// OpenTab
@@ -70,7 +71,8 @@ using Action = std::variant<
     actions::ScrollToBottom,
     actions::CopySelection,
     actions::PasteSelection,
-    actions::PasteClipboard
+    actions::PasteClipboard,
+	actions::NewTerminal
 >;
 
 struct InputMapping {
@@ -128,6 +130,7 @@ struct Config {
             {terminal::CharInputEvent{'c', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::CopySelection{}},
             {terminal::CharInputEvent{'v', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::PasteClipboard{}},
             {terminal::MousePressEvent{terminal::MouseButton::Middle, terminal::Modifier::None}, actions::PasteSelection{}},
+            {terminal::CharInputEvent{'n', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::NewTerminal{}},
         };
     }
 };

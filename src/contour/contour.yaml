@@ -78,6 +78,7 @@ background:
 # - DecreaseOpacity  Decreases the default-background opacity by 5%.
 # - IncreaseFontSize Increases the font size by 1 pixel.
 # - IncreaseOpacity  Increases the default-background opacity by 5%.
+# - NewTerminal      Spawns a new terminal at the current terminals current working directory.
 # - PasteClipboard   Pastes clipboard to standard input.
 # - PasteSelection   Pastes current selection to standard input.
 # - ScreenshotVT     Takes a screenshot in form of VT escape sequences.
@@ -93,24 +94,28 @@ background:
 # - ToggleFullScreen Enables/disables full screen mode.
 # - WriteScreen:     Writes VT sequence in `chars` member to the screen (bypassing the application).
 input_mapping:
+    - { mods: [],               mouse: Middle,      action: PasteSelection }
+    - { mods: [],               mouse: WheelDown,   action: ScrollDown }
+    - { mods: [],               mouse: WheelUp,     action: ScrollUp }
     - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
+    - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
+    - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
     - { mods: [Control, Shift], key: Add,           action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
-    - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: N,             action: NewTerminal }
+    - { mods: [Control, Shift], key: V,             action: PasteClipboard }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
-    - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
-    - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
-    - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
-    - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
-    - { mods: [],               mouse: WheelUp,     action: ScrollUp }
-    - { mods: [],               mouse: WheelDown,   action: ScrollDown }
-    - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
+    - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
     - { mods: [Shift],          key: DownArrow,     action: ScrollOneDown }
-    - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
-    - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
-    - { mods: [Shift],          key: Home,          action: ScrollToTop }
     - { mods: [Shift],          key: End,           action: ScrollToBottom }
+    - { mods: [Shift],          key: Home,          action: ScrollToTop }
+    - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
+    - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
+    - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
+    - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
+    - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
 
 # Color Profile
 # -------------

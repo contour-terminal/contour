@@ -102,7 +102,7 @@ TerminalView::TerminalView(WindowSize const& _winSize,
         [this](terminal::LogEvent const& _event) { logger_(_event); },
         bind(&TerminalView::onScreenUpdateHook, this, _1),
     },
-    process_{ terminal_, _shell, {_shell}, envvars },
+    process_{ _shell, {_shell}, envvars, terminal_ },
     processExitWatcher_{ [this]() { wait(); }},
     onScreenUpdate_{ move(_onScreenUpdate) },
 	post_{ move(_post) }

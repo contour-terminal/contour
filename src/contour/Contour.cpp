@@ -34,7 +34,8 @@
 using namespace std;
 using namespace std::placeholders;
 
-Contour::Contour(Config const& _config) :
+Contour::Contour(std::string _programPath, Config const& _config) :
+	programPath_{move(_programPath)},
     config_{_config},
     logger_{
         _config.logFilePath
@@ -380,7 +381,10 @@ void Contour::executeAction(Action const& _action)
         },
         [this](actions::PasteClipboard) {
             terminalView_.sendPaste(glfwGetClipboardString(window_));
-        }
+        },
+		[this](actions::NewTerminal) {
+			spawnNewTerminal();
+		}
     }, _action);
 }
 
@@ -748,7 +752,6 @@ bool Contour::reloadConfigValues()
 	if (newConfig.cursorBlinking != config_.cursorBlinking)
 		terminalView_.setCursorBlinking(newConfig.cursorBlinking);
 
-    // TODO: background blur
 	if (newConfig.backgroundBlur != config_.backgroundBlur)
 		window_.enableBackgroundBlur(newConfig.backgroundBlur);
 
@@ -757,4 +760,19 @@ bool Contour::reloadConfigValues()
     config_ = move(newConfig);
 
     return true;
+}
+
+void Contour::spawnNewTerminal()
+{
+	terminal::Process{
+		programPath_,
+		vector<string>{
+			programPath_,
+			"-c"s,
+			config_.backingFilePath.string()
+		},
+		{/*env*/},
+		terminalView_.process().workingDirectory(),
+		true
+	};
 }

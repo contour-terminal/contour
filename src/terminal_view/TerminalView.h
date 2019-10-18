@@ -136,6 +136,8 @@ class TerminalView {
     bool scrollToTop();
     bool scrollToBottom();
 
+	terminal::Process const& process() const noexcept { return process_; }
+
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
