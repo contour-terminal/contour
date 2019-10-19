@@ -44,6 +44,7 @@ namespace actions {
 	struct PasteClipboard{};
 	struct CopySelection{};
 	struct PasteSelection{};
+	struct NewTerminal{};
 	// Quit
 	// CloseTab
 	// OpenTab
@@ -70,7 +71,8 @@ using Action = std::variant<
     actions::ScrollToBottom,
     actions::CopySelection,
     actions::PasteSelection,
-    actions::PasteClipboard
+    actions::PasteClipboard,
+	actions::NewTerminal
 >;
 
 struct InputMapping {
@@ -90,12 +92,15 @@ struct Config {
     bool fullscreen = false;
     unsigned short fontSize = 12;
     std::string fontFamily = "Fira Code, Ubuntu Mono, Consolas, monospace";
-    CursorShape cursorShape = CursorShape::Block;
+    terminal::view::CursorShape cursorShape = terminal::view::CursorShape::Block;
     bool cursorBlinking = true;
     unsigned int tabWidth = 8;
     terminal::Opacity backgroundOpacity = terminal::Opacity::Opaque; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
-    LogMask loggingMask = LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput;
+    terminal::view::LogMask loggingMask =
+		terminal::view::LogMask::ParserError |
+		terminal::view::LogMask::InvalidOutput |
+		terminal::view::LogMask::UnsupportedOutput;
 
     std::string wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82";
 
@@ -125,6 +130,7 @@ struct Config {
             {terminal::CharInputEvent{'c', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::CopySelection{}},
             {terminal::CharInputEvent{'v', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::PasteClipboard{}},
             {terminal::MousePressEvent{terminal::MouseButton::Middle, terminal::Modifier::None}, actions::PasteSelection{}},
+            {terminal::CharInputEvent{'n', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::NewTerminal{}},
         };
     }
 };

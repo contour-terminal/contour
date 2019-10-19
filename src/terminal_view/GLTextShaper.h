@@ -24,6 +24,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace terminal::view {
+
 class GLTextShaper {
   public:
     GLTextShaper(Font& _regularFont, glm::mat4 const& _projection);
@@ -68,3 +70,4 @@ class GLTextShaper {
     GLint colorLocation_;
 };
 
+} // namespace terminal::view

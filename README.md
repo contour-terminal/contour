@@ -118,6 +118,7 @@ input_mapping:
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
     - { mods: [Control, Shift], key: Equal,         action: IncreaseFontSize }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
+    - { mods: [Control, Shift], key: N,             action: NewTerminal }
     - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
     - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }

@@ -138,34 +138,42 @@ bool UIWindow::enableBackgroundBlur(bool _enable)
         const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));
         if (hModule)
         {
+			enum WindowCompositionAttribute : int {
+				// ...
+				WCA_ACCENT_POLICY = 19,
+				// ...
+			};
+			enum AcceptState : int {
+				ACCENT_DISABLED = 0,
+				ACCENT_ENABLE_GRADIENT = 1,
+				ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
+				ACCENT_ENABLE_BLURBEHIND = 3,
+				ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
+				ACCENT_ENABLE_HOSTBACKDROP = 5,
+			};
             struct ACCENTPOLICY
             {
-                int nAccentState;
+                AcceptState nAccentState;
                 int nFlags;
                 int nColor;
                 int nAnimationId;
             };
             struct WINCOMPATTRDATA
             {
-                int nAttribute;
-                PVOID pData;
+                WindowCompositionAttribute nAttribute;
+                void const* pData;
                 ULONG ulDataSize;
             };
-            typedef BOOL(WINAPI *pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA*);
+            typedef BOOL(WINAPI *pSetWindowCompositionAttribute)(HWND, WINCOMPATTRDATA const*);
             const pSetWindowCompositionAttribute SetWindowCompositionAttribute = (pSetWindowCompositionAttribute)GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {
-				if (_enable)
-				{
-					ACCENTPOLICY policy = { 3, 0, 0, 0 }; // ACCENT_ENABLE_BLURBEHIND=3...
-					WINCOMPATTRDATA data = { 19, &policy, sizeof(ACCENTPOLICY) }; // WCA_ACCENT_POLICY=19
-					BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
-					success = rs != FALSE;
-				}
-				else
-				{
-					success = false; // TODO: how to disable me again?
-				}
+				auto const policy = _enable
+					? ACCENTPOLICY{ ACCENT_ENABLE_BLURBEHIND, 0, 0, 0 }
+					: ACCENTPOLICY{ ACCENT_DISABLED, 0, 0, 0 };
+				auto const data = WINCOMPATTRDATA{ WCA_ACCENT_POLICY, &policy, sizeof(ACCENTPOLICY) };
+				BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
+				success = rs != FALSE;
             }
             FreeLibrary(hModule);
         }

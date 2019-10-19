@@ -21,6 +21,8 @@
 
 using namespace std;
 
+namespace terminal::view {
+
 CursorShape makeCursorShape(string const& _name)
 {
 	auto const name = ground::toLower(_name);
@@ -197,3 +199,4 @@ void GLCursor::render(glm::ivec2 _pos)
     glDrawArrays(drawMode_, 0, drawCount_);
 }
 
+} // namespace terminal::view

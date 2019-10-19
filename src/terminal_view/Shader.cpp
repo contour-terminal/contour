@@ -22,6 +22,8 @@
 
 using namespace std;
 
+namespace terminal::view {
+
 Shader::Shader(string const& vertexCode, string const& fragmentCode, string const& geometryCode)
 {
     const char* vShaderCode = vertexCode.c_str();
@@ -188,3 +190,5 @@ void Shader::checkCompileErrors(GLuint shader, string type)
         }
     }
 }
+
+} // namespace terminal::view

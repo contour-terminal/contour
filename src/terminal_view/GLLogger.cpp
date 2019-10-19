@@ -24,7 +24,8 @@
 #include <fstream>
 
 using namespace std;
-using namespace terminal;
+
+namespace terminal::view {
 
 GLLogger::GLLogger(LogMask _logMask, FileSystem::path _logfile) :
     logMask_{ _logMask },
@@ -90,3 +91,5 @@ void GLLogger::flush()
     if (sink_)
         sink_->flush();
 }
+
+} // namespace terminal::view

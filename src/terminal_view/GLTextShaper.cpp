@@ -18,6 +18,8 @@
 
 using namespace std;
 
+namespace terminal::view {
+
 GLTextShaper::Glyph::~Glyph()
 {
     // TODO: release texture
@@ -209,3 +211,5 @@ void GLTextShaper::clearGlyphCache()
     for (auto& cache: cache_)
         cache.clear();
 }
+
+} // namespace terminal::view

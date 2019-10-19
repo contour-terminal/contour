@@ -35,6 +35,8 @@
 #include <string>
 #include <vector>
 
+namespace terminal::view {
+
 class Font;
 
 /// OpenGL-Terminal Object.
@@ -134,6 +136,8 @@ class TerminalView {
     bool scrollToTop();
     bool scrollToBottom();
 
+	terminal::Process const& process() const noexcept { return process_; }
+
   private:
     using cursor_pos_t = terminal::cursor_pos_t;
     using RGBColor = terminal::RGBColor;
@@ -225,3 +229,5 @@ class TerminalView {
 
 	std::function<void(std::function<void()>)> post_;
 };
+
+} // namespace terminal::view

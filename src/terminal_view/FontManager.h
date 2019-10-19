@@ -30,6 +30,8 @@
 #include <unordered_map>
 #include <vector>
 
+namespace terminal::view {
+
 enum class FontStyle {
     Regular = 0,
     Bold = 1,
@@ -122,3 +124,4 @@ class FontManager {
     std::unordered_map<std::string, Font> fonts_;
 };
 
+} // namespace terminal::view

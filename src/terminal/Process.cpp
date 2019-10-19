@@ -13,12 +13,15 @@
  */
 #include <terminal/Process.h>
 #include <terminal/PseudoTerminal.h>
+#include <fmt/format.h>
+#include <ground/stdfs.h>
 
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -29,6 +32,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <direct.h>
+#include <errno.h>
 #endif
 
 using namespace std;
@@ -155,10 +161,10 @@ static termios constructTerminalSettings(int fd)
 #endif
 
 Process::Process(
-    PseudoTerminal& _pty,
     string const& _path,
     vector<string> const& _args,
-    Environment const& _env)
+    Environment const& _env,
+    PseudoTerminal& _pty)
 {
 #if defined(__unix__) || defined(__APPLE__)
     pid_ = fork();
@@ -218,15 +224,83 @@ Process::Process(
 #endif
 }
 
+Process::Process(
+    string const& _path,
+    vector<string> const& _args,
+    Environment const& _env,
+	std::string const& _cwd,
+	bool _detached)
+{
+	detached_ = _detached;
+
+#if defined(__unix__) || defined(__APPLE__)
+    pid_ = fork();
+    switch (pid_)
+    {
+        default: // in parent
+            break;
+        case -1: // fork error
+            throw runtime_error{ getLastErrorAsString() };
+        case 0:  // in child
+        {
+			if (_detached)
+				setsid();
+
+			if (chdir(_cwd.c_str()) < 0)
+			{
+				printf("Failed to chdir to \"%s\". %s\n", _cwd.c_str(), strerror(errno));
+				exit(EXIT_FAILURE);
+			}
+
+            char** argv = new char* [_args.size() + 1];
+            for (size_t i = 0; i < _args.size(); ++i)
+                argv[i] = const_cast<char*>(_args[i].c_str());
+			argv[_args.size()] = nullptr;
+
+            for (auto&& [name, value] : _env)
+                setenv(name.c_str(), value.c_str(), true);
+
+            ::execvp(_path.c_str(), argv);
+            ::_exit(EXIT_FAILURE);
+            break;
+        }
+    }
+#else
+	// TODO: anything to handle wrt. detached spawn?
+
+	_chdir(_cwd.c_str());
+
+    string cmd = _path;
+    for (size_t i = 1; i < _args.size(); ++i)
+        cmd += " \"" + _args[i] + "\"";
+
+    // TODO: _env
+
+    BOOL success = CreateProcess(
+        nullptr,                            // No module name - use Command Line
+        const_cast<LPSTR>(cmd.c_str()),     // Command Line
+        nullptr,                            // Process handle not inheritable
+        nullptr,                            // Thread handle not inheritable
+        FALSE,                              // Inherit handles
+        EXTENDED_STARTUPINFO_PRESENT,       // Creation flags
+        nullptr,                            // Use parent's environment block
+        nullptr,                            // Use parent's starting directory
+        &startupInfo_.StartupInfo,          // Pointer to STARTUPINFO
+        &processInfo_);                     // Pointer to PROCESS_INFORMATION
+    if (!success)
+        throw runtime_error{ getLastErrorAsString() };
+#endif
+}
+
 Process::~Process()
 {
 #if defined(__unix__) || defined(__APPLE__)
-    if (pid_ != -1)
+    if (pid_ != -1 && !detached_)
         (void) wait();
 #else
     CloseHandle(processInfo_.hThread);
     CloseHandle(processInfo_.hProcess);
- 
+
     DeleteProcThreadAttributeList(startupInfo_.lpAttributeList);
     free(startupInfo_.lpAttributeList);
 #endif
@@ -311,6 +385,26 @@ std::string Process::loginShell()
         return pw->pw_shell;
     else
         return "/bin/sh"s;
+#endif
+}
+
+string Process::workingDirectory() const
+{
+#if defined(__linux__)
+	try
+	{
+		auto const path = FileSystem::path{fmt::format("/proc/{}/cwd", pid_)};
+		auto const cwd = FileSystem::read_symlink(path);
+		return cwd.string();
+	}
+	catch (...)
+	{
+		// ignore failure, and use default instead.
+		return "."s;
+	}
+#else
+	// TODO: Apple, Windows
+	return "."s;
 #endif
 }
 

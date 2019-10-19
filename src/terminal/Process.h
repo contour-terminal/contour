@@ -63,10 +63,18 @@ class [[nodiscard]] Process {
     static std::string loginShell();
 
     Process(
-		PseudoTerminal& pty,
 		const std::string& path,
 		std::vector<std::string> const& args,
-		Environment const& env
+		Environment const& env,
+		PseudoTerminal& pty
+	);
+
+    Process(
+		const std::string& _path,
+		std::vector<std::string> const& _args,
+		Environment const& _env,
+		std::string const& _cwd,
+		bool _detached
 	);
 
 	~Process();
@@ -76,8 +84,11 @@ class [[nodiscard]] Process {
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
 	[[nodiscard]] ExitStatus wait();
 
+	std::string workingDirectory() const;
+
 private:
 	mutable NativeHandle pid_{};
+	bool detached_;
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};
