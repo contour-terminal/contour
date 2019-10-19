@@ -32,6 +32,9 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#else
+#include <direct.h>
+#include <errno.h>
 #endif
 
 using namespace std;
@@ -243,7 +246,11 @@ Process::Process(
 			if (_detached)
 				setsid();
 
-			chdir(_cwd.c_str());
+			if (chdir(_cwd.c_str()) < 0)
+			{
+				printf("Failed to chdir to \"%s\". %s\n", _cwd.c_str(), strerror(errno));
+				exit(EXIT_FAILURE);
+			}
 
             char** argv = new char* [_args.size() + 1];
             for (size_t i = 0; i < _args.size(); ++i)
