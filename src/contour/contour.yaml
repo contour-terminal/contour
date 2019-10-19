@@ -95,7 +95,7 @@ background:
 input_mapping:
     - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
-    - { mods: [Control, Shift], key: Add,           action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: Equal,         action: IncreaseFontSize }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
     - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
