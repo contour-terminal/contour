@@ -84,6 +84,12 @@ void createFileIfNotExists(FileSystem::path const& _path)
     }
 }
 
+template <typename T>
+inline auto mapAction(std::string_view _name)
+{
+	return pair{_name, Action{T{}}};
+}
+
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
@@ -108,24 +114,24 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             return nullopt;
 
         auto static const mappings = array{
-            pair{"ToggleFullscreen"sv, Action{actions::ToggleFullScreen{}}},
-            pair{"IncreaseFontSize"sv, Action{actions::IncreaseFontSize{}}},
-            pair{"DecreaseFontSize"sv, Action{actions::DecreaseFontSize{}}},
-            pair{"IncreaseOpacity"sv, Action{actions::IncreaseOpacity{}}},
-            pair{"DecreaseOpacity"sv, Action{actions::DecreaseOpacity{}}},
-            pair{"ScreenshotVT"sv, Action{actions::ScreenshotVT{}}},
-            pair{"ScrollOneUp"sv, Action{actions::ScrollOneUp{}}},
-            pair{"ScrollOneDown"sv, Action{actions::ScrollOneDown{}}},
-            pair{"ScrollUp"sv, Action{actions::ScrollUp{}}},
-            pair{"ScrollDown"sv, Action{actions::ScrollDown{}}},
-            pair{"ScrollPageUp"sv, Action{actions::ScrollPageUp{}}},
-            pair{"ScrollPageDown"sv, Action{actions::ScrollPageDown{}}},
-            pair{"ScrollToTop"sv, Action{actions::ScrollToTop{}}},
-            pair{"ScrollToBottom"sv, Action{actions::ScrollToBottom{}}},
-            pair{"CopySelection"sv, Action{actions::CopySelection{}}},
-            pair{"PasteSelection"sv, Action{actions::PasteSelection{}}},
-            pair{"PasteClipboard"sv, Action{actions::PasteClipboard{}}},
-			pair{"NewTerminal"sv, Action{actions::NewTerminal{}}},
+			mapAction<actions::ToggleFullScreen>("ToggleFullscreen"),
+            mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
+            mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
+            mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
+            mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
+			mapAction<actions::ScreenshotVT>("ScreenshotVT"),
+			mapAction<actions::ScrollOneUp>("ScrollOneUp"),
+			mapAction<actions::ScrollOneDown>("ScrollOneDown"),
+			mapAction<actions::ScrollUp>("ScrollUp"),
+			mapAction<actions::ScrollDown>("ScrollDown"),
+			mapAction<actions::ScrollPageUp>("ScrollPageUp"),
+			mapAction<actions::ScrollPageDown>("ScrollPageDown"),
+			mapAction<actions::ScrollToTop>("ScrollToTop"),
+			mapAction<actions::ScrollToBottom>("ScrollToBottom"),
+			mapAction<actions::CopySelection>("CopySelection"),
+			mapAction<actions::PasteSelection>("PasteSelection"),
+			mapAction<actions::PasteClipboard>("PasteClipboard"),
+			mapAction<actions::NewTerminal>("NewTerminal"),
         };
 
         auto const name = toLower(_node.as<string>());
