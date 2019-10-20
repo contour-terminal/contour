@@ -469,7 +469,7 @@ void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
     fill(
         prev(rightMargin, n),
         rightMargin,
-        Cell{L' ', {}}
+        Cell{L' ', graphicsRendition}
     );
 }
 
