@@ -181,7 +181,7 @@ void GLCursor::updateShape()
 {
 	auto [drawMode, vertices] = getTriangles(size_, shape_);
 	drawMode_ = drawMode;
-	drawCount_ = vertices.size() / 2; // vertex count = array element size divided by dimension (2)
+	drawCount_ = static_cast<GLsizei>(vertices.size() / 2); // vertex count = array element size divided by dimension (2)
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(GLfloat), &vertices[0]);
