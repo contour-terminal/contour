@@ -49,7 +49,8 @@ Usage:
 
 Options:
   -h, --help                  Shows this help and quits.
-  -c, --config=PATH           Specifies path to config file to load from (and save to). [contour.yml]
+  -c, --config=PATH           Specifies path to config file to load from (and save to).
+                              [~/.config/contour/contour.yml]
 ```
 
 ## Example Configuration File

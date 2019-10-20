@@ -136,7 +136,7 @@ struct Config {
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);
-void loadConfigFromFile(Config& _config, std::string const& _fileName);
+void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
 
 std::string serializeYaml(Config const& _config);
-void saveConfigToFile(Config const& _config, std::string const& _fileName);
+void saveConfigToFile(Config const& _config, FileSystem::path const& _path);

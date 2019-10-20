@@ -29,17 +29,45 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
+
+#if defined(_WIN32)
+#include <Windows.h>
+#endif
 
 using namespace std;
 using namespace ground;
+
+FileSystem::path configHome(string const& _programName)
+{
+#if defined(__unix__) || defined(__APPLE__)
+	if (auto const *value = getenv("XDG_CONFIG_HOME"); value && *value)
+		return FileSystem::path{value} / _programName;
+	else if (auto const *value = getenv("HOME"); value && *value)
+		return FileSystem::path{value} / ".config" / _programName;
+#endif
+
+#if defined(_WIN32)
+	DWORD size = GetEnvironmentVariable("LOCALAPPDATA", nullptr, 0);
+	if (size)
+	{
+		std::vector<char> buf;
+		buf.resize(size);
+		GetEnvironmentVariable("LOCALAPPDATA", &buf[0], size);
+		return FileSystem::path{&buf[0]} / _programName;
+	}
+#endif
+
+	throw runtime_error{"Could not find config home folder."};
+}
 
 optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
 {
     util::Flags flags;
     flags.defineBool("help", 'h', "Shows this help and quits.");
     flags.defineBool("version", 'v', "Shows this version and exits.");
-    flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", "contour.yml");
+    flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", (configHome("contour") / "contour.yml").string());
 
     flags.parse(_argc, _argv);
     if (flags.getBool("help"))
@@ -80,7 +108,7 @@ void createFileIfNotExists(FileSystem::path const& _path)
     {
         Config freshConfig{};
         freshConfig.inputMappings = Config::defaultInputMappings();
-        saveConfigToFile(freshConfig, _path.string());
+        saveConfigToFile(freshConfig, _path);
     }
 }
 
@@ -248,12 +276,12 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     }
 }
 
-void loadConfigFromFile(Config& _config, std::string const& _fileName)
+void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
-    _config.backingFilePath = FileSystem::path{_fileName};
+    _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
 
-    YAML::Node doc = YAML::LoadFile(_fileName);
+    YAML::Node doc = YAML::LoadFile(_fileName.string());
 
     softLoadValue(doc, "shell", _config.shell);
 
@@ -450,9 +478,18 @@ std::string serializeYaml(Config const& _config)
     return os.str();
 }
 
-void saveConfigToFile(Config const& _config, std::string const& _fileName)
+void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
 {
-    auto ofs = ofstream{_fileName, ios::trunc};
+	FileSystemError ec;
+	if (!FileSystem::create_directories(_path.parent_path(), ec))
+	{
+		throw runtime_error{fmt::format(
+				"Could not create directory {}. {}",
+				_path.parent_path().string(),
+				ec.message())};
+	}
+
+    auto ofs = ofstream{_path.string(), ios::trunc};
     if (!ofs.good())
         throw runtime_error{ "Unable to create config file." };
 
