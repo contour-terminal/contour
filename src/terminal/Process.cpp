@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -67,6 +68,53 @@ namespace {
         return message;
 #endif
     }
+
+	#if defined(_WIN32)
+	terminal::Process::Environment currentEnvBlock()
+	{
+		auto const out = terminal::Process::Environment{};
+		auto env = GetEnvironmentStrings();
+		while (env)
+		{
+			auto cstr = env;
+			auto slen = strlen(cstr);
+			env += slen + 1;
+		}
+		return out;
+	}
+	class InheritingEnvBlock {
+	  public:
+		using Environment = terminal::Process::Environment;
+
+		explicit InheritingEnvBlock(Environment const& _newValues)
+		{
+			for (auto const& env: _newValues)
+			{
+				if (auto len = GetEnvironmentVariable(env.first.c_str(), nullptr, 0); len != 0)
+				{
+					vector<char> buf;
+					buf.reserve(len);
+					GetEnvironmentVariable(env.first.c_str(), &buf[0], len);
+					oldValues_[env.first] = string(&buf[0], len - 1);
+				}
+				if (!env.second.empty())
+					SetEnvironmentVariable(env.first.c_str(), env.second.c_str());
+				else
+					SetEnvironmentVariable(env.first.c_str(), nullptr);
+			}
+		}
+
+		~InheritingEnvBlock()
+		{
+			for (auto const& env: oldValues_)
+				SetEnvironmentVariable(env.first.c_str(), env.second.c_str());
+		}
+
+	  private:
+		Environment oldValues_;
+	};
+	#endif
+
 } // anonymous namespace
 
 namespace terminal {
@@ -206,7 +254,7 @@ Process::Process(
     for (size_t i = 1; i < _args.size(); ++i)
         cmd += " \"" + _args[i] + "\"";
 
-    // TODO: _env
+	auto const envScope = InheritingEnvBlock{_env};
 
     BOOL success = CreateProcess(
         nullptr,                            // No module name - use Command Line
@@ -268,13 +316,11 @@ Process::Process(
 #else
 	// TODO: anything to handle wrt. detached spawn?
 
-	_chdir(_cwd.c_str());
-
     string cmd = _path;
     for (size_t i = 1; i < _args.size(); ++i)
         cmd += " \"" + _args[i] + "\"";
 
-    // TODO: _env
+	auto const envScope = InheritingEnvBlock{_env};
 
     BOOL success = CreateProcess(
         nullptr,                            // No module name - use Command Line
@@ -284,7 +330,7 @@ Process::Process(
         FALSE,                              // Inherit handles
         EXTENDED_STARTUPINFO_PRESENT,       // Creation flags
         nullptr,                            // Use parent's environment block
-        nullptr,                            // Use parent's starting directory
+        _cwd.c_str(),                       // Use parent's starting directory
         &startupInfo_.StartupInfo,          // Pointer to STARTUPINFO
         &processInfo_);                     // Pointer to PROCESS_INFORMATION
     if (!success)
