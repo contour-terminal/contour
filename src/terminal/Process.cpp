@@ -27,7 +27,7 @@
 #include <string>
 #include <unordered_map>
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 #include <utmp.h>
 #include <pwd.h>
 #include <sys/types.h>
@@ -40,12 +40,14 @@
 
 using namespace std;
 
+namespace terminal {
+
 namespace {
     string getLastErrorAsString()
     {
-#if defined(__unix__) || defined(__APPLE__)
+		#if defined(__unix__) || defined(__APPLE__)
         return strerror(errno);
-#else
+		#else
         DWORD errorMessageID = GetLastError();
         if (errorMessageID == 0)
             return "";
@@ -66,22 +68,10 @@ namespace {
         LocalFree(messageBuffer);
 
         return message;
-#endif
+		#endif
     }
 
 	#if defined(_WIN32)
-	terminal::Process::Environment currentEnvBlock()
-	{
-		auto const out = terminal::Process::Environment{};
-		auto env = GetEnvironmentStrings();
-		while (env)
-		{
-			auto cstr = env;
-			auto slen = strlen(cstr);
-			env += slen + 1;
-		}
-		return out;
-	}
 	class InheritingEnvBlock {
 	  public:
 		using Environment = terminal::Process::Environment;
@@ -115,12 +105,7 @@ namespace {
 	};
 	#endif
 
-} // anonymous namespace
-
-namespace terminal {
-
-#if defined(_MSC_VER)
-namespace {
+	#if defined(_WIN32)
     HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEX& _startupInfoEx, PseudoTerminal& _pty)
     {
         // Initializes the specified startup info struct with the required properties and
@@ -160,10 +145,10 @@ namespace {
         }
         return hr;
     }
+	#endif
 } // anonymous namespace
-#endif
 
-#if !defined(_MSC_VER)
+#if !defined(_WIN32)
 static termios getTerminalSettings(int fd)
 {
     termios tio;
@@ -424,7 +409,7 @@ Process::ExitStatus Process::wait()
 
 std::string Process::loginShell()
 {
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     return "powershell.exe"s;
 #else
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
