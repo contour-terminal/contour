@@ -1,5 +1,4 @@
 # Contour - A modern C++ Terminal Emulator
-[![CircleCI](https://circleci.com/gh/christianparpart/contour.svg?style=svg)](https://circleci.com/gh/christianparpart/contour)
 ![Build](https://github.com/christianparpart/contour/workflows/Ubuntu/badge.svg)
 ![Build](https://github.com/christianparpart/contour/workflows/Windows/badge.svg)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
