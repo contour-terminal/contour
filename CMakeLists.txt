@@ -12,6 +12,7 @@ endif()
 
 include(EnableCcache)
 include(ClangTidy)
+include(CIncludeMe)
 find_package(Threads)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})

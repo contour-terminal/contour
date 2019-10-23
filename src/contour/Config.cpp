@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include "Config.h"
+#include "contour_yaml.h"
 #include "Flags.h"
 
 #include <ground/overloaded.h>
@@ -102,13 +103,21 @@ void softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
 
 void createFileIfNotExists(FileSystem::path const& _path)
 {
-    FileSystemError errorCode;
-    auto const& status = FileSystem::status(_path, errorCode);
-    if (!FileSystem::is_regular_file(status))
+    if (!FileSystem::is_regular_file(_path))
     {
-        Config freshConfig{};
-        freshConfig.inputMappings = Config::defaultInputMappings();
-        saveConfigToFile(freshConfig, _path);
+		FileSystemError ec;
+		FileSystem::create_directories(_path.parent_path(), ec);
+		if (ec)
+		{
+			throw runtime_error{fmt::format(
+					"Could not create directory {}. {}",
+					_path.parent_path().string(),
+					ec.message())};
+		}
+		ofstream{_path.string()}.write(
+			&contour::default_config_yaml[0],
+			contour::default_config_yaml.size()
+		);
     }
 }
 

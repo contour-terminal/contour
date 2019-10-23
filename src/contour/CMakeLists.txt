@@ -14,13 +14,17 @@ find_package(glfw3 ${GLFW_VER} CONFIG REQUIRED)
 
 option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 
+CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
+
 add_executable(contour
 	Contour.cpp Contour.h
 	Config.cpp Config.h
 	Flags.cpp Flags.h
 	UIWindow.cpp UIWindow.h
 	main.cpp
+	"${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )
+target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw terminal_view ground yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
