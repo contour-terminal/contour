@@ -34,6 +34,20 @@
 using namespace std;
 using namespace std::placeholders;
 
+string Contour::launcher() const
+{
+	// TODO: could be configurable with the below as default
+	#if defined(__APPLE__)
+		return "open"s;
+	#elif defined(_WIN32)
+		return "explorer";
+	#elif defined(__unix__)
+		return "xdg-open";
+	#else
+		#error "Unknown platform"
+	#endif
+}
+
 Contour::Contour(std::string _programPath, Config const& _config) :
 	programPath_{move(_programPath)},
     config_{_config},
@@ -384,6 +398,11 @@ void Contour::executeAction(Action const& _action)
         },
 		[this](actions::NewTerminal) {
 			spawnNewTerminal();
+		},
+		[this](actions::OpenConfiguration) {
+			auto const fileName = FileSystem::absolute(config_.backingFilePath);
+			auto const cmd = fmt::format("{} \"{}\"", launcher(), fileName.string());
+			system(cmd.c_str());
 		}
     }, _action);
 }

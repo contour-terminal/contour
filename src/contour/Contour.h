@@ -60,6 +60,7 @@ class Contour {
     void executeAction(Action const& _action);
     std::string extractSelectionText();
 
+	std::string launcher() const;
 	void spawnNewTerminal();
 
   private:

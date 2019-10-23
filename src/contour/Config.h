@@ -45,6 +45,7 @@ namespace actions {
 	struct CopySelection{};
 	struct PasteSelection{};
 	struct NewTerminal{};
+	struct OpenConfiguration{};
 	// Quit
 	// CloseTab
 	// OpenTab
@@ -72,7 +73,8 @@ using Action = std::variant<
     actions::CopySelection,
     actions::PasteSelection,
     actions::PasteClipboard,
-	actions::NewTerminal
+	actions::NewTerminal,
+	actions::OpenConfiguration
 >;
 
 struct InputMapping {
