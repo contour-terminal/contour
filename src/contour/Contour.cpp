@@ -402,7 +402,8 @@ void Contour::executeAction(Action const& _action)
 		[this](actions::OpenConfiguration) {
 			auto const fileName = FileSystem::absolute(config_.backingFilePath);
 			auto const cmd = fmt::format("{} \"{}\"", launcher(), fileName.string());
-			system(cmd.c_str());
+			if (system(cmd.c_str()) != EXIT_SUCCESS)
+				cerr << "Couldn't open configuration.\n";
 		}
     }, _action);
 }
