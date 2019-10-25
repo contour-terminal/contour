@@ -162,6 +162,8 @@ inline std::u32string decode(std::string const& _u8string)
 
 // UTF8-representation of Unicode character.
 struct Bytes : public std::vector<uint8_t> {
+	Bytes() {}
+
     explicit Bytes(uint8_t b0) {
         emplace_back(b0);
     }
@@ -194,6 +196,31 @@ inline std::string to_string(Bytes const& _utf8)
     for (auto b: _utf8)
         s.push_back(static_cast<char>(b));
     return s;
+}
+
+inline Bytes encode(char16_t character)
+{
+    if (character <= 0x7F)
+        return Bytes{static_cast<uint8_t>(character & 0b0111'1111)};
+    else if (character <= 0x07FF)
+        return Bytes{static_cast<uint8_t>(((character >> 6) & 0b0001'1111) | 0b1100'0000),
+                     static_cast<uint8_t>(((character >> 0) & 0b0011'1111) | 0b1000'0000)};
+    else
+        return Bytes{static_cast<uint8_t>(((character >> 12) & 0b0000'1111) | 0b1110'0000),
+                     static_cast<uint8_t>(((character >> 6) & 0b0011'1111) | 0b1000'0000),
+                     static_cast<uint8_t>(((character >> 0) & 0b0011'1111) | 0b1000'0000)};
+}
+
+inline Bytes encode(char16_t const* cstr)
+{
+	Bytes out;
+	while (*cstr)
+	{
+		auto const chr = encode(*cstr);
+		out.insert(end(out), begin(chr), end(chr));
+		++cstr;
+	}
+	return out;
 }
 
 inline Bytes encode(char32_t character)
