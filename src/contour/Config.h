@@ -13,12 +13,13 @@
  */
 #pragma once
 
-#include <terminal_view/GLCursor.h>
-#include <terminal_view/GLLogger.h>
 #include <terminal/Color.h>
 #include <terminal/WindowSize.h>
-#include <terminal/Process.h>
+#include <terminal_view/GLCursor.h>
+#include <terminal_view/GLLogger.h>
+
 #include <ground/stdfs.h>
+
 #include <optional>
 #include <string>
 #include <variant>
@@ -86,55 +87,26 @@ struct Config {
     FileSystem::path backingFilePath;
     std::optional<FileSystem::path> logFilePath;
 
-    std::string shell = terminal::Process::loginShell();
-    terminal::WindowSize terminalSize = {80, 25};
-    std::optional<size_t> maxHistoryLineCount = {8000};
-    size_t historyScrollMultiplier = 3;
-    bool autoScrollOnUpdate = true;
-    bool fullscreen = false;
-    unsigned short fontSize = 12;
-    std::string fontFamily = "Fira Code, Ubuntu Mono, Consolas, monospace";
-    terminal::view::CursorShape cursorShape = terminal::view::CursorShape::Block;
-    bool cursorBlinking = true;
-    unsigned int tabWidth = 8;
-    terminal::Opacity backgroundOpacity = terminal::Opacity::Opaque; // value between 0 (fully transparent) and 0xFF (fully visible).
-    bool backgroundBlur = false; // On Windows 10, this will enable Acrylic Backdrop.
-    terminal::view::LogMask loggingMask =
-		terminal::view::LogMask::ParserError |
-		terminal::view::LogMask::InvalidOutput |
-		terminal::view::LogMask::UnsupportedOutput;
+    std::string shell;
 
-    std::string wordDelimiters = " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82";
+    terminal::WindowSize terminalSize;
+    std::optional<size_t> maxHistoryLineCount;
+    size_t historyScrollMultiplier;
+    bool autoScrollOnUpdate;
+    bool fullscreen;
+    unsigned short fontSize;
+    std::string fontFamily;
+    terminal::view::CursorShape cursorShape;
+    bool cursorBlinking;
+    unsigned int tabWidth;
+    terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
+    bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
+    terminal::view::LogMask loggingMask;
+
+    std::string wordDelimiters;
 
     terminal::ColorProfile colorProfile{};
     std::vector<InputMapping> inputMappings;
-
-    static std::vector<InputMapping> defaultInputMappings()
-    {
-        return {
-            {terminal::KeyInputEvent{terminal::Key::Enter, terminal::Modifier::Alt}, actions::ToggleFullScreen{}},
-            {terminal::CharInputEvent{'=', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::IncreaseFontSize{}},
-            {terminal::CharInputEvent{'-', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::DecreaseFontSize{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Control}, actions::IncreaseFontSize{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Control}, actions::DecreaseFontSize{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Alt}, actions::IncreaseOpacity{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Alt}, actions::DecreaseOpacity{}},
-            {terminal::KeyInputEvent{terminal::Key::UpArrow, terminal::Modifier::Shift}, actions::ScrollOneUp{}},
-            {terminal::KeyInputEvent{terminal::Key::DownArrow, terminal::Modifier::Shift}, actions::ScrollOneDown{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::None}, actions::ScrollUp{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::None}, actions::ScrollDown{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
-            {terminal::MousePressEvent{terminal::MouseButton::WheelDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
-            {terminal::KeyInputEvent{terminal::Key::PageUp, terminal::Modifier::Shift}, actions::ScrollPageUp{}},
-            {terminal::KeyInputEvent{terminal::Key::PageDown, terminal::Modifier::Shift}, actions::ScrollPageDown{}},
-            {terminal::KeyInputEvent{terminal::Key::Home, terminal::Modifier::Shift}, actions::ScrollToTop{}},
-            {terminal::KeyInputEvent{terminal::Key::End, terminal::Modifier::Shift}, actions::ScrollToBottom{}},
-            {terminal::CharInputEvent{'c', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::CopySelection{}},
-            {terminal::CharInputEvent{'v', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::PasteClipboard{}},
-            {terminal::MousePressEvent{terminal::MouseButton::Middle, terminal::Modifier::None}, actions::PasteSelection{}},
-            {terminal::CharInputEvent{'n', terminal::Modifier::Control + terminal::Modifier::Shift}, actions::NewTerminal{}},
-        };
-    }
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);

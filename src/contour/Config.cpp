@@ -294,6 +294,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     YAML::Node doc = YAML::LoadFile(_fileName.string());
 
     softLoadValue(doc, "shell", _config.shell);
+	if (_config.shell.empty())
+		_config.shell = terminal::Process::loginShell();
 
     if (auto terminalSize = doc["terminalSize"]; terminalSize)
     {
@@ -402,8 +404,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 			for (size_t i = 0; i < mapping.size(); ++i)
 				parseInputMapping(_config, mapping[i]);
     }
-    else
-        _config.inputMappings = Config::defaultInputMappings();
 
     if (auto logging = doc["logging"]; logging)
     {
