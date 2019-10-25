@@ -16,7 +16,7 @@ option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent 
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
-add_executable(contour
+add_executable(contour WIN32 MACOSX_BUNDLE
 	Contour.cpp Contour.h
 	Config.cpp Config.h
 	Flags.cpp Flags.h
@@ -25,6 +25,14 @@ add_executable(contour
 	"${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+if (MSVC)
+    # Tell MSVC to use main instead of WinMain for Windows subsystem executables
+    set_target_properties(contour PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup")
+endif()
+if (APPLE)
+    set_target_properties(contour PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal")
+endif()
 
 set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw terminal_view ground yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
