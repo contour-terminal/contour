@@ -16,7 +16,7 @@ option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent 
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
-add_executable(contour WIN32 MACOSX_BUNDLE
+add_executable(contour
 	Contour.cpp Contour.h
 	Config.cpp Config.h
 	Flags.cpp Flags.h
@@ -26,17 +26,33 @@ add_executable(contour WIN32 MACOSX_BUNDLE
 )
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
-if (MSVC)
-    # Tell MSVC to use main instead of WinMain for Windows subsystem executables
-    set_target_properties(contour PROPERTIES LINK_FLAGS "/ENTRY:mainCRTStartup")
-endif()
-if (APPLE)
-    set_target_properties(contour PROPERTIES MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal")
+if(WIN32)
+    set_target_properties(contour PROPERTIES
+        # Tell MSVC to create a GUI application.
+        WIN32_EXECUTABLE ON
+
+        # Tell MSVC to use main instead of WinMain for Windows subsystem executables.
+        LINK_FLAGS "/ENTRY:mainCRTStartup"
+    )
+elseif(APPLE)
+    set(contour_version "0.1.0_pre")
+    set_target_properties(contour PROPERTIES
+        MACOSX_BUNDLE ON
+        MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal"
+        MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.christianparpart.contour"
+        MACOSX_BUNDLE_LONG_VERSION_STRING "${contour_version}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${contour_version}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${contour_version}"
+        # TODO: MACOSX_BUNDLE_ICON_FILE "contour.icns"
+        # TODO: RESOURCE "images/icon.icns"
+    )
 endif()
 
 set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw terminal_view ground yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
-    list(APPEND contour_LIBRARIES ${Boost_FILESYSTEM_LIBRARY})
+    target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
+    target_link_libraries(contour PRIVATE ${Boost_LIBRARIES})
 endif()
 if(CONTOUR_BLUR_PLATFORM_KWIN_X11)
 	find_package(X11 REQUIRED)

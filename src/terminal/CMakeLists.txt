@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 #project(libterminal VERSION "0.0.0" LANGUAGES CXX)
 
 find_package(Threads)
+include(FilesystemResolver)
 
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
 

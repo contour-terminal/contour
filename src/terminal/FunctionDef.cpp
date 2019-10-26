@@ -86,18 +86,18 @@ namespace {
 		};
 	}
 
-	constexpr FunctionDef OSC(char _leader, std::string_view _mnemonic, std::string_view _comment) noexcept
-	{
-		return FunctionDef{
-			FunctionType::OSC,
-			std::nullopt,
-			std::nullopt,
-			_leader,
-			VTType::VT100,
-			_mnemonic,
-			_comment
-		};
-	}
+	// constexpr FunctionDef OSC(char _leader, std::string_view _mnemonic, std::string_view _comment) noexcept
+	// {
+	// 	return FunctionDef{
+	// 		FunctionType::OSC,
+	// 		std::nullopt,
+	// 		std::nullopt,
+	// 		_leader,
+	// 		VTType::VT100,
+	// 		_mnemonic,
+	// 		_comment
+	// 	};
+	// }
 
 	HandlerResult setMode(HandlerContext& _ctx, size_t _modeIndex, bool _enable)
 	{
