@@ -499,7 +499,7 @@ void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
 				ec.message())};
 	}
 
-    auto ofs = ofstream{_path.string(), ios::trunc};
+    auto ofs = ofstream{_path.string(), ios::app};
     if (!ofs.good())
         throw runtime_error{ "Unable to create config file." };
 
