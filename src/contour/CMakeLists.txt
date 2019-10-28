@@ -16,7 +16,7 @@ option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent 
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
-add_executable(contour
+set(contour_SRCS
 	Contour.cpp Contour.h
 	Config.cpp Config.h
 	Flags.cpp Flags.h
@@ -24,6 +24,8 @@ add_executable(contour
 	main.cpp
 	"${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )
+
+add_executable(contour ${contour_SRCS})
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 if(WIN32)
