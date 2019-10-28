@@ -266,9 +266,9 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
 
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
-    if (_modifier.control() && _characterEvent == L' ')
+    if (_modifier == Modifier::Control && _characterEvent == L' ')
         return emit("\x00");
-    else if (_modifier.control() && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
+    else if (_modifier == Modifier::Control && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
         return emit(tolower(_characterEvent) - 'a' + 1);
     else if (!_modifier.control() && utf8::isASCII(_characterEvent))
         return emit(static_cast<char>(_characterEvent));
