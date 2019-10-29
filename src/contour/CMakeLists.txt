@@ -17,25 +17,27 @@ option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
 set(contour_SRCS
-	Contour.cpp Contour.h
-	Config.cpp Config.h
-	Flags.cpp Flags.h
-	UIWindow.cpp UIWindow.h
-	main.cpp
-	"${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
+    Contour.cpp Contour.h
+    Config.cpp Config.h
+    Flags.cpp Flags.h
+    UIWindow.cpp UIWindow.h
+    main.cpp
+    "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )
 
 add_executable(contour ${contour_SRCS})
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 if(WIN32)
-    set_target_properties(contour PROPERTIES
-        # Tell MSVC to create a GUI application.
-        WIN32_EXECUTABLE ON
+    if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
+        set_target_properties(contour PROPERTIES
+            # Tell MSVC to create a GUI application.
+            WIN32_EXECUTABLE ON
 
-        # Tell MSVC to use main instead of WinMain for Windows subsystem executables.
-        LINK_FLAGS "/ENTRY:mainCRTStartup"
-    )
+            # Tell MSVC to use main instead of WinMain for Windows subsystem executables.
+            LINK_FLAGS "/ENTRY:mainCRTStartup"
+        )
+    endif()
 elseif(APPLE)
     set(contour_version "0.1.0_pre")
     set_target_properties(contour PROPERTIES
