@@ -543,10 +543,10 @@ void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
         // else if (modifier_ && modifier_ != terminal::Modifier::Shift) // Debug print unhandled characters
         // {
         //     char const* cstr = glfwGetKeyName(_key, _scanCode);
-        //     cerr << fmt::format(
-        //         "key:{}, scanCode:{}, name:{} ({})",
+        //     logger_(terminal::TraceInputEvent{fmt::format(
+        //         "unhandled key: {}, scanCode: {}, name: {} ({})",
         //         _key, _scanCode, cstr ? cstr : "(null)", terminal::to_string(modifier_)
-        //     ) << endl;
+        //     )});
         // }
     }
     else if (_action == GLFW_RELEASE)
