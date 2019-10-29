@@ -83,7 +83,7 @@ namespace {
 				if (auto len = GetEnvironmentVariable(env.first.c_str(), nullptr, 0); len != 0)
 				{
 					vector<char> buf;
-					buf.reserve(len);
+					buf.resize(len);
 					GetEnvironmentVariable(env.first.c_str(), &buf[0], len);
 					oldValues_[env.first] = string(&buf[0], len - 1);
 				}
