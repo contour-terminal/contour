@@ -237,7 +237,13 @@ Process::Process(
 
     string cmd = _path;
     for (size_t i = 1; i < _args.size(); ++i)
-        cmd += " \"" + _args[i] + "\"";
+    {
+        cmd += ' ';
+        if (_args[i].find(' ') != std::string::npos)
+            cmd += '\"' + _args[i] + '\"';
+        else
+            cmd += _args[i];
+    }
 
 	auto const envScope = InheritingEnvBlock{_env};
 
@@ -306,7 +312,7 @@ Process::Process(
     {
         cmd += ' ';
         if (_args[i].find(' ') != std::string::npos)
-            cmd += "\"" + _args[i] + "\"";
+            cmd += '\"' + _args[i] + '\"';
         else
             cmd += _args[i];
     }
