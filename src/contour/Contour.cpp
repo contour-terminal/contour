@@ -466,36 +466,46 @@ optional<terminal::InputEvent> makeInputEvent(int _key, terminal::Modifier _mods
         case GLFW_KEY_9: return CharInputEvent{'9', _mods};
         case GLFW_KEY_SEMICOLON: return CharInputEvent{';', _mods};
         case GLFW_KEY_EQUAL: return CharInputEvent{'=', _mods};
-        case GLFW_KEY_A: return CharInputEvent{'a', _mods};
-        case GLFW_KEY_B: return CharInputEvent{'b', _mods};
-        case GLFW_KEY_C: return CharInputEvent{'c', _mods};
-        case GLFW_KEY_D: return CharInputEvent{'d', _mods};
-        case GLFW_KEY_E: return CharInputEvent{'e', _mods};
-        case GLFW_KEY_F: return CharInputEvent{'f', _mods};
-        case GLFW_KEY_G: return CharInputEvent{'g', _mods};
-        case GLFW_KEY_H: return CharInputEvent{'h', _mods};
-        case GLFW_KEY_I: return CharInputEvent{'i', _mods};
-        case GLFW_KEY_J: return CharInputEvent{'j', _mods};
-        case GLFW_KEY_K: return CharInputEvent{'k', _mods};
-        case GLFW_KEY_L: return CharInputEvent{'l', _mods};
-        case GLFW_KEY_M: return CharInputEvent{'m', _mods};
-        case GLFW_KEY_N: return CharInputEvent{'n', _mods};
-        case GLFW_KEY_O: return CharInputEvent{'o', _mods};
-        case GLFW_KEY_P: return CharInputEvent{'p', _mods};
-        case GLFW_KEY_Q: return CharInputEvent{'q', _mods};
-        case GLFW_KEY_R: return CharInputEvent{'r', _mods};
-        case GLFW_KEY_S: return CharInputEvent{'s', _mods};
-        case GLFW_KEY_T: return CharInputEvent{'t', _mods};
-        case GLFW_KEY_U: return CharInputEvent{'u', _mods};
-        case GLFW_KEY_V: return CharInputEvent{'v', _mods};
-        case GLFW_KEY_W: return CharInputEvent{'w', _mods};
-        case GLFW_KEY_X: return CharInputEvent{'x', _mods};
-        case GLFW_KEY_Y: return CharInputEvent{'y', _mods};
-        case GLFW_KEY_Z: return CharInputEvent{'z', _mods};
         case GLFW_KEY_LEFT_BRACKET: return CharInputEvent{'[', _mods};
         case GLFW_KEY_BACKSLASH: return CharInputEvent{'\\', _mods};
         case GLFW_KEY_RIGHT_BRACKET: return CharInputEvent{']', _mods};
         case GLFW_KEY_GRAVE_ACCENT: return CharInputEvent{'`', _mods};
+    }
+
+    if (_mods)
+    {
+        // Do these mappings only iff modifiers are present, because
+        // we do not want to track CAPSLOCK, hence,
+        // the character callback (onChar) will kick in.
+        switch (_key)
+        {
+            case GLFW_KEY_A: return CharInputEvent{'a', _mods};
+            case GLFW_KEY_B: return CharInputEvent{'b', _mods};
+            case GLFW_KEY_C: return CharInputEvent{'c', _mods};
+            case GLFW_KEY_D: return CharInputEvent{'d', _mods};
+            case GLFW_KEY_E: return CharInputEvent{'e', _mods};
+            case GLFW_KEY_F: return CharInputEvent{'f', _mods};
+            case GLFW_KEY_G: return CharInputEvent{'g', _mods};
+            case GLFW_KEY_H: return CharInputEvent{'h', _mods};
+            case GLFW_KEY_I: return CharInputEvent{'i', _mods};
+            case GLFW_KEY_J: return CharInputEvent{'j', _mods};
+            case GLFW_KEY_K: return CharInputEvent{'k', _mods};
+            case GLFW_KEY_L: return CharInputEvent{'l', _mods};
+            case GLFW_KEY_M: return CharInputEvent{'m', _mods};
+            case GLFW_KEY_N: return CharInputEvent{'n', _mods};
+            case GLFW_KEY_O: return CharInputEvent{'o', _mods};
+            case GLFW_KEY_P: return CharInputEvent{'p', _mods};
+            case GLFW_KEY_Q: return CharInputEvent{'q', _mods};
+            case GLFW_KEY_R: return CharInputEvent{'r', _mods};
+            case GLFW_KEY_S: return CharInputEvent{'s', _mods};
+            case GLFW_KEY_T: return CharInputEvent{'t', _mods};
+            case GLFW_KEY_U: return CharInputEvent{'u', _mods};
+            case GLFW_KEY_V: return CharInputEvent{'v', _mods};
+            case GLFW_KEY_W: return CharInputEvent{'w', _mods};
+            case GLFW_KEY_X: return CharInputEvent{'x', _mods};
+            case GLFW_KEY_Y: return CharInputEvent{'y', _mods};
+            case GLFW_KEY_Z: return CharInputEvent{'z', _mods};
+        }
     }
 
     return nullopt;
