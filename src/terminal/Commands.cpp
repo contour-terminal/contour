@@ -11,15 +11,38 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <fmt/format.h>
 #include <terminal/Commands.h>
 #include <terminal/Util.h>
+
+#include <fmt/format.h>
+
+#include <algorithm>
 #include <sstream>
 
 using namespace std;
 using fmt::format;
 
 namespace terminal {
+
+CursorShape makeCursorShape(string const& _name)
+{
+    string const name = [](string const& _input) {
+        string output;
+        transform(begin(_input), end(_input), back_inserter(output), [](auto ch) { return tolower(ch); });
+        return output;
+    }(_name);
+
+    if (name == "block")
+        return CursorShape::Block;
+    else if (name == "rectangle")
+        return CursorShape::Rectangle;
+    else if (name == "underscore")
+        return CursorShape::Underscore;
+    else if (name == "bar")
+        return CursorShape::Bar;
+    else
+        throw runtime_error{"Invalid cursor shape."};
+}
 
 string to_string(GraphicsRendition s)
 {
@@ -269,7 +292,7 @@ class MnemonicBuilder {
     void operator()(RequestMode const& v) {
         build("DECRQM", fmt::format("Reuqest mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
     }
-    void operator()(SetCursorStyle const& v) { build("DECSCUSR", fmt::format("Select cursor style to {} {}", to_string(v.display), to_string(v.style))); }
+    void operator()(SetCursorStyle const& v) { build("DECSCUSR", fmt::format("Select cursor style to {} {}", to_string(v.display), to_string(v.shape))); }
     void operator()(SetTopBottomMargin const& v) {
 		if (v.bottom.has_value())
 	        build("DECSTBM", "Set top/bottom margin.", v.top.value_or(1), v.bottom.value());

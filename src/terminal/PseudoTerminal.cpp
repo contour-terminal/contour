@@ -107,7 +107,7 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
         0,
         0
     };
-    
+
 #if defined(__APPLE__)
     winsize* wsa = const_cast<winsize*>(&ws);
 #else
@@ -212,12 +212,12 @@ auto PseudoTerminal::write(char const* buf, size_t size) -> ssize_t
 #endif
 }
 
-WindowSize PseudoTerminal::size() const noexcept
+WindowSize PseudoTerminal::screenSize() const noexcept
 {
     return size_;
 }
 
-void PseudoTerminal::resize(WindowSize const& _newWindowSize)
+void PseudoTerminal::resizeScreen(WindowSize const& _newWindowSize)
 {
 #if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};

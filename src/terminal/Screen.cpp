@@ -1059,7 +1059,7 @@ void Screen::operator()(SetBackgroundColor const& v)
 void Screen::operator()(SetCursorStyle const& v)
 {
 	if (setCursorStyle_)
-		setCursorStyle_(v.display, v.style);
+		setCursorStyle_(v.display, v.shape);
 }
 
 void Screen::operator()(SetGraphicsRendition const& v)

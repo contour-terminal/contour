@@ -333,9 +333,11 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     if (auto cursor = doc["cursor"]; cursor)
     {
         if (auto shape = cursor["shape"]; shape)
-            _config.cursorShape = terminal::view::makeCursorShape(shape.as<string>());
+            _config.cursorShape = terminal::makeCursorShape(shape.as<string>());
 
-        softLoadValue(cursor, "blinking", _config.cursorBlinking);
+        bool blinking = false;
+        softLoadValue(cursor, "blinking", blinking);
+        _config.cursorDisplay = blinking ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
     }
 
     if (auto colors = doc["colors"]; colors)
@@ -468,7 +470,7 @@ std::string serializeYaml(Config const& _config)
 
     // cursor
     root["cursor"]["shape"] = to_string(_config.cursorShape);
-    root["cursor"]["blinking"] = _config.cursorBlinking;
+    root["cursor"]["blinking"] = _config.cursorDisplay == terminal::CursorDisplay::Blink;
 
     // logging
 	using terminal::view::LogMask;

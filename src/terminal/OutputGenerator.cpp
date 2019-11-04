@@ -213,24 +213,32 @@ void OutputGenerator::operator()(Command const& command)
                     sgr_add(100 + static_cast<unsigned>(get<BrightColor>(v.color)));
             }
         },
-		[&](SetCursorStyle cursor) {
-			switch (cursor.display) {
+		[&](SetCursorStyle cursorStyle) {
+			switch (cursorStyle.display) {
 				case CursorDisplay::Blink:
-					switch (cursor.style) {
-						case CursorStyle::Block:
+					switch (cursorStyle.shape) {
+                        case CursorShape::Rectangle:
+                        case CursorShape::Bar:
+                            // not supported as CSI, defaulting to BLOCK
+                            [[fallthrough]];
+						case CursorShape::Block:
 							write("\033[2 q");
 							break;
-						case CursorStyle::Underline:
+						case CursorShape::Underscore:
 							write("\033[4 q");
 							break;
 					}
 					break;
 				case CursorDisplay::Steady:
-					switch (cursor.style) {
-						case CursorStyle::Block:
+					switch (cursorStyle.shape) {
+                        case CursorShape::Rectangle:
+                        case CursorShape::Bar:
+                            // not supported as CSI, defaulting to BLOCK
+                            [[fallthrough]];
+						case CursorShape::Block:
 							write("\033[1 q");
 							break;
-						case CursorStyle::Underline:
+						case CursorShape::Underscore:
 							write("\033[3 q");
 							break;
 					}

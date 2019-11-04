@@ -55,7 +55,7 @@ public:
 	/// Releases this PTY early.
 	///
 	/// This is automatically invoked when the destructor is called.
-	virtual void close();
+	void close();
 
 	/// Reads from the terminal whatever has been written to from the other side of the terminal.
 	///
@@ -74,31 +74,13 @@ public:
 	auto write(char const* buf, size_t size) -> ssize_t;
 
     /// @returns current underlying window size in characters width and height.
-    WindowSize size() const noexcept;
+    WindowSize screenSize() const noexcept;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resize(WindowSize const& _newWindowSize);
+    virtual void resizeScreen(WindowSize const& _newWindowSize);
 
 	/// @returns The native master PTY handle.
 	PtyHandle master() const noexcept { return master_; }
-
-	/// @returns the native input handle of the master side.
-	IOHandle input() const noexcept {
-#if defined(__unix__) || defined(__APPLE__)
-		return master_;
-#else
-		return input_;
-#endif
-	}
-
-	/// @returns the native output handle of the master side.
-	IOHandle output() const noexcept {
-#if defined(__unix__) || defined(__APPLE__)
-		return master_;
-#else
-		return output_;
-#endif
-	}
 
 #if defined(__unix__) || defined(__APPLE__)
 	/// @returns the native PTY handle of the slave side (not available on Windows).

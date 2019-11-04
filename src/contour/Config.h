@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
+#include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/WindowSize.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLLogger.h>
@@ -96,8 +97,8 @@ struct Config {
     bool fullscreen;
     unsigned short fontSize;
     std::string fontFamily;
-    terminal::view::CursorShape cursorShape;
-    bool cursorBlinking;
+    terminal::CursorDisplay cursorDisplay;
+    terminal::CursorShape cursorShape;
     unsigned int tabWidth;
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.

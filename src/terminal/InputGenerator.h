@@ -200,8 +200,11 @@ struct MousePressEvent {
 };
 
 struct MouseMoveEvent {
-    int row;
-    int column;
+    /// Row number in screen coordinates [1..rows]
+    unsigned int row;
+
+    /// Column number in screen coordinates [1..cols]
+    unsigned int column;
 
     constexpr auto as_pair() const noexcept { return std::pair{ row, column }; }
 };

@@ -678,13 +678,13 @@ FunctionHandlerMap functions(VTType _vt)
 					{
 						case 0:
 						case 1:
-							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Block);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Block);
 						case 2:
-							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Block);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Block);
 						case 3:
-							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorStyle::Underline);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Underscore);
 						case 4:
-							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorStyle::Underline);
+							return _ctx.template emit<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Underscore);
 						default:
 							return HandlerResult::Invalid;
 					}

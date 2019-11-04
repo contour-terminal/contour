@@ -145,7 +145,7 @@ GLCursor::GLCursor(glm::ivec2 _size, glm::mat4 _transform, CursorShape _shape, g
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
 
-	setShape(shape_);
+	updateShape();
 }
 
 GLCursor::~GLCursor()
@@ -161,8 +161,11 @@ void GLCursor::setProjection(glm::mat4 const& _mat)
 
 void GLCursor::setShape(CursorShape _shape)
 {
-	shape_ = _shape;
-	updateShape();
+    if (_shape != shape_)
+    {
+        shape_ = _shape;
+        updateShape();
+    }
 }
 
 void GLCursor::setColor(glm::vec3 _color)

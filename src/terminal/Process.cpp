@@ -15,6 +15,7 @@
 #include <terminal/PseudoTerminal.h>
 #include <fmt/format.h>
 #include <ground/stdfs.h>
+#include <ground/overloaded.h>
 
 #include <cassert>
 #include <cerrno>
@@ -193,11 +194,10 @@ static termios constructTerminalSettings(int fd)
 }
 #endif
 
-Process::Process(
-    string const& _path,
-    vector<string> const& _args,
-    Environment const& _env,
-    PseudoTerminal& _pty)
+Process::Process(string const& _path,
+                 vector<string> const& _args,
+                 Environment const& _env,
+                 PseudoTerminal& _pty)
 {
 #if defined(__unix__) || defined(__APPLE__)
     pid_ = fork();
@@ -349,6 +349,14 @@ Process::~Process()
 #endif
 }
 
+bool Process::alive() const noexcept
+{
+    exitStatus_.reset();
+    (void) checkStatus();
+    return !exitStatus_.has_value() || !(holds_alternative<NormalExit>(*exitStatus_) ||
+                                         holds_alternative<SignalExit>(*exitStatus_));
+}
+
 optional<Process::ExitStatus> Process::checkStatus() const
 {
     if (exitStatus_.has_value())
@@ -357,29 +365,35 @@ optional<Process::ExitStatus> Process::checkStatus() const
 #if defined(__unix__) || defined(__APPLE__)
     assert(pid_ != -1);
     int status = 0;
-    if (waitpid(pid_, &status, WNOHANG) == -1)
+    int const rv = waitpid(pid_, &status, WNOHANG);
+
+    if (rv < 0)
         throw runtime_error{ getLastErrorAsString() };
-
-    pid_ = -1;
-
-    if (WIFEXITED(status))
-        return exitStatus_ = ExitStatus{ NormalExit{ WEXITSTATUS(status) } };
-    else if (WIFSIGNALED(status))
-        return exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } };
-    else if (WIFSTOPPED(status))
-        return exitStatus_ = ExitStatus{ Suspend{} };
-    else if (WIFCONTINUED(status))
-        return exitStatus_ = ExitStatus{ Resume{} };
+    else if (rv == 0)
+        return nullopt;
     else
-        throw runtime_error{ "Unknown waitpid() return value." };
+    {
+        pid_ = -1;
+
+        if (WIFEXITED(status))
+            return exitStatus_ = ExitStatus{ NormalExit{ WEXITSTATUS(status) } };
+        else if (WIFSIGNALED(status))
+            return exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } };
+        else if (WIFSTOPPED(status))
+            return exitStatus_ = ExitStatus{ Suspend{} };
+        else if (WIFCONTINUED(status))
+            return exitStatus_ = ExitStatus{ Resume{} };
+        else
+            throw runtime_error{ "Unknown waitpid() return value." };
+    }
 #else
-    if (WaitForSingleObject(processInfo_.hThread, 0) != S_OK)
-        printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
     DWORD exitCode;
-    if (GetExitCodeProcess(processInfo_.hProcess, &exitCode))
-        return exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } };
-    else
+    if (!GetExitCodeProcess(processInfo_.hProcess, &exitCode))
         throw runtime_error{ getLastErrorAsString() };
+    else if (exitCode == STILL_ACTIVE)
+        return exitStatus_;
+    else
+        return exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } };
 #endif
 }
 
@@ -449,6 +463,20 @@ string Process::workingDirectory() const
 	// TODO: Apple, Windows
 	return "."s;
 #endif
+}
+
+Process::ExitStatus Process::waitForExit()
+{
+    while (true)
+        if (visit(overloaded{[&](NormalExit) { return true; },
+                             [&](SignalExit) { return true; },
+                             [&](Suspend) { return false; },
+                             [&](Resume) { return false; },
+                  },
+                  wait()))
+            break;
+
+    return exitStatus_.value();
 }
 
 }  // namespace terminal

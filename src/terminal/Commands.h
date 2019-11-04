@@ -685,18 +685,24 @@ inline std::string to_string(CursorDisplay _v)
 	return "";
 }
 
-enum class CursorStyle { Block, Underline };
+enum class CursorShape {
+    Block,
+	Rectangle,
+    Underscore,
+    Bar,
+};
 
-inline std::string to_string(CursorStyle _v)
+CursorShape makeCursorShape(std::string const& _name);
+inline std::string to_string(CursorShape _value)
 {
-	switch (_v)
-	{
-		case CursorStyle::Block:
-			return "Block";
-		case CursorStyle::Underline:
-			return "Underline";
-	}
-	return "";
+    switch (_value)
+    {
+        case CursorShape::Block: return "Block";
+        case CursorShape::Rectangle: return "Rectangle";
+        case CursorShape::Underscore: return "Underscore";
+        case CursorShape::Bar: return "Bar";
+    }
+    return "";
 }
 
 /// DECSCUSR - Set Cursor Style
@@ -704,7 +710,7 @@ inline std::string to_string(CursorStyle _v)
 /// Select the style of the cursor on the screen.
 struct SetCursorStyle {
 	CursorDisplay display;
-	CursorStyle style;
+    CursorShape shape;
 };
 
 struct SaveWindowTitle {};

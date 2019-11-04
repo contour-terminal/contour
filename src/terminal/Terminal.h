@@ -18,10 +18,14 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/PseudoTerminal.h>
 #include <terminal/Screen.h>
+#include <terminal/Selector.h>
 
 #include <fmt/format.h>
 
+#include <atomic>
+#include <chrono>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <thread>
@@ -35,7 +39,7 @@ namespace terminal {
 /// gets updated according to the process' outputted text,
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
-class Terminal : public PseudoTerminal {
+class Terminal {
   public:
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
@@ -44,30 +48,48 @@ class Terminal : public PseudoTerminal {
         std::optional<size_t> _maxHistoryLineCount = std::nullopt,
         std::function<void()> _changeWindowTitleCallback = {},
         std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
-		Screen::OnSetCursorStyle _setCursorStyle = {},
+        std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
         Logger _logger = {},
-        Hook _onScreenCommands = {});
-    ~Terminal() override;
+        Hook _onScreenCommands = {},
+        std::string const& _wordDelimiters = "");
+    ~Terminal();
+
+    /// Retrieves reference to the underlying PTY device.
+    PseudoTerminal& device() noexcept { return pty_; }
+
+    /// Retrieves the time point this terminal instance has been spawned.
+    std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
 
     // Sends given input event to connected slave.
-    bool send(InputEvent _inputEvent);
+    bool send(InputEvent _inputEvent, std::chrono::steady_clock::time_point _now);
 
     /// Sends verbatim text in bracketed mode to application.
     void sendPaste(std::string_view const& _text);
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
+    void writeToScreen(std::string_view const& _text);
+
+    /// Checks if a render() method should be called by checking the dirty bit,
+    /// and if so, clears the dirty bit and returns true, false otherwise.
+    bool shouldRender(std::chrono::steady_clock::time_point const& _now) const;
 
     /// Thread-safe access to screen data for rendering
-    void render(Screen::Renderer const& renderer, size_t _scrollOffset = 0) const;
+    void render(Screen::Renderer const& renderer, std::chrono::steady_clock::time_point _now) const;
 
     Screen::Cell const& absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
+
+    /// @returns absolute coordinate of given _viewportCoordinate at the current viewport scroll offset.
+    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept
+    {
+        return absoluteCoordinate(_viewportCoordinate, scrollOffset_);
+    }
 
     using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 
@@ -79,12 +101,64 @@ class Terminal : public PseudoTerminal {
     /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
     std::string screenshot() const;
 
-    void resize(WindowSize const& _newWindowSize) override;
+    void resizeScreen(WindowSize const& _newWindowSize);
 
     /// Waits until process screen update thread has terminated.
     void wait();
 
     void setTabWidth(unsigned int _tabWidth);
+
+    /// Tests whether given absolute line number [1..num] is within scrolling region
+    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
+
+    size_t scrollOffset() const noexcept { return scrollOffset_; }
+
+    bool scrollUp(size_t _numLines);
+    bool scrollDown(size_t _numLines);
+    bool scrollToTop();
+    bool scrollToBottom();
+
+    // -----------------------------------------------------------------------------------
+
+    void setCursorDisplay(CursorDisplay _value);
+    void setCursorShape(CursorShape _value);
+    CursorShape cursorShape() const noexcept { return cursorShape_; }
+
+    bool shouldDisplayCursor() const noexcept
+    {
+        return cursor().visible && (cursorDisplay_ != CursorDisplay::Blink || cursorBlinkState_);
+    }
+
+    std::chrono::steady_clock::time_point lastCursorBlink() const noexcept
+    {
+        return lastCursorBlink_;
+    }
+
+    // -----------------------------------------------------------------------------------
+
+    void setWordDelimiters(std::string const& _wordDelimiters);
+    std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
+
+    // -----------------------------------------------------------------------------------
+
+    /// Tests whether some area has been selected.
+    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
+
+    /// Returns list of ranges that have been selected.
+    std::vector<Selector::Range> selection() const;
+
+    /// Clears current selection, if any currently present.
+    void clearSelection();
+
+    /// Renders only the selected area.
+    void renderSelection(terminal::Screen::Renderer _render) const;
+
+	std::chrono::duration<double, std::milli> cursorBlinkInterval() const noexcept
+	{
+		return std::chrono::duration<double, std::milli>{500.0}; // TODO: make configurable
+	}
+
+    WindowSize screenSize() const noexcept { return pty_.screenSize(); }
 
   private:
     void flushInput();
@@ -92,9 +166,32 @@ class Terminal : public PseudoTerminal {
     void useApplicationCursorKeys(bool _enable);
     void onScreenReply(std::string_view const& reply);
     void onScreenCommands(std::vector<Command> const& commands);
+    void onSetCursorStyle(CursorDisplay _display, CursorShape _shape);
 
   private:
+    /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
+    mutable std::atomic<bool> updated_;
+
     Logger logger_;
+    PseudoTerminal pty_;
+
+    CursorDisplay cursorDisplay_;
+    CursorShape cursorShape_;
+	mutable unsigned cursorBlinkState_;
+	mutable std::chrono::steady_clock::time_point lastCursorBlink_;
+
+    std::chrono::steady_clock::time_point startTime_;
+
+    std::u32string wordDelimiters_;
+    std::unique_ptr<Selector> selector_;
+
+    // helpers for detecting double/tripple clicks
+    std::chrono::steady_clock::time_point lastClick_{};
+    unsigned int speedClicks_ = 0;
+
+    size_t scrollOffset_ = 0;
+    terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
+
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
     Screen screen_;

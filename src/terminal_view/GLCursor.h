@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/Commands.h>
 #include <terminal_view/Shader.h>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
@@ -20,16 +21,6 @@
 #include <string>
 
 namespace terminal::view {
-
-enum class CursorShape {
-    Block,
-	Rectangle,
-    Underscore,
-    Bar,
-};
-
-CursorShape makeCursorShape(std::string const& _name);
-std::string to_string(CursorShape _value);
 
 class GLCursor {
   public:

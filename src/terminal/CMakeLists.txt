@@ -24,6 +24,7 @@ set(terminal_HEADERS
     Screen.h
 	Selector.h
     Terminal.h
+    TerminalProcess.h
     VTType.h
     WindowSize.h
 )
@@ -41,6 +42,7 @@ set(terminal_SOURCES
     Screen.cpp
 	Selector.cpp
     Terminal.cpp
+    TerminalProcess.cpp
     VTType.cpp
 )
 

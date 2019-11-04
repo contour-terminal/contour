@@ -79,16 +79,18 @@ class [[nodiscard]] Process {
 
 	~Process();
 
-	NativeHandle nativeHandle() const noexcept { return pid_; }
+	[[nodiscard]] NativeHandle nativeHandle() const noexcept { return pid_; }
+    [[nodiscard]] bool alive() const noexcept;
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
 	[[nodiscard]] ExitStatus wait();
+    [[nodiscard]] ExitStatus waitForExit();
 
-	std::string workingDirectory() const;
+	[[nodiscard]] std::string workingDirectory() const;
 
 private:
 	mutable NativeHandle pid_{};
-	bool detached_;
+	bool detached_ = false;
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};

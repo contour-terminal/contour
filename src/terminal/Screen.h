@@ -271,7 +271,7 @@ class Screen {
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
     using SetBracketedPaste = std::function<void(bool)>;
-	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorStyle)>;
+	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
   public:

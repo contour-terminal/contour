@@ -15,7 +15,6 @@
 
 #include <terminal/InputGenerator.h>
 #include <terminal/Screen.h> // Coordinate
-#include <terminal/Terminal.h>
 
 #include <fmt/format.h>
 

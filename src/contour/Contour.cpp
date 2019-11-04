@@ -48,7 +48,8 @@ string Contour::launcher() const
 	#endif
 }
 
-Contour::Contour(std::string _programPath, Config const& _config) :
+Contour::Contour(string _programPath, Config const& _config) :
+    now_{chrono::steady_clock::now()},
 	programPath_{move(_programPath)},
     config_{_config},
     logger_{
@@ -78,12 +79,13 @@ Contour::Contour(std::string _programPath, Config const& _config) :
         bind(&Contour::onContentScale, this, _1, _2)
     },
     terminalView_{
+        now_,
         config_.terminalSize,
         config_.maxHistoryLineCount,
         config_.wordDelimiters,
         regularFont_.get(),
         config_.cursorShape,
-		config_.cursorBlinking,
+		config_.cursorDisplay,
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,
@@ -91,7 +93,6 @@ Contour::Contour(std::string _programPath, Config const& _config) :
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),
         bind(&Contour::doResize, this, _1, _2, _3),
-		bind(&Contour::post, this, _1),
         logger_
     },
     configFileChangeWatcher_{
@@ -111,7 +112,7 @@ Contour::Contour(std::string _programPath, Config const& _config) :
             throw runtime_error{ "Could not enable background blur." };
     }
 
-    terminalView_.setTabWidth(config_.tabWidth);
+    terminalView_.terminal().setTabWidth(config_.tabWidth);
 
     glViewport(0, 0, window_.width(), window_.height());
 }
@@ -120,7 +121,7 @@ Contour::~Contour()
 {
 }
 
-void Contour::post(std::function<void()> _fn)
+void Contour::post(function<void()> _fn)
 {
 	auto lg = lock_guard{queuedCallsLock_};
 	queuedCalls_.emplace_back(move(_fn));
@@ -129,6 +130,7 @@ void Contour::post(std::function<void()> _fn)
 
 int Contour::main()
 {
+    try {
     while (terminalView_.alive() && !glfwWindowShouldClose(window_))
     {
 		now_ = chrono::steady_clock::now();
@@ -140,7 +142,7 @@ int Contour::main()
 			for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
 		}
 
-        if (terminalView_.shouldRender(now_))
+        if (terminalView_.terminal().shouldRender(now_))
             screenDirty_ = true;
 
 		// TODO: move into channeled function (queued calls)
@@ -157,9 +159,13 @@ int Contour::main()
             screenDirty_ = false;
         }
 
-
 		// The wait timeout is determined by the interval of a blinking cursor.
-		glfwWaitEventsTimeout(chrono::duration<double>(terminalView_.cursorBlinkInterval()).count());
+		glfwWaitEventsTimeout(chrono::duration<double>(terminalView_.terminal().cursorBlinkInterval()).count());
+    }
+    }
+    catch (exception const& e)
+    {
+        cerr << fmt::format("Unhandled exception caught ({}). {}", typeid(e).name(), e.what()) << endl;
     }
 
     return EXIT_SUCCESS;
@@ -181,6 +187,7 @@ void Contour::render()
     glClear(GL_COLOR_BUFFER_BIT);
 
     terminalView_.render(now_);
+    //terminal::view::render(terminalView_, now_);
 
     window_.swapBuffers();
 }
@@ -303,24 +310,24 @@ void Contour::executeInput(terminal::InputEvent const& _inputEvent)
         [&](terminal::KeyInputEvent const&) {
             if (!handled)
                 if (modifier_ != terminal::Modifier::Shift)
-                    terminalView_.send(_inputEvent, now_);
+                    terminalView_.terminal().send(_inputEvent, now_);
             keyHandled_ = true;
         },
         [&](terminal::CharInputEvent const&) {
             if (!handled && modifier_ != terminal::Modifier::Shift)
             {
-                terminalView_.send(_inputEvent, now_);
+                terminalView_.terminal().send(_inputEvent, now_);
                 keyHandled_ = true;
             }
         },
         [&](terminal::MousePressEvent const&) {
-            terminalView_.send(_inputEvent, now_);
+            terminalView_.terminal().send(_inputEvent, now_);
         },
         [&](terminal::MouseMoveEvent const&) {
-            terminalView_.send(_inputEvent, now_);
+            terminalView_.terminal().send(_inputEvent, now_);
         },
         [&](terminal::MouseReleaseEvent const&) {
-            terminalView_.send(_inputEvent, now_);
+            terminalView_.terminal().send(_inputEvent, now_);
         }
     }, _inputEvent);
 }
@@ -329,7 +336,7 @@ void Contour::executeAction(Action const& _action)
 {
     visit(overloaded{
         [this](actions::WriteScreen const& _write) {
-            terminalView_.writeToScreen(_write.chars);
+            terminalView_.terminal().writeToScreen(_write.chars);
         },
         [&](actions::ToggleFullScreen) {
             window_.toggleFullScreen();
@@ -353,37 +360,37 @@ void Contour::executeAction(Action const& _action)
             glfwPostEmptyEvent();
         },
         [&](actions::ScreenshotVT) {
-            auto const screenshot = terminalView_.screenshot();
+            auto const screenshot = terminalView_.terminal().screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
         },
         [this](actions::SendChars const& chars) {
             for (auto const ch : chars.chars)
-                terminalView_.send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None}, now_);
+                terminalView_.terminal().send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None}, now_);
         },
         [this](actions::ScrollOneUp) {
-            screenDirty_ = terminalView_.scrollUp(1) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollUp(1) || screenDirty_;
         },
         [this](actions::ScrollOneDown) {
-            screenDirty_ = terminalView_.scrollDown(1) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollDown(1) || screenDirty_;
         },
         [this](actions::ScrollUp) {
-            screenDirty_ = terminalView_.scrollUp(config_.historyScrollMultiplier) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollUp(config_.historyScrollMultiplier) || screenDirty_;
         },
         [this](actions::ScrollDown) {
-            screenDirty_ = terminalView_.scrollDown(config_.historyScrollMultiplier) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollDown(config_.historyScrollMultiplier) || screenDirty_;
         },
         [this](actions::ScrollPageUp) {
-            screenDirty_ = terminalView_.scrollUp(config_.terminalSize.rows / 2) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollUp(config_.terminalSize.rows / 2) || screenDirty_;
         },
         [this](actions::ScrollPageDown) {
-            screenDirty_ = terminalView_.scrollDown(config_.terminalSize.rows / 2) || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollDown(config_.terminalSize.rows / 2) || screenDirty_;
         },
         [this](actions::ScrollToTop) {
-            screenDirty_ = terminalView_.scrollToTop() || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollToTop() || screenDirty_;
         },
         [this](actions::ScrollToBottom) {
-            screenDirty_ = terminalView_.scrollToBottom() || screenDirty_;
+            screenDirty_ = terminalView_.terminal().scrollToBottom() || screenDirty_;
         },
         [this](actions::CopySelection) {
             string const text = extractSelectionText();
@@ -391,10 +398,10 @@ void Contour::executeAction(Action const& _action)
         },
         [this](actions::PasteSelection) {
             string const text = extractSelectionText();
-            terminalView_.sendPaste(string_view{text});
+            terminalView_.terminal().sendPaste(string_view{text});
         },
         [this](actions::PasteClipboard) {
-            terminalView_.sendPaste(glfwGetClipboardString(window_));
+            terminalView_.terminal().sendPaste(glfwGetClipboardString(window_));
         },
 		[this](actions::NewTerminal) {
 			spawnNewTerminal();
@@ -415,7 +422,7 @@ string Contour::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_.renderSelection([&](cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell) {
+    terminalView_.terminal().renderSelection([&](cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell) {
         if (_col <= lastColumn)
         {
             text += currentLine;
@@ -430,7 +437,7 @@ string Contour::extractSelectionText()
     text += currentLine;
     cout << "Copy: \"" << currentLine << '"' << endl;
 
-    terminalView_.clearSelection();
+    terminalView_.terminal().clearSelection();
 
     return text;
 }
@@ -571,7 +578,7 @@ void Contour::onChar(char32_t _char)
     {
 		now_ = chrono::steady_clock::now();
         //executeInput(terminal::CharInputEvent{_char, modifier_});
-        terminalView_.send(terminal::CharInputEvent{_char, modifier_}, now_);
+        terminalView_.terminal().send(terminal::CharInputEvent{_char, modifier_}, now_);
         keyHandled_ = true;
     }
 }
@@ -607,7 +614,7 @@ void Contour::onMouseButton(int _button, int _action, int _mods)
     }
     else if (_action == GLFW_RELEASE)
     {
-        terminalView_.send(terminal::MouseReleaseEvent{mouseButton}, now_);
+        terminalView_.terminal().send(terminal::MouseReleaseEvent{mouseButton}, now_);
     }
 }
 
@@ -615,7 +622,13 @@ void Contour::onMousePosition(double _x, double _y)
 {
 	now_ = chrono::steady_clock::now();
 
-    terminalView_.send(terminal::MouseMoveEvent{static_cast<int>(_y), static_cast<int>(_x)}, now_);
+    terminalView_.terminal().send(
+        terminal::MouseMoveEvent{
+            static_cast<unsigned>(1 + max(static_cast<int>(_y), 0) / terminalView_.cellHeight()),
+            static_cast<unsigned>(1 + max(static_cast<int>(_x), 0) / terminalView_.cellWidth())
+        },
+        now_
+    );
 }
 
 bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
@@ -648,15 +661,15 @@ bool Contour::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
 
 void Contour::onScreenUpdate()
 {
-    if (config_.autoScrollOnUpdate && terminalView_.scrollOffset())
-        terminalView_.scrollToBottom();
+    if (config_.autoScrollOnUpdate && terminalView_.terminal().scrollOffset())
+        terminalView_.terminal().scrollToBottom();
 
     glfwPostEmptyEvent();
 }
 
 void Contour::onWindowTitleChanged()
 {
-	post([this]() { glfwSetWindowTitle(window_, terminalView_.windowTitle().c_str()); });
+	post([this]() { glfwSetWindowTitle(window_, terminalView_.terminal().windowTitle().c_str()); });
 }
 
 void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
@@ -744,7 +757,7 @@ bool Contour::reloadConfigValues()
 
     bool windowResizeRequired = false;
 
-    terminalView_.setTabWidth(newConfig.tabWidth);
+    terminalView_.terminal().setTabWidth(newConfig.tabWidth);
     if (newConfig.fontFamily != config_.fontFamily)
     {
         regularFont_ = fontManager_.load(
@@ -762,7 +775,7 @@ bool Contour::reloadConfigValues()
     if (newConfig.terminalSize != config_.terminalSize && !window_.fullscreen())
         windowResizeRequired |= terminalView_.setTerminalSize(config_.terminalSize);
 
-    terminalView_.setWordDelimiters(newConfig.wordDelimiters);
+    terminalView_.terminal().setWordDelimiters(newConfig.wordDelimiters);
 
     if (windowResizeRequired && !window_.fullscreen())
     {
@@ -771,19 +784,19 @@ bool Contour::reloadConfigValues()
         window_.resize(width, height);
     }
 
-    terminalView_.setMaxHistoryLineCount(newConfig.maxHistoryLineCount);
+    terminalView_.terminal().setMaxHistoryLineCount(newConfig.maxHistoryLineCount);
 
-	if (newConfig.colorProfile.cursor != config_.colorProfile.cursor)
-		terminalView_.setCursorColor(newConfig.colorProfile.cursor);
+    if (newConfig.colorProfile.cursor != config_.colorProfile.cursor)
+        terminalView_.setCursorColor(newConfig.colorProfile.cursor);
 
-	if (newConfig.cursorShape != config_.cursorShape)
-		terminalView_.setCursorShape(newConfig.cursorShape);
+    if (newConfig.cursorShape != config_.cursorShape)
+        terminalView_.setCursorShape(newConfig.cursorShape);
 
-	if (newConfig.cursorBlinking != config_.cursorBlinking)
-		terminalView_.setCursorBlinking(newConfig.cursorBlinking);
+    if (newConfig.cursorDisplay != config_.cursorDisplay)
+        terminalView_.terminal().setCursorDisplay(newConfig.cursorDisplay);
 
-	if (newConfig.backgroundBlur != config_.backgroundBlur)
-		window_.enableBackgroundBlur(newConfig.backgroundBlur);
+    if (newConfig.backgroundBlur != config_.backgroundBlur)
+        window_.enableBackgroundBlur(newConfig.backgroundBlur);
 
     // TODO: tab width
 

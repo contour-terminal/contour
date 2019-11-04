@@ -55,7 +55,6 @@ class Contour {
     void onConfigReload(ground::FileChangeWatcher::Event _event);
     bool reloadConfigValues();
     bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
-    terminal::view::Font const& regularFont() const noexcept { return terminalView_.regularFont(); }
     void executeInput(terminal::InputEvent const& _inputEvent);
     void executeAction(Action const& _action);
     std::string extractSelectionText();
