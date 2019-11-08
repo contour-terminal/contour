@@ -19,9 +19,9 @@ jobs:
       - name: "some debug prints"
         run: |
           set -x
-          ls -hl "/Applications/"
-          find /Applications -name SDKs
-          find /Applications -name OpenGL.framework
+          ls -hl /Applications/Xcode.app
+          find /Applications/Xcode.app -name OpenGL.framework
+          ls -hl "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.15.sdk/System/Library/Frameworks/OpenGL.framework/"
       - name: "Install dependencies"
         run: |
           set -ex
