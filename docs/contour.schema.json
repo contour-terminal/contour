@@ -1,0 +1,208 @@
+{
+    "$id": "https://contour.io/contour.schema.json",
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Contour Configuration Schema",
+    "description": "Contour Configuration Schema",
+    "$comment": "TODO: Make this schema complete.",
+    "type": "object",
+    "properties": {
+        "fontSize": {
+            "title": "The font size.",
+            "type": "integer"
+        },
+        "fontFamily": {
+            "title": "Display font family.",
+            "type": "string"
+        },
+        "terminalSize": {
+            "title": "Initial terminal size when creating a new terminal window.",
+            "properties": {
+                "columns": {
+                    "type":"integer",
+                    "minimum": 1
+                },
+                "rows": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "word_delimiters": {
+            "title": "Word-delimiting characters to obey when selecting words (e.g. via mouse double click).",
+            "type": "string",
+            "examples": [
+                "\" ./\\\\()\\\"'-:,.;<>~!@#$%^&*|+=[]{}~?\\u2502\""
+            ]
+        },
+        "history": {
+            "properties": {
+                "limit": {
+                    "title": "Number of lines to limit the history to.",
+                    "type": "number",
+                    "minimum": 0
+                },
+                "scrollMultiplier": {
+                    "title": "Scroll offset multiplier to apply when scrolling up or down.",
+                    "type": "number",
+                    "minimum": 1
+                },
+                "autoScrollOnUpdate": {
+                    "title": "Decides whether or not to scroll automatically when written to the terminal screen.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "cursor": {
+            "properties": {
+                "shape": {
+                    "title": "The cursor's shape.",
+                    "type": "string",
+                    "enum": [
+                        "block",
+                        "rectangle",
+                        "underscore",
+                        "bar"
+                    ]
+                },
+                "blinking": {
+                    "title": "Whether or not the cursor should blink when visible.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "input_mapping": {
+            "title": "Input event to action mapping.",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "mods": {
+                        "title": "Key modifiers",
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "Control",
+                                "Alt",
+                                "Shift",
+                                "Meta"
+                            ]
+                        }
+                    },
+                    "key": {
+                        "title": "keyboard key press event",
+                        "type": "string",
+                        "enum": [
+                            "A", "B", "C", "D", "E", "F", "G", "H", "I",
+                            "J", "K", "L", "M", "N", "O", "P", "Q", "R",
+                            "S", "T", "U", "V", "W", "X", "Y", "Z",
+                            "Apostrophe",
+                            "Add",
+                            "Backslash",
+                            "Comma",
+                            "Decimal",
+                            "Divide",
+                            "Equal",
+                            "Left_bracket",
+                            "Minus",
+                            "Multiply",
+                            "Period",
+                            "Right_bracket",
+                            "Semicolon",
+                            "Slash",
+                            "Subtract",
+                            "Space",
+                            "Enter",
+                            "Backspace",
+                            "Tab",
+                            "Escape",
+                            "F1",
+                            "F2",
+                            "F3",
+                            "F4",
+                            "F5",
+                            "F6",
+                            "F7",
+                            "F8",
+                            "F9",
+                            "F10",
+                            "F11",
+                            "F12",
+                            "DownArrow",
+                            "LeftArrow",
+                            "RightArrow",
+                            "UpArrow",
+                            "Insert",
+                            "Delete",
+                            "Home",
+                            "End",
+                            "PageUp",
+                            "PageDown",
+                            "Numpad_NumLock",
+                            "Numpad_Divide",
+                            "Numpad_Multiply",
+                            "Numpad_Subtract",
+                            "Numpad_CapsLock",
+                            "Numpad_Add",
+                            "Numpad_Decimal",
+                            "Numpad_Enter",
+                            "Numpad_Equal",
+                            "Numpad_0",
+                            "Numpad_1",
+                            "Numpad_2",
+                            "Numpad_3",
+                            "Numpad_4",
+                            "Numpad_5",
+                            "Numpad_6",
+                            "Numpad_7",
+                            "Numpad_8",
+                            "Numpad_9"
+                        ]
+                    },
+                    "mouse": {
+                        "title": "Mouse button press event",
+                        "type": "string",
+                        "enum": ["Left", "Middle", "Right", "WheelUp", "WheelDown"]
+                    },
+                    "action": {
+                        "title": "Action to be invoked upon matching the input events.",
+                        "type": "string",
+                        "enum": [
+                            "ToggleFullscreen",
+                            "ScreenshotVT",
+                            "IncreaseFontSize",
+                            "DecreaseFontSize",
+                            "IncreaseOpacity",
+                            "DecreaseOpacity",
+                            "SendChars",
+                            "WriteScreen",
+                            "ScrollOneUp",
+                            "ScrollOneDown",
+                            "ScrollUp",
+                            "ScrollDown",
+                            "ScrollPageUp",
+                            "ScrollPageDown",
+                            "ScrollToTop",
+                            "ScrollToBottom",
+                            "PasteClipboard",
+                            "CopySelection",
+                            "PasteSelection",
+                            "NewTerminal",
+                            "OpenConfiguration"
+                        ]
+                    },
+                    "chars": {
+                        "title": "Character sequence to send.",
+                        "type": "string",
+                        "examples": [
+                            "\"\\x1B[3J\"",
+                            "\"\\0x0C\""
+                        ]
+                    }
+                }
+            }
+
+        }
+    },
+    "required": ["fontSize", "fontFamily"]
+}

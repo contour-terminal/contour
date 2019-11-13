@@ -1,5 +1,15 @@
 # Contour Terminal Emulator - Internals
 
+## Configuration file schema & auto completion
+
+Add the following block to your Visual Studio Code's `settings.json`:
+
+```json
+    "yaml.schemas": {
+        "docs/contour.schema.json": ["contour.yaml"]
+    },
+```
+
 ## Repository Layout
 
 * **docs/** - Project related documentation
