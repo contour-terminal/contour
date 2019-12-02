@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(Toolchain)
 
 project(contour VERSION "0.0.0" LANGUAGES CXX)
 
@@ -9,6 +8,19 @@ set(MASTER_PROJECT OFF)
 if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
     set(MASTER_PROJECT ON)
 endif()
+
+# setting defaults
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
+    add_compile_options(-Wall)
+    add_compile_options(-Wextra)
+elseif(DEFINED MSVC)
+    add_definitions(-DNOMINMAX)
+endif()
+
 
 include(EnableCcache)
 include(ClangTidy)
@@ -56,13 +68,6 @@ if(CONTOUR_EMBEDDED_YAML_CPP)
 	add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/yaml-cpp")
 else()
 	# master project must provide its own fmtlib
-endif()
-
-# ----------------------------------------------------------------------------
-if(NOT MSVC)
-    add_compile_options(-Wall -Werror -pedantic)
-else()
-    add_definitions(-DNOMINMAX)
 endif()
 
 # ----------------------------------------------------------------------------
