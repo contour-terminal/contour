@@ -258,9 +258,9 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
         [&](CharInputEvent const& _chr) { return generate(_chr.value, _chr.modifier); },
 		// TODO: the mouse input events should only generate input and return true *iff* requested
 		//       by the connected application, returning false immediately otherwise.
-        [&](MousePressEvent const& _mousePress) { return false /*TODO: generate(_mouse.button, _mouse.modifier)*/; },
-        [&](MouseMoveEvent const& _mouseMove) { return false; /* TODO */ },
-        [&](MouseReleaseEvent const& _mouseRelease) { return false; /* TODO */ },
+        [&](MousePressEvent const& /*_mousePress*/) { return false /*TODO: generate(_mouse.button, _mouse.modifier)*/; },
+        [&](MouseMoveEvent const& /*_mouseMove*/) { return false; /* TODO */ },
+        [&](MouseReleaseEvent const& /*_mouseRelease*/) { return false; /* TODO */ },
     }, _inputEvent);
 }
 

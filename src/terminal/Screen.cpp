@@ -713,16 +713,16 @@ std::string Screen::screenshot() const
 }
 
 // {{{ ops
-void Screen::operator()(Bell const& v)
+void Screen::operator()(Bell const&)
 {
 }
 
-void Screen::operator()(FullReset const& v)
+void Screen::operator()(FullReset const&)
 {
     resetHard();
 }
 
-void Screen::operator()(Linefeed const& v)
+void Screen::operator()(Linefeed const&)
 {
     // if (realCursorPosition().row == state_->margin_.vertical.to)
     //     state_->scrollUp(1);
@@ -734,28 +734,28 @@ void Screen::operator()(Linefeed const& v)
         state_->linefeed(realCursorPosition().column);
 }
 
-void Screen::operator()(Backspace const& v)
+void Screen::operator()(Backspace const&)
 {
     moveCursorTo({cursorPosition().row, cursorPosition().column > 1 ? cursorPosition().column - 1 : 1});
 }
 
-void Screen::operator()(DeviceStatusReport const& v)
+void Screen::operator()(DeviceStatusReport const&)
 {
     reply("\033[0n");
 }
 
-void Screen::operator()(ReportCursorPosition const& v)
+void Screen::operator()(ReportCursorPosition const&)
 {
     reply("\033[{};{}R", cursorPosition().row, cursorPosition().column);
 }
 
-void Screen::operator()(ReportExtendedCursorPosition const& v)
+void Screen::operator()(ReportExtendedCursorPosition const&)
 {
     auto const pageNum = 1;
     reply("\033[{};{};{}R", cursorPosition().row, cursorPosition().column, pageNum);
 }
 
-void Screen::operator()(SendDeviceAttributes const& v)
+void Screen::operator()(SendDeviceAttributes const&)
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
     reply("\033[?64;{}c",
@@ -765,7 +765,7 @@ void Screen::operator()(SendDeviceAttributes const& v)
                   | DeviceAttributes::AnsiTextLocator));
 }
 
-void Screen::operator()(SendTerminalId const& v)
+void Screen::operator()(SendTerminalId const&)
 {
     // terminal protocol type
     auto constexpr Pp = static_cast<unsigned>(VTType::VT420);
@@ -780,26 +780,26 @@ void Screen::operator()(SendTerminalId const& v)
     reply("\033[{};{};{}c", Pp, Pv, Pc);
 }
 
-void Screen::operator()(ClearToEndOfScreen const& v)
+void Screen::operator()(ClearToEndOfScreen const&)
 {
     for (auto line = state_->currentLine; line != end(state_->lines); ++line)
         fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 
-void Screen::operator()(ClearToBeginOfScreen const& v)
+void Screen::operator()(ClearToBeginOfScreen const&)
 {
     for (auto line = begin(state_->lines); line != next(state_->currentLine); ++line)
         fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 
-void Screen::operator()(ClearScreen const& v)
+void Screen::operator()(ClearScreen const&)
 {
     // https://vt100.net/docs/vt510-rm/ED.html
     for (auto& line : state_->lines)
         fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
 }
 
-void Screen::operator()(ClearScrollbackBuffer const& v)
+void Screen::operator()(ClearScrollbackBuffer const&)
 {
     state_->savedLines.clear();
 }
@@ -823,7 +823,7 @@ void Screen::operator()(ScrollDown const& v)
     state_->scrollDown(v.n);
 }
 
-void Screen::operator()(ClearToEndOfLine const& v)
+void Screen::operator()(ClearToEndOfLine const&)
 {
     fill(
         state_->currentColumn,
@@ -832,7 +832,7 @@ void Screen::operator()(ClearToEndOfLine const& v)
     );
 }
 
-void Screen::operator()(ClearToBeginOfLine const& v)
+void Screen::operator()(ClearToBeginOfLine const&)
 {
     fill(
         begin(*state_->currentLine),
@@ -841,7 +841,7 @@ void Screen::operator()(ClearToBeginOfLine const& v)
     );
 }
 
-void Screen::operator()(ClearLine const& v)
+void Screen::operator()(ClearLine const&)
 {
     fill(
         begin(*state_->currentLine),
@@ -976,7 +976,7 @@ void Screen::operator()(MoveCursorToColumn const& v)
     state_->verifyState();
 }
 
-void Screen::operator()(MoveCursorToBeginOfLine const& v)
+void Screen::operator()(MoveCursorToBeginOfLine const&)
 {
     state_->wrapPending = false;
     state_->cursor.column = 1;
@@ -997,24 +997,24 @@ void Screen::operator()(MoveCursorToLine const& v)
     moveCursorTo({v.row, state_->cursor.column});
 }
 
-void Screen::operator()(MoveCursorToNextTab const& v)
+void Screen::operator()(MoveCursorToNextTab const&)
 {
     auto const n = 1 + state_->tabWidth - state_->cursor.column % state_->tabWidth;
     (*this)(MoveCursorForward{n});
     // TODO: I guess something must remember when a \t was added, for proper move-back?
 }
 
-void Screen::operator()(SaveCursor const& v)
+void Screen::operator()(SaveCursor const&)
 {
     state_->saveState();
 }
 
-void Screen::operator()(RestoreCursor const& v)
+void Screen::operator()(RestoreCursor const&)
 {
     state_->restoreState();
 }
 
-void Screen::operator()(Index const& v)
+void Screen::operator()(Index const&)
 {
     if (realCursorPosition().row == state_->margin_.vertical.to)
         state_->scrollUp(1);
@@ -1022,7 +1022,7 @@ void Screen::operator()(Index const& v)
         moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
 }
 
-void Screen::operator()(ReverseIndex const& v)
+void Screen::operator()(ReverseIndex const&)
 {
     if (realCursorPosition().row == state_->margin_.vertical.from)
         state_->scrollDown(1);
@@ -1030,7 +1030,7 @@ void Screen::operator()(ReverseIndex const& v)
         moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
 }
 
-void Screen::operator()(BackIndex const& v)
+void Screen::operator()(BackIndex const&)
 {
     if (realCursorPosition().column == state_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
@@ -1038,7 +1038,7 @@ void Screen::operator()(BackIndex const& v)
         moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
 }
 
-void Screen::operator()(ForwardIndex const& v)
+void Screen::operator()(ForwardIndex const&)
 {
     if (realCursorPosition().column == state_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
@@ -1230,12 +1230,12 @@ void Screen::operator()(ApplicationKeypadMode const& v)
         setApplicationkeypadMode_(v.enable);
 }
 
-void Screen::operator()(DesignateCharset const& v)
+void Screen::operator()(DesignateCharset const&)
 {
     // TODO
 }
 
-void Screen::operator()(SingleShiftSelect const& v)
+void Screen::operator()(SingleShiftSelect const&)
 {
     // TODO
 }
@@ -1253,12 +1253,12 @@ void Screen::operator()(ChangeWindowTitle const& v)
         onWindowTitleChanged_();
 }
 
-void Screen::operator()(SaveWindowTitle const& v)
+void Screen::operator()(SaveWindowTitle const&)
 {
     savedWindowTitles_.push(windowTitle_);
 }
 
-void Screen::operator()(RestoreWindowTitle const& v)
+void Screen::operator()(RestoreWindowTitle const&)
 {
     if (!savedWindowTitles_.empty())
     {

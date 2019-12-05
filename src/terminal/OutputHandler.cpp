@@ -77,7 +77,7 @@ string OutputHandler::sequenceString(char _finalChar, string const& _prefix) con
     return sstr.str();
 }
 
-void OutputHandler::invokeAction(ActionClass _actionClass, Action _action, char32_t _currentChar)
+void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, char32_t _currentChar)
 {
     currentChar_ = _currentChar;
 
@@ -117,7 +117,10 @@ void OutputHandler::invokeAction(ActionClass _actionClass, Action _action, char3
             else if (intermediateCharacters_ == "#" && _currentChar == '8')
                 emit<ScreenAlignmentPattern>();
             else if (intermediateCharacters_ == "(" && _currentChar == 'B')
-                logUnsupported("Designate Character Set US-ASCII.");
+            {
+                // TODO: ESC ( B
+                log<UnsupportedOutputEvent>("Designate Character Set US-ASCII.");
+            }
             else if (_currentChar == '0')
             {
                 if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
@@ -152,7 +155,7 @@ void OutputHandler::invokeAction(ActionClass _actionClass, Action _action, char3
                         break;
                     default:
                     {
-                        log<InvalidOutputEvent>("OSC " + intermediateCharacters_);
+                        log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
                         break;
                     }
                 }
@@ -166,8 +169,9 @@ void OutputHandler::invokeAction(ActionClass _actionClass, Action _action, char3
         case Action::Hook:
         case Action::Put:
         case Action::Unhook:
-            logUnsupported("Action: {} {} \"{}\"", to_string(_action), escape(_currentChar),
-                           escape(intermediateCharacters_));
+            log<UnsupportedOutputEvent>(fmt::format(
+                "Action: {} {} \"{}\"", to_string(_action), escape(_currentChar),
+                escape(intermediateCharacters_)));
             return;
         case Action::Ignore:
         case Action::Undefined:
@@ -209,7 +213,7 @@ void OutputHandler::executeControlFunction(char _c0)
             emit<RestoreCursor>();
             break;
         default:
-            logUnsupported("ESC C0 or C1 control function: {}", escape(_c0));
+            log<UnsupportedOutputEvent>(escape(_c0));
             break;
     }
 }
@@ -254,11 +258,6 @@ void OutputHandler::dispatchCSI(char _finalChar)
 	}
 }
 
-void OutputHandler::logUnsupported(std::string_view const& msg) const
-{
-    log<UnsupportedOutputEvent>(msg);
-}
-
 void OutputHandler::logUnsupportedCSI(char _finalChar) const
 {
     log<UnsupportedOutputEvent>(sequenceString(_finalChar, "CSI"));
@@ -266,18 +265,12 @@ void OutputHandler::logUnsupportedCSI(char _finalChar) const
 
 void OutputHandler::logInvalidESC(char _finalChar, std::string const& message) const
 {
-	if (message.empty())
-    	log<InvalidOutputEvent>("{}.", sequenceString(_finalChar, "ESC"));
-	else
-    	log<InvalidOutputEvent>("{} ({})", sequenceString(_finalChar, "ESC"), message);
+    log<InvalidOutputEvent>(sequenceString(_finalChar, "ESC"), message);
 }
 
 void OutputHandler::logInvalidCSI(char _finalChar, std::string const& message) const
 {
-	if (message.empty())
-		log<InvalidOutputEvent>("{}", sequenceString(_finalChar, "CSI"));
-	else
-		log<InvalidOutputEvent>("{} ({})", sequenceString(_finalChar, "CSI"), message);
+    log<InvalidOutputEvent>(sequenceString(_finalChar, "CSI"), message);
 }
 
 }  // namespace terminal

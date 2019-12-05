@@ -219,25 +219,25 @@ class MnemonicBuilder {
         return result_;
     }
 
-    void operator()(Bell const& v) { build("\\a"); }
-    void operator()(FullReset const& v) { build("RIS", "Reset to Initial state (hard reset)"); }
-    void operator()(Linefeed const& v) { build("\\n"); }
-    void operator()(Backspace const& v) { build("\\b"); }
-    void operator()(DeviceStatusReport const& v) {} // TODO
-    void operator()(ReportCursorPosition const& v) { build("CPR", "Report cursor position"); }
-    void operator()(ReportExtendedCursorPosition const& v) { build("DECXCPR", "Report cursor position (extended)."); }
-    void operator()(SendDeviceAttributes const& v) {} // TODO
-    void operator()(SendTerminalId const& v) {} // TODO
-    void operator()(ClearToEndOfScreen const& v) { build("ED", "Clear to end of screen", 0); }
-    void operator()(ClearToBeginOfScreen const& v) { build("ED", "Clear to begin of screen", 1); }
-    void operator()(ClearScreen const& v) { build("ED", "Clear screen", 2); }
-    void operator()(ClearScrollbackBuffer const& v) { build("ED", "Clear scrollback buffer", 3); }
+    void operator()(Bell const&) { build("\\a"); }
+    void operator()(FullReset const&) { build("RIS", "Reset to Initial state (hard reset)"); }
+    void operator()(Linefeed const&) { build("\\n"); }
+    void operator()(Backspace const&) { build("\\b"); }
+    void operator()(DeviceStatusReport const&) {} // TODO
+    void operator()(ReportCursorPosition const&) { build("CPR", "Report cursor position"); }
+    void operator()(ReportExtendedCursorPosition const&) { build("DECXCPR", "Report cursor position (extended)."); }
+    void operator()(SendDeviceAttributes const&) {} // TODO
+    void operator()(SendTerminalId const&) {} // TODO
+    void operator()(ClearToEndOfScreen const&) { build("ED", "Clear to end of screen", 0); }
+    void operator()(ClearToBeginOfScreen const&) { build("ED", "Clear to begin of screen", 1); }
+    void operator()(ClearScreen const&) { build("ED", "Clear screen", 2); }
+    void operator()(ClearScrollbackBuffer const&) { build("ED", "Clear scrollback buffer", 3); }
     void operator()(EraseCharacters const& v) { build("ECH", "Erase characters", v.n); }
     void operator()(ScrollUp const& v) { build("SU", "Scroll up", v.n); }
     void operator()(ScrollDown const& v) { build("SD", "Scroll down", v.n); }
-    void operator()(ClearToEndOfLine const& v) { build("EL", "Clear to end of line", 0); }
-    void operator()(ClearToBeginOfLine const& v) { build("EL", "Clear to begin of line", 1); }
-    void operator()(ClearLine const& v)  { build("EL", "Clear line", 2); }
+    void operator()(ClearToEndOfLine const&) { build("EL", "Clear to end of line", 0); }
+    void operator()(ClearToBeginOfLine const&) { build("EL", "Clear to begin of line", 1); }
+    void operator()(ClearLine const&)  { build("EL", "Clear line", 2); }
     void operator()(CursorNextLine const& v) { build("CNL", "Cursor Next Line", v.n); }
     void operator()(CursorPreviousLine const& v) { build("CNL", "Cursor Previous Line", v.n); }
     void operator()(InsertCharacters const& v) { build("ICH", "Insert Characters", v.n); }
@@ -253,17 +253,17 @@ class MnemonicBuilder {
     void operator()(MoveCursorForward const& v) { build("CUF", "Move cursor forward", v.n); }
     void operator()(MoveCursorBackward const& v)  { build("CUB", "Move cursor backward", v.n); }
     void operator()(MoveCursorToColumn const& v) { build("CHA", "Move cursor to column", v.column); }
-    void operator()(MoveCursorToBeginOfLine const& v) { build("\\r"); }
+    void operator()(MoveCursorToBeginOfLine const&) { build("\\r"); }
     void operator()(MoveCursorTo const& v) { build("CUP", "Move cursor to position", v.row, v.column); }
     void operator()(MoveCursorToLine const& v) { build("VPA", "Move cursor to line", v.row); }
-    void operator()(MoveCursorToNextTab const& v) { build("\\t"); }
-    void operator()(SaveCursor const& v) { build("DECSC", "Save cursor"); }
-    void operator()(RestoreCursor const& v) { build("DECRC", "Restore cursor"); }
-    void operator()(Index const& v) { build("IND", "Moves cursor down (possibly scrolling)"); }
-    void operator()(ReverseIndex const& v) { build("RI", "Moves cursor up (possibly scrolling)"); }
-    void operator()(BackIndex const& v) { build("DECBI", "Moves cursor left (possibly scrolling)"); }
-    void operator()(ForwardIndex const& v) { build("DECFI", "Moves cursor right (possibly scrolling)"); }
-    void operator()(SaveWindowTitle const& v) {
+    void operator()(MoveCursorToNextTab const&) { build("\\t"); }
+    void operator()(SaveCursor const&) { build("DECSC", "Save cursor"); }
+    void operator()(RestoreCursor const&) { build("DECRC", "Restore cursor"); }
+    void operator()(Index const&) { build("IND", "Moves cursor down (possibly scrolling)"); }
+    void operator()(ReverseIndex const&) { build("RI", "Moves cursor up (possibly scrolling)"); }
+    void operator()(BackIndex const&) { build("DECBI", "Moves cursor left (possibly scrolling)"); }
+    void operator()(ForwardIndex const&) { build("DECFI", "Moves cursor right (possibly scrolling)"); }
+    void operator()(SaveWindowTitle const&) {
         build("WINMANIP", "Saves window title on stack.", 22, 0, 0);
     }
     void operator()(ResizeWindow const& v) {
@@ -277,7 +277,7 @@ class MnemonicBuilder {
                 break;
         }
     }
-    void operator()(RestoreWindowTitle const& v) {
+    void operator()(RestoreWindowTitle const&) {
         build("WINMANIP", "Restores window title from stack.", 23, 0, 0);
     }
     void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Select foreground color to {}", to_string(v.color))); }
@@ -305,12 +305,12 @@ class MnemonicBuilder {
 		else
 			build("DECSLRM", "Set left/right margin.", v.left.value_or(1));
     }
-    void operator()(ScreenAlignmentPattern const& v) { build("DECALN", "Draw Screen Alignment Pattern."); }
-    void operator()(SendMouseEvents const& v) {} // TODO
-    void operator()(ApplicationKeypadMode const& v) {} // TODO
-    void operator()(DesignateCharset const& v) {} // TODO
-    void operator()(SingleShiftSelect const& v) {} // TODO
-    void operator()(ChangeWindowTitle const& v) {} // TODO
+    void operator()(ScreenAlignmentPattern) { build("DECALN", "Draw Screen Alignment Pattern."); }
+    void operator()(SendMouseEvents) {} // TODO
+    void operator()(ApplicationKeypadMode) {} // TODO
+    void operator()(DesignateCharset) {} // TODO
+    void operator()(SingleShiftSelect) {} // TODO
+    void operator()(ChangeWindowTitle) {} // TODO
     void operator()(SoftTerminalReset) { build("DECSTR", "Soft terminal reset."); }
     void operator()(AppendChar const& v) {
         pendingText_ += utf8::to_string(utf8::encode(v.ch));

@@ -316,8 +316,8 @@ void OutputGenerator::operator()(Command const& command)
                 v.width
             );
         },
-        [&](SaveWindowTitle const& v) { write("\033[22;0;0t"); },
-        [&](RestoreWindowTitle const& v) { write("\033[23;0;0t"); },
+        [&](SaveWindowTitle const&) { write("\033[22;0;0t"); },
+        [&](RestoreWindowTitle const&) { write("\033[23;0;0t"); },
     }, command);
 }
 

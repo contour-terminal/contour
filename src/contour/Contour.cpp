@@ -422,7 +422,7 @@ string Contour::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_.terminal().renderSelection([&](cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell) {
+    terminalView_.terminal().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Screen::Cell const& _cell) {
         if (_col <= lastColumn)
         {
             text += currentLine;
@@ -544,7 +544,7 @@ static void updateModifier(terminal::Modifier& _modifier, int _glfwKey, bool _en
     }
 }
 
-void Contour::onKey(int _key, int _scanCode, int _action, int _mods)
+void Contour::onKey(int _key, int /*_scanCode*/, int _action, int /*_mods*/)
 {
     //modifier_ = makeModifier(_mods);
 
@@ -583,13 +583,13 @@ void Contour::onChar(char32_t _char)
     }
 }
 
-void Contour::onMouseScroll(double _xOffset, double _yOffset)
+void Contour::onMouseScroll(double /*_xOffset*/, double _yOffset)
 {
     auto const button = _yOffset > 0.0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
     executeInput(terminal::MousePressEvent{button, modifier_});
 }
 
-void Contour::onMouseButton(int _button, int _action, int _mods)
+void Contour::onMouseButton(int _button, int _action, int /*_mods*/)
 {
 	now_ = chrono::steady_clock::now();
 
@@ -729,7 +729,7 @@ void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
 	}
 }
 
-void Contour::onConfigReload(ground::FileChangeWatcher::Event _event)
+void Contour::onConfigReload(ground::FileChangeWatcher::Event /*_event*/)
 {
     configReloadPending_.store(true);
     glfwPostEmptyEvent();

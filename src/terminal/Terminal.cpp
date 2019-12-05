@@ -219,7 +219,7 @@ bool Terminal::send(InputEvent _inputEvent, chrono::steady_clock::time_point _no
 
             return true;
         },
-        [this](MouseReleaseEvent const& _mouseRelease) -> bool {
+        [this](MouseReleaseEvent const& /*_mouseRelease*/) -> bool {
             if (selector_)
             {
                 if (selector_->state() == Selector::State::InProgress)

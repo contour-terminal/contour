@@ -46,7 +46,7 @@ constexpr bool isC1(char32_t x) noexcept
 
 constexpr bool isControl(char32_t x) noexcept
 {
-    return (0 <= x && x < 0x1F) || (0x80 <= x && x <= 0x9F);
+    return (x < 0x1F) || (0x80 <= x && x <= 0x9F);
 }
 
 //! Decodes an UTF8 byte stream into Unicode characters of type char32_t.

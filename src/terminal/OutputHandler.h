@@ -46,22 +46,15 @@ class OutputHandler : private HandlerContext {
     void dispatchCSI(char _finalChar);
 
     template <typename Event, typename... Args>
-    void log(std::string_view const& msg, Args&&... args) const
+    void log(Args&&... args) const
     {
         if (logger_)
-            logger_(Event{ fmt::format(msg, std::forward<Args>(args)...) });
+            logger_(Event{ std::forward<Args>(args)... });
     }
 
     void logInvalidESC(char _finalChar, std::string const& message = "") const;
     void logInvalidCSI(char _finalChar, std::string const& message = "") const;
     void logUnsupportedCSI(char _finalChar) const;
-    void logUnsupported(std::string_view const& msg) const;
-
-    template <typename... Args>
-    void logUnsupported(std::string_view const& msg, Args... args) const
-    {
-        logUnsupported(fmt::format(msg, std::forward<Args>(args)...));
-    }
 
     std::string sequenceString(char _finalChar, std::string const& _prefix) const;
 

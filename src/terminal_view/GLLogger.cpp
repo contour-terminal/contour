@@ -57,25 +57,25 @@ void GLLogger::keyPress(char32_t _char, Modifier _modifier)
 void GLLogger::log(LogEvent const& _event)
 {
     LogMask const m = visit(overloaded{
-            [&](ParserErrorEvent const& v) {
+            [&](ParserErrorEvent const&) {
                 return LogMask::ParserError;
             },
-            [&](RawInputEvent const& v) {
+            [&](RawInputEvent const&) {
                 return LogMask::RawInput;
             },
-            [&](RawOutputEvent const& v) {
+            [&](RawOutputEvent const&) {
                 return LogMask::RawOutput;
             },
-            [&](InvalidOutputEvent const& v) {
+            [&](InvalidOutputEvent const&) {
                 return LogMask::InvalidOutput;
             },
-            [&](UnsupportedOutputEvent const& v) {
+            [&](UnsupportedOutputEvent const&) {
                 return LogMask::UnsupportedOutput;
             },
-            [&](TraceInputEvent const& v) {
+            [&](TraceInputEvent const&) {
                 return LogMask::TraceInput;
             },
-            [&](TraceOutputEvent const& v) {
+            [&](TraceOutputEvent const&) {
                 return LogMask::TraceOutput;
             },
         },

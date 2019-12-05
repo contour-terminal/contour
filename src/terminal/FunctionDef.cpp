@@ -210,10 +210,10 @@ namespace {
 					if (i <= 255)
 						_ctx.template emit<T>(static_cast<IndexedColor>(value));
 					else
-						;//TODO: _ctx.logInvalidCSI("Invalid color indexing.");
+                        {} // TODO: _ctx.logInvalidCSI("Invalid color indexing.");
 				}
 				else
-					;//TODO: _ctx.logInvalidCSI("Missing color index.");
+                    {} // TODO: _ctx.logInvalidCSI("Missing color index.");
 			}
 			else if (mode == 2)
 			{
@@ -226,16 +226,16 @@ namespace {
 					if (r <= 255 && g <= 255 && b <= 255)
 						_ctx.template emit<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
 					else
-						; // TODO: _ctx.logInvalidCSI("RGB color out of range.");
+                        {} // TODO: _ctx.logInvalidCSI("RGB color out of range.");
 				}
 				else
-					; // TODO: _ctx.logInvalidCSI("Invalid color mode.");
+                    {} // TODO: _ctx.logInvalidCSI("Invalid color mode.");
 			}
 			else
-				; // TODO: _ctx.logInvalidCSI("Invalid color mode.");
+                {} // TODO: _ctx.logInvalidCSI("Invalid color mode.");
 		}
 		else
-			; // TODO: _ctx.logInvalidCSI("Invalid color indexing.");
+            {} // TODO: _ctx.logInvalidCSI("Invalid color indexing.");
 
 		return i;
 	}
@@ -248,6 +248,7 @@ namespace {
 			{
 				case 0:
 					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Reset);
+                    break;
 				case 1:
 					_ctx.template emit<SetGraphicsRendition>(GraphicsRendition::Bold);
 					break;
@@ -412,7 +413,7 @@ namespace {
 		return HandlerResult::Ok;
 	}
 
-	HandlerResult requestMode(HandlerContext& _ctx, unsigned int _mode)
+	HandlerResult requestMode(HandlerContext& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
@@ -439,7 +440,7 @@ namespace {
 		}
 	}
 
-	HandlerResult requestModeDEC(HandlerContext& _ctx, unsigned int _mode)
+	HandlerResult requestModeDEC(HandlerContext& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
