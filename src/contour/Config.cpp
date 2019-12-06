@@ -170,6 +170,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 			mapAction<actions::PasteClipboard>("PasteClipboard"),
 			mapAction<actions::NewTerminal>("NewTerminal"),
 			mapAction<actions::OpenConfiguration>("OpenConfiguration"),
+			mapAction<actions::Quit>("Quit"),
         };
 
         auto const name = toLower(_node.as<string>());

@@ -108,6 +108,7 @@ input_mapping:
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard }
     - { mods: [Control, Shift], key: Comma,         action: OpenConfiguration }
+    - { mods: [Control, Shift], key: Q,             action: Quit }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
     - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
     - { mods: [Shift],          key: DownArrow,     action: ScrollOneDown }

@@ -411,7 +411,11 @@ void Contour::executeAction(Action const& _action)
 			auto const cmd = fmt::format("{} \"{}\"", launcher(), fileName.string());
 			if (system(cmd.c_str()) != EXIT_SUCCESS)
 				cerr << "Couldn't open configuration.\n";
-		}
+		},
+        [this](actions::Quit) {
+            // XXX: later warn here when more then one terminal view is open
+            terminalView_.terminal().device().close();
+        }
     }, _action);
 }
 
