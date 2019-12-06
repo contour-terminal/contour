@@ -80,11 +80,6 @@ using Action = std::variant<
     actions::Quit
 >;
 
-struct InputMapping {
-    terminal::InputEvent input;
-    Action action;
-};
-
 struct Config {
     FileSystem::path backingFilePath;
     std::optional<FileSystem::path> logFilePath;
@@ -108,7 +103,7 @@ struct Config {
     std::string wordDelimiters;
 
     terminal::ColorProfile colorProfile{};
-    std::vector<InputMapping> inputMappings;
+    std::unordered_map<terminal::InputEvent, std::vector<Action>> inputMappings;
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);

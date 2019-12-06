@@ -296,40 +296,39 @@ constexpr terminal::Modifier makeModifier(int _mods)
 
 void Contour::executeInput(terminal::InputEvent const& _inputEvent)
 {
-    bool handled = false;
-    for (InputMapping const& mapping : config_.inputMappings)
+    if (auto mapping = config_.inputMappings.find(_inputEvent); mapping != config_.inputMappings.end())
     {
-        if (_inputEvent == mapping.input)
-        {
-            executeAction(mapping.action);
-            handled = true;
-        }
+        keyHandled_ = true;
+        auto const& actions = mapping->second;
+        for (auto const& action : actions)
+            executeAction(action);
     }
-
-    visit(overloaded{
-        [&](terminal::KeyInputEvent const&) {
-            if (!handled)
+    else
+    {
+        visit(overloaded{
+            [&](terminal::KeyInputEvent const&) {
                 if (modifier_ != terminal::Modifier::Shift)
                     terminalView_.terminal().send(_inputEvent, now_);
-            keyHandled_ = true;
-        },
-        [&](terminal::CharInputEvent const&) {
-            if (!handled && modifier_ != terminal::Modifier::Shift)
-            {
-                terminalView_.terminal().send(_inputEvent, now_);
                 keyHandled_ = true;
+            },
+            [&](terminal::CharInputEvent const&) {
+                if (modifier_ != terminal::Modifier::Shift)
+                {
+                    terminalView_.terminal().send(_inputEvent, now_);
+                    keyHandled_ = true;
+                }
+            },
+            [&](terminal::MousePressEvent const&) {
+                terminalView_.terminal().send(_inputEvent, now_);
+            },
+            [&](terminal::MouseMoveEvent const&) {
+                terminalView_.terminal().send(_inputEvent, now_);
+            },
+            [&](terminal::MouseReleaseEvent const&) {
+                terminalView_.terminal().send(_inputEvent, now_);
             }
-        },
-        [&](terminal::MousePressEvent const&) {
-            terminalView_.terminal().send(_inputEvent, now_);
-        },
-        [&](terminal::MouseMoveEvent const&) {
-            terminalView_.terminal().send(_inputEvent, now_);
-        },
-        [&](terminal::MouseReleaseEvent const&) {
-            terminalView_.terminal().send(_inputEvent, now_);
-        }
-    }, _inputEvent);
+        }, _inputEvent);
+    }
 }
 
 void Contour::executeAction(Action const& _action)
