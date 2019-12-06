@@ -15,6 +15,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Commands.h>          // CursorDisplay
+#include <terminal/Process.h>
 #include <terminal/WindowSize.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLLogger.h>
@@ -85,6 +86,7 @@ struct Config {
     std::optional<FileSystem::path> logFilePath;
 
     std::string shell;
+    terminal::Process::Environment env;
 
     terminal::WindowSize terminalSize;
     std::optional<size_t> maxHistoryLineCount;

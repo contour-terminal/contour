@@ -33,15 +33,6 @@ using namespace std::placeholders;
 
 namespace terminal::view {
 
-auto const envvars = terminal::Process::Environment{
-    {"TERM", "xterm-256color"},
-    {"COLORTERM", "xterm"},
-    {"COLORFGBG", "15;0"},
-    {"LINES", ""},
-    {"COLUMNS", ""},
-    {"TERMCAP", ""}
-};
-
 inline glm::vec4 makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
 {
     return glm::vec4{
@@ -62,6 +53,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            terminal::ColorProfile const& _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
+                           terminal::Process::Environment const& _env,
                            glm::mat4 const& _projectionMatrix,
                            function<void()> _onScreenUpdate,
                            function<void()> _onWindowTitleChanged,
@@ -78,7 +70,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
     process_{
         _shell,
         {_shell},
-        envvars,
+        _env,
         _winSize,
         move(_maxHistoryLineCount),
         move(_onWindowTitleChanged),

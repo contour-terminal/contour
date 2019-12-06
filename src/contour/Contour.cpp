@@ -89,6 +89,7 @@ Contour::Contour(string _programPath, Config const& _config) :
         config_.colorProfile,
         config_.backgroundOpacity,
         config_.shell,
+        config_.env,
         glm::ortho(0.0f, static_cast<GLfloat>(window_.width()), 0.0f, static_cast<GLfloat>(window_.height())),
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),

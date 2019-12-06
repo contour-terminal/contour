@@ -51,6 +51,7 @@ class TerminalView {
                  terminal::ColorProfile const& _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
+                 terminal::Process::Environment const& _env,
                  glm::mat4 const& _projectionMatrix,
                  std::function<void()> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,

@@ -6,6 +6,11 @@
 # shell: "ssh ubuntu-vm"
 # shell: "/bin/bash"
 
+# Environment variables to be passed to the shell.
+environment:
+    TERM: xterm-256color
+    COLORTERM: truecolor
+
 # Determines the initial terminal sice in characters.
 terminalSize:
     columns: 130

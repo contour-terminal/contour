@@ -298,6 +298,22 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 	if (_config.shell.empty())
 		_config.shell = terminal::Process::loginShell();
 
+    if (auto env = doc["environment"]; env)
+    {
+        for (auto i = env.begin(); i != env.end(); ++i)
+        {
+            auto const name = i->first.as<string>();
+            auto const value = i->second.as<string>();
+            _config.env[name] = value;
+        }
+    }
+
+    // force some default env
+    if (_config.env.find("TERM") == _config.env.end())
+        _config.env["TERM"] = "xterm-256color";
+    if (_config.env.find("COLORTERM") == _config.env.end())
+        _config.env["COLORTERM"] = "truecolor";
+
     if (auto terminalSize = doc["terminalSize"]; terminalSize)
     {
         softLoadValue(terminalSize, "columns", _config.terminalSize.columns);
@@ -442,6 +458,8 @@ std::string serializeYaml(Config const& _config)
 {
     YAML::Node root;
     root["shell"] = _config.shell;
+    for (auto const [key, value] : _config.env)
+        root["environment"][key] = value;
     root["terminalSize"]["columns"] = _config.terminalSize.columns;
     root["terminalSize"]["lines"] = _config.terminalSize.rows;
     root["fontSize"] = _config.fontSize;
