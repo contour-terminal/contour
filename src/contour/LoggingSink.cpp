@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/GLLogger.h>
+#include "LoggingSink.h"
 
 #include <terminal/Util.h>
 #include <terminal/util/UTF8.h>
@@ -23,29 +23,28 @@
 #include <fstream>
 
 using namespace std;
+using namespace terminal;
 
-namespace terminal::view {
-
-GLLogger::GLLogger(LogMask _logMask, FileSystem::path _logfile) :
+LoggingSink::LoggingSink(LogMask _logMask, FileSystem::path _logfile) :
     logMask_{ _logMask },
     ownedSink_{ make_unique<ofstream>(_logfile.string(), ios::trunc) },
     sink_{ ownedSink_.get() }
 {
 }
 
-GLLogger::GLLogger(LogMask _logMask, std::ostream* _sink) :
+LoggingSink::LoggingSink(LogMask _logMask, std::ostream* _sink) :
     logMask_{ _logMask },
     ownedSink_{},
     sink_{ _sink }
 {
 }
 
-void GLLogger::keyPress(Key _key, Modifier _modifier)
+void LoggingSink::keyPress(Key _key, Modifier _modifier)
 {
     log(TraceInputEvent{ fmt::format("key: {} {}", to_string(_key), to_string(_modifier)) });
 }
 
-void GLLogger::keyPress(char32_t _char, Modifier _modifier)
+void LoggingSink::keyPress(char32_t _char, Modifier _modifier)
 {
     if (utf8::isASCII(_char) && isprint(_char))
         log(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_char), to_string(_modifier)) });
@@ -53,7 +52,7 @@ void GLLogger::keyPress(char32_t _char, Modifier _modifier)
         log(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_char), to_string(_modifier)) });
 }
 
-void GLLogger::log(LogEvent const& _event)
+void LoggingSink::log(LogEvent const& _event)
 {
     LogMask const m = visit(overloaded{
             [&](ParserErrorEvent const&) {
@@ -85,10 +84,8 @@ void GLLogger::log(LogEvent const& _event)
         *sink_ << fmt::format("{}\n", _event);
 }
 
-void GLLogger::flush()
+void LoggingSink::flush()
 {
     if (sink_)
         sink_->flush();
 }
-
-} // namespace terminal::view

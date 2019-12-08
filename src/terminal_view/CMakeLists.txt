@@ -21,7 +21,6 @@ add_library(terminal_view
     CellBackground.cpp CellBackground.h
     FontManager.cpp FontManager.h
     GLCursor.cpp GLCursor.h
-    GLLogger.cpp GLLogger.h
     GLTextShaper.cpp GLTextShaper.h
     GLRenderer.cpp GLRenderer.h
     Shader.cpp Shader.h

@@ -512,8 +512,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         if (auto filePath = logging["file"]; filePath)
             _config.logFilePath = {FileSystem::path{filePath.as<string>()}};
 
-		using terminal::view::LogMask;
-
         auto constexpr mappings = array{
             pair{"parseErrors", LogMask::ParserError},
             pair{"invalidOutput", LogMask::InvalidOutput},
@@ -575,7 +573,6 @@ std::string serializeYaml(Config const& _config)
     root["cursor"]["blinking"] = _config.cursorDisplay == terminal::CursorDisplay::Blink;
 
     // logging
-	using terminal::view::LogMask;
     root["logging"]["parseErrors"] = (_config.loggingMask & LogMask::ParserError) != 0;
     root["logging"]["invalidOutput"] = (_config.loggingMask & LogMask::InvalidOutput) != 0;
     root["logging"]["unsupportedOutput"] = (_config.loggingMask & LogMask::UnsupportedOutput) != 0;

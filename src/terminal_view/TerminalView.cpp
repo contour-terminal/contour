@@ -12,9 +12,9 @@
  * limitations under the License.
  */
 #include <terminal_view/TerminalView.h>
-#include <terminal_view/GLLogger.h>
 #include <terminal_view/FontManager.h>
 
+#include <terminal/Logger.h>
 #include <terminal/Util.h>
 #include <terminal/util/overloaded.h>
 #include <terminal/util/UTF8.h>
@@ -57,10 +57,10 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onScreenUpdate,
                            function<void()> _onWindowTitleChanged,
                            function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                           GLLogger& _logger) :
-    logger_{ _logger },
+                           Logger _logger) :
+    logger_{ move(_logger) },
     renderer_{
-        _logger,
+        logger_,
         _regularFont,
         _colorProfile,
         _backgroundOpacity,

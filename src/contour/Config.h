@@ -13,12 +13,13 @@
  */
 #pragma once
 
+#include "LoggingSink.h"
+
 #include <terminal/Color.h>
 #include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/Process.h>
 #include <terminal/WindowSize.h>
 #include <terminal_view/GLCursor.h>
-#include <terminal_view/GLLogger.h>
 
 #include <terminal/util/stdfs.h>
 
@@ -100,7 +101,7 @@ struct Config {
     unsigned int tabWidth;
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
-    terminal::view::LogMask loggingMask;
+    LogMask loggingMask;
 
     std::string wordDelimiters;
 

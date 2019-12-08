@@ -13,16 +13,13 @@
  */
 #pragma once
 
-#include <terminal/util/stdfs.h>
-
 #include <terminal/InputGenerator.h>
 #include <terminal/Logger.h>
+#include <terminal/util/stdfs.h>
 
 #include <iostream>
 #include <memory>
 #include <string>
-
-namespace terminal::view {
 
 enum class LogMask {
     None  = 0,
@@ -69,16 +66,16 @@ constexpr bool operator!=(LogMask lhs, unsigned rhs) noexcept
 }
 
 /// glterm Logging endpoint.
-class GLLogger {
+class LoggingSink {
   public:
-    GLLogger(LogMask _mask, FileSystem::path _logfile);
-    GLLogger(LogMask _mask, std::ostream* _sink);
-    GLLogger() : GLLogger{LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput, nullptr} {}
-    GLLogger(GLLogger const&) = delete;
-    GLLogger(GLLogger&&) = default;
-    GLLogger& operator=(GLLogger const&) = delete;
-    GLLogger& operator=(GLLogger&&) = default;
-    ~GLLogger() = default;
+    LoggingSink(LogMask _mask, FileSystem::path _logfile);
+    LoggingSink(LogMask _mask, std::ostream* _sink);
+    LoggingSink() : LoggingSink{LogMask::ParserError | LogMask::InvalidOutput | LogMask::UnsupportedOutput, nullptr} {}
+    LoggingSink(LoggingSink const&) = delete;
+    LoggingSink(LoggingSink&&) = default;
+    LoggingSink& operator=(LoggingSink const&) = delete;
+    LoggingSink& operator=(LoggingSink&&) = default;
+    ~LoggingSink() = default;
 
     LogMask logMask() const noexcept { return logMask_; }
     void setLogMask(LogMask _level) { logMask_ = _level; }
@@ -99,5 +96,3 @@ class GLLogger {
     std::unique_ptr<std::ostream> ownedSink_;
     std::ostream* sink_;
 };
-
-} // namespace terminal::view

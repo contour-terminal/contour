@@ -17,12 +17,12 @@ inline glm::vec4 makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opa
     };
 }
 
-GLRenderer::GLRenderer(GLLogger& _logger,
+GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
                        terminal::ColorProfile const& _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        glm::mat4 const& _projectionMatrix) :
-    logger_{ _logger },
+    logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },

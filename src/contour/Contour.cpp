@@ -54,8 +54,8 @@ Contour::Contour(string _programPath, Config const& _config) :
     config_{_config},
     logger_{
         _config.logFilePath
-            ? terminal::view::GLLogger{_config.loggingMask, _config.logFilePath->string()}
-            : terminal::view::GLLogger{_config.loggingMask, &cout}
+            ? LoggingSink{_config.loggingMask, _config.logFilePath->string()}
+            : LoggingSink{_config.loggingMask, &cout}
     },
     fontManager_{},
     regularFont_{
@@ -94,7 +94,7 @@ Contour::Contour(string _programPath, Config const& _config) :
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),
         bind(&Contour::doResize, this, _1, _2, _3),
-        logger_
+        bind(&LoggingSink::log, &logger_, _1)
     },
     configFileChangeWatcher_{
         _config.backingFilePath,
@@ -756,8 +756,8 @@ bool Contour::reloadConfigValues()
 
     logger_ =
         newConfig.logFilePath
-            ? terminal::view::GLLogger{newConfig.loggingMask, newConfig.logFilePath->string()}
-            : terminal::view::GLLogger{newConfig.loggingMask, &cout};
+            ? LoggingSink{newConfig.loggingMask, newConfig.logFilePath->string()}
+            : LoggingSink{newConfig.loggingMask, &cout};
 
     bool windowResizeRequired = false;
 

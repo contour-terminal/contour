@@ -21,6 +21,7 @@ set(contour_SRCS
     Config.cpp Config.h
     Flags.cpp Flags.h
     FileChangeWatcher.cpp FileChangeWatcher.h
+    LoggingSink.cpp LoggingSink.h
     UIWindow.cpp UIWindow.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"

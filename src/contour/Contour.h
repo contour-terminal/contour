@@ -14,15 +14,15 @@
 #pragma once
 
 #include "Config.h"
-#include "UIWindow.h"
 #include "FileChangeWatcher.h"
+#include "LoggingSink.h"
+#include "UIWindow.h"
 
 #include <terminal/util/stdfs.h>
 
 #include <terminal/InputGenerator.h>
 
 #include <terminal_view/FontManager.h>
-#include <terminal_view/GLLogger.h>
 #include <terminal_view/TerminalView.h>
 
 #include <atomic>
@@ -68,7 +68,7 @@ class Contour {
 	std::string programPath_;
     std::ofstream loggingSink_;
     Config config_;
-    terminal::view::GLLogger logger_;
+    LoggingSink logger_;
     terminal::view::FontManager fontManager_;
     std::reference_wrapper<terminal::view::Font> regularFont_;
     UIWindow window_;

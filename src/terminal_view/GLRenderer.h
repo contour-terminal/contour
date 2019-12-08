@@ -1,11 +1,11 @@
 #pragma once
 
+#include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
 #include <terminal_view/CellBackground.h>
 #include <terminal_view/FontManager.h>
 #include <terminal_view/GLCursor.h>
-#include <terminal_view/GLLogger.h>
 #include <terminal_view/GLTextShaper.h>
 
 #include <glm/vec2.hpp>
@@ -17,7 +17,7 @@ namespace terminal::view {
 
 class GLRenderer {
   public:
-    GLRenderer(GLLogger& _logger,
+    GLRenderer(Logger _logger,
                Font& _regularFont,
                ColorProfile const& _colorProfile,
                Opacity _backgroundOpacity,
@@ -61,7 +61,7 @@ class GLRenderer {
 
     PendingDraw pendingDraw_;
     Margin margin_{};
-    GLLogger& logger_;
+    Logger logger_;
 
     ColorProfile const& colorProfile_;
     Opacity backgroundOpacity_;

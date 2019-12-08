@@ -15,12 +15,12 @@
 
 #include <terminal/Color.h>
 #include <terminal/TerminalProcess.h>
+#include <terminal/Logger.h>
 #include <terminal/WindowSize.h>
 
 #include <terminal_view/CellBackground.h>
 #include <terminal_view/FontManager.h>
 #include <terminal_view/GLCursor.h>
-#include <terminal_view/GLLogger.h>
 #include <terminal_view/GLTextShaper.h>
 #include <terminal_view/GLRenderer.h>
 
@@ -56,7 +56,7 @@ class TerminalView {
                  std::function<void()> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                 GLLogger& _logger);
+                 Logger _logger);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -99,7 +99,7 @@ class TerminalView {
     Terminal& terminal() noexcept { return process_.terminal(); }
 
   private:
-    GLLogger& logger_;
+    Logger logger_;
     GLRenderer renderer_;
     TerminalProcess process_;
 };
@@ -113,6 +113,6 @@ void render(TerminalView const& _terminalView,
             terminal::ColorProfile const& _colorProfile,
             terminal::Opacity _backgroundOpacity,
             glm::mat4 const& _projectionMatrix,
-            GLLogger& _logger);
+            Logger _logger);
 
 } // namespace terminal::view
