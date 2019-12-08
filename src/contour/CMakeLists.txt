@@ -29,6 +29,11 @@ set(contour_SRCS
 
 add_executable(contour ${contour_SRCS})
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_compile_definitions(contour PRIVATE
+    CONTOUR_VERSION_MAJOR=${CMAKE_PROJECT_VERSION_MAJOR}
+    CONTOUR_VERSION_MINOR=${CMAKE_PROJECT_VERSION_MINOR}
+    CONTOUR_VERSION_PATCH=${CMAKE_PROJECT_VERSION_PATCH}
+)
 
 if(WIN32)
     if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))

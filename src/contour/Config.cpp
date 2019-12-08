@@ -167,7 +167,11 @@ optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
 
     if (flags.getBool("version"))
     {
-        cout << fmt::format("Aero Terminal, version {}.{}.{}", 0, 1, 0) << endl; // TODO: get from CMake
+        cout << fmt::format(
+            "Contour Terminal Emulator, version {}.{}.{}",
+            CONTOUR_VERSION_MAJOR,
+            CONTOUR_VERSION_MINOR,
+            CONTOUR_VERSION_PATCH) << endl;
         return {EXIT_SUCCESS};
     }
 
