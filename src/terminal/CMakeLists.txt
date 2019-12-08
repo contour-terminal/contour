@@ -12,6 +12,9 @@ if(MSVC)
 endif()
 
 set(terminal_HEADERS
+    util/UTF8.h
+    util/overloaded.h
+    util/stdfs.h
     Color.h
     Commands.h
     FunctionDef.h
@@ -25,6 +28,7 @@ set(terminal_HEADERS
 	Selector.h
     Terminal.h
     TerminalProcess.h
+    Util.h
     VTType.h
     WindowSize.h
 )
@@ -43,6 +47,7 @@ set(terminal_SOURCES
 	Selector.cpp
     Terminal.cpp
     TerminalProcess.cpp
+    Util.cpp
     VTType.cpp
 )
 

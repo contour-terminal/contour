@@ -15,7 +15,7 @@
 #include <terminal/Parser.h>
 #include <terminal/ParserTables.h>
 #include <terminal/Util.h>
-#include <ground/UTF8.h>
+#include <terminal/util/UTF8.h>
 
 #include <array>
 #include <cctype>

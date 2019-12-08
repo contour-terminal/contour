@@ -12,8 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/InputGenerator.h>
-#include <ground/UTF8.h>
-#include <ground/StringUtils.h>
+#include <terminal/util/UTF8.h>
 
 #include <algorithm>
 #include <array>
@@ -24,7 +23,6 @@
 #include <fmt/format.h>
 
 using namespace std;
-using namespace ground;
 
 #define ESC "\x1B"
 #define CSI "\x1B["
@@ -32,6 +30,36 @@ using namespace ground;
 #define SS3 "\x4F"
 
 namespace terminal {
+
+namespace {
+    template <typename String>
+    inline std::string toLower(String const& _value)
+    {
+        std::string result;
+        result.reserve(_value.size());
+        std::transform(
+            begin(_value),
+            end(_value),
+            back_inserter(result),
+            [](auto ch) { return std::tolower(ch); }
+        );
+        return result;
+    }
+
+    template <typename String>
+    inline std::string toUpper(String const& _value)
+    {
+        std::string result;
+        result.reserve(_value.size());
+        std::transform(
+            begin(_value),
+            end(_value),
+            back_inserter(result),
+            [](auto ch) { return std::toupper(ch); }
+        );
+        return result;
+    }
+}
 
 namespace mappings {
     struct KeyMapping {

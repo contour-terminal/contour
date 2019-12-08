@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal_view/GLCursor.h>
-#include <ground/StringUtils.h>
 
 #include <stdexcept>
 #include <vector>
@@ -25,7 +24,14 @@ namespace terminal::view {
 
 CursorShape makeCursorShape(string const& _name)
 {
-	auto const name = ground::toLower(_name);
+    auto static const toLower = [](string const& _value) -> string {
+        string result;
+        result.reserve(_value.size());
+        transform(begin(_value), end(_value), back_inserter(result), [](auto ch) { return tolower(ch); });
+        return result;
+    };
+
+	auto const name = toLower(_name);
 
     if (name == "block")
         return CursorShape::Block;

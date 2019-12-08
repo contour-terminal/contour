@@ -15,9 +15,8 @@
 #include "contour_yaml.h"
 #include "Flags.h"
 
-#include <ground/overloaded.h>
-#include <ground/stdfs.h>
-#include <ground/StringUtils.h>
+#include <terminal/util/overloaded.h>
+#include <terminal/util/stdfs.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
@@ -38,7 +37,91 @@
 #endif
 
 using namespace std;
-using namespace ground;
+
+namespace {
+    template <typename String>
+    inline std::string toLower(String const& _value)
+    {
+        std::string result;
+        result.reserve(_value.size());
+        std::transform(
+            begin(_value),
+            end(_value),
+            back_inserter(result),
+            [](auto ch) { return std::tolower(ch); }
+        );
+        return result;
+    }
+
+    template <typename String>
+    inline std::string toUpper(String const& _value)
+    {
+        std::string result;
+        result.reserve(_value.size());
+        std::transform(
+            begin(_value),
+            end(_value),
+            back_inserter(result),
+            [](auto ch) { return std::toupper(ch); }
+        );
+        return result;
+    }
+
+    string parseEscaped(string const& _value) {
+        string out;
+        out.reserve(_value.size());
+
+        enum class State { Text, Escape, Octal1, Octal2, Hex1, Hex2 };
+        State state = State::Text;
+        char buf[3] = {};
+
+        for (size_t i = 0; i < _value.size(); ++i)
+        {
+            switch (state)
+            {
+                case State::Text:
+                    if (_value[i] == '\\')
+                        state = State::Escape;
+                    else
+                        out.push_back(_value[i]);
+                    break;
+                case State::Escape:
+                    if (_value[i] == '0')
+                        state = State::Octal1;
+                    else if (_value[i] == 'x')
+                        state = State::Hex1;
+                    else
+                    {
+                        // Unknown escape sequence, so just continue as text.
+                        out.push_back('\\');
+                        out.push_back(_value[i]);
+                        state = State::Text;
+                    }
+                    break;
+                case State::Octal1:
+                    buf[0] = _value[i];
+                    state = State::Octal2;
+                    break;
+                case State::Octal2:
+                    buf[1] = _value[i];
+                    out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
+                    state = State::Text;
+                    break;
+                case State::Hex1:
+                    buf[0] = _value[i];
+                    state = State::Hex2;
+                    break;
+                case State::Hex2:
+                    buf[1] = _value[i];
+                    out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
+                    state = State::Text;
+                    break;
+            }
+        }
+
+        return out;
+    }
+}
 
 FileSystem::path configHome(string const& _programName)
 {

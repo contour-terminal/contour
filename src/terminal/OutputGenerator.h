@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/Commands.h>
-#include <ground/UTF8.h>
+#include <terminal/util/UTF8.h>
 
 #include <fmt/format.h>
 

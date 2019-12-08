@@ -20,7 +20,7 @@
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLLogger.h>
 
-#include <ground/stdfs.h>
+#include <terminal/util/stdfs.h>
 
 #include <optional>
 #include <string>

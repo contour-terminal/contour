@@ -13,6 +13,7 @@
  */
 #include <terminal/Commands.h>
 #include <terminal/Util.h>
+#include <terminal/util/UTF8.h>
 
 #include <fmt/format.h>
 

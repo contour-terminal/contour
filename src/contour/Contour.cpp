@@ -14,7 +14,7 @@
 #include "Contour.h"
 #include <terminal/Color.h>
 #include <terminal/InputGenerator.h>
-#include <ground/overloaded.h>
+#include <terminal/util/overloaded.h>
 
 #include <cctype>
 #include <chrono>
@@ -733,7 +733,7 @@ void Contour::doResize(unsigned _width, unsigned _height, bool _inPixels)
 	}
 }
 
-void Contour::onConfigReload(ground::FileChangeWatcher::Event /*_event*/)
+void Contour::onConfigReload(FileChangeWatcher::Event /*_event*/)
 {
     configReloadPending_.store(true);
     glfwPostEmptyEvent();

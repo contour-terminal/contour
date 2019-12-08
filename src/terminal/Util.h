@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <ground/UTF8.h>
-
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -25,37 +23,7 @@
 
 namespace terminal {
 
-inline std::string escape(char32_t ch)
-{
-    switch (ch)
-    {
-        case '\\':
-            return "\\\\";
-        case 0x1B:
-            return "\\033";
-        case '\t':
-            return "\\t";
-        case '\r':
-            return "\\r";
-        case '\n':
-            return "\\n";
-        case '"':
-            return "\\\"";
-        default:
-            if (ch <= 0xFF && std::isprint(ch))
-                return fmt::format("{}", static_cast<char>(ch));
-            else if (ch <= 0xFF)
-                return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
-            else
-            {
-                auto const bytes = utf8::encode(ch);
-                auto res = std::string{};
-                for (auto const byte : bytes)
-                    res += byte; // fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
-                return res;
-            }
-    }
-}
+std::string escape(char32_t ch);
 
 template <typename T>
 inline std::string escape(T begin, T end)

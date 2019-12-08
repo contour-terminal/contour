@@ -14,9 +14,8 @@
 #include <terminal_view/GLLogger.h>
 
 #include <terminal/Util.h>
-#include <ground/UTF8.h>
-
-#include <ground/overloaded.h>
+#include <terminal/util/UTF8.h>
+#include <terminal/util/overloaded.h>
 
 #include <fmt/format.h>
 

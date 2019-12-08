@@ -21,7 +21,6 @@
 #include <terminal/Terminal.h>
 #include <terminal/Process.h>
 #include <terminal/Util.h>
-#include <ground/UTF8.h>
 
 #include <iostream>
 

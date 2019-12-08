@@ -71,7 +71,6 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
-add_subdirectory(src/ground)
 add_subdirectory(src/terminal)
 add_subdirectory(src/terminal_view)
 add_subdirectory(src/contour)

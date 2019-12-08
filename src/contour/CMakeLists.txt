@@ -20,6 +20,7 @@ set(contour_SRCS
     Contour.cpp Contour.h
     Config.cpp Config.h
     Flags.cpp Flags.h
+    FileChangeWatcher.cpp FileChangeWatcher.h
     UIWindow.cpp UIWindow.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
@@ -53,7 +54,7 @@ elseif(APPLE)
     )
 endif()
 
-set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw terminal_view ground yaml-cpp)
+set(contour_LIBRARIES GLEW::GLEW OpenGL::GL glm glfw terminal_view yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(contour PRIVATE ${Boost_LIBRARIES})

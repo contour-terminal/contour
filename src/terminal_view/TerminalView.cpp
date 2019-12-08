@@ -16,9 +16,8 @@
 #include <terminal_view/FontManager.h>
 
 #include <terminal/Util.h>
-
-#include <ground/overloaded.h>
-#include <ground/UTF8.h>
+#include <terminal/util/overloaded.h>
+#include <terminal/util/UTF8.h>
 
 #include <GL/glew.h>
 #include <glm/glm.hpp>

@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <ground/overloaded.h>
+#include <terminal/util/overloaded.h>
 
 #include <cassert>
 #include <cstddef>
@@ -25,7 +25,7 @@
 #include <variant>
 #include <vector>
 
-namespace utf8 {
+namespace terminal::utf8 {
 
 // XXX some type traits (TODO use STD specialization instead)
 constexpr bool isASCII(char32_t x) noexcept
@@ -241,4 +241,4 @@ inline Bytes encode(char32_t character)
                      static_cast<uint8_t>(((character >> 0) & 0b0011'1111) | 0b1000'0000)};
 }
 
-}  // namespace utf8
+}  // namespace terminal::utf8

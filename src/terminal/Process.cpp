@@ -14,8 +14,8 @@
 #include <terminal/Process.h>
 #include <terminal/PseudoTerminal.h>
 #include <fmt/format.h>
-#include <ground/stdfs.h>
-#include <ground/overloaded.h>
+#include <terminal/util/stdfs.h>
+#include <terminal/util/overloaded.h>
 
 #include <cassert>
 #include <cerrno>
