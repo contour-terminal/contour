@@ -7,6 +7,10 @@
 /out/
 /CMakeSettings.json
 
+# VIM: code completion / IntelliSense
+/.clangd/
+/compile_commands.json
+
 # CMake (CTest)
 /Testing/
 
