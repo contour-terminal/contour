@@ -119,7 +119,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             else if (intermediateCharacters_ == "(" && _currentChar == 'B')
             {
                 // TODO: ESC ( B
-                log<UnsupportedOutputEvent>("Designate Character Set US-ASCII.");
+                log<UnsupportedOutputEvent>("Designate G0 Character Set: US-ASCII.");
             }
             else if (_currentChar == '0')
             {
@@ -181,6 +181,8 @@ void OutputHandler::dispatchOSC()
             emit<ChangeWindowTitle>(value);
             break;
         case 1: // set icon name
+            // ignore
+            break;
         case 3: // set X server property
         case 4: // Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
         case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
@@ -218,10 +220,8 @@ void OutputHandler::dispatchOSC()
             log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
         default:
-        {
             log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
             break;
-        }
     }
 }
 
