@@ -42,7 +42,5 @@ jobs:
         #         -B build/
       - name: "build"
         run: cmake --build build/ -- -j3
-      - name: "test: libground"
-        run: ./build/src/ground/ground_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
