@@ -94,7 +94,7 @@ Contour::Contour(string _programPath, Config const& _config) :
         bind(&Contour::onScreenUpdate, this),
         bind(&Contour::onWindowTitleChanged, this),
         bind(&Contour::doResize, this, _1, _2, _3),
-        bind(&LoggingSink::log, &logger_, _1)
+        ref(logger_)
     },
     configFileChangeWatcher_{
         _config.backingFilePath,
