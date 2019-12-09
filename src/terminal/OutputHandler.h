@@ -44,6 +44,7 @@ class OutputHandler : private HandlerContext {
     void executeControlFunction(char _c0);
     void dispatchESC(char _finalChar);
     void dispatchCSI(char _finalChar);
+    void dispatchOSC();
 
     template <typename Event, typename... Args>
     void log(Args&&... args) const

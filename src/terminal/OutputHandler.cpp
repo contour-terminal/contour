@@ -138,32 +138,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, becuase only ASCII's allowed (I think) TODO: check that fact
             break;
         case Action::OSC_End:
-            if (intermediateCharacters_.size() > 1 && intermediateCharacters_[1] == ';')
-            {
-                string const value = intermediateCharacters_.substr(2);
-                switch (intermediateCharacters_[0])
-                {
-                    case '0':
-                        emit<ChangeWindowTitle>(value);
-                        break;
-                    case '2':
-                        emit<ChangeWindowTitle>(value);
-                        break;
-                    case '1': // change X11 resource
-                    case '3': // change icon name (also X11 specific)
-                        log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
-                        break;
-                    default:
-                    {
-                        log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
-                        break;
-                    }
-                }
-            }
-            else
-            {
-                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
-            }
+            dispatchOSC();
             intermediateCharacters_.clear();
             break;
         case Action::Hook:
@@ -176,6 +151,77 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
         case Action::Ignore:
         case Action::Undefined:
             return;
+    }
+}
+
+void OutputHandler::dispatchOSC()
+{
+    auto const [code, value] = [](std::string const& _data) {
+        int code = 0;
+        size_t i = 0;
+        while (i < _data.size() && isdigit(_data[i]))
+            code = code * 10 + _data[i++] - '0';
+        if (i == 0 && !_data.empty() && _data[0] != ';')
+        {
+            // such as 'L' is encoded as -'L'
+            code = -_data[0];
+            ++i;
+        }
+        if (i < _data.size() && _data[i] == ';')
+            ++i;
+
+        string const value = _data.substr(i);
+        return pair{code, value};
+    }(intermediateCharacters_);
+
+    switch (code)
+    {
+        case 0: // set window title and icon name
+        case 2: // set window title
+            emit<ChangeWindowTitle>(value);
+            break;
+        case 1: // set icon name
+        case 3: // set X server property
+        case 4: // Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
+        case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
+        case 6: // Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
+        case 10: // Ps = 1 0  -> Change VT100 text foreground color to Pt.
+        case 11: // Ps = 1 1  -> Change VT100 text background color to Pt.
+        case 12: // Ps = 1 2  -> Change text cursor color to Pt.
+        case 13: // Ps = 1 3  -> Change mouse foreground color to Pt.
+        case 14: // Ps = 1 4  -> Change mouse background color to Pt.
+        case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
+        case 16: // Ps = 1 6  -> Change Tektronix background color to Pt.
+        case 17: // Ps = 1 7  -> Change highlight background color to Pt.
+        case 18: // Ps = 1 8  -> Change Tektronix cursor color to Pt.
+        case 19: // Ps = 1 9  -> Change highlight foreground color to Pt.
+        case 46: // Ps = 4 6  -> Change Log File to Pt.  This is normally disabled by a compile-time option.
+        case 50: // Ps = 5 0  -> Set Font to Pt.
+        case 51: // Ps = 5 1  -> reserved for Emacs shell.
+        case 52: // Ps = 5 2  -> Manipulate Selection Data.
+        case 104: // Ps = 1 0 4 ; c -> Reset Color Number c.
+        case 105: // Ps = 1 0 5 ; c -> Reset Special Color Number c.
+        case 106: // Ps = 1 0 6 ; c ; f -> Enable/disable Special Color Number c.
+        case 110: // Ps = 1 1 0  -> Reset VT100 text foreground color.
+        case 111: // Ps = 1 1 1  -> Reset VT100 text background color.
+        case 112: // Ps = 1 1 2  -> Reset text cursor color.
+        case 113: // Ps = 1 1 3  -> Reset mouse foreground color.
+        case 114: // Ps = 1 1 4  -> Reset mouse background color.
+        case 115: // Ps = 1 1 5  -> Reset Tektronix foreground color.
+        case 116: // Ps = 1 1 6  -> Reset Tektronix background color.
+        case 117: // Ps = 1 1 7  -> Reset highlight color.
+        case 118: // Ps = 1 1 8  -> Reset Tektronix cursor color.
+        case 119: // Ps = 1 1 9  -> Reset highlight foreground color.
+        case -'I': // Ps = I  ; c -> Set icon to file.
+        case -'l': // Ps = l  ; c -> Set window title.
+        case -'L': // Ps = L  ; c -> Set icon label.
+            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            break;
+        default:
+        {
+            log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
+            break;
+        }
     }
 }
 
