@@ -46,7 +46,7 @@ TEST_CASE("bytes_1", "[utf8]")
 
 TEST_CASE("bytes_2", "[utf8]")
 {
-    char32_t C = U'ö'; // 0xC3 0xB6
+    char32_t C{ 0xF6 }; // 0xC3 0xB6, 'ö'
     INFO(fmt::format("C : 0x{:04X}", (unsigned)C));
 
     // encode
@@ -124,7 +124,7 @@ TEST_CASE("bytes_4", "[utf8]")
 
 TEST_CASE("to_string_2", "[utf8]")
 {
-    char32_t C = U'ö'; // 0xF6 (UTF8: 0xC3 0xB6)
+    char32_t C{ 0xF6 }; // 0xC3 0xB6, 'ö'
 
     auto const encoded = utf8::encode(C);
     REQUIRE(2 == encoded.size());
