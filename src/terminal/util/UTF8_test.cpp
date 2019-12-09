@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cassert>
 using namespace std;
+using namespace terminal;
 
 std::string binstr(unsigned n)
 {
