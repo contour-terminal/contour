@@ -14,6 +14,7 @@ endif()
 set(terminal_HEADERS
     util/UTF8.h
     util/overloaded.h
+    util/compose.h
     util/stdfs.h
     Color.h
     Commands.h
@@ -70,6 +71,7 @@ if(LIBTERMINAL_TESTING)
 		Selector_test.cpp
         terminal_test.cpp
         util/UTF8_test.cpp
+        util/compose_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
