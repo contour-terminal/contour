@@ -42,21 +42,11 @@ class [[nodiscard]] Process {
 	using NativeHandle = HANDLE;
 #endif
 
-    struct NormalExit {
-        int exitCode;
-    };
+    struct NormalExit { int exitCode; };
+    struct SignalExit { int signum; };
+    struct Suspend {};
 
-    struct SignalExit {
-        int signum;
-    };
-
-    struct Suspend {
-    };
-
-    struct Resume {
-    };
-
-    using ExitStatus = std::variant<NormalExit, SignalExit, Suspend, Resume>;
+    using ExitStatus = std::variant<NormalExit, SignalExit, Suspend>;
 	using Environment = std::map<std::string, std::string>;
 
     //! Returns login shell of current user.
@@ -89,6 +79,7 @@ class [[nodiscard]] Process {
 	[[nodiscard]] std::string workingDirectory() const;
 
 private:
+    [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
 	mutable NativeHandle pid_{};
 	bool detached_ = false;
 

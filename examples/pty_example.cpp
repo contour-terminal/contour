@@ -131,8 +131,6 @@ int main()
             }
             else if (holds_alternative<terminal::Process::Suspend>(exitStatus))
                 cout << "Process suspended.";
-            else if (holds_alternative<terminal::Process::Resume>(exitStatus))
-                cout << "Process resumed.";
         }
 
 		pty.close();
