@@ -97,7 +97,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, because non-ASCII wouldn't be valid collected chars
             return;
         case Action::Print:
-            emit<AppendChar>(_currentChar);
+            emitCommand<AppendChar>(_currentChar);
             return;
         case Action::Param:
             if (_currentChar == ';')
@@ -115,7 +115,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             if (intermediateCharacters_.empty())
                 dispatchESC(static_cast<char>(_currentChar));
             else if (intermediateCharacters_ == "#" && _currentChar == '8')
-                emit<ScreenAlignmentPattern>();
+                emitCommand<ScreenAlignmentPattern>();
             else if (intermediateCharacters_ == "(" && _currentChar == 'B')
             {
                 // TODO: ESC ( B
@@ -124,7 +124,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             else if (_currentChar == '0')
             {
                 if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
-                    emit<DesignateCharset>(*g, Charset::Special);
+                    emitCommand<DesignateCharset>(*g, Charset::Special);
                 else
                     logInvalidESC(static_cast<char>(_currentChar), fmt::format("Invalid charset table identifier: {}", escape(intermediateCharacters_[0])));
             }
@@ -178,7 +178,7 @@ void OutputHandler::dispatchOSC()
     {
         case 0: // set window title and icon name
         case 2: // set window title
-            emit<ChangeWindowTitle>(value);
+            emitCommand<ChangeWindowTitle>(value);
             break;
         case 1: // set icon name
             // ignore
@@ -230,33 +230,33 @@ void OutputHandler::executeControlFunction(char _c0)
     switch (_c0)
     {
         case 0x07: // BEL
-            emit<Bell>();
+            emitCommand<Bell>();
             break;
         case 0x08: // BS
-            emit<Backspace>();
+            emitCommand<Backspace>();
             break;
         case 0x09: // TAB
-            emit<MoveCursorToNextTab>();
+            emitCommand<MoveCursorToNextTab>();
             break;
         case 0x0A: // LF
-            emit<Linefeed>();
+            emitCommand<Linefeed>();
             break;
         case 0x0B: // VT
             // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
-            emit<Index>();
+            emitCommand<Index>();
             break;
         case 0x0C: // FF
             // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
-            emit<Index>();
+            emitCommand<Index>();
             break;
         case 0x0D:
-            emit<MoveCursorToBeginOfLine>();
+            emitCommand<MoveCursorToBeginOfLine>();
             break;
         case 0x37:
-            emit<SaveCursor>();
+            emitCommand<SaveCursor>();
             break;
         case 0x38:
-            emit<RestoreCursor>();
+            emitCommand<RestoreCursor>();
             break;
         default:
             log<UnsupportedOutputEvent>(escape(_c0));

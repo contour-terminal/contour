@@ -38,7 +38,7 @@ class OutputGenerator {
     void operator()(Command const& command);
 
     template <typename T, typename... Args>
-    void emit(Args&&... args)
+    void emitCommand(Args&&... args)
     {
         (*this)(T{std::forward<Args>(args)...});
     }

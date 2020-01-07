@@ -295,13 +295,15 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
     if (_modifier == Modifier::Control && _characterEvent == L' ')
-        return emit("\x00");
+        return append("\x00");
     else if (_modifier == Modifier::Control && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
-        return emit(tolower(_characterEvent) - 'a' + 1);
+        return append(tolower(_characterEvent) - 'a' + 1);
+    else if (_modifier.control() && _characterEvent >= '[' && _characterEvent <= '_')
+        return append(_characterEvent - 'A' + 1); // remaining C0 characters 0x1B .. 0x1F
     else if (!_modifier.control() && utf8::isASCII(_characterEvent))
-        return emit(static_cast<char>(_characterEvent));
+        return append(static_cast<char>(_characterEvent));
     else if (!_modifier || _modifier == Modifier::Shift)
-        return emit(utf8::to_string(utf8::encode(_characterEvent)));
+        return append(utf8::to_string(utf8::encode(_characterEvent)));
     else
         return false;
 }
@@ -310,21 +312,21 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
 {
     if (applicationCursorKeys())
         if (auto mapping = tryMap(mappings::applicationCursorKeys, _key); mapping)
-            return emit(*mapping);
+            return append(*mapping);
 
     if (applicationKeypad())
         if (auto mapping = tryMap(mappings::applicationNumpadKeys, _key); mapping)
-            return emit(*mapping);
+            return append(*mapping);
 
     if (_modifier)
     {
         if (auto mapping = tryMap(mappings::functionKeysWithModifiers, _key); mapping)
-            return emit(fmt::format(*mapping, makeVirtualTerminalParam(_modifier)));
+            return append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier)));
     }
     else
     {
         if (auto mapping = tryMap(mappings::standard, _key); mapping)
-            return emit(*mapping);
+            return append(*mapping);
     }
 
     return false;
@@ -333,39 +335,40 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
 void InputGenerator::generatePaste(std::string_view const& _text)
 {
     if (bracketedPaste_)
-        emit("\033[200~"sv);
+        append("\033[200~"sv);
 
-    emit(_text);
+    append(_text);
 
     if (bracketedPaste_)
-        emit("\033[201~"sv);
+        append("\033[201~"sv);
 }
 
 void InputGenerator::swap(Sequence& _other)
 {
     std::swap(pendingSequence_, _other);
+    printf("InputGenerator.transmit(\"%s\")\n", escape(begin(_other), end(_other)).c_str());
 }
 
-inline bool InputGenerator::emit(std::string _sequence)
+inline bool InputGenerator::append(std::string _sequence)
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
-inline bool InputGenerator::emit(std::string_view _sequence)
+inline bool InputGenerator::append(std::string_view _sequence)
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
-inline bool InputGenerator::emit(char _asciiChar)
+inline bool InputGenerator::append(char _asciiChar)
 {
     pendingSequence_.push_back(_asciiChar);
     return true;
 }
 
 template <typename T, size_t N>
-inline bool InputGenerator::emit(T(&_sequence)[N])
+inline bool InputGenerator::append(T(&_sequence)[N])
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
     return true;

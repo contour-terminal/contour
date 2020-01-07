@@ -110,7 +110,7 @@ class HandlerContext {
     }
 
     template <typename T, typename... Args>
-    HandlerResult emit(Args&&... args)
+    HandlerResult emitCommand(Args&&... args)
     {
         commands_.emplace_back(T{std::forward<Args>(args)...});
         // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));

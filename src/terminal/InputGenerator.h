@@ -59,7 +59,6 @@ class Modifier {
         return *this;
     }
 
-
     constexpr void enable(Key _key) noexcept
     {
         mask_ |= _key;
@@ -314,10 +313,10 @@ class InputGenerator {
     void swap(Sequence& _other);
 
   private:
-    inline bool emit(std::string _sequence);
-    inline bool emit(std::string_view _sequence);
-    inline bool emit(char _asciiChar);
-    template <typename T, size_t N> inline bool emit(T (&_sequence)[N]);
+    inline bool append(std::string _sequence);
+    inline bool append(std::string_view _sequence);
+    inline bool append(char _asciiChar);
+    template <typename T, size_t N> inline bool append(T (&_sequence)[N]);
 
   private:
     KeyMode cursorKeysMode_ = KeyMode::Normal;
