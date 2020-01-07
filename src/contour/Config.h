@@ -19,7 +19,6 @@
 #include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/Process.h>
 #include <terminal/WindowSize.h>
-#include <terminal_view/GLCursor.h>
 
 #include <terminal/util/stdfs.h>
 
