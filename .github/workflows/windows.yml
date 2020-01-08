@@ -16,8 +16,10 @@ jobs:
     - uses: actions/checkout@v1
     - name: "Initialize sub modules"
       run: git submodule update --init --recursive
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
     - name: "Install dependencies"
-      run: vcpkg install freetype fontconfig glew glfw3 glm harfbuzz --triplet x64-windows
+      run: vcpkg install freetype fontconfig harfbuzz --triplet x64-windows
     - name: "create build directory"
       run: mkdir build
     - name: "Generate build files"

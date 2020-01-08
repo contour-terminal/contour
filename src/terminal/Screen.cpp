@@ -313,6 +313,8 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 begin(lines),
                 next(begin(lines), n)
             );
+
+#if 1
             clampSavedLines();
 
             generate_n(
@@ -320,6 +322,23 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 n,
                 [this]() { return Line{size_.columns, Cell{{}, graphicsRendition}}; }
             );
+#else
+            auto const maxHistLines = maxHistoryLineCount_.value_or(0);
+            if (savedLines.size() > maxHistLines)
+            {
+                auto const numRotations = min(static_cast<cursor_pos_t>(savedLines.size() - maxHistLines), n);
+                for (auto i = begin(savedLines), e = next(begin(savedLines), numRotations); i != e; ++i)
+                    for (Cell& c : *i)
+                        c = Cell{{}, graphicsRendition};
+                lines.splice(
+                    end(lines),
+                    savedLines,
+                    begin(savedLines),
+                    next(begin(savedLines), numRotations)
+                );
+            }
+            clampSavedLines();
+#endif
         }
     }
     else
@@ -519,6 +538,7 @@ void ScreenBuffer::clampSavedLines()
 
 void ScreenBuffer::verifyState() const
 {
+#if !defined(NDEBUG)
     assert(size_.rows == lines.size());
 
     // verify cursor positions
@@ -532,6 +552,7 @@ void ScreenBuffer::verifyState() const
     assert(line == currentLine);
     assert(col == currentColumn);
     assert(cursor.column == size_.columns || wrapPending == false);
+#endif
 }
 
 // ==================================================================================
@@ -592,8 +613,10 @@ void Screen::resize(WindowSize const& _newSize)
 
 void Screen::write(char const * _data, size_t _size)
 {
+#if defined(LIBTERMINAL_LOG_RAW)
     if (logger_)
         logger_(RawOutputEvent{ escape(_data, _data + _size) });
+#endif
 
     handler_.commands().clear();
     parser_.parseFragment(_data, _size);

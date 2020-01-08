@@ -109,12 +109,6 @@ constexpr size_t makeVirtualTerminalParam(Modifier _modifier) noexcept
 std::string to_string(Modifier _modifier);
 
 enum class Key {
-    // C0 keys
-    Enter,
-    Backspace,
-    Tab,
-    Escape,
-
     // function keys
     F1,
     F2,
@@ -165,9 +159,6 @@ enum class Key {
     Numpad_9,
 };
 
-std::optional<Key> parseKey(std::string const& _name);
-std::optional<std::variant<Key, char32_t>> parseKeyOrChar(std::string const& _name);
-
 std::string to_string(Key _key);
 
 enum class KeyMode {
@@ -192,6 +183,7 @@ enum class MouseButton {
     WheelUp,
     WheelDown,
 };
+std::string to_string(MouseButton _button);
 
 struct MousePressEvent {
     MouseButton button;
@@ -215,6 +207,12 @@ struct MouseReleaseEvent {
 using InputEvent = std::variant<
     KeyInputEvent,
     CharInputEvent,
+    MousePressEvent,
+    MouseMoveEvent,
+    MouseReleaseEvent
+>;
+
+using MouseEvent = std::variant<
     MousePressEvent,
     MouseMoveEvent,
     MouseReleaseEvent
@@ -360,6 +358,17 @@ namespace std {
     struct hash<terminal::MouseReleaseEvent> {
         constexpr size_t operator()(terminal::MouseReleaseEvent const& _input) const noexcept {
             return (5 << 16) | (static_cast<unsigned>(_input.button) & 0xFF);
+        }
+    };
+
+    template<>
+    struct hash<terminal::MouseEvent> {
+        constexpr size_t operator()(terminal::MouseEvent const& _input) const noexcept {
+            return visit(overloaded{
+                [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },
+                [](terminal::MouseMoveEvent ev) { return hash<terminal::MouseMoveEvent>{}(ev); },
+                [](terminal::MouseReleaseEvent ev) { return hash<terminal::MouseReleaseEvent>{}(ev); },
+            }, _input);
         }
     };
 

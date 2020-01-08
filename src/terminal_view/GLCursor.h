@@ -14,43 +14,45 @@
 #pragma once
 
 #include <terminal/Commands.h>
-#include <terminal_view/Shader.h>
-#include <GL/glew.h>
-#include <glm/glm.hpp>
+#include <QtCore/QPoint>
+#include <QtCore/QSize>
+#include <QtGui/QMatrix4x4>
+#include <QtGui/QOpenGLShaderProgram>
+#include <QtGui/QVector4D>
+#include <QtGui/QOpenGLFunctions_3_2_Core>
 #include <memory>
 #include <string>
 
 namespace terminal::view {
 
-class GLCursor {
+class GLCursor : public QOpenGLFunctions_3_2_Core {
   public:
-    GLCursor(glm::ivec2 _size, glm::mat4 _transform,  CursorShape _shape, glm::vec3 const& _color);
+    GLCursor(QSize _size, QMatrix4x4 _transform,  CursorShape _shape, QVector4D const& _color);
     ~GLCursor();
 
-    void setProjection(glm::mat4 const& _mat);
+    void setProjection(QMatrix4x4 const& _mat);
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
-    void setColor(glm::vec3 _color);
+    void setColor(QVector4D const& _color);
 
-    void resize(glm::ivec2 _size);
-
-    void render(glm::ivec2 _pos);
+    void resize(QSize _size);
+    void render(QPoint _pos);
 
   private:
-	void updateShape();
+    void updateShape();
 
   private:
     CursorShape shape_;
-	glm::ivec2 size_;
-    glm::mat4 projectionMatrix_;
-    Shader shader_;
-    GLint const transformLocation_;
-    GLint const colorLocation_;
+    QSize size_;
+    QMatrix4x4 projectionMatrix_;
+    QOpenGLShaderProgram shader_;
+    GLint transformLocation_;
+    GLint colorLocation_;
     GLuint vbo_;
     GLuint vao_;
-	GLenum drawMode_;
-	GLsizei drawCount_;
+    GLenum drawMode_;
+    GLsizei drawCount_;
 };
 
 } // namespace terminal::view

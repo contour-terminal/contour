@@ -20,6 +20,7 @@
 #include <terminal_view/GLCursor.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
+#include <terminal/ControlCode.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
@@ -37,6 +38,8 @@
 #endif
 
 using namespace std;
+
+namespace contour {
 
 namespace {
     template <typename String>
@@ -121,6 +124,84 @@ namespace {
 
         return out;
     }
+
+    auto toQtKeyboardModifier(terminal::Modifier _mods) -> Qt::KeyboardModifiers {
+        Qt::KeyboardModifiers mods;
+        if (_mods.shift())
+            mods.setFlag(Qt::ShiftModifier);
+        if (_mods.alt())
+            mods.setFlag(Qt::AltModifier);
+        if (_mods.control())
+            mods.setFlag(Qt::ControlModifier);
+        if (_mods.meta())
+            mods.setFlag(Qt::MetaModifier);
+        return mods;
+    };
+
+    QKeySequence toQtKeySequence(terminal::CharInputEvent _char) {
+        auto const mods = toQtKeyboardModifier(_char.modifier);
+        using terminal::ControlCode::C0;
+        switch (static_cast<C0>(_char.value))
+        {
+            case C0::CR:
+                return QKeySequence(Qt::Key_Return | mods);
+            default:
+                return QKeySequence(_char.value | mods);
+        }
+    };
+
+    QKeySequence toQtKeySequence(terminal::KeyInputEvent const& _key) {
+        using terminal::Key;
+
+        static auto constexpr mapping = array{
+            pair{Key::Insert, Qt::Key_Insert},
+            pair{Key::Delete, Qt::Key_Delete},
+            pair{Key::RightArrow, Qt::Key_Right},
+            pair{Key::LeftArrow, Qt::Key_Left},
+            pair{Key::DownArrow, Qt::Key_Down},
+            pair{Key::UpArrow, Qt::Key_Up},
+            pair{Key::PageDown, Qt::Key_PageDown},
+            pair{Key::PageUp, Qt::Key_PageUp},
+            pair{Key::Home, Qt::Key_Home},
+            pair{Key::End, Qt::Key_End},
+            pair{Key::F1, Qt::Key_F1},
+            pair{Key::F2, Qt::Key_F2},
+            pair{Key::F3, Qt::Key_F3},
+            pair{Key::F4, Qt::Key_F4},
+            pair{Key::F5, Qt::Key_F5},
+            pair{Key::F6, Qt::Key_F6},
+            pair{Key::F7, Qt::Key_F7},
+            pair{Key::F8, Qt::Key_F8},
+            pair{Key::F9, Qt::Key_F9},
+            pair{Key::F10, Qt::Key_F10},
+            pair{Key::F11, Qt::Key_F11},
+            pair{Key::F12, Qt::Key_F12},
+            // todo: F13..F25
+            // TODO: NumPad
+            // pair{Key::Numpad_0, Qt::Key_0},
+            // pair{Key::Numpad_1, Qt::Key_1},
+            // pair{Key::Numpad_2, Qt::Key_2},
+            // pair{Key::Numpad_3, Qt::Key_3},
+            // pair{Key::Numpad_4, Qt::Key_4},
+            // pair{Key::Numpad_5, Qt::Key_5},
+            // pair{Key::Numpad_6, Qt::Key_6},
+            // pair{Key::Numpad_7, Qt::Key_7},
+            // pair{Key::Numpad_8, Qt::Key_8},
+            // pair{Key::Numpad_9, Qt::Key_9},
+            // pair{Key::Numpad_Decimal, Qt::Key_Period},
+            // pair{Key::Numpad_Divide, Qt::Key_Slash},
+            // pair{Key::Numpad_Multiply, Qt::Key_Asterisk},
+            // pair{Key::Numpad_Subtract, Qt::Key_Minus},
+            // pair{Key::Numpad_Add, Qt::Key_Plus},
+            // pair{Key::Numpad_Enter, Qt::Key_Enter},
+            // pair{Key::Numpad_Equal, Qt::Key_Equal},
+        };
+
+        if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key.key; }); i != end(mapping))
+            return QKeySequence{static_cast<int>(i->second) | static_cast<int>(toQtKeyboardModifier(_key.modifier)) };
+
+        throw std::invalid_argument(fmt::format("Unsupported input Key. {}", _key.key));
+    };
 }
 
 FileSystem::path configHome(string const& _programName)
@@ -212,6 +293,124 @@ template <typename T>
 inline auto mapAction(std::string_view _name)
 {
 	return pair{_name, Action{T{}}};
+}
+
+optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
+{
+    using terminal::Modifier;
+    auto const key = toUpper(_key);
+    if (key == "ALT")
+        return Modifier::Key::Alt;
+    if (key == "CONTROL")
+        return Modifier::Key::Control;
+    if (key == "SHIFT")
+        return Modifier::Key::Shift;
+    if (key == "META")
+        return Modifier::Key::Meta;
+    return nullopt;
+}
+
+optional<terminal::Key> parseKey(string const& _name)
+{
+    using terminal::Key;
+	auto static constexpr mappings = array{
+		pair{ "F1"sv, Key::F1 },
+		pair{ "F2"sv, Key::F2 },
+		pair{ "F3"sv, Key::F3 },
+		pair{ "F4"sv, Key::F4 },
+		pair{ "F5"sv, Key::F5 },
+		pair{ "F6"sv, Key::F6 },
+		pair{ "F7"sv, Key::F7 },
+		pair{ "F8"sv, Key::F8 },
+		pair{ "F9"sv, Key::F9 },
+		pair{ "F10"sv, Key::F10 },
+		pair{ "F11"sv, Key::F11 },
+		pair{ "F12"sv, Key::F12 },
+		pair{ "DownArrow"sv, Key::DownArrow },
+		pair{ "LeftArrow"sv, Key::LeftArrow },
+		pair{ "RightArrow"sv, Key::RightArrow },
+		pair{ "UpArrow"sv, Key::UpArrow },
+		pair{ "Insert"sv, Key::Insert },
+		pair{ "Delete"sv, Key::Delete },
+		pair{ "Home"sv, Key::Home },
+		pair{ "End"sv, Key::End },
+		pair{ "PageUp"sv, Key::PageUp },
+		pair{ "PageDown"sv, Key::PageDown },
+		pair{ "Numpad_NumLock"sv, Key::Numpad_NumLock },
+		pair{ "Numpad_Divide"sv, Key::Numpad_Divide },
+		pair{ "Numpad_Multiply"sv, Key::Numpad_Multiply },
+		pair{ "Numpad_Subtract"sv, Key::Numpad_Subtract },
+		pair{ "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
+		pair{ "Numpad_Add"sv, Key::Numpad_Add },
+		pair{ "Numpad_Decimal"sv, Key::Numpad_Decimal },
+		pair{ "Numpad_Enter"sv, Key::Numpad_Enter },
+		pair{ "Numpad_Equal"sv, Key::Numpad_Equal },
+		pair{ "Numpad_0"sv, Key::Numpad_0 },
+		pair{ "Numpad_1"sv, Key::Numpad_1 },
+		pair{ "Numpad_2"sv, Key::Numpad_2 },
+		pair{ "Numpad_3"sv, Key::Numpad_3 },
+		pair{ "Numpad_4"sv, Key::Numpad_4 },
+		pair{ "Numpad_5"sv, Key::Numpad_5 },
+		pair{ "Numpad_6"sv, Key::Numpad_6 },
+		pair{ "Numpad_7"sv, Key::Numpad_7 },
+		pair{ "Numpad_8"sv, Key::Numpad_8 },
+		pair{ "Numpad_9"sv, Key::Numpad_9 }
+    };
+
+    auto const name = toLower(_name);
+
+    for (auto const mapping: mappings)
+        if (name == toLower(mapping.first))
+            return mapping.second;
+
+    return nullopt;
+}
+
+optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
+{
+    using namespace terminal::ControlCode;
+
+    if (auto const key = parseKey(_name); key.has_value())
+        return key.value();
+
+    auto const text = QString::fromUtf8(_name.c_str()).toUcs4();
+    if (text.size() == 1)
+        return static_cast<char32_t>(toupper(text[0]));
+
+    auto constexpr namedChars = array{
+        pair{"ENTER"sv, (char) C0::CR}, // TODO: should map to Qt::Key_Return instead
+        pair{"BACKSPACE"sv, (char) C0::BS },
+        pair{"TAB"sv, (char) C0::HT },
+        pair{"ESCAPE"sv, (char) C0::ESC },
+
+        pair{"LESS"sv, '<'},
+        pair{"GREATER"sv, '>'},
+        pair{"PLUS"sv, '+'},
+
+        pair{"APOSTROPHE"sv, '\''},
+        pair{"ADD"sv, '+'},
+        pair{"BACKSLASH"sv, 'x'},
+        pair{"COMMA"sv, ','},
+        pair{"DECIMAL"sv, '.'},
+        pair{"DIVIDE"sv, '/'},
+        pair{"EQUAL"sv, '='},
+        pair{"LEFT_BRACKET"sv, '['},
+        pair{"MINUS"sv, '-'},
+        pair{"MULTIPLY"sv, '*'},
+        pair{"PERIOD"sv, '.'},
+        pair{"RIGHT_BRACKET"sv, ']'},
+        pair{"SEMICOLON"sv, ';'},
+        pair{"SLASH"sv, '/'},
+        pair{"SUBTRACT"sv, '-'},
+        pair{"SPACE"sv, ' '}
+    };
+
+    auto const name = toUpper(_name);
+    for (auto const& mapping: namedChars)
+        if (name == mapping.first)
+            return mapping.second;
+
+    return nullopt;
 }
 
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
@@ -338,20 +537,20 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             return make_pair(nullopt, false);
         else if (!_node.IsScalar())
             return make_pair(nullopt, true);
-        else if (auto const input = terminal::parseKeyOrChar(_node.as<string>()); input.has_value())
+        else if (auto const input = parseKeyOrChar(_node.as<string>()); input.has_value())
         {
             return make_pair(terminal::InputEvent{visit(overloaded{
                 [&](terminal::Key _key) -> terminal::InputEvent {
                     return terminal::KeyInputEvent{_key, _mods};
                 },
                 [&](char32_t _ch) -> terminal::InputEvent {
-                    return terminal::CharInputEvent{static_cast<char32_t>(tolower(_ch)), _mods};
+                    return terminal::CharInputEvent{static_cast<char32_t>(toupper(_ch)), _mods};
                 }
             }, input.value())}, true);
         }
 
         return make_pair(nullopt, false);
-	};
+    };
 
     auto const action = parseAction(_mapping["action"], _mapping["chars"]);
 	auto const mods = parseModifier(_mapping["mods"]);
@@ -360,18 +559,35 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
         {
             if (keyEvent.has_value())
-                _config.inputMappings[InputEvent{*keyEvent}].emplace_back(*action);
+            {
+                if (holds_alternative<KeyInputEvent>(*keyEvent))
+                    _config.keyMappings[toQtKeySequence(get<KeyInputEvent>(*keyEvent))].emplace_back(*action);
+                else
+                    _config.keyMappings[toQtKeySequence(get<CharInputEvent>(*keyEvent))].emplace_back(*action);
+            }
         }
         else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
         {
             if (mouseEvent.has_value())
-                _config.inputMappings[InputEvent{*mouseEvent}].emplace_back(*action);
+                _config.mouseMappings[*mouseEvent].emplace_back(*action);
         }
         else
         {
             // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
         }
     }
+}
+
+Config loadConfig()
+{
+    return loadConfigFromFile((configHome("contour") / "contour.yml").string());
+}
+
+Config loadConfigFromFile(FileSystem::path const& _fileName)
+{
+    Config config{};
+    loadConfigFromFile(config, _fileName);
+    return config;
 }
 
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
@@ -442,6 +658,9 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         bool blinking = false;
         softLoadValue(cursor, "blinking", blinking);
         _config.cursorDisplay = blinking ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+
+        if (cursor["blinking_interval"].IsDefined())
+            _config.cursorBlinkInterval = chrono::milliseconds(cursor["blinking_interval"].as<int>());
     }
 
     if (auto colors = doc["colors"]; colors)
@@ -575,6 +794,7 @@ std::string serializeYaml(Config const& _config)
     // cursor
     root["cursor"]["shape"] = to_string(_config.cursorShape);
     root["cursor"]["blinking"] = _config.cursorDisplay == terminal::CursorDisplay::Blink;
+    root["cursor"]["blinking_interval"] = _config.cursorBlinkInterval.count();
 
     // logging
     root["logging"]["parseErrors"] = (_config.loggingMask & LogMask::ParserError) != 0;
@@ -610,3 +830,5 @@ void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
 
      ofs << serializeYaml(_config);
 }
+
+} // namespace contour

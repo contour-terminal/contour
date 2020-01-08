@@ -14,10 +14,12 @@
 #pragma once
 
 #include <terminal_view/FontManager.h>
-#include <terminal_view/Shader.h>
 
-#include <glm/glm.hpp>
-#include <GL/glew.h>
+#include <QMatrix4x4>
+#include <QPoint>
+#include <QOpenGLShaderProgram>
+#include <QOpenGLFunctions>
+#include <QOpenGLFunctions_3_2_Core>
 
 #include <array>
 #include <functional>
@@ -26,18 +28,18 @@
 
 namespace terminal::view {
 
-class GLTextShaper {
+class GLTextShaper : private QOpenGLFunctions_3_2_Core {
   public:
-    GLTextShaper(Font& _regularFont, glm::mat4 const& _projection);
+    GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection);
     ~GLTextShaper();
 
     void setFont(Font& _regularFont);
-    void setProjection(glm::mat4 const& _projectionMatrix);
+    void setProjection(QMatrix4x4 const& _projectionMatrix);
 
     void render(
-        glm::ivec2 _pos,
+        QPoint _pos,
         std::vector<char32_t> const& _chars,
-        glm::vec4 const& _color,
+        QVector4D const& _color,
         FontStyle _style);
 
     void clearGlyphCache();
@@ -45,8 +47,8 @@ class GLTextShaper {
   private:
     struct Glyph {
         GLuint textureID;
-        glm::ivec2 size;      // glyph size
-        glm::ivec2 bearing;   // offset from baseline to left/top of glyph
+        QPoint size;      // glyph size
+        QPoint bearing;   // offset from baseline to left/top of glyph
         unsigned height;
         unsigned descender;
         unsigned advance;     // offset to advance to next glyph in line.
@@ -66,8 +68,9 @@ class GLTextShaper {
     GLuint vbo_;
     GLuint vao_;
     //glm::mat4 projectionMatrix_;
-    Shader shader_;
+    QOpenGLShaderProgram shader_;
     GLint colorLocation_;
+    GLuint projectionLocation_;
 };
 
 } // namespace terminal::view

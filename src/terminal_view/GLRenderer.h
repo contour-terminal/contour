@@ -8,20 +8,23 @@
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLTextShaper.h>
 
-#include <glm/vec2.hpp>
+#include <QPoint>
+#include <QMatrix2x4>
+#include <QOpenGLFunctions_3_2_Core>
 
+#include <chrono>
 #include <vector>
 #include <utility>
 
 namespace terminal::view {
 
-class GLRenderer {
+class GLRenderer : public QOpenGLFunctions_3_2_Core {
   public:
     GLRenderer(Logger _logger,
                Font& _regularFont,
                ColorProfile const& _colorProfile,
                Opacity _backgroundOpacity,
-               glm::mat4 const& _projectionMatrix);
+               QMatrix4x4 const& _projectionMatrix);
 
     size_t cellHeight() const noexcept { return regularFont_.get().lineHeight(); }
     size_t cellWidth() const noexcept { return regularFont_.get().maxAdvance(); }
@@ -30,7 +33,7 @@ class GLRenderer {
     void setCursorColor(RGBColor const& _color);
     void setFont(Font& _font);
     bool setFontSize(unsigned int _fontSize);
-    void setProjection(glm::mat4 const& _projectionMatrix);
+    void setProjection(QMatrix4x4 const& _projectionMatrix);
 
     void render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
@@ -38,8 +41,8 @@ class GLRenderer {
     void fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
     void renderCellGroup(WindowSize const& _screenSize);
 
-    glm::ivec2 makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
-    std::pair<glm::vec4, glm::vec4> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
+    QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
+    std::pair<QVector4D, QVector4D> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
 
   private:
     /// Holds an array of directly connected characters on a single line that all share the same visual attributes.

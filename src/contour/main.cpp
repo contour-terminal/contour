@@ -11,34 +11,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "Contour.h"
-#include "Flags.h"
-#include "Config.h"
-
-#include <terminal/InputGenerator.h>
-#include <terminal/OutputGenerator.h>
-#include <terminal/Terminal.h>
-#include <terminal/Process.h>
-#include <terminal/Util.h>
-
+#include <contour/Config.h>
+#include <contour/TerminalWindow.h>
+#include <QGuiApplication>
 #include <iostream>
-
-#if defined(__unix__) || defined(__APPLE__)
-#include <unistd.h>
-#endif
 
 using namespace std;
 
-int main(int argc, char const* argv[])
+int main(int argc, char* argv[])
 {
     try
     {
-        auto config = Config{};
-        if (auto exitStatus = loadConfigFromCLI(config, argc, argv); exitStatus.has_value())
-            return *exitStatus;
+        QGuiApplication::setApplicationName("contour");
+        QGuiApplication::setOrganizationName("contour");
+        QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+        QGuiApplication app(argc, argv);
 
-        auto myterm = Contour{argv[0], config};
-        return myterm.main();
+        // TODO: CLI
+        // --help
+        // -c,--config=PATH
+        // -p,--profile=NAME
+        // ??? -s,--shell=SHELL
+        // ??? [ -- args for shell, if provided]
+
+        auto mainWindow = contour::TerminalWindow{contour::loadConfig(), argv[0]};
+        mainWindow.show();
+
+        return app.exec();
     }
     catch (exception const& e)
     {

@@ -21,22 +21,26 @@ TerminalProcess::TerminalProcess(const string& _path,
                                  Environment const& _env,
                                  WindowSize _winSize,
                                  optional<size_t> _maxHistoryLineCount,
+                                 chrono::milliseconds _cursorBlinkInterval,
                                  function<void()> _changeWindowTitleCallback,
                                  function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                                  chrono::steady_clock::time_point _now,
                                  string const& _wordDelimiters,
                                  CursorDisplay _cursorDisplay,
                                  CursorShape _cursorShape,
-                                 Logger _logger,
-                                 Hook _onScreenCommands) :
+                                 Hook _onScreenCommands,
+                                 function<void()> _onTerminalClosed,
+                                 Logger _logger) :
     Terminal(
         _winSize,
         _maxHistoryLineCount,
+        _cursorBlinkInterval,
         move(_changeWindowTitleCallback),
         move(_resizeWindow),
         _now,
         _logger,
         move(_onScreenCommands),
+        move(_onTerminalClosed),
         _wordDelimiters
     ),
     Process{_path, _args, _env, terminal().device()}

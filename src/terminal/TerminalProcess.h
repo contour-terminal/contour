@@ -26,14 +26,16 @@ class TerminalProcess : public Terminal, public Process {
 		Environment const& _env,
         WindowSize _winSize,
         std::optional<size_t> _maxHistoryLineCount,
+        std::chrono::milliseconds _cursorBlinkInterval,
         std::function<void()> _changeWindowTitleCallback,
         std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
         std::chrono::steady_clock::time_point _now,
         std::string const& _wordDelimiters,
         CursorDisplay _cursorDisplay,
         CursorShape _cursorShape,
-        Logger _logger,
-        Hook _onScreenCommands
+        Hook _onScreenCommands,
+        std::function<void()> _onTerminalClosed,
+        Logger _logger
     );
 
     ~TerminalProcess();

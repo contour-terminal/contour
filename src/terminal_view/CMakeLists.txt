@@ -1,14 +1,13 @@
 find_package(Freetype REQUIRED)
 find_package(OpenGL REQUIRED)
-find_package(GLEW REQUIRED)
-find_package(glm CONFIG REQUIRED)
+find_package(Qt5 COMPONENTS Gui REQUIRED)  # apt install qtbase5-dev libqt5gui5
 
 if(APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(fontconfig REQUIRED IMPORTED_TARGET fontconfig)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Linux")
-	  #find_package(fontconfig)
+      #find_package(fontconfig)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
@@ -23,13 +22,12 @@ add_library(terminal_view
     GLCursor.cpp GLCursor.h
     GLTextShaper.cpp GLTextShaper.h
     GLRenderer.cpp GLRenderer.h
-    Shader.cpp Shader.h
     TerminalView.cpp TerminalView.h
 )
 
 target_include_directories(terminal_view PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
-set(TERMINAL_VIEW_LIBRARIES GLEW::GLEW OpenGL::GL glm Freetype::Freetype terminal)
+set(TERMINAL_VIEW_LIBRARIES Qt5::Gui Freetype::Freetype terminal)
 if(APPLE)
     list(APPEND TERMINAL_VIEW_LIBRARIES PkgConfig::fontconfig)
     list(APPEND TERMINAL_VIEW_LIBRARIES PkgConfig::harfbuzz)

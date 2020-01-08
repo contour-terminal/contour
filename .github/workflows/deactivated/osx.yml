@@ -16,17 +16,11 @@ jobs:
       - uses: actions/checkout@v1
       - name: "Initialize sub modules"
         run: git submodule update --init --recursive
-      - name: "some debug prints"
-        run: |
-          set -x
-          ls -hl /Applications/Xcode.app
-          find /Applications/Xcode.app -name OpenGL.framework
-          ls -hl "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.15.sdk/System/Library/Frameworks/OpenGL.framework/"
       - name: "Install dependencies"
         run: |
           set -ex
           brew update
-          brew install freetype fontconfig glew glfw3 glm harfbuzz boost pkg-config
+          brew install freetype fontconfig qt5 harfbuzz boost pkg-config
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"

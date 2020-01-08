@@ -14,8 +14,6 @@
 #include <terminal_view/GLTextShaper.h>
 #include <terminal_view/FontManager.h>
 
-#include <GL/glew.h>
-
 using namespace std;
 
 namespace terminal::view {
@@ -25,13 +23,25 @@ GLTextShaper::Glyph::~Glyph()
     // TODO: release texture
 }
 
-GLTextShaper::GLTextShaper(Font& _regularFont, glm::mat4 const& _projection) :
+GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
     cache_{},
     regularFont_{ _regularFont },
     //projectionMatrix_{ _projection },
-    shader_{ vertexShaderCode(), fragmentShaderCode() },
-    colorLocation_{ shader_.uniformLocation("textColor") }
+    shader_{},
+    colorLocation_{}
 {
+    initializeOpenGLFunctions();
+    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderCode().c_str());
+    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderCode().c_str());
+    shader_.link();
+    if (!shader_.isLinked())
+    {
+        qDebug() << "GLCursor: Failed to link shader.";
+        qDebug() << "GLTextShaper.shader. " << shader_.log();
+    }
+    colorLocation_ = shader_.uniformLocation("textColor");
+    projectionLocation_ = shader_.uniformLocation("projection");
+
     // disable byte-alignment restriction
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
@@ -59,39 +69,37 @@ GLTextShaper::~GLTextShaper()
 
 string const& GLTextShaper::vertexShaderCode()
 {
-	static string const code = R"(
-		#version 140
+    static string const code = R"(
         in vec4 vertex;
-		out vec2 TexCoords;
+        varying out vec2 TexCoords;
 
-		uniform mat4 projection;
+        uniform mat4 projection;
 
-		void main()
-		{
-			gl_Position = projection * vec4(vertex.xy, 0.1, 1.0);
-			TexCoords = vertex.zw;
-		}
-	)";
-	return code;
+        void main()
+        {
+            gl_Position = projection * vec4(vertex.xy, 0.1, 1.0);
+            TexCoords = vertex.zw;
+        }
+    )";
+    return code;
 }
 
 string const& GLTextShaper::fragmentShaderCode()
 {
-	static string const code = R"(
-		#version 140
-		in vec2 TexCoords;
-		out vec4 color;
+    static string const code = R"(
+        in vec2 TexCoords;
+        varying out vec4 color;
 
-		uniform sampler2D text;
-		uniform vec4 textColor;
+        uniform sampler2D text;
+        uniform vec4 textColor;
 
-		void main()
-		{
-			vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);
-			color = textColor * sampled;
-		}
-	)";
-	return code;
+        void main()
+        {
+            vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
+            color = textColor * sampled;
+        }
+    )";
+    return code;
 }
 
 void GLTextShaper::setFont(Font& _regularFont)
@@ -100,24 +108,24 @@ void GLTextShaper::setFont(Font& _regularFont)
     clearGlyphCache();
 }
 
-void GLTextShaper::setProjection(glm::mat4 const& _projectionMatrix)
+void GLTextShaper::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
-	shader_.use();
-	shader_.setMat4("projection", _projectionMatrix);
+    shader_.bind();
+    shader_.setUniformValue(projectionLocation_, _projectionMatrix);
 }
 
 void GLTextShaper::render(
-    glm::ivec2 _pos,
+    QPoint _pos,
     std::vector<char32_t> const& _chars,
-    glm::vec4 const& _color,
+    QVector4D const& _color,
     FontStyle _style)
 {
     Font& font = regularFont_.get(); // TODO: respect _style
 
     font.render(_chars, glyphPositions_);
 
-    shader_.use();
-    shader_.setVec4(colorLocation_, _color);
+    shader_.bind();
+    shader_.setUniformValue(colorLocation_, _color);
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -128,13 +136,13 @@ void GLTextShaper::render(
             continue;
 
         Glyph const& glyph = getGlyphByIndex(gpos.codepoint, _style);
-        unsigned const x = _pos.x + gpos.x;
-        unsigned const y = _pos.y + gpos.y;
+        unsigned const x = _pos.x() + gpos.x;
+        unsigned const y = _pos.y() + gpos.y;
 
-        auto const xpos = static_cast<GLfloat>(x + glyph.bearing.x);
+        auto const xpos = static_cast<GLfloat>(x + glyph.bearing.x());
         auto const ypos = static_cast<GLfloat>(y + font.baseline() - glyph.descender);
-        auto const w = static_cast<GLfloat>(glyph.size.x);
-        auto const h = static_cast<GLfloat>(glyph.size.y);
+        auto const w = static_cast<GLfloat>(glyph.size.x());
+        auto const h = static_cast<GLfloat>(glyph.size.y());
 
         GLfloat const vertices[6][4] = {
             { xpos,     ypos + h,   0.0, 0.0 },
@@ -196,8 +204,8 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
     auto const descender = font->glyph->metrics.height / 64 - font->glyph->bitmap_top;
     Glyph& glyph = cache.emplace(make_pair(_index, Glyph{
         texture,
-        glm::ivec2{(unsigned)font->glyph->bitmap.width, (unsigned)font->glyph->bitmap.rows},
-        glm::ivec2{(unsigned)font->glyph->bitmap_left, (unsigned)font->glyph->bitmap_top},
+        QPoint((unsigned)font->glyph->bitmap.width, (unsigned)font->glyph->bitmap.rows),
+        QPoint((unsigned)font->glyph->bitmap_left, (unsigned)font->glyph->bitmap_top),
         static_cast<unsigned>(font->height) / 64,
         static_cast<unsigned>(descender),
         static_cast<unsigned>(font->glyph->advance.x / 64)

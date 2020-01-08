@@ -152,7 +152,7 @@ namespace {
 #if !defined(_WIN32)
 static termios getTerminalSettings(int fd)
 {
-    termios tio;
+    termios tio{};
     tcgetattr(fd, &tio);
     return tio;
 }

@@ -6,6 +6,8 @@ find_package(Threads)
 include(FilesystemResolver)
 
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
+option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" OFF)
+option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" OFF)
 
 if(MSVC)
     add_definitions(-DNOMINMAX)
@@ -60,6 +62,12 @@ endif()
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
 target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
+if(LIBTERMINAL_LOG_RAW)
+    target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_RAW=1)
+endif()
+if(LIBTERMINAL_LOG_TRACE)
+    target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_TRACE=1)
+endif()
 
 # ----------------------------------------------------------------------------
 if(LIBTERMINAL_TESTING)

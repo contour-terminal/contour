@@ -119,7 +119,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             else if (intermediateCharacters_ == "(" && _currentChar == 'B')
             {
                 // TODO: ESC ( B
-                log<UnsupportedOutputEvent>("Designate G0 Character Set: US-ASCII.");
+                //log<UnsupportedOutputEvent>("Designate G0 Character Set: US-ASCII.");
             }
             else if (_currentChar == '0')
             {
