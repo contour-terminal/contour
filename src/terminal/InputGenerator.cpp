@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/InputGenerator.h>
+#include <terminal/ControlCode.h>
 #include <terminal/util/UTF8.h>
 
 #include <algorithm>
@@ -23,11 +24,6 @@
 #include <fmt/format.h>
 
 using namespace std;
-
-#define ESC "\x1B"
-#define CSI "\x1B["
-#define DEL "\x7F"
-#define SS3 "\x4F"
 
 namespace terminal {
 
@@ -72,6 +68,10 @@ namespace mappings {
     // - constexpr-evaluated sort()ed array returned in lambda-expr to be assigned to these globals here.
     // - make use of this property and let tryMap() do a std::binary_search()
 
+    #define ESC "\x1B"
+    #define CSI "\x1B["
+    #define SS3 "\x4F"
+
     // the modifier parameter is going to be replaced via fmt::format()
     auto constexpr functionKeysWithModifiers = array{
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
@@ -104,11 +104,6 @@ namespace mappings {
     };
 
     auto constexpr standard = array{
-        KeyMapping{Key::Enter, "\r"},
-        KeyMapping{Key::Backspace, "\b"},
-        KeyMapping{Key::Tab, "\t"},
-        KeyMapping{Key::Escape, ESC},
-
         // cursor keys
         KeyMapping{Key::UpArrow, CSI "A"},
         KeyMapping{Key::DownArrow, CSI "B"},
@@ -168,6 +163,10 @@ namespace mappings {
         KeyMapping{Key::Numpad_9, ESC SS3 "y"},
     };
 
+    #undef ESC
+    #undef CSI
+    #undef SS3
+
     constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept
     {
         return _km.key == _key;
@@ -209,10 +208,6 @@ string to_string(Key _key)
 {
     switch (_key)
     {
-        case Key::Enter: return "Enter";
-        case Key::Backspace: return "Backspace";
-        case Key::Tab: return "Tab";
-        case Key::Escape: return "Escape";
         case Key::F1: return "F1";
         case Key::F2: return "F2";
         case Key::F3: return "F3";
@@ -258,6 +253,19 @@ string to_string(Key _key)
     return "(unknown)";
 }
 
+string to_string(MouseButton _button)
+{
+    switch (_button)
+    {
+        case MouseButton::Left: return "Left"s;
+        case MouseButton::Right: return "Right"s;
+        case MouseButton::Middle: return "Middle"s;
+        case MouseButton::WheelUp: return "WheelUp"s;
+        case MouseButton::WheelDown: return "WheelDown"s;
+    }
+    return ""; // should never be reached
+}
+
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
     cursorKeysMode_ = _mode;
@@ -294,7 +302,9 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
 
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
-    if (_modifier == Modifier::Control && _characterEvent == L' ')
+    if (_characterEvent < 32)
+        return append(_characterEvent); // raw C0 code
+    else if (_modifier == Modifier::Control && _characterEvent == L' ')
         return append("\x00");
     else if (_modifier == Modifier::Control && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
         return append(tolower(_characterEvent) - 'a' + 1);
@@ -372,120 +382,6 @@ inline bool InputGenerator::append(T(&_sequence)[N])
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
     return true;
-}
-
-optional<Modifier::Key> parseModifierKey(string const& _key)
-{
-    auto const key = toUpper(_key);
-	if (key == "ALT")
-		return Modifier::Key::Alt;
-	if (key == "CONTROL")
-		return Modifier::Key::Control;
-	if (key == "SHIFT")
-		return Modifier::Key::Shift;
-	if (key == "META")
-		return Modifier::Key::Meta;
-	return nullopt;
-}
-
-optional<variant<Key, char32_t>> parseKeyOrChar(string const& _name)
-{
-    if (auto const key = parseKey(_name); key.has_value())
-        return key.value();
-
-    if (_name.size() == 1)
-    {
-        if (isdigit(_name[0]))
-            return static_cast<char32_t>(_name[0]);
-
-        if (isalpha(_name[0]))
-            return static_cast<char32_t>(tolower(_name[0]));
-    }
-
-    auto constexpr namedChars = array{
-        pair{"APOSTROPHE"sv, '\''},
-        pair{"ADD"sv, '+'},
-        pair{"BACKSLASH"sv, 'x'},
-        pair{"COMMA"sv, ','},
-        pair{"DECIMAL"sv, '.'},
-        pair{"DIVIDE"sv, '/'},
-        pair{"EQUAL"sv, '='},
-        pair{"LEFT_BRACKET"sv, '['},
-        pair{"MINUS"sv, '-'},
-        pair{"MULTIPLY"sv, '*'},
-        pair{"PERIOD"sv, '.'},
-        pair{"RIGHT_BRACKET"sv, ']'},
-        pair{"SEMICOLON"sv, ';'},
-        pair{"SLASH"sv, '/'},
-        pair{"SUBTRACT"sv, '-'},
-        pair{"SPACE"sv, ' '}
-    };
-
-    auto const name = toUpper(_name);
-    for (auto const& mapping: namedChars)
-        if (name == mapping.first)
-            return mapping.second;
-
-    return nullopt;
-}
-
-optional<Key> parseKey(string const& _name)
-{
-	auto static constexpr mappings = array{
-		pair{ "Enter"sv, Key::Enter },
-		pair{ "Backspace"sv, Key::Backspace },
-		pair{ "Tab"sv, Key::Tab },
-		pair{ "Escape"sv, Key::Escape },
-		pair{ "F1"sv, Key::F1 },
-		pair{ "F2"sv, Key::F2 },
-		pair{ "F3"sv, Key::F3 },
-		pair{ "F4"sv, Key::F4 },
-		pair{ "F5"sv, Key::F5 },
-		pair{ "F6"sv, Key::F6 },
-		pair{ "F7"sv, Key::F7 },
-		pair{ "F8"sv, Key::F8 },
-		pair{ "F9"sv, Key::F9 },
-		pair{ "F10"sv, Key::F10 },
-		pair{ "F11"sv, Key::F11 },
-		pair{ "F12"sv, Key::F12 },
-		pair{ "DownArrow"sv, Key::DownArrow },
-		pair{ "LeftArrow"sv, Key::LeftArrow },
-		pair{ "RightArrow"sv, Key::RightArrow },
-		pair{ "UpArrow"sv, Key::UpArrow },
-		pair{ "Insert"sv, Key::Insert },
-		pair{ "Delete"sv, Key::Delete },
-		pair{ "Home"sv, Key::Home },
-		pair{ "End"sv, Key::End },
-		pair{ "PageUp"sv, Key::PageUp },
-		pair{ "PageDown"sv, Key::PageDown },
-		pair{ "Numpad_NumLock"sv, Key::Numpad_NumLock },
-		pair{ "Numpad_Divide"sv, Key::Numpad_Divide },
-		pair{ "Numpad_Multiply"sv, Key::Numpad_Multiply },
-		pair{ "Numpad_Subtract"sv, Key::Numpad_Subtract },
-		pair{ "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
-		pair{ "Numpad_Add"sv, Key::Numpad_Add },
-		pair{ "Numpad_Decimal"sv, Key::Numpad_Decimal },
-		pair{ "Numpad_Enter"sv, Key::Numpad_Enter },
-		pair{ "Numpad_Equal"sv, Key::Numpad_Equal },
-		pair{ "Numpad_0"sv, Key::Numpad_0 },
-		pair{ "Numpad_1"sv, Key::Numpad_1 },
-		pair{ "Numpad_2"sv, Key::Numpad_2 },
-		pair{ "Numpad_3"sv, Key::Numpad_3 },
-		pair{ "Numpad_4"sv, Key::Numpad_4 },
-		pair{ "Numpad_5"sv, Key::Numpad_5 },
-		pair{ "Numpad_6"sv, Key::Numpad_6 },
-		pair{ "Numpad_7"sv, Key::Numpad_7 },
-		pair{ "Numpad_8"sv, Key::Numpad_8 },
-		pair{ "Numpad_9"sv, Key::Numpad_9 }
-    };
-
-    auto const name = toLower(_name);
-
-    for (auto const mapping: mappings)
-        if (name == toLower(mapping.first))
-            return mapping.second;
-
-    return nullopt;
 }
 
 } // namespace terminal

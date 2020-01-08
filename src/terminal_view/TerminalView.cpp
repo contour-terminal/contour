@@ -19,9 +19,6 @@
 #include <terminal/util/overloaded.h>
 #include <terminal/util/UTF8.h>
 
-#include <GL/glew.h>
-#include <glm/glm.hpp>
-
 #include <array>
 #include <chrono>
 #include <iostream>
@@ -32,13 +29,13 @@ using namespace std::placeholders;
 
 namespace terminal::view {
 
-inline glm::vec4 makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
+inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
 {
-    return glm::vec4{
-        _rgb.red / 255.0,
-        _rgb.green / 255.0,
-        _rgb.blue / 255.0,
-        static_cast<unsigned>(_opacity) / 255.0
+    return QVector4D{
+        _rgb.red / 255.0f,
+        _rgb.green / 255.0f,
+        _rgb.blue / 255.0f,
+        static_cast<unsigned>(_opacity) / 255.0f
     };
 }
 
@@ -48,15 +45,17 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            std::string const& _wordDelimiters,
                            Font& _regularFont,
                            CursorShape _cursorShape, // TODO: remember !
-						   CursorDisplay _cursorDisplay,
+                           CursorDisplay _cursorDisplay,
+                           chrono::milliseconds _cursorBlinkInterval,
                            terminal::ColorProfile const& _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
                            terminal::Process::Environment const& _env,
-                           glm::mat4 const& _projectionMatrix,
+                           QMatrix4x4 const& _projectionMatrix,
                            function<void()> _onScreenUpdate,
                            function<void()> _onWindowTitleChanged,
                            function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+                           function<void()> _onTerminalClosed,
                            Logger _logger) :
     logger_{ move(_logger) },
     renderer_{
@@ -72,14 +71,16 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _env,
         _winSize,
         move(_maxHistoryLineCount),
+        _cursorBlinkInterval,
         move(_onWindowTitleChanged),
         move(_resizeWindow),
-		_now,
+        _now,
         _wordDelimiters,
         _cursorDisplay,
         _cursorShape,
-        [this](terminal::LogEvent const& _event) { logger_(_event); },
-        [_onScreenUpdate](auto const& /*_commands*/) { if (_onScreenUpdate) _onScreenUpdate(); }
+        [_onScreenUpdate](auto const& /*_commands*/) { if (_onScreenUpdate) _onScreenUpdate(); },
+        move(_onTerminalClosed),
+        [this](terminal::LogEvent const& _event) { logger_(_event); }
     }
 {
 }

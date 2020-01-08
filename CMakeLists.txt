@@ -73,7 +73,11 @@ endif()
 # ----------------------------------------------------------------------------
 add_subdirectory(src/terminal)
 add_subdirectory(src/terminal_view)
-add_subdirectory(src/contour)
+
+if(CONTOUR_CLIENT)
+    add_subdirectory(src/contour)
+endif()
+
 if(CONTOUR_EXAMPLES)
     add_subdirectory(examples)
 endif()

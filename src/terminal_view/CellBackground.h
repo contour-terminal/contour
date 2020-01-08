@@ -13,30 +13,34 @@
  */
 #pragma once
 
-#include <terminal_view/Shader.h>
-
 #include <terminal/Color.h>
 
-#include <GL/glew.h>
-#include <glm/glm.hpp>
+#include <QtCore/QPoint>
+#include <QtCore/QSize>
+#include <QtGui/QMatrix4x4>
+#include <QtGui/QOpenGLBuffer>
+#include <QtGui/QOpenGLShader>
+#include <QtGui/QOpenGLVertexArrayObject>
+#include <QtGui/QVector4D>
+#include <QtGui/QOpenGLFunctions_3_2_Core>
 
 namespace terminal::view {
 
 /// OpenGL Object for rendering character cell's background.
-class CellBackground {
+class CellBackground : public QOpenGLFunctions_3_2_Core {
   public:
-    CellBackground(glm::ivec2 _size, glm::mat4 _projectionMatrix);
+    CellBackground(QSize _size, QMatrix4x4 _projectionMatrix);
     ~CellBackground();
 
-    void setProjection(glm::mat4 const& _projectionMatrix);
-    void render(glm::ivec2 _pos, glm::vec4 const& _color);
-    void resize(glm::ivec2 _size);
+    void setProjection(QMatrix4x4 const& _projectionMatrix);
+    void resize(QSize _size);
+    void render(QPoint _pos, QVector4D const& _color);
 
   private:
-    glm::mat4 projectionMatrix_;
-    Shader shader_;
-    GLint const transformLocation_;
-    GLint const colorLocation_;
+    QMatrix4x4 projectionMatrix_;
+    QOpenGLShaderProgram shader_;
+    GLint transformLocation_;
+    GLint colorLocation_;
     GLuint vbo_{};
     GLuint vao_{};
 };

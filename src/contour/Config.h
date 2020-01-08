@@ -22,10 +22,15 @@
 
 #include <terminal/util/stdfs.h>
 
+#include <QKeySequence>
+
+#include <chrono>
 #include <optional>
 #include <string>
 #include <variant>
 #include <unordered_map>
+
+namespace contour {
 
 namespace actions {
     struct ToggleFullScreen{};
@@ -44,16 +49,16 @@ namespace actions {
     struct ScrollPageDown{};
     struct ScrollToTop{};
     struct ScrollToBottom{};
-	struct PasteClipboard{};
-	struct CopySelection{};
-	struct PasteSelection{};
-	struct NewTerminal{};
-	struct OpenConfiguration{};
+    struct PasteClipboard{};
+    struct CopySelection{};
+    struct PasteSelection{};
+    struct NewTerminal{};
+    struct OpenConfiguration{};
     struct Quit{};
-	// CloseTab
-	// OpenTab
-	// FocusNextTab
-	// FocusPreviousTab
+    // CloseTab
+    // OpenTab
+    // FocusNextTab
+    // FocusPreviousTab
 }
 
 using Action = std::variant<
@@ -76,10 +81,12 @@ using Action = std::variant<
     actions::CopySelection,
     actions::PasteSelection,
     actions::PasteClipboard,
-	actions::NewTerminal,
-	actions::OpenConfiguration,
+    actions::NewTerminal,
+    actions::OpenConfiguration,
     actions::Quit
 >;
+
+std::string to_string(Action action);
 
 struct Config {
     FileSystem::path backingFilePath;
@@ -95,8 +102,9 @@ struct Config {
     bool fullscreen;
     unsigned short fontSize;
     std::string fontFamily;
-    terminal::CursorDisplay cursorDisplay;
     terminal::CursorShape cursorShape;
+    terminal::CursorDisplay cursorDisplay;
+    std::chrono::milliseconds cursorBlinkInterval;
     unsigned int tabWidth;
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
@@ -105,11 +113,16 @@ struct Config {
     std::string wordDelimiters;
 
     terminal::ColorProfile colorProfile{};
-    std::unordered_map<terminal::InputEvent, std::vector<Action>> inputMappings;
+    std::map<QKeySequence, std::vector<Action>> keyMappings;
+    std::unordered_map<terminal::MouseEvent, std::vector<Action>> mouseMappings;
 };
 
 std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
+Config loadConfigFromFile(FileSystem::path const& _fileName);
+Config loadConfig();
 
 std::string serializeYaml(Config const& _config);
 void saveConfigToFile(Config const& _config, FileSystem::path const& _path);
+
+} // namespace contour

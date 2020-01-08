@@ -271,10 +271,10 @@ class MnemonicBuilder {
         switch (v.unit)
         {
             case ResizeWindow::Unit::Pixels:
-                build("WINMANIP", "Resize window", 4, v.height, v.width);
+                build("WINMANIP", "Resize window (in pixels)", 4, v.height, v.width);
                 break;
             case ResizeWindow::Unit::Characters:
-                build("WINMANIP", "Resize window", 8, v.height, v.width);
+                build("WINMANIP", "Resize window (in chars)", 8, v.height, v.width);
                 break;
         }
     }
@@ -307,11 +307,15 @@ class MnemonicBuilder {
 			build("DECSLRM", "Set left/right margin.", v.left.value_or(1));
     }
     void operator()(ScreenAlignmentPattern) { build("DECALN", "Draw Screen Alignment Pattern."); }
-    void operator()(SendMouseEvents) {} // TODO
+    void operator()(SendMouseEvents const& v) {
+        build(fmt::format("MOUSE({})", to_string(v.protocol)), "Send Mouse Events", v.enable);
+    }
     void operator()(ApplicationKeypadMode) {} // TODO
     void operator()(DesignateCharset) {} // TODO
     void operator()(SingleShiftSelect) {} // TODO
-    void operator()(ChangeWindowTitle) {} // TODO
+    void operator()(ChangeWindowTitle const& v) {
+        build("WINTITLE", fmt::format("Sets window title to {}", v.title));
+    }
     void operator()(SoftTerminalReset) { build("DECSTR", "Soft terminal reset."); }
     void operator()(AppendChar const& v) {
         pendingText_ += utf8::to_string(utf8::encode(v.ch));

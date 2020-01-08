@@ -24,8 +24,6 @@
 #include <terminal_view/GLTextShaper.h>
 #include <terminal_view/GLRenderer.h>
 
-#include <glm/matrix.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -47,15 +45,17 @@ class TerminalView {
                  std::string const& _wordDelimiters,
                  Font& _regularFont,
                  CursorShape _cursorShape,
-				 CursorDisplay _cursorDisplay,
+                 CursorDisplay _cursorDisplay,
+                 std::chrono::milliseconds _cursorBlinkInterval,
                  terminal::ColorProfile const& _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
                  terminal::Process::Environment const& _env,
-                 glm::mat4 const& _projectionMatrix,
+                 QMatrix4x4 const& _projectionMatrix,
                  std::function<void()> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+                 std::function<void()> _onTerminalClosed,
                  Logger _logger);
 
     TerminalView(TerminalView const&) = delete;
@@ -77,10 +77,10 @@ class TerminalView {
     void setFont(Font& _font) { renderer_.setFont(_font); }
     bool setFontSize(unsigned int _fontSize) { return renderer_.setFontSize(_fontSize); }
     bool setTerminalSize(WindowSize const& _newSize);
-	void setCursorColor(RGBColor const& _color) { return renderer_.setCursorColor(_color); }
-	void setCursorShape(CursorShape _shape);
+    void setCursorColor(RGBColor const& _color) { return renderer_.setCursorColor(_color); }
+    void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
-    void setProjection(glm::mat4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
+    void setProjection(QMatrix4x4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
 
     /// Renders the screen buffer to the current OpenGL screen.
     void render(std::chrono::steady_clock::time_point const& _now);
@@ -93,8 +93,8 @@ class TerminalView {
     /// The alive() test will fail after this call.
     void wait();
 
-	Process const& process() const noexcept { return process_; }
-	Process& process() noexcept { return process_; }
+    Process const& process() const noexcept { return process_; }
+    Process& process() noexcept { return process_; }
     Terminal const& terminal() const noexcept { return process_.terminal(); }
     Terminal& terminal() noexcept { return process_.terminal(); }
 
@@ -112,7 +112,7 @@ void render(TerminalView const& _terminalView,
             CursorShape _cursorShape,
             terminal::ColorProfile const& _colorProfile,
             terminal::Opacity _backgroundOpacity,
-            glm::mat4 const& _projectionMatrix,
+            QMatrix4x4 const& _projectionMatrix,
             Logger _logger);
 
 } // namespace terminal::view

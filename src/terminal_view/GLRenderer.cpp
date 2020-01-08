@@ -7,13 +7,13 @@ using namespace std::placeholders;
 using namespace terminal;
 using namespace terminal::view;
 
-inline glm::vec4 makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
+inline QVector4D makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
 {
-    return glm::vec4{
-        _rgb.red / 255.0,
-        _rgb.green / 255.0,
-        _rgb.blue / 255.0,
-        static_cast<unsigned>(_opacity) / 255.0
+    return QVector4D{
+        _rgb.red / 255.0f,
+        _rgb.green / 255.0f,
+        _rgb.blue / 255.0f,
+        static_cast<unsigned>(_opacity) / 255.0f
     };
 }
 
@@ -21,29 +21,30 @@ GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
                        terminal::ColorProfile const& _colorProfile,
                        terminal::Opacity _backgroundOpacity,
-                       glm::mat4 const& _projectionMatrix) :
+                       QMatrix4x4 const& _projectionMatrix) :
     logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     textShaper_{ regularFont_.get(), _projectionMatrix },
     cellBackground_{
-        glm::vec2{
+        QSize(
             regularFont_.get().maxAdvance(),
             regularFont_.get().lineHeight()
-        },
+        ),
         _projectionMatrix
     },
     cursor_{
-        glm::ivec2{
+        QSize(
             regularFont_.get().maxAdvance(),
-            regularFont_.get().lineHeight(),
-        },
+            regularFont_.get().lineHeight()
+        ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
         makeColor(colorProfile_.cursor)
     }
 {
+    initializeOpenGLFunctions();
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -64,14 +65,20 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     regularFont_.get().setFontSize(_fontSize);
     // TODO: other font styles
     textShaper_.clearGlyphCache();
-    cellBackground_.resize(glm::ivec2{regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()});
-    cursor_.resize(glm::ivec2{regularFont_.get().maxAdvance(), regularFont_.get().lineHeight()});
+    cellBackground_.resize(QSize{
+        static_cast<int>(regularFont_.get().maxAdvance()),
+        static_cast<int>(regularFont_.get().lineHeight())
+    });
+    cursor_.resize(QSize{
+        static_cast<int>(regularFont_.get().maxAdvance()),
+        static_cast<int>(regularFont_.get().lineHeight())
+    });
     // TODO update margins?
 
     return true;
 }
 
-void GLRenderer::setProjection(glm::mat4 const& _projectionMatrix)
+void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
     cellBackground_.setProjection(_projectionMatrix);
     textShaper_.setProjection(_projectionMatrix);
@@ -85,7 +92,7 @@ void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
 
 void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
 {
-	cursor_.setColor(makeColor(_color));
+    cursor_.setColor(makeColor(_color));
 }
 
 void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
@@ -175,18 +182,18 @@ void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
     );
 }
 
-glm::ivec2 GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
+QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
 {
     constexpr int LeftMargin = 0;
     constexpr int BottomMargin = 0;
 
-    return glm::ivec2{
-        LeftMargin + (col - 1) * regularFont_.get().maxAdvance(),
-        BottomMargin + (_screenSize.rows - row) * regularFont_.get().lineHeight()
+    return QPoint{
+        static_cast<int>(LeftMargin + (col - 1) * regularFont_.get().maxAdvance()),
+        static_cast<int>(BottomMargin + (_screenSize.rows - row) * regularFont_.get().lineHeight())
     };
 }
 
-std::pair<glm::vec4, glm::vec4> GLRenderer::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
+std::pair<QVector4D, QVector4D> GLRenderer::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
 {
     float const opacity = [=]() {
         if (_attributes.styles & CharacterStyleMask::Hidden)
@@ -197,10 +204,10 @@ std::pair<glm::vec4, glm::vec4> GLRenderer::makeColors(ScreenBuffer::GraphicsAtt
             return 1.0f;
     }();
 
-    auto const applyColor = [_attributes, this](Color const& _color, ColorTarget _target, float _opacity) -> glm::vec4
+    auto const applyColor = [_attributes, this](Color const& _color, ColorTarget _target, float _opacity) -> QVector4D
     {
         RGBColor const rgb = apply(colorProfile_, _color, _target, _attributes.styles & CharacterStyleMask::Bold);
-        glm::vec4 const rgba{
+        QVector4D const rgba{
             rgb.red / 255.0f,
             rgb.green / 255.0f,
             rgb.blue / 255.0f,
@@ -210,9 +217,9 @@ std::pair<glm::vec4, glm::vec4> GLRenderer::makeColors(ScreenBuffer::GraphicsAtt
     };
 
     float const backgroundOpacity =
-		holds_alternative<DefaultColor>(_attributes.backgroundColor)
-			? static_cast<float>(backgroundOpacity_) / 255.0f
-			: 1.0f;
+        holds_alternative<DefaultColor>(_attributes.backgroundColor)
+            ? static_cast<float>(backgroundOpacity_) / 255.0f
+            : 1.0f;
 
     return (_attributes.styles & CharacterStyleMask::Inverse)
         ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity),

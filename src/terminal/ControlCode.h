@@ -18,7 +18,7 @@
 
 namespace terminal::ControlCode {
 
-enum class C0 {
+enum class C0 : char {
     NUL = 0x00,  //!< Null
     SOH = 0x01,  //!< Start of Heading
     STX = 0x02,  //!< Start of Text

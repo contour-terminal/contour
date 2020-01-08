@@ -45,6 +45,9 @@ cursor:
     # Determins whether or not the cursor will be blinking over time.
     blinking: true
 
+    # Blinking interval (in milliseconds) to use when cursor is blinking.
+    blinking_interval: 500
+
 # Background configuration
 background:
     # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully
@@ -95,6 +98,7 @@ background:
 # - OpenConfiguration Opens the configuration file.
 # - PasteClipboard    Pastes clipboard to standard input.
 # - PasteSelection    Pastes current selection to standard input.
+# - Quit              Quits the application.
 # - ScreenshotVT      Takes a screenshot in form of VT escape sequences.
 # - ScrollDown        Scrolls down by the multiplier factor.
 # - ScrollOneDown     Scrolls down by exactly one line.

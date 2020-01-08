@@ -46,11 +46,13 @@ class Terminal {
     explicit Terminal(
         WindowSize _winSize,
         std::optional<size_t> _maxHistoryLineCount = std::nullopt,
+        std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
         std::function<void()> _changeWindowTitleCallback = {},
         std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
         std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
         Logger _logger = {},
         Hook _onScreenCommands = {},
+        std::function<void()> _onClosed = {},
         std::string const& _wordDelimiters = "");
     ~Terminal();
 
@@ -64,7 +66,14 @@ class Terminal {
     size_t historyLineCount() const noexcept;
 
     // Sends given input event to connected slave.
-    bool send(InputEvent _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(KeyInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(CharInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(MousePressEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(MouseReleaseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(MouseMoveEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+
+    bool send(MouseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(InputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
 
     /// Sends verbatim text in bracketed mode to application.
     void sendPaste(std::string_view const& _text);
@@ -79,6 +88,8 @@ class Terminal {
 
     /// Thread-safe access to screen data for rendering
     void render(Screen::Renderer const& renderer, std::chrono::steady_clock::time_point _now) const;
+
+    std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
 
     Screen::Cell const& absoluteAt(Coordinate const& _coord) const;
 
@@ -153,10 +164,10 @@ class Terminal {
     /// Renders only the selected area.
     void renderSelection(terminal::Screen::Renderer _render) const;
 
-	std::chrono::duration<double, std::milli> cursorBlinkInterval() const noexcept
-	{
-		return std::chrono::duration<double, std::milli>{500.0}; // TODO: make configurable
-	}
+    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
+    {
+        return cursorBlinkInterval_;
+    }
 
     WindowSize screenSize() const noexcept { return pty_.screenSize(); }
 
@@ -177,6 +188,7 @@ class Terminal {
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
+    std::chrono::milliseconds cursorBlinkInterval_;
 	mutable unsigned cursorBlinkState_;
 	mutable std::chrono::steady_clock::time_point lastCursorBlink_;
 
@@ -198,6 +210,8 @@ class Terminal {
     Screen::Hook onScreenCommands_;
     std::recursive_mutex mutable screenLock_;
     std::thread screenUpdateThread_;
+
+    std::function<void()> onClosed_;
 };
 
 }  // namespace terminal
