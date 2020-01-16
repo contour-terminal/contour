@@ -25,6 +25,14 @@ fontFamily: "Fira Code, Hack, Ubuntu Mono, Consolas, monospace"
 # Tab width to move the cursor to the right when a HT control character is recieved.
 tabWidth: 8
 
+history:
+    # Number of lines to preserve (-1 for infinite).
+    limit: -1
+    # Boolean indicating whether or not to scroll down to the bottom on screen updates.
+    autoScrollOnUpdate: true
+    # Number of lines to scroll on ScrollUp & ScrollDown events.
+    scrollMultiplier: 3
+
 cursor:
     # Supported shapes are:
     #
@@ -99,6 +107,7 @@ background:
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleFullScreen  Enables/disables full screen mode.
 # - WriteScreen:      Writes VT sequence in `chars` member to the screen (bypassing the application).
+
 input_mapping:
     - { mods: [],               mouse: Middle,      action: PasteSelection }
     - { mods: [],               mouse: WheelDown,   action: ScrollDown }
@@ -107,7 +116,7 @@ input_mapping:
     - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
     - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
-    - { mods: [Control, Shift], key: Equal,         action: IncreaseFontSize }
+    - { mods: [Control, Shift], key: Plus,          action: IncreaseFontSize }
     - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
