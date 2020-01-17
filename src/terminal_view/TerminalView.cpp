@@ -96,8 +96,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
         static_cast<unsigned short>(_height / renderer_.cellHeight())
     };
 
-    WindowSize const oldSize = process_.screenSize();
-    bool const doResize = newSize != oldSize; // process_.size();
+    bool const doResize = newSize != process_.screenSize();
     if (doResize)
         process_.resizeScreen(newSize);
 
