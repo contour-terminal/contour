@@ -243,8 +243,7 @@ void OutputHandler::executeControlFunction(char _c0)
             break;
         case 0x0B: // VT
             // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
-            emitCommand<Index>();
-            break;
+            [[fallthrough]];
         case 0x0C: // FF
             // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
             emitCommand<Index>();
@@ -268,7 +267,7 @@ void OutputHandler::dispatchESC(char _finalChar)
 {
     char const leaderSym = intermediateCharacters_.size() == 1
 		? intermediateCharacters_[0]
-		: 0;
+		: char{};
 
 	auto const funcId = FunctionDef::makeId(
 		FunctionType::ESC, leaderSym, 0, static_cast<char>(_finalChar));
@@ -283,7 +282,7 @@ void OutputHandler::dispatchCSI(char _finalChar)
 {
     char const followerSym = intermediateCharacters_.size() == 1
 		? intermediateCharacters_[0]
-		: 0;
+		: char{};
 
 	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(_finalChar));
 

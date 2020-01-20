@@ -397,7 +397,7 @@ vector<Selector::Range> Terminal::selection() const
         return {};
 }
 
-void Terminal::renderSelection(terminal::Screen::Renderer _render) const
+void Terminal::renderSelection(terminal::Screen::Renderer const& _render) const
 {
     if (selector_)
         selector_->render(_render);

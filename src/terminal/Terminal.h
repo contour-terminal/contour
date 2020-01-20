@@ -162,7 +162,7 @@ class Terminal {
     void clearSelection();
 
     /// Renders only the selected area.
-    void renderSelection(terminal::Screen::Renderer _render) const;
+    void renderSelection(terminal::Screen::Renderer const& _render) const;
 
     constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
     {

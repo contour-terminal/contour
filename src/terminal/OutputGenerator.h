@@ -30,7 +30,7 @@ class OutputGenerator {
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    explicit OutputGenerator(Writer writer) : writer_{writer} {}
+    explicit OutputGenerator(Writer writer) : writer_{std::move(writer)} {}
     explicit OutputGenerator(std::ostream& output) : OutputGenerator{[&](auto d, auto n) { output.write(d, n); }} {}
     ~OutputGenerator();
 
@@ -53,8 +53,8 @@ class OutputGenerator {
     }
 
   private:
-    static std::string flush(std::vector<int> _sgr);
-    void sgr_add(int _param);
+    static std::string flush(std::vector<unsigned> const& _sgr);
+    void sgr_add(unsigned _param);
 
     void write(char32_t v)
     {
@@ -81,7 +81,7 @@ class OutputGenerator {
 
   private:
     Writer writer_;
-    std::vector<int> sgr_;
+    std::vector<unsigned> sgr_;
     Color currentForegroundColor_ = DefaultColor{};
     Color currentBackgroundColor_ = DefaultColor{};
 };

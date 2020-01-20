@@ -32,10 +32,10 @@ namespace terminal::view {
 inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
 {
     return QVector4D{
-        _rgb.red / 255.0f,
-        _rgb.green / 255.0f,
-        _rgb.blue / 255.0f,
-        static_cast<unsigned>(_opacity) / 255.0f
+        static_cast<float>(_rgb.red) / 255.0f,
+        static_cast<float>(_rgb.green) / 255.0f,
+        static_cast<float>(_rgb.blue) / 255.0f,
+        static_cast<float>(_opacity) / 255.0f
     };
 }
 
@@ -70,7 +70,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         {_shell},
         _env,
         _winSize,
-        move(_maxHistoryLineCount),
+        _maxHistoryLineCount,
         _cursorBlinkInterval,
         move(_onWindowTitleChanged),
         move(_resizeWindow),

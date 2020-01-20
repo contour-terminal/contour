@@ -124,7 +124,7 @@ pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape)
 GLCursor::GLCursor(QSize _size, QMatrix4x4 _transform, CursorShape _shape, QVector4D const& _color) :
     shape_{ _shape },
     size_{ _size },
-    projectionMatrix_{ move(_transform) },
+    projectionMatrix_{ _transform },
     shader_{},
     transformLocation_{},
     colorLocation_{},
@@ -208,7 +208,7 @@ void GLCursor::render(QPoint _pos)
     shader_.bind();
 
     auto translation = QMatrix4x4{};
-    translation.translate(_pos.x(), _pos.y(), 0.0);
+    translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()), 0.0f);
 
     shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
 

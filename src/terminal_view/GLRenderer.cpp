@@ -10,10 +10,10 @@ using namespace terminal::view;
 inline QVector4D makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
 {
     return QVector4D{
-        _rgb.red / 255.0f,
-        _rgb.green / 255.0f,
-        _rgb.blue / 255.0f,
-        static_cast<unsigned>(_opacity) / 255.0f
+        static_cast<float>(_rgb.red) / 255.0f,
+        static_cast<float>(_rgb.green) / 255.0f,
+        static_cast<float>(_rgb.blue) / 255.0f,
+        static_cast<float>(_opacity) / 255.0f
     };
 }
 
@@ -29,15 +29,15 @@ GLRenderer::GLRenderer(Logger _logger,
     textShaper_{ regularFont_.get(), _projectionMatrix },
     cellBackground_{
         QSize(
-            regularFont_.get().maxAdvance(),
-            regularFont_.get().lineHeight()
+            static_cast<int>(regularFont_.get().maxAdvance()),
+            static_cast<int>(regularFont_.get().lineHeight())
         ),
         _projectionMatrix
     },
     cursor_{
         QSize(
-            regularFont_.get().maxAdvance(),
-            regularFont_.get().lineHeight()
+            static_cast<int>(regularFont_.get().maxAdvance()),
+            static_cast<int>(regularFont_.get().lineHeight())
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
@@ -208,9 +208,9 @@ std::pair<QVector4D, QVector4D> GLRenderer::makeColors(ScreenBuffer::GraphicsAtt
     {
         RGBColor const rgb = apply(colorProfile_, _color, _target, _attributes.styles & CharacterStyleMask::Bold);
         QVector4D const rgba{
-            rgb.red / 255.0f,
-            rgb.green / 255.0f,
-            rgb.blue / 255.0f,
+            static_cast<float>(rgb.red) / 255.0f,
+            static_cast<float>(rgb.green) / 255.0f,
+            static_cast<float>(rgb.blue) / 255.0f,
             _opacity
         };
         return rgba;

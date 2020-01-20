@@ -55,8 +55,8 @@ class Font {
     Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
-    Font(Font&&);
-    Font& operator=(Font&&);
+    Font(Font&&) noexcept;
+    Font& operator=(Font&&) noexcept;
     ~Font();
 
     unsigned int fontSize() const noexcept { return fontSize_; }
