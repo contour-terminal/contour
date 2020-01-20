@@ -38,7 +38,7 @@ TerminalProcess::TerminalProcess(const string& _path,
         move(_changeWindowTitleCallback),
         move(_resizeWindow),
         _now,
-        _logger,
+        move(_logger),
         move(_onScreenCommands),
         move(_onTerminalClosed),
         _wordDelimiters

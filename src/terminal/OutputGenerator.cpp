@@ -69,7 +69,7 @@ optional<char> finalChar(Charset charset)
     return nullopt;
 }
 
-string OutputGenerator::flush(vector<int> _sgr)
+string OutputGenerator::flush(vector<unsigned> const& _sgr)
 {
     if (_sgr.empty())
         return "";
@@ -89,13 +89,13 @@ void OutputGenerator::flush()
 {
     if (!sgr_.empty())
     {
-        auto const f = flush(move(sgr_));
+        auto const f = flush(sgr_);
         sgr_.clear();
         writer_(f.data(), f.size());
     }
 }
 
-void OutputGenerator::sgr_add(int n)
+void OutputGenerator::sgr_add(unsigned n)
 {
     if (n == 0)
     {
@@ -109,7 +109,7 @@ void OutputGenerator::sgr_add(int n)
 
         if (sgr_.size() == 16)
         {
-            write(flush(move(sgr_)));
+            write(flush(sgr_));
             sgr_.clear();
         }
     }

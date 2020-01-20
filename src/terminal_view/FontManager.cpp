@@ -59,7 +59,7 @@ static string getFontFilePath([[maybe_unused]] string const& _fontPattern)
         return _fontPattern;
 
     #if defined(HAVE_FONTCONFIG)
-    string const pattern = _fontPattern; // TODO: append bold/italic if needed
+    string const& pattern = _fontPattern; // TODO: append bold/italic if needed
 
     FcConfig* fcConfig = FcInitLoadConfigAndFonts();
     FcPattern* fcPattern = FcNameParse((FcChar8 const*) pattern.c_str());
@@ -159,7 +159,7 @@ Font::Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize)
     // a regular face's advance value works.
 }
 
-Font::Font(Font&& v) :
+Font::Font(Font&& v) noexcept :
     ft_{ v.ft_ },
     face_{ v.face_ },
     hb_font_{ v.hb_font_ },
@@ -173,7 +173,7 @@ Font::Font(Font&& v) :
     v.fontSize_ = 0;
 }
 
-Font& Font::operator=(Font&& v)
+Font& Font::operator=(Font&& v) noexcept
 {
     // TODO: free current resources, if any
 

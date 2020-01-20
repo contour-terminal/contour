@@ -174,7 +174,7 @@ vector<Selector::Range> Selector::selection() const
 	return {};
 }
 
-void Selector::render(Selector::Renderer _render)
+void Selector::render(Selector::Renderer const& _render)
 {
     for (auto const& range : selection())
         for (auto col = range.fromColumn; col <= range.toColumn; ++col)

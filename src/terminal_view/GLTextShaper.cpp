@@ -204,8 +204,8 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
     auto const descender = font->glyph->metrics.height / 64 - font->glyph->bitmap_top;
     Glyph& glyph = cache.emplace(make_pair(_index, Glyph{
         texture,
-        QPoint((unsigned)font->glyph->bitmap.width, (unsigned)font->glyph->bitmap.rows),
-        QPoint((unsigned)font->glyph->bitmap_left, (unsigned)font->glyph->bitmap_top),
+        QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows)),
+        QPoint(font->glyph->bitmap_left, font->glyph->bitmap_top),
         static_cast<unsigned>(font->height) / 64,
         static_cast<unsigned>(descender),
         static_cast<unsigned>(font->glyph->advance.x / 64)

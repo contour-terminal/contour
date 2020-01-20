@@ -302,16 +302,16 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
 
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
-    if (_characterEvent < 32)
-        return append(_characterEvent); // raw C0 code
+    char const chr = static_cast<char>(_characterEvent);
+
+    if (_characterEvent < 32 || (!_modifier.control() && utf8::isASCII(_characterEvent)))
+        return append(chr); // raw C0 code
     else if (_modifier == Modifier::Control && _characterEvent == L' ')
         return append("\x00");
-    else if (_modifier == Modifier::Control && tolower(_characterEvent) >= 'a' && tolower(_characterEvent) <= 'z')
-        return append(tolower(_characterEvent) - 'a' + 1);
+    else if (_modifier == Modifier::Control && tolower(chr) >= 'a' && tolower(chr) <= 'z')
+        return append(static_cast<char>(tolower(chr) - 'a' + 1));
     else if (_modifier.control() && _characterEvent >= '[' && _characterEvent <= '_')
-        return append(_characterEvent - 'A' + 1); // remaining C0 characters 0x1B .. 0x1F
-    else if (!_modifier.control() && utf8::isASCII(_characterEvent))
-        return append(static_cast<char>(_characterEvent));
+        return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
     else if (!_modifier || _modifier == Modifier::Shift)
         return append(utf8::to_string(utf8::encode(_characterEvent)));
     else

@@ -46,7 +46,7 @@ auto constexpr fragmentShader = R"(
 )";
 
 CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
-    projectionMatrix_{ move(_projectionMatrix) },
+    projectionMatrix_{ _projectionMatrix },
     shader_{},
     transformLocation_{},
     colorLocation_{}
@@ -118,7 +118,7 @@ void CellBackground::render(QPoint _pos, QVector4D const& _color)
     shader_.bind();
 
     auto translation = QMatrix4x4{};
-    translation.translate(_pos.x(), _pos.y(), 0.0f);
+    translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()), 0.0f);
     shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
     shader_.setUniformValue(colorLocation_, _color);
 

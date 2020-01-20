@@ -78,7 +78,7 @@ namespace {
             case Qt::MiddleButton:
                 return terminal::MouseButton::Middle;
             case Qt::LeftButton:
-                return terminal::MouseButton::Left;
+                [[fallthrough]];
             default: // d'oh
                 return terminal::MouseButton::Left;
         }
@@ -295,9 +295,9 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
 inline QVector4D makeColor(terminal::RGBColor const& _color, terminal::Opacity _opacity)
 {
     return QVector4D{
-        _color.red / 255.0f,
-        _color.green / 255.0f,
-        _color.blue / 255.0f,
+        static_cast<float>(_color.red) / 255.0f,
+        static_cast<float>(_color.green) / 255.0f,
+        static_cast<float>(_color.blue) / 255.0f,
         static_cast<float>(_opacity) / 255.0f};
 }
 
@@ -647,7 +647,7 @@ void TerminalWindow::executeAction(Action const& _action)
         [this](actions::CopySelection) -> bool {
             string const text = extractSelectionText();
             if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-                clipboard->setText(QString::fromUtf8(text.c_str(), text.size()));
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())));
             return false;
         },
         [this](actions::PasteSelection) -> bool {

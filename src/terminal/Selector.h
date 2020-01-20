@@ -129,7 +129,7 @@ class Selector {
 	std::vector<Range> rectangular() const;
 
 	/// Renders the current selection into @p _render.
-	void render(Renderer _render);
+	void render(Renderer const& _render);
 
   private:
 	bool isWordWiseSelection() const noexcept

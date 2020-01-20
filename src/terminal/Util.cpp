@@ -33,7 +33,7 @@ std::string escape(char32_t ch)
         case '"':
             return "\\\"";
         default:
-            if (ch <= 0xFF && std::isprint(ch))
+            if (ch <= 0xFF && std::isprint(static_cast<char>(ch)))
                 return fmt::format("{}", static_cast<char>(ch));
             else if (ch <= 0xFF)
                 return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
