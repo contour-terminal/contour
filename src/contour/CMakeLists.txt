@@ -10,7 +10,6 @@ CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_con
 
 set(contour_SRCS
     Config.cpp Config.h
-    Flags.cpp Flags.h
     FileChangeWatcher.cpp FileChangeWatcher.h
     LoggingSink.cpp LoggingSink.h
     TerminalWindow.cpp TerminalWindow.h

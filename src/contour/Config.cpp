@@ -13,7 +13,6 @@
  */
 #include "Config.h"
 #include "contour_yaml.h"
-#include "Flags.h"
 
 #include <terminal/util/overloaded.h>
 #include <terminal/util/stdfs.h>
@@ -225,41 +224,6 @@ FileSystem::path configHome(string const& _programName)
 #endif
 
 	throw runtime_error{"Could not find config home folder."};
-}
-
-optional<int> loadConfigFromCLI(Config& _config, int _argc, char const* _argv[])
-{
-    util::Flags flags;
-    flags.defineBool("help", 'h', "Shows this help and quits.");
-    flags.defineBool("version", 'v', "Shows this version and exits.");
-    flags.defineString("config", 'c', "PATH", "Specifies path to config file to load from (and save to).", (configHome("contour") / "contour.yml").string());
-
-    flags.parse(_argc, _argv);
-    if (flags.getBool("help"))
-    {
-        cout << "Aero Terminal Emulator.\n"
-             << "\n"
-             << "Usage:\n"
-             << "  contour [OPTIONS ...]\n"
-             << "\n"
-             << flags.helpText() << endl;
-        return {EXIT_SUCCESS};
-    }
-
-    if (flags.getBool("version"))
-    {
-        cout << fmt::format(
-            "Contour Terminal Emulator, version {}.{}.{}",
-            CONTOUR_VERSION_MAJOR,
-            CONTOUR_VERSION_MINOR,
-            CONTOUR_VERSION_PATCH) << endl;
-        return {EXIT_SUCCESS};
-    }
-
-    if (flags.isSet("config"))
-        loadConfigFromFile(_config, flags.getString("config"));
-
-    return nullopt;
 }
 
 template <typename T>
