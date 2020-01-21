@@ -14,10 +14,8 @@
 #include <contour/TerminalWindow.h>
 
 #include <QClipboard>
-#include <QCommandLineParser>
 #include <QDebug>
 #include <QDesktopServices>
-#include <QGuiApplication>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QOpenGLFunctions>

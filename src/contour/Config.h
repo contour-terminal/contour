@@ -117,7 +117,6 @@ struct Config {
     std::unordered_map<terminal::MouseEvent, std::vector<Action>> mouseMappings;
 };
 
-std::optional<int> loadConfigFromCLI(Config& _config, int argc, char const* argv[]);
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
 Config loadConfigFromFile(FileSystem::path const& _fileName);
 Config loadConfig();

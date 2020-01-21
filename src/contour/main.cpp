@@ -13,10 +13,41 @@
  */
 #include <contour/Config.h>
 #include <contour/TerminalWindow.h>
+
+#include <QCommandLineParser>
 #include <QGuiApplication>
+
 #include <iostream>
 
 using namespace std;
+
+namespace contour {
+    struct CLI : public QCommandLineParser {
+        CLI() {
+            setApplicationDescription("Terminal Emulator");
+            addHelpOption();
+            addVersionOption();
+            addOption(configOption);
+            // addOption(profileOption); // TODO: profile handling
+        }
+
+        QCommandLineOption const configOption{
+            QStringList() << "c" << "config",
+            QCoreApplication::translate("main", "Path to configuration file to load at startup."),
+            QCoreApplication::translate("main", "PATH")
+        };
+
+        QString configPath() const { return value(configOption); }
+
+        // QCommandLineOption const profileOption{
+        //     QStringList() << "p" << "profile",
+        //     QCoreApplication::translate("main", "Terminal Profile to load."),
+        //     QCoreApplication::translate("main", "NAME")
+        // };
+
+        // QString profileName() const { return value(profileOption); }
+    };
+}
 
 int main(int argc, char* argv[])
 {
@@ -24,17 +55,23 @@ int main(int argc, char* argv[])
     {
         QGuiApplication::setApplicationName("contour");
         QGuiApplication::setOrganizationName("contour");
+        QGuiApplication::setApplicationVersion(QString::fromStdString(
+            fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH)
+        ));
         QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
         QGuiApplication app(argc, argv);
 
-        // TODO: CLI
-        // --help
-        // -c,--config=PATH
-        // -p,--profile=NAME
-        // ??? -s,--shell=SHELL
-        // ??? [ -- args for shell, if provided]
+        auto cli = contour::CLI{};
+        cli.process(app);
 
-        auto mainWindow = contour::TerminalWindow{contour::loadConfig(), argv[0]};
+        QString const configPath = cli.value(cli.configOption);
+        // QString const profileName = cli.value(cli.profileOption); // TODO: support for profiles
+
+        auto mainWindow = contour::TerminalWindow{
+            configPath.isEmpty() ? contour::loadConfig()
+                                 : contour::loadConfigFromFile(configPath.toStdString()),
+            argv[0]
+        };
         mainWindow.show();
 
         return app.exec();
