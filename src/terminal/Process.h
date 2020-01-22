@@ -44,9 +44,8 @@ class [[nodiscard]] Process {
 
     struct NormalExit { int exitCode; };
     struct SignalExit { int signum; };
-    struct Suspend {};
 
-    using ExitStatus = std::variant<NormalExit, SignalExit, Suspend>;
+    using ExitStatus = std::variant<NormalExit, SignalExit>;
 	using Environment = std::map<std::string, std::string>;
 
     //! Returns login shell of current user.
@@ -74,7 +73,6 @@ class [[nodiscard]] Process {
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
 	[[nodiscard]] ExitStatus wait();
-    [[nodiscard]] ExitStatus waitForExit();
 
 	[[nodiscard]] std::string workingDirectory() const;
 

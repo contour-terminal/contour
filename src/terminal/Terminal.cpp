@@ -69,7 +69,6 @@ Terminal::Terminal(WindowSize _winSize,
 Terminal::~Terminal()
 {
     screenUpdateThread_.join();
-    //wait();
 }
 
 void Terminal::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
@@ -348,11 +347,6 @@ void Terminal::resizeScreen(WindowSize const& _newWindowSize)
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.resize(_newWindowSize);
     pty_.resizeScreen(_newWindowSize);
-}
-
-void Terminal::wait()
-{
-    screenUpdateThread_.join();
 }
 
 void Terminal::setTabWidth(unsigned int _tabWidth)

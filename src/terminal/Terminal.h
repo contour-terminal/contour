@@ -114,9 +114,6 @@ class Terminal {
 
     void resizeScreen(WindowSize const& _newWindowSize);
 
-    /// Waits until process screen update thread has terminated.
-    void wait();
-
     void setTabWidth(unsigned int _tabWidth);
 
     /// Tests whether given absolute line number [1..num] is within scrolling region
