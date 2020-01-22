@@ -58,5 +58,5 @@ TerminalProcess::~TerminalProcess()
     terminal().device().close();
 
     // Wait until the process is actually terminated.
-    (void) waitForExit();
+    (void) Process::wait();
 }

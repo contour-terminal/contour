@@ -140,7 +140,7 @@ void TerminalView::wait()
         return;
 
     process_.terminal().device().close();
-    (void) process_.waitForExit();
+    (void) process_.wait();
 }
 
 } // namespace terminal::view

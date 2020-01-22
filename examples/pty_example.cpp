@@ -105,9 +105,9 @@ int main()
 	try
 	{
 		#if defined(__unix__) || defined(__APPLE__)
-		vector<string> args = {"ping", "-c4", "localhost"};
+		vector<string> const args = {"ping", "-c4", "localhost"};
 		#else
-		vector<string> args = {"ping", "localhost"};
+		vector<string> const args = {"ping", "localhost"};
 		#endif
 
 		enableConsoleVT();
@@ -124,13 +124,11 @@ int main()
                 cout << "Process terminated normally with exit code " << get<terminal::Process::NormalExit>(exitStatus).exitCode << '\n';
                 waiting = false;
             }
-            else if (holds_alternative<terminal::Process::SignalExit>(exitStatus))
+            else
             {
                 cout << "Process terminated with signal " << get<terminal::Process::SignalExit>(exitStatus).signum << '\n';
                 waiting = false;
             }
-            else if (holds_alternative<terminal::Process::Suspend>(exitStatus))
-                cout << "Process suspended.";
         }
 
 		pty.close();

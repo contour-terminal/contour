@@ -30,7 +30,7 @@ using namespace std;
 using namespace std::placeholders;
 
 /// TODO:
-/// [ ] FIX terminating app on Alt+F4 (hangup in dtor ...waitForExit())
+/// [ ] FIX terminating app on Alt+F4 (hangup in dtor ...Process::wait())
 /// [ ] NEW: provide config option to auto-close when shell has exited.
 /// [ ] revive numpad numbers in input mapping
 /// [ ] replace FileChangeWatcher with Qt native API
@@ -833,11 +833,10 @@ void TerminalWindow::post(std::function<void()> _fn)
 
 void TerminalWindow::onTerminalClosed()
 {
-    terminal::Process::ExitStatus const ec = terminalView_->process().waitForExit();
+    terminal::Process::ExitStatus const ec = terminalView_->process().wait();
     auto const info = visit(overloaded{
         [](terminal::Process::NormalExit v) { return fmt::format("normal exit code {}", v.exitCode); },
         [](terminal::Process::SignalExit v) { return fmt::format("signal code {} ({})", v.signum, strerror(errno)); },
-        [](terminal::Process::Suspend) { return "suspend"s; /* NB: should never happen. */ },
     }, ec);
     terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with {}.", info));
 }

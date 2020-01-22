@@ -385,7 +385,7 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
         else if (WIFSIGNALED(status))
             return exitStatus_ = ExitStatus{ SignalExit{ WTERMSIG(status) } };
         else if (WIFSTOPPED(status))
-            return exitStatus_ = ExitStatus{ Suspend{} };
+            return exitStatus_ = ExitStatus{ SignalExit{ SIGSTOP } };
         else
             throw runtime_error{ "Unknown waitpid() return value." };
     }
@@ -440,19 +440,6 @@ string Process::workingDirectory() const
 	// TODO: Apple, Windows
 	return "."s;
 #endif
-}
-
-Process::ExitStatus Process::waitForExit()
-{
-    while (true)
-        if (visit(overloaded{[&](NormalExit) { return true; },
-                             [&](SignalExit) { return true; },
-                             [&](Suspend) { return false; },
-                  },
-                  wait()))
-            break;
-
-    return exitStatus_.value();
 }
 
 }  // namespace terminal
