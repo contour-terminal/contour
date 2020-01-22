@@ -24,6 +24,7 @@
 #include <QScreen>
 #include <QTimer>
 
+#include <cstring>
 #include <fstream>
 
 using namespace std;
@@ -837,14 +838,29 @@ void TerminalWindow::post(std::function<void()> _fn)
     QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 }
 
+inline char const* signalName(int _signo)
+{
+#if defined(__unix__) || defined(APPLE)
+    return strsignal(_signo);
+#else
+    return "unknown";
+#endif
+}
+
 void TerminalWindow::onTerminalClosed()
 {
+    using terminal::Process;
+
     terminal::Process::ExitStatus const ec = terminalView_->process().wait();
-    auto const info = visit(overloaded{
-        [](terminal::Process::NormalExit v) { return fmt::format("normal exit code {}", v.exitCode); },
-        [](terminal::Process::SignalExit v) { return fmt::format("signal code {} ({})", v.signum, strerror(errno)); },
-    }, ec);
-    terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with {}.", info));
+    if (holds_alternative<Process::SignalExit>(ec))
+        terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with signal {} ({}).",
+                                                            get<Process::SignalExit>(ec).signum,
+                                                            signalName(get<Process::SignalExit>(ec).signum)));
+    else if (auto const normalExit = get<Process::NormalExit>(ec); normalExit.exitCode != EXIT_SUCCESS)
+        terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with exit code {}.",
+                                                            normalExit.exitCode));
+    else
+        close();
 }
 
 } // namespace contour

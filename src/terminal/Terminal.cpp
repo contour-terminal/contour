@@ -284,11 +284,6 @@ void Terminal::writeToScreen(char const* data, size_t size)
     screen_.write(data, size);
 }
 
-void Terminal::writeToScreen(string_view const& _text)
-{
-    writeToScreen(_text.data(), _text.size());
-}
-
 Terminal::Cursor Terminal::cursor() const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };

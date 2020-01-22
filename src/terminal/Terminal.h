@@ -80,7 +80,8 @@ class Terminal {
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
-    void writeToScreen(std::string_view const& _text);
+    void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
+    void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
 
     /// Checks if a render() method should be called by checking the dirty bit,
     /// and if so, clears the dirty bit and returns true, false otherwise.
