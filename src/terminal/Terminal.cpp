@@ -453,6 +453,4 @@ bool Terminal::scrollToBottom()
         return false;
 }
 
-
-
 }  // namespace terminal

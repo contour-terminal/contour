@@ -30,12 +30,10 @@ using namespace std;
 using namespace std::placeholders;
 
 /// TODO:
-/// [ ] FIX terminating app on Alt+F4 (hangup in dtor ...Process::wait())
 /// [ ] NEW: provide config option to auto-close when shell has exited.
 /// [ ] revive numpad numbers in input mapping
 /// [ ] replace FileChangeWatcher with Qt native API
 /// [ ] see if it makes sense to replace Freetype/Harfbuzz with Qt's API
-/// [ ] kill: loadConfigFromCLI(Config& _config, int _argc, char const* _argv[]);
 /// [ ] replace cerr's with GUI error dialogs / systray notification - QSystemTrayIcon::showMessage
 /// [ ] reorder function impls to match the properly ordered signatures in header file
 /// [ ] unit test: InputGenerator: char32_t 0 .. 31 equals to A-Za-z (and the others) and modifiers=Ctrl
@@ -532,6 +530,14 @@ void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
 void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with "faint" colors
 {
     (void) _event;
+}
+
+bool TerminalWindow::event(QEvent* _event)
+{
+    if (_event->type() == QEvent::Close)
+        terminalView_->process().terminate(terminal::Process::TerminationHint::Hangup);
+
+    return QOpenGLWindow::event(_event);
 }
 
 bool TerminalWindow::fullscreen() const

@@ -76,6 +76,12 @@ class [[nodiscard]] Process {
 
 	[[nodiscard]] std::string workingDirectory() const;
 
+    enum class TerminationHint {
+        Normal,
+        Hangup
+    };
+    void terminate(TerminationHint _terminationHint);
+
 private:
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
 	mutable NativeHandle pid_{};

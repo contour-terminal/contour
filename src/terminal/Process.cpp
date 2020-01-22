@@ -351,7 +351,6 @@ Process::~Process()
 
 bool Process::alive() const noexcept
 {
-    exitStatus_.reset();
     (void) checkStatus();
     return !exitStatus_.has_value() || !(holds_alternative<NormalExit>(*exitStatus_) ||
                                          holds_alternative<SignalExit>(*exitStatus_));
@@ -373,7 +372,7 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
     int const rv = waitpid(pid_, &status, _waitForExit ? 0 : WNOHANG);
 
     if (rv < 0)
-        throw runtime_error{ getLastErrorAsString() };
+        throw runtime_error{ "waitpid: "s + getLastErrorAsString() };
     else if (rv == 0)
         return nullopt;
     else
@@ -403,6 +402,18 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
     else
         return exitStatus_ = ExitStatus{ NormalExit{ static_cast<int>(exitCode) } };
 #endif
+}
+
+void Process::terminate(TerminationHint _terminationHint)
+{
+    if (alive())
+    {
+        #if defined(_WIN32)
+        TerminateProcess(nativeHandle(), 1);
+        #else
+        ::kill(nativeHandle(), _terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
+        #endif
+    }
 }
 
 Process::ExitStatus Process::wait()

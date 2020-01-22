@@ -42,6 +42,8 @@ class TerminalWindow :
     void focusInEvent(QFocusEvent* _event) override;
     void focusOutEvent(QFocusEvent* _event) override;
 
+    bool event(QEvent* _event) override;
+
     void post(std::function<void()> _fn);
 
   public Q_SLOTS:
