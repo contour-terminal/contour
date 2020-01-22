@@ -356,7 +356,6 @@ void InputGenerator::generatePaste(std::string_view const& _text)
 void InputGenerator::swap(Sequence& _other)
 {
     std::swap(pendingSequence_, _other);
-    printf("InputGenerator.transmit(\"%s\")\n", escape(begin(_other), end(_other)).c_str());
 }
 
 inline bool InputGenerator::append(std::string _sequence)
