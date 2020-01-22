@@ -833,7 +833,13 @@ void TerminalWindow::post(std::function<void()> _fn)
 
 void TerminalWindow::onTerminalClosed()
 {
-    terminalView_->terminal().writeToScreen(fmt::format("\r\nTerminal has closed."));
+    terminal::Process::ExitStatus const ec = terminalView_->process().waitForExit();
+    auto const info = visit(overloaded{
+        [](terminal::Process::NormalExit v) { return fmt::format("normal exit code {}", v.exitCode); },
+        [](terminal::Process::SignalExit v) { return fmt::format("signal code {} ({})", v.signum, strerror(errno)); },
+        [](terminal::Process::Suspend) { return "suspend"s; /* NB: should never happen. */ },
+    }, ec);
+    terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with {}.", info));
 }
 
 } // namespace contour
