@@ -320,6 +320,12 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 
 bool InputGenerator::generate(Key _key, Modifier _modifier)
 {
+    if (_modifier)
+    {
+        if (auto mapping = tryMap(mappings::functionKeysWithModifiers, _key); mapping)
+            return append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier)));
+    }
+
     if (applicationCursorKeys())
         if (auto mapping = tryMap(mappings::applicationCursorKeys, _key); mapping)
             return append(*mapping);
@@ -328,16 +334,8 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
         if (auto mapping = tryMap(mappings::applicationNumpadKeys, _key); mapping)
             return append(*mapping);
 
-    if (_modifier)
-    {
-        if (auto mapping = tryMap(mappings::functionKeysWithModifiers, _key); mapping)
-            return append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier)));
-    }
-    else
-    {
-        if (auto mapping = tryMap(mappings::standard, _key); mapping)
-            return append(*mapping);
-    }
+    if (auto mapping = tryMap(mappings::standard, _key); mapping)
+        return append(*mapping);
 
     return false;
 }
