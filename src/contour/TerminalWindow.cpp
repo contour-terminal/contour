@@ -31,20 +31,21 @@ using namespace std;
 using namespace std::placeholders;
 
 /// TODO:
-/// [ ] NEW: provide config option to auto-close when shell has exited.
-/// [ ] revive numpad numbers in input mapping
-/// [ ] replace FileChangeWatcher with Qt native API
-/// [ ] see if it makes sense to replace Freetype/Harfbuzz with Qt's API
-/// [ ] replace cerr's with GUI error dialogs / systray notification - QSystemTrayIcon::showMessage
-/// [ ] reorder function impls to match the properly ordered signatures in header file
-/// [ ] unit test: InputGenerator: char32_t 0 .. 31 equals to A-Za-z (and the others) and modifiers=Ctrl
-/// [x] replace launcher() with Qt native API
-/// [x] replace shortcat mapping with Qt's QKeySequence.
-/// [x] revive keyboard input
-/// [x] revive mouse wheel input events
-/// [x] revive mouse move input events
-/// [x] revive mouse click input events
-/// [x] revive blinking cursor (missing timer)
+/// [ ] NEW: dpi-adjust on screen change
+/// [ ] REVIVE: blurred background
+/// [ ] REVIVE: numpad numbers in input mapping
+/// [ ] QTPORT: replace FileChangeWatcher with Qt native API
+/// [ ] QTPORT: see if it makes sense to replace Freetype/Harfbuzz with Qt's API
+/// [ ] QTPORT: replace cerr's with GUI error dialogs / systray notification - QSystemTrayIcon::showMessage
+/// [ ] QA: reorder function impls to match the properly ordered signatures in header file
+/// [ ] QA: unit test: InputGenerator: char32_t 0 .. 31 equals to A-Za-z (and the others) and modifiers=Ctrl
+/// [x] QTPORT: replace launcher() with Qt native API
+/// [x] QTPORT: replace shortcut mapping with Qt's QKeySequence.
+/// [x] REVIVE: keyboard input
+/// [x] REVIVE: mouse wheel input events
+/// [x] REVIVE: mouse move input events
+/// [x] REVIVE: mouse click input events
+/// [x] REVIVE: blinking cursor (missing timer)
 /// [x] NEW: upon shell termination, print message on screen that shell has exited.
 
 namespace contour {
