@@ -5,6 +5,7 @@ find_package(OpenGL REQUIRED)
 find_package(Freetype REQUIRED)
 
 option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
+option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
@@ -25,6 +26,10 @@ target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_PATCH=${CMAKE_PROJECT_VERSION_PATCH}
 )
 set_target_properties(contour PROPERTIES AUTOMOC ON)
+
+if(CONTOUR_PERF_STATS)
+    target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
+endif()
 
 if(WIN32)
     if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
