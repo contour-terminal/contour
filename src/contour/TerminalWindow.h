@@ -88,6 +88,12 @@ class TerminalWindow :
     QTimer updateTimer_;
     std::atomic<bool> screenDirty_ = true;
     std::atomic<bool> updating_ = false;
+    struct Stats {
+        std::atomic<uint64_t> updatesSinceRendering = 0;
+        std::atomic<uint64_t> updatesSinceLastSwap = 0;
+        std::atomic<uint64_t> currentRenderCount = 0;
+    };
+    Stats stats_;
 };
 
 } // namespace contour

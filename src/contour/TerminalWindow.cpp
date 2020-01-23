@@ -48,6 +48,16 @@ using namespace std::placeholders;
 /// [x] REVIVE: blinking cursor (missing timer)
 /// [x] NEW: upon shell termination, print message on screen that shell has exited.
 
+#if defined(CONTOUR_PERF_STATS)
+#define STATS_INC(name)   ++(stats_. name)
+#define STATS_ZERO(name)  (stats_. name = 0)
+#define STATS_GET(name)   (stats_. name).load()
+#else
+#define STATS_INC(name)   do {} while (0)
+#define STATS_ZERO(name)  do {} while (0)
+#define STATS_GET(name)   0
+#endif
+
 namespace contour {
 
 namespace {
@@ -233,12 +243,17 @@ void TerminalWindow::onFrameSwapped()
     bool const dirty = screenDirty_.load();
     bool updating = updating_.load();
 
+    STATS_ZERO(updatesSinceLastSwap);
+
     if (dirty)
         update();
     else if (config_.cursorDisplay == terminal::CursorDisplay::Blink)
         updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
     else if (updating && updating_.compare_exchange_strong(updating, false))
+    {
+        STATS_ZERO(currentRenderCount);
         disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+    }
 }
 
 void TerminalWindow::onScreenChanged(QScreen* _screen)
@@ -304,10 +319,19 @@ inline QVector4D makeColor(terminal::RGBColor const& _color, terminal::Opacity _
 void TerminalWindow::paintGL()
 {
     try {
-        glViewport(0, 0, width() * contentScale(), height() * contentScale());
-
+        STATS_INC(currentRenderCount);
         screenDirty_ = false;
         now_ = chrono::steady_clock::now();
+
+#if defined(CONTOUR_PERF_STATS)
+        qDebug() << QString::fromStdString(fmt::format("paintGL({}) updates since (rendering={}, last_swap={})",
+                    STATS_GET(currentRenderCount),
+                    STATS_GET(updatesSinceRendering),
+                    STATS_GET(updatesSinceLastSwap)
+        ));
+#endif
+
+        glViewport(0, 0, width() * contentScale(), height() * contentScale());
 
         {
             auto calls = decltype(queuedCalls_){};
@@ -731,17 +755,21 @@ float TerminalWindow::contentScale() const
 
 void TerminalWindow::onScreenUpdate()
 {
+    screenDirty_ = true;
+
     if (config_.autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
-
-    screenDirty_ = true;
 
     bool updating = updating_.load();
     if (!updating && updating_.compare_exchange_strong(updating, true))
     {
         connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
         QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+        STATS_ZERO(updatesSinceRendering);
     }
+
+    STATS_INC(updatesSinceRendering);
+    STATS_INC(updatesSinceLastSwap);
 }
 
 void TerminalWindow::onWindowTitleChanged()
