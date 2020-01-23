@@ -72,23 +72,24 @@ CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
         0.0f, 0.0f                                              // bottom left
     };
 
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    vbo_.create();
+    vbo_.bind();
+    vbo_.setUsagePattern(QOpenGLBuffer::UsagePattern::StaticDraw);
+    vbo_.allocate(vertices, sizeof(vertices));
 
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
+    vao_.create();
+    vao_.bind();
 
     // specify vertex data layout
-    auto posAttr = shader_.attributeLocation("position");
+    int const posAttr = shader_.attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
 }
 
 CellBackground::~CellBackground()
 {
-    glDeleteBuffers(1, &vbo_);
-    glDeleteVertexArrays(1, &vao_);
+    vbo_.destroy();
+    vao_.destroy();
 }
 
 void CellBackground::setProjection(QMatrix4x4 const& _projectionMatrix)
@@ -108,9 +109,9 @@ void CellBackground::resize(QSize _size)
         0.0f, 0.0f                                          // bottom left
     };
 
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    vbo_.bind();
+    vbo_.write(0, vertices, sizeof(vertices));
+    vbo_.release();
 }
 
 void CellBackground::render(QPoint _pos, QVector4D const& _color)
@@ -122,7 +123,7 @@ void CellBackground::render(QPoint _pos, QVector4D const& _color)
     shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
     shader_.setUniformValue(colorLocation_, _color);
 
-    glBindVertexArray(vao_);
+    vao_.bind();
     glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 

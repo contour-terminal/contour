@@ -46,18 +46,19 @@ GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     // Configure VAO/VBO for texture quads
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
+    vao_.create();
+    vao_.bind();
 
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    vbo_.create();
+    vbo_.bind();
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 4, NULL, GL_DYNAMIC_DRAW);
+    vbo_.setUsagePattern(QOpenGLBuffer::UsagePattern::DynamicDraw);
+    vbo_.allocate(sizeof(GLfloat) * 6 * 4);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    vbo_.release();
+    vao_.release();
 
     setProjection(_projection);
 }
@@ -127,8 +128,8 @@ void GLTextShaper::render(
     shader_.bind();
     shader_.setUniformValue(colorLocation_, _color);
     glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(vao_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    vao_.bind();
+    vbo_.bind();
 
     for (auto const& gpos : glyphPositions_)
     {
@@ -155,7 +156,8 @@ void GLTextShaper::render(
         };
 
         glBindTexture(GL_TEXTURE_2D, glyph.textureID);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        // XXX glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        vbo_.write(0, vertices, sizeof(vertices));
 
         glDrawArrays(GL_TRIANGLES, 0, 6);
     }
@@ -163,8 +165,8 @@ void GLTextShaper::render(
     glyphPositions_.clear();
 
     #if !defined(NDEBUG)
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    vao_.release();
+    vbo_.release();
     #endif
 }
 

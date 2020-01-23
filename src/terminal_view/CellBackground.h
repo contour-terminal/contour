@@ -18,11 +18,12 @@
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLShader>
 #include <QtGui/QOpenGLVertexArrayObject>
 #include <QtGui/QVector4D>
 #include <QtGui/QOpenGLFunctions_3_2_Core>
+#include <QtGui/QOpenGLBuffer>
+#include <QtGui/QOpenGLVertexArrayObject>
 
 namespace terminal::view {
 
@@ -41,8 +42,8 @@ class CellBackground : public QOpenGLFunctions_3_2_Core {
     QOpenGLShaderProgram shader_;
     GLint transformLocation_;
     GLint colorLocation_;
-    GLuint vbo_{};
-    GLuint vao_{};
+    QOpenGLBuffer vbo_;
+    QOpenGLVertexArrayObject vao_;
 };
 
 } // namespace terminal::view
