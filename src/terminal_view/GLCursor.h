@@ -20,6 +20,8 @@
 #include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QVector4D>
 #include <QtGui/QOpenGLFunctions_3_2_Core>
+#include <QtGui/QOpenGLBuffer>
+#include <QtGui/QOpenGLVertexArrayObject>
 #include <memory>
 #include <string>
 
@@ -49,8 +51,8 @@ class GLCursor : public QOpenGLFunctions_3_2_Core {
     QOpenGLShaderProgram shader_;
     GLint transformLocation_;
     GLint colorLocation_;
-    GLuint vbo_;
-    GLuint vao_;
+    QOpenGLBuffer vbo_;
+    QOpenGLVertexArrayObject vao_;
     GLenum drawMode_;
     GLsizei drawCount_;
 };

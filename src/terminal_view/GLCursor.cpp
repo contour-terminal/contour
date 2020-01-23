@@ -145,12 +145,13 @@ GLCursor::GLCursor(QSize _size, QMatrix4x4 _transform, CursorShape _shape, QVect
 
     // --------------------------------------------------------------------
     // setup vertices
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, 12 * sizeof(GLfloat), nullptr, GL_STATIC_DRAW);
+    vbo_.create();
+    vbo_.bind();
+    vbo_.setUsagePattern(QOpenGLBuffer::UsagePattern::StaticDraw);
+    vbo_.allocate(12 * sizeof(GLfloat));
 
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
+    vao_.create();
+    vao_.bind();
 
     // specify vertex data layout
     auto const posAttr = shader_.attributeLocation("position");
@@ -162,8 +163,8 @@ GLCursor::GLCursor(QSize _size, QMatrix4x4 _transform, CursorShape _shape, QVect
 
 GLCursor::~GLCursor()
 {
-    glDeleteBuffers(1, &vbo_);
-    glDeleteVertexArrays(1, &vao_);
+    vbo_.destroy();
+    vao_.destroy();
 }
 
 void GLCursor::setProjection(QMatrix4x4 const& _mat)
@@ -198,9 +199,9 @@ void GLCursor::updateShape()
     drawMode_ = drawMode;
     drawCount_ = static_cast<GLsizei>(vertices.size() / 2); // vertex count = array element size divided by dimension (2)
 
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(GLfloat), &vertices[0]);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    vbo_.bind();
+    vbo_.write(0, &vertices[0], vertices.size() * sizeof(GLfloat));
+    vbo_.release();
 }
 
 void GLCursor::render(QPoint _pos)
@@ -212,7 +213,7 @@ void GLCursor::render(QPoint _pos)
 
     shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
 
-    glBindVertexArray(vao_);
+    vao_.bind();
     glDrawArrays(drawMode_, 0, drawCount_);
 }
 

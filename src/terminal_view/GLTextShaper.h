@@ -20,6 +20,8 @@
 #include <QOpenGLShaderProgram>
 #include <QOpenGLFunctions>
 #include <QOpenGLFunctions_3_2_Core>
+#include <QtGui/QOpenGLBuffer>
+#include <QtGui/QOpenGLVertexArrayObject>
 
 #include <array>
 #include <functional>
@@ -65,8 +67,8 @@ class GLTextShaper : private QOpenGLFunctions_3_2_Core {
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;
     std::reference_wrapper<Font> regularFont_;
     std::vector<Font::GlyphPosition> glyphPositions_;
-    GLuint vbo_;
-    GLuint vao_;
+    QOpenGLBuffer vbo_;
+    QOpenGLVertexArrayObject vao_;
     //glm::mat4 projectionMatrix_;
     QOpenGLShaderProgram shader_;
     GLint colorLocation_;
