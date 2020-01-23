@@ -309,29 +309,20 @@ void TerminalWindow::paintGL()
         now_ = chrono::steady_clock::now();
 
         {
-            auto lg = lock_guard{queuedCallsLock_};
             auto calls = decltype(queuedCalls_){};
-            swap(queuedCalls_, calls);
+            {
+                auto lg = lock_guard{queuedCallsLock_};
+                swap(queuedCalls_, calls);
+            }
             for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
         }
 
-        // if (terminalView_->terminal().shouldRender(now_))
-        //     screenDirty_ = true;
-
-        //qDebug() << "paintGL()" << (screenDirty_ ? "screen dirty" : "screen NOT dirty");
-
-        //QVector4D const bg = makeColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
-        QVector4D const bg = makeColor(terminal::RGBColor(0x000000), config_.backgroundOpacity);
+        QVector4D const bg = makeColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
         glClearColor(bg[0], bg[1], bg[2], bg[3]);
         glClear(GL_COLOR_BUFFER_BIT);
 
         //terminal::view::render(terminalView_, now_);
         terminalView_->render(now_);
-
-        // if (config_.cursorDisplay == terminal::CursorDisplay::Blink && terminalView_->terminal().cursor().visible)
-        // {
-        //     repaint(terminalView_->terminal().nextRender(now_));
-        // }
     }
     catch (exception const& ex)
     {
@@ -458,7 +449,7 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
     }
 }
 
-void TerminalWindow::wheelEvent(QWheelEvent* _event) // TODO
+void TerminalWindow::wheelEvent(QWheelEvent* _event)
 {
     auto const button = _event->delta() > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
     auto const mouseEvent = terminal::MousePressEvent{button, makeModifier(_event->modifiers())};
@@ -815,7 +806,7 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
     }
 }
 
-void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/) // TODO
+void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/)
 {
     post([this]() {
         if (reloadConfigValues())
