@@ -30,11 +30,13 @@
 #include <pty.h>
 #endif
 
+#include <fcntl.h>
 #include <utmp.h>
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <unistd.h>
 #endif
 
@@ -189,7 +191,46 @@ void PseudoTerminal::close()
 auto PseudoTerminal::read(char* buf, size_t size) -> ssize_t
 {
 #if defined(__unix__) || defined(__APPLE__)
-    return ::read(master_, buf, size);
+    ssize_t rv = ::read(master_, buf, size);
+    if (rv < 0 || rv >= static_cast<decltype(rv)>(size))
+        return rv;
+#if 1
+    //size_t const cap = size;
+    ssize_t nread = rv;
+    int i = 1;
+    size -= rv;
+    buf += rv;
+
+    auto const oldFlags = fcntl(master_, F_GETFL);
+    fcntl(master_, F_SETFL, oldFlags | O_NONBLOCK);
+
+    fd_set in, out, err;
+    FD_ZERO(&in);
+    FD_ZERO(&out);
+    FD_ZERO(&err);
+    FD_SET(master_, &in);
+
+    while (size > 0)
+    {
+        ++i;
+        timeval tv{0, 0};
+        int const selected = select(master_ + 1, &in, &out, &err, &tv);
+        if (selected <= 0)
+            break;
+        rv = ::read(master_, buf, size);
+        if (rv < 0)
+            break;
+        nread += rv;
+        size -= rv;
+        buf += rv;
+    }
+
+    fcntl(master_, F_SETFL, oldFlags);
+    //printf("pty.read: %zu/%zu bytes (%ld%%, #%d)\n", nread, cap, nread * 100 / cap, i);
+    return nread;
+#else
+    return rv;
+#endif
 #else
     DWORD nread{};
     if (ReadFile(input_, buf, static_cast<DWORD>(size), &nread, nullptr))
