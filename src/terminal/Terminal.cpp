@@ -111,14 +111,17 @@ void Terminal::onScreenCommands(vector<Command> const& _commands)
 
 void Terminal::screenUpdateThread()
 {
+    constexpr size_t BufSize = 32 * 1024;
+    vector<char> buf;
+    buf.resize(BufSize);
+
     for (;;)
     {
-        char buf[4096];
-        if (auto const n = pty_.read(buf, sizeof(buf)); n != -1)
+        if (auto const n = pty_.read(buf.data(), buf.size()); n != -1)
         {
             //log("outputThread.data: {}", terminal::escape(buf, buf + n));
             lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-            screen_.write(buf, n);
+            screen_.write(buf.data(), n);
         }
         else
         {
