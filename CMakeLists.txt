@@ -42,9 +42,9 @@ option(CONTOUR_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MAS
 if(CONTOUR_COVERAGE AND NOT MSVC)
     add_compile_options(-g --coverage)
     set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
-    message("-- Code coverage: enabled")
+    message("-- [code coverage] Enabled.")
 else()
-    message("-- Code coverage: disabled")
+    message("-- [code coverage] Disabled.")
 endif()
 
 # ----------------------------------------------------------------------------
