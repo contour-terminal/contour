@@ -170,7 +170,7 @@ namespace {
         format.setGreenBufferSize(8);
         format.setBlueBufferSize(8);
         format.setAlphaBufferSize(8);
-        format.setRenderableType(QSurfaceFormat::OpenGL);
+        format.setRenderableType(QSurfaceFormat::OpenGLES);
         format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
         format.setProfile(QSurfaceFormat::CoreProfile);
         format.setVersion(3, 3);
