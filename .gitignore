@@ -1,6 +1,7 @@
 # Visual Studio Code
 /.vscode/
 /build/
+/release/
 
 # Visual Studio
 /.vs/
@@ -28,3 +29,6 @@
 
 # OS X
 .DS_Store
+
+# Linux/KDE
+.directory
