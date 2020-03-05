@@ -71,8 +71,9 @@ GLTextShaper::~GLTextShaper()
 string const& GLTextShaper::vertexShaderCode()
 {
     static string const code = R"(
+        #version 130
         in vec4 vertex;
-        varying out vec2 TexCoords;
+        varying vec2 TexCoords;
 
         uniform mat4 projection;
 
@@ -88,8 +89,9 @@ string const& GLTextShaper::vertexShaderCode()
 string const& GLTextShaper::fragmentShaderCode()
 {
     static string const code = R"(
+        #version 130
         in vec2 TexCoords;
-        varying out vec4 color;
+        out vec4 color;
 
         uniform sampler2D text;
         uniform vec4 textColor;

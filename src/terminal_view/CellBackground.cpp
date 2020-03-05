@@ -26,6 +26,7 @@ using namespace std;
 namespace terminal::view {
 
 auto constexpr vertexShader = R"(
+    #version 130
     // Vertex Shader
     in vec2 position;
     uniform mat4 u_transform;
@@ -36,9 +37,10 @@ auto constexpr vertexShader = R"(
 )";
 
 auto constexpr fragmentShader = R"(
+    #version 130
     // Fragment Shader
     uniform vec4 u_color;
-    varying out vec4 outColor;
+    out vec4 outColor;
     void main()
     {
         outColor = u_color;

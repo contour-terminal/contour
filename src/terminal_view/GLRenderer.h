@@ -10,7 +10,7 @@
 
 #include <QPoint>
 #include <QMatrix2x4>
-#include <QOpenGLFunctions_3_2_Core>
+#include <QOpenGLFunctions>
 
 #include <chrono>
 #include <vector>
@@ -18,7 +18,7 @@
 
 namespace terminal::view {
 
-class GLRenderer : public QOpenGLFunctions_3_2_Core {
+class GLRenderer : public QOpenGLFunctions {
   public:
     GLRenderer(Logger _logger,
                Font& _regularFont,

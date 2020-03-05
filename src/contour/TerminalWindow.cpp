@@ -208,8 +208,6 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     //     << "fontSize:" << config_.fontSize
     //     << "contentScale:" << contentScale();
 
-    setFormat(surfaceFormat());
-
     // FIXME: blinking cursor
     // updateTimer_.setInterval(config_.cursorBlinkInterval.count());
     updateTimer_.setSingleShot(true);
@@ -264,6 +262,7 @@ void TerminalWindow::onScreenChanged(QScreen* _screen)
 
 void TerminalWindow::initializeGL()
 {
+    setFormat(surfaceFormat());
     initializeOpenGLFunctions();
 
     terminalView_ = make_unique<terminal::view::TerminalView>(

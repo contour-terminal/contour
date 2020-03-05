@@ -19,7 +19,7 @@
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QVector4D>
-#include <QtGui/QOpenGLFunctions_3_2_Core>
+#include <QtGui/QOpenGLFunctions>
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
 #include <memory>
@@ -27,7 +27,7 @@
 
 namespace terminal::view {
 
-class GLCursor : public QOpenGLFunctions_3_2_Core {
+class GLCursor : public QOpenGLFunctions {
   public:
     GLCursor(QSize _size, QMatrix4x4 _transform,  CursorShape _shape, QVector4D const& _color);
     ~GLCursor();

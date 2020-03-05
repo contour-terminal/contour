@@ -63,6 +63,7 @@ string to_string(CursorShape _value)
 }
 
 auto constexpr vertexShader = R"(
+    #version 130
     in vec2 position;
     uniform mat4 u_transform;
     void main()
@@ -72,8 +73,9 @@ auto constexpr vertexShader = R"(
 )";
 
 auto constexpr fragmentShader = R"(
+    #version 130
     uniform vec4 u_color;
-    varying out vec4 outColor;
+    out vec4 outColor;
     void main()
     {
         outColor = u_color;
