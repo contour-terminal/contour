@@ -18,17 +18,17 @@
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
+#include <QtGui/QOpenGLBuffer>
+#include <QtGui/QOpenGLFunctions>
 #include <QtGui/QOpenGLShader>
 #include <QtGui/QOpenGLVertexArrayObject>
-#include <QtGui/QVector4D>
-#include <QtGui/QOpenGLFunctions_3_2_Core>
-#include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
+#include <QtGui/QVector4D>
 
 namespace terminal::view {
 
 /// OpenGL Object for rendering character cell's background.
-class CellBackground : public QOpenGLFunctions_3_2_Core {
+class CellBackground : public QOpenGLFunctions {
   public:
     CellBackground(QSize _size, QMatrix4x4 _projectionMatrix);
     ~CellBackground();

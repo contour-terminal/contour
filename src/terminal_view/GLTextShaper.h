@@ -19,7 +19,7 @@
 #include <QPoint>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLFunctions>
-#include <QOpenGLFunctions_3_2_Core>
+#include <QOpenGLFunctions>
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
 
@@ -30,7 +30,7 @@
 
 namespace terminal::view {
 
-class GLTextShaper : private QOpenGLFunctions_3_2_Core {
+class GLTextShaper : private QOpenGLFunctions {
   public:
     GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection);
     ~GLTextShaper();
