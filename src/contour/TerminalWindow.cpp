@@ -691,6 +691,10 @@ void TerminalWindow::executeAction(Action const& _action)
                 cerr << "Could not open configuration file \"" << config_.backingFilePath << "\"" << endl;
             return false;
         },
+        [this](actions::OpenFileManager) -> bool {
+            // TODO open file manager at current window's current working directory (via /proc/self/cwd)
+            return false;
+        },
         [this](actions::Quit) -> bool {
             // XXX: later warn here when more then one terminal view is open
             terminalView_->terminal().device().close();
