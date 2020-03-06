@@ -31,6 +31,35 @@
 #include <vector>
 
 namespace terminal::view {
+    using CharSequence = std::vector<char32_t>;
+}
+
+namespace std {
+    template<>
+    struct hash<terminal::view::CharSequence> {
+        std::size_t operator()(terminal::view::CharSequence const& seq) const noexcept
+        {
+            // Using FNV to create a hash value for the character sequence.
+            auto constexpr basis = 2166136261llu;
+            auto constexpr prime = 16777619llu;
+
+            if (!seq.empty())
+            {
+                auto h = basis;
+                for (auto const ch : seq)
+                {
+                    h ^= ch;
+                    h *= prime;
+                }
+                return h;
+            }
+            else
+                return 0;
+        }
+    };
+}
+
+namespace terminal::view {
 
 enum class FontStyle {
     Regular = 0,
@@ -96,8 +125,10 @@ class Font {
         unsigned int y;
         unsigned int codepoint;
     };
+    using GlyphPositionList = std::vector<GlyphPosition>;
+
     /// Renders text into glyph positions of this font.
-    void render(std::vector<char32_t> const& _chars, std::vector<GlyphPosition>& _result);
+    void render(CharSequence const& _chars, GlyphPositionList& _result);
 
   private:
     FT_Library ft_;
@@ -105,6 +136,12 @@ class Font {
     hb_font_t* hb_font_;
     hb_buffer_t* hb_buf_;
     unsigned int fontSize_;
+
+#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+    // TODO: Currently this can become ever-growing. We should evict least recently used items
+    //       if the cache would exceed a given threshold.
+    std::unordered_map<CharSequence, GlyphPositionList> renderCache_{};
+#endif
 };
 
 /// API for managing multiple fonts.

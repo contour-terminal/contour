@@ -25,6 +25,11 @@ add_library(terminal_view
     TerminalView.cpp TerminalView.h
 )
 
+option(LIBTERMINAL_VIEW_FONT_RENDER_CACHE "Enables internal render cache [default: OFF]." OFF)
+if(LIBTERMINAL_VIEW_FONT_RENDER_CACHE)
+    target_compile_definitions(terminal_view PUBLIC LIBTERMINAL_VIEW_FONT_RENDER_CACHE=1)
+endif()
+
 target_include_directories(terminal_view PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
 set(TERMINAL_VIEW_LIBRARIES Qt5::Gui Freetype::Freetype terminal)
