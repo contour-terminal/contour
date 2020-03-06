@@ -87,9 +87,9 @@ class TerminalWindow :
     FileChangeWatcher configFileChangeWatcher_;
     std::mutex queuedCallsLock_;
     std::deque<std::function<void()>> queuedCalls_;
-    QTimer updateTimer_;
-    std::atomic<bool> screenDirty_ = true;
-    std::atomic<bool> updating_ = false;
+    QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
+    std::atomic<bool> screenDirty_ = true;          // Tells us if the screen needs a new update
+    std::atomic<bool> updating_ = false;            // Tells us if the screen is currently being rendered (i.e. frame swap not finished yet).
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> updatesSinceLastSwap = 0;
