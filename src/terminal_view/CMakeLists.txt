@@ -25,7 +25,7 @@ add_library(terminal_view
     TerminalView.cpp TerminalView.h
 )
 
-option(LIBTERMINAL_VIEW_FONT_RENDER_CACHE "Enables internal render cache [default: OFF]." OFF)
+option(LIBTERMINAL_VIEW_FONT_RENDER_CACHE "Enables internal render cache [default: ON]." ON)
 if(LIBTERMINAL_VIEW_FONT_RENDER_CACHE)
     target_compile_definitions(terminal_view PUBLIC LIBTERMINAL_VIEW_FONT_RENDER_CACHE=1)
 endif()
