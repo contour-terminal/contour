@@ -18,7 +18,6 @@
 #include <terminal/Logger.h>
 #include <terminal/WindowSize.h>
 
-#include <terminal_view/CellBackground.h>
 #include <terminal_view/FontManager.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLTextShaper.h>
@@ -97,6 +96,8 @@ class TerminalView {
     Process& process() noexcept { return process_; }
     Terminal const& terminal() const noexcept { return process_.terminal(); }
     Terminal& terminal() noexcept { return process_.terminal(); }
+
+    GLRenderer const& renderer() const { return renderer_; }
 
   private:
     Logger logger_;

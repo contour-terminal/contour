@@ -97,6 +97,8 @@ void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
 
 void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
 {
+    metrics_.clear();
+
     _terminal.render(bind(&GLRenderer::fillCellGroup, this, _1, _2, _3, _terminal.screenSize()), _now);
     renderCellGroup(_terminal.screenSize());
 
@@ -117,7 +119,10 @@ void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now
                 cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(_terminal.historyLineCount() - _terminal.scrollOffset());
 
                 for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
-                    cellBackground_.render(makeCoords(col, row, _terminal.screenSize()), color);
+                {
+                    ++metrics_.cellBackgroundRenderCount;
+                    cellBackground_.render(makeCoords(col, row, _terminal.screenSize()), color, 1);
+                }
             }
         }
     }
@@ -125,6 +130,8 @@ void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now
 
 void GLRenderer::fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
 {
+    ++metrics_.fillCellGroup;
+
     if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes)
         pendingDraw_.text.push_back(_cell.character);
     else
@@ -138,6 +145,8 @@ void GLRenderer::fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
 
 void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
 {
+    ++metrics_.renderCellGroup;
+
     auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
     auto const textStyle = FontStyle::Regular;
 
@@ -170,10 +179,23 @@ void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
         // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
 
+#if defined(GROUPED_CELL_BACKGROUND_RENDER)
+    ++metrics_.cellBackgroundRenderCount;
+    cellBackground_.render(
+        makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
+        bgColor,
+        pendingDraw_.text.size()
+    );
+#else
     // TODO: stretch background to number of characters instead.
     for (cursor_pos_t i = 0; i < pendingDraw_.text.size(); ++i)
+    {
+        ++metrics_.cellBackgroundRenderCount;
         cellBackground_.render(makeCoords(pendingDraw_.startColumn + i, pendingDraw_.lineNumber, _screenSize), bgColor);
+    }
+#endif
 
+    ++metrics_.textRenderCount;
     textShaper_.render(
         makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
         pendingDraw_.text,

@@ -37,6 +37,36 @@ class GLRenderer : public QOpenGLFunctions {
 
     void render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
+    struct Metrics {
+        uint64_t fillCellGroup = 0;
+        uint64_t renderCellGroup = 0;
+
+        uint64_t textRenderCount = 0;
+        uint64_t cellBackgroundRenderCount = 0;
+
+        void clear()
+        {
+            fillCellGroup = 0;
+            renderCellGroup = 0;
+            textRenderCount = 0;
+            cellBackgroundRenderCount = 0;
+        }
+
+        std::string to_string() const
+        {
+            char buf[120];
+            int n = snprintf(buf, sizeof(buf),
+                "fill cell group: %zu, render cell group: %zu, text renders: %zu, cell renders: %zu",
+                fillCellGroup,
+                renderCellGroup,
+                textRenderCount,
+                cellBackgroundRenderCount);
+            return std::string(buf, n - 1);
+        }
+    };
+
+    Metrics const& metrics() const noexcept { return metrics_; }
+
   private:
     void fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
     void renderCellGroup(WindowSize const& _screenSize);
@@ -45,6 +75,8 @@ class GLRenderer : public QOpenGLFunctions {
     std::pair<QVector4D, QVector4D> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
 
   private:
+    Metrics metrics_;
+
     /// Holds an array of directly connected characters on a single line that all share the same visual attributes.
     struct PendingDraw {
         cursor_pos_t lineNumber{};
