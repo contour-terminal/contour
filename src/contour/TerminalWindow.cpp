@@ -211,7 +211,7 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     // FIXME: blinking cursor
     // updateTimer_.setInterval(config_.cursorBlinkInterval.count());
     updateTimer_.setSingleShot(true);
-    connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::update));
+    connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::connectAndUpdate));
 
     connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 
@@ -230,6 +230,15 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     );
 }
 
+void TerminalWindow::connectAndUpdate()
+{
+    bool updating = updating_.load();
+    if (!updating && updating_.compare_exchange_strong(updating, true))
+        connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+
+    update();
+}
+
 TerminalWindow::~TerminalWindow()
 {
     makeCurrent(); // XXX must be called.
@@ -245,12 +254,17 @@ void TerminalWindow::onFrameSwapped()
 
     if (dirty)
         update();
-    else if (config_.cursorDisplay == terminal::CursorDisplay::Blink)
-        updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
-    else if (updating && updating_.compare_exchange_strong(updating, false))
+    else
     {
-        STATS_ZERO(currentRenderCount);
-        disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+        if (updating && updating_.compare_exchange_strong(updating, false))
+        {
+            STATS_ZERO(currentRenderCount);
+            disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+        }
+
+        if (config_.cursorDisplay == terminal::CursorDisplay::Blink
+                && this->terminalView_->terminal().cursor().visible)
+            updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
     }
 }
 
