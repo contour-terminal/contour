@@ -73,6 +73,8 @@ class TerminalWindow :
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
     void onTerminalClosed();
 
+    void connectAndUpdate();
+
   private:
     std::chrono::steady_clock::time_point now_;
     Config config_;
