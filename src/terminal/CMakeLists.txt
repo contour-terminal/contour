@@ -84,3 +84,7 @@ if(LIBTERMINAL_TESTING)
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
 endif(LIBTERMINAL_TESTING)
+
+message(STATUS "[libterminal] Compile unit tests: ${LIBTERMINAL_TESTING}")
+message(STATUS "[libterminal] Enable raw VT sequence logging: ${LIBTERMINAL_LOG_RAW}")
+message(STATUS "[libterminal] Enable VT sequence tracing: ${LIBTERMINAL_LOG_TRACE}")

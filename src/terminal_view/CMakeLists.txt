@@ -44,4 +44,6 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     #list(APPEND GLTERM_LIBRARIES unofficial::fontconfig::fontconfig)
 endif()
 
+message(STATUS "[libterminal_view] Font Render Cache: ${LIBTERMINAL_VIEW_FONT_RENDER_CACHE}")
+
 target_link_libraries(terminal_view PUBLIC ${TERMINAL_VIEW_LIBRARIES})

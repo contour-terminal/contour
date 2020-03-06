@@ -68,3 +68,6 @@ if(CONTOUR_BLUR_PLATFORM_KWIN_X11)
 endif()
 
 target_link_libraries(contour PRIVATE ${contour_LIBRARIES})
+
+message(STATUS "[contour] Enable blur effect on KWin/X11 window manager: ${CONTOUR_BLUR_PLATFORM_KWIN_X11}")
+message(STATUS "[contour] Enable performance metrics: ${CONTOUR_PERF_STATS}")
