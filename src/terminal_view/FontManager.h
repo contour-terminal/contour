@@ -130,6 +130,9 @@ class Font {
     /// Renders text into glyph positions of this font.
     void render(CharSequence const& _chars, GlyphPositionList& _result);
 
+    /// Clears the render cache.
+    void clearRenderCache();
+
   private:
     FT_Library ft_;
     FT_Face face_;
@@ -153,6 +156,8 @@ class FontManager {
     FontManager& operator=(FontManager&&) = delete;
     FontManager& operator=(FontManager const&) = delete;
     ~FontManager();
+
+    void clearRenderCache();
 
     Font& load(std::string const& _fontPattern, unsigned int _fontSize);
 

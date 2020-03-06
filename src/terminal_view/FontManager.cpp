@@ -109,6 +109,12 @@ FontManager::~FontManager()
     FT_Done_FreeType(ft_);
 }
 
+void FontManager::clearRenderCache()
+{
+    for (auto& font : fonts_)
+        font.second.clearRenderCache();
+}
+
 Font& FontManager::load(string const& _fontPattern, unsigned int _fontSize)
 {
     string const filePath = getFontFilePath(_fontPattern);
@@ -127,6 +133,8 @@ void Font::setFontSize(unsigned int _fontSize)
 
     fontSize_ = _fontSize;
     loadGlyphByIndex(0);
+
+    clearRenderCache();
 }
 
 // -------------------------------------------------------------------------------------------------------
@@ -202,6 +210,13 @@ Font::~Font()
 
     if (hb_buf_)
         hb_buffer_destroy(hb_buf_);
+}
+
+void Font::clearRenderCache()
+{
+#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+    renderCache_.clear();
+#endif
 }
 
 void Font::loadGlyphByIndex(unsigned int _glyphIndex)
