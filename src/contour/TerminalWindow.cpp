@@ -30,24 +30,6 @@
 using namespace std;
 using namespace std::placeholders;
 
-/// TODO:
-/// [ ] NEW: dpi-adjust on screen change
-/// [ ] REVIVE: blurred background
-/// [ ] REVIVE: numpad numbers in input mapping
-/// [ ] QTPORT: replace FileChangeWatcher with Qt native API
-/// [ ] QTPORT: see if it makes sense to replace Freetype/Harfbuzz with Qt's API
-/// [ ] QTPORT: replace cerr's with GUI error dialogs / systray notification - QSystemTrayIcon::showMessage
-/// [ ] QA: reorder function impls to match the properly ordered signatures in header file
-/// [ ] QA: unit test: InputGenerator: char32_t 0 .. 31 equals to A-Za-z (and the others) and modifiers=Ctrl
-/// [x] QTPORT: replace launcher() with Qt native API
-/// [x] QTPORT: replace shortcut mapping with Qt's QKeySequence.
-/// [x] REVIVE: keyboard input
-/// [x] REVIVE: mouse wheel input events
-/// [x] REVIVE: mouse move input events
-/// [x] REVIVE: mouse click input events
-/// [x] REVIVE: blinking cursor (missing timer)
-/// [x] NEW: upon shell termination, print message on screen that shell has exited.
-
 #if defined(CONTOUR_PERF_STATS)
 #define STATS_INC(name)   ++(stats_. name)
 #define STATS_ZERO(name)  (stats_. name = 0)
