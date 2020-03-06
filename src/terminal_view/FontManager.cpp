@@ -211,8 +211,16 @@ void Font::loadGlyphByIndex(unsigned int _glyphIndex)
         throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
 }
 
-void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _result)
+void Font::render(CharSequence const& _chars, GlyphPositionList& _result)
 {
+#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+    if (auto i = renderCache_.find(_chars); i != renderCache_.end())
+    {
+        _result = i->second;
+        return;
+    }
+#endif
+
     hb_buffer_clear_contents(hb_buf_);
     hb_buffer_add_utf32(
         hb_buf_,
@@ -245,6 +253,9 @@ void Font::render(vector<char32_t> const& _chars, vector<Font::GlyphPosition>& _
         cy += pos[i].y_advance >> 6;
         advance += pos[i].x_advance >> 6;
     }
+#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+    renderCache_[_chars] = _result;
+#endif
 }
 
 } // namespace terminal::view
