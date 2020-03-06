@@ -35,10 +35,12 @@ class CellBackground : public QOpenGLFunctions {
 
     void setProjection(QMatrix4x4 const& _projectionMatrix);
     void resize(QSize _size);
-    void render(QPoint _pos, QVector4D const& _color);
+    void resize2(QSize _size);
+    void render(QPoint _pos, QVector4D const& _color, size_t count = 1);
 
   private:
     QMatrix4x4 projectionMatrix_;
+    QSize size_;
     QOpenGLShaderProgram shader_;
     GLint transformLocation_;
     GLint colorLocation_;

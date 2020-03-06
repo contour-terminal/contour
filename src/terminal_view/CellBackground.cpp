@@ -49,6 +49,7 @@ auto constexpr fragmentShader = R"(
 
 CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
     projectionMatrix_{ _projectionMatrix },
+    size_{_size},
     shader_{},
     transformLocation_{},
     colorLocation_{}
@@ -101,6 +102,12 @@ void CellBackground::setProjection(QMatrix4x4 const& _projectionMatrix)
 
 void CellBackground::resize(QSize _size)
 {
+    size_ = _size;
+    //resize2(_size);
+}
+
+void CellBackground::resize2(QSize _size)
+{
     GLfloat const vertices[] = {
         0.0f, 0.0f,                                         // bottom left
         (GLfloat) _size.width(), 0.0f,                      // bottom right
@@ -116,12 +123,17 @@ void CellBackground::resize(QSize _size)
     vbo_.release();
 }
 
-void CellBackground::render(QPoint _pos, QVector4D const& _color)
+void CellBackground::render(QPoint _pos, QVector4D const& _color, std::size_t _count)
 {
+    resize2(QSize(
+        size_.width() * static_cast<int>(_count),
+        size_.height()
+    ));
+
     shader_.bind();
 
     auto translation = QMatrix4x4{};
-    translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()), 0.0f);
+    translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()));
     shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
     shader_.setUniformValue(colorLocation_, _color);
 

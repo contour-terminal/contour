@@ -230,12 +230,13 @@ TerminalWindow::~TerminalWindow()
 void TerminalWindow::onFrameSwapped()
 {
 #if defined(CONTOUR_PERF_STATS)
-        qDebug() << QString::fromStdString(fmt::format("onFrameSwapped({}) updates since (rendering={}, last_swap={}) {}",
-                    STATS_GET(currentRenderCount),
-                    STATS_GET(updatesSinceRendering),
-                    STATS_GET(updatesSinceLastSwap),
-                    terminalView_->renderer().metrics().to_string()
-        ));
+    qDebug() << QString::fromStdString(fmt::format(
+        "onFrameSwapped({}) updates since (rendering={}, last_swap={}) {}",
+        STATS_GET(currentRenderCount),
+        STATS_GET(updatesSinceRendering),
+        STATS_GET(updatesSinceLastSwap),
+        terminalView_->renderer().metrics().to_string()
+    ));
 #endif
 
     bool const dirty = screenDirty_.load();

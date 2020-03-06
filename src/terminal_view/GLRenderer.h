@@ -12,6 +12,8 @@
 #include <QMatrix2x4>
 #include <QOpenGLFunctions>
 
+#include <fmt/format.h>
+
 #include <chrono>
 #include <vector>
 #include <utility>
@@ -38,38 +40,32 @@ class GLRenderer : public QOpenGLFunctions {
     void render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
     struct Metrics {
-        uint64_t fillCellGroup = 0;
-        uint64_t renderCellGroup = 0;
-
-        uint64_t textRenderCount = 0;
-        uint64_t cellBackgroundRenderCount = 0;
+        unsigned renderTextGroup = 0;
+        unsigned cellBackgroundRenderCount = 0;
 
         void clear()
         {
-            fillCellGroup = 0;
-            renderCellGroup = 0;
-            textRenderCount = 0;
+            renderTextGroup = 0;
             cellBackgroundRenderCount = 0;
         }
 
         std::string to_string() const
         {
-            char buf[120];
-            int n = snprintf(buf, sizeof(buf),
-                "fill cell group: %zu, render cell group: %zu, text renders: %zu, cell renders: %zu",
-                fillCellGroup,
-                renderCellGroup,
-                textRenderCount,
+            return fmt::format(
+                "text renders: {}, background renders: {}",
+                renderTextGroup,
                 cellBackgroundRenderCount);
-            return std::string(buf, n - 1);
         }
     };
 
     Metrics const& metrics() const noexcept { return metrics_; }
 
   private:
-    void fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
-    void renderCellGroup(WindowSize const& _screenSize);
+    void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
+    void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
+
+    void renderTextGroup(WindowSize const& _screenSize);
+    void renderPendingBackgroundCells(WindowSize const& _screenSize);
 
     QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
     std::pair<QVector4D, QVector4D> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
@@ -94,7 +90,29 @@ class GLRenderer : public QOpenGLFunctions {
         }
     };
 
+    struct PendingBackgroundDraw
+    {
+        QVector4D color;                // The background color the draw is pending for.
+        cursor_pos_t lineNumber{};      // The line this color has to be drawn on.
+        cursor_pos_t startColumn{};     // The first column to start drawing.
+        cursor_pos_t endColumn{};       // The last column to draw.
+
+        void reset(QVector4D const& _color, cursor_pos_t _lineNo, cursor_pos_t _col)
+        {
+            color = _color;
+            lineNumber = _lineNo;
+            startColumn = _col;
+            endColumn = _col;
+        }
+
+        bool empty() const noexcept
+        {
+            return lineNumber == 0;
+        }
+    };
+
     PendingDraw pendingDraw_;
+    PendingBackgroundDraw pendingBackgroundDraw_;
     Margin margin_{};
     Logger logger_;
 

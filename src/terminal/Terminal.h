@@ -87,8 +87,15 @@ class Terminal {
     /// and if so, clears the dirty bit and returns true, false otherwise.
     bool shouldRender(std::chrono::steady_clock::time_point const& _now) const;
 
-    /// Thread-safe access to screen data for rendering
-    void render(Screen::Renderer const& renderer, std::chrono::steady_clock::time_point _now) const;
+    /// Thread-safe access to screen data for rendering.
+    template <typename... RenderPasses>
+    void render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
+    {
+        auto _l = std::lock_guard{screenLock_};
+        updated_.store(false);
+        updateCursorVisibilityState(_now);
+        renderPass(pass, std::forward<RenderPasses>(passes)...);
+    }
 
     std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
 
@@ -176,6 +183,16 @@ class Terminal {
     void onScreenReply(std::string_view const& reply);
     void onScreenCommands(std::vector<Command> const& commands);
     void onSetCursorStyle(CursorDisplay _display, CursorShape _shape);
+    void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
+
+    template <typename... RemainingPasses>
+    void renderPass(Screen::Renderer const& pass, RemainingPasses... remainingPasses) const
+    {
+        screen_.render(pass, scrollOffset_);
+
+        if constexpr (sizeof...(RemainingPasses) != 0)
+            renderPass(std::forward<RemainingPasses>(remainingPasses)...);
+    }
 
   private:
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.

@@ -1,3 +1,16 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <terminal_view/GLRenderer.h>
 
 using namespace std;
@@ -6,6 +19,8 @@ using namespace std::placeholders;
 
 using namespace terminal;
 using namespace terminal::view;
+
+#define GROUPED_CELL_BACKGROUND_RENDER 1
 
 inline QVector4D makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
 {
@@ -98,9 +113,22 @@ void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
 void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
 {
     metrics_.clear();
+    pendingBackgroundDraw_ = {};
+    pendingDraw_ = {};
 
-    _terminal.render(bind(&GLRenderer::fillCellGroup, this, _1, _2, _3, _terminal.screenSize()), _now);
-    renderCellGroup(_terminal.screenSize());
+    _terminal.render(
+        _now,
+        bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3, _terminal.screenSize()),
+        bind(&GLRenderer::fillTextGroup, this, _1, _2, _3, _terminal.screenSize())
+    );
+
+#if defined(GROUPED_CELL_BACKGROUND_RENDER)
+    assert(!pendingBackgroundDraw_.empty());
+    renderPendingBackgroundCells(_terminal.screenSize());
+#endif
+
+    assert(!pendingDraw_.text.empty());
+    renderTextGroup(_terminal.screenSize());
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -118,34 +146,78 @@ void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now
             {
                 cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(_terminal.historyLineCount() - _terminal.scrollOffset());
 
+#if defined(GROUPED_CELL_BACKGROUND_RENDER)
+                ++metrics_.cellBackgroundRenderCount;
+                cellBackground_.render(
+                    makeCoords(range.fromColumn, row, _terminal.screenSize()),
+                    color,
+                    1 + range.toColumn - range.fromColumn);
+#else
                 for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
                 {
                     ++metrics_.cellBackgroundRenderCount;
-                    cellBackground_.render(makeCoords(col, row, _terminal.screenSize()), color, 1);
+                    cellBackground_.render(makeCoords(col, row, _terminal.screenSize()), color);
                 }
+#endif
             }
         }
     }
 }
 
-void GLRenderer::fillCellGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
+void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
 {
-    ++metrics_.fillCellGroup;
-
     if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes)
         pendingDraw_.text.push_back(_cell.character);
     else
     {
         if (!pendingDraw_.text.empty())
-            renderCellGroup(_screenSize);
+            renderTextGroup(_screenSize);
 
         pendingDraw_.reset(_row, _col, _cell.attributes, _cell.character);
     }
 }
 
-void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
+void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize)
 {
-    ++metrics_.renderCellGroup;
+    auto const bgColor = makeColors(_cell.attributes).second;
+
+    if (pendingBackgroundDraw_.lineNumber == _row && pendingBackgroundDraw_.color == bgColor)
+        pendingBackgroundDraw_.endColumn++;
+    else
+    {
+        if (!pendingBackgroundDraw_.empty())
+            renderPendingBackgroundCells(_screenSize);
+
+        pendingBackgroundDraw_.reset(bgColor, _row, _col);
+    }
+}
+
+void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
+{
+    ++metrics_.cellBackgroundRenderCount;
+
+    // printf("GLRenderer.renderPendingBackgroundCells(#%u: %d, %d-%d) #%02x%02x%02x\n",
+    //     metrics_.cellBackgroundRenderCount,
+    //     pendingBackgroundDraw_.lineNumber,
+    //     pendingBackgroundDraw_.startColumn,
+    //     pendingBackgroundDraw_.endColumn,
+    //     int(pendingBackgroundDraw_.color[0] * 0xFF) & 0xFF,
+    //     int(pendingBackgroundDraw_.color[1] * 0xFF) & 0xFF,
+    //     int(pendingBackgroundDraw_.color[2] * 0xFF) & 0xFF
+    // );
+
+    cellBackground_.render(
+        makeCoords(pendingBackgroundDraw_.startColumn, pendingBackgroundDraw_.lineNumber, _screenSize),
+        pendingBackgroundDraw_.color,
+        1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
+    );
+}
+
+void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
+{
+    assert(!pendingDraw_.text.empty()); // oh wait, what about empty lines/space?
+
+    ++metrics_.renderTextGroup;
 
     auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
     auto const textStyle = FontStyle::Regular;
@@ -179,15 +251,7 @@ void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
         // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
 
-#if defined(GROUPED_CELL_BACKGROUND_RENDER)
-    ++metrics_.cellBackgroundRenderCount;
-    cellBackground_.render(
-        makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
-        bgColor,
-        pendingDraw_.text.size()
-    );
-#else
-    // TODO: stretch background to number of characters instead.
+#if !defined(GROUPED_CELL_BACKGROUND_RENDER)
     for (cursor_pos_t i = 0; i < pendingDraw_.text.size(); ++i)
     {
         ++metrics_.cellBackgroundRenderCount;
@@ -195,7 +259,6 @@ void GLRenderer::renderCellGroup(WindowSize const& _screenSize)
     }
 #endif
 
-    ++metrics_.textRenderCount;
     textShaper_.render(
         makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
         pendingDraw_.text,

@@ -306,23 +306,31 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
         chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_) >= cursorBlinkInterval());
 }
 
-void Terminal::render(Screen::Renderer const& renderer, steady_clock::time_point _now) const
+// void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1) const
+// {
+//     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+//     updated_.store(false);
+//     updateCursorVisibilityState(_now);
+//     screen_.render(pass1, scrollOffset_);
+// }
+//
+// void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1, Screen::Renderer const& pass2) const
+// {
+//     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+//     updated_.store(false);
+//     updateCursorVisibilityState(_now);
+//     screen_.render(pass1, scrollOffset_);
+//     screen_.render(pass2, scrollOffset_);
+// }
+
+void Terminal::updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const
 {
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-
-    updated_.store(false);
-
-    // update cursor visibility state
+    auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
+    if (diff >= cursorBlinkInterval())
     {
-        auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
-        if (diff >= cursorBlinkInterval())
-        {
-            lastCursorBlink_ = _now;
-            cursorBlinkState_ = (cursorBlinkState_ + 1) % 2;
-        }
+        lastCursorBlink_ = _now;
+        cursorBlinkState_ = (cursorBlinkState_ + 1) % 2;
     }
-
-    screen_.render(renderer, scrollOffset_);
 }
 
 std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point _now) const
