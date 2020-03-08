@@ -16,6 +16,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <initializer_list>
 #include <string>
@@ -74,6 +75,15 @@ struct RGBColor {
 
     RGBColor& operator=(std::string const& _hexCode);
 };
+
+constexpr RGBColor operator*(RGBColor const& c, float s) noexcept
+{
+    return RGBColor{
+        static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
+        static_cast<uint8_t>(std::clamp(static_cast<float>(c.green) * s, 0.0f, 255.0f)),
+        static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f))
+    };
+}
 
 constexpr RGBColor operator "" _rgb(unsigned long long _value)
 {
