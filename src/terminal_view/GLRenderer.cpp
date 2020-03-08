@@ -194,6 +194,9 @@ void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, Scree
 
 void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
 {
+    if (pendingBackgroundDraw_.color == colorProfile_.defaultBackground)
+        return;
+
     ++metrics_.cellBackgroundRenderCount;
 
     // printf("GLRenderer.renderPendingBackgroundCells(#%u: %d, %d-%d) #%02x%02x%02x\n",
@@ -208,7 +211,12 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
 
     cellBackground_.render(
         makeCoords(pendingBackgroundDraw_.startColumn, pendingBackgroundDraw_.lineNumber, _screenSize),
-        pendingBackgroundDraw_.color,
+        QVector4D(
+            static_cast<float>(pendingBackgroundDraw_.color.red) / 255.0f,
+            static_cast<float>(pendingBackgroundDraw_.color.green) / 255.0f,
+            static_cast<float>(pendingBackgroundDraw_.color.blue) / 255.0f,
+            static_cast<float>(backgroundOpacity_) / 255.0f
+        ),
         1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
     );
 }
@@ -259,12 +267,18 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     }
 #endif
 
-    textShaper_.render(
-        makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
-        pendingDraw_.text,
-        fgColor,
-        textStyle
-    );
+    if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
+        textShaper_.render(
+            makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
+            pendingDraw_.text,
+            QVector4D(
+                static_cast<float>(fgColor.red) / 255.0f,
+                static_cast<float>(fgColor.green) / 255.0f,
+                static_cast<float>(fgColor.blue) / 255.0f,
+                static_cast<float>(backgroundOpacity_) / 255.0f
+            ),
+            textStyle
+        );
 }
 
 QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
@@ -278,37 +292,20 @@ QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize con
     };
 }
 
-std::pair<QVector4D, QVector4D> GLRenderer::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
+std::pair<RGBColor, RGBColor> GLRenderer::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
 {
     float const opacity = [=]() {
-        if (_attributes.styles & CharacterStyleMask::Hidden)
-            return 0.0f;
-        else if (_attributes.styles & CharacterStyleMask::Faint)
+        if (_attributes.styles & CharacterStyleMask::Faint)
             return 0.5f;
         else
             return 1.0f;
     }();
 
-    auto const applyColor = [_attributes, this](Color const& _color, ColorTarget _target, float _opacity) -> QVector4D
-    {
-        RGBColor const rgb = apply(colorProfile_, _color, _target, _attributes.styles & CharacterStyleMask::Bold);
-        QVector4D const rgba{
-            static_cast<float>(rgb.red) / 255.0f,
-            static_cast<float>(rgb.green) / 255.0f,
-            static_cast<float>(rgb.blue) / 255.0f,
-            _opacity
-        };
-        return rgba;
-    };
-
-    float const backgroundOpacity =
-        holds_alternative<DefaultColor>(_attributes.backgroundColor)
-            ? static_cast<float>(backgroundOpacity_) / 255.0f
-            : 1.0f;
+    bool const bright = (_attributes.styles & CharacterStyleMask::Bold) != 0;
 
     return (_attributes.styles & CharacterStyleMask::Inverse)
-        ? pair{ applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity),
-                applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity) }
-        : pair{ applyColor(_attributes.foregroundColor, ColorTarget::Foreground, opacity),
-                applyColor(_attributes.backgroundColor, ColorTarget::Background, opacity * backgroundOpacity) };
+        ? pair{ apply(colorProfile_, _attributes.backgroundColor, ColorTarget::Background, bright) * opacity,
+                apply(colorProfile_, _attributes.foregroundColor, ColorTarget::Foreground, bright) }
+        : pair{ apply(colorProfile_, _attributes.foregroundColor, ColorTarget::Foreground, bright) * opacity,
+                apply(colorProfile_, _attributes.backgroundColor, ColorTarget::Background, bright) };
 }

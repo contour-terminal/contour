@@ -68,7 +68,7 @@ class GLRenderer : public QOpenGLFunctions {
     void renderPendingBackgroundCells(WindowSize const& _screenSize);
 
     QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
-    std::pair<QVector4D, QVector4D> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
+    std::pair<RGBColor, RGBColor> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
 
   private:
     Metrics metrics_;
@@ -92,12 +92,12 @@ class GLRenderer : public QOpenGLFunctions {
 
     struct PendingBackgroundDraw
     {
-        QVector4D color;                // The background color the draw is pending for.
+        RGBColor color;                 // The background color the draw is pending for.
         cursor_pos_t lineNumber{};      // The line this color has to be drawn on.
         cursor_pos_t startColumn{};     // The first column to start drawing.
         cursor_pos_t endColumn{};       // The last column to draw.
 
-        void reset(QVector4D const& _color, cursor_pos_t _lineNo, cursor_pos_t _col)
+        void reset(RGBColor const& _color, cursor_pos_t _lineNo, cursor_pos_t _col)
         {
             color = _color;
             lineNumber = _lineNo;
