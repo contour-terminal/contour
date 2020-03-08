@@ -93,7 +93,7 @@ class TerminalWindow :
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> updatesSinceLastSwap = 0;
-        std::atomic<uint64_t> currentRenderCount = 0;
+        std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
     Stats stats_;
 };

@@ -231,8 +231,8 @@ void TerminalWindow::onFrameSwapped()
 {
 #if defined(CONTOUR_PERF_STATS)
     qDebug() << QString::fromStdString(fmt::format(
-        "onFrameSwapped({}) updates since (rendering={}, last_swap={}) {}",
-        STATS_GET(currentRenderCount),
+        "Consecutive renders: {}, updates since last render: {}, last swap=: {}; {}",
+        STATS_GET(consecutiveRenderCount),
         STATS_GET(updatesSinceRendering),
         STATS_GET(updatesSinceLastSwap),
         terminalView_->renderer().metrics().to_string()
@@ -250,7 +250,7 @@ void TerminalWindow::onFrameSwapped()
     {
         if (updating && updating_.compare_exchange_strong(updating, false))
         {
-            STATS_ZERO(currentRenderCount);
+            STATS_ZERO(consecutiveRenderCount);
             disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
         }
 
@@ -324,7 +324,7 @@ inline QVector4D makeColor(terminal::RGBColor const& _color, terminal::Opacity _
 void TerminalWindow::paintGL()
 {
     try {
-        STATS_INC(currentRenderCount);
+        STATS_INC(consecutiveRenderCount);
         screenDirty_ = false;
         now_ = chrono::steady_clock::now();
 
