@@ -22,16 +22,6 @@ using namespace terminal::view;
 
 #define GROUPED_CELL_BACKGROUND_RENDER 1
 
-inline QVector4D makeColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
-{
-    return QVector4D{
-        static_cast<float>(_rgb.red) / 255.0f,
-        static_cast<float>(_rgb.green) / 255.0f,
-        static_cast<float>(_rgb.blue) / 255.0f,
-        static_cast<float>(_opacity) / 255.0f
-    };
-}
-
 GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
                        terminal::ColorProfile const& _colorProfile,
@@ -56,7 +46,7 @@ GLRenderer::GLRenderer(Logger _logger,
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        makeColor(colorProfile_.cursor)
+        canonicalColor(colorProfile_.cursor)
     }
 {
     initializeOpenGLFunctions();
@@ -107,7 +97,7 @@ void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
 
 void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
 {
-    cursor_.setColor(makeColor(_color));
+    cursor_.setColor(canonicalColor(_color));
 }
 
 void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
@@ -139,7 +129,7 @@ void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now
 
     if (_terminal.isSelectionAvailable())
     {
-        auto const color = makeColor(colorProfile_.selection, static_cast<terminal::Opacity>(0xC0));
+        auto const color = canonicalColor(colorProfile_.selection, static_cast<terminal::Opacity>(0xC0));
         for (Selector::Range const& range : _terminal.selection())
         {
             if (_terminal.isAbsoluteLineVisible(range.line))
@@ -215,7 +205,7 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
             static_cast<float>(pendingBackgroundDraw_.color.red) / 255.0f,
             static_cast<float>(pendingBackgroundDraw_.color.green) / 255.0f,
             static_cast<float>(pendingBackgroundDraw_.color.blue) / 255.0f,
-            static_cast<float>(backgroundOpacity_) / 255.0f
+            1.0f
         ),
         1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
     );
@@ -275,7 +265,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
                 static_cast<float>(fgColor.red) / 255.0f,
                 static_cast<float>(fgColor.green) / 255.0f,
                 static_cast<float>(fgColor.blue) / 255.0f,
-                static_cast<float>(backgroundOpacity_) / 255.0f
+                1.0f
             ),
             textStyle
         );

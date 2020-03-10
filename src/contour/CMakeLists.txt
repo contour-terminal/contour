@@ -4,7 +4,18 @@ find_package(Qt5 COMPONENTS Gui REQUIRED)  # apt install qtbase5-dev libqt5gui5
 find_package(OpenGL REQUIRED)
 find_package(Freetype REQUIRED)
 
-option(CONTOUR_BLUR_PLATFORM_KWIN_X11 "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
+# /// {{{ Linux/KDE
+# ! apt install extra-cmake-modules libkf5windowsystem-dev
+if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
+    set(KF5_MIN_VERSION "5.12.0")
+    find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
+    set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
+    include(FeatureSummary)
+    find_package(KF5 ${KF5_MIN_VERSION} REQUIRED WindowSystem)
+endif()
+# }}}
+
+option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
@@ -61,15 +72,14 @@ if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     list(APPEND contour_LIBRARIES ${Boost_LIBRARIES})
 endif()
-if(CONTOUR_BLUR_PLATFORM_KWIN_X11)
-	find_package(X11 REQUIRED)
-	list(APPEND contour_LIBRARIES ${X11_LIBRARIES})
-	target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN_X11)
+if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
+    list(APPEND contour_LIBRARIES KF5::WindowSystem)
+	target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
 endif()
 
 target_link_libraries(contour PRIVATE ${contour_LIBRARIES})
 
-message(STATUS "[contour] Enable blur effect on KWin/X11 window manager: ${CONTOUR_BLUR_PLATFORM_KWIN_X11}")
+message(STATUS "[contour] Enable blur effect on KWin window manager: ${CONTOUR_BLUR_PLATFORM_KWIN}")
 message(STATUS "[contour] Enable performance metrics: ${CONTOUR_PERF_STATS}")
 
 install(TARGETS contour DESTINATION bin)

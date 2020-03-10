@@ -75,6 +75,17 @@ class GLRenderer : public QOpenGLFunctions {
 
     Metrics const& metrics() const noexcept { return metrics_; }
 
+    // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
+    static constexpr QVector4D canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
+    {
+        return QVector4D{
+            static_cast<float>(_rgb.red) / 255.0f,
+            static_cast<float>(_rgb.green) / 255.0f,
+            static_cast<float>(_rgb.blue) / 255.0f,
+            static_cast<float>(_opacity) / 255.0f
+        };
+    }
+
   private:
     void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);

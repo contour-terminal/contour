@@ -24,6 +24,10 @@
 #include <QScreen>
 #include <QTimer>
 
+#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
+#include <KWindowEffects>
+#endif
+
 #include <cstring>
 #include <fstream>
 
@@ -41,6 +45,8 @@ using namespace std::placeholders;
 #endif
 
 namespace contour {
+
+using terminal::view::GLRenderer;
 
 namespace {
     constexpr inline terminal::Modifier makeModifier(int _mods)
@@ -152,10 +158,10 @@ namespace {
         format.setGreenBufferSize(8);
         format.setBlueBufferSize(8);
         format.setAlphaBufferSize(8);
-        format.setRenderableType(QSurfaceFormat::OpenGLES);
+        format.setRenderableType(QSurfaceFormat::OpenGL);//ES);
         format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
         format.setProfile(QSurfaceFormat::CoreProfile);
-        format.setVersion(3, 3);
+        format.setVersion(3, 0);
         format.setSwapInterval(1);
 
         return format;
@@ -189,6 +195,8 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     //     << QString::fromUtf8(fmt::format("{}x{}", _config.terminalSize.columns, _config.terminalSize.rows).c_str())
     //     << "fontSize:" << config_.fontSize
     //     << "contentScale:" << contentScale();
+
+    setFormat(surfaceFormat());
 
     // FIXME: blinking cursor
     // updateTimer_.setInterval(config_.cursorBlinkInterval.count());
@@ -268,7 +276,6 @@ void TerminalWindow::onScreenChanged(QScreen* _screen)
 
 void TerminalWindow::initializeGL()
 {
-    setFormat(surfaceFormat());
     initializeOpenGLFunctions();
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
@@ -312,15 +319,6 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
     }
 }
 
-inline QVector4D makeColor(terminal::RGBColor const& _color, terminal::Opacity _opacity)
-{
-    return QVector4D{
-        static_cast<float>(_color.red) / 255.0f,
-        static_cast<float>(_color.green) / 255.0f,
-        static_cast<float>(_color.blue) / 255.0f,
-        static_cast<float>(_opacity) / 255.0f};
-}
-
 void TerminalWindow::paintGL()
 {
     try {
@@ -339,7 +337,7 @@ void TerminalWindow::paintGL()
             for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
         }
 
-        QVector4D const bg = makeColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
+        QVector4D const bg = GLRenderer::canonicalColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
         glClearColor(bg[0], bg[1], bg[2], bg[3]);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -847,9 +845,15 @@ void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/)
     });
 }
 
-bool TerminalWindow::enableBackgroundBlur(bool /*_enable*/) // TODO
+bool TerminalWindow::enableBackgroundBlur([[maybe_unused]] bool _enable)
 {
+#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
+    KWindowEffects::enableBlurBehind(winId(), _enable);
+    KWindowEffects::enableBackgroundContrast(winId(), !_enable);
+    return true;
+#else
     return false;
+#endif
 }
 
 void TerminalWindow::post(std::function<void()> _fn)
