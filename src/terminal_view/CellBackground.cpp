@@ -59,7 +59,10 @@ CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
     shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShader);
     shader_.link();
     if (!shader_.isLinked())
+    {
         qDebug() << "CellBackground: Failed to link shader.";
+        abort();
+    }
 
     transformLocation_ = shader_.uniformLocation("u_transform");
     colorLocation_ = shader_.uniformLocation("u_color");

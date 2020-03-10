@@ -31,13 +31,25 @@ GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
     colorLocation_{}
 {
     initializeOpenGLFunctions();
-    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderCode().c_str());
-    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderCode().c_str());
-    shader_.link();
-    if (!shader_.isLinked())
+    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderCode().c_str()))
+    {
+        qDebug() << "GLCursor: Failed to add vertex shader.";
+        qDebug() << "GLTextShaper.shader. " << shader_.log();
+        abort();
+    }
+
+    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderCode().c_str()))
+    {
+        qDebug() << "GLCursor: Failed to add fragment shader.";
+        qDebug() << "GLTextShaper.shader. " << shader_.log();
+        abort();
+    }
+
+    if (!shader_.link())
     {
         qDebug() << "GLCursor: Failed to link shader.";
         qDebug() << "GLTextShaper.shader. " << shader_.log();
+        abort();
     }
     colorLocation_ = shader_.uniformLocation("textColor");
     projectionLocation_ = shader_.uniformLocation("projection");
@@ -71,7 +83,7 @@ GLTextShaper::~GLTextShaper()
 string const& GLTextShaper::vertexShaderCode()
 {
     static string const code = R"(
-        #version 130
+        #version 330
         in vec4 vertex;
         varying vec2 TexCoords;
 
@@ -89,7 +101,7 @@ string const& GLTextShaper::vertexShaderCode()
 string const& GLTextShaper::fragmentShaderCode()
 {
     static string const code = R"(
-        #version 130
+        #version 330
         in vec2 TexCoords;
         out vec4 color;
 
