@@ -231,7 +231,7 @@ void TerminalWindow::onFrameSwapped()
 {
 #if defined(CONTOUR_PERF_STATS)
     qDebug() << QString::fromStdString(fmt::format(
-        "Consecutive renders: {}, updates since last render: {}, last swap=: {}; {}",
+        "Consecutive renders: {}, updates since last render: {}, last swap: {}; {}",
         STATS_GET(consecutiveRenderCount),
         STATS_GET(updatesSinceRendering),
         STATS_GET(updatesSinceLastSwap),
