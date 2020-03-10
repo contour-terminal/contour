@@ -20,8 +20,18 @@
 
 namespace terminal::view {
 
+/**
+ * Renders a terminal's screen to the current OpenGL context.
+ */
 class GLRenderer : public QOpenGLFunctions {
   public:
+    /** Constructs a GLRenderer instances.
+     *
+     * @p _logger the logging instance to use when logging is needed during rendering.
+     * @p _regularFont reference to the font to use for rendering standard text.
+     * @p _colorProfile user-configurable color profile to use to map terminal colors to.
+     * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
+     */
     GLRenderer(Logger _logger,
                Font& _regularFont,
                ColorProfile const& _colorProfile,
@@ -37,6 +47,11 @@ class GLRenderer : public QOpenGLFunctions {
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
+    /**
+     * Renders the given @p _terminal to the current OpenGL context.
+     *
+     * @p _now The time hint to use when rendering the eventually blinking cursor.
+     */
     void render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
     struct Metrics {
