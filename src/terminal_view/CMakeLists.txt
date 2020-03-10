@@ -16,7 +16,7 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     find_package(harfbuzz CONFIG REQUIRED)
 endif()
 
-add_library(terminal_view
+add_library(terminal_view STATIC
     CellBackground.cpp CellBackground.h
     FontManager.cpp FontManager.h
     GLCursor.cpp GLCursor.h
