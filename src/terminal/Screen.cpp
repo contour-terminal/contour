@@ -583,8 +583,8 @@ Screen::Screen(WindowSize const& _size,
     reply_{ move(reply) },
     handler_{ _logger },
     parser_{ ref(handler_), _logger },
-    primaryBuffer_{ _size, _maxHistoryLineCount },
-    alternateBuffer_{ _size, nullopt },
+    primaryBuffer_{ ScreenBuffer::Type::Main, _size, _maxHistoryLineCount },
+    alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, nullopt },
     state_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
@@ -1362,8 +1362,8 @@ void Screen::resetSoft()
 
 void Screen::resetHard()
 {
-    primaryBuffer_ = ScreenBuffer{size_, maxHistoryLineCount_};
-    alternateBuffer_ = ScreenBuffer{size_, nullopt};
+    primaryBuffer_ = ScreenBuffer{ScreenBuffer::Type::Main, size_, maxHistoryLineCount_};
+    alternateBuffer_ = ScreenBuffer{ScreenBuffer::Type::Alternate, size_, nullopt};
     state_ = &primaryBuffer_;
 }
 

@@ -111,6 +111,12 @@ struct Margin {
  * Screen Buffer, managing a single screen buffer.
  */
 struct ScreenBuffer {
+    /// ScreenBuffer's type, such as main screen or alternate screen.
+    enum class Type {
+        Main,
+        Alternate
+    };
+
     /// Character graphics rendition information.
     struct GraphicsAttributes {
         Color foregroundColor{DefaultColor{}};
@@ -148,8 +154,9 @@ struct ScreenBuffer {
 		// TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
 	};
 
-	ScreenBuffer(WindowSize const& _size, std::optional<size_t> _maxHistoryLineCount)
-		: size_{ _size },
+	ScreenBuffer(Type _type, WindowSize const& _size, std::optional<size_t> _maxHistoryLineCount)
+		: type_{ _type },
+          size_{ _size },
           maxHistoryLineCount_{ move(_maxHistoryLineCount) },
 		  margin_{
 			  {1, _size.rows},
@@ -160,6 +167,7 @@ struct ScreenBuffer {
 		verifyState();
 	}
 
+    Type type_;
 	WindowSize size_;
     std::optional<size_t> maxHistoryLineCount_;
 	Margin margin_;
@@ -555,3 +563,28 @@ constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) no
 }
 
 }  // namespace terminal
+
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::ScreenBuffer::Type> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::ScreenBuffer::Type value, FormatContext& ctx)
+        {
+            switch (value)
+            {
+                case terminal::ScreenBuffer::Type::Main:
+                    return format_to(ctx.out(), "main");
+                case terminal::ScreenBuffer::Type::Alternate:
+                    return format_to(ctx.out(), "alternate");
+            }
+            return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        }
+    };
+}
