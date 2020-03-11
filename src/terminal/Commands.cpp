@@ -25,6 +25,14 @@ using fmt::format;
 
 namespace terminal {
 
+std::string setDynamicColorValue(RGBColor const& color)
+{
+    auto const r = static_cast<unsigned>(static_cast<float>(color.red) / 255.0f * 0xFFFF);
+    auto const g = static_cast<unsigned>(static_cast<float>(color.green) / 255.0f * 0xFFFF);
+    auto const b = static_cast<unsigned>(static_cast<float>(color.blue) / 255.0f * 0xFFFF);
+    return fmt::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
+}
+
 CursorShape makeCursorShape(string const& _name)
 {
     string const name = [](string const& _input) {

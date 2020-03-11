@@ -166,9 +166,9 @@ std::optional<RGBColor> OutputHandler::parseColor(std::string const& _value)
             auto const b = stoul(_value.substr(14, 4), nullptr, 16);
 
             return RGBColor{
-                static_cast<uint8_t>(r / 0xFF),
-                static_cast<uint8_t>(g / 0xFF),
-                static_cast<uint8_t>(b / 0xFF)
+                static_cast<uint8_t>(r & 0xFF),
+                static_cast<uint8_t>(g & 0xFF),
+                static_cast<uint8_t>(b & 0xFF)
             };
         }
         return std::nullopt;

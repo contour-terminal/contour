@@ -808,15 +808,7 @@ constexpr int resetDynamicColorCommand(DynamicColorName name)
     }
 }
 
-inline std::string setDynamicColorValue(RGBColor const& color)
-{
-    return fmt::format(
-        "rgb:{:04X}/{:04X}/{:04X}",
-        0xFFFF * color.red / 0xFF,
-        0xFFFF * color.green / 0xFF,
-        0xFFFF * color.blue / 0xFF
-    );
-}
+std::string setDynamicColorValue(RGBColor const& color);
 
 /// OSC 46
 ///
