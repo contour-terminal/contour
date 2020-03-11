@@ -656,6 +656,9 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
         cursor_pos_t rowNumber = 1;
         for (auto line = prev(end(state_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
         {
+            if (line->size() < size_.columns)
+                line->resize(size_.columns);
+
             auto column = begin(*line);
             for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
                 _render(rowNumber, colNumber, *column);
