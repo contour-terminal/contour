@@ -56,7 +56,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
 {
     if (_newSize.rows > size_.rows)
     {
-        // Grow line count by splicing available lince from history back into buffer, if available,
+        // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until size_.rows == _newSize.rows.
         auto const extendCount = _newSize.rows - size_.rows;
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned int>(std::size(savedLines)));
