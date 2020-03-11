@@ -55,7 +55,7 @@ string to_string(CursorShape _value)
         case CursorShape::Rectangle:
             return "rectangle";
         case CursorShape::Underscore:
-            return "underscroe";
+            return "underscore";
         case CursorShape::Bar:
             return "bar";
     }
