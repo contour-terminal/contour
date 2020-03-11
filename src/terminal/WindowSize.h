@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 namespace terminal {
 
 struct [[nodiscard]] WindowSize {
@@ -30,4 +32,21 @@ constexpr bool operator!=(WindowSize const& _a, WindowSize const& _b) noexcept
     return !(_a == _b);
 }
 
+}
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::WindowSize> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::WindowSize& value, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({}, {})", value.columns, value.rows);
+        }
+    };
 }
