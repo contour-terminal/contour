@@ -716,9 +716,120 @@ struct SetCursorStyle {
 struct SaveWindowTitle {};
 struct RestoreWindowTitle {};
 
+// {{{ config commands
+/// OSC color-setting related commands that can be grouped into one
+enum class DynamicColorName {
+    DefaultForegroundColor,
+    DefaultBackgroundColor,
+    TextCursorColor,
+    MouseForegroundColor,
+    MouseBackgroundColor,
+    HighlightForegroundColor,
+    HighlightBackgroundColor,
+};
+
+constexpr DynamicColorName getChangeDynamicColorCommand(int value)
+{
+    switch (value)
+    {
+        case 10: return DynamicColorName::DefaultForegroundColor;
+        case 11: return DynamicColorName::DefaultBackgroundColor;
+        case 12: return DynamicColorName::TextCursorColor;
+        case 13: return DynamicColorName::MouseForegroundColor;
+        case 14: return DynamicColorName::MouseBackgroundColor;
+        case 19: return DynamicColorName::HighlightForegroundColor;
+        case 17: return DynamicColorName::HighlightBackgroundColor;
+        default:
+            return DynamicColorName::DefaultForegroundColor;
+    }
+}
+
+constexpr DynamicColorName getResetDynamicColorCommand(int value)
+{
+    switch (value)
+    {
+        case 110: return DynamicColorName::DefaultForegroundColor;
+        case 111: return DynamicColorName::DefaultBackgroundColor;
+        case 112: return DynamicColorName::TextCursorColor;
+        case 113: return DynamicColorName::MouseForegroundColor;
+        case 114: return DynamicColorName::MouseBackgroundColor;
+        case 119: return DynamicColorName::HighlightForegroundColor;
+        case 117: return DynamicColorName::HighlightBackgroundColor;
+        default:
+            return DynamicColorName::DefaultForegroundColor;
+    }
+}
+
+/// Requests the current color value of a DynamicColorName.
+struct RequestDynamicColor {
+    DynamicColorName name;
+};
+
+/// Sets the DynamicColorName to given color value.
+struct SetDynamicColor {
+    DynamicColorName name;
+    RGBColor color;
+};
+
+/// Resets the DynamicColorName to its configuration default.
+struct ResetDynamicColor {
+    DynamicColorName name;
+};
+
+constexpr int setDynamicColorCommand(DynamicColorName name)
+{
+    switch (name)
+    {
+        case DynamicColorName::DefaultForegroundColor: return 10;
+        case DynamicColorName::DefaultBackgroundColor: return 11;
+        case DynamicColorName::TextCursorColor: return 12;
+        case DynamicColorName::MouseForegroundColor: return 13;
+        case DynamicColorName::MouseBackgroundColor: return 14;
+        case DynamicColorName::HighlightForegroundColor: return 19;
+        case DynamicColorName::HighlightBackgroundColor: return 17;
+        default:
+            return 0;
+    }
+}
+
+constexpr int resetDynamicColorCommand(DynamicColorName name)
+{
+    switch (name)
+    {
+        case DynamicColorName::DefaultForegroundColor: return 110;
+        case DynamicColorName::DefaultBackgroundColor: return 111;
+        case DynamicColorName::TextCursorColor: return 112;
+        case DynamicColorName::MouseForegroundColor: return 113;
+        case DynamicColorName::MouseBackgroundColor: return 114;
+        case DynamicColorName::HighlightForegroundColor: return 119;
+        case DynamicColorName::HighlightBackgroundColor: return 117;
+        default:
+            return 0;
+    }
+}
+
+inline std::string setDynamicColorValue(RGBColor const& color)
+{
+    return fmt::format(
+        "rgb:{:04X}/{:04X}/{:04X}",
+        0xFFFF * color.red / 0xFF,
+        0xFFFF * color.green / 0xFF,
+        0xFFFF * color.blue / 0xFF
+    );
+}
+
+/// OSC 46
+///
+/// Change Log File to Pt.  This is normally dis-
+/// abled by a compile-time option.
+struct SetLogFilePathConfig {
+    std::string path;
+};
+
+// }}}
+
 using Command = std::variant<
     AppendChar,
-
     ApplicationKeypadMode,
     BackIndex,
     Backspace,
@@ -759,7 +870,9 @@ using Command = std::variant<
     MoveCursorUp,
     ReportCursorPosition,
     ReportExtendedCursorPosition,
+    RequestDynamicColor,
     RequestMode,
+    ResetDynamicColor,
     ResizeWindow,
     RestoreCursor,
     RestoreWindowTitle,
@@ -773,7 +886,8 @@ using Command = std::variant<
     SendMouseEvents,
     SendTerminalId,
     SetBackgroundColor,
-	SetCursorStyle,
+    SetCursorStyle,
+    SetDynamicColor,
     SetForegroundColor,
     SetGraphicsRendition,
     SetLeftRightMargin,
@@ -803,6 +917,39 @@ namespace fmt {
         auto format(const terminal::Coordinate& coord, FormatContext& ctx)
         {
             return format_to(ctx.out(), "({}, {})", coord.row, coord.column);
+        }
+    };
+
+    template <>
+    struct formatter<terminal::DynamicColorName> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::DynamicColorName& name, FormatContext& ctx)
+        {
+            using terminal::DynamicColorName;
+            switch (name)
+            {
+                case DynamicColorName::DefaultForegroundColor:
+                    return format_to(ctx.out(), "DefaultForegroundColor");
+                case DynamicColorName::DefaultBackgroundColor:
+                    return format_to(ctx.out(), "DefaultForegroundColor");
+                case DynamicColorName::TextCursorColor:
+                    return format_to(ctx.out(), "TextCursorColor");
+                case DynamicColorName::MouseForegroundColor:
+                    return format_to(ctx.out(), "MouseForegroundColor");
+                case DynamicColorName::MouseBackgroundColor:
+                    return format_to(ctx.out(), "MouseBackgroundColor");
+                case DynamicColorName::HighlightForegroundColor:
+                    return format_to(ctx.out(), "HighlightForegroundColor");
+                case DynamicColorName::HighlightBackgroundColor:
+                    return format_to(ctx.out(), "HighlightBackgroundColor");
+            }
+            return format_to(ctx.out(), "({})", static_cast<int>(name));
         }
     };
 }

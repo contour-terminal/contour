@@ -154,6 +154,32 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
     }
 }
 
+std::optional<RGBColor> OutputHandler::parseColor(std::string const& _value)
+{
+    try
+    {
+        // "rgb:RRRR/GGGG/BBBB"
+        if (_value.size() == 18 && _value.substr(0, 4) == "rgb:" && _value[8] == '/' && _value[13] == '/')
+        {
+            auto const r = stoul(_value.substr(4, 4), nullptr, 16);
+            auto const g = stoul(_value.substr(9, 4), nullptr, 16);
+            auto const b = stoul(_value.substr(14, 4), nullptr, 16);
+
+            return RGBColor{
+                static_cast<uint8_t>(r / 0xFF),
+                static_cast<uint8_t>(g / 0xFF),
+                static_cast<uint8_t>(b / 0xFF)
+            };
+        }
+        return std::nullopt;
+    }
+    catch (...)
+    {
+        // that will be a formatting error in stoul() then.
+        return std::nullopt;
+    }
+}
+
 void OutputHandler::dispatchOSC()
 {
     auto const [code, value] = [](std::string const& _data) {
@@ -179,7 +205,7 @@ void OutputHandler::dispatchOSC()
         case 0: // set window title and icon name
         case 2: // set window title
             emitCommand<ChangeWindowTitle>(value);
-            break;
+            [[fallthrough]];
         case 1: // set icon name
             // ignore
             break;
@@ -187,9 +213,32 @@ void OutputHandler::dispatchOSC()
         case 4: // Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
         case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
         case 6: // Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
+            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            break;
         case 10: // Ps = 1 0  -> Change VT100 text foreground color to Pt.
+            if (value == "?")
+                emitCommand<RequestDynamicColor>(DynamicColorName::DefaultForegroundColor);
+            else if (auto color = parseColor(value); color.has_value())
+                emitCommand<SetDynamicColor>(DynamicColorName::DefaultForegroundColor, color.value());
+            else
+                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+            break;
         case 11: // Ps = 1 1  -> Change VT100 text background color to Pt.
+            if (value == "?")
+                emitCommand<RequestDynamicColor>(DynamicColorName::DefaultBackgroundColor);
+            else if (auto color = parseColor(value); color.has_value())
+                emitCommand<SetDynamicColor>(DynamicColorName::DefaultBackgroundColor, color.value());
+            else
+                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+            break;
         case 12: // Ps = 1 2  -> Change text cursor color to Pt.
+            if (value == "?")
+                emitCommand<RequestDynamicColor>(DynamicColorName::TextCursorColor);
+            else if (auto color = parseColor(value); color.has_value())
+                emitCommand<SetDynamicColor>(DynamicColorName::TextCursorColor, color.value());
+            else
+                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+            return;
         case 13: // Ps = 1 3  -> Change mouse foreground color to Pt.
         case 14: // Ps = 1 4  -> Change mouse background color to Pt.
         case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
@@ -204,11 +253,23 @@ void OutputHandler::dispatchOSC()
         case 104: // Ps = 1 0 4 ; c -> Reset Color Number c.
         case 105: // Ps = 1 0 5 ; c -> Reset Special Color Number c.
         case 106: // Ps = 1 0 6 ; c ; f -> Enable/disable Special Color Number c.
+            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            break;
         case 110: // Ps = 1 1 0  -> Reset VT100 text foreground color.
+            emitCommand<ResetDynamicColor>(DynamicColorName::DefaultForegroundColor);
+            break;
         case 111: // Ps = 1 1 1  -> Reset VT100 text background color.
+            emitCommand<ResetDynamicColor>(DynamicColorName::DefaultBackgroundColor);
+            break;
         case 112: // Ps = 1 1 2  -> Reset text cursor color.
+            emitCommand<ResetDynamicColor>(DynamicColorName::TextCursorColor);
+            break;
         case 113: // Ps = 1 1 3  -> Reset mouse foreground color.
+            emitCommand<ResetDynamicColor>(DynamicColorName::MouseForegroundColor);
+            break;
         case 114: // Ps = 1 1 4  -> Reset mouse background color.
+            emitCommand<ResetDynamicColor>(DynamicColorName::MouseBackgroundColor);
+            break;
         case 115: // Ps = 1 1 5  -> Reset Tektronix foreground color.
         case 116: // Ps = 1 1 6  -> Reset Tektronix background color.
         case 117: // Ps = 1 1 7  -> Reset highlight color.

@@ -19,6 +19,22 @@
 using namespace std;
 using namespace terminal;
 
+TEST_CASE("parseColor", "[OutputHandler]")
+{
+    Color const c1 = OutputHandler::parseColor("rgb:FFFF/FFFF/FFFF").value();
+    CHECK(c1 == RGBColor{0xFF, 0xFF, 0xFF});
+
+    Color const c2 = OutputHandler::parseColor("rgb:0000/0000/0000").value();
+    CHECK(c2 == RGBColor{0x00, 0x00, 0x00});
+
+    RGBColor const c3 = RGBColor{0x10, 0x30, 0xC0};
+    std::string const s3 = setDynamicColorValue(c3);
+    RGBColor const c4 = *OutputHandler::parseColor(s3);
+    CHECK(c3 == c4);
+
+    // TODO: other colors
+}
+
 TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
 {
     auto output = OutputHandler{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};

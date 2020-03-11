@@ -34,8 +34,12 @@ Terminal::Terminal(WindowSize _winSize,
                    Logger _logger,
                    Hook _onScreenCommands,
                    function<void()> _onClosed,
-                   string const& _wordDelimiters)
-  : updated_{ false },
+                   string const& _wordDelimiters,
+                   std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
+                   std::function<void(DynamicColorName)> _resetDynamicColor,
+                   std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+) :
+    updated_{ false },
     logger_{ _logger },
     pty_{ _winSize },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
@@ -58,7 +62,10 @@ Terminal::Terminal(WindowSize _winSize,
         bind(&Terminal::onSetCursorStyle, this, _1, _2),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
-        bind(&Terminal::onScreenCommands, this, _1)
+        bind(&Terminal::onScreenCommands, this, _1),
+        std::move(_requestDynamicColor),
+        std::move(_resetDynamicColor),
+        std::move(_setDynamicColor)
     },
     onScreenCommands_{ move(_onScreenCommands) },
     screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) },

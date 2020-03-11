@@ -53,7 +53,11 @@ class Terminal {
         Logger _logger = {},
         Hook _onScreenCommands = {},
         std::function<void()> _onClosed = {},
-        std::string const& _wordDelimiters = "");
+        std::string const& _wordDelimiters = "",
+        std::function<RGBColor(DynamicColorName)> _requestDynamicColor = {},
+        std::function<void(DynamicColorName)> _resetDynamicColor = {},
+        std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor = {}
+    );
     ~Terminal();
 
     /// Retrieves reference to the underlying PTY device.

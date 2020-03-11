@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <initializer_list>
+#include <ostream>
 #include <string>
 #include <variant>
 #include <utility>
@@ -130,6 +131,9 @@ struct ColorProfile {
     RGBColor selection = 0x707070;
 	RGBColor cursor = 0x707020;
 
+    RGBColor mouseForeground = 0x800000;
+    RGBColor mouseBackground = 0x808000;
+
     Palette palette = []() {
         Palette colors;
 
@@ -239,4 +243,58 @@ constexpr bool isRGB(Color const& color) noexcept
     return std::holds_alternative<RGBColor>(color);
 }
 
+inline std::ostream& operator<<(std::ostream& os, terminal::IndexedColor value)
+{
+    return os << to_string(value);
+}
+
+inline std::ostream& operator<<(std::ostream& os, terminal::BrightColor value)
+{
+    return os << to_string(value);
+}
+
+inline std::ostream& operator<<(std::ostream& os, terminal::RGBColor value)
+{
+    return os << to_string(value);
+}
+
+inline std::ostream& operator<<(std::ostream& os, terminal::Color value)
+{
+    return os << to_string(value);
+}
+
 }  // namespace terminal
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::IndexedColor> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::IndexedColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+    };
+
+    template <>
+    struct formatter<terminal::BrightColor> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::BrightColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+    };
+
+    template <>
+    struct formatter<terminal::RGBColor> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::RGBColor const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+    };
+
+    template <>
+    struct formatter<terminal::Color> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Color const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+    };
+}

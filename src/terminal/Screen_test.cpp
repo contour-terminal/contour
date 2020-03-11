@@ -1397,8 +1397,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         {}, // setBracketedPaste
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
-        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
-        {} // commands
+        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
     };
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(MoveCursorTo{2, 3});
@@ -1437,8 +1436,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         {}, // setBracketedPaste
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
-        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
-        {} // commands
+        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
     };
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen(MoveCursorTo{2, 3});
@@ -1492,8 +1490,7 @@ TEST_CASE("RequestMode", "[screen]")
         {}, // setBracketedPaste
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
-        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); },
-        {} // commands
+        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
     };
 
     SECTION("ANSI modes") {

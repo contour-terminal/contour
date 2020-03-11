@@ -47,7 +47,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
-                           terminal::ColorProfile const& _colorProfile,
+                           terminal::ColorProfile& _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
                            terminal::Process::Environment const& _env,
@@ -74,6 +74,9 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _cursorBlinkInterval,
         move(_onWindowTitleChanged),
         move(_resizeWindow),
+        bind(&TerminalView::requestDynamicColor, this, _1),
+        bind(&TerminalView::resetDynamicColor, this, _1),
+        bind(&TerminalView::setDynamicColor, this, _1, _2),
         _now,
         _wordDelimiters,
         _cursorDisplay,
@@ -81,8 +84,63 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         [_onScreenUpdate](auto const& /*_commands*/) { if (_onScreenUpdate) _onScreenUpdate(); },
         move(_onTerminalClosed),
         [this](terminal::LogEvent const& _event) { logger_(_event); }
-    }
+    },
+    colorProfile_{_colorProfile}
 {
+}
+
+RGBColor TerminalView::requestDynamicColor(DynamicColorName _name)
+{
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            return colorProfile_.defaultForeground;
+        case DynamicColorName::DefaultBackgroundColor:
+            return colorProfile_.defaultBackground;
+        case DynamicColorName::TextCursorColor:
+            return colorProfile_.cursor;
+        case DynamicColorName::MouseForegroundColor:
+            return colorProfile_.mouseForeground;
+        case DynamicColorName::MouseBackgroundColor:
+            return colorProfile_.mouseBackground;
+        case DynamicColorName::HighlightForegroundColor:
+            return RGBColor{}; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
+        case DynamicColorName::HighlightBackgroundColor:
+            return colorProfile_.selection;
+    }
+    return RGBColor{}; // should never happen.
+}
+
+void TerminalView::resetDynamicColor(DynamicColorName _name)
+{
+    std::cout << fmt::format("*** TODO: Resetting dynamic color: {}\n", _name); // TODO
+}
+
+void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& value)
+{
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorProfile_.defaultForeground = value;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorProfile_.defaultBackground = value;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorProfile_.cursor = value;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorProfile_.mouseForeground = value;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorProfile_.mouseBackground = value;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            break; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
+        case DynamicColorName::HighlightBackgroundColor:
+            colorProfile_.selection = value;
+            break;
+    }
 }
 
 bool TerminalView::alive() const

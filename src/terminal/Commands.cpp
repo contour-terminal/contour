@@ -321,6 +321,16 @@ class MnemonicBuilder {
         pendingText_ += utf8::to_string(utf8::encode(v.ch));
     }
 
+    void operator()(SetDynamicColor const& v) {
+        build("SETDYNCOLOR", fmt::format("{} {}", v.name, to_string(v.color)));
+    }
+    void operator()(ResetDynamicColor v) {
+        build("RSTDYNCOLOR", fmt::format("{}", v.name));
+    }
+    void operator()(RequestDynamicColor v) {
+        build("REQDYNCOLOR", fmt::format("{}", v.name));
+    }
+
   private:
     bool withParameters_;
     bool withComment_;

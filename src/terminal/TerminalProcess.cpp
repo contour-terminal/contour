@@ -24,6 +24,9 @@ TerminalProcess::TerminalProcess(const string& _path,
                                  chrono::milliseconds _cursorBlinkInterval,
                                  function<void()> _changeWindowTitleCallback,
                                  function<void(unsigned int, unsigned int, bool)> _resizeWindow,
+                                 function<RGBColor(DynamicColorName)> _requestDynamicColor,
+                                 function<void(DynamicColorName)> _resetDynamicColor,
+                                 function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
                                  chrono::steady_clock::time_point _now,
                                  string const& _wordDelimiters,
                                  CursorDisplay _cursorDisplay,
@@ -41,7 +44,10 @@ TerminalProcess::TerminalProcess(const string& _path,
         move(_logger),
         move(_onScreenCommands),
         move(_onTerminalClosed),
-        _wordDelimiters
+        _wordDelimiters,
+        move(_requestDynamicColor),
+        move(_resetDynamicColor),
+        move(_setDynamicColor)
     ),
     Process{_path, _args, _env, terminal().device()}
 {

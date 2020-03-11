@@ -46,7 +46,7 @@ class TerminalView {
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
-                 terminal::ColorProfile const& _colorProfile,
+                 terminal::ColorProfile& _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
                  terminal::Process::Environment const& _env,
@@ -99,10 +99,15 @@ class TerminalView {
 
     GLRenderer const& renderer() const { return renderer_; }
 
+    RGBColor requestDynamicColor(DynamicColorName _name);
+    void resetDynamicColor(DynamicColorName _name);
+    void setDynamicColor(DynamicColorName _name, RGBColor const& value);
+
   private:
     Logger logger_;
     GLRenderer renderer_;
     TerminalProcess process_;
+    ColorProfile& colorProfile_;
 };
 
 class GLTextShaper;

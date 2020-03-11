@@ -30,6 +30,8 @@ class OutputHandler : private HandlerContext {
 
     explicit OutputHandler(Logger _logger);
 
+    static std::optional<RGBColor> parseColor(std::string const& _value);
+
     void invokeAction(ActionClass _actionClass, Action _action, char32_t _finalChar);
 
     void operator()(ActionClass _actionClass, Action _action, char32_t _finalChar)

@@ -52,6 +52,8 @@ class OutputGenerator {
         return output;
     }
 
+    static Color parseColor(std::string const& _value);
+
   private:
     static std::string flush(std::vector<unsigned> const& _sgr);
     void sgr_add(unsigned _param);

@@ -294,10 +294,37 @@ class Screen {
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
            Logger _logger,
-           Hook _onCommands);
+           Hook _onCommands,
+           std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
+           std::function<void(DynamicColorName)> _resetDynamicColor,
+           std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+    );
+
+    Screen(WindowSize const& _size,
+           std::optional<size_t> _maxHistoryLineCount,
+           ModeSwitchCallback _useApplicationCursorKeys,
+           std::function<void()> _onWindowTitleChanged,
+           ResizeWindowCallback _resizeWindow,
+           SetApplicationKeypadMode _setApplicationkeypadMode,
+           SetBracketedPaste _setBracketedPaste,
+		   OnSetCursorStyle _setCursorStyle,
+           Reply _reply,
+           Logger _logger
+    ) : Screen{
+        _size,
+        _maxHistoryLineCount,
+        std::move(_useApplicationCursorKeys),
+        std::move(_onWindowTitleChanged),
+        std::move(_resizeWindow),
+        std::move(_setApplicationkeypadMode),
+        std::move(_setBracketedPaste),
+        std::move(_setCursorStyle),
+        std::move(_reply),
+        std::move(_logger),
+        {}, {}, {}, {}} {}
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), {}, {}, {}, {}} {}
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
@@ -388,6 +415,10 @@ class Screen {
     void operator()(SaveWindowTitle const& v);
     void operator()(RestoreWindowTitle const& v);
     void operator()(AppendChar const& v);
+
+    void operator()(RequestDynamicColor const& v);
+    void operator()(ResetDynamicColor const& v);
+    void operator()(SetDynamicColor const& v);
 
     // reset screen
     void resetSoft();
@@ -505,6 +536,10 @@ class Screen {
     std::optional<size_t> maxHistoryLineCount_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
+
+    std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
+    std::function<void(DynamicColorName)> resetDynamicColor_{};
+    std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};
 };
 
 constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept

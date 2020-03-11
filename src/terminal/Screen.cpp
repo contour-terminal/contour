@@ -567,7 +567,11 @@ Screen::Screen(WindowSize const& _size,
 			   OnSetCursorStyle _setCursorStyle,
                Reply reply,
                Logger _logger,
-               Hook onCommands) :
+               Hook onCommands,
+               std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
+               std::function<void(DynamicColorName)> _resetDynamicColor,
+               std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
     useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
@@ -583,7 +587,10 @@ Screen::Screen(WindowSize const& _size,
     alternateBuffer_{ _size, nullopt },
     state_{ &primaryBuffer_ },
     size_{ _size },
-    maxHistoryLineCount_ { _maxHistoryLineCount }
+    maxHistoryLineCount_{ _maxHistoryLineCount },
+    requestDynamicColor_{ move(_requestDynamicColor) },
+    resetDynamicColor_{ move(_resetDynamicColor) },
+    setDynamicColor_{ move(_setDynamicColor) }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
 }
@@ -1302,6 +1309,30 @@ void Screen::operator()(ResizeWindow const& v)
 void Screen::operator()(AppendChar const& v)
 {
     state_->appendChar(v.ch);
+}
+
+
+void Screen::operator()(RequestDynamicColor const& v)
+{
+    if (requestDynamicColor_)
+    {
+        reply("\033]{};{}\x07",
+            setDynamicColorCommand(v.name),
+            setDynamicColorValue(requestDynamicColor_(v.name))
+        );
+    }
+}
+
+void Screen::operator()(ResetDynamicColor const& v)
+{
+    if (resetDynamicColor_)
+        resetDynamicColor_(v.name);
+}
+
+void Screen::operator()(SetDynamicColor const& v)
+{
+    if (setDynamicColor_)
+        setDynamicColor_(v.name, v.color);
 }
 // }}}
 
