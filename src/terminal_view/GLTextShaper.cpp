@@ -85,7 +85,7 @@ string const& GLTextShaper::vertexShaderCode()
     static string const code = R"(
         #version 330
         in vec4 vertex;
-        varying vec2 TexCoords;
+        out vec2 TexCoords;
 
         uniform mat4 projection;
 
