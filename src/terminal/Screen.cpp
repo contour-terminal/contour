@@ -60,11 +60,12 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         // or create new ones until size_.rows == _newSize.rows.
         auto const extendCount = _newSize.rows - size_.rows;
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned int>(std::size(savedLines)));
-        lines.splice(
-            begin(lines),
-            savedLines,
-            prev(end(savedLines), rowsToTakeFromSavedLines),
-            end(savedLines));
+        for (size_t i = 0; i < rowsToTakeFromSavedLines; ++i)
+        {
+            savedLines.back().resize(_newSize.columns);
+            lines.emplace_front(std::move(savedLines.back()));
+            savedLines.pop_back();
+        }
 
         cursor.row += rowsToTakeFromSavedLines;
 
@@ -81,12 +82,12 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         if (cursor.row == size_.rows)
         {
             auto const n = size_.rows - _newSize.rows;
-            savedLines.splice(
-                end(savedLines),
-                lines,
-                begin(lines),
-                next(begin(lines), n)
-            );
+            for (size_t i = 0; i < n; ++i)
+            {
+                lines.front().resize(_newSize.columns);
+                savedLines.emplace_back(std::move(lines.front()));
+                lines.pop_front();
+            }
             clampSavedLines();
         }
         else
@@ -307,12 +308,11 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 
         if (n > 0)
         {
-            savedLines.splice(
-                end(savedLines),
-                lines,
-                begin(lines),
-                next(begin(lines), n)
-            );
+            for (size_t i = 0; i < n; ++i)
+            {
+                savedLines.emplace_back(std::move(lines.front()));
+                lines.pop_front();
+            }
 
 #if 1
             clampSavedLines();

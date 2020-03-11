@@ -23,6 +23,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <deque>
 #include <functional>
 #include <list>
 #include <optional>
@@ -131,7 +132,7 @@ struct ScreenBuffer {
     };
 
 	using Line = std::vector<Cell>;
-	using Lines = std::list<Line>;
+	using Lines = std::deque<Line>;
 
     struct Cursor : public Coordinate {
         bool visible = true;
