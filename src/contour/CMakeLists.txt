@@ -6,7 +6,7 @@ find_package(Freetype REQUIRED)
 
 # /// {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
-if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
+if(CONTOUR_BLUR_PLATFORM_KWIN)
     set(KF5_MIN_VERSION "5.12.0")
     find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
     set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
