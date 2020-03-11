@@ -40,7 +40,7 @@ static string freetypeErrorString(FT_Error _errorCode)
     return "(Unknown error)";
 }
 
-static bool endsWidthIgnoreCase(string const& _text, string const& _suffix)
+static bool endsWithIgnoreCase(string const& _text, string const& _suffix)
 {
     if (_text.size() < _suffix.size())
         return false;
@@ -55,7 +55,7 @@ static bool endsWidthIgnoreCase(string const& _text, string const& _suffix)
 
 static string getFontFilePath([[maybe_unused]] string const& _fontPattern)
 {
-    if (endsWidthIgnoreCase(_fontPattern, ".ttf") || endsWidthIgnoreCase(_fontPattern, ".otf"))
+    if (endsWithIgnoreCase(_fontPattern, ".ttf") || endsWithIgnoreCase(_fontPattern, ".otf"))
         return _fontPattern;
 
     #if defined(HAVE_FONTCONFIG)
