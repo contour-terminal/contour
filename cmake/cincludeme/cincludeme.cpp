@@ -19,6 +19,24 @@
 #include <iostream>
 #include <utility>
 
+#if (!defined(__has_include) || __has_include(<filesystem>)) && !defined(__APPLE__)
+    #include <filesystem>
+    #include <system_error>
+    namespace FileSystem = std::filesystem;
+    typedef std::error_code FileSystemError;
+#elif __has_include(<experimental/filesystem>) && !defined(__APPLE__)
+    #include <experimental/filesystem>
+    #include <system_error>
+    namespace FileSystem = std::experimental::filesystem;
+    typedef std::error_code FileSystemError;
+#elif __has_include(<boost/filesystem.hpp>)
+    #include <boost/filesystem.hpp>
+    namespace FileSystem = boost::filesystem;
+    typedef boost::system::error_code FileSystemError;
+#else
+    #error No filesystem implementation found.
+#endif
+
 using namespace std;
 
 void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
@@ -61,12 +79,16 @@ int main(int argc, char const* argv[])
 {
     if (argc != 5)
     {
-        cerr << "Usage: " << argv[0] << " <OUTPUT_FILE> <NS> (<INPUT_FILE> <INPUT_SYMBOL>)...\n";
+        cerr << "Usage: " << argv[0] << " <OUTPUT_FILE> <NS> <INPUT_FILE> <INPUT_SYMBOL>\n";
         return EXIT_FAILURE;
     }
 
-    auto out = ofstream{argv[1]};
+    auto const outputFileName = argv[1];
     auto const ns = string{argv[2]};
+    auto const inputFileName = argv[3];
+    auto const symbolName = argv[4];
+
+    auto out = ofstream{outputFileName};
 
     out << "#pragma once\n\n";
     out << "#include <array>\n\n";
@@ -74,15 +96,15 @@ int main(int argc, char const* argv[])
     if (!ns.empty())
         out << "namespace " << ns << " {\n\n";
 
-    for (int i = 3; i < argc; i += 2)
-    {
-        auto const inputFile = string{argv[i]};
-        auto const symbolName = string{argv[i + 1]};
-        dump(out, inputFile, symbolName);
-    }
+    dump(out, inputFileName, symbolName);
 
     if (!ns.empty())
         out << "\n}  // namespace " << ns << "\n";
+
+    FileSystem::last_write_time(
+        FileSystem::path(outputFileName),
+        FileSystem::last_write_time(inputFileName)
+    );
 
     return EXIT_SUCCESS;
 }
