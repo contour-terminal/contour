@@ -164,6 +164,10 @@ namespace {
         format.setVersion(3, 2);
         format.setSwapInterval(1);
 
+#if !defined(NDEBUG)
+        format.setOption(QSurfaceFormat::DebugContext);
+#endif
+
         return format;
     }
 }
