@@ -11,40 +11,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#pragma once
+#include <terminal_view/ShaderConfig.h>
 
 #include <string>
-#include <stdexcept>
-#include <fmt/format.h>
+
+#include "background_vert.h"
+#include "background_frag.h"
+#include "text_vert.h"
+#include "text_frag.h"
+#include "cursor_vert.h"
+#include "cursor_frag.h"
 
 namespace terminal::view {
 
-enum class ShaderClass {
-    Background,
-    Text,
-    Cursor
-};
+namespace {
+    template <size_t N>
+    inline std::string s(std::array<char, N> const& data)
+    {
+        return std::string(data.data(), data.size());
+    }
+}
 
-struct ShaderConfig {
-    std::string vertexShader;
-    std::string fragmentShader;
-};
-
-inline std::string to_string(ShaderClass _shaderClass)
+ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 {
+    using namespace default_shaders;
+
     switch (_shaderClass)
     {
         case ShaderClass::Background:
-            return "background";
+            return {s(background_vert), s(background_frag)};
         case ShaderClass::Text:
-            return "text";
+            return {s(text_vert), s(text_frag)};
         case ShaderClass::Cursor:
-            return "cursor";
+            return {s(cursor_vert), s(cursor_frag)};
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
 }
 
-ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
-
-} // namespace
+} // end namespace
