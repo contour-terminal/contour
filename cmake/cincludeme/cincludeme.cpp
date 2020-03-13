@@ -21,60 +21,68 @@
 
 using namespace std;
 
+void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
+{
+    auto in = ifstream{_inputFile};
+    if (!in.good())
+    {
+        cerr << "Could not open input file.\n";
+        exit(EXIT_FAILURE);
+    }
+
+    in.seekg(0, in.end);
+    auto length = in.tellg();
+    _out << "constexpr std::array<char, " << length << "> " << _symbolName << " = {\n\t";
+
+    in.seekg(0, in.beg);
+    unsigned column = 0;
+    while (length > 0)
+    {
+        char ch{};
+        in.read(&ch, sizeof(ch));
+        if (!isprint(ch) || ch == '\'')
+            _out << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ch) << ',';
+        else
+            _out << '\'' << ch << '\'' << ',' << ' ';
+        ++column;
+        if (column % 16)
+            _out << ' ';
+        else
+        {
+            column = 0;
+            _out << "\n\t";
+        }
+        length -= sizeof(ch);
+    }
+    _out << "\n};\n";
+}
+
 int main(int argc, char const* argv[])
 {
-	if (argc != 5)
-	{
-		cerr << "Usage: " << argv[0] << " <INPUT_FILE> <OUTPUT_FILE> <SYMBOL_NAME>\n";
-		return EXIT_FAILURE;
-	}
+    if (argc != 5)
+    {
+        cerr << "Usage: " << argv[0] << " <OUTPUT_FILE> <NS> (<INPUT_FILE> <INPUT_SYMBOL>)...\n";
+        return EXIT_FAILURE;
+    }
 
-	auto in = ifstream{argv[1]};
-	auto out = ofstream{argv[2]};
-	auto const name = string{argv[3]};
-	auto const ns = string{argv[4]};
+    auto out = ofstream{argv[1]};
+    auto const ns = string{argv[2]};
 
-	if (!in.good())
-	{
-		cerr << "Could not open input file.\n";
-		return EXIT_FAILURE;
-	}
+    out << "#pragma once\n\n";
+    out << "#include <array>\n\n";
 
-	in.seekg(0, in.end);
-	auto length = in.tellg();
+    if (!ns.empty())
+        out << "namespace " << ns << " {\n\n";
 
-	out << "#pragma once\n\n";
-	out << "#include <array>\n\n";
+    for (int i = 3; i < argc; i += 2)
+    {
+        auto const inputFile = string{argv[i]};
+        auto const symbolName = string{argv[i + 1]};
+        dump(out, inputFile, symbolName);
+    }
 
-	if (!ns.empty())
-		out << "namespace " << ns << " {\n\n";
+    if (!ns.empty())
+        out << "\n}  // namespace " << ns << "\n";
 
-	out << "constexpr std::array<char, " << length << "> " << name << " = {\n\t";
-
-	in.seekg(0, in.beg);
-	unsigned column = 0;
-	while (length > 0)
-	{
-		char ch{};
-		in.read(&ch, sizeof(ch));
-		if (!isprint(ch) || ch == '\'')
-			out << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ch) << ',';
-		else
-			out << '\'' << ch << '\'' << ',' << ' ';
-		++column;
-		if (column % 16)
-			out << ' ';
-		else
-		{
-			column = 0;
-			out << "\n\t";
-		}
-		length -= sizeof(ch);
-	}
-	out << "\n};\n";
-
-	if (!ns.empty())
-		out << "\n}  // namespace " << ns << "\n";
-
-	return EXIT_SUCCESS;
+    return EXIT_SUCCESS;
 }
