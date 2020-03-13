@@ -226,6 +226,11 @@ FileSystem::path configHome(string const& _programName)
 	throw runtime_error{"Could not find config home folder."};
 }
 
+FileSystem::path configHome()
+{
+    return configHome("contour");
+}
+
 template <typename T>
 void softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
 {
@@ -545,7 +550,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 
 Config loadConfig()
 {
-    return loadConfigFromFile((configHome("contour") / "contour.yml").string());
+    return loadConfigFromFile((configHome() / "contour.yml").string());
 }
 
 Config loadConfigFromFile(FileSystem::path const& _fileName)
@@ -794,6 +799,145 @@ void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
         throw runtime_error{ "Unable to create config file." };
 
      ofs << serializeYaml(_config);
+}
+
+ShaderConfig Config::defaultBackgroundShader()
+{
+    auto constexpr vertexShader = R"(
+        #version 300 es
+        in mediump vec2 position;
+        uniform mediump mat4 u_transform;
+        void main()
+        {
+            gl_Position = u_transform * vec4(position, 0.0, 1.0);
+        }
+    )";
+
+    auto constexpr fragmentShader = R"(
+        #version 300 es
+        uniform mediump vec4 u_color;
+        out mediump vec4 outColor;
+        void main()
+        {
+            outColor = u_color;
+        }
+    )";
+
+    return {vertexShader, fragmentShader};
+}
+
+optional<std::string> readFile(FileSystem::path const& _path)
+{
+    auto ifs = ifstream(_path.string());
+    if (!ifs.good())
+        return nullopt;
+
+    auto const size = FileSystem::file_size(_path);
+
+    auto text = string{};
+    text.resize(size);
+    ifs.read(text.data(), size);
+
+    return {text};
+}
+
+std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
+{
+    auto const& defaultConfig = defaultShaderConfig(_shaderClass);
+    auto const basename = to_string(_shaderClass);
+
+    auto const vertPath = configHome() / (basename + ".vert");
+    auto const vertText = [&]() {
+        if (auto content = readFile(vertPath); content.has_value())
+            return *content;
+        else
+            return defaultConfig.vertexShader;
+    }();
+
+    auto const fragPath = configHome() / (basename + ".frag");
+    auto const fragText = [&]() {
+        if (auto content = readFile(fragPath); content.has_value())
+            return *content;
+        else
+            return defaultConfig.fragmentShader;
+    }();
+
+    return {ShaderConfig{vertText, fragText}};
+}
+
+ShaderConfig Config::defaultShaderConfig(ShaderClass _shaderClass)
+{
+    switch (_shaderClass)
+    {
+        case ShaderClass::Background:
+            return defaultBackgroundShader();
+        case ShaderClass::Text:
+            return defaultTextShader();
+        case ShaderClass::Cursor:
+            return defaultCursorShader();
+    }
+
+    throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
+}
+
+ShaderConfig Config::defaultTextShader()
+{
+    static string const vertexShader = R"(
+        #version 300 es
+        precision mediump float;
+        in mediump vec4 vertex;
+        out mediump vec2 TexCoords;
+
+        uniform mediump mat4 projection;
+
+        void main()
+        {
+            gl_Position = projection * vec4(vertex.xy, 0.1, 1.0);
+            TexCoords = vertex.zw;
+        }
+    )";
+
+    static string const fragmentShader = R"(
+        #version 300 es
+
+        in mediump vec2 TexCoords;
+        out mediump vec4 color;
+
+        uniform mediump sampler2D text;
+        uniform mediump vec4 textColor;
+
+        void main()
+        {
+            mediump vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
+            color = textColor * sampled;
+        }
+    )";
+    return {vertexShader, fragmentShader};
+}
+
+ShaderConfig Config::defaultCursorShader()
+{
+    auto constexpr vertexShader = R"(
+        #version 300 es
+        in mediump vec2 position;
+        uniform mediump mat4 u_transform;
+        void main()
+        {
+            gl_Position = u_transform * vec4(position, 0.2, 1.0);
+        }
+    )";
+
+    auto constexpr fragmentShader = R"(
+        #version 300 es
+        uniform mediump vec4 u_color;
+        out mediump vec4 outColor;
+        void main()
+        {
+            outColor = u_color;
+        }
+    )";
+
+    return {vertexShader, fragmentShader};
 }
 
 } // namespace contour

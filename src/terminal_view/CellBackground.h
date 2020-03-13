@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
+#include <terminal_view/ShaderConfig.h>
 
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
@@ -30,7 +31,9 @@ namespace terminal::view {
 /// OpenGL Object for rendering character cell's background.
 class CellBackground : public QOpenGLFunctions {
   public:
-    CellBackground(QSize _size, QMatrix4x4 _projectionMatrix);
+    CellBackground(QSize _size,
+                   QMatrix4x4 _projectionMatrix,
+                   ShaderConfig const& _shaderConfig);
     ~CellBackground();
 
     void setProjection(QMatrix4x4 const& _projectionMatrix);

@@ -19,6 +19,7 @@
 #include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/Process.h>
 #include <terminal/WindowSize.h>
+#include <terminal_view/ShaderConfig.h>
 
 #include <terminal/util/stdfs.h>
 
@@ -90,6 +91,9 @@ using Action = std::variant<
 
 std::string to_string(Action action);
 
+using terminal::view::ShaderConfig;
+using terminal::view::ShaderClass;
+
 struct Config {
     FileSystem::path backingFilePath;
     std::optional<FileSystem::path> logFilePath;
@@ -117,7 +121,20 @@ struct Config {
     terminal::ColorProfile colorProfile{};
     std::map<QKeySequence, std::vector<Action>> keyMappings;
     std::unordered_map<terminal::MouseEvent, std::vector<Action>> mouseMappings;
+
+    static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
+
+    static ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
+    static ShaderConfig defaultBackgroundShader();
+    static ShaderConfig defaultTextShader();
+    static ShaderConfig defaultCursorShader();
+
+    ShaderConfig backgroundShader = defaultShaderConfig(ShaderClass::Background);
+    ShaderConfig textShader = defaultShaderConfig(ShaderClass::Text);
+    ShaderConfig cursorShader = defaultShaderConfig(ShaderClass::Cursor);
 };
+
+std::optional<std::string> readFile(FileSystem::path const& _path);
 
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
 Config loadConfigFromFile(FileSystem::path const& _fileName);

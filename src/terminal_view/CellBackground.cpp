@@ -25,29 +25,9 @@ using namespace std;
 
 namespace terminal::view {
 
-auto constexpr vertexShader = R"(
-    #version 300 es
-    // Vertex Shader
-    in mediump vec2 position;
-    uniform mediump mat4 u_transform;
-    void main()
-    {
-        gl_Position = u_transform * vec4(position, 0.0, 1.0);
-    }
-)";
-
-auto constexpr fragmentShader = R"(
-    #version 300 es
-    // Fragment Shader
-    uniform mediump vec4 u_color;
-    out mediump vec4 outColor;
-    void main()
-    {
-        outColor = u_color;
-    }
-)";
-
-CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
+CellBackground::CellBackground(QSize _size,
+                               QMatrix4x4 _projectionMatrix,
+                               ShaderConfig const& _shaderConfig) :
     projectionMatrix_{ _projectionMatrix },
     size_{_size},
     shader_{},
@@ -55,8 +35,8 @@ CellBackground::CellBackground(QSize _size, QMatrix4x4 _projectionMatrix) :
     colorLocation_{}
 {
     initializeOpenGLFunctions();
-    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
-    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShader);
+    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str());
+    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str());
     shader_.link();
     if (!shader_.isLinked())
     {

@@ -14,6 +14,8 @@
 #pragma once
 
 #include <terminal/Commands.h>
+#include <terminal_view/ShaderConfig.h>
+
 #include <QtCore/QPoint>
 #include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
@@ -22,6 +24,7 @@
 #include <QtGui/QOpenGLFunctions>
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
+
 #include <memory>
 #include <string>
 
@@ -29,7 +32,11 @@ namespace terminal::view {
 
 class GLCursor : public QOpenGLFunctions {
   public:
-    GLCursor(QSize _size, QMatrix4x4 _transform,  CursorShape _shape, QVector4D const& _color);
+    GLCursor(QSize _size,
+             QMatrix4x4 _transform,
+             CursorShape _shape,
+             QVector4D const& _color,
+             ShaderConfig const& _shaderConfig);
     ~GLCursor();
 
     void setProjection(QMatrix4x4 const& _mat);

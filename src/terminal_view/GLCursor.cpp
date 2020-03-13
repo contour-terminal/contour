@@ -62,26 +62,6 @@ string to_string(CursorShape _value)
     return "block";
 }
 
-auto constexpr vertexShader = R"(
-    #version 300 es
-    in mediump vec2 position;
-    uniform mediump mat4 u_transform;
-    void main()
-    {
-        gl_Position = u_transform * vec4(position, 0.2, 1.0);
-    }
-)";
-
-auto constexpr fragmentShader = R"(
-    #version 300 es
-    uniform mediump vec4 u_color;
-    out mediump vec4 outColor;
-    void main()
-    {
-        outColor = u_color;
-    }
-)";
-
 pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape)
 {
     switch (_shape)
@@ -122,7 +102,11 @@ pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape)
     return {GL_TRIANGLES, {}};
 }
 
-GLCursor::GLCursor(QSize _size, QMatrix4x4 _transform, CursorShape _shape, QVector4D const& _color) :
+GLCursor::GLCursor(QSize _size,
+                   QMatrix4x4 _transform,
+                   CursorShape _shape,
+                   QVector4D const& _color,
+                   ShaderConfig const& _shaderConfig) :
     shape_{ _shape },
     size_{ _size },
     projectionMatrix_{ _transform },
@@ -133,8 +117,8 @@ GLCursor::GLCursor(QSize _size, QMatrix4x4 _transform, CursorShape _shape, QVect
     vao_{}
 {
     initializeOpenGLFunctions();
-    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
-    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShader);
+    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str());
+    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str());
     shader_.link();
     if (!shader_.isLinked())
         qDebug() << "GLCursor: Failed to link shader.";

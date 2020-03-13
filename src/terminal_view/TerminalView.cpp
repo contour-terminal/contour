@@ -56,6 +56,9 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onWindowTitleChanged,
                            function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                            function<void()> _onTerminalClosed,
+                           ShaderConfig const& _backgroundShaderConfig,
+                           ShaderConfig const& _textShaderConfig,
+                           ShaderConfig const& _cursorShaderConfig,
                            Logger _logger) :
     logger_{ move(_logger) },
     renderer_{
@@ -63,6 +66,9 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _regularFont,
         _colorProfile,
         _backgroundOpacity,
+        _backgroundShaderConfig,
+        _textShaderConfig,
+        _cursorShaderConfig,
         _projectionMatrix
     },
     process_{
