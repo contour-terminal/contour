@@ -83,11 +83,12 @@ GLTextShaper::~GLTextShaper()
 string const& GLTextShaper::vertexShaderCode()
 {
     static string const code = R"(
-        #version 330
-        in vec4 vertex;
-        out vec2 TexCoords;
+        #version 300 es
+        precision mediump float;
+        in mediump vec4 vertex;
+        out mediump vec2 TexCoords;
 
-        uniform mat4 projection;
+        uniform mediump mat4 projection;
 
         void main()
         {
@@ -101,16 +102,17 @@ string const& GLTextShaper::vertexShaderCode()
 string const& GLTextShaper::fragmentShaderCode()
 {
     static string const code = R"(
-        #version 330
-        in vec2 TexCoords;
-        out vec4 color;
+        #version 300 es
 
-        uniform sampler2D text;
-        uniform vec4 textColor;
+        in mediump vec2 TexCoords;
+        out mediump vec4 color;
+
+        uniform mediump sampler2D text;
+        uniform mediump vec4 textColor;
 
         void main()
         {
-            vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
+            mediump vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
             color = textColor * sampled;
         }
     )";

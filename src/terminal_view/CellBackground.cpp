@@ -26,10 +26,10 @@ using namespace std;
 namespace terminal::view {
 
 auto constexpr vertexShader = R"(
-    #version 130
+    #version 300 es
     // Vertex Shader
-    in vec2 position;
-    uniform mat4 u_transform;
+    in mediump vec2 position;
+    uniform mediump mat4 u_transform;
     void main()
     {
         gl_Position = u_transform * vec4(position, 0.0, 1.0);
@@ -37,10 +37,10 @@ auto constexpr vertexShader = R"(
 )";
 
 auto constexpr fragmentShader = R"(
-    #version 130
+    #version 300 es
     // Fragment Shader
-    uniform vec4 u_color;
-    out vec4 outColor;
+    uniform mediump vec4 u_color;
+    out mediump vec4 outColor;
     void main()
     {
         outColor = u_color;

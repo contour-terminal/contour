@@ -63,9 +63,9 @@ string to_string(CursorShape _value)
 }
 
 auto constexpr vertexShader = R"(
-    #version 130
-    in vec2 position;
-    uniform mat4 u_transform;
+    #version 300 es
+    in mediump vec2 position;
+    uniform mediump mat4 u_transform;
     void main()
     {
         gl_Position = u_transform * vec4(position, 0.2, 1.0);
@@ -73,15 +73,14 @@ auto constexpr vertexShader = R"(
 )";
 
 auto constexpr fragmentShader = R"(
-    #version 130
-    uniform vec4 u_color;
-    out vec4 outColor;
+    #version 300 es
+    uniform mediump vec4 u_color;
+    out mediump vec4 outColor;
     void main()
     {
         outColor = u_color;
     }
 )";
-
 
 pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape)
 {
