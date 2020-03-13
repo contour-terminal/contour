@@ -124,14 +124,9 @@ struct Config {
 
     static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
 
-    static ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
-    static ShaderConfig defaultBackgroundShader();
-    static ShaderConfig defaultTextShader();
-    static ShaderConfig defaultCursorShader();
-
-    ShaderConfig backgroundShader = defaultShaderConfig(ShaderClass::Background);
-    ShaderConfig textShader = defaultShaderConfig(ShaderClass::Text);
-    ShaderConfig cursorShader = defaultShaderConfig(ShaderClass::Cursor);
+    ShaderConfig backgroundShader = terminal::view::defaultShaderConfig(ShaderClass::Background);
+    ShaderConfig textShader = terminal::view::defaultShaderConfig(ShaderClass::Text);
+    ShaderConfig cursorShader = terminal::view::defaultShaderConfig(ShaderClass::Cursor);
 };
 
 std::optional<std::string> readFile(FileSystem::path const& _path);

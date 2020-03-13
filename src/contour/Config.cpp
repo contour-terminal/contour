@@ -801,31 +801,6 @@ void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
      ofs << serializeYaml(_config);
 }
 
-ShaderConfig Config::defaultBackgroundShader()
-{
-    auto constexpr vertexShader = R"(
-        #version 300 es
-        in mediump vec2 position;
-        uniform mediump mat4 u_transform;
-        void main()
-        {
-            gl_Position = u_transform * vec4(position, 0.0, 1.0);
-        }
-    )";
-
-    auto constexpr fragmentShader = R"(
-        #version 300 es
-        uniform mediump vec4 u_color;
-        out mediump vec4 outColor;
-        void main()
-        {
-            outColor = u_color;
-        }
-    )";
-
-    return {vertexShader, fragmentShader};
-}
-
 optional<std::string> readFile(FileSystem::path const& _path)
 {
     auto ifs = ifstream(_path.string());
@@ -843,7 +818,7 @@ optional<std::string> readFile(FileSystem::path const& _path)
 
 std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
 {
-    auto const& defaultConfig = defaultShaderConfig(_shaderClass);
+    auto const& defaultConfig = terminal::view::defaultShaderConfig(_shaderClass);
     auto const basename = to_string(_shaderClass);
 
     auto const vertPath = configHome() / (basename + ".vert");
@@ -863,81 +838,6 @@ std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
     }();
 
     return {ShaderConfig{vertText, fragText}};
-}
-
-ShaderConfig Config::defaultShaderConfig(ShaderClass _shaderClass)
-{
-    switch (_shaderClass)
-    {
-        case ShaderClass::Background:
-            return defaultBackgroundShader();
-        case ShaderClass::Text:
-            return defaultTextShader();
-        case ShaderClass::Cursor:
-            return defaultCursorShader();
-    }
-
-    throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
-}
-
-ShaderConfig Config::defaultTextShader()
-{
-    static string const vertexShader = R"(
-        #version 300 es
-        precision mediump float;
-        in mediump vec4 vertex;
-        out mediump vec2 TexCoords;
-
-        uniform mediump mat4 projection;
-
-        void main()
-        {
-            gl_Position = projection * vec4(vertex.xy, 0.1, 1.0);
-            TexCoords = vertex.zw;
-        }
-    )";
-
-    static string const fragmentShader = R"(
-        #version 300 es
-
-        in mediump vec2 TexCoords;
-        out mediump vec4 color;
-
-        uniform mediump sampler2D text;
-        uniform mediump vec4 textColor;
-
-        void main()
-        {
-            mediump vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
-            color = textColor * sampled;
-        }
-    )";
-    return {vertexShader, fragmentShader};
-}
-
-ShaderConfig Config::defaultCursorShader()
-{
-    auto constexpr vertexShader = R"(
-        #version 300 es
-        in mediump vec2 position;
-        uniform mediump mat4 u_transform;
-        void main()
-        {
-            gl_Position = u_transform * vec4(position, 0.2, 1.0);
-        }
-    )";
-
-    auto constexpr fragmentShader = R"(
-        #version 300 es
-        uniform mediump vec4 u_color;
-        out mediump vec4 outColor;
-        void main()
-        {
-            outColor = u_color;
-        }
-    )";
-
-    return {vertexShader, fragmentShader};
 }
 
 } // namespace contour
