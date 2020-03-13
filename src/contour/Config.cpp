@@ -226,6 +226,23 @@ FileSystem::path configHome(string const& _programName)
 	throw runtime_error{"Could not find config home folder."};
 }
 
+std::vector<FileSystem::path> configHomes(string const& _programName)
+{
+    std::vector<FileSystem::path> paths;
+
+#if defined(CONTOUR_PROJECT_SOURCE_DIR) && !defined(NDEBUG)
+    paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view" / "shaders");
+#endif
+
+    paths.emplace_back(configHome(_programName));
+
+#if defined(__unix__) || defined(__APPLE__)
+    paths.emplace_back(FileSystem::path("/etc") / _programName);
+#endif
+
+    return paths;
+}
+
 FileSystem::path configHome()
 {
     return configHome("contour");
@@ -801,19 +818,26 @@ void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
      ofs << serializeYaml(_config);
 }
 
-optional<std::string> readFile(FileSystem::path const& _path)
+optional<std::string> readConfigFile(std::string const& _filename)
 {
-    auto ifs = ifstream(_path.string());
-    if (!ifs.good())
-        return nullopt;
+    for (FileSystem::path const& prefix : configHomes("contour"))
+    {
+        FileSystem::path path = prefix / _filename;
+        if (!FileSystem::exists(path))
+            continue;
 
-    auto const size = FileSystem::file_size(_path);
+        auto ifs = ifstream(path.string());
+        if (!ifs.good())
+            continue;
 
-    auto text = string{};
-    text.resize(size);
-    ifs.read(text.data(), size);
-
-    return {text};
+        auto const size = FileSystem::file_size(path);
+        auto text = string{};
+        text.resize(size);
+        ifs.read(text.data(), size);
+        printf("read file: %s (%zu bytes)\n", path.string().c_str(), size);
+        return {text};
+    }
+    return nullopt;
 }
 
 std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
@@ -821,17 +845,15 @@ std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
     auto const& defaultConfig = terminal::view::defaultShaderConfig(_shaderClass);
     auto const basename = to_string(_shaderClass);
 
-    auto const vertPath = configHome() / (basename + ".vert");
     auto const vertText = [&]() {
-        if (auto content = readFile(vertPath); content.has_value())
+        if (auto content = readConfigFile(basename + ".vert"); content.has_value())
             return *content;
         else
             return defaultConfig.vertexShader;
     }();
 
-    auto const fragPath = configHome() / (basename + ".frag");
     auto const fragText = [&]() {
-        if (auto content = readFile(fragPath); content.has_value())
+        if (auto content = readConfigFile(basename + ".frag"); content.has_value())
             return *content;
         else
             return defaultConfig.fragmentShader;

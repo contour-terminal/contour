@@ -129,7 +129,7 @@ struct Config {
     ShaderConfig cursorShader = terminal::view::defaultShaderConfig(ShaderClass::Cursor);
 };
 
-std::optional<std::string> readFile(FileSystem::path const& _path);
+std::optional<std::string> readConfigFile(std::string const& _filename);
 
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
 Config loadConfigFromFile(FileSystem::path const& _fileName);
