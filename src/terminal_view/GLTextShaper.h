@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal_view/FontManager.h>
+#include <terminal_view/ShaderConfig.h>
 
 #include <QMatrix4x4>
 #include <QPoint>
@@ -32,7 +33,9 @@ namespace terminal::view {
 
 class GLTextShaper : private QOpenGLFunctions {
   public:
-    GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection);
+    GLTextShaper(Font& _regularFont,
+                 QMatrix4x4 const& _projection,
+                 ShaderConfig const& _shaderConfig);
     ~GLTextShaper();
 
     void setFont(Font& _regularFont);
@@ -59,9 +62,6 @@ class GLTextShaper : private QOpenGLFunctions {
     };
 
     Glyph& getGlyphByIndex(unsigned long _index, FontStyle _style);
-
-    static std::string const& fragmentShaderCode();
-    static std::string const& vertexShaderCode();
 
   private:
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;

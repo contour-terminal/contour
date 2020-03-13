@@ -20,6 +20,8 @@
 
 namespace terminal::view {
 
+struct ShaderConfig;
+
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
@@ -36,6 +38,9 @@ class GLRenderer : public QOpenGLFunctions {
                Font& _regularFont,
                ColorProfile const& _colorProfile,
                Opacity _backgroundOpacity,
+               ShaderConfig const& _backgroundShaderConfig,
+               ShaderConfig const& _textShaderConfig,
+               ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
     size_t cellHeight() const noexcept { return regularFont_.get().lineHeight(); }

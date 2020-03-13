@@ -26,18 +26,22 @@ GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
                        terminal::ColorProfile const& _colorProfile,
                        terminal::Opacity _backgroundOpacity,
+                       ShaderConfig const& _backgroundShaderConfig,
+                       ShaderConfig const& _textShaderConfig,
+                       ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
-    textShaper_{ regularFont_.get(), _projectionMatrix },
+    textShaper_{ regularFont_.get(), _projectionMatrix, _textShaderConfig },
     cellBackground_{
         QSize(
             static_cast<int>(regularFont_.get().maxAdvance()),
             static_cast<int>(regularFont_.get().lineHeight())
         ),
-        _projectionMatrix
+        _projectionMatrix,
+        _backgroundShaderConfig
     },
     cursor_{
         QSize(
@@ -46,7 +50,8 @@ GLRenderer::GLRenderer(Logger _logger,
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        canonicalColor(colorProfile_.cursor)
+        canonicalColor(colorProfile_.cursor),
+        _cursorShaderConfig
     }
 {
     initializeOpenGLFunctions();

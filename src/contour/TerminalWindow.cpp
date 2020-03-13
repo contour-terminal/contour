@@ -300,6 +300,9 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onWindowTitleChanged, this),
         bind(&TerminalWindow::onDoResize, this, _1, _2, _3),
         bind(&TerminalWindow::onTerminalClosed, this),
+        *Config::loadShaderConfig(ShaderClass::Background),
+        *Config::loadShaderConfig(ShaderClass::Text),
+        *Config::loadShaderConfig(ShaderClass::Cursor),
         ref(logger_)
     );
 

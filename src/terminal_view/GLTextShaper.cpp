@@ -23,7 +23,9 @@ GLTextShaper::Glyph::~Glyph()
     // TODO: release texture
 }
 
-GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
+GLTextShaper::GLTextShaper(Font& _regularFont,
+                           QMatrix4x4 const& _projection,
+                           ShaderConfig const& _shaderConfig) :
     cache_{},
     regularFont_{ _regularFont },
     //projectionMatrix_{ _projection },
@@ -31,14 +33,14 @@ GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
     colorLocation_{}
 {
     initializeOpenGLFunctions();
-    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderCode().c_str()))
+    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
     {
         qDebug() << "GLCursor: Failed to add vertex shader.";
         qDebug() << "GLTextShaper.shader. " << shader_.log();
         abort();
     }
 
-    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderCode().c_str()))
+    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
     {
         qDebug() << "GLCursor: Failed to add fragment shader.";
         qDebug() << "GLTextShaper.shader. " << shader_.log();
@@ -78,45 +80,6 @@ GLTextShaper::GLTextShaper(Font& _regularFont, QMatrix4x4 const& _projection) :
 GLTextShaper::~GLTextShaper()
 {
     // TODO: release vbo / vba
-}
-
-string const& GLTextShaper::vertexShaderCode()
-{
-    static string const code = R"(
-        #version 300 es
-        precision mediump float;
-        in mediump vec4 vertex;
-        out mediump vec2 TexCoords;
-
-        uniform mediump mat4 projection;
-
-        void main()
-        {
-            gl_Position = projection * vec4(vertex.xy, 0.1, 1.0);
-            TexCoords = vertex.zw;
-        }
-    )";
-    return code;
-}
-
-string const& GLTextShaper::fragmentShaderCode()
-{
-    static string const code = R"(
-        #version 300 es
-
-        in mediump vec2 TexCoords;
-        out mediump vec4 color;
-
-        uniform mediump sampler2D text;
-        uniform mediump vec4 textColor;
-
-        void main()
-        {
-            mediump vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
-            color = textColor * sampled;
-        }
-    )";
-    return code;
 }
 
 void GLTextShaper::setFont(Font& _regularFont)

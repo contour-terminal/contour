@@ -34,6 +34,7 @@
 namespace terminal::view {
 
 class Font;
+struct ShaderConfig;
 
 /// OpenGL-Terminal Object.
 class TerminalView {
@@ -55,6 +56,9 @@ class TerminalView {
                  std::function<void()> _onWindowTitleChanged,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                  std::function<void()> _onTerminalClosed,
+                 ShaderConfig const& _backgroundShaderConfig,
+                 ShaderConfig const& _textShaderConfig,
+                 ShaderConfig const& _cursorShaderConfig,
                  Logger _logger);
 
     TerminalView(TerminalView const&) = delete;
