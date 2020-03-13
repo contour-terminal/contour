@@ -24,7 +24,7 @@ using namespace std;
 namespace contour {
     struct CLI : public QCommandLineParser {
         CLI() {
-            setApplicationDescription("Terminal Emulator");
+            setApplicationDescription("Contour Terminal Emulator");
             addHelpOption();
             addVersionOption();
             addOption(configOption);
@@ -55,9 +55,9 @@ int main(int argc, char* argv[])
     {
         QGuiApplication::setApplicationName("contour");
         QGuiApplication::setOrganizationName("contour");
-        QGuiApplication::setApplicationVersion(QString::fromStdString(
-            fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH)
-        ));
+        QGuiApplication::setApplicationVersion(QString::fromStdString(fmt::format(
+            "{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH
+        )));
         QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
         QGuiApplication app(argc, argv);
 
