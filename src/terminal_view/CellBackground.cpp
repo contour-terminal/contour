@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/CellBackground.h>
+#include <terminal_view/ShaderConfig.h>
 
 #include <QVector4D>
 #include <QMatrix4x4>
@@ -35,17 +36,9 @@ CellBackground::CellBackground(QSize _size,
     colorLocation_{}
 {
     initializeOpenGLFunctions();
-    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str());
-    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str());
-    shader_.link();
-    if (!shader_.isLinked())
-    {
-        qDebug() << "CellBackground: Failed to link shader.";
-        abort();
-    }
 
-    transformLocation_ = shader_.uniformLocation("u_transform");
-    colorLocation_ = shader_.uniformLocation("u_color");
+    if (!setShaderConfig(_shaderConfig))
+        throw std::runtime_error("Could not load shaders.");
 
     // setup background shader
     GLfloat const vertices[] = {
@@ -67,7 +60,7 @@ CellBackground::CellBackground(QSize _size,
     vao_.bind();
 
     // specify vertex data layout
-    int const posAttr = shader_.attributeLocation("position");
+    int const posAttr = shader_->attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
 }
@@ -76,6 +69,18 @@ CellBackground::~CellBackground()
 {
     vbo_.destroy();
     vao_.destroy();
+}
+
+bool CellBackground::setShaderConfig(ShaderConfig const& _shaderConfig)
+{
+    auto shader = createShader(_shaderConfig);
+    if (!shader)
+        return false;
+
+    transformLocation_ = shader->uniformLocation("u_transform");
+    colorLocation_ = shader->uniformLocation("u_color");
+    shader.swap(shader_);
+    return true;
 }
 
 void CellBackground::setProjection(QMatrix4x4 const& _projectionMatrix)
@@ -113,12 +118,12 @@ void CellBackground::render(QPoint _pos, QVector4D const& _color, std::size_t _c
         size_.height()
     ));
 
-    shader_.bind();
+    shader_->bind();
 
     auto translation = QMatrix4x4{};
     translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()));
-    shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
-    shader_.setUniformValue(colorLocation_, _color);
+    shader_->setUniformValue(transformLocation_, projectionMatrix_ * translation);
+    shader_->setUniformValue(colorLocation_, _color);
 
     vao_.bind();
     glDrawArrays(GL_TRIANGLES, 0, 6);

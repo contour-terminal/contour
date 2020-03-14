@@ -36,6 +36,7 @@ class CellBackground : public QOpenGLFunctions {
                    ShaderConfig const& _shaderConfig);
     ~CellBackground();
 
+    bool setShaderConfig(ShaderConfig const& _shaderConfig);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
     void resize(QSize _size);
     void resize2(QSize _size);
@@ -44,7 +45,7 @@ class CellBackground : public QOpenGLFunctions {
   private:
     QMatrix4x4 projectionMatrix_;
     QSize size_;
-    QOpenGLShaderProgram shader_;
+    std::unique_ptr<QOpenGLShaderProgram> shader_;
     GLint transformLocation_;
     GLint colorLocation_;
     QOpenGLBuffer vbo_;

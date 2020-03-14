@@ -39,6 +39,7 @@ class GLTextShaper : private QOpenGLFunctions {
     ~GLTextShaper();
 
     void setFont(Font& _regularFont);
+    bool setShaderConfig(ShaderConfig const& _shaderConfig);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
     void render(
@@ -70,7 +71,7 @@ class GLTextShaper : private QOpenGLFunctions {
     QOpenGLBuffer vbo_;
     QOpenGLVertexArrayObject vao_;
     //glm::mat4 projectionMatrix_;
-    QOpenGLShaderProgram shader_;
+    std::unique_ptr<QOpenGLShaderProgram> shader_;
     GLint colorLocation_;
     GLuint projectionLocation_;
 };

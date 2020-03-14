@@ -13,8 +13,10 @@
  */
 #pragma once
 
+#include <memory>
 #include <string>
 #include <stdexcept>
+#include <QOpenGLShaderProgram>
 #include <fmt/format.h>
 
 namespace terminal::view {
@@ -46,5 +48,7 @@ inline std::string to_string(ShaderClass _shaderClass)
 }
 
 ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
+
+std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig);
 
 } // namespace

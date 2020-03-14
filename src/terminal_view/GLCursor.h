@@ -39,6 +39,7 @@ class GLCursor : public QOpenGLFunctions {
              ShaderConfig const& _shaderConfig);
     ~GLCursor();
 
+    bool setShaderConfig(ShaderConfig const& _shaderConfig);
     void setProjection(QMatrix4x4 const& _mat);
 
     CursorShape shape() const noexcept { return shape_; }
@@ -55,7 +56,7 @@ class GLCursor : public QOpenGLFunctions {
     CursorShape shape_;
     QSize size_;
     QMatrix4x4 projectionMatrix_;
-    QOpenGLShaderProgram shader_;
+    std::unique_ptr<QOpenGLShaderProgram> shader_;
     GLint transformLocation_;
     GLint colorLocation_;
     QOpenGLBuffer vbo_;
