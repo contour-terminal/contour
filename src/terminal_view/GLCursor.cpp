@@ -117,15 +117,11 @@ GLCursor::GLCursor(QSize _size,
     vao_{}
 {
     initializeOpenGLFunctions();
-    shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str());
-    shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str());
-    shader_.link();
-    if (!shader_.isLinked())
-        qDebug() << "GLCursor: Failed to link shader.";
 
-    transformLocation_ = shader_.uniformLocation("u_transform");
-    colorLocation_ = shader_.uniformLocation("u_color");
-    shader_.bind();
+    if (!setShaderConfig(_shaderConfig))
+        throw std::runtime_error("Could not load shaders.");
+
+    shader_->bind();
     setColor(_color);
 
     // --------------------------------------------------------------------
@@ -139,7 +135,7 @@ GLCursor::GLCursor(QSize _size,
     vao_.bind();
 
     // specify vertex data layout
-    auto const posAttr = shader_.attributeLocation("position");
+    auto const posAttr = shader_->attributeLocation("position");
     glVertexAttribPointer(posAttr, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(posAttr);
 
@@ -150,6 +146,18 @@ GLCursor::~GLCursor()
 {
     vbo_.destroy();
     vao_.destroy();
+}
+
+bool GLCursor::setShaderConfig(ShaderConfig const& _shaderConfig)
+{
+    auto shader = createShader(_shaderConfig);
+    if (!shader)
+        return false;
+
+    transformLocation_ = shader->uniformLocation("u_transform");
+    colorLocation_ = shader->uniformLocation("u_color");
+    shader.swap(shader_);
+    return true;
 }
 
 void GLCursor::setProjection(QMatrix4x4 const& _mat)
@@ -168,8 +176,8 @@ void GLCursor::setShape(CursorShape _shape)
 
 void GLCursor::setColor(QVector4D const& _color)
 {
-    shader_.bind();
-    shader_.setUniformValue(colorLocation_, _color);
+    shader_->bind();
+    shader_->setUniformValue(colorLocation_, _color);
 }
 
 void GLCursor::resize(QSize _size)
@@ -191,12 +199,12 @@ void GLCursor::updateShape()
 
 void GLCursor::render(QPoint _pos)
 {
-    shader_.bind();
+    shader_->bind();
 
     auto translation = QMatrix4x4{};
     translation.translate(static_cast<float>(_pos.x()), static_cast<float>(_pos.y()), 0.0f);
 
-    shader_.setUniformValue(transformLocation_, projectionMatrix_ * translation);
+    shader_->setUniformValue(transformLocation_, projectionMatrix_ * translation);
 
     vao_.bind();
     glDrawArrays(drawMode_, 0, drawCount_);

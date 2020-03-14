@@ -33,28 +33,8 @@ GLTextShaper::GLTextShaper(Font& _regularFont,
     colorLocation_{}
 {
     initializeOpenGLFunctions();
-    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
-    {
-        qDebug() << "GLCursor: Failed to add vertex shader.";
-        qDebug() << "GLTextShaper.shader. " << shader_.log();
-        abort();
-    }
-
-    if (!shader_.addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
-    {
-        qDebug() << "GLCursor: Failed to add fragment shader.";
-        qDebug() << "GLTextShaper.shader. " << shader_.log();
-        abort();
-    }
-
-    if (!shader_.link())
-    {
-        qDebug() << "GLCursor: Failed to link shader.";
-        qDebug() << "GLTextShaper.shader. " << shader_.log();
-        abort();
-    }
-    colorLocation_ = shader_.uniformLocation("textColor");
-    projectionLocation_ = shader_.uniformLocation("projection");
+    if (!setShaderConfig(_shaderConfig))
+        throw std::runtime_error("Could not load shaders.");
 
     // disable byte-alignment restriction
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -82,6 +62,18 @@ GLTextShaper::~GLTextShaper()
     // TODO: release vbo / vba
 }
 
+bool GLTextShaper::setShaderConfig(ShaderConfig const& _shaderConfig)
+{
+    auto shader = createShader(_shaderConfig);
+    if (!shader)
+        return false;
+
+    colorLocation_ = shader->uniformLocation("textColor");
+    projectionLocation_ = shader->uniformLocation("projection");
+    shader.swap(shader_);
+    return true;
+}
+
 void GLTextShaper::setFont(Font& _regularFont)
 {
     regularFont_ = _regularFont;
@@ -90,8 +82,8 @@ void GLTextShaper::setFont(Font& _regularFont)
 
 void GLTextShaper::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
-    shader_.bind();
-    shader_.setUniformValue(projectionLocation_, _projectionMatrix);
+    shader_->bind();
+    shader_->setUniformValue(projectionLocation_, _projectionMatrix);
 }
 
 void GLTextShaper::render(
@@ -104,8 +96,8 @@ void GLTextShaper::render(
 
     font.render(_chars, glyphPositions_);
 
-    shader_.bind();
-    shader_.setUniformValue(colorLocation_, _color);
+    shader_->bind();
+    shader_->setUniformValue(colorLocation_, _color);
     glActiveTexture(GL_TEXTURE0);
     vao_.bind();
     vbo_.bind();

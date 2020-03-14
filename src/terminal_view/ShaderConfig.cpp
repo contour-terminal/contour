@@ -49,4 +49,26 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
 }
 
+std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig)
+{
+    auto shader = std::make_unique<QOpenGLShaderProgram>();
+    if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
+    {
+        qDebug() << shader->log();
+        return {};
+    }
+    if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
+    {
+        qDebug() << shader->log();
+        return {};
+    }
+    if (!shader->link())
+    {
+        qDebug() << shader->log();
+        return {};
+    }
+
+    return shader;
+}
+
 } // end namespace
