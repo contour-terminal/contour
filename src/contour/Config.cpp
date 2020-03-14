@@ -834,7 +834,6 @@ optional<std::string> readConfigFile(std::string const& _filename)
         auto text = string{};
         text.resize(size);
         ifs.read(text.data(), size);
-        printf("read file: %s (%zu bytes)\n", path.string().c_str(), size);
         return {text};
     }
     return nullopt;
