@@ -74,6 +74,7 @@ class TerminalWindow :
     void onTerminalClosed();
 
     void connectAndUpdate();
+    bool startPaint();
 
   private:
     std::chrono::steady_clock::time_point now_;
@@ -91,7 +92,6 @@ class TerminalWindow :
     std::atomic<bool> screenDirty_ = true;          // Tells us if the screen needs a new update
     std::atomic<bool> updating_ = false;            // Tells us if the screen is currently being rendered (i.e. frame swap not finished yet).
     struct Stats {
-        std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> updatesSinceLastSwap = 0;
         std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
