@@ -24,8 +24,6 @@
 #include <QScreen>
 #include <QTimer>
 
-#include <QMetaEnum>
-
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
 #endif
@@ -210,7 +208,6 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::connectAndUpdate));
 
     connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
-    connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
     if (!loggingSink_.good())
         throw runtime_error{ "Failed to open log file." };
@@ -229,6 +226,10 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
 
 void TerminalWindow::connectAndUpdate()
 {
+    bool updating = updating_.load();
+    if (!updating && updating_.compare_exchange_strong(updating, true))
+        connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+
     update();
 }
 
@@ -240,40 +241,35 @@ TerminalWindow::~TerminalWindow()
 
 void TerminalWindow::onFrameSwapped()
 {
-    auto const consecutiveRenderCount = STATS_GET(consecutiveRenderCount);
-
-    STATS_ZERO(updatesSinceLastSwap);
-
-    bool needUpdate = true;
-    auto updatesSinceLastSwap = STATS_GET(updatesSinceLastSwap);
-
-    for (unsigned i = 0; true; ++i)
-    {
-        updatesSinceLastSwap = STATS_GET(updatesSinceLastSwap);
-        bool updating = updating_.load();
-        if (!updatesSinceLastSwap && updating_.compare_exchange_strong(updating, false))
-        {
-            STATS_ZERO(consecutiveRenderCount);
-            if (config_.cursorDisplay == terminal::CursorDisplay::Blink
-                    && this->terminalView_->terminal().cursor().visible)
-                updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
-            needUpdate = false;
-            break;
-        }
-    }
-
-    if (needUpdate)
-        update();
-
 #if defined(CONTOUR_PERF_STATS)
     qDebug() << QString::fromStdString(fmt::format(
-        "Consecutive renders: {}, updates since last swap: {} ({}); {}",
-        consecutiveRenderCount,
-        updatesSinceLastSwap,
-        updating_.load() ? "updating" : "suspend",
+        "Consecutive renders: {}, updates since last render: {}, last swap: {}; {}",
+        STATS_GET(consecutiveRenderCount),
+        STATS_GET(updatesSinceRendering),
+        STATS_GET(updatesSinceLastSwap),
         terminalView_->renderer().metrics().to_string()
     ));
 #endif
+
+    bool const dirty = screenDirty_.load();
+    bool updating = updating_.load();
+
+    STATS_ZERO(updatesSinceLastSwap);
+
+    if (dirty)
+        update();
+    else
+    {
+        if (updating && updating_.compare_exchange_strong(updating, false))
+        {
+            STATS_ZERO(consecutiveRenderCount);
+            disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+        }
+
+        if (config_.cursorDisplay == terminal::CursorDisplay::Blink
+                && this->terminalView_->terminal().cursor().visible)
+            updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
+    }
 }
 
 void TerminalWindow::onScreenChanged(QScreen* _screen)
@@ -326,8 +322,7 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
                 0.0f, static_cast<float>(height())
             )
         );
-        if (startPaint())
-            update();
+        screenDirty_ = true;
     }
 }
 
@@ -335,6 +330,7 @@ void TerminalWindow::paintGL()
 {
     try {
         STATS_INC(consecutiveRenderCount);
+        screenDirty_ = false;
         now_ = chrono::steady_clock::now();
 
         glViewport(0, 0, width() * contentScale(), height() * contentScale());
@@ -508,8 +504,8 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
 
     if (terminalView_->terminal().isSelectionAvailable())
     {
-        if (startPaint())
-            update();
+        screenDirty_ = true;
+        update();
     }
 }
 
@@ -520,8 +516,8 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
 
     if (terminalView_->terminal().isSelectionAvailable())
     {
-        if (startPaint())
-            update();
+        screenDirty_ = true;
+        update();
     }
 }
 
@@ -540,8 +536,8 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
 
     if (terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
     {
-        if (startPaint())
-            update();
+        screenDirty_ = true;
+        update();
     }
 }
 
@@ -555,20 +551,8 @@ void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with
     (void) _event;
 }
 
-QDebug operator<<(QDebug str, QEvent const& ev) {
-    static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
-    str << "QEvent";
-    if (QString const name = QEvent::staticMetaObject.enumerator(eventEnumIndex).valueToKey(ev.type());
-            !name.isEmpty())
-        str << name;
-    else
-        str << ev.type();
-    return str.maybeSpace();
-}
-
 bool TerminalWindow::event(QEvent* _event)
 {
-    qDebug() << "TerminalWindow.event:" << *_event;
     if (_event->type() == QEvent::Close)
         terminalView_->process().terminate(terminal::Process::TerminationHint::Hangup);
 
@@ -722,8 +706,8 @@ void TerminalWindow::executeAction(Action const& _action)
 
     if (dirty)
     {
-        if (startPaint())
-            update();
+        screenDirty_ = true;
+        update();
     }
 }
 
@@ -777,23 +761,21 @@ float TerminalWindow::contentScale() const
 
 void TerminalWindow::onScreenUpdate()
 {
+    screenDirty_ = true;
+
     if (config_.autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
 
-    STATS_INC(updatesSinceLastSwap);
-
-    // Initiate rendering if and only if no render is currently in progress.
-    if (startPaint())
-        QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-}
-
-bool TerminalWindow::startPaint()
-{
-    auto updating = updating_.load();
+    bool updating = updating_.load();
     if (!updating && updating_.compare_exchange_strong(updating, true))
-        return true;
-    else
-        return false;
+    {
+        connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+        QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+        STATS_ZERO(updatesSinceRendering);
+    }
+
+    STATS_INC(updatesSinceRendering);
+    STATS_INC(updatesSinceLastSwap);
 }
 
 void TerminalWindow::onWindowTitleChanged()
@@ -853,8 +835,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
             auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
             auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
             resize(width, height);
-            if (startPaint())
-                update();
+            screenDirty_ = true;
+            update();
         });
     }
 }
@@ -864,8 +846,8 @@ void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/)
     post([this]() {
         if (reloadConfigValues())
         {
-            if (startPaint())
-                update();
+            screenDirty_ = true;
+            update();
         }
     });
 }
