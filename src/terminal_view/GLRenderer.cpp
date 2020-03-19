@@ -105,13 +105,13 @@ void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
     cursor_.setColor(canonicalColor(_color));
 }
 
-void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
+uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
 {
     metrics_.clear();
     pendingBackgroundDraw_ = {};
     pendingDraw_ = {};
 
-    _terminal.render(
+    auto const changes = _terminal.render(
         _now,
         bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3, _terminal.screenSize()),
         bind(&GLRenderer::fillTextGroup, this, _1, _2, _3, _terminal.screenSize())
@@ -157,6 +157,7 @@ void GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now
             }
         }
     }
+    return changes;
 }
 
 void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)

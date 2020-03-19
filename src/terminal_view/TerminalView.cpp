@@ -193,9 +193,9 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
 }
 
 
-void TerminalView::render(chrono::steady_clock::time_point const& _now)
+uint64_t TerminalView::render(chrono::steady_clock::time_point const& _now)
 {
-    renderer_.render(process_.terminal(), _now);
+    return renderer_.render(process_.terminal(), _now);
 }
 
 void TerminalView::wait()

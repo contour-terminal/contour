@@ -93,12 +93,13 @@ class Terminal {
 
     /// Thread-safe access to screen data for rendering.
     template <typename... RenderPasses>
-    void render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
+    uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
     {
         auto _l = std::lock_guard{screenLock_};
-        updated_.store(false);
+        auto const changes = changes_.exchange(0);
         updateCursorVisibilityState(_now);
         renderPass(pass, std::forward<RenderPasses>(passes)...);
+        return changes;
     }
 
     std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
@@ -200,7 +201,7 @@ class Terminal {
 
   private:
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
-    mutable std::atomic<bool> updated_;
+    mutable std::atomic<uint64_t> changes_;
 
     Logger logger_;
     PseudoTerminal pty_;

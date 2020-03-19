@@ -70,7 +70,7 @@ class GLRenderer : public QOpenGLFunctions {
      *
      * @p _now The time hint to use when rendering the eventually blinking cursor.
      */
-    void render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
+    uint64_t render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
     struct Metrics {
         unsigned renderTextGroup = 0;

@@ -39,7 +39,7 @@ Terminal::Terminal(WindowSize _winSize,
                    std::function<void(DynamicColorName)> _resetDynamicColor,
                    std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
 ) :
-    updated_{ false },
+    changes_{ 0 },
     logger_{ _logger },
     pty_{ _winSize },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
@@ -101,7 +101,7 @@ void Terminal::onScreenReply(string_view const& reply)
 
 void Terminal::onScreenCommands(vector<Command> const& _commands)
 {
-    updated_.store(true);
+    changes_++;
 
 #if defined(LIBTERMINAL_LOG_TRACE)
     logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
@@ -217,7 +217,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                 screenSize(),
                 absoluteCoordinate(currentMousePosition_)
             );
-            updated_.store(true);
+            changes_++;
             cout << fmt::format("start-selection: {}\n", *selector_);
 
             return true;
@@ -235,7 +235,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     if (selector_ && selector_->state() != Selector::State::Complete)
     {
         selector_->extend(absoluteCoordinate(newPosition));
-        updated_.store(true);
+        changes_++;
     }
 
     return true;
@@ -308,7 +308,7 @@ string Terminal::screenshot() const
 
 bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 {
-    return updated_.load() || (
+    return changes_.load() || (
         cursorDisplay_ == CursorDisplay::Blink &&
         chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_) >= cursorBlinkInterval());
 }
@@ -316,7 +316,7 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 // void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1) const
 // {
 //     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-//     updated_.store(false);
+//     changes_.store(0);
 //     updateCursorVisibilityState(_now);
 //     screen_.render(pass1, scrollOffset_);
 // }
@@ -324,7 +324,7 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 // void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1, Screen::Renderer const& pass2) const
 // {
 //     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-//     updated_.store(false);
+//     changes_.store(0);
 //     updateCursorVisibilityState(_now);
 //     screen_.render(pass1, scrollOffset_);
 //     screen_.render(pass2, scrollOffset_);
@@ -413,7 +413,7 @@ void Terminal::renderSelection(terminal::Screen::Renderer const& _render) const
 void Terminal::clearSelection()
 {
     selector_.reset();
-    updated_.store(true);
+    changes_++;
 }
 
 bool Terminal::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
