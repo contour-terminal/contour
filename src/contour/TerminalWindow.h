@@ -76,6 +76,59 @@ class TerminalWindow :
     void blinkingCursorUpdate();
 
   private:
+    /// Declares the screen-dirtiness-vs-rendering state.
+    enum class State {
+        /// No screen updates and no rendering currently in progress.
+        CleanIdle,
+
+        /// Screen updates pending and no rendering currently in progress.
+        DirtyIdle,
+
+        /// No screen updates and rendering currently in progress.
+        CleanPainting,
+
+        /// Screen updates pending and rendering currently in progress.
+        DirtyPainting
+    };
+
+    /// Defines the current screen-dirtiness-vs-rendering state.
+    ///
+    /// This is primarily updated by two independant threads, the rendering thread and the I/O
+    /// thread.
+    /// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
+    /// to render and, depending on whether new screen changes happened, in the frameSwapped()
+    /// callback either DirtyPainting and continues to rerender or CleanIdle if no changes came in
+    /// since last render.
+    ///
+    /// The I/O thread constantly marks the state dirty whenever new data has arrived,
+    /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
+    std::atomic<State> state_ = State::CleanIdle;
+
+    /// Flags the screen as dirty.
+    ///
+    /// @returns boolean indicating whether the screen was clean before and made dirty (true), false otherwise.
+    bool setScreenDirty()
+    {
+        for (;;)
+        {
+            auto state = state_.load();
+            switch (state)
+            {
+                case State::CleanIdle:
+                    if (state_.compare_exchange_strong(state, State::DirtyIdle))
+                        return true;
+                    break;
+                case State::CleanPainting:
+                    if (state_.compare_exchange_strong(state, State::DirtyPainting))
+                        return true;
+                    break;
+                case State::DirtyIdle:
+                case State::DirtyPainting:
+                    return false;
+            }
+        }
+    }
+
     std::chrono::steady_clock::time_point now_;
     Config config_;
     std::string programPath_;
@@ -88,8 +141,6 @@ class TerminalWindow :
     std::mutex queuedCallsLock_;
     std::deque<std::function<void()>> queuedCalls_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
-    std::atomic<bool> screenDirty_ = true;          // Tells us if the screen needs a new update
-    std::atomic<bool> updating_ = false;            // Tells us if the screen is currently being rendered (i.e. frame swap not finished yet).
     std::mutex screenUpdateLock_;
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;

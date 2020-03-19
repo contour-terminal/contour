@@ -264,20 +264,35 @@ void TerminalWindow::onFrameSwapped()
     ));
 #endif
 
-    auto _l = scoped_lock{screenUpdateLock_};
-
-    bool const dirty = screenDirty_.load();
-
-    if (dirty)
-        update();
-    else
+    for (;;)
     {
-        updating_ = false;
-        STATS_ZERO(consecutiveRenderCount);
+        auto state = state_.load();
+        switch (state)
+        {
+            case State::DirtyIdle:
+                assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                [[fallthrough]];
+            case State::DirtyPainting:
+                // FIXME: Qt/Wayland!
+                // QCoreApplication::postEvent() works on both, but horrorble performance
+                // requestUpdate() works on X11 as well as Wayland but isn't mentioned in any QtGL docs.
+                // update() is meant to be correct way and works on X11 but freezes on Wayland!
 
-        if (config_.cursorDisplay == terminal::CursorDisplay::Blink
-                && this->terminalView_->terminal().cursor().visible)
-            updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
+                //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+                //requestUpdate();
+                update();
+                return;
+            case State::CleanPainting:
+                if (!state_.compare_exchange_strong(state, State::CleanIdle))
+                    break;
+                [[fallthrough]];
+            case State::CleanIdle:
+                STATS_ZERO(consecutiveRenderCount);
+                if (config_.cursorDisplay == terminal::CursorDisplay::Blink
+                        && this->terminalView_->terminal().cursor().visible)
+                    updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
+                return;
+        }
     }
 }
 
@@ -331,7 +346,7 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
                 0.0f, static_cast<float>(height())
             )
         );
-        screenDirty_ = true;
+        setScreenDirty();
     }
 }
 
@@ -339,8 +354,7 @@ void TerminalWindow::paintGL()
 {
     try {
         STATS_INC(consecutiveRenderCount);
-        screenDirty_ = false;
-        updating_ = true;
+        state_.store(State::CleanPainting);
         now_ = chrono::steady_clock::now();
 
         glViewport(0, 0, width() * contentScale(), height() * contentScale());
@@ -514,7 +528,7 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
 
     if (terminalView_->terminal().isSelectionAvailable())
     {
-        screenDirty_ = true;
+        setScreenDirty();
         update();
     }
 }
@@ -526,7 +540,7 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
 
     if (terminalView_->terminal().isSelectionAvailable())
     {
-        screenDirty_ = true;
+        setScreenDirty();
         update();
     }
 }
@@ -546,7 +560,7 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
 
     if (terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
     {
-        screenDirty_ = true;
+        setScreenDirty();
         update();
     }
 }
@@ -720,7 +734,7 @@ void TerminalWindow::executeAction(Action const& _action)
 
     if (dirty)
     {
-        screenDirty_ = true;
+        setScreenDirty();
         update();
     }
 }
@@ -775,19 +789,11 @@ float TerminalWindow::contentScale() const
 
 void TerminalWindow::onScreenUpdate()
 {
-    screenDirty_ = true;
-
     if (config_.autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
 
-    auto _l = scoped_lock{screenUpdateLock_};
-    bool updating = updating_.load();
-    if (!updating)
-    {
-        //update();
-        //requestUpdate();
+    if (setScreenDirty())
         QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-    }
 }
 
 void TerminalWindow::onWindowTitleChanged()
@@ -847,7 +853,7 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
             auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
             auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
             resize(width, height);
-            screenDirty_ = true;
+            setScreenDirty();
             update();
         });
     }
@@ -858,7 +864,7 @@ void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/)
     post([this]() {
         if (reloadConfigValues())
         {
-            screenDirty_ = true;
+            setScreenDirty();
             update();
         }
     });
