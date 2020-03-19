@@ -24,6 +24,8 @@
 #include <QScreen>
 #include <QTimer>
 
+#include <QMetaEnum>
+
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
 #endif
@@ -38,10 +40,12 @@ using namespace std::placeholders;
 #define STATS_INC(name)   ++(stats_. name)
 #define STATS_ZERO(name)  (stats_. name = 0)
 #define STATS_GET(name)   (stats_. name).load()
+#define STATS_SET(name)   (stats_. name) =
 #else
 #define STATS_INC(name)   do {} while (0)
 #define STATS_ZERO(name)  do {} while (0)
 #define STATS_GET(name)   0
+#define STATS_SET(name)   /*!*/
 #endif
 
 namespace contour {
@@ -170,6 +174,19 @@ namespace {
 
         return format;
     }
+
+#if !defined(NDEBUG)
+    QDebug operator<<(QDebug str, QEvent const& ev) {
+        static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
+        str << "QEvent";
+        if (QString const name = QEvent::staticMetaObject.enumerator(eventEnumIndex).valueToKey(ev.type());
+                !name.isEmpty())
+            str << name;
+        else
+            str << ev.type();
+        return str.maybeSpace();
+    }
+#endif
 }
 
 TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
@@ -205,9 +222,10 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     // FIXME: blinking cursor
     // updateTimer_.setInterval(config_.cursorBlinkInterval.count());
     updateTimer_.setSingleShot(true);
-    connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::connectAndUpdate));
+    connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::blinkingCursorUpdate));
 
     connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
+    connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
     if (!loggingSink_.good())
         throw runtime_error{ "Failed to open log file." };
@@ -224,12 +242,8 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     );
 }
 
-void TerminalWindow::connectAndUpdate()
+void TerminalWindow::blinkingCursorUpdate()
 {
-    bool updating = updating_.load();
-    if (!updating && updating_.compare_exchange_strong(updating, true))
-        connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
-
     update();
 }
 
@@ -243,28 +257,23 @@ void TerminalWindow::onFrameSwapped()
 {
 #if defined(CONTOUR_PERF_STATS)
     qDebug() << QString::fromStdString(fmt::format(
-        "Consecutive renders: {}, updates since last render: {}, last swap: {}; {}",
+        "Consecutive renders: {}, updates since last render: {}; {}",
         STATS_GET(consecutiveRenderCount),
         STATS_GET(updatesSinceRendering),
-        STATS_GET(updatesSinceLastSwap),
         terminalView_->renderer().metrics().to_string()
     ));
 #endif
 
-    bool const dirty = screenDirty_.load();
-    bool updating = updating_.load();
+    auto _l = scoped_lock{screenUpdateLock_};
 
-    STATS_ZERO(updatesSinceLastSwap);
+    bool const dirty = screenDirty_.load();
 
     if (dirty)
         update();
     else
     {
-        if (updating && updating_.compare_exchange_strong(updating, false))
-        {
-            STATS_ZERO(consecutiveRenderCount);
-            disconnect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
-        }
+        updating_ = false;
+        STATS_ZERO(consecutiveRenderCount);
 
         if (config_.cursorDisplay == terminal::CursorDisplay::Blink
                 && this->terminalView_->terminal().cursor().visible)
@@ -331,6 +340,7 @@ void TerminalWindow::paintGL()
     try {
         STATS_INC(consecutiveRenderCount);
         screenDirty_ = false;
+        updating_ = true;
         now_ = chrono::steady_clock::now();
 
         glViewport(0, 0, width() * contentScale(), height() * contentScale());
@@ -349,7 +359,7 @@ void TerminalWindow::paintGL()
         glClear(GL_COLOR_BUFFER_BIT);
 
         //terminal::view::render(terminalView_, now_);
-        terminalView_->render(now_);
+        STATS_SET(updatesSinceRendering) terminalView_->render(now_);
     }
     catch (exception const& ex)
     {
@@ -553,6 +563,10 @@ void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with
 
 bool TerminalWindow::event(QEvent* _event)
 {
+#if !defined(NDEBUG)
+    qDebug() << "TerminalWindow.event:" << *_event;
+#endif
+
     if (_event->type() == QEvent::Close)
         terminalView_->process().terminate(terminal::Process::TerminationHint::Hangup);
 
@@ -766,16 +780,14 @@ void TerminalWindow::onScreenUpdate()
     if (config_.autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
 
+    auto _l = scoped_lock{screenUpdateLock_};
     bool updating = updating_.load();
-    if (!updating && updating_.compare_exchange_strong(updating, true))
+    if (!updating)
     {
-        connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+        //update();
+        //requestUpdate();
         QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-        STATS_ZERO(updatesSinceRendering);
     }
-
-    STATS_INC(updatesSinceRendering);
-    STATS_INC(updatesSinceLastSwap);
 }
 
 void TerminalWindow::onWindowTitleChanged()

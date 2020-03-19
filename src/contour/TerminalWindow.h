@@ -73,7 +73,7 @@ class TerminalWindow :
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
     void onTerminalClosed();
 
-    void connectAndUpdate();
+    void blinkingCursorUpdate();
 
   private:
     std::chrono::steady_clock::time_point now_;
@@ -90,9 +90,9 @@ class TerminalWindow :
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
     std::atomic<bool> screenDirty_ = true;          // Tells us if the screen needs a new update
     std::atomic<bool> updating_ = false;            // Tells us if the screen is currently being rendered (i.e. frame swap not finished yet).
+    std::mutex screenUpdateLock_;
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;
-        std::atomic<uint64_t> updatesSinceLastSwap = 0;
         std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
     Stats stats_;
