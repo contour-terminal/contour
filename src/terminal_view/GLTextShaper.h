@@ -70,7 +70,7 @@ class GLTextShaper : private QOpenGLFunctions {
     std::vector<Font::GlyphPosition> glyphPositions_;
     QOpenGLBuffer vbo_;
     QOpenGLVertexArrayObject vao_;
-    //glm::mat4 projectionMatrix_;
+    QMatrix4x4 projectionMatrix_;
     std::unique_ptr<QOpenGLShaderProgram> shader_;
     GLint colorLocation_;
     GLuint projectionLocation_;

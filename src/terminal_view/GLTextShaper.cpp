@@ -82,8 +82,7 @@ void GLTextShaper::setFont(Font& _regularFont)
 
 void GLTextShaper::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
-    shader_->bind();
-    shader_->setUniformValue(projectionLocation_, _projectionMatrix);
+    projectionMatrix_ = _projectionMatrix;
 }
 
 void GLTextShaper::render(
@@ -98,6 +97,7 @@ void GLTextShaper::render(
 
     shader_->bind();
     shader_->setUniformValue(colorLocation_, _color);
+    shader_->setUniformValue(projectionLocation_, projectionMatrix_);
     glActiveTexture(GL_TEXTURE0);
     vao_.bind();
     vbo_.bind();
