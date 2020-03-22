@@ -686,6 +686,10 @@ FunctionHandlerMap functions(VTType _vt)
 							return _ctx.template emitCommand<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Underscore);
 						case 4:
 							return _ctx.template emitCommand<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Underscore);
+                        case 5:
+							return _ctx.template emitCommand<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Bar);
+                        case 6:
+							return _ctx.template emitCommand<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Bar);
 						default:
 							return HandlerResult::Invalid;
 					}
