@@ -1,61 +1,108 @@
 # Default Contour Configuration File.
 
-# You can override the process to be started inside the terminal.
-# If nothing is specified, the users' default login shell will be used.
-# But you may as well log in to a remote host.
-# shell: "ssh ubuntu-vm"
-# shell: "/bin/bash"
+# Word delimiters when selecting word-wise.
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82"
 
-# Environment variables to be passed to the shell.
-environment:
-    TERM: xterm-256color
-    COLORTERM: truecolor
+default_profile: main
 
-# Determines the initial terminal sice in characters.
-terminalSize:
-    columns: 130
-    lines: 30
+# Terminal Profiles
+# -----------------
+#
+# Dominates how your terminal visually looks like. You will need at least one terminal profile.
+profiles:
+    main:
+        # You can override the process to be started inside the terminal.
+        # If nothing is specified, the users' default login shell will be used.
+        # But you may as well log in to a remote host.
+        # shell: "ssh ubuntu-vm"
+        # shell: "/bin/bash"
 
-# Initial font size in pixels.
-fontSize: 12
+        # Determines the initial terminal sice in characters.
+        terminalSize:
+            columns: 130
+            lines: 30
 
-# Font family to use for displaying text.
-fontFamily: "Fira Code, Hack, Ubuntu Mono, Consolas, monospace"
+        # Environment variables to be passed to the shell.
+        environment:
+            TERM: xterm-256color
+            COLORTERM: truecolor
 
-# Tab width to move the cursor to the right when a HT control character is recieved.
-tabWidth: 8
+        history:
+            # Number of lines to preserve (-1 for infinite).
+            limit: -1
+            # Boolean indicating whether or not to scroll down to the bottom on screen updates.
+            autoScrollOnUpdate: true
+            # Number of lines to scroll on ScrollUp & ScrollDown events.
+            scrollMultiplier: 3
 
-history:
-    # Number of lines to preserve (-1 for infinite).
-    limit: -1
-    # Boolean indicating whether or not to scroll down to the bottom on screen updates.
-    autoScrollOnUpdate: true
-    # Number of lines to scroll on ScrollUp & ScrollDown events.
-    scrollMultiplier: 3
+        # Initial font size in pixels.
+        fontSize: 12
+        # Font family to use for displaying text.
+        fontFamily: "Fira Code, Hack, Ubuntu Mono, Consolas, monospace"
+        # Tab width to move the cursor to the right when a HT control character is recieved.
+        tabWidth: 8
+        # Terminal cursor display configuration
+        cursor:
+            # Supported shapes are:
+            #
+            # - block         a filled rectangle
+            # - rectangle     just the outline of a block
+            # - underscore    a line under the text
+            # - bar:          the well known i-Beam
+            shape: "block"
+            # Determins whether or not the cursor will be blinking over time.
+            blinking: false
+            # Blinking interval (in milliseconds) to use when cursor is blinking.
+            blinking_interval: 500
+        # Background configuration
+        background:
+            # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully
+            # transparent. Only values between 0.0 and 1.0 are allowed.
+            opacity: 1.0
+            # Some platforms can blur the transparent background (currently only Windows 10 is supported).
+            blur: false
+        # Specifies a colorscheme to use (alternatively the colors can be inlined).
+        colors: "default"
 
-cursor:
-    # Supported shapes are:
-    #
-    # - block         a filled rectangle
-    # - rectangle     just the outline of a block
-    # - underscore    a line under the text
-    # - bar:          the well known i-Beam
-    shape: "block"
-
-    # Determins whether or not the cursor will be blinking over time.
-    blinking: true
-
-    # Blinking interval (in milliseconds) to use when cursor is blinking.
-    blinking_interval: 500
-
-# Background configuration
-background:
-    # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully
-    # transparent. Only values between 0.0 and 1.0 are allowed.
-    opacity: 1.0
-
-    # Some platforms can blur the transparent background (currently only Windows 10 is supported).
-    blur: false
+# Color Profiles
+# --------------
+#
+# Here you can configure your color profiles, wereas a color can be expressed in standard web format,
+# with a leading # followed by red/green/blue values, 7 characters in total.
+# You may alternatively use 0x as prefix instead of #.
+# For example 0x102030 is equal to '#102030'.
+color_schemes:
+    default:
+        # Mandates the color of the cursor.
+        cursor: '#b0b030'
+        # The text selection color can be customized here.
+        selection: '#30c0c0'
+        # Default colors
+        default:
+            # Default background color (this can be made transparent, see above).
+            background: '#1d1f21'
+            # Default foreground text color.
+            foreground: '#c5c8c6'
+        # Normal colors
+        normal:
+            black:   '#1d1f21'
+            red:     '#cc342b'
+            green:   '#198844'
+            yellow:  '#fba922'
+            blue:    '#3971ed'
+            magenta: '#a36ac7'
+            cyan:    '#3971ed'
+            white:   '#c5c8c6'
+        # Bright colors
+        bright:
+            black:   '#969896'
+            red:     '#cc342b'
+            green:   '#198844'
+            yellow:  '#fba922'
+            blue:    '#3971ed'
+            magenta: '#a36ac7'
+            cyan:    '#3971ed'
+            white:   '#ffffff'
 
 # Key Bindings
 # ------------
@@ -137,45 +184,6 @@ input_mapping:
     - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
-
-# Color Profile
-# -------------
-#
-# Here you can configure your colors, wereas a color can be expressed in standard web format,
-# with a leading # followed by red/green/blue values, 7 characters in total.
-# You may alternatively use 0x as prefix instead of #.
-# For example 0x102030 is equal to '#102030'.
-colors:
-    # Mandates the color of the cursor.
-    cursor: '#b0b030'
-    # The text selection color can be customized here.
-    selection: '#30c0c0'
-    # Default colors
-    default:
-        # Default background color (this can be made transparent, see above).
-        background: '#1d1f21'
-        # Default foreground text color.
-        foreground: '#c5c8c6'
-    # Normal colors
-    normal:
-        black:   '#1d1f21'
-        red:     '#cc342b'
-        green:   '#198844'
-        yellow:  '#fba922'
-        blue:    '#3971ed'
-        magenta: '#a36ac7'
-        cyan:    '#3971ed'
-        white:   '#c5c8c6'
-    # Bright colors
-    bright:
-        black:   '#969896'
-        red:     '#cc342b'
-        green:   '#198844'
-        yellow:  '#fba922'
-        blue:    '#3971ed'
-        magenta: '#a36ac7'
-        cyan:    '#3971ed'
-        white:   '#ffffff'
 
 # Logging section
 logging:

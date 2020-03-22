@@ -1,5 +1,6 @@
 #pragma once
 
+#include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/FileChangeWatcher.h>
 #include <terminal_view/TerminalView.h>
@@ -25,7 +26,7 @@ class TerminalWindow :
     Q_OBJECT
 
   public:
-    TerminalWindow(Config _config, std::string _programPath);
+    TerminalWindow(config::Config _config, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
     void initializeGL() override;
@@ -46,21 +47,24 @@ class TerminalWindow :
 
     void post(std::function<void()> _fn);
 
+    /// Applies given profile, potentially setting/resetting terminal configuration.
+    void setProfile(config::TerminalProfile _newProfile);
+
   public Q_SLOTS:
     void onFrameSwapped();
     void onScreenChanged(QScreen* _screen);
 
   private:
-    void executeAction(Action const& _action);
+    void executeAction(actions::Action const& _action);
     void executeInput(terminal::MouseEvent const& event);
 
     bool fullscreen() const;
     void toggleFullScreen();
 
-    bool setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded);
+    bool setFontSize(unsigned _fontSize);
     std::string getClipboardString();
     std::string extractSelectionText();
-    void spawnNewTerminal();
+    void spawnNewTerminal(std::string const& _profileName);
 
     float contentScale() const;
 
@@ -129,8 +133,13 @@ class TerminalWindow :
         }
     }
 
+    config::TerminalProfile const& profile() const { return profile_; }
+    config::TerminalProfile& profile() { return profile_; }
+
     std::chrono::steady_clock::time_point now_;
-    Config config_;
+    config::Config config_;
+    std::string profileName_;
+    config::TerminalProfile profile_;
     std::string programPath_;
     std::ofstream loggingSink_;
     LoggingSink logger_;

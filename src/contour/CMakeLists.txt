@@ -21,6 +21,7 @@ option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
 set(contour_SRCS
+    Actions.cpp Actions.h
     Config.cpp Config.h
     FileChangeWatcher.cpp FileChangeWatcher.h
     LoggingSink.cpp LoggingSink.h

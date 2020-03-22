@@ -28,7 +28,7 @@ namespace contour {
             addHelpOption();
             addVersionOption();
             addOption(configOption);
-            // addOption(profileOption); // TODO: profile handling
+            addOption(profileOption);
         }
 
         QCommandLineOption const configOption{
@@ -39,13 +39,13 @@ namespace contour {
 
         QString configPath() const { return value(configOption); }
 
-        // QCommandLineOption const profileOption{
-        //     QStringList() << "p" << "profile",
-        //     QCoreApplication::translate("main", "Terminal Profile to load."),
-        //     QCoreApplication::translate("main", "NAME")
-        // };
+        QCommandLineOption const profileOption{
+            QStringList() << "p" << "profile",
+            QCoreApplication::translate("main", "Terminal Profile to load."),
+            QCoreApplication::translate("main", "NAME")
+        };
 
-        // QString profileName() const { return value(profileOption); }
+        QString profileName() const { return value(profileOption); }
     };
 }
 
@@ -64,12 +64,52 @@ int main(int argc, char* argv[])
         auto cli = contour::CLI{};
         cli.process(app);
 
+        auto configFailures = int{0};
+        auto const configLogger = [&](string const& _msg)
+        {
+            cerr << "Configuration failure. " << _msg << '\n';
+            ++configFailures;
+        };
+
         QString const configPath = cli.value(cli.configOption);
-        // QString const profileName = cli.value(cli.profileOption); // TODO: support for profiles
+
+        auto config =
+            configPath.isEmpty() ? contour::config::loadConfig(configLogger)
+                                 : contour::config::loadConfigFromFile(configPath.toStdString(), configLogger);
+
+        string const profileName = [&]() {
+            if (!cli.value(cli.profileOption).isEmpty())
+                return cli.value(cli.profileOption).toStdString();
+
+            if (!config.defaultProfileName.empty())
+                return config.defaultProfileName;
+
+            if (config.profiles.size() == 1)
+                return config.profiles.begin()->first;
+
+            return ""s;
+        }();
+
+        if (!config.profile(profileName))
+        {
+            auto const s = accumulate(
+                begin(config.profiles),
+                end(config.profiles),
+                ""s,
+                [](string const& acc, auto const& profile) -> string {
+                    return acc.empty() ? profile.first
+                                       : fmt::format("{}, {}", acc, profile.first);
+                }
+            );
+            configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
+        }
+
+        if (configFailures)
+            return EXIT_FAILURE;
 
         auto mainWindow = contour::TerminalWindow{
-            configPath.isEmpty() ? contour::loadConfig()
-                                 : contour::loadConfigFromFile(configPath.toStdString()),
+            config,
+            profileName,
             argv[0]
         };
         mainWindow.show();

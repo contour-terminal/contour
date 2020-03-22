@@ -30,7 +30,7 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] 256-color and Truecolor support
 * [x] Key binding customization
 * [x] Color Schemes
-* [ ] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+* [x] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 * [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
@@ -41,77 +41,71 @@ The following is an incomplete list of features that contour does or will suppor
 ## CLI - Command Line Interface
 
 ```txt
-Contour Terminal Emulator.
-
-Usage:
-  contour [OPTIONS ...]
+Usage: contour [options]
+Contour Terminal Emulator
 
 Options:
-  -h, --help                  Shows this help and quits.
-  -c, --config=PATH           Specifies path to config file to load from (and save to).
-                              [~/.config/contour/contour.yml]
+  -h, --help            Displays this help.
+  -v, --version         Displays version information.
+  -c, --config <PATH>   Path to configuration file to load at startup
+                        [~/.config/contour/conour.yml].
+  -p, --profile <NAME>  Terminal Profile to load.
 ```
 
 ## Example Configuration File
 
 ```yaml
-shell: "ssh ubuntu-vm"
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82"
+default_profile: main
+profiles:
+    ubuntu_vm:
+        shell: "ssh ubuntu-vm"
+        terminalSize:
+            columns: 130
+            lines: 30
+        environment:
+            TERM: xterm-256color
+            COLORTERM: truecolor
+        fontSize: 12
+        fontFamily: "Fira Code, Hack, Cascadia Code, Ubuntu Mono, Consolas, monospace"
+        tabWidth: 8
+        history:
+            limit: 8000
+            scrollMultiplier: 3
+            autoScrollOnUpdate: true
+        cursor:
+            shape: block
+            blinking: true
+        background:
+            opacity: 0.9
+            blur: false
+        colors: google_dark
 
-terminalSize:
-    columns: 130
-    lines: 30
-
-fontSize: 12
-fontFamily: "Fira Code, Hack, Cascadia Code, Ubuntu Mono, Consolas, monospace"
-tabWidth: 8
-
-history:
-    limit: 8000
-    scrollMultiplier: 3
-    autoScrollOnUpdate: true
-
-cursor:
-    shape: block
-    blinking: true
-
-background:
-    opacity: 0.9
-    blur: false
-
-logging:
-    file: "/path/to/contour.log"
-    parseErrors: true
-    invalidOutput: true
-    unsupportedOutput: true
-    rawInput: false
-    rawOutput: false
-    traceInput: false
-    traceOutput: false
-
-colors: # Color scheme: Google Dark
-    cursor: '#b0b030'
-    selection: '#30c0c0'
-    default:
-        background: '#1d1f21'
-        foreground: '#c5c8c6'
-    normal:
-        black:   '#1d1f21'
-        red:     '#cc342b'
-        green:   '#198844'
-        yellow:  '#fba922'
-        blue:    '#3971ed'
-        magenta: '#a36ac7'
-        cyan:    '#3971ed'
-        white:   '#c5c8c6'
-    bright:
-        black:   '#969896'
-        red:     '#cc342b'
-        green:   '#198844'
-        yellow:  '#fba922'
-        blue:    '#3971ed'
-        magenta: '#a36ac7'
-        cyan:    '#3971ed'
-        white:   '#ffffff'
+color_schemes:
+    google_dark:
+        cursor: '#b0b030'
+        selection: '#30c0c0'
+        default:
+            background: '#1d1f21'
+            foreground: '#c5c8c6'
+        normal:
+            black:   '#1d1f21'
+            red:     '#cc342b'
+            green:   '#198844'
+            yellow:  '#fba922'
+            blue:    '#3971ed'
+            magenta: '#a36ac7'
+            cyan:    '#3971ed'
+            white:   '#c5c8c6'
+        bright:
+            black:   '#969896'
+            red:     '#cc342b'
+            green:   '#198844'
+            yellow:  '#fba922'
+            blue:    '#3971ed'
+            magenta: '#a36ac7'
+            cyan:    '#3971ed'
+            white:   '#ffffff'
 
 input_mapping:
     - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
@@ -133,6 +127,17 @@ input_mapping:
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
     - { mods: [Shift],          key: Home,          action: ScrollToTop }
     - { mods: [Shift],          key: End,           action: ScrollToBottom }
+
+logging:
+    file: "/path/to/contour.log"
+    parseErrors: true
+    invalidOutput: true
+    unsupportedOutput: true
+    rawInput: false
+    rawOutput: false
+    traceInput: false
+    traceOutput: false
+
 ```
 
 ## Installing from source

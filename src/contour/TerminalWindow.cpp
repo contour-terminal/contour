@@ -51,6 +51,7 @@ using namespace std::placeholders;
 namespace contour {
 
 using terminal::view::GLRenderer;
+using actions::Action;
 
 namespace {
     constexpr inline terminal::Modifier makeModifier(int _mods)
@@ -175,7 +176,7 @@ namespace {
         return format;
     }
 
-#if !defined(NDEBUG)
+#if 0 // !defined(NDEBUG)
     QDebug operator<<(QDebug str, QEvent const& ev) {
         static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
         str << "QEvent";
@@ -189,9 +190,11 @@ namespace {
 #endif
 }
 
-TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
+TerminalWindow::TerminalWindow(config::Config _config, string _profileName, string _programPath) :
     now_{ chrono::steady_clock::now() },
     config_{ move(_config) },
+    profileName_{ move(_profileName) },
+    profile_{ *config_.profile(profileName_) },
     programPath_{ move(_programPath) },
     logger_{
         config_.logFilePath
@@ -201,8 +204,8 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     fontManager_{},
     regularFont_{
         fontManager_.load(
-            config_.fontFamily,
-            static_cast<unsigned>(config_.fontSize * contentScale())
+            profile().fontFamily,
+            static_cast<unsigned>(profile().fontSize * contentScale())
         )
     },
     terminalView_{},
@@ -213,14 +216,12 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     updateTimer_(this)
 {
     // qDebug() << "TerminalWindow:"
-    //     << QString::fromUtf8(fmt::format("{}x{}", _config.terminalSize.columns, _config.terminalSize.rows).c_str())
-    //     << "fontSize:" << config_.fontSize
+    //     << QString::fromUtf8(fmt::format("{}x{}", config_.terminalSize.columns, config_.terminalSize.rows).c_str())
+    //     << "fontSize:" << profile().fontSize
     //     << "contentScale:" << contentScale();
 
     setFormat(surfaceFormat());
 
-    // FIXME: blinking cursor
-    // updateTimer_.setInterval(config_.cursorBlinkInterval.count());
     updateTimer_.setSingleShot(true);
     connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWindow::blinkingCursorUpdate));
 
@@ -233,12 +234,12 @@ TerminalWindow::TerminalWindow(Config _config, std::string _programPath) :
     if (!regularFont_.get().isFixedWidth())
         throw runtime_error{ "Regular font is not a fixed-width font." };
 
-    if (config_.backgroundBlur && !enableBackgroundBlur(true))
+    if (profile().backgroundBlur && !enableBackgroundBlur(true))
         throw runtime_error{ "Could not enable background blur." };
 
     resize(
-        config_.terminalSize.columns * regularFont_.get().maxAdvance(),
-        config_.terminalSize.rows * regularFont_.get().lineHeight()
+        profile().terminalSize.columns * regularFont_.get().maxAdvance(),
+        profile().terminalSize.rows * regularFont_.get().lineHeight()
     );
 }
 
@@ -288,7 +289,7 @@ void TerminalWindow::onFrameSwapped()
                 [[fallthrough]];
             case State::CleanIdle:
                 STATS_ZERO(consecutiveRenderCount);
-                if (config_.cursorDisplay == terminal::CursorDisplay::Blink
+                if (profile().cursorDisplay == terminal::CursorDisplay::Blink
                         && this->terminalView_->terminal().cursor().visible)
                     updateTimer_.start(terminalView_->terminal().nextRender(chrono::steady_clock::now()));
                 return;
@@ -308,29 +309,29 @@ void TerminalWindow::initializeGL()
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
-        config_.terminalSize,
-        config_.maxHistoryLineCount,
+        profile().terminalSize,
+        profile().maxHistoryLineCount,
         config_.wordDelimiters,
         regularFont_.get(),
-        config_.cursorShape,
-        config_.cursorDisplay,
-        config_.cursorBlinkInterval,
-        config_.colorProfile,
-        config_.backgroundOpacity,
-        config_.shell,
-        config_.env,
+        profile().cursorShape,
+        profile().cursorDisplay,
+        profile().cursorBlinkInterval,
+        profile().colors,
+        profile().backgroundOpacity,
+        profile().shell,
+        profile().env,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
         bind(&TerminalWindow::onScreenUpdate, this),
         bind(&TerminalWindow::onWindowTitleChanged, this),
         bind(&TerminalWindow::onDoResize, this, _1, _2, _3),
         bind(&TerminalWindow::onTerminalClosed, this),
-        *Config::loadShaderConfig(ShaderClass::Background),
-        *Config::loadShaderConfig(ShaderClass::Text),
-        *Config::loadShaderConfig(ShaderClass::Cursor),
+        *config::Config::loadShaderConfig(config::ShaderClass::Background),
+        *config::Config::loadShaderConfig(config::ShaderClass::Text),
+        *config::Config::loadShaderConfig(config::ShaderClass::Cursor),
         ref(logger_)
     );
 
-    terminalView_->terminal().setTabWidth(config_.tabWidth);
+    terminalView_->terminal().setTabWidth(profile().tabWidth);
 }
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
@@ -368,7 +369,7 @@ void TerminalWindow::paintGL()
             for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
         }
 
-        QVector4D const bg = GLRenderer::canonicalColor(config_.colorProfile.defaultBackground, config_.backgroundOpacity);
+        QVector4D const bg = GLRenderer::canonicalColor(profile().colors.defaultBackground, profile().backgroundOpacity);
         glClearColor(bg[0], bg[1], bg[2], bg[3]);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -384,16 +385,31 @@ void TerminalWindow::paintGL()
 bool TerminalWindow::reloadConfigValues()
 {
     auto filePath = config_.backingFilePath.string();
-    auto newConfig = Config{};
+    auto newConfig = config::Config{};
+
+    auto configFailures = int{0};
+    auto const configLogger = [&](string const& _msg)
+    {
+        cerr << "Configuration failure. " << _msg << '\n';
+        ++configFailures;
+    };
 
     try
     {
-        loadConfigFromFile(newConfig, filePath);
+        loadConfigFromFile(newConfig, filePath, configLogger);
     }
     catch (exception const& e)
     {
         //TODO: logger_.error(e.what());
-        cerr << "Failed to load configuration. " << e.what() << endl;
+        configLogger(fmt::format("Unhandled exception during configuration reload caught. {}", e.what()));
+    }
+
+    if (!newConfig.profile(profileName_))
+        configLogger(fmt::format("Currently active profile with name '{}' gone.", profileName_));
+
+    if (configFailures)
+    {
+        cerr << "Failed to load configuration.\n";
         return false;
     }
 
@@ -402,54 +418,9 @@ bool TerminalWindow::reloadConfigValues()
             ? LoggingSink{newConfig.loggingMask, newConfig.logFilePath->string()}
             : LoggingSink{newConfig.loggingMask, &cout};
 
-    bool windowResizeRequired = false;
-
-    terminalView_->terminal().setTabWidth(newConfig.tabWidth);
-    if (newConfig.fontFamily != config_.fontFamily)
-    {
-        regularFont_ = fontManager_.load(
-            newConfig.fontFamily,
-            static_cast<unsigned>(newConfig.fontSize * contentScale())
-        );
-        terminalView_->setFont(regularFont_.get());
-        windowResizeRequired = true;
-    }
-    else if (newConfig.fontSize != config_.fontSize)
-    {
-        windowResizeRequired |= setFontSize(newConfig.fontSize, false);
-    }
-
-    if (newConfig.terminalSize != config_.terminalSize && !fullscreen())
-        windowResizeRequired |= terminalView_->setTerminalSize(config_.terminalSize);
-
     terminalView_->terminal().setWordDelimiters(newConfig.wordDelimiters);
-
-    if (windowResizeRequired && !fullscreen())
-    {
-        auto const width = newConfig.terminalSize.columns * regularFont_.get().maxAdvance();
-        auto const height = newConfig.terminalSize.rows * regularFont_.get().lineHeight();
-        resize(width, height);
-    }
-
-    terminalView_->terminal().setMaxHistoryLineCount(newConfig.maxHistoryLineCount);
-
-    if (newConfig.colorProfile.cursor != config_.colorProfile.cursor)
-        terminalView_->setCursorColor(newConfig.colorProfile.cursor);
-
-    if (newConfig.cursorShape != config_.cursorShape)
-        terminalView_->setCursorShape(newConfig.cursorShape);
-
-    if (newConfig.cursorDisplay != config_.cursorDisplay)
-        terminalView_->terminal().setCursorDisplay(newConfig.cursorDisplay);
-
-    if (newConfig.backgroundBlur != config_.backgroundBlur)
-        enableBackgroundBlur(newConfig.backgroundBlur);
-
-
-    if (newConfig.tabWidth != config_.tabWidth)
-        terminalView_->terminal().setTabWidth(newConfig.tabWidth);
-
     config_ = move(newConfig);
+    setProfile(*config_.profile(profileName_));
 
     return true;
 }
@@ -577,9 +548,7 @@ void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with
 
 bool TerminalWindow::event(QEvent* _event)
 {
-#if !defined(NDEBUG)
-    qDebug() << "TerminalWindow.event:" << *_event;
-#endif
+    //qDebug() << "TerminalWindow.event:" << *_event;
 
     if (_event->type() == QEvent::Close)
         terminalView_->process().terminate(terminal::Process::TerminationHint::Hangup);
@@ -600,9 +569,9 @@ void TerminalWindow::toggleFullScreen()
         setVisibility(QWindow::FullScreen);
 }
 
-bool TerminalWindow::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
+bool TerminalWindow::setFontSize(unsigned _fontSize)
 {
-    //qDebug() << "TerminalWindow.setFontSize" << _fontSize << (_resizeWindowIfNeeded ? "resizeWindowIfNeeded" : "");
+    //qDebug() << "TerminalWindow.setFontSize" << _fontSize;
 
     if (_fontSize < 5) // Let's not be crazy.
         return false;
@@ -613,22 +582,11 @@ bool TerminalWindow::setFontSize(unsigned _fontSize, bool _resizeWindowIfNeeded)
     if (!terminalView_->setFontSize(static_cast<unsigned>(_fontSize * contentScale())))
         return false;
 
-    config_.fontSize = _fontSize;
+    profile().fontSize = _fontSize;
 
-    if (!fullscreen())
-    {
-        // resize window
-        auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
-        auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
-        if (_resizeWindowIfNeeded)
-            resize(width, height);
-    }
-    else
-    {
-        // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-        auto const windowSize = size();
-        terminalView_->resize(windowSize.width(), windowSize.height());
-    }
+    // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
+    auto const windowSize = size();
+    terminalView_->resize(windowSize.width(), windowSize.height());
 
     return true;
 }
@@ -645,21 +603,21 @@ void TerminalWindow::executeAction(Action const& _action)
             return false;
         },
         [&](actions::IncreaseFontSize) -> bool {
-            setFontSize(config_.fontSize + 1, true);
+            setFontSize(profile().fontSize + 1);
             return false;
         },
         [&](actions::DecreaseFontSize) -> bool {
-            setFontSize(config_.fontSize - 1, true);
+            setFontSize(profile().fontSize - 1);
             return false;
         },
         [&](actions::IncreaseOpacity) -> bool {
-            ++config_.backgroundOpacity;
-            terminalView_->setBackgroundOpacity(config_.backgroundOpacity);
+            ++profile().backgroundOpacity;
+            terminalView_->setBackgroundOpacity(profile().backgroundOpacity);
             return true;
         },
         [&](actions::DecreaseOpacity) -> bool {
-            --config_.backgroundOpacity;
-            terminalView_->setBackgroundOpacity(config_.backgroundOpacity);
+            --profile().backgroundOpacity;
+            terminalView_->setBackgroundOpacity(profile().backgroundOpacity);
             return true;
         },
         [&](actions::ScreenshotVT) -> bool {
@@ -680,16 +638,16 @@ void TerminalWindow::executeAction(Action const& _action)
             return terminalView_->terminal().scrollDown(1);
         },
         [this](actions::ScrollUp) -> bool {
-            return terminalView_->terminal().scrollUp(config_.historyScrollMultiplier);
+            return terminalView_->terminal().scrollUp(profile().historyScrollMultiplier);
         },
         [this](actions::ScrollDown) -> bool {
-            return terminalView_->terminal().scrollDown(config_.historyScrollMultiplier);
+            return terminalView_->terminal().scrollDown(profile().historyScrollMultiplier);
         },
         [this](actions::ScrollPageUp) -> bool {
-            return terminalView_->terminal().scrollUp(config_.terminalSize.rows / 2);
+            return terminalView_->terminal().scrollUp(profile().terminalSize.rows / 2);
         },
         [this](actions::ScrollPageDown) -> bool {
-            return terminalView_->terminal().scrollDown(config_.terminalSize.rows / 2);
+            return terminalView_->terminal().scrollDown(profile().terminalSize.rows / 2);
         },
         [this](actions::ScrollToTop) -> bool {
             return terminalView_->terminal().scrollToTop();
@@ -712,8 +670,16 @@ void TerminalWindow::executeAction(Action const& _action)
             terminalView_->terminal().sendPaste(getClipboardString());
             return false;
         },
-        [this](actions::NewTerminal) -> bool {
-            spawnNewTerminal();
+        [this](actions::ChangeProfile const& v) -> bool {
+            cerr << fmt::format("Changing profile to '{}'.", v.name) << endl;
+            if (auto newProfile = config_.profile(v.name); newProfile)
+                setProfile(*newProfile);
+            else
+                cerr << fmt::format("No such profile: '{}'.", v.name) << endl;
+            return true;
+        },
+        [this](actions::NewTerminal const& v) -> bool {
+            spawnNewTerminal(v.profileName.value_or(profileName_));
             return false;
         },
         [this](actions::OpenConfiguration) -> bool {
@@ -737,6 +703,52 @@ void TerminalWindow::executeAction(Action const& _action)
         setScreenDirty();
         update();
     }
+}
+
+void TerminalWindow::setProfile(config::TerminalProfile newProfile)
+{
+    terminalView_->terminal().setTabWidth(newProfile.tabWidth);
+    if (newProfile.fontFamily != profile().fontFamily)
+    {
+        regularFont_ = fontManager_.load(
+            newProfile.fontFamily,
+            static_cast<unsigned>(newProfile.fontSize * contentScale())
+        );
+        terminalView_->setFont(regularFont_.get());
+    }
+    else if (newProfile.fontSize != profile().fontSize)
+        setFontSize(newProfile.fontSize);
+
+    if (newProfile.terminalSize != profile().terminalSize)
+    {
+        auto const screenSize = size();
+
+        auto const terminalSize = terminal::WindowSize{
+            screenSize.width() / regularFont_.get().maxAdvance(),
+            screenSize.height() / regularFont_.get().lineHeight()
+        };
+
+        terminalView_->setTerminalSize(terminalSize);
+    }
+
+    terminalView_->terminal().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
+
+    if (newProfile.colors.cursor != profile().colors.cursor)
+        terminalView_->setCursorColor(newProfile.colors.cursor);
+
+    if (newProfile.cursorShape != profile().cursorShape)
+        terminalView_->setCursorShape(newProfile.cursorShape);
+
+    if (newProfile.cursorDisplay != profile().cursorDisplay)
+        terminalView_->terminal().setCursorDisplay(newProfile.cursorDisplay);
+
+    if (newProfile.backgroundBlur != profile().backgroundBlur)
+        enableBackgroundBlur(newProfile.backgroundBlur);
+
+    if (newProfile.tabWidth != profile().tabWidth)
+        terminalView_->terminal().setTabWidth(newProfile.tabWidth);
+
+    profile_ = move(newProfile);
 }
 
 std::string TerminalWindow::getClipboardString()
@@ -774,11 +786,14 @@ string TerminalWindow::extractSelectionText()
     return text;
 }
 
-void TerminalWindow::spawnNewTerminal()
+void TerminalWindow::spawnNewTerminal(std::string const& _profileName)
 {
     // TODO: config option to either spawn new terminal via new process (default) or just as second window.
     QString const program = QString::fromUtf8(programPath_.c_str());
-    QStringList const args; // TODO: Do we need to pass args?
+    QStringList args;
+    if (!_profileName.empty())
+        args << "-p" << QString::fromStdString(_profileName);
+
     QProcess::startDetached(program, args);
 }
 
@@ -789,7 +804,7 @@ float TerminalWindow::contentScale() const
 
 void TerminalWindow::onScreenUpdate()
 {
-    if (config_.autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
 
     if (setScreenDirty())
@@ -824,8 +839,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
             if (!_height)
                 _height = screenSize.height();
         }
-        config_.terminalSize.columns = _width / regularFont_.get().maxAdvance();
-        config_.terminalSize.rows = _height / regularFont_.get().lineHeight();
+        profile().terminalSize.columns = _width / regularFont_.get().maxAdvance();
+        profile().terminalSize.rows = _height / regularFont_.get().lineHeight();
         resizePending = true;
     }
     else
@@ -835,13 +850,13 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
         else
         {
             if (!_width)
-                _width = config_.terminalSize.columns;
+                _width = profile().terminalSize.columns;
 
             if (!_height)
-                _height = config_.terminalSize.rows;
+                _height = profile().terminalSize.rows;
 
-            config_.terminalSize.columns = _width;
-            config_.terminalSize.rows = _height;
+            profile().terminalSize.columns = _width;
+            profile().terminalSize.rows = _height;
             resizePending = true;
         }
     }
@@ -849,9 +864,9 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
     if (resizePending)
     {
         post([this]() {
-            terminalView_->setTerminalSize(config_.terminalSize);
-            auto const width = config_.terminalSize.columns * regularFont_.get().maxAdvance();
-            auto const height = config_.terminalSize.rows * regularFont_.get().lineHeight();
+            terminalView_->setTerminalSize(profile().terminalSize);
+            auto const width = profile().terminalSize.columns * regularFont_.get().maxAdvance();
+            auto const height = profile().terminalSize.rows * regularFont_.get().lineHeight();
             resize(width, height);
             setScreenDirty();
             update();

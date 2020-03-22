@@ -36,9 +36,10 @@
 #include <Windows.h>
 #endif
 
-using namespace std;
+namespace contour::config {
 
-namespace contour {
+using namespace std;
+using actions::Action;
 
 namespace {
     template <typename String>
@@ -403,75 +404,49 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
 
-    #if 0 // Example:
-    input_mapping:
-        - { mods: [Alt], key: Enter, action: ToggleFullscreen }
-        - { mods: [Control, Alt],   key: S,   action: ScreenshotVT }
-        - { mods: [Control, Shift], key: "+", action: IncreaseFontSize }
-        - { mods: [Control, Shift], key: "-", action: DecreaseFontSize }
-        - { mods: [Control], mouse: WheelUp, action: IncreaseFontSize }
-        - { mods: [Control], mouse: WheelDown, action: DecreaseFontSize }
-        - { mods: [Alt], mouse: WheelUp, action: IncreaseOpacity }
-        - { mods: [Alt], mouse: WheelDown, action: DecreaseOpacity }
-        - [ mods: [Control, Shift], key: V, action: PastClipboard }
-        - { mods: [Control, Shift], key: C, action: CopySelection }
-        - { mods: [Shift], mouse: RightClick, action: PasteSelection }
-    #endif
-
-	auto const parseAction = [&](YAML::Node const& _node, YAML::Node const& _chars) -> optional<Action> {
-        if (!_node || !_node.IsScalar())
+	auto const parseAction = [&](YAML::Node const& _parent) -> optional<Action> {
+        auto actionOpt = actions::fromString(_parent["action"].as<string>());
+        if (!actionOpt)
+        {
+            cerr << "Unknown action: '" << _parent["action"].as<string>() << '\'' << endl;
             return nullopt;
-
-        auto static const mappings = array{
-			mapAction<actions::ToggleFullScreen>("ToggleFullscreen"),
-            mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
-            mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
-            mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
-            mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
-			mapAction<actions::ScreenshotVT>("ScreenshotVT"),
-			mapAction<actions::ScrollOneUp>("ScrollOneUp"),
-			mapAction<actions::ScrollOneDown>("ScrollOneDown"),
-			mapAction<actions::ScrollUp>("ScrollUp"),
-			mapAction<actions::ScrollDown>("ScrollDown"),
-			mapAction<actions::ScrollPageUp>("ScrollPageUp"),
-			mapAction<actions::ScrollPageDown>("ScrollPageDown"),
-			mapAction<actions::ScrollToTop>("ScrollToTop"),
-			mapAction<actions::ScrollToBottom>("ScrollToBottom"),
-			mapAction<actions::CopySelection>("CopySelection"),
-			mapAction<actions::PasteSelection>("PasteSelection"),
-			mapAction<actions::PasteClipboard>("PasteClipboard"),
-			mapAction<actions::NewTerminal>("NewTerminal"),
-			mapAction<actions::OpenConfiguration>("OpenConfiguration"),
-			mapAction<actions::OpenFileManager>("OpenFileManager"),
-			mapAction<actions::Quit>("Quit"),
-        };
-
-        auto const name = toLower(_node.as<string>());
-        for (auto const& mapping : mappings)
-        {
-            if (name == toLower(mapping.first))
-                return mapping.second;
         }
 
-        if (name == "sendchars")
+        auto action = actionOpt.value();
+
+        if (holds_alternative<actions::ChangeProfile>(action))
         {
-            if (!_chars || !_chars.IsScalar())
+            if (auto name = _parent["name"]; name.IsScalar())
+                return actions::ChangeProfile{name.as<string>()};
+            else
                 return nullopt;
-
-            return actions::SendChars{parseEscaped(_chars.as<string>())};
         }
 
-        if (name == "writescreen")
+        if (holds_alternative<actions::NewTerminal>(action))
         {
-            if (!_chars || !_chars.IsScalar())
-                return nullopt;
-
-            return actions::WriteScreen{_chars.as<string>()};
+            if (auto profile = _parent["profile"]; profile && profile.IsScalar())
+                return actions::NewTerminal{profile.as<string>()};
+            else
+                return action;
         }
 
-        cerr << "Unknown action: '" << _node.as<string>() << '\'' << endl;
+        if (holds_alternative<actions::SendChars>(action))
+        {
+            if (auto chars = _parent["chars"]; chars.IsScalar())
+                return actions::SendChars{parseEscaped(chars.as<string>())};
+            else
+                return nullopt;
+        }
 
-		return nullopt;
+        if (holds_alternative<actions::WriteScreen>(action))
+        {
+            if (auto chars = _parent["chars"]; chars.IsScalar())
+                return actions::WriteScreen{chars.as<string>()};
+            else
+                return nullopt;
+        }
+
+		return action;
 	};
 
 	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
@@ -539,7 +514,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         return make_pair(nullopt, false);
     };
 
-    auto const action = parseAction(_mapping["action"], _mapping["chars"]);
+    auto const action = parseAction(_mapping);
 	auto const mods = parseModifier(_mapping["mods"]);
     if (action && mods)
     {
@@ -565,149 +540,202 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     }
 }
 
-Config loadConfig()
+Config loadConfig(Logger const& _logger)
 {
-    return loadConfigFromFile((configHome() / "contour.yml").string());
+    return loadConfigFromFile((configHome() / "contour.yml").string(), _logger);
 }
 
-Config loadConfigFromFile(FileSystem::path const& _fileName)
+Config loadConfigFromFile(FileSystem::path const& _fileName, Logger const& _logger)
 {
     Config config{};
-    loadConfigFromFile(config, _fileName);
+    loadConfigFromFile(config, _fileName, _logger);
     return config;
 }
 
-void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
+terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
+{
+    auto colors = terminal::ColorProfile{};
+
+    using terminal::RGBColor;
+    if (auto def = _node["default"]; def)
+    {
+        if (auto fg = def["foreground"]; fg)
+            colors.defaultForeground = fg.as<string>();
+        if (auto bg = def["background"]; bg)
+            colors.defaultBackground = bg.as<string>();
+    }
+
+    if (auto selection = _node["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
+        colors.selection = selection.as<string>();
+
+    if (auto cursor = _node["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
+        colors.cursor = cursor.as<string>();
+
+    auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
+        if (_node)
+        {
+            if (_node.IsMap())
+            {
+                auto const assignColor = [&](size_t _index, string const& _name) {
+                    if (auto nodeValue = _node[_name]; nodeValue)
+                    {
+                        if (auto const value = nodeValue.as<string>(); !value.empty())
+                        {
+                            if (value[0] == '#')
+                                colors.palette[_offset + _index] = value;
+                            else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                                colors.palette[_offset + _index] = nodeValue.as<unsigned long>();
+                        }
+                    }
+                };
+                assignColor(0, "black");
+                assignColor(1, "red");
+                assignColor(2, "green");
+                assignColor(3, "yellow");
+                assignColor(4, "blue");
+                assignColor(5, "magenta");
+                assignColor(6, "cyan");
+                assignColor(7, "white");
+            }
+            else if (_node.IsSequence())
+            {
+                for (size_t i = 0; i < _node.size() && i < 8; ++i)
+                    if (_node.IsScalar())
+                        colors.palette[i] = _node[i].as<long>();
+                    else
+                        colors.palette[i] = _node[i].as<string>();
+            }
+        }
+    };
+
+    loadColorMap(_node["normal"], 0);
+    loadColorMap(_node["bright"], 8);
+    // TODO: color palette from 16..255
+    // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
+
+    return colors;
+}
+
+TerminalProfile loadTerminalProfile(YAML::Node const& _node,
+                                    unordered_map<string, terminal::ColorProfile> const& _colorschemes,
+                                    Logger const& _logger)
+{
+    auto profile = TerminalProfile{};
+
+    if (auto colors = _node["colors"]; colors)
+    {
+        if (colors.IsMap())
+            profile.colors = loadColorScheme(colors);
+        else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
+            profile.colors = i->second;
+        else
+            _logger(fmt::format("scheme '{}' not found.", colors.as<string>()));
+    }
+    else
+        _logger(fmt::format("No colors section found."));
+
+    softLoadValue(_node, "shell", profile.shell);
+    if (profile.shell.empty())
+        profile.shell = terminal::Process::loginShell();
+
+    if (auto env = _node["environment"]; env)
+    {
+        for (auto i = env.begin(); i != env.end(); ++i)
+        {
+            auto const name = i->first.as<string>();
+            auto const value = i->second.as<string>();
+            profile.env[name] = value;
+        }
+    }
+
+    // force some default env
+    if (profile.env.find("TERM") == profile.env.end())
+        profile.env["TERM"] = "xterm-256color";
+    if (profile.env.find("COLORTERM") == profile.env.end())
+        profile.env["COLORTERM"] = "truecolor";
+
+    if (auto terminalSize = _node["terminalSize"]; terminalSize)
+    {
+        softLoadValue(terminalSize, "columns", profile.terminalSize.columns);
+        softLoadValue(terminalSize, "lines", profile.terminalSize.rows);
+    }
+
+    softLoadValue(_node, "fontSize", profile.fontSize);
+    softLoadValue(_node, "fontFamily", profile.fontFamily);
+    softLoadValue(_node, "tabWidth", profile.tabWidth);
+
+    if (auto history = _node["history"]; history)
+    {
+        if (auto limit = history["limit"]; limit)
+        {
+            if (limit.as<int>() < 0)
+                profile.maxHistoryLineCount = nullopt;
+            else
+                profile.maxHistoryLineCount = limit.as<size_t>();
+        }
+
+        softLoadValue(history, "autoScrollOnUpdate", profile.autoScrollOnUpdate);
+        softLoadValue(history, "scrollMultiplier", profile.historyScrollMultiplier);
+    }
+
+    if (auto background = _node["background"]; background)
+    {
+        if (auto opacity = background["opacity"]; opacity)
+            profile.backgroundOpacity =
+                (terminal::Opacity)(static_cast<unsigned>(255 * clamp(opacity.as<float>(), 0.0f, 1.0f)));
+        softLoadValue(background, "blur", profile.backgroundBlur);
+    }
+
+    if (auto cursor = _node["cursor"]; cursor)
+    {
+        if (auto shape = cursor["shape"]; shape)
+            profile.cursorShape = terminal::makeCursorShape(shape.as<string>());
+
+        bool blinking = false;
+        softLoadValue(cursor, "blinking", blinking);
+        profile.cursorDisplay = blinking ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+
+        if (cursor["blinking_interval"].IsDefined())
+            profile.cursorBlinkInterval = chrono::milliseconds(cursor["blinking_interval"].as<int>());
+    }
+
+    return profile;
+}
+
+void loadConfigFromFile(Config& _config,
+                        FileSystem::path const& _fileName,
+                        Logger const& _logger)
 {
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
 
     YAML::Node doc = YAML::LoadFile(_fileName.string());
 
-    softLoadValue(doc, "shell", _config.shell);
-	if (_config.shell.empty())
-		_config.shell = terminal::Process::loginShell();
+    softLoadValue(doc, "word_delimiters", _config.wordDelimiters);
 
-    if (auto env = doc["environment"]; env)
+    if (auto profiles = doc["color_schemes"]; profiles)
     {
-        for (auto i = env.begin(); i != env.end(); ++i)
+        for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            auto const value = i->second.as<string>();
-            _config.env[name] = value;
+            _config.colorschemes[name] = loadColorScheme(i->second);
         }
     }
 
-    // force some default env
-    if (_config.env.find("TERM") == _config.env.end())
-        _config.env["TERM"] = "xterm-256color";
-    if (_config.env.find("COLORTERM") == _config.env.end())
-        _config.env["COLORTERM"] = "truecolor";
-
-    if (auto terminalSize = doc["terminalSize"]; terminalSize)
+    if (auto profiles = doc["profiles"]; profiles)
     {
-        softLoadValue(terminalSize, "columns", _config.terminalSize.columns);
-        softLoadValue(terminalSize, "lines", _config.terminalSize.rows);
-    }
-
-    softLoadValue(doc, "fontSize", _config.fontSize);
-    softLoadValue(doc, "fontFamily", _config.fontFamily);
-    softLoadValue(doc, "tabWidth", _config.tabWidth);
-    softLoadValue(doc, "wordDelimiters", _config.wordDelimiters);
-
-    if (auto history = doc["history"]; history)
-    {
-        if (auto limit = history["limit"]; limit)
+        for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
-            if (limit.as<int>() < 0)
-                _config.maxHistoryLineCount = nullopt;
-            else
-                _config.maxHistoryLineCount = limit.as<size_t>();
+            auto const name = i->first.as<string>();
+            _config.profiles[name] = loadTerminalProfile(i->second, _config.colorschemes, _logger);
         }
-
-        softLoadValue(history, "autoScrollOnUpdate", _config.autoScrollOnUpdate);
-        softLoadValue(history, "scrollMultiplier", _config.historyScrollMultiplier);
     }
 
-    if (auto background = doc["background"]; background)
+    softLoadValue(doc, "default_profile", _config.defaultProfileName);
+    if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
     {
-        if (auto opacity = background["opacity"]; opacity)
-            _config.backgroundOpacity =
-                (terminal::Opacity)(static_cast<unsigned>(255 * clamp(opacity.as<float>(), 0.0f, 1.0f)));
-        softLoadValue(background, "blur", _config.backgroundBlur);
-    }
-
-    if (auto cursor = doc["cursor"]; cursor)
-    {
-        if (auto shape = cursor["shape"]; shape)
-            _config.cursorShape = terminal::makeCursorShape(shape.as<string>());
-
-        bool blinking = false;
-        softLoadValue(cursor, "blinking", blinking);
-        _config.cursorDisplay = blinking ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
-
-        if (cursor["blinking_interval"].IsDefined())
-            _config.cursorBlinkInterval = chrono::milliseconds(cursor["blinking_interval"].as<int>());
-    }
-
-    if (auto colors = doc["colors"]; colors)
-    {
-        using terminal::RGBColor;
-        if (auto def = colors["default"]; def)
-        {
-            if (auto fg = def["foreground"]; fg)
-                _config.colorProfile.defaultForeground = fg.as<string>();
-            if (auto bg = def["background"]; bg)
-                _config.colorProfile.defaultBackground = bg.as<string>();
-        }
-
-        if (auto selection = colors["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
-            _config.colorProfile.selection = selection.as<string>();
-
-		if (auto cursor = colors["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
-			_config.colorProfile.cursor = cursor.as<string>();
-
-        auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
-            if (_node)
-            {
-                if (_node.IsMap())
-                {
-                    auto const assignColor = [&](size_t _index, string const& _name) {
-                        if (auto nodeValue = _node[_name]; nodeValue)
-                        {
-                            if (auto const value = nodeValue.as<string>(); !value.empty())
-                            {
-                                if (value[0] == '#')
-                                    _config.colorProfile.palette[_offset + _index] = value;
-                                else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                                    _config.colorProfile.palette[_offset + _index] = nodeValue.as<unsigned long>();
-                            }
-                        }
-                    };
-                    assignColor(0, "black");
-                    assignColor(1, "red");
-                    assignColor(2, "green");
-                    assignColor(3, "yellow");
-                    assignColor(4, "blue");
-                    assignColor(5, "magenta");
-                    assignColor(6, "cyan");
-                    assignColor(7, "white");
-                }
-                else if (_node.IsSequence())
-                {
-                    for (size_t i = 0; i < _node.size() && i < 8; ++i)
-                        if (_node.IsScalar())
-                            _config.colorProfile.palette[i] = _node[i].as<long>();
-                        else
-                            _config.colorProfile.palette[i] = _node[i].as<string>();
-                }
-            }
-        };
-
-        loadColorMap(colors["normal"], 0);
-        loadColorMap(colors["bright"], 8);
-        // TODO: color palette from 16..255
-        // TODO: dim colors (maybe put them into the palette at 256..(256+8)?)
+        _logger(fmt::format("default_profile \"{}\" not found in profiles list.",
+                            _config.defaultProfileName));
     }
 
 	if (auto mapping = doc["input_mapping"]; mapping)
@@ -743,79 +771,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             }
         }
     }
-}
-
-std::string serializeYaml(Config const& _config)
-{
-    YAML::Node root;
-    root["shell"] = _config.shell;
-    for (auto const [key, value] : _config.env)
-        root["environment"][key] = value;
-    root["terminalSize"]["columns"] = _config.terminalSize.columns;
-    root["terminalSize"]["lines"] = _config.terminalSize.rows;
-    root["fontSize"] = _config.fontSize;
-    root["fontFamily"] = _config.fontFamily;
-    root["tabWidth"] = _config.tabWidth;
-    root["background"]["opacity"] = static_cast<float>(_config.backgroundOpacity) / 255.0f;
-    root["background"]["blur"] = _config.backgroundBlur;
-
-    // history
-    root["history"]["limit"] = _config.maxHistoryLineCount.has_value()
-        ? static_cast<int64_t>(_config.maxHistoryLineCount.value())
-        : -1ll;
-    root["history"]["autoScrollOnUpdate"] = _config.autoScrollOnUpdate;
-    root["history"]["scrollMultiplier"] = _config.historyScrollMultiplier;
-
-    // colors
-    root["colors"]["default"]["foreground"] = to_string(_config.colorProfile.defaultForeground);
-    root["colors"]["default"]["background"] = to_string(_config.colorProfile.defaultBackground);
-    root["colors"]["selection"] = to_string(_config.colorProfile.selection);
-
-    constexpr auto names = array{"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"};
-    for (size_t i = 0; i < names.size(); ++i)
-    {
-        root["colors"]["normal"][names[i]] = to_string(_config.colorProfile.normalColor(i));
-        root["colors"]["bright"][names[i]] = to_string(_config.colorProfile.brightColor(i));
-    }
-
-    // cursor
-    root["cursor"]["shape"] = to_string(_config.cursorShape);
-    root["cursor"]["blinking"] = _config.cursorDisplay == terminal::CursorDisplay::Blink;
-    root["cursor"]["blinking_interval"] = _config.cursorBlinkInterval.count();
-
-    // logging
-    root["logging"]["parseErrors"] = (_config.loggingMask & LogMask::ParserError) != 0;
-    root["logging"]["invalidOutput"] = (_config.loggingMask & LogMask::InvalidOutput) != 0;
-    root["logging"]["unsupportedOutput"] = (_config.loggingMask & LogMask::UnsupportedOutput) != 0;
-    root["logging"]["rawInput"] = (_config.loggingMask & LogMask::RawInput) != 0;
-    root["logging"]["rawOutput"] = (_config.loggingMask & LogMask::RawOutput) != 0;
-    root["logging"]["traceInput"] = (_config.loggingMask & LogMask::TraceInput) != 0;
-    root["logging"]["traceOutput"] = (_config.loggingMask & LogMask::TraceOutput) != 0;
-
-    // input mapping
-    // TODO
-
-    ostringstream os;
-    os << root;// TODO: returns LF? if not, endl it.
-    return os.str();
-}
-
-void saveConfigToFile(Config const& _config, FileSystem::path const& _path)
-{
-	FileSystemError ec;
-	if (!FileSystem::create_directories(_path.parent_path(), ec))
-	{
-		throw runtime_error{fmt::format(
-				"Could not create directory {}. {}",
-				_path.parent_path().string(),
-				ec.message())};
-	}
-
-    auto ofs = ofstream{_path.string(), ios::app};
-    if (!ofs.good())
-        throw runtime_error{ "Unable to create config file." };
-
-     ofs << serializeYaml(_config);
 }
 
 optional<std::string> readConfigFile(std::string const& _filename)
