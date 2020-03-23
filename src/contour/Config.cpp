@@ -813,7 +813,14 @@ std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
             return defaultConfig.fragmentShader;
     }();
 
-    return {ShaderConfig{vertText, fragText}};
+    auto const prependVersionPragma = [&](string const& _code) {
+        if (QOpenGLContext::currentContext()->isOpenGLES())
+            return "#version 300 es\n#line 1\n" + _code;
+        else
+            return "#version 330\n#line 1\n" + _code;
+    };
+
+    return {ShaderConfig{prependVersionPragma(vertText), prependVersionPragma(fragText)}};
 }
 
 } // namespace contour

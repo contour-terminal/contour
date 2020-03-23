@@ -159,14 +159,30 @@ namespace {
     QSurfaceFormat surfaceFormat()
     {
         QSurfaceFormat format;
-        format.setRedBufferSize(8);
-        format.setGreenBufferSize(8);
-        format.setBlueBufferSize(8);
+
+        constexpr bool forceOpenGLES = (
+#if defined(__linux__)
+            true
+#else
+            false
+#endif
+        );
+
+        if (forceOpenGLES || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
+        {
+            format.setVersion(3, 2);
+            format.setRenderableType(QSurfaceFormat::OpenGLES);
+            format.setProfile(QSurfaceFormat::CoreProfile);
+        }
+        else
+        {
+            format.setVersion(3, 3);
+            format.setProfile(QSurfaceFormat::CompatibilityProfile);
+            format.setRenderableType(QSurfaceFormat::OpenGL);
+        }
+
         format.setAlphaBufferSize(8);
-        format.setRenderableType(QSurfaceFormat::OpenGLES);
         format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-        format.setProfile(QSurfaceFormat::CoreProfile);
-        format.setVersion(3, 2);
         format.setSwapInterval(1);
 
 #if !defined(NDEBUG)
@@ -306,6 +322,8 @@ void TerminalWindow::onScreenChanged(QScreen* _screen)
 void TerminalWindow::initializeGL()
 {
     initializeOpenGLFunctions();
+
+    qDebug() << "GL type:" << (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL");
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
@@ -814,7 +832,7 @@ void TerminalWindow::onScreenUpdate()
 void TerminalWindow::onWindowTitleChanged()
 {
     post([this]() {
-    setTitle(QString::fromUtf8(terminalView_->terminal().windowTitle().c_str()));
+        setTitle(QString::fromUtf8(terminalView_->terminal().windowTitle().c_str()));
     });
 }
 

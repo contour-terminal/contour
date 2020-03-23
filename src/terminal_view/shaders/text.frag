@@ -1,5 +1,3 @@
-#version 300 es
-
 in mediump vec2 TexCoords;
 out mediump vec4 color;
 

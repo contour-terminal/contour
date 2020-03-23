@@ -1,5 +1,3 @@
-#version 300 es
-
 in mediump vec2 position;
 uniform mediump mat4 u_transform;
 

@@ -1,5 +1,3 @@
-#version 300 es
-precision mediump float;
 in mediump vec4 vertex;
 out mediump vec2 TexCoords;
 
