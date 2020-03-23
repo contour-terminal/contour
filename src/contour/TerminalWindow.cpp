@@ -813,7 +813,9 @@ void TerminalWindow::onScreenUpdate()
 
 void TerminalWindow::onWindowTitleChanged()
 {
+    post([this]() {
     setTitle(QString::fromUtf8(terminalView_->terminal().windowTitle().c_str()));
+    });
 }
 
 void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixels)
