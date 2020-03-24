@@ -58,7 +58,7 @@ void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
     {
         char ch{};
         in.read(&ch, sizeof(ch));
-        if (!isprint(ch) || ch == '\'')
+        if (!isprint(ch) || ch == '\'' || ch == '\\')
             _out << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ch) << ',';
         else
             _out << '\'' << ch << '\'' << ',' << ' ';
