@@ -515,11 +515,8 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
     auto const mouseButton = makeMouseButton(_event->button());
     executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
 
-    if (terminalView_->terminal().isSelectionAvailable())
-    {
-        setScreenDirty();
-        update();
-    }
+    setScreenDirty();
+    update();
 }
 
 void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)

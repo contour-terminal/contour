@@ -209,16 +209,24 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     return Selector::Mode::Linear;
             }(speedClicks_, _mousePress.modifier);
 
-            selector_ = make_unique<Selector>(
-                selectionMode,
-                bind(&Terminal::absoluteAt, this, _1),
-                wordDelimiters(),
-                screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
-                screenSize(),
-                absoluteCoordinate(currentMousePosition_)
-            );
+            if (selector_)
+            {
+                cout << fmt::format("cancel-selection: {}\n", *selector_);
+                selector_.reset();
+            }
+            else
+            {
+                selector_ = make_unique<Selector>(
+                    selectionMode,
+                    bind(&Terminal::absoluteAt, this, _1),
+                    wordDelimiters(),
+                    screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
+                    screenSize(),
+                    absoluteCoordinate(currentMousePosition_)
+                );
+                cout << fmt::format("start-selection: {}\n", *selector_);
+            }
             changes_++;
-            cout << fmt::format("start-selection: {}\n", *selector_);
 
             return true;
         }
