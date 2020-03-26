@@ -180,6 +180,7 @@ struct ScreenBuffer {
 	bool wrapPending{false};
 	bool cursorRestrictedToMargin{false};
 	unsigned int tabWidth{8};
+    std::vector<cursor_pos_t> tabs;
 	GraphicsAttributes graphicsRendition{};
 	std::stack<SavedState> savedStates{};
 
@@ -209,6 +210,10 @@ struct ScreenBuffer {
 	void saveState();
 	void restoreState();
 	void updateCursorIterators();
+
+    void clearAllTabs();
+    void clearTabUnderCursor();
+    void setTabUnderCursor();
 
 	constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
 
@@ -390,6 +395,8 @@ class Screen {
     void operator()(DeleteColumns const& v);
     void operator()(HorizontalPositionAbsolute const& v);
     void operator()(HorizontalPositionRelative const& v);
+    void operator()(HorizontalTabClear const& v);
+    void operator()(HorizontalTabSet const& v);
     void operator()(MoveCursorUp const& v);
     void operator()(MoveCursorDown const& v);
     void operator()(MoveCursorForward const& v);

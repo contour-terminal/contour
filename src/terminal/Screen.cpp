@@ -115,6 +115,10 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         // Nothing should be done, I think, as we preserve prior (now exceeding) content.
         if (cursor.column == size_.columns)
             wrapPending = true;
+
+        // truncating tabs
+        while (!tabs.empty() && tabs.back() > _newSize.columns)
+            tabs.pop_back();
     }
 
     // Reset margin to their default.
@@ -534,6 +538,30 @@ void ScreenBuffer::clampSavedLines()
     if (maxHistoryLineCount_.has_value())
         while (savedLines.size() > maxHistoryLineCount_.value())
             savedLines.pop_front();
+}
+
+void ScreenBuffer::clearAllTabs()
+{
+    tabs.clear();
+    tabWidth = 0;
+}
+
+void ScreenBuffer::clearTabUnderCursor()
+{
+    // populate tabs vector in case of default tabWidth is used (until now).
+    if (tabs.empty() && tabWidth != 0)
+        for (cursor_pos_t column = tabWidth; column <= size().columns; column += tabWidth)
+            tabs.emplace_back(column);
+
+    // erase the specific tab underneath
+    if (auto i = find(begin(tabs), end(tabs), realCursorPosition().column); i != end(tabs))
+        tabs.erase(i);
+}
+
+void ScreenBuffer::setTabUnderCursor()
+{
+    tabs.emplace_back(realCursorPosition().column);
+    sort(begin(tabs), end(tabs));
 }
 
 void ScreenBuffer::verifyState() const
@@ -959,6 +987,24 @@ void Screen::operator()(HorizontalPositionRelative const& v)
     (*this)(MoveCursorForward{v.n});
 }
 
+void Screen::operator()(HorizontalTabClear const& v)
+{
+    switch (v.which)
+    {
+        case HorizontalTabClear::AllTabs:
+            state_->clearAllTabs();
+            break;
+        case HorizontalTabClear::UnderCursor:
+            state_->clearTabUnderCursor();
+            break;
+    }
+}
+
+void Screen::operator()(HorizontalTabSet const&)
+{
+    state_->setTabUnderCursor();
+}
+
 void Screen::operator()(MoveCursorUp const& v)
 {
     auto const n = min(v.n, cursorPosition().row - state_->margin_.vertical.from);
@@ -1032,9 +1078,44 @@ void Screen::operator()(MoveCursorToLine const& v)
 
 void Screen::operator()(MoveCursorToNextTab const&)
 {
-    auto const n = 1 + state_->tabWidth - state_->cursor.column % state_->tabWidth;
-    (*this)(MoveCursorForward{n});
     // TODO: I guess something must remember when a \t was added, for proper move-back?
+    // TODO: respect HTS/TBC
+
+    if (!state_->tabs.empty())
+    {
+        // advance to the next tab
+        size_t i = 0;
+        while (i < state_->tabs.size() && state_->realCursorPosition().column >= state_->tabs[i])
+            ++i;
+
+        if (i < state_->tabs.size())
+            (*this)(MoveCursorToColumn{state_->tabs[i]});
+        else if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
+            (*this)(MoveCursorToColumn{state_->margin_.horizontal.to});
+        else
+            (*this)(CursorNextLine{1});
+    }
+    else if (state_->tabWidth)
+    {
+        // default tab settings
+        if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
+        {
+            auto const n = 1 + state_->tabWidth - state_->cursor.column % state_->tabWidth;
+            (*this)(MoveCursorForward{n});
+        }
+        else
+            (*this)(CursorNextLine{1});
+    }
+    else
+    {
+        // no tab stops configured
+        if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
+            // then TAB moves to the end of the screen
+            (*this)(MoveCursorToColumn{state_->margin_.horizontal.to});
+        else
+            // then TAB moves to next line left margin
+            (*this)(CursorNextLine{1});
+    }
 }
 
 void Screen::operator()(SaveCursor const&)

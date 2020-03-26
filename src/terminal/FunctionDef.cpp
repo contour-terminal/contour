@@ -524,6 +524,10 @@ FunctionHandlerMap functions(VTType _vt)
 			[](auto& _ctx) { return _ctx.template emitCommand<Index>(); }
 		},
 		{
+			ESC(std::nullopt, 'H', VTType::VT100, "HTS", "Horizontal Tab Set"),
+			[](auto& _ctx) { return _ctx.template emitCommand<HorizontalTabSet>(); }
+		},
+		{
 			ESC(std::nullopt, 'M', VTType::VT100, "RI", "Reverse Index"),
 			[](auto& _ctx) { return _ctx.template emitCommand<ReverseIndex>(); }
 		},
@@ -642,6 +646,23 @@ FunctionHandlerMap functions(VTType _vt)
 					return _ctx.template emitCommand<InsertColumns>(_ctx.param_or(0, FunctionParam{1}));
 				else
 					return HandlerResult::Invalid;
+			}
+		},
+		{
+			CSI(std::nullopt, std::nullopt, 'g', VTType::VT100, "TBC", "Horizontal Tab Clear"),
+			[](auto& _ctx) {
+				if (_ctx.parameterCount() != 1)
+					return _ctx.template emitCommand<HorizontalTabClear>(HorizontalTabClear::AllTabs);
+
+                switch (_ctx.param(0))
+                {
+                    case 0:
+                        return _ctx.template emitCommand<HorizontalTabClear>(HorizontalTabClear::UnderCursor);
+                    case 3:
+                        return _ctx.template emitCommand<HorizontalTabClear>(HorizontalTabClear::AllTabs);
+                    default:
+                        return HandlerResult::Invalid;
+                }
 			}
 		},
 		{

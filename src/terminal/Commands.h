@@ -500,6 +500,10 @@ struct MoveCursorTo {
     cursor_pos_t column;
 };
 
+/// HT - Horizontal Tab
+///
+/// Moves the cursor to the next tab stop. If there are no more tab stops, the cursor moves to the
+/// right margin. HT does not cause text to auto wrap.
 struct MoveCursorToNextTab {};
 
 /// VPA - Vertical Line Position Absolute
@@ -645,6 +649,26 @@ struct BackIndex {};
 /// If the cursor is at the right border of the page when the terminal receives DECFI,
 /// then the terminal ignores DECFI.
 struct ForwardIndex {};
+
+/// TBC - Tab Clear
+///
+/// This control function clears tab stops.
+struct HorizontalTabClear {
+    enum Which {
+        /// Ps = 0 (default)
+        AllTabs,
+
+        /// Ps = 3
+        UnderCursor,
+    };
+    Which which = AllTabs;
+};
+
+/// HTS - Horizontal Tab Set
+///
+/// HTS sets a horizontal tab stop at the column position indicated by the value of the active
+/// column when the terminal receives an HTS.
+struct HorizontalTabSet {};
 
 /// DECALN - Screen Alignment Pattern.
 ///
@@ -846,6 +870,8 @@ using Command = std::variant<
     FullReset,
     HorizontalPositionAbsolute,
     HorizontalPositionRelative,
+    HorizontalTabClear,
+    HorizontalTabSet,
     Index,
     InsertCharacters,
     InsertColumns,
@@ -909,6 +935,25 @@ namespace fmt {
         auto format(const terminal::Coordinate& coord, FormatContext& ctx)
         {
             return format_to(ctx.out(), "({}, {})", coord.row, coord.column);
+        }
+    };
+
+    template <>
+    struct formatter<terminal::HorizontalTabClear::Which> {
+        using Which = terminal::HorizontalTabClear::Which;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const Which _which, FormatContext& ctx)
+        {
+            switch (_which)
+            {
+                case Which::AllTabs:
+                    return format_to(ctx.out(), "AllTabs");
+                case Which::UnderCursor:
+                    return format_to(ctx.out(), "UnderCursor");
+            }
+            return format_to(ctx.out(), "({})", static_cast<unsigned>(_which));
         }
     };
 

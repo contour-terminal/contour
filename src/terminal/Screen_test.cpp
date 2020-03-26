@@ -1580,6 +1580,94 @@ TEST_CASE("render into history", "[screen]")
     }
 }
 
+TEST_CASE("HorizontalTabClear.AllTabs", "[screen]")
+{
+    Screen screen{{5, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen(HorizontalTabClear{HorizontalTabClear::AllTabs});
+
+    screen(AppendChar{'X'});
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'Y'});
+    REQUIRE("X   Y" == screen.renderTextLine(1));
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'Z'});
+    REQUIRE("X   Y" == screen.renderTextLine(1));
+    REQUIRE("Z    " == screen.renderTextLine(2));
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'A'});
+    REQUIRE("X   Y" == screen.renderTextLine(1));
+    REQUIRE("Z   A" == screen.renderTextLine(2));
+}
+
+TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
+{
+    Screen screen{{10, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.setTabWidth(4);
+
+    // clear tab at column 4
+    screen(MoveCursorTo{1, 4});
+    screen(HorizontalTabClear{HorizontalTabClear::UnderCursor});
+
+    screen(MoveCursorTo{1, 1});
+    screen(AppendChar{'A'});
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'B'});
+
+    //       1234567890
+    REQUIRE("A      B  " == screen.renderTextLine(1));
+    REQUIRE("          " == screen.renderTextLine(2));
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'C'});
+    CHECK("A      B C" == screen.renderTextLine(1));
+    CHECK("          " == screen.renderTextLine(2));
+}
+
+TEST_CASE("HorizontalTabSet", "[screen]")
+{
+    Screen screen{{10, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen(HorizontalTabClear{HorizontalTabClear::AllTabs});
+
+    screen(MoveCursorToColumn{3});
+    screen(HorizontalTabSet{});
+
+    screen(MoveCursorToColumn{5});
+    screen(HorizontalTabSet{});
+
+    screen(MoveCursorToColumn{8});
+    screen(HorizontalTabSet{});
+
+    screen(MoveCursorToBeginOfLine{});
+
+    screen(AppendChar{'1'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'3'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'5'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'8'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'A'});
+
+    screen(MoveCursorToNextTab{});  // capped
+    screen(AppendChar{'B'});        // writes B at right margin, flags for autowrap
+
+    screen(MoveCursorToNextTab{});  // 1 -> 3 (overflow)
+    screen(MoveCursorToNextTab{});  // 3 -> 5
+    screen(MoveCursorToNextTab{});  // 5 -> 8
+    screen(AppendChar{'C'});
+
+    //     1234567890
+    CHECK("1 3 5  8 A" == screen.renderTextLine(1));
+    CHECK("B      C  " == screen.renderTextLine(2));
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
