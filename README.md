@@ -147,16 +147,18 @@ logging:
 This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compiler should do:
 
 ```sh
-apt install libfreetype6-dev libglew-dev libglfw3-dev libglm-dev libfontconfig1-dev libharfbuzz-dev
+sudo apt install \
+    "g++-9" libfreetype6-dev qtbase5-dev libqt5gui5 extra-cmake-modules \
+    libfontconfig1-dev libharfbuzz-dev
 ```
 
 To enable blur-behind feature on transparent background, you'll need the following packages:
 
 ```sh
-apt install libx11-dev
+sudo apt install libkf5windowsystem-dev
 ```
 
-And set pass `-DCONTOUR_BLUR_PLATFORM_KWIN_X11=ON` to cmake when configuring the project.
+And set pass `-DCONTOUR_BLUR_PLATFORM_KWIN=ON` to cmake when configuring the project.
 
 ### Prerequisites Windows 10
 
@@ -164,13 +166,13 @@ For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Stu
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```psh
-vcpkg install freetype fontconfig glew glfw3 glm harfbuzz
+vcpkg install freetype fontconfig glew glfw3 glm harfbuzz qt5-base
 ```
 
 ### Prerequisites Mac OS/X
 
 ```psh
-brew install freetype fontconfig glew glfw3 glm harfbuzz boost
+brew install freetype fontconfig glew glfw3 glm harfbuzz boost qt5
 ```
 
 
