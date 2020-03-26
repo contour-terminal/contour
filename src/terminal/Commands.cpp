@@ -349,27 +349,25 @@ class MnemonicBuilder {
     {
         if (!pendingText_.empty())
         {
-            result_.emplace_back(fmt::format("\"{}\"", escape(pendingText_)));
+            auto const a1 = '"' + move(pendingText_) + '"';
             pendingText_.clear();
+            build("TEXT", "", vector{a1});
         }
     }
 
+    template <typename T>
     void build(string_view _mnemonic,
-               string_view _comment = {},
-               vector<unsigned> _args = {})
+               string_view _comment,
+               vector<T> const& _args)
     {
         flushPendingText();
         string out;
         out += _mnemonic;
         if (withParameters_ & !_args.empty())
         {
-            out += ' ';
-            out += std::to_string(_args[0]);
+            out += fmt::format(" {}", _args[0]);
             for (size_t i = 1; i < _args.size(); ++i)
-            {
-                out += ' ';
-                out += std::to_string(_args[i]);
-            }
+                out += fmt::format(" {}", _args[i]);
         }
         if (withComment_ && !_comment.empty())
         {
@@ -381,7 +379,9 @@ class MnemonicBuilder {
         result_.emplace_back(move(out));
     }
 
-    void build(string_view _mnemonic, string_view _comment, unsigned _a1) { build(_mnemonic, _comment, vector{_a1}); }
+    void build(string_view _mnemonic) { build(_mnemonic, "", vector<int>{}); }
+    void build(string_view _mnemonic, string_view _comment) { build(_mnemonic, _comment, vector<int>{}); }
+    template <typename T> void build(string_view _mnemonic, string_view _comment, T _a1) { build(_mnemonic, _comment, vector{_a1}); }
     void build(string_view _mnemonic, string_view _comment, unsigned _a1, unsigned _a2) { build(_mnemonic, _comment, vector{_a1, _a2}); }
     void build(string_view _mnemonic, string_view _comment, unsigned _a1, unsigned _a2, unsigned _a3) { build(_mnemonic, _comment, vector{_a1, _a2, _a3}); }
 };
