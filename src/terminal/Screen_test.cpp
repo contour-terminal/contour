@@ -1506,7 +1506,7 @@ TEST_CASE("RequestMode", "[screen]")
     }
 }
 
-TEST_CASE("peek into history")
+TEST_CASE("peek into history", "[screen]")
 {
     Screen screen{{3, 2}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
     screen.write("123\r\n456\r\nABC\r\nDEF");
@@ -1538,7 +1538,7 @@ TEST_CASE("peek into history")
     CHECK_THROWS(screen.absoluteAt({5, 1}));
 }
 
-TEST_CASE("render into history")
+TEST_CASE("render into history", "[screen]")
 {
     Screen screen{{5, 2}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
