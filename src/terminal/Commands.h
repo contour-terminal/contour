@@ -506,6 +506,13 @@ struct MoveCursorTo {
 /// right margin. HT does not cause text to auto wrap.
 struct MoveCursorToNextTab {};
 
+/// CBT - Cursor Backward Tabulation
+///
+/// Move the active position n tabs backward. (default: 1)
+struct CursorBackwardTab {
+    unsigned count = 1;
+};
+
 /// VPA - Vertical Line Position Absolute
 ///
 /// VPA causes the active position to be moved to the corresponding horizontal position.
@@ -858,6 +865,7 @@ using Command = std::variant<
     ClearToBeginOfScreen,
     ClearToEndOfLine,
     ClearToEndOfScreen,
+    CursorBackwardTab,
     CursorNextLine,
     CursorPreviousLine,
     DeleteCharacters,

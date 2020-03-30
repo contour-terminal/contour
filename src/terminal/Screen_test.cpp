@@ -1672,6 +1672,119 @@ TEST_CASE("HorizontalTabSet", "[screen]")
     CHECK("B      C  " == screen.renderTextLine(2));
 }
 
+TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
+{
+    Screen screen{{10, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.setTabWidth(4); // 5, 9
+
+    screen(AppendChar{'a'});
+
+    screen(MoveCursorToNextTab{}); // -> 5
+    screen(AppendChar{'b'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'c'});       // -> 9
+
+    //      "1234567890"
+    REQUIRE("a   b   c " == screen.renderTextLine(1));
+    REQUIRE(screen.cursorPosition().column == 10);
+
+    SECTION("oveflow") {
+        screen(CursorBackwardTab{4});
+        CHECK(screen.cursorPosition() == Coordinate{1, 1});
+        screen(AppendChar{'X'});
+        CHECK("X   b   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("exact") {
+        screen(CursorBackwardTab{3});
+        CHECK(screen.cursorPosition() == Coordinate{1, 1});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("X   b   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("inside 2") {
+        screen(CursorBackwardTab{2});
+        CHECK(screen.cursorPosition() == Coordinate{1, 5});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("a   X   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("inside 1") {
+        screen(CursorBackwardTab{1});
+        CHECK(screen.cursorPosition() == Coordinate{1, 9});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("a   b   X " == screen.renderTextLine(1));
+    }
+
+    SECTION("no op") {
+        screen(CursorBackwardTab{0});
+        CHECK(screen.cursorPosition() == Coordinate{1, 10});
+    }
+}
+
+TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
+{
+    Screen screen{{10, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    screen(MoveCursorToColumn{5});
+    screen(HorizontalTabSet{});
+    screen(MoveCursorToColumn{9});
+    screen(HorizontalTabSet{});
+    screen(MoveCursorToBeginOfLine{});
+
+    screen(AppendChar{'a'});
+
+    screen(MoveCursorToNextTab{}); // -> 5
+    screen(AppendChar{'b'});
+
+    screen(MoveCursorToNextTab{});
+    screen(AppendChar{'c'});       // -> 9
+
+    //      "1234567890"
+    REQUIRE("a   b   c " == screen.renderTextLine(1));
+    REQUIRE(screen.cursorPosition().column == 10);
+
+    SECTION("oveflow") {
+        screen(CursorBackwardTab{4});
+        CHECK(screen.cursorPosition() == Coordinate{1, 1});
+        screen(AppendChar{'X'});
+        CHECK("X   b   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("exact") {
+        screen(CursorBackwardTab{3});
+        CHECK(screen.cursorPosition() == Coordinate{1, 1});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("X   b   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("inside 2") {
+        screen(CursorBackwardTab{2});
+        CHECK(screen.cursorPosition() == Coordinate{1, 5});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("a   X   c " == screen.renderTextLine(1));
+    }
+
+    SECTION("inside 1") {
+        screen(CursorBackwardTab{1});
+        CHECK(screen.cursorPosition() == Coordinate{1, 9});
+        screen(AppendChar{'X'});
+        //    "1234567890"
+        CHECK("a   b   X " == screen.renderTextLine(1));
+    }
+
+    SECTION("no op") {
+        screen(CursorBackwardTab{0});
+        CHECK(screen.cursorPosition() == Coordinate{1, 10});
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition

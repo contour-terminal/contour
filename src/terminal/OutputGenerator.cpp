@@ -179,6 +179,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](MoveCursorTo const& to) { write("\033[{}H", pairOrNone(1, to.row, to.column)); },
         [&](MoveCursorToLine const& to) { write("\033[{}d", to.row); },
         [&](MoveCursorToNextTab) { write("\t"); },
+        [&](CursorBackwardTab const& v) { write("\033[{}Z", v.count); },
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
         [&](RequestDynamicColor const& v) { write("\033];?\x07", setDynamicColorCommand(v.name)); },

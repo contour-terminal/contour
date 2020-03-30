@@ -1118,6 +1118,52 @@ void Screen::operator()(MoveCursorToNextTab const&)
     }
 }
 
+void Screen::operator()(CursorBackwardTab const& v)
+{
+    if (v.count == 0)
+        return;
+
+    if (!state_->tabs.empty())
+    {
+        for (unsigned k = 0; k < v.count; ++k)
+        {
+            auto const i = std::find_if(rbegin(state_->tabs), rend(state_->tabs),
+                                        [&](auto tabPos) -> bool {
+                                            return tabPos <= cursorPosition().column - 1;
+                                        });
+            if (i != rend(state_->tabs))
+            {
+                // prev tab found -> move to prev tab
+                (*this)(MoveCursorToColumn{*i});
+            }
+            else
+            {
+                (*this)(MoveCursorToColumn{state_->margin_.horizontal.from});
+                break;
+            }
+        }
+    }
+    else if (state_->tabWidth)
+    {
+        // default tab settings
+        if (state_->cursor.column <= state_->tabWidth)
+            (*this)(MoveCursorToBeginOfLine{});
+        else
+        {
+            auto const m = state_->cursor.column % state_->tabWidth;
+            auto const n = m
+                         ? (v.count - 1) * state_->tabWidth + m
+                         : v.count * state_->tabWidth + m;
+            (*this)(MoveCursorBackward{n - 1});
+        }
+    }
+    else
+    {
+        // no tab stops configured
+        (*this)(MoveCursorToBeginOfLine{});
+    }
+}
+
 void Screen::operator()(SaveCursor const&)
 {
     state_->saveState();

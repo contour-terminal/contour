@@ -406,6 +406,7 @@ class Screen {
     void operator()(MoveCursorTo const& v);
     void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
+    void operator()(CursorBackwardTab const& v);
     void operator()(SaveCursor const& v);
     void operator()(RestoreCursor const& v);
     void operator()(Index const& v);

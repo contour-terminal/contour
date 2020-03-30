@@ -947,7 +947,16 @@ FunctionHandlerMap functions(VTType _vt)
 				else
 					return HandlerResult::Unsupported;
 			}
-		}
+		},
+		{
+			CSI(std::nullopt, std::nullopt, 'Z', VTType::VT100, "CBT", "Cursor Backward Tabulation"),
+			[](auto& _ctx) {
+                if (_ctx.parameterCount() <= 1)
+                    return _ctx.template emitCommand<CursorBackwardTab>(_ctx.param_or(0, FunctionParam{1}));
+                else
+					return HandlerResult::Invalid;
+            }
+        }
 	};
 
 	FunctionHandlerMap result;
