@@ -1652,12 +1652,16 @@ TEST_CASE("HorizontalTabSet", "[screen]")
     screen(MoveCursorToNextTab{});
     screen(AppendChar{'8'});
 
-    screen(MoveCursorToNextTab{});
-    screen(AppendChar{'A'});
+    screen(MoveCursorToNextTab{}); // capped
+    screen(AppendChar{'A'});       // writes B at right margin, flags for autowrap
 
-    screen(MoveCursorToNextTab{});  // capped
-    screen(AppendChar{'B'});        // writes B at right margin, flags for autowrap
+    REQUIRE("1 3 5  8 A" == screen.renderTextLine(1));
 
+    screen(MoveCursorToNextTab{});  // wrapped
+    screen(AppendChar{'B'});        // writes B at left margin
+
+    //       1234567890
+    REQUIRE("1 3 5  8 A" == screen.renderTextLine(1));
     screen(MoveCursorToNextTab{});  // 1 -> 3 (overflow)
     screen(MoveCursorToNextTab{});  // 3 -> 5
     screen(MoveCursorToNextTab{});  // 5 -> 8
