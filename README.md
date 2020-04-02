@@ -55,8 +55,8 @@ Options:
 ## Example Configuration File
 
 ```yaml
-word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82"
-default_profile: main
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
+default_profile: ubuntu_vm
 profiles:
     ubuntu_vm:
         shell: "ssh ubuntu-vm"
