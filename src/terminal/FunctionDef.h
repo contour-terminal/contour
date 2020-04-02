@@ -31,6 +31,17 @@ enum class FunctionType {
 	OSC = 2,
 };
 
+inline std::string to_string(FunctionType _type)
+{
+    switch (_type)
+    {
+        case FunctionType::ESC: return "ESC";
+        case FunctionType::CSI: return "CSI";
+        case FunctionType::OSC: return "OSC";
+        default: return "?";
+    }
+}
+
 struct FunctionDef {
 	FunctionType type;                  // ESC, CSI, OSC
     std::optional<char> leaderSymbol;   // < ?
