@@ -349,7 +349,7 @@ void OutputHandler::dispatchCSI(char _finalChar)
 
 	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
 	{
-		auto const result = funcMap->second.second(*this);
+		HandlerResult const result = funcMap->second.second(*this);
 		switch (result)
 		{
 			case HandlerResult::Unsupported:
