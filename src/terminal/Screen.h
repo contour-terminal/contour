@@ -131,7 +131,36 @@ struct ScreenBuffer {
         GraphicsAttributes attributes{};
     };
 
-	using Line = std::vector<Cell>;
+	using LineBuffer = std::vector<Cell>;
+    struct Line {
+        LineBuffer buffer;
+
+        using iterator = LineBuffer::iterator;
+        using const_iterator = LineBuffer::const_iterator;
+        using reverse_iterator = LineBuffer::reverse_iterator;
+        using size_type = LineBuffer::size_type;
+
+        Line(size_t _numCols, Cell const& _defaultCell) : buffer{_numCols, _defaultCell} {}
+        Line() = default;
+        Line(Line const&) = default;
+        Line(Line&&) = default;
+        Line& operator=(Line const&) = default;
+        Line& operator=(Line&&) = default;
+
+        LineBuffer* operator->() noexcept { return &buffer; }
+        LineBuffer const* operator->()  const noexcept { return &buffer; }
+        auto& operator[](std::size_t _index) { return buffer[_index]; }
+        auto const& operator[](std::size_t _index) const { return buffer[_index]; }
+        auto size() const noexcept { return buffer.size(); }
+        void resize(size_type _size) { buffer.resize(_size); }
+
+        iterator begin() { return buffer.begin(); }
+        iterator end() { return buffer.end(); }
+        reverse_iterator rbegin() { return buffer.rbegin(); }
+        reverse_iterator rend() { return buffer.rend(); }
+        const_iterator cbegin() const { return buffer.cbegin(); }
+        const_iterator cend() const { return buffer.cend(); }
+    };
 	using Lines = std::deque<Line>;
 
     struct Cursor : public Coordinate {
@@ -185,7 +214,7 @@ struct ScreenBuffer {
 	std::stack<SavedState> savedStates{};
 
 	Lines::iterator currentLine{std::begin(lines)};
-	Line::iterator currentColumn{std::begin(*currentLine)};
+	Line::iterator currentColumn{currentLine->begin()};
 
 	void appendChar(char32_t ch);
 
@@ -266,6 +295,13 @@ struct ScreenBuffer {
 
 	void moveCursorTo(Coordinate to);
 };
+
+inline auto begin(ScreenBuffer::Line& _line) { return _line.begin(); }
+inline auto end(ScreenBuffer::Line& _line) { return _line.end(); }
+inline auto begin(ScreenBuffer::Line const& _line) { return _line.cbegin(); }
+inline auto end(ScreenBuffer::Line const& _line) { return _line.cend(); }
+inline ScreenBuffer::Line::const_iterator cbegin(ScreenBuffer::Line const& _line) { return _line.cbegin(); }
+inline ScreenBuffer::Line::const_iterator cend(ScreenBuffer::Line const& _line) { return _line.cend(); }
 
 /**
  * Terminal Screen.
