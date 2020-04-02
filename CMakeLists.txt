@@ -34,7 +34,7 @@ option(CONTOUR_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ${MASTER_PROJ
 option(CONTOUR_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(CONTOUR_CLIENT "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(CONTOUR_COVERAGE "Builds with codecov [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 
 # ----------------------------------------------------------------------------
 # code coverage
