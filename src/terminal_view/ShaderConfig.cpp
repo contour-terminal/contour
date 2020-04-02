@@ -26,9 +26,9 @@ namespace terminal::view {
 
 namespace {
     template <size_t N>
-    inline std::string s(std::array<char, N> const& data)
+    inline std::string s(std::array<uint8_t, N> const& data)
     {
-        return std::string(data.data(), data.size());
+        return std::string(reinterpret_cast<char const*>(data.data()), data.size());
     }
 }
 

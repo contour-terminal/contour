@@ -62,6 +62,7 @@ struct TerminalProfile {
 using terminal::view::ShaderConfig;
 using terminal::view::ShaderClass;
 
+// NB: All strings in here must be UTF8-encoded.
 struct Config {
     FileSystem::path backingFilePath;
 

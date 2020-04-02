@@ -270,7 +270,7 @@ void createFileIfNotExists(FileSystem::path const& _path)
 					ec.message())};
 		}
 		ofstream{_path.string()}.write(
-			&contour::default_config_yaml[0],
+			(char const*) &contour::default_config_yaml[0],
 			contour::default_config_yaml.size()
 		);
     }

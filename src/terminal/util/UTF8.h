@@ -150,7 +150,8 @@ inline std::u32string decode(char const* begin, char const* end)
                 [&](Decoder::Invalid) { out += L'?'; },
                 [&](Decoder::Success ok) { out += ok.value; },
             },
-            decode(*begin));
+            decode(*begin)
+        );
     }
     return out;
 }

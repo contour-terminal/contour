@@ -1,7 +1,7 @@
 # Default Contour Configuration File.
 
 # Word delimiters when selecting word-wise.
-word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?\xE2\x94\x82"
+word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 
 default_profile: main
 
