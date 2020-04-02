@@ -452,6 +452,31 @@ bool Terminal::scrollDown(size_t _numLines)
         return false;
 }
 
+bool Terminal::scrollMarkUp()
+{
+    if (auto const newScrollOffset = screen_.findPrevMarker(scrollOffset_); newScrollOffset.has_value())
+    {
+        printf("%s\n", fmt::format("ScrollMarkUp: {}", *newScrollOffset).c_str());
+        scrollOffset_ = newScrollOffset.value();
+        return true;
+    }
+    else
+        printf("%s\n", fmt::format("ScrollMarkUp: FAILED", *newScrollOffset).c_str());
+
+    return false;
+}
+
+bool Terminal::scrollMarkDown()
+{
+    if (auto const newScrollOffset = screen_.findNextMarker(scrollOffset_); newScrollOffset.has_value())
+    {
+        scrollOffset_ = newScrollOffset.value();
+        return true;
+    }
+
+    return false;
+}
+
 bool Terminal::scrollToTop()
 {
     if (auto top = historyLineCount(); top != scrollOffset_)

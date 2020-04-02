@@ -261,6 +261,7 @@ void OutputGenerator::operator()(Command const& command)
 					break;
 			}
 		},
+        [&](SetMark) { write("\033[>M"); },
         [&](SetMode mode) { write("\033[{}{}", to_code(mode.mode), mode.enable ? 'h' : 'l'); },
         [&](RequestMode v) {
             if (isAnsiMode(v.mode))

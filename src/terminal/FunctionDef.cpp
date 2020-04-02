@@ -956,7 +956,11 @@ FunctionHandlerMap functions(VTType _vt)
                 else
 					return HandlerResult::Invalid;
             }
-        }
+        },
+		{
+			CSI('>', std::nullopt, 'M', VTType::VT100, "SETMARK", "Set Vertical Mark"),
+			[](auto& _ctx) { return _ctx.template emitCommand<SetMark>(); }
+		}
 	};
 
 	FunctionHandlerMap result;

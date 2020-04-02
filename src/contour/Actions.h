@@ -33,6 +33,8 @@ struct ScrollUp{};
 struct ScrollDown{};
 struct ScrollPageUp{};
 struct ScrollPageDown{};
+struct ScrollMarkUp{};
+struct ScrollMarkDown{};
 struct ScrollToTop{};
 struct ScrollToBottom{};
 struct PasteClipboard{};
@@ -63,6 +65,8 @@ using Action = std::variant<
     ScrollDown,
     ScrollPageUp,
     ScrollPageDown,
+    ScrollMarkUp,
+    ScrollMarkDown,
     ScrollToTop,
     ScrollToBottom,
     CopySelection,

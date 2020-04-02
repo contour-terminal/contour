@@ -747,6 +747,9 @@ struct SetCursorStyle {
 struct SaveWindowTitle {};
 struct RestoreWindowTitle {};
 
+/// SETMARK - Sets a marker at the current cursor line position that can be jumped to later.
+struct SetMark {};
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -917,6 +920,7 @@ using Command = std::variant<
     SetForegroundColor,
     SetGraphicsRendition,
     SetLeftRightMargin,
+    SetMark,
     SetMode,
     SetTopBottomMargin,
     SingleShiftSelect,

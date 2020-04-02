@@ -134,6 +134,7 @@ struct ScreenBuffer {
 	using LineBuffer = std::vector<Cell>;
     struct Line {
         LineBuffer buffer;
+        bool marked = false;
 
         using iterator = LineBuffer::iterator;
         using const_iterator = LineBuffer::const_iterator;
@@ -196,6 +197,9 @@ struct ScreenBuffer {
 	{
 		verifyState();
 	}
+
+    std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const;
+    std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const;
 
     Type type_;
 	WindowSize size_;
@@ -453,6 +457,7 @@ class Screen {
     void operator()(SetBackgroundColor const& v);
     void operator()(SetCursorStyle const& v);
     void operator()(SetGraphicsRendition const& v);
+    void operator()(SetMark const&);
     void operator()(SetMode const& v);
     void operator()(RequestMode const& v);
     void operator()(SetTopBottomMargin const& v);
@@ -552,6 +557,16 @@ class Screen {
     std::string renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const;
 
     std::string const& windowTitle() const noexcept { return windowTitle_; }
+
+    std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const
+    {
+        return state_->findPrevMarker(_currentScrollOffset);
+    }
+
+    std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const
+    {
+        return state_->findNextMarker(_currentScrollOffset);
+    }
 
   private:
     // interactive replies

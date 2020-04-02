@@ -152,6 +152,8 @@ color_schemes:
 # - ScrollOneUp       Scrolls up by exactly one line.
 # - ScrollPageDown    Scrolls a page down.
 # - ScrollPageUp      Scrolls a page up.
+# - ScrollMarkUp      Scrolls one mark up
+# - ScrollMarkDown    Scrolls one mark down (if none present, bottom of the screen)
 # - ScrollToBottom    Scrolls to the bottom of the screen buffer.
 # - ScrollToTop       Scrolls to the top of the screen buffer.
 # - ScrollUp          Scrolls up by the multiplier factor.
@@ -182,6 +184,8 @@ input_mapping:
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
     - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
     - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
+    - { mods: [Shift, Alt],     key: 'k',           action: ScrollMarkUp }
+    - { mods: [Shift, Alt],     key: 'j',           action: ScrollMarkDown }
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
 

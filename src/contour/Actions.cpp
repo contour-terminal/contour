@@ -66,6 +66,8 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::ScrollOneUp>("ScrollOneUp"),
         mapAction<actions::ScrollPageDown>("ScrollPageDown"),
         mapAction<actions::ScrollPageUp>("ScrollPageUp"),
+        mapAction<actions::ScrollMarkUp>("ScrollMarkUp"),
+        mapAction<actions::ScrollMarkDown>("ScrollMarkDown"),
         mapAction<actions::ScrollToBottom>("ScrollToBottom"),
         mapAction<actions::ScrollToTop>("ScrollToTop"),
         mapAction<actions::ScrollUp>("ScrollUp"),

@@ -52,6 +52,32 @@ string to_string(CharacterStyleMask _mask)
     return out;
 }
 
+std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
+{
+    _scrollOffset = min(_scrollOffset, savedLines.size());
+    cursor_pos_t rowNumber = _scrollOffset + 1;
+
+    for (auto line = prev(end(savedLines), _scrollOffset + 1); rowNumber < savedLines.size(); --line, ++rowNumber)
+        if (line->marked)
+            return {rowNumber};
+
+    return nullopt;
+}
+
+std::optional<size_t> ScreenBuffer::findNextMarker(size_t _scrollOffset) const
+{
+    _scrollOffset = min(_scrollOffset, savedLines.size());
+    cursor_pos_t rowNumber = _scrollOffset - 1;
+
+    if (rowNumber < savedLines.size())
+        for (auto line = prev(end(savedLines), rowNumber); rowNumber > 0; ++line, --rowNumber)
+            if (line->marked)
+                return {rowNumber};
+
+    // default to bottom
+    return 0;
+}
+
 void ScreenBuffer::resize(WindowSize const& _newSize)
 {
     if (_newSize.rows > size_.rows)
@@ -1278,6 +1304,11 @@ void Screen::operator()(SetGraphicsRendition const& v)
             state_->graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
             break;
     }
+}
+
+void Screen::operator()(SetMark const&)
+{
+    state_->currentLine->marked = true;
 }
 
 void Screen::operator()(SetMode const& v)

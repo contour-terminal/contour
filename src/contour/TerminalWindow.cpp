@@ -664,6 +664,12 @@ void TerminalWindow::executeAction(Action const& _action)
         [this](actions::ScrollPageDown) -> bool {
             return terminalView_->terminal().scrollDown(profile().terminalSize.rows / 2);
         },
+        [this](actions::ScrollMarkUp) -> bool {
+            return terminalView_->terminal().scrollMarkUp();
+        },
+        [this](actions::ScrollMarkDown) -> bool {
+            return terminalView_->terminal().scrollMarkDown();
+        },
         [this](actions::ScrollToTop) -> bool {
             return terminalView_->terminal().scrollToTop();
         },

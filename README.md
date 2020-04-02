@@ -31,12 +31,37 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] Key binding customization
 * [x] Color Schemes
 * [x] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+* [x] Vertical Line Markers (quickly jump to markers in your history!)
 * [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification
 * [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
 * [ ] Shell Integration (inspired by iTerm2)
 * [ ] Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
+
+## A word on vertical line markers
+
+Suppose you type a lot in the terminal, and I bet you do. Some commands may have inconveniently long
+output and you need a way to conveniently scroll the terminal viewport up to the top of that
+command. This is what this feature is there for. You can easily walk up/down your markers
+like you'd walk up code folds or markers in VIM or other editors.
+
+Set a mark:
+
+```sh
+echo -ne "\033[>M"
+```
+
+Example key bindings:
+
+```yaml
+input_mapping:
+    - { mods: [Alt, Shift], key: 'k', action: ScrollMarkUp }
+    - { mods: [Alt, Shift], key: 'j', action: ScrollMarkDown }
+```
+
+It is recommended to integrate the marker into your command prompt, such as `$PS1` in bash or sh to
+have automatic markers set.
 
 ## CLI - Command Line Interface
 
@@ -127,6 +152,8 @@ input_mapping:
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
     - { mods: [Shift],          key: Home,          action: ScrollToTop }
     - { mods: [Shift],          key: End,           action: ScrollToBottom }
+    - { mods: [Alt, Shift],     key: 'k',           action: ScrollMarkUp }
+    - { mods: [Alt, Shift],     key: 'j',           action: ScrollMarkDown }
 
 logging:
     file: "/path/to/contour.log"

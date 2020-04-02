@@ -124,3 +124,17 @@ TEST_CASE("color_bg_indexed", "[OutputHandler]")
     auto indexedColor = get<IndexedColor>(sgr.color);
     REQUIRE(235 == static_cast<unsigned>(indexedColor));
 }
+
+TEST_CASE("SETMARK", "[OutputHandler]")
+{
+    auto output = OutputHandler{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto parser = Parser{
+            ref(output),
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
+
+    parser.parseFragment("\033[>M");
+    REQUIRE(output.commands().size() == 1);
+    INFO(fmt::format("cmd: {}", to_string(output.commands()[0])));
+    REQUIRE(holds_alternative<SetMark>(output.commands()[0]));
+}

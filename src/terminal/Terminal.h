@@ -181,6 +181,9 @@ class Terminal {
 
     WindowSize screenSize() const noexcept { return pty_.screenSize(); }
 
+    bool scrollMarkUp();
+    bool scrollMarkDown();
+
   private:
     void flushInput();
     void screenUpdateThread();
