@@ -664,6 +664,16 @@ void Screen::resize(WindowSize const& _newSize)
     size_ = _newSize;
 }
 
+void Screen::write(Command const& _command)
+{
+    state_->verifyState();
+    visit(*this, _command);
+    state_->verifyState();
+
+    if (onCommands_)
+        onCommands_({_command});
+}
+
 void Screen::write(char const * _data, size_t _size)
 {
 #if defined(LIBTERMINAL_LOG_RAW)

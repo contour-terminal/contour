@@ -386,6 +386,8 @@ class Screen {
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
 
+    void write(Command const& _command);
+
     /// Writes given data into the screen.
     void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
 
