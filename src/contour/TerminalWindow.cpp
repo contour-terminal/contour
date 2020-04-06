@@ -797,7 +797,6 @@ string TerminalWindow::extractSelectionText()
         {
             text += currentLine;
             text += '\n';
-            cout << "Copy: \"" << currentLine << '"' << endl;
             currentLine.clear();
         }
         if (_cell.character)
@@ -805,9 +804,6 @@ string TerminalWindow::extractSelectionText()
         lastColumn = _col;
     });
     text += currentLine;
-    cout << "Copy: \"" << currentLine << '"' << endl;
-
-    terminalView_->terminal().clearSelection();
 
     return text;
 }
