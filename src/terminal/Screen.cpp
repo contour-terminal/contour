@@ -64,7 +64,7 @@ std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
     _scrollOffset = min(_scrollOffset, savedLines.size());
     cursor_pos_t rowNumber = _scrollOffset + 1;
 
-    for (auto line = prev(end(savedLines), _scrollOffset + 1); rowNumber < savedLines.size(); --line, ++rowNumber)
+    for (auto line = prev(end(savedLines), _scrollOffset + 1); rowNumber <= savedLines.size(); --line, ++rowNumber)
         if (line->marked)
             return {rowNumber};
 
