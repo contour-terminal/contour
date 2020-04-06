@@ -726,9 +726,13 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
 {
     if (!_scrollOffset)
     {
-        for (cursor_pos_t row = 1; row <= size_.rows; ++row)
-            for (cursor_pos_t col = 1; col <= size_.columns; ++col)
+        for_each(
+            times(1, size_.rows) * times(1, size_.columns),
+            [&](auto pos) {
+                auto const [row, col] = pos;
                 _render(row, col, at(row, col));
+            }
+        );
     }
     else
     {
