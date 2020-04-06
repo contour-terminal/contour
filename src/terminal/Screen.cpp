@@ -869,13 +869,17 @@ void Screen::operator()(SendTerminalId const&)
 
 void Screen::operator()(ClearToEndOfScreen const&)
 {
-    for (auto line = state_->currentLine; line != end(state_->lines); ++line)
+    (*this)(ClearToEndOfLine{});
+
+    for (auto line = next(state_->currentLine); line != end(state_->lines); ++line)
         fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 
 void Screen::operator()(ClearToBeginOfScreen const&)
 {
-    for (auto line = begin(state_->lines); line != next(state_->currentLine); ++line)
+    (*this)(ClearToBeginOfLine{});
+
+    for (auto line = begin(state_->lines); line != state_->currentLine; ++line)
         fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
 }
 

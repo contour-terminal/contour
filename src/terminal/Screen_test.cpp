@@ -239,34 +239,40 @@ TEST_CASE("Linefeed", "[screen]")
 
 TEST_CASE("ClearToEndOfScreen", "[screen]")
 {
-    auto screen = Screen{{2, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    Screen screen{{3, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.write("ABC\r\nDEF\r\nGHI");
 
-    screen.write("AB\r\nC");
-    CHECK("AB" == screen.renderTextLine(1));
-    CHECK("C " == screen.renderTextLine(2));
+    REQUIRE("ABC" == screen.renderTextLine(1));
+    REQUIRE("DEF" == screen.renderTextLine(2));
+    REQUIRE("GHI" == screen.renderTextLine(3));
+    REQUIRE(screen.cursorPosition() == Coordinate{3, 3});
+
+    screen(MoveCursorTo{2, 2});
     screen(ClearToEndOfScreen{});
 
-    CHECK("AB" == screen.renderTextLine(1));
-    CHECK("  " == screen.renderTextLine(2));
+    CHECK("ABC" == screen.renderTextLine(1));
+    CHECK("D  " == screen.renderTextLine(2));
+    CHECK("   " == screen.renderTextLine(3));
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 }
 
 TEST_CASE("ClearToBeginOfScreen", "[screen]")
 {
-    Screen screen{{2, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
-    screen.write("AB\r\nCD\r\nE");
+    Screen screen{{3, 3}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.write("ABC\r\nDEF\r\nGHI");
 
-    REQUIRE("AB" == screen.renderTextLine(1));
-    REQUIRE("CD" == screen.renderTextLine(2));
-    REQUIRE("E " == screen.renderTextLine(3));
-    REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
+    REQUIRE("ABC" == screen.renderTextLine(1));
+    REQUIRE("DEF" == screen.renderTextLine(2));
+    REQUIRE("GHI" == screen.renderTextLine(3));
+    REQUIRE(screen.cursorPosition() == Coordinate{3, 3});
 
-    screen(MoveCursorUp{1});
+    screen(MoveCursorTo{2, 2});
     screen(ClearToBeginOfScreen{});
 
-    CHECK("  " == screen.renderTextLine(1));
-    CHECK("  " == screen.renderTextLine(2));
-    CHECK("E " == screen.renderTextLine(3));
-    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+    CHECK("   " == screen.renderTextLine(1));
+    CHECK("  F" == screen.renderTextLine(2));
+    CHECK("GHI" == screen.renderTextLine(3));
+    CHECK(screen.cursorPosition() == Coordinate{2, 2});
 }
 
 TEST_CASE("ClearScreen", "[screen]")
