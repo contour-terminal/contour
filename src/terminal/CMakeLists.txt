@@ -19,6 +19,7 @@ set(terminal_HEADERS
     util/overloaded.h
     util/compose.h
     util/stdfs.h
+    util/times.h
     Color.h
     Commands.h
     FunctionDef.h
