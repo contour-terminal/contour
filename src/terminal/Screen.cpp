@@ -20,6 +20,13 @@
 #include <iterator>
 #include <sstream>
 
+#if defined(LIBTERMINAL_EXECUTION_PAR)
+#include <execution>
+#define LIBTERMINAL_EXECUTION_COMMA(par) (std::execution:: par),
+#else
+#define LIBTERMINAL_EXECUTION_COMMA(par) /*!*/
+#endif
+
 using namespace std;
 
 namespace terminal {
@@ -320,16 +327,19 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
         }
 
         // clear bottom n lines in margin.
-        auto targetLine = next(begin(lines), margin.vertical.to - n);
+        auto const topLine = next(begin(lines), margin.vertical.to - n);
         auto const bottomLine = next(begin(lines), margin.vertical.to);     // bottom margin's end-line iterator
-        for (; targetLine != bottomLine; ++targetLine)
-        {
-            fill_n(
-                next(begin(*targetLine), margin.horizontal.from - 1),
-                margin.horizontal.length(),
-                Cell{{}, graphicsRendition}
-            );
-        }
+        for_each(
+            topLine,
+            bottomLine,
+            [&](ScreenBuffer::Line& line) {
+                fill_n(
+                    next(begin(line), margin.horizontal.from - 1),
+                    margin.horizontal.length(),
+                    Cell{{}, graphicsRendition}
+                );
+            }
+        );
     }
     else if (margin.vertical == Margin::Range{1, size_.rows})
     {
@@ -344,7 +354,6 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 lines.pop_front();
             }
 
-#if 1
             clampSavedLines();
 
             generate_n(
@@ -352,23 +361,6 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 n,
                 [this]() { return Line{size_.columns, Cell{{}, graphicsRendition}}; }
             );
-#else
-            auto const maxHistLines = maxHistoryLineCount_.value_or(0);
-            if (savedLines.size() > maxHistLines)
-            {
-                auto const numRotations = min(static_cast<cursor_pos_t>(savedLines.size() - maxHistLines), n);
-                for (auto i = begin(savedLines), e = next(begin(savedLines), numRotations); i != e; ++i)
-                    for (Cell& c : *i)
-                        c = Cell{{}, graphicsRendition};
-                lines.splice(
-                    end(lines),
-                    savedLines,
-                    begin(savedLines),
-                    next(begin(savedLines), numRotations)
-                );
-            }
-            clampSavedLines();
-#endif
         }
     }
     else
@@ -871,23 +863,40 @@ void Screen::operator()(ClearToEndOfScreen const&)
 {
     (*this)(ClearToEndOfLine{});
 
-    for (auto line = next(state_->currentLine); line != end(state_->lines); ++line)
-        fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
+    for_each(
+        LIBTERMINAL_EXECUTION_COMMA(par)
+        next(state_->currentLine),
+        end(state_->lines),
+        [&](ScreenBuffer::Line& line) {
+            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+        }
+    );
 }
 
 void Screen::operator()(ClearToBeginOfScreen const&)
 {
     (*this)(ClearToBeginOfLine{});
 
-    for (auto line = begin(state_->lines); line != state_->currentLine; ++line)
-        fill(begin(*line), end(*line), Cell{{}, state_->graphicsRendition});
+    for_each(
+        LIBTERMINAL_EXECUTION_COMMA(par)
+        begin(state_->lines),
+        state_->currentLine,
+        [&](ScreenBuffer::Line& line) {
+            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+        }
+    );
 }
 
 void Screen::operator()(ClearScreen const&)
 {
-    // https://vt100.net/docs/vt510-rm/ED.html
-    for (auto& line : state_->lines)
-        fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+    for_each(
+        LIBTERMINAL_EXECUTION_COMMA(par)
+        begin(state_->lines),
+        end(state_->lines),
+        [&](ScreenBuffer::Line& line) {
+            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+        }
+    );
 }
 
 void Screen::operator()(ClearScrollbackBuffer const&)
@@ -1405,9 +1414,19 @@ void Screen::operator()(ScreenAlignmentPattern const&)
     moveCursorTo({1, 1});
 
     // fills the complete screen area with a test pattern
-    for (auto& line: state_->lines)
-        for (auto& col: line)
-            col.character = 'X';
+    for_each(
+        LIBTERMINAL_EXECUTION_COMMA(par)
+        begin(state_->lines),
+        end(state_->lines),
+        [&](ScreenBuffer::Line& line) {
+            fill(
+                LIBTERMINAL_EXECUTION_COMMA(par)
+                begin(line),
+                end(line),
+                ScreenBuffer::Cell{'X', state_->graphicsRendition}
+            );
+        }
+    );
 }
 
 void Screen::operator()(SendMouseEvents const& v)

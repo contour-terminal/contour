@@ -8,6 +8,7 @@ include(FilesystemResolver)
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
 option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" OFF)
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" OFF)
+option(LIBTERMINAL_EXECUTION_PAR "Builds with parallel execution where possible [default: OFF]" OFF)
 
 if(MSVC)
     add_definitions(-DNOMINMAX)
@@ -57,6 +58,10 @@ set(terminal_SOURCES
 set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only Threads::Threads)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
+endif()
+if(LIBTERMINAL_EXECUTION_PAR)
+    add_definitions(-DLIBTERMINAL_EXECUTION_PAR=1)
+    list(APPEND LIBTERMINAL_LIBRARIES tbb)
 endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
