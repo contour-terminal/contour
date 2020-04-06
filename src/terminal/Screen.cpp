@@ -14,6 +14,8 @@
 #include <terminal/Screen.h>
 #include <terminal/OutputGenerator.h>
 #include <terminal/Util.h>
+#include <terminal/util/algorithm.h>
+#include <terminal/util/times.h>
 #include <terminal/VTType.h>
 
 #include <algorithm>
@@ -28,6 +30,7 @@
 #endif
 
 using namespace std;
+using namespace terminal::support;
 
 namespace terminal {
 
@@ -93,12 +96,15 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         // or create new ones until size_.rows == _newSize.rows.
         auto const extendCount = _newSize.rows - size_.rows;
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned int>(std::size(savedLines)));
-        for (size_t i = 0; i < rowsToTakeFromSavedLines; ++i)
-        {
-            savedLines.back().resize(_newSize.columns);
-            lines.emplace_front(std::move(savedLines.back()));
-            savedLines.pop_back();
-        }
+
+        for_each(
+            times(rowsToTakeFromSavedLines),
+            [&](auto) {
+                savedLines.back().resize(_newSize.columns);
+                lines.emplace_front(std::move(savedLines.back()));
+                savedLines.pop_back();
+            }
+        );
 
         cursor.row += rowsToTakeFromSavedLines;
 
@@ -115,12 +121,14 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         if (cursor.row == size_.rows)
         {
             auto const n = size_.rows - _newSize.rows;
-            for (size_t i = 0; i < n; ++i)
-            {
-                lines.front().resize(_newSize.columns);
-                savedLines.emplace_back(std::move(lines.front()));
-                lines.pop_front();
-            }
+            for_each(
+                times(n),
+                [&](auto) {
+                    lines.front().resize(_newSize.columns);
+                    savedLines.emplace_back(std::move(lines.front()));
+                    lines.pop_front();
+                }
+            );
             clampSavedLines();
         }
         else
@@ -348,11 +356,13 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 
         if (n > 0)
         {
-            for (size_t i = 0; i < n; ++i)
-            {
-                savedLines.emplace_back(std::move(lines.front()));
-                lines.pop_front();
-            }
+            for_each(
+                times(n),
+                [&](auto) {
+                    savedLines.emplace_back(std::move(lines.front()));
+                    lines.pop_front();
+                }
+            );
 
             clampSavedLines();
 
@@ -377,9 +387,14 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             );
         }
 
-        auto const e_i = margin.vertical.to - n;
-        for (auto li = next(begin(lines), e_i); li != next(begin(lines), margin.vertical.to); ++li)
-            fill(begin(*li), end(*li), Cell{{}, graphicsRendition});
+        for_each(
+            LIBTERMINAL_EXECUTION_COMMA(par)
+            next(begin(lines), margin.vertical.to - n),
+            next(begin(lines), margin.vertical.to),
+            [&](Line& line) {
+                fill(begin(line), end(line), Cell{{}, graphicsRendition});
+            }
+        );
     }
 
     updateCursorIterators();
@@ -685,11 +700,14 @@ void Screen::write(char const * _data, size_t _size)
     parser_.parseFragment(_data, _size);
 
     state_->verifyState();
-    for (Command const& command : handler_.commands())
-    {
-        visit(*this, command);
-        state_->verifyState();
-    }
+
+    for_each(
+        handler_.commands(),
+        [&](Command const& _command) {
+            visit(*this, _command);
+            state_->verifyState();
+        }
+    );
 
     if (onCommands_)
         onCommands_(handler_.commands());
