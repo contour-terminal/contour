@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <cassert>
 
 using namespace std;
 using fmt::format;
@@ -222,6 +223,14 @@ class MnemonicBuilder {
         return result();
     }
 
+    string build(Command const& _command)
+    {
+        visit(*this, _command);
+        flushPendingText();
+        assert(result_.size() == 1);
+        return result_.back();
+    }
+
     vector<string> result()
     {
         flushPendingText();
@@ -395,13 +404,14 @@ vector<string> to_mnemonic(vector<Command> const& _commands, bool _withParameter
     return MnemonicBuilder{_withParameters, _withComment}.build(_commands);
 }
 
+string to_mnemonic(Command const& _command, bool _withParameters, bool _withComment)
+{
+    return MnemonicBuilder{_withParameters, _withComment}.build(_command);
+}
+
 string to_string(Command const& _command)
 {
-    auto const v = to_mnemonic(vector{_command}, true, false);
-    if (!v.empty())
-        return v.front();
-    else
-        return ""s;
+    return MnemonicBuilder{true, false}.build(_command);
 }
 
 }  // namespace terminal

@@ -928,7 +928,7 @@ using Command = std::variant<
 >;
 
 std::string to_string(Command const& cmd);
-
+std::string to_mnemonic(Command const& _command, bool _withParameters, bool _withComment);
 std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool _withParameters, bool _withComment);
 
 }  // namespace terminal

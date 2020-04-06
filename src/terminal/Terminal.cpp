@@ -103,14 +103,6 @@ void Terminal::onScreenCommands(vector<Command> const& _commands)
 {
     changes_++;
 
-#if defined(LIBTERMINAL_LOG_TRACE)
-    logger_(TraceOutputEvent{ fmt::format("onScreenUpdate: {} instructions", _commands.size()) });
-
-    auto const mnemonics = to_mnemonic(_commands, true, true);
-    for (auto const& mnemonic : mnemonics)
-        logger_(TraceOutputEvent{ mnemonic });
-#endif
-
     // Screen output commands be here - anything this terminal is interested in?
     if (onScreenCommands_)
         onScreenCommands_(_commands);

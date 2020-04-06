@@ -706,6 +706,11 @@ void Screen::write(char const * _data, size_t _size)
         [&](Command const& _command) {
             visit(*this, _command);
             state_->verifyState();
+
+            #if defined(LIBTERMINAL_LOG_TRACE)
+            // TODO: if (logTrace_)
+            logger_(TraceOutputEvent{to_mnemonic(_command, true, true)});
+            #endif
         }
     );
 
