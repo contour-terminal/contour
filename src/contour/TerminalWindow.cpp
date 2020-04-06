@@ -835,7 +835,11 @@ void TerminalWindow::onScreenUpdate()
 void TerminalWindow::onWindowTitleChanged()
 {
     post([this]() {
-        setTitle(QString::fromUtf8(terminalView_->terminal().windowTitle().c_str()));
+        auto const terminalTitle = terminalView_->terminal().windowTitle();
+        auto const title = terminalTitle.empty()
+            ? "contour"s
+            : fmt::format("{} - contour", terminalTitle);
+        setTitle(QString::fromUtf8(title.c_str()));
     });
 }
 
