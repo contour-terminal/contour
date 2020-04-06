@@ -62,6 +62,8 @@ Terminal::Terminal(WindowSize _winSize,
         bind(&Terminal::onSetCursorStyle, this, _1, _2),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
+        true, // logs raw output by default?
+        true, // logs trace output by default?
         bind(&Terminal::onScreenCommands, this, _1),
         std::move(_requestDynamicColor),
         std::move(_resetDynamicColor),

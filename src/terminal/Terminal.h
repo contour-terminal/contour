@@ -63,6 +63,9 @@ class Terminal {
     /// Retrieves reference to the underlying PTY device.
     PseudoTerminal& device() noexcept { return pty_; }
 
+    void setLogTraceOutput(bool _enabled) { screen_.setLogTrace(_enabled); }
+    void setLogRawOutput(bool _enabled) { screen_.setLogRaw(_enabled); }
+
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
 

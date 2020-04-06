@@ -348,6 +348,8 @@ class Screen {
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
            Logger _logger,
+           bool _logRaw,
+           bool _logTrace,
            Hook _onCommands,
            std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
            std::function<void(DynamicColorName)> _resetDynamicColor,
@@ -375,10 +377,17 @@ class Screen {
         std::move(_setCursorStyle),
         std::move(_reply),
         std::move(_logger),
+        true, // logs raw output by default?
+        true, // logs trace output by default?
         {}, {}, {}, {}} {}
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), {}, {}, {}, {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}} {}
+
+    void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
+    bool logTrace() const noexcept { return logTrace_; }
+    void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
+    bool logRaw() const noexcept { return logRaw_; }
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
@@ -587,6 +596,8 @@ class Screen {
   private:
     Hook const onCommands_;
     Logger const logger_;
+    bool logRaw_ = false;
+    bool logTrace_ = false;
     ModeSwitchCallback useApplicationCursorKeys_;
     std::function<void()> onWindowTitleChanged_;
     ResizeWindowCallback resizeWindow_;

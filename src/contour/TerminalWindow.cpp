@@ -349,6 +349,8 @@ void TerminalWindow::initializeGL()
         ref(logger_)
     );
 
+    terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
+    terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
     terminalView_->terminal().setTabWidth(profile().tabWidth);
 }
 
@@ -439,6 +441,9 @@ bool TerminalWindow::reloadConfigValues()
     terminalView_->terminal().setWordDelimiters(newConfig.wordDelimiters);
     config_ = move(newConfig);
     setProfile(*config_.profile(profileName_));
+
+    terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
+    terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
 
     return true;
 }

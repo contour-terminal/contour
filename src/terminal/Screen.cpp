@@ -628,6 +628,8 @@ Screen::Screen(WindowSize const& _size,
 			   OnSetCursorStyle _setCursorStyle,
                Reply reply,
                Logger _logger,
+               bool _logRaw,
+               bool _logTrace,
                Hook onCommands,
                std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                std::function<void(DynamicColorName)> _resetDynamicColor,
@@ -635,6 +637,8 @@ Screen::Screen(WindowSize const& _size,
 ) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
+    logRaw_{ _logRaw },
+    logTrace_{ _logTrace },
     useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
     onWindowTitleChanged_{ move(_onWindowTitleChanged) },
     resizeWindow_{ move(_resizeWindow) },
@@ -692,7 +696,7 @@ void Screen::write(Command const& _command)
 void Screen::write(char const * _data, size_t _size)
 {
 #if defined(LIBTERMINAL_LOG_RAW)
-    if (logger_)
+    if (logRaw_ && logger_)
         logger_(RawOutputEvent{ escape(_data, _data + _size) });
 #endif
 
@@ -708,8 +712,8 @@ void Screen::write(char const * _data, size_t _size)
             state_->verifyState();
 
             #if defined(LIBTERMINAL_LOG_TRACE)
-            // TODO: if (logTrace_)
-            logger_(TraceOutputEvent{to_mnemonic(_command, true, true)});
+            if (logTrace_ && logger_)
+                logger_(TraceOutputEvent{to_mnemonic(_command, true, true)});
             #endif
         }
     );
