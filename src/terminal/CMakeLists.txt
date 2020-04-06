@@ -78,11 +78,11 @@ endif()
 if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(terminal_test
+        test_main.cpp
         Parser_test.cpp
         Screen_test.cpp
         OutputHandler_test.cpp
 		Selector_test.cpp
-        terminal_test.cpp
         util/UTF8_test.cpp
         util/compose_test.cpp
     )
