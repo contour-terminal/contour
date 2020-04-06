@@ -1791,6 +1791,100 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     }
 }
 
+TEST_CASE("findNextMarker", "[screen]")
+{
+    auto screen = Screen{{4, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
+
+    SECTION("no marks") {
+        screen.write("1abc\r\n"s);
+        screen.write("2def\r\n"s);
+        screen.write("3ghi\r\n"s);
+        screen.write("4jkl\r\n"s);
+        screen.write("5mno\r\n"s);
+
+        CHECK(screen.findNextMarker(0).value() == 0);
+        CHECK(screen.findNextMarker(1).value() == 0);
+        CHECK(screen.findNextMarker(2).value() == 0);
+        CHECK(screen.findNextMarker(3).value() == 0);
+        CHECK(screen.findNextMarker(4).value() == 0);
+        CHECK(screen.findNextMarker(5).value() == 0);
+    }
+
+    SECTION("with marks") {
+        screen.write(SetMark{});
+        screen.write("1abc\r\n"s);
+        screen.write("2def\r\n"s);
+        screen.write(SetMark{});
+        screen.write(SetMark{});
+        screen.write("3ghi\r\n"s);
+        screen.write(SetMark{});
+        screen.write("4jkl\r\n"s);
+        screen.write("5mno\r\n"s);
+
+        REQUIRE(screen.renderTextLine(1) == "5mno");
+        REQUIRE(screen.renderTextLine(2) == "    ");
+
+        CHECK(screen.findNextMarker(0).value() == 0);
+
+        CHECK(screen.findNextMarker(1).has_value());
+        CHECK(screen.findNextMarker(1).value() == 0); // 3ghi
+
+        CHECK(screen.findNextMarker(2).has_value());
+        CHECK(screen.findNextMarker(2).value() == 1); // 2def
+
+        CHECK(screen.findNextMarker(4).has_value());
+        CHECK(screen.findNextMarker(4).value() == 2); // 2def
+    }
+}
+
+TEST_CASE("findPrevMarker", "[screen]")
+{
+    auto screen = Screen{{4, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
+
+    SECTION("no marks") {
+        screen.write("1abc\r\n"s);
+        screen.write("2def\r\n"s);
+        screen.write("3ghi\r\n"s);
+        screen.write("4jkl\r\n"s);
+        screen.write("5mno\r\n"s);
+
+        REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
+
+        // being a little beyond history line count
+        REQUIRE_FALSE(screen.findPrevMarker(1).has_value());
+    }
+
+    SECTION("with marks") {
+        screen.write(SetMark{});
+        screen.write("1abc\r\n"s);
+        screen.write("2def\r\n"s);
+        screen.write(SetMark{});
+        screen.write(SetMark{});
+        screen.write("3ghi\r\n"s);
+        screen.write(SetMark{});
+        screen.write("4jkl\r\n"s);
+        screen.write("5mno\r\n"s);
+
+        REQUIRE(screen.renderTextLine(1) == "5mno");
+        REQUIRE(screen.renderTextLine(2) == "    ");
+
+        REQUIRE(screen.findPrevMarker(0).has_value());
+        REQUIRE(screen.findPrevMarker(0).value() == 1); // 4jkl
+
+        REQUIRE(screen.findPrevMarker(1).has_value());
+        REQUIRE(screen.findPrevMarker(1).value() == 2); // 3ghi
+
+        REQUIRE(screen.findPrevMarker(2).has_value());
+        REQUIRE(screen.findPrevMarker(2).value() == 4); // 2def
+
+        REQUIRE_FALSE(screen.findPrevMarker(4).has_value());
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
