@@ -15,6 +15,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <type_traits>
 
 namespace terminal::support {
 
@@ -81,6 +83,98 @@ template <typename T>
 constexpr inline _Times<T, T> times(T count)
 {
     return _Times<T, T>{0, count, 1};
+}
+
+// ---------------------------------------------------------------------------------------------------
+
+template <typename I, typename T1, typename T2>
+struct _Times2DIerator {
+    using Outer = _Times<I, T1>;
+    using Inner = _Times<I, T2>;
+
+    Outer first;
+    Inner second;
+    typename Outer::iterator outerIt;
+    typename Inner::iterator innerIt;
+
+    constexpr _Times2DIerator(Outer _outer, Inner _inner, bool _init) noexcept :
+        first{ std::move(_outer) },
+        second{ std::move(_inner) },
+        outerIt{ _init ? std::begin(first) : std::end(first) },
+        innerIt{ _init ? std::begin(second) : std::end(second) }
+    {}
+
+    using value_type = std::tuple<T1, T2>;
+    constexpr value_type operator*() const noexcept { return {*outerIt, *innerIt}; }
+
+    constexpr _Times2DIerator<I, T1, T2>& operator++() noexcept {
+        ++innerIt;
+        if (innerIt == std::end(second)) {
+            ++outerIt;
+            if (outerIt != std::end(first))
+                innerIt = std::begin(second);
+        }
+        return *this;
+    }
+
+    constexpr _Times2DIerator<I, T1, T2>& operator++(int) noexcept { return *++this; }
+
+    constexpr bool operator==(_Times2DIerator<I, T1, T2> const& other) const noexcept {
+        return innerIt == other.innerIt;
+        //return outerIt == other.outerIt && innerIt == other.innerIt;
+    }
+
+    constexpr bool operator!=(_Times2DIerator<I, T1, T2> const& other) const noexcept {
+        return !(*this == other);
+    }
+};
+
+template <typename I, typename T1, typename T2>
+struct _Times2D
+{
+    _Times<I, T1> first;
+    _Times<I, T2> second;
+
+    using iterator = _Times2DIerator<I, T1, T2>;
+
+    constexpr std::size_t size() const noexcept { return first.size() * second.size(); }
+    constexpr auto operator[](std::size_t i) const noexcept { return second[i % second.size()]; }
+
+    constexpr iterator begin() const noexcept { return iterator{first, second, true}; }
+    constexpr iterator end() const noexcept { return iterator{first, second, false}; }
+};
+
+template <typename I, typename T1, typename T2>
+constexpr auto begin(_Times2D<I, T1, T2> const& _times) noexcept { return _times.begin(); }
+
+template <typename I, typename T1, typename T2>
+constexpr auto end(_Times2D<I, T1, T2> const& _times) noexcept { return _times.end(); }
+
+template <typename I, typename T1, typename T2>
+constexpr auto begin(_Times2D<I, T1, T2>& _times) noexcept { return _times.begin(); }
+
+template <typename I, typename T1, typename T2>
+constexpr auto end(_Times2D<I, T1, T2>& _times) noexcept { return _times.end(); }
+
+template <typename I, typename T1, typename T2>
+constexpr inline _Times2D<I, T1, T2> operator*(_Times<I, T1> a, _Times<I, T2> b)
+{
+    return _Times2D<I, T1, T2>{std::move(a), std::move(b)};
+}
+
+template<
+    typename I,
+    typename T1,
+    typename T2,
+    typename Callable,
+              typename std::enable_if_t<
+                  std::is_invocable_r_v<void, Callable, T1, T2>,
+                  int> = 0
+>
+constexpr void operator|(_Times2D<I, T1, T2> _times, Callable _callable)
+{
+    for (auto && [i, j] : _times)
+        _callable(i, j);
 }
 
 } // end namespace
