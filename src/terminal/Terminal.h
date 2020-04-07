@@ -33,7 +33,7 @@
 
 namespace terminal {
 
-/// Terminal API to manage keyboard and screen of a pseudo terminal.
+/// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
 /// With a terminal being attached to a Process, the terminal's screen
 /// gets updated according to the process' outputted text,
@@ -42,6 +42,7 @@ namespace terminal {
 class Terminal {
   public:
     using Hook = std::function<void(std::vector<Command> const& commands)>;
+    using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 
     explicit Terminal(
         WindowSize _winSize,
@@ -60,18 +61,16 @@ class Terminal {
     );
     ~Terminal();
 
-    /// Retrieves reference to the underlying PTY device.
-    PseudoTerminal& device() noexcept { return pty_; }
-
-    void setLogTraceOutput(bool _enabled) { screen_.setLogTrace(_enabled); }
-    void setLogRawOutput(bool _enabled) { screen_.setLogRaw(_enabled); }
-
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
 
-    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
-    size_t historyLineCount() const noexcept;
+    /// Retrieves reference to the underlying PTY device.
+    PseudoTerminal& device() noexcept { return pty_; }
 
+    WindowSize screenSize() const noexcept { return pty_.screenSize(); }
+    void resizeScreen(WindowSize const& _newWindowSize);
+
+    // {{{ input proxy
     // Sends given input event to connected slave.
     bool send(KeyInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
     bool send(CharInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
@@ -84,29 +83,23 @@ class Terminal {
 
     /// Sends verbatim text in bracketed mode to application.
     void sendPaste(std::string_view const& _text);
+    // }}}
 
-    /// Writes a given VT-sequence to screen.
-    void writeToScreen(char const* data, size_t size);
-    void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
-    void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
+    // {{{ screen proxy
+    void setLogTraceOutput(bool _enabled) { screen_.setLogTrace(_enabled); }
+    void setLogRawOutput(bool _enabled) { screen_.setLogRaw(_enabled); }
+    void setTabWidth(unsigned int _tabWidth) { screen_.setTabWidth(_tabWidth); }
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount) { screen_.setMaxHistoryLineCount(_maxHistoryLineCount); }
+    size_t historyLineCount() const noexcept { return screen_.historyLineCount(); }
+    std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
 
-    /// Checks if a render() method should be called by checking the dirty bit,
-    /// and if so, clears the dirty bit and returns true, false otherwise.
-    bool shouldRender(std::chrono::steady_clock::time_point const& _now) const;
+    /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
+    std::string screenshot() const;
 
-    /// Thread-safe access to screen data for rendering.
-    template <typename... RenderPasses>
-    uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
-    {
-        auto _l = std::lock_guard{screenLock_};
-        auto const changes = changes_.exchange(0);
-        updateCursorVisibilityState(_now);
-        renderPass(pass, std::forward<RenderPasses>(passes)...);
-        return changes;
-    }
+    /// @returns the current Cursor state.
+    Cursor cursor() const;
 
-    std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
-
+    /// @returns a reference to the cell at the given absolute coordinate.
     Screen::Cell const& absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
@@ -118,20 +111,32 @@ class Terminal {
         return absoluteCoordinate(_viewportCoordinate, scrollOffset_);
     }
 
-    using Cursor = Screen::Cursor; //TODO: CursorShape shape;
+    /// Writes a given VT-sequence to screen.
+    void writeToScreen(char const* data, size_t size);
+    void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
+    void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
+    // }}}
 
-    /// @returns the current Cursor state.
-    Cursor cursor() const;
+    // {{{ Screen Render Proxy
+    /// Checks if a render() method should be called by checking the dirty bit,
+    /// and if so, clears the dirty bit and returns true, false otherwise.
+    bool shouldRender(std::chrono::steady_clock::time_point const& _now) const;
 
-    std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
+    std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
 
-    /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
-    std::string screenshot() const;
+    /// Thread-safe access to screen data for rendering.
+    template <typename... RenderPasses>
+    uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
+    {
+        auto _l = std::lock_guard{screenLock_};
+        auto const changes = changes_.exchange(0);
+        updateCursorVisibilityState(_now);
+        renderPass(pass, std::forward<RenderPasses>(passes)...);
+        return changes;
+    }
+    // }}}
 
-    void resizeScreen(WindowSize const& _newWindowSize);
-
-    void setTabWidth(unsigned int _tabWidth);
-
+    // {{{ viewport management
     /// Tests whether given absolute line number [1..num] is within scrolling region
     bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
 
@@ -141,9 +146,11 @@ class Terminal {
     bool scrollDown(size_t _numLines);
     bool scrollToTop();
     bool scrollToBottom();
+    bool scrollMarkUp();
+    bool scrollMarkDown();
+    // }}}
 
-    // -----------------------------------------------------------------------------------
-
+    // {{{ cursor management
     void setCursorDisplay(CursorDisplay _value);
     void setCursorShape(CursorShape _value);
     CursorShape cursorShape() const noexcept { return cursorShape_; }
@@ -158,12 +165,15 @@ class Terminal {
         return lastCursorBlink_;
     }
 
-    // -----------------------------------------------------------------------------------
+    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
+    {
+        return cursorBlinkInterval_;
+    }
+    // }}}
 
+    // {{{ selection management
     void setWordDelimiters(std::string const& _wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
-
-    // -----------------------------------------------------------------------------------
 
     /// Tests whether some area has been selected.
     bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
@@ -176,16 +186,7 @@ class Terminal {
 
     /// Renders only the selected area.
     void renderSelection(terminal::Screen::Renderer const& _render) const;
-
-    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
-    {
-        return cursorBlinkInterval_;
-    }
-
-    WindowSize screenSize() const noexcept { return pty_.screenSize(); }
-
-    bool scrollMarkUp();
-    bool scrollMarkDown();
+    // }}}
 
   private:
     void flushInput();
@@ -229,6 +230,7 @@ class Terminal {
 
     size_t scrollOffset_ = 0;
     terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
+    bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;

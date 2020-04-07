@@ -80,16 +80,6 @@ Terminal::~Terminal()
     screenUpdateThread_.join();
 }
 
-void Terminal::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
-{
-    screen_.setMaxHistoryLineCount(_maxHistoryLineCount);
-}
-
-size_t Terminal::historyLineCount() const noexcept
-{
-    return screen_.historyLineCount();
-}
-
 void Terminal::useApplicationCursorKeys(bool _enable)
 {
     auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
@@ -188,7 +178,8 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
     {
         double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
         lastClick_ = _now;
-        speedClicks_ = diff_ms >= 10.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
+        speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
+        leftMouseButtonPressed_ = true;
 
         if (_mousePress.modifier == Modifier::None || _mousePress.modifier == Modifier::Control)
         {
@@ -203,12 +194,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     return Selector::Mode::Linear;
             }(speedClicks_, _mousePress.modifier);
 
-            if (selector_)
-            {
-                cout << fmt::format("cancel-selection: {}\n", *selector_);
-                selector_.reset();
-            }
-            else
+            if (speedClicks_ >= 2)
             {
                 selector_ = make_unique<Selector>(
                     selectionMode,
@@ -218,8 +204,10 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     screenSize(),
                     absoluteCoordinate(currentMousePosition_)
                 );
-                cout << fmt::format("start-selection: {}\n", *selector_);
             }
+            else if (selector_)
+                clearSelection();
+
             changes_++;
 
             return true;
@@ -233,6 +221,17 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     auto const newPosition = terminal::Coordinate{_mouseMove.row, _mouseMove.column};
 
     currentMousePosition_ = newPosition;
+    if (leftMouseButtonPressed_ && !selector_)
+    {
+        selector_ = make_unique<Selector>(
+            Selector::Mode::Linear,
+            bind(&Terminal::absoluteAt, this, _1),
+            wordDelimiters(),
+            screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
+            screenSize(),
+            absoluteCoordinate(currentMousePosition_)
+        );
+    }
 
     if (selector_ && selector_->state() != Selector::State::Complete)
     {
@@ -240,17 +239,18 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
         changes_++;
     }
 
+    speedClicks_ = 0;
+
     return true;
 }
 
-bool Terminal::send(MouseReleaseEvent const& /*_mouseRelease*/, chrono::steady_clock::time_point /*_now*/)
+bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
 {
-    if (selector_)
+    if (_mouseRelease.button == MouseButton::Left)
     {
-        if (selector_->state() == Selector::State::InProgress)
+        leftMouseButtonPressed_ = false;
+        if (selector_ && selector_->state() == Selector::State::InProgress)
             selector_->stop();
-        else
-            selector_.reset();
     }
 
     return true;
@@ -362,11 +362,6 @@ void Terminal::resizeScreen(WindowSize const& _newWindowSize)
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.resize(_newWindowSize);
     pty_.resizeScreen(_newWindowSize);
-}
-
-void Terminal::setTabWidth(unsigned int _tabWidth)
-{
-    screen_.setTabWidth(_tabWidth);
 }
 
 Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept

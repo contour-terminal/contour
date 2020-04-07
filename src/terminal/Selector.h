@@ -38,6 +38,14 @@ namespace terminal {
  * to move the screen contents up, then also the selection's begin (and extend) is being moved up.
  *
  * This is achieved by using absolute coordinates from the top history line.
+ *
+ * How Selection usually works
+ * ===========================
+ *
+ * First mouse press ->
+ * Second mouse press AND on same coordinate as first mouse press -> selects word
+ * Third mouse press AND on same coordinate as prior mouse presses -> reselects line
+ * Mouse moves -> resets last recorded mouse press coordinate
  */
 class Selector {
   public:
@@ -164,6 +172,30 @@ class Selector {
 
 namespace fmt {
     template <>
+    struct formatter<terminal::Selector::State> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+        using State = terminal::Selector::State;
+        template <typename FormatContext>
+        auto format(State _state, FormatContext& ctx)
+        {
+            switch (_state)
+            {
+                case State::Waiting:
+                    return format_to(ctx.out(), "Waiting");
+                case State::InProgress:
+                    return format_to(ctx.out(), "InProgress");
+                case State::Complete:
+                    return format_to(ctx.out(), "Complete");
+            }
+            return format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
+        }
+    };
+
+    template <>
     struct formatter<terminal::Selector> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
@@ -174,8 +206,11 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::Selector& _selector, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({} .. {}; state: {})",
-                    _selector.from(), _selector.to(), static_cast<int>(_selector.state()));
+            return format_to(ctx.out(),
+                             "({} .. {}; state: {})",
+                             _selector.from(),
+                             _selector.to(),
+                             _selector.state());
         }
     };
 }
