@@ -35,6 +35,7 @@ Terminal::Terminal(WindowSize _winSize,
                    Hook _onScreenCommands,
                    function<void()> _onClosed,
                    string const& _wordDelimiters,
+                   function<void()> _onSelectionComplete,
                    std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                    std::function<void(DynamicColorName)> _resetDynamicColor,
                    std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
@@ -50,6 +51,7 @@ Terminal::Terminal(WindowSize _winSize,
     startTime_{ _now },
     wordDelimiters_{ utf8::decode(_wordDelimiters) },
     selector_{},
+    onSelectionComplete_{ move(_onSelectionComplete) },
     inputGenerator_{},
     screen_{
         _winSize,
@@ -250,7 +252,12 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     {
         leftMouseButtonPressed_ = false;
         if (selector_ && selector_->state() == Selector::State::InProgress)
+        {
             selector_->stop();
+
+            if (onSelectionComplete_)
+                onSelectionComplete_();
+        }
     }
 
     return true;

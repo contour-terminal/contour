@@ -62,7 +62,7 @@ class TerminalWindow :
     void toggleFullScreen();
 
     bool setFontSize(unsigned _fontSize);
-    std::string getClipboardString();
+    void onSelectionComplete();
     std::string extractSelectionText();
     void spawnNewTerminal(std::string const& _profileName);
 

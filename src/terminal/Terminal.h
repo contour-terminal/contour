@@ -55,6 +55,7 @@ class Terminal {
         Hook _onScreenCommands = {},
         std::function<void()> _onClosed = {},
         std::string const& _wordDelimiters = "",
+        std::function<void()> _onSelectionComplete = {},
         std::function<RGBColor(DynamicColorName)> _requestDynamicColor = {},
         std::function<void(DynamicColorName)> _resetDynamicColor = {},
         std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor = {}
@@ -223,6 +224,7 @@ class Terminal {
 
     std::u32string wordDelimiters_;
     std::unique_ptr<Selector> selector_;
+    std::function<void()> onSelectionComplete_;
 
     // helpers for detecting double/tripple clicks
     std::chrono::steady_clock::time_point lastClick_{};

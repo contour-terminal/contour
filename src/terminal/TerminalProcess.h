@@ -13,6 +13,7 @@
  */
 #include <terminal/Terminal.h>
 #include <terminal/Process.h>
+#include <functional>
 #include <thread>
 
 namespace terminal {
@@ -34,6 +35,7 @@ class TerminalProcess : public Terminal, public Process {
         std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
         std::chrono::steady_clock::time_point _now,
         std::string const& _wordDelimiters,
+        std::function<void()> _onSelectionComplete,
         CursorDisplay _cursorDisplay,
         CursorShape _cursorShape,
         Hook _onScreenCommands,

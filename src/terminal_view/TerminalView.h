@@ -43,6 +43,7 @@ class TerminalView {
                  terminal::WindowSize const& _winSize,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
+                 std::function<void()> _onSelectionComplete,
                  Font& _regularFont,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,

@@ -330,6 +330,7 @@ void TerminalWindow::initializeGL()
         profile().terminalSize,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
+        bind(&TerminalWindow::onSelectionComplete, this),
         regularFont_.get(),
         profile().cursorShape,
         profile().cursorDisplay,
@@ -688,12 +689,19 @@ void TerminalWindow::executeAction(Action const& _action)
             return false;
         },
         [this](actions::PasteSelection) -> bool {
-            string const text = extractSelectionText();
-            terminalView_->terminal().sendPaste(string_view{text});
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+            {
+                string const text = clipboard->text(QClipboard::Selection).toUtf8().toStdString();
+                terminalView_->terminal().sendPaste(string_view{text});
+            }
             return false;
         },
         [this](actions::PasteClipboard) -> bool {
-            terminalView_->terminal().sendPaste(getClipboardString());
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+            {
+                string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
+                terminalView_->terminal().sendPaste(string_view{text});
+            }
             return false;
         },
         [this](actions::ChangeProfile const& v) -> bool {
@@ -777,12 +785,13 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     profile_ = move(newProfile);
 }
 
-std::string TerminalWindow::getClipboardString()
+void TerminalWindow::onSelectionComplete()
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        return clipboard->text().toUtf8().toStdString();
-    else
-        return "";
+    {
+        string const text = extractSelectionText();
+        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
+    }
 }
 
 string TerminalWindow::extractSelectionText()
