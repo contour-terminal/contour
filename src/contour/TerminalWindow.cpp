@@ -247,11 +247,11 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     if (!loggingSink_.good())
         throw runtime_error{ "Failed to open log file." };
 
-    if (!regularFont_.get().isFixedWidth())
-        throw runtime_error{ "Regular font is not a fixed-width font." };
-
     if (profile().backgroundBlur && !enableBackgroundBlur(true))
         throw runtime_error{ "Could not enable background blur." };
+
+    if (!regularFont_.get().isFixedWidth())
+        cerr << "Regular font is not a fixed-width font." << endl;
 
     resize(
         profile().terminalSize.columns * regularFont_.get().maxAdvance(),
