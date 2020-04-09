@@ -417,6 +417,7 @@ class Screen {
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot() const;
 
+    // {{{ Command processor
     void operator()(Bell const& v);
     void operator()(FullReset const& v);
     void operator()(Linefeed const& v);
@@ -488,6 +489,7 @@ class Screen {
     void operator()(RequestDynamicColor const& v);
     void operator()(ResetDynamicColor const& v);
     void operator()(SetDynamicColor const& v);
+    // }}}
 
     // reset screen
     void resetSoft();
@@ -495,6 +497,17 @@ class Screen {
 
     WindowSize const& size() const noexcept { return size_; }
     void resize(WindowSize const& _newSize);
+
+    /// {{{ viewport management API
+    size_t scrollOffset() const noexcept { return scrollOffset_; }
+    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
+    bool scrollUp(size_t _numLines);
+    bool scrollDown(size_t _numLines);
+    bool scrollToTop();
+    bool scrollToBottom();
+    bool scrollMarkUp();
+    bool scrollMarkDown();
+    //}}}
 
     bool isCursorInsideMargins() const noexcept {
         if (!state_->margin_.vertical.contains(state_->cursor.row))
@@ -617,6 +630,8 @@ class Screen {
     std::optional<size_t> maxHistoryLineCount_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
+
+    size_t scrollOffset_;
 
     std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
     std::function<void(DynamicColorName)> resetDynamicColor_{};

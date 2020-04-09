@@ -107,15 +107,22 @@ class Terminal {
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
 
     /// @returns absolute coordinate of given _viewportCoordinate at the current viewport scroll offset.
-    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept
-    {
-        return absoluteCoordinate(_viewportCoordinate, scrollOffset_);
-    }
+    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept { return absoluteCoordinate(_viewportCoordinate, screen_.scrollOffset()); }
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
     void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
+
+    // viewport management
+    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept { return screen_.isAbsoluteLineVisible(_row); }
+    size_t scrollOffset() const noexcept { return screen_.scrollOffset(); }
+    bool scrollUp(size_t _numLines) { return screen_.scrollUp(_numLines); }
+    bool scrollDown(size_t _numLines) { return screen_.scrollDown(_numLines); }
+    bool scrollToTop() { return screen_.scrollToTop(); }
+    bool scrollToBottom() { return screen_.scrollToBottom(); }
+    bool scrollMarkUp() { return screen_.scrollMarkUp(); }
+    bool scrollMarkDown() { return screen_.scrollMarkDown(); }
     // }}}
 
     // {{{ Screen Render Proxy
@@ -135,20 +142,6 @@ class Terminal {
         renderPass(pass, std::forward<RenderPasses>(passes)...);
         return changes;
     }
-    // }}}
-
-    // {{{ viewport management
-    /// Tests whether given absolute line number [1..num] is within scrolling region
-    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
-
-    size_t scrollOffset() const noexcept { return scrollOffset_; }
-
-    bool scrollUp(size_t _numLines);
-    bool scrollDown(size_t _numLines);
-    bool scrollToTop();
-    bool scrollToBottom();
-    bool scrollMarkUp();
-    bool scrollMarkDown();
     // }}}
 
     // {{{ cursor management
@@ -201,7 +194,7 @@ class Terminal {
     template <typename... RemainingPasses>
     void renderPass(Screen::Renderer const& pass, RemainingPasses... remainingPasses) const
     {
-        screen_.render(pass, scrollOffset_);
+        screen_.render(pass, screen_.scrollOffset());
 
         if constexpr (sizeof...(RemainingPasses) != 0)
             renderPass(std::forward<RemainingPasses>(remainingPasses)...);
@@ -230,7 +223,6 @@ class Terminal {
     std::chrono::steady_clock::time_point lastClick_{};
     unsigned int speedClicks_ = 0;
 
-    size_t scrollOffset_ = 0;
     terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 

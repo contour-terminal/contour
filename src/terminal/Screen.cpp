@@ -832,6 +832,83 @@ std::string Screen::screenshot() const
     return result.str();
 }
 
+// {{{ viewport management
+bool Screen::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
+{
+    return _row >= historyLineCount() - scrollOffset_
+        && _row <= historyLineCount() - scrollOffset_ + size().rows;
+}
+
+bool Screen::scrollUp(size_t _numLines)
+{
+    if (auto const newOffset = min(scrollOffset_ + _numLines, historyLineCount()); newOffset != scrollOffset_)
+    {
+        scrollOffset_ = newOffset;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool Screen::scrollDown(size_t _numLines)
+{
+    if (auto const newOffset = scrollOffset_ >= _numLines ? scrollOffset_ - _numLines : 0; newOffset != scrollOffset_)
+    {
+        scrollOffset_ = newOffset;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool Screen::scrollMarkUp()
+{
+    if (auto const newScrollOffset = findPrevMarker(scrollOffset_); newScrollOffset.has_value())
+    {
+        printf("%s\n", fmt::format("ScrollMarkUp: {}", *newScrollOffset).c_str());
+        scrollOffset_ = newScrollOffset.value();
+        return true;
+    }
+    else
+        printf("%s\n", fmt::format("ScrollMarkUp: FAILED", *newScrollOffset).c_str());
+
+    return false;
+}
+
+bool Screen::scrollMarkDown()
+{
+    if (auto const newScrollOffset = findNextMarker(scrollOffset_); newScrollOffset.has_value())
+    {
+        scrollOffset_ = newScrollOffset.value();
+        return true;
+    }
+
+    return false;
+}
+
+bool Screen::scrollToTop()
+{
+    if (auto top = historyLineCount(); top != scrollOffset_)
+    {
+        scrollOffset_ = top;
+        return true;
+    }
+    else
+        return false;
+}
+
+bool Screen::scrollToBottom()
+{
+    if (scrollOffset_ != 0)
+    {
+        scrollOffset_ = 0;
+        return true;
+    }
+    else
+        return false;
+}
+// }}}
+
 // {{{ ops
 void Screen::operator()(Bell const&)
 {

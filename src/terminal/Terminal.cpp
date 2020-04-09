@@ -327,7 +327,7 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 //     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
 //     changes_.store(0);
 //     updateCursorVisibilityState(_now);
-//     screen_.render(pass1, scrollOffset_);
+//     screen_.render(pass1, screen_.scrollOffset());
 // }
 //
 // void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1, Screen::Renderer const& pass2) const
@@ -335,8 +335,8 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 //     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
 //     changes_.store(0);
 //     updateCursorVisibilityState(_now);
-//     screen_.render(pass1, scrollOffset_);
-//     screen_.render(pass2, scrollOffset_);
+//     screen_.render(pass1, screen_.scrollOffset());
+//     screen_.render(pass2, screen_.scrollOffset());
 // }
 
 void Terminal::updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const
@@ -418,81 +418,6 @@ void Terminal::clearSelection()
 {
     selector_.reset();
     changes_++;
-}
-
-bool Terminal::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
-{
-    return _row >= historyLineCount() - scrollOffset_
-        && _row <= historyLineCount() - scrollOffset_ + screenSize().rows;
-}
-
-bool Terminal::scrollUp(size_t _numLines)
-{
-    if (auto const newOffset = min(scrollOffset_ + _numLines, historyLineCount()); newOffset != scrollOffset_)
-    {
-        scrollOffset_ = newOffset;
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Terminal::scrollDown(size_t _numLines)
-{
-    if (auto const newOffset = scrollOffset_ >= _numLines ? scrollOffset_ - _numLines : 0; newOffset != scrollOffset_)
-    {
-        scrollOffset_ = newOffset;
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Terminal::scrollMarkUp()
-{
-    if (auto const newScrollOffset = screen_.findPrevMarker(scrollOffset_); newScrollOffset.has_value())
-    {
-        printf("%s\n", fmt::format("ScrollMarkUp: {}", *newScrollOffset).c_str());
-        scrollOffset_ = newScrollOffset.value();
-        return true;
-    }
-    else
-        printf("%s\n", fmt::format("ScrollMarkUp: FAILED", *newScrollOffset).c_str());
-
-    return false;
-}
-
-bool Terminal::scrollMarkDown()
-{
-    if (auto const newScrollOffset = screen_.findNextMarker(scrollOffset_); newScrollOffset.has_value())
-    {
-        scrollOffset_ = newScrollOffset.value();
-        return true;
-    }
-
-    return false;
-}
-
-bool Terminal::scrollToTop()
-{
-    if (auto top = historyLineCount(); top != scrollOffset_)
-    {
-        scrollOffset_ = top;
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Terminal::scrollToBottom()
-{
-    if (scrollOffset_ != 0)
-    {
-        scrollOffset_ = 0;
-        return true;
-    }
-    else
-        return false;
 }
 
 }  // namespace terminal
