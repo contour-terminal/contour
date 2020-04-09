@@ -151,12 +151,6 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
     else
         logger_(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier)) });
 
-    if (selector_ && _charEvent.value == static_cast<char32_t>(ControlCode::C0::ESC))
-    {
-        clearSelection();
-        return true;
-    }
-
     // Early exit if KAM is enabled.
     if (screen_.isModeEnabled(Mode::KeyboardAction))
         return true;
