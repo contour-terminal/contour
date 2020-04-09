@@ -114,6 +114,7 @@ class TerminalView {
     GLRenderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;
+    ColorProfile defaultColorProfile_;
 };
 
 class GLTextShaper;

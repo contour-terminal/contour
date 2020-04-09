@@ -93,7 +93,8 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         move(_onTerminalClosed),
         [this](terminal::LogEvent const& _event) { logger_(_event); }
     },
-    colorProfile_{_colorProfile}
+    colorProfile_{_colorProfile},
+    defaultColorProfile_{_colorProfile}
 {
 }
 
@@ -122,37 +123,61 @@ RGBColor TerminalView::requestDynamicColor(DynamicColorName _name)
 void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
 {
     colorProfile_ = _colors;
+    defaultColorProfile_ = _colors;
     renderer_.setColorProfile(colorProfile_);
 }
 
 void TerminalView::resetDynamicColor(DynamicColorName _name)
 {
-    std::cout << fmt::format("*** TODO: Resetting dynamic color: {}\n", _name); // TODO
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorProfile_.defaultForeground = defaultColorProfile_.defaultForeground;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorProfile_.defaultBackground = defaultColorProfile_.defaultBackground;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorProfile_.cursor = defaultColorProfile_.cursor;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorProfile_.mouseForeground = defaultColorProfile_.mouseForeground;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            // not needed (for now)
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorProfile_.selection = defaultColorProfile_.selection;
+            break;
+    }
 }
 
-void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& value)
+void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
 {
     switch (_name)
     {
         case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = value;
+            colorProfile_.defaultForeground = _value;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = value;
+            colorProfile_.defaultBackground = _value;
             break;
         case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = value;
+            colorProfile_.cursor = _value;
             break;
         case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = value;
+            colorProfile_.mouseForeground = _value;
             break;
         case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = value;
+            colorProfile_.mouseBackground = _value;
             break;
         case DynamicColorName::HighlightForegroundColor:
             break; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
         case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selection = value;
+            colorProfile_.selection = _value;
             break;
     }
 }
