@@ -49,7 +49,7 @@ class GLRenderer : public QOpenGLFunctions {
      */
     GLRenderer(Logger _logger,
                Font& _regularFont,
-               ColorProfile const& _colorProfile,
+               ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
@@ -59,8 +59,8 @@ class GLRenderer : public QOpenGLFunctions {
     size_t cellHeight() const noexcept { return regularFont_.get().lineHeight(); }
     size_t cellWidth() const noexcept { return regularFont_.get().maxAdvance(); }
 
+    void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setCursorColor(RGBColor const& _color);
     void setFont(Font& _font);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
@@ -160,7 +160,7 @@ class GLRenderer : public QOpenGLFunctions {
     Margin margin_{};
     Logger logger_;
 
-    ColorProfile const& colorProfile_;
+    ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
     std::reference_wrapper<Font> regularFont_;

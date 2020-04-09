@@ -48,7 +48,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
-                           terminal::ColorProfile& _colorProfile,
+                           terminal::ColorProfile _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            string const& _shell,
                            terminal::Process::Environment const& _env,
@@ -117,6 +117,12 @@ RGBColor TerminalView::requestDynamicColor(DynamicColorName _name)
             return colorProfile_.selection;
     }
     return RGBColor{}; // should never happen.
+}
+
+void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
+{
+    colorProfile_ = _colors;
+    renderer_.setColorProfile(colorProfile_);
 }
 
 void TerminalView::resetDynamicColor(DynamicColorName _name)

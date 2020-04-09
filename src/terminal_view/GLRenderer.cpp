@@ -24,14 +24,14 @@ using namespace terminal::view;
 
 GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
-                       terminal::ColorProfile const& _colorProfile,
+                       terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
                        ShaderConfig const& _textShaderConfig,
                        ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     logger_{ move(_logger) },
-    colorProfile_{ _colorProfile },
+    colorProfile_{ move(_colorProfile) },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     textShaper_{ regularFont_.get(), _projectionMatrix, _textShaderConfig },
@@ -100,9 +100,10 @@ void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
     backgroundOpacity_ = _opacity;
 }
 
-void GLRenderer::setCursorColor(terminal::RGBColor const& _color)
+void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
 {
-    cursor_.setColor(canonicalColor(_color));
+    colorProfile_ = _colors;
+    cursor_.setColor(canonicalColor(colorProfile_.cursor));
 }
 
 uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)

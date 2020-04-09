@@ -767,8 +767,7 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
 
     terminalView_->terminal().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
 
-    if (newProfile.colors.cursor != profile().colors.cursor)
-        terminalView_->setCursorColor(newProfile.colors.cursor);
+    terminalView_->setColorProfile(newProfile.colors);
 
     if (newProfile.cursorShape != profile().cursorShape)
         terminalView_->setCursorShape(newProfile.cursorShape);

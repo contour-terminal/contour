@@ -48,7 +48,7 @@ class TerminalView {
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
-                 terminal::ColorProfile& _colorProfile,
+                 terminal::ColorProfile _colorProfile,
                  terminal::Opacity _backgroundOpacity,
                  std::string const& _shell,
                  terminal::Process::Environment const& _env,
@@ -81,7 +81,6 @@ class TerminalView {
     void setFont(Font& _font) { renderer_.setFont(_font); }
     bool setFontSize(unsigned int _fontSize) { return renderer_.setFontSize(_fontSize); }
     bool setTerminalSize(WindowSize const& _newSize);
-    void setCursorColor(RGBColor const& _color) { return renderer_.setCursorColor(_color); }
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setProjection(QMatrix4x4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
@@ -104,6 +103,8 @@ class TerminalView {
 
     GLRenderer const& renderer() const { return renderer_; }
 
+    void setColorProfile(terminal::ColorProfile const& _colors);
+
     RGBColor requestDynamicColor(DynamicColorName _name);
     void resetDynamicColor(DynamicColorName _name);
     void setDynamicColor(DynamicColorName _name, RGBColor const& value);
@@ -112,7 +113,7 @@ class TerminalView {
     Logger logger_;
     GLRenderer renderer_;
     TerminalProcess process_;
-    ColorProfile& colorProfile_;
+    ColorProfile colorProfile_;
 };
 
 class GLTextShaper;
