@@ -1625,6 +1625,31 @@ void Screen::operator()(RequestDynamicColor const& v)
     }
 }
 
+void Screen::operator()(RequestTabStops const&)
+{
+    // Response: `DCS 2 $ u Pt ST`
+    ostringstream dcs;
+    dcs << "\033P2$u"; // DCS
+    if (!state_->tabs.empty())
+    {
+        for (size_t const i : times(state_->tabs.size()))
+        {
+            if (i)
+                dcs << '/';
+            dcs << state_->tabs[i];
+        }
+    }
+    else if (state_->tabWidth != 0)
+    {
+        dcs << state_->tabWidth + 1;
+        for (size_t column = 2 * state_->tabWidth + 1; column <= size().columns; column += state_->tabWidth)
+            dcs << '/' << column;
+    }
+    dcs << '\x5c'; // ST
+
+    reply(dcs.str());
+}
+
 void Screen::operator()(ResetDynamicColor const& v)
 {
     if (resetDynamicColor_)

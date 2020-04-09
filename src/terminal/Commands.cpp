@@ -351,6 +351,9 @@ class MnemonicBuilder {
     void operator()(RequestDynamicColor v) {
         build("REQDYNCOLOR", fmt::format("{}", v.name));
     }
+    void operator()(RequestTabStops) {
+        build("DECTABSR");
+    }
 
   private:
     bool withParameters_;

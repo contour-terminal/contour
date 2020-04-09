@@ -799,6 +799,11 @@ struct RequestDynamicColor {
     DynamicColorName name;
 };
 
+/// DECTABSR - Tab Stop Report
+///
+/// Requests currently configured tab stops.
+struct RequestTabStops {};
+
 /// Sets the DynamicColorName to given color value.
 struct SetDynamicColor {
     DynamicColorName name;
@@ -900,6 +905,7 @@ using Command = std::variant<
     ReportCursorPosition,
     ReportExtendedCursorPosition,
     RequestDynamicColor,
+    RequestTabStops,
     RequestMode,
     ResetDynamicColor,
     ResizeWindow,

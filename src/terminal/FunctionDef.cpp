@@ -692,6 +692,21 @@ FunctionHandlerMap functions(VTType _vt)
 			}
 		},
 		{
+			CSI(std::nullopt, '$', 'w', VTType::VT320, "DECRQPSR", "Request presentation state report"),
+			[](auto& _ctx) {
+				if (_ctx.parameterCount() != 1)
+					return HandlerResult::Invalid; // -> error
+				else if (_ctx.param(0) == 1)
+                    // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
+                    // TODO return _ctx.template emitCommand<RequestCursorState>(); // or call it with ...Detailed?
+					return HandlerResult::Invalid;
+				else if (_ctx.param(0) == 2)
+					return _ctx.template emitCommand<RequestTabStops>();
+				else
+					return HandlerResult::Invalid;
+			}
+		},
+		{
 			CSI(std::nullopt, ' ', 'q', VTType::VT100, "DECSCUSR", "Set Cursor Style"),
 			[](auto& _ctx) {
 				if (_ctx.parameterCount() <= 1)

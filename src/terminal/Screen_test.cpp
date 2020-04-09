@@ -1885,6 +1885,53 @@ TEST_CASE("findPrevMarker", "[screen]")
     }
 }
 
+TEST_CASE("DECTABSR", "[screen]")
+{
+    string reply;
+    auto screen = Screen{
+        {35, 2},
+        nullopt, // history line count (infinite)
+        {}, // useAppCursorKeys
+        {}, // onWindowTitleChanged
+        {}, // resizeWindow
+        {}, // setAppKeypadMode,
+        {}, // setBracketedPaste
+        {}, // setCursorStyle
+        [&](auto const& _reply) { reply += _reply; },
+        [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
+    };
+
+    SECTION("default tabstops") {
+        screen.write(RequestTabStops{});
+        CHECK(reply == "\033P2$u9/17/25/33\x5c");
+    }
+
+    SECTION("cleared tabs") {
+        screen.write(HorizontalTabClear{HorizontalTabClear::AllTabs});
+        screen.write(RequestTabStops{});
+        CHECK(reply == "\033P2$u\x5c");
+    }
+
+    SECTION("custom tabstops") {
+        screen.write(HorizontalTabClear{HorizontalTabClear::AllTabs});
+
+        screen.write(MoveCursorToColumn{2});
+        screen.write(HorizontalTabSet{});
+
+        screen.write(MoveCursorToColumn{4});
+        screen.write(HorizontalTabSet{});
+
+        screen.write(MoveCursorToColumn{8});
+        screen.write(HorizontalTabSet{});
+
+        screen.write(MoveCursorToColumn{16});
+        screen.write(HorizontalTabSet{});
+
+        screen.write(RequestTabStops{});
+        CHECK(reply == "\033P2$u2/4/8/16\x5c");
+    }
+}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition

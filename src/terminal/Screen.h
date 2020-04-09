@@ -487,6 +487,7 @@ class Screen {
     void operator()(AppendChar const& v);
 
     void operator()(RequestDynamicColor const& v);
+    void operator()(RequestTabStops const& v);
     void operator()(ResetDynamicColor const& v);
     void operator()(SetDynamicColor const& v);
     // }}}

@@ -183,6 +183,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
         [&](RequestDynamicColor const& v) { write("\033];?\x07", setDynamicColorCommand(v.name)); },
+        [&](RequestTabStops const&) { write("\033[2$w"); },
         [&](SetDynamicColor const& v) { write("\033]{};{}\x07", setDynamicColorCommand(v.name), setDynamicColorValue(v.color)); },
         [&](ResetDynamicColor const& v) { write("\033]{}\x07", resetDynamicColorCommand(v.name)); },
         [&](SetForegroundColor const& v) {
