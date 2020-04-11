@@ -304,6 +304,11 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 {
     char const chr = static_cast<char>(_characterEvent);
 
+    // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
+    if (_modifier.alt())
+        // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
+        append("\033");
+
     if (_characterEvent < 32 || (!_modifier.control() && utf8::isASCII(_characterEvent)))
         return append(chr); // raw C0 code
     else if (_modifier == Modifier::Control && _characterEvent == L' ')
