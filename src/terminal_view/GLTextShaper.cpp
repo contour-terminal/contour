@@ -155,15 +155,15 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        GL_RED,
-        font->glyph->bitmap.width,
-        font->glyph->bitmap.rows,
-        0,
-        GL_RED,
-        GL_UNSIGNED_BYTE,
-        font->glyph->bitmap.buffer
+        GL_TEXTURE_2D,                  // target
+        0,                              // level
+        GL_RED,                         // internal format
+        font->glyph->bitmap.width,      // width
+        font->glyph->bitmap.rows,       // height
+        0,                              // border (must be set to 0)
+        GL_RED,                         // pixel-data format
+        GL_UNSIGNED_BYTE,               // pixel-data type
+        font->glyph->bitmap.buffer      // pixel-data pointer
     );
 
     // Set texture options
