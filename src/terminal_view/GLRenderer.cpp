@@ -135,7 +135,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     if (_terminal.isSelectionAvailable())
     {
-        auto const color = canonicalColor(colorProfile_.selection, static_cast<terminal::Opacity>(0xC0));
+        auto const color = canonicalColor(colorProfile_.selection, static_cast<Opacity>(colorProfile_.selectionOpacity * 255.0f));
         for (Selector::Range const& range : _terminal.selection())
         {
             if (_terminal.isAbsoluteLineVisible(range.line))

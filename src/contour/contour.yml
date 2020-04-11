@@ -77,6 +77,8 @@ color_schemes:
         cursor: '#b0b030'
         # The text selection color can be customized here.
         selection: '#30c0c0'
+        # Opacity to draw the selection color over the existing screen cell(s).
+        selection_opacity: 0.3
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).

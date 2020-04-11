@@ -568,6 +568,9 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
     if (auto selection = _node["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
         colors.selection = selection.as<string>();
 
+    if (auto const selectionOpacity = _node["selection_opacity"]; selectionOpacity && selectionOpacity.IsScalar())
+        colors.selectionOpacity = std::clamp(selectionOpacity.as<float>(), 0.0f, 1.0f);
+
     if (auto cursor = _node["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
         colors.cursor = cursor.as<string>();
 
