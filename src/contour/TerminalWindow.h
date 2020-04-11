@@ -66,6 +66,8 @@ class TerminalWindow :
     std::string extractSelectionText();
     void spawnNewTerminal(std::string const& _profileName);
 
+    void onBell();
+
     float contentScale() const;
 
     bool enableBackgroundBlur(bool _enable);

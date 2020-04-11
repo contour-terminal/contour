@@ -36,6 +36,7 @@ Terminal::Terminal(WindowSize _winSize,
                    function<void()> _onClosed,
                    string const& _wordDelimiters,
                    function<void()> _onSelectionComplete,
+                   std::function<void()> _bell,
                    std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                    std::function<void(DynamicColorName)> _resetDynamicColor,
                    std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
@@ -67,6 +68,7 @@ Terminal::Terminal(WindowSize _winSize,
         true, // logs raw output by default?
         true, // logs trace output by default?
         bind(&Terminal::onScreenCommands, this, _1),
+        std::move(_bell),
         std::move(_requestDynamicColor),
         std::move(_resetDynamicColor),
         std::move(_setDynamicColor)

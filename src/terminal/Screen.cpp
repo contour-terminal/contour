@@ -631,6 +631,7 @@ Screen::Screen(WindowSize const& _size,
                bool _logRaw,
                bool _logTrace,
                Hook onCommands,
+               std::function<void()> _bell,
                std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                std::function<void(DynamicColorName)> _resetDynamicColor,
                std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
@@ -653,6 +654,7 @@ Screen::Screen(WindowSize const& _size,
     state_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
+    bell_{ move(_bell) },
     requestDynamicColor_{ move(_requestDynamicColor) },
     resetDynamicColor_{ move(_resetDynamicColor) },
     setDynamicColor_{ move(_setDynamicColor) }
@@ -912,6 +914,8 @@ bool Screen::scrollToBottom()
 // {{{ ops
 void Screen::operator()(Bell const&)
 {
+    if (bell_)
+        bell_();
 }
 
 void Screen::operator()(FullReset const&)

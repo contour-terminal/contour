@@ -331,6 +331,7 @@ void TerminalWindow::initializeGL()
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
         bind(&TerminalWindow::onSelectionComplete, this),
+        bind(&TerminalWindow::onBell, this),
         regularFont_.get(),
         profile().cursorShape,
         profile().cursorDisplay,
@@ -828,6 +829,14 @@ string TerminalWindow::extractSelectionText()
     text += currentLine;
 
     return text;
+}
+
+void TerminalWindow::onBell()
+{
+    if (logger_.sink())
+        *logger_.sink() << "TODO: Beep!\n";
+    // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
+    // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
 }
 
 void TerminalWindow::spawnNewTerminal(std::string const& _profileName)

@@ -351,6 +351,7 @@ class Screen {
            bool _logRaw,
            bool _logTrace,
            Hook _onCommands,
+           std::function<void()> _bell,
            std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
            std::function<void(DynamicColorName)> _resetDynamicColor,
            std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
@@ -379,10 +380,10 @@ class Screen {
         std::move(_logger),
         true, // logs raw output by default?
         true, // logs trace output by default?
-        {}, {}, {}, {}} {}
+        {}, {}, {}, {}, {}} {}
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}} {}
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -634,6 +635,7 @@ class Screen {
 
     size_t scrollOffset_;
 
+    std::function<void()> bell_{};
     std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
     std::function<void(DynamicColorName)> resetDynamicColor_{};
     std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};

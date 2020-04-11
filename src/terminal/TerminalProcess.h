@@ -36,6 +36,7 @@ class TerminalProcess : public Terminal, public Process {
         std::chrono::steady_clock::time_point _now,
         std::string const& _wordDelimiters,
         std::function<void()> _onSelectionComplete,
+        std::function<void()> _bell,
         CursorDisplay _cursorDisplay,
         CursorShape _cursorShape,
         Hook _onScreenCommands,
