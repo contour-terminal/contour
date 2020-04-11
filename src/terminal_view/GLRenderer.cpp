@@ -55,8 +55,10 @@ GLRenderer::GLRenderer(Logger _logger,
     }
 {
     initializeOpenGLFunctions();
+
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+    glBlendEquation(GL_FUNC_ADD);
 }
 
 void GLRenderer::setFont(Font& _font)
