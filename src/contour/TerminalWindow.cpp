@@ -357,18 +357,25 @@ void TerminalWindow::initializeGL()
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
 {
-    QOpenGLWindow::resizeEvent(_event);
-
-    if (width() != 0 && height() != 0)
+    try
     {
-        terminalView_->resize(width(), height());
-        terminalView_->setProjection(
-            ortho(
-                0.0f, static_cast<float>(width()),
-                0.0f, static_cast<float>(height())
-            )
-        );
-        setScreenDirty();
+        QOpenGLWindow::resizeEvent(_event);
+
+        if (width() != 0 && height() != 0)
+        {
+            terminalView_->resize(width(), height());
+            terminalView_->setProjection(
+                ortho(
+                    0.0f, static_cast<float>(width()),
+                    0.0f, static_cast<float>(height())
+                )
+            );
+            setScreenDirty();
+        }
+    }
+    catch (std::exception const& e)
+    {
+        cerr << fmt::format("resizeEvent: Unhandled exception caught ({}). {}\n", typeid(e).name(), e.what());
     }
 }
 
@@ -539,21 +546,28 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
 
 void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
 {
-    now_ = chrono::steady_clock::now();
-
-    int const topPadding = abs(height() - static_cast<int>(terminalView_->terminal().screenSize().rows * terminalView_->cellHeight()));
-    if (_event->y() < topPadding)
-        return;
-
-    unsigned const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - topPadding) / terminalView_->cellHeight());
-    unsigned const col = static_cast<unsigned>(1 + max(_event->x(), 0) / terminalView_->cellWidth());
-
-    terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
-
-    if (terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
+    try
     {
-        setScreenDirty();
-        update();
+        now_ = chrono::steady_clock::now();
+
+        int const topPadding = abs(height() - static_cast<int>(terminalView_->terminal().screenSize().rows * terminalView_->cellHeight()));
+        if (_event->y() < topPadding)
+            return;
+
+        unsigned const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - topPadding) / terminalView_->cellHeight());
+        unsigned const col = static_cast<unsigned>(1 + max(_event->x(), 0) / terminalView_->cellWidth());
+
+        terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
+
+        if (terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
+        {
+            setScreenDirty();
+            update();
+        }
+    }
+    catch (std::exception const& e)
+    {
+        cerr << fmt::format("Unhandled exception caught ({}). {}\n", typeid(e).name(), e.what());
     }
 }
 
