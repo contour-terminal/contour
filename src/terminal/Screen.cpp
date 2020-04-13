@@ -652,7 +652,7 @@ Screen::Screen(WindowSize const& _size,
     parser_{ ref(handler_), _logger },
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, _maxHistoryLineCount },
     alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, nullopt },
-    state_{ &primaryBuffer_ },
+    buffer_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
     onBufferChanged_{ move(_onBufferChanged) },
@@ -676,7 +676,7 @@ void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
 
 size_t Screen::historyLineCount() const noexcept
 {
-    return state_->savedLines.size();
+    return buffer_->savedLines.size();
 }
 
 void Screen::resize(WindowSize const& _newSize)
@@ -689,9 +689,9 @@ void Screen::resize(WindowSize const& _newSize)
 
 void Screen::write(Command const& _command)
 {
-    state_->verifyState();
+    buffer_->verifyState();
     visit(*this, _command);
-    state_->verifyState();
+    buffer_->verifyState();
 
     if (onCommands_)
         onCommands_({_command});
@@ -707,13 +707,13 @@ void Screen::write(char const * _data, size_t _size)
     handler_.commands().clear();
     parser_.parseFragment(_data, _size);
 
-    state_->verifyState();
+    buffer_->verifyState();
 
     for_each(
         handler_.commands(),
         [&](Command const& _command) {
             visit(*this, _command);
-            state_->verifyState();
+            buffer_->verifyState();
 
             #if defined(LIBTERMINAL_LOG_TRACE)
             if (logTrace_ && logger_)
@@ -740,12 +740,12 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
     }
     else
     {
-        _scrollOffset = min(_scrollOffset, state_->savedLines.size());
+        _scrollOffset = min(_scrollOffset, buffer_->savedLines.size());
         auto const historyLineCount = min(size_.rows, static_cast<unsigned int>(_scrollOffset));
         auto const mainLineCount = size_.rows - historyLineCount;
 
         cursor_pos_t rowNumber = 1;
-        for (auto line = prev(end(state_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
+        for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
         {
             if (line->size() < size_.columns)
                 line->resize(size_.columns);
@@ -755,7 +755,7 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
                 _render(rowNumber, colNumber, *column);
         }
 
-        for (auto line = begin(state_->lines); line != next(begin(state_->lines), mainLineCount); ++line, ++rowNumber)
+        for (auto line = begin(buffer_->lines); line != next(begin(buffer_->lines), mainLineCount); ++line, ++rowNumber)
         {
             auto column = begin(*line);
             for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
@@ -766,10 +766,10 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
-    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= state_->savedLines.size());
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->savedLines.size());
     string line;
     line.reserve(size_.columns);
-    auto const lineIter = next(state_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
+    auto const lineIter = next(buffer_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
         if (cell.character)
             line += utf8::to_string(utf8::encode(cell.character));
@@ -829,7 +829,7 @@ std::string Screen::screenshot() const
         generator(Linefeed{});
     }
 
-    generator(MoveCursorTo{ state_->cursor.row, state_->cursor.column });
+    generator(MoveCursorTo{ buffer_->cursor.row, buffer_->cursor.column });
     if (realCursor().visible)
         generator(SetMode{ Mode::VisibleCursor, false });
 
@@ -869,12 +869,9 @@ bool Screen::scrollMarkUp()
 {
     if (auto const newScrollOffset = findPrevMarker(scrollOffset_); newScrollOffset.has_value())
     {
-        printf("%s\n", fmt::format("ScrollMarkUp: {}", *newScrollOffset).c_str());
         scrollOffset_ = newScrollOffset.value();
         return true;
     }
-    else
-        printf("%s\n", fmt::format("ScrollMarkUp: FAILED", *newScrollOffset).c_str());
 
     return false;
 }
@@ -927,14 +924,14 @@ void Screen::operator()(FullReset const&)
 
 void Screen::operator()(Linefeed const&)
 {
-    // if (realCursorPosition().row == state_->margin_.vertical.to)
-    //     state_->scrollUp(1);
+    // if (realCursorPosition().row == buffer_->margin_.vertical.to)
+    //     buffer_->scrollUp(1);
     // else
     //     moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
     if (isModeEnabled(Mode::AutomaticNewLine))
-        state_->linefeed(state_->margin_.horizontal.from);
+        buffer_->linefeed(buffer_->margin_.horizontal.from);
     else
-        state_->linefeed(realCursorPosition().column);
+        buffer_->linefeed(realCursorPosition().column);
 }
 
 void Screen::operator()(Backspace const&)
@@ -989,10 +986,10 @@ void Screen::operator()(ClearToEndOfScreen const&)
 
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        next(state_->currentLine),
-        end(state_->lines),
+        next(buffer_->currentLine),
+        end(buffer_->lines),
         [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
         }
     );
 }
@@ -1003,10 +1000,10 @@ void Screen::operator()(ClearToBeginOfScreen const&)
 
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(state_->lines),
-        state_->currentLine,
+        begin(buffer_->lines),
+        buffer_->currentLine,
         [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
         }
     );
 }
@@ -1015,17 +1012,17 @@ void Screen::operator()(ClearScreen const&)
 {
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(state_->lines),
-        end(state_->lines),
+        begin(buffer_->lines),
+        end(buffer_->lines),
         [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, state_->graphicsRendition});
+            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
         }
     );
 }
 
 void Screen::operator()(ClearScrollbackBuffer const&)
 {
-    state_->savedLines.clear();
+    buffer_->savedLines.clear();
 }
 
 void Screen::operator()(EraseCharacters const& v)
@@ -1033,73 +1030,73 @@ void Screen::operator()(EraseCharacters const& v)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(state_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
-    fill_n(state_->currentColumn, n, Cell{{}, state_->graphicsRendition});
+    size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
+    fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->graphicsRendition});
 }
 
 void Screen::operator()(ScrollUp const& v)
 {
-    state_->scrollUp(v.n);
+    buffer_->scrollUp(v.n);
 }
 
 void Screen::operator()(ScrollDown const& v)
 {
-    state_->scrollDown(v.n);
+    buffer_->scrollDown(v.n);
 }
 
 void Screen::operator()(ClearToEndOfLine const&)
 {
     fill(
-        state_->currentColumn,
-        end(*state_->currentLine),
-        Cell{{}, state_->graphicsRendition}
+        buffer_->currentColumn,
+        end(*buffer_->currentLine),
+        Cell{{}, buffer_->graphicsRendition}
     );
 }
 
 void Screen::operator()(ClearToBeginOfLine const&)
 {
     fill(
-        begin(*state_->currentLine),
-        next(state_->currentColumn),
-        Cell{{}, state_->graphicsRendition}
+        begin(*buffer_->currentLine),
+        next(buffer_->currentColumn),
+        Cell{{}, buffer_->graphicsRendition}
     );
 }
 
 void Screen::operator()(ClearLine const&)
 {
     fill(
-        begin(*state_->currentLine),
-        end(*state_->currentLine),
-        Cell{{}, state_->graphicsRendition}
+        begin(*buffer_->currentLine),
+        end(*buffer_->currentLine),
+        Cell{{}, buffer_->graphicsRendition}
     );
 }
 
 void Screen::operator()(CursorNextLine const& v)
 {
-    state_->moveCursorTo({cursorPosition().row + v.n, 1});
+    buffer_->moveCursorTo({cursorPosition().row + v.n, 1});
 }
 
 void Screen::operator()(CursorPreviousLine const& v)
 {
     auto const n = min(v.n, cursorPosition().row - 1);
-    state_->moveCursorTo({cursorPosition().row - n, 1});
+    buffer_->moveCursorTo({cursorPosition().row - n, 1});
 }
 
 void Screen::operator()(InsertCharacters const& v)
 {
     if (isCursorInsideMargins())
-        state_->insertChars(realCursorPosition().row, v.n);
+        buffer_->insertChars(realCursorPosition().row, v.n);
 }
 
 void Screen::operator()(InsertLines const& v)
 {
     if (isCursorInsideMargins())
     {
-        state_->scrollDown(
+        buffer_->scrollDown(
             v.n,
             Margin{
-                { state_->cursor.row, state_->margin_.vertical.to },
-                state_->margin_.horizontal
+                { buffer_->cursor.row, buffer_->margin_.vertical.to },
+                buffer_->margin_.horizontal
             }
         );
     }
@@ -1108,18 +1105,18 @@ void Screen::operator()(InsertLines const& v)
 void Screen::operator()(InsertColumns const& v)
 {
     if (isCursorInsideMargins())
-        state_->insertColumns(v.n);
+        buffer_->insertColumns(v.n);
 }
 
 void Screen::operator()(DeleteLines const& v)
 {
     if (isCursorInsideMargins())
     {
-        state_->scrollUp(
+        buffer_->scrollUp(
             v.n,
             Margin{
-                { state_->cursor.row, state_->margin_.vertical.to },
-                state_->margin_.horizontal
+                { buffer_->cursor.row, buffer_->margin_.vertical.to },
+                buffer_->margin_.horizontal
             }
         );
     }
@@ -1128,14 +1125,14 @@ void Screen::operator()(DeleteLines const& v)
 void Screen::operator()(DeleteCharacters const& v)
 {
     if (isCursorInsideMargins() && v.n != 0)
-        state_->deleteChars(realCursorPosition().row, v.n);
+        buffer_->deleteChars(realCursorPosition().row, v.n);
 }
 
 void Screen::operator()(DeleteColumns const& v)
 {
     if (isCursorInsideMargins())
-        for (cursor_pos_t lineNo = state_->margin_.vertical.from; lineNo <= state_->margin_.vertical.to; ++lineNo)
-            state_->deleteChars(lineNo, v.n);
+        for (cursor_pos_t lineNo = buffer_->margin_.vertical.from; lineNo <= buffer_->margin_.vertical.to; ++lineNo)
+            buffer_->deleteChars(lineNo, v.n);
 }
 
 void Screen::operator()(HorizontalPositionAbsolute const& v)
@@ -1155,78 +1152,78 @@ void Screen::operator()(HorizontalTabClear const& v)
     switch (v.which)
     {
         case HorizontalTabClear::AllTabs:
-            state_->clearAllTabs();
+            buffer_->clearAllTabs();
             break;
         case HorizontalTabClear::UnderCursor:
-            state_->clearTabUnderCursor();
+            buffer_->clearTabUnderCursor();
             break;
     }
 }
 
 void Screen::operator()(HorizontalTabSet const&)
 {
-    state_->setTabUnderCursor();
+    buffer_->setTabUnderCursor();
 }
 
 void Screen::operator()(MoveCursorUp const& v)
 {
-    auto const n = min(v.n, cursorPosition().row - state_->margin_.vertical.from);
-    state_->cursor.row -= n;
-    state_->currentLine = prev(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
-    state_->verifyState();
+    auto const n = min(v.n, cursorPosition().row - buffer_->margin_.vertical.from);
+    buffer_->cursor.row -= n;
+    buffer_->currentLine = prev(buffer_->currentLine, n);
+    buffer_->currentColumn = next(begin(*buffer_->currentLine), realCursorPosition().column - 1);
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorDown const& v)
 {
     auto const n = min(v.n, size_.rows - cursorPosition().row);
-    state_->cursor.row += n;
-    state_->currentLine = next(state_->currentLine, n);
-    state_->currentColumn = next(begin(*state_->currentLine), realCursorPosition().column - 1);
-    state_->verifyState();
+    buffer_->cursor.row += n;
+    buffer_->currentLine = next(buffer_->currentLine, n);
+    buffer_->currentColumn = next(begin(*buffer_->currentLine), realCursorPosition().column - 1);
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorForward const& v)
 {
-    auto const n = min(v.n, size_.columns - state_->cursor.column);
-    state_->cursor.column += n;
-    state_->currentColumn = next(
-        state_->currentColumn,
+    auto const n = min(v.n, size_.columns - buffer_->cursor.column);
+    buffer_->cursor.column += n;
+    buffer_->currentColumn = next(
+        buffer_->currentColumn,
         n
     );
-    state_->verifyState();
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorBackward const& v)
 {
-    auto const n = min(v.n, state_->cursor.column - 1);
-    state_->cursor.column -= n;
-    state_->currentColumn = prev(state_->currentColumn, n);
+    auto const n = min(v.n, buffer_->cursor.column - 1);
+    buffer_->cursor.column -= n;
+    buffer_->currentColumn = prev(buffer_->currentColumn, n);
 
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
-    state_->wrapPending = false;
+    buffer_->wrapPending = false;
 
-    state_->verifyState();
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorToColumn const& v)
 {
-    state_->wrapPending = false;
+    buffer_->wrapPending = false;
     auto const n = min(v.column, size_.columns);
-    state_->cursor.column = n;
-    state_->currentColumn = next(begin(*state_->currentLine), n - 1);
-    state_->verifyState();
+    buffer_->cursor.column = n;
+    buffer_->currentColumn = next(begin(*buffer_->currentLine), n - 1);
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorToBeginOfLine const&)
 {
-    state_->wrapPending = false;
-    state_->cursor.column = 1;
-    state_->currentColumn = next(
-        begin(*state_->currentLine),
-        state_->cursor.column - 1
+    buffer_->wrapPending = false;
+    buffer_->cursor.column = 1;
+    buffer_->currentColumn = next(
+        begin(*buffer_->currentLine),
+        buffer_->cursor.column - 1
     );
-    state_->verifyState();
+    buffer_->verifyState();
 }
 
 void Screen::operator()(MoveCursorTo const& v)
@@ -1236,7 +1233,7 @@ void Screen::operator()(MoveCursorTo const& v)
 
 void Screen::operator()(MoveCursorToLine const& v)
 {
-    moveCursorTo({v.row, state_->cursor.column});
+    moveCursorTo({v.row, buffer_->cursor.column});
 }
 
 void Screen::operator()(MoveCursorToNextTab const&)
@@ -1244,26 +1241,26 @@ void Screen::operator()(MoveCursorToNextTab const&)
     // TODO: I guess something must remember when a \t was added, for proper move-back?
     // TODO: respect HTS/TBC
 
-    if (!state_->tabs.empty())
+    if (!buffer_->tabs.empty())
     {
         // advance to the next tab
         size_t i = 0;
-        while (i < state_->tabs.size() && state_->realCursorPosition().column >= state_->tabs[i])
+        while (i < buffer_->tabs.size() && buffer_->realCursorPosition().column >= buffer_->tabs[i])
             ++i;
 
-        if (i < state_->tabs.size())
-            (*this)(MoveCursorToColumn{state_->tabs[i]});
-        else if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
-            (*this)(MoveCursorToColumn{state_->margin_.horizontal.to});
+        if (i < buffer_->tabs.size())
+            (*this)(MoveCursorToColumn{buffer_->tabs[i]});
+        else if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
+            (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.to});
         else
             (*this)(CursorNextLine{1});
     }
-    else if (state_->tabWidth)
+    else if (buffer_->tabWidth)
     {
         // default tab settings
-        if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
+        if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
         {
-            auto const n = 1 + state_->tabWidth - state_->cursor.column % state_->tabWidth;
+            auto const n = 1 + buffer_->tabWidth - buffer_->cursor.column % buffer_->tabWidth;
             (*this)(MoveCursorForward{n});
         }
         else
@@ -1272,9 +1269,9 @@ void Screen::operator()(MoveCursorToNextTab const&)
     else
     {
         // no tab stops configured
-        if (state_->realCursorPosition().column < state_->margin_.horizontal.to)
+        if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
             // then TAB moves to the end of the screen
-            (*this)(MoveCursorToColumn{state_->margin_.horizontal.to});
+            (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.to});
         else
             // then TAB moves to next line left margin
             (*this)(CursorNextLine{1});
@@ -1286,37 +1283,37 @@ void Screen::operator()(CursorBackwardTab const& v)
     if (v.count == 0)
         return;
 
-    if (!state_->tabs.empty())
+    if (!buffer_->tabs.empty())
     {
         for (unsigned k = 0; k < v.count; ++k)
         {
-            auto const i = std::find_if(rbegin(state_->tabs), rend(state_->tabs),
+            auto const i = std::find_if(rbegin(buffer_->tabs), rend(buffer_->tabs),
                                         [&](auto tabPos) -> bool {
                                             return tabPos <= cursorPosition().column - 1;
                                         });
-            if (i != rend(state_->tabs))
+            if (i != rend(buffer_->tabs))
             {
                 // prev tab found -> move to prev tab
                 (*this)(MoveCursorToColumn{*i});
             }
             else
             {
-                (*this)(MoveCursorToColumn{state_->margin_.horizontal.from});
+                (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.from});
                 break;
             }
         }
     }
-    else if (state_->tabWidth)
+    else if (buffer_->tabWidth)
     {
         // default tab settings
-        if (state_->cursor.column <= state_->tabWidth)
+        if (buffer_->cursor.column <= buffer_->tabWidth)
             (*this)(MoveCursorToBeginOfLine{});
         else
         {
-            auto const m = state_->cursor.column % state_->tabWidth;
+            auto const m = buffer_->cursor.column % buffer_->tabWidth;
             auto const n = m
-                         ? (v.count - 1) * state_->tabWidth + m
-                         : v.count * state_->tabWidth + m;
+                         ? (v.count - 1) * buffer_->tabWidth + m
+                         : v.count * buffer_->tabWidth + m;
             (*this)(MoveCursorBackward{n - 1});
         }
     }
@@ -1329,33 +1326,33 @@ void Screen::operator()(CursorBackwardTab const& v)
 
 void Screen::operator()(SaveCursor const&)
 {
-    state_->saveState();
+    buffer_->saveState();
 }
 
 void Screen::operator()(RestoreCursor const&)
 {
-    state_->restoreState();
+    buffer_->restoreState();
 }
 
 void Screen::operator()(Index const&)
 {
-    if (realCursorPosition().row == state_->margin_.vertical.to)
-        state_->scrollUp(1);
+    if (realCursorPosition().row == buffer_->margin_.vertical.to)
+        buffer_->scrollUp(1);
     else
         moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
 }
 
 void Screen::operator()(ReverseIndex const&)
 {
-    if (realCursorPosition().row == state_->margin_.vertical.from)
-        state_->scrollDown(1);
+    if (realCursorPosition().row == buffer_->margin_.vertical.from)
+        buffer_->scrollDown(1);
     else
         moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
 }
 
 void Screen::operator()(BackIndex const&)
 {
-    if (realCursorPosition().column == state_->margin_.horizontal.from)
+    if (realCursorPosition().column == buffer_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
     else
         moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
@@ -1363,7 +1360,7 @@ void Screen::operator()(BackIndex const&)
 
 void Screen::operator()(ForwardIndex const&)
 {
-    if (realCursorPosition().column == state_->margin_.horizontal.to)
+    if (realCursorPosition().column == buffer_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
     else
         moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
@@ -1371,12 +1368,12 @@ void Screen::operator()(ForwardIndex const&)
 
 void Screen::operator()(SetForegroundColor const& v)
 {
-    state_->graphicsRendition.foregroundColor = v.color;
+    buffer_->graphicsRendition.foregroundColor = v.color;
 }
 
 void Screen::operator()(SetBackgroundColor const& v)
 {
-    state_->graphicsRendition.backgroundColor = v.color;
+    buffer_->graphicsRendition.backgroundColor = v.color;
 }
 
 void Screen::operator()(SetCursorStyle const& v)
@@ -1390,67 +1387,67 @@ void Screen::operator()(SetGraphicsRendition const& v)
     switch (v.rendition)
     {
         case GraphicsRendition::Reset:
-            state_->graphicsRendition = {};
+            buffer_->graphicsRendition = {};
             break;
         case GraphicsRendition::Bold:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Bold;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Bold;
             break;
         case GraphicsRendition::Faint:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Faint;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Faint;
             break;
         case GraphicsRendition::Italic:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Italic;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Italic;
             break;
         case GraphicsRendition::Underline:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Underline;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Underline;
             break;
         case GraphicsRendition::Blinking:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Blinking;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Blinking;
             break;
         case GraphicsRendition::Inverse:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Inverse;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Inverse;
             break;
         case GraphicsRendition::Hidden:
-            state_->graphicsRendition.styles |= CharacterStyleMask::Hidden;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Hidden;
             break;
         case GraphicsRendition::CrossedOut:
-            state_->graphicsRendition.styles |= CharacterStyleMask::CrossedOut;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::CrossedOut;
             break;
         case GraphicsRendition::DoublyUnderlined:
-            state_->graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
             break;
         case GraphicsRendition::Normal:
-            state_->graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
+            buffer_->graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
             break;
         case GraphicsRendition::NoItalic:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::Italic;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Italic;
             break;
         case GraphicsRendition::NoUnderline:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::Underline;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Underline;
             break;
         case GraphicsRendition::NoBlinking:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::Blinking;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Blinking;
             break;
         case GraphicsRendition::NoInverse:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::Inverse;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Inverse;
             break;
         case GraphicsRendition::NoHidden:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::Hidden;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Hidden;
             break;
         case GraphicsRendition::NoCrossedOut:
-            state_->graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
             break;
     }
 }
 
 void Screen::operator()(SetMark const&)
 {
-    state_->currentLine->marked = true;
+    buffer_->currentLine->marked = true;
 }
 
 void Screen::operator()(SetMode const& v)
 {
-    state_->setMode(v.mode, v.enable);
+    buffer_->setMode(v.mode, v.enable);
 
     switch (v.mode)
     {
@@ -1503,9 +1500,9 @@ void Screen::operator()(SetTopBottomMargin const& _margin)
 
 	if (top < bottom)
     {
-        state_->margin_.vertical.from = top;
-        state_->margin_.vertical.to = bottom;
-        state_->moveCursorTo({1, 1});
+        buffer_->margin_.vertical.from = top;
+        buffer_->margin_.vertical.to = bottom;
+        buffer_->moveCursorTo({1, 1});
     }
 }
 
@@ -1519,9 +1516,9 @@ void Screen::operator()(SetLeftRightMargin const& margin)
 		auto const left = margin.left.value_or(1);
 		if (left + 1 < right)
         {
-            state_->margin_.horizontal.from = left;
-            state_->margin_.horizontal.to = right;
-            state_->moveCursorTo({1, 1});
+            buffer_->margin_.horizontal.from = left;
+            buffer_->margin_.horizontal.to = right;
+            buffer_->moveCursorTo({1, 1});
         }
     }
 }
@@ -1529,10 +1526,10 @@ void Screen::operator()(SetLeftRightMargin const& margin)
 void Screen::operator()(ScreenAlignmentPattern const&)
 {
     // sets the margins to the extremes of the page
-    state_->margin_.vertical.from = 1;
-    state_->margin_.vertical.to = size_.rows;
-    state_->margin_.horizontal.from = 1;
-    state_->margin_.horizontal.to = size_.columns;
+    buffer_->margin_.vertical.from = 1;
+    buffer_->margin_.vertical.to = size_.rows;
+    buffer_->margin_.horizontal.from = 1;
+    buffer_->margin_.horizontal.to = size_.columns;
 
     // and moves the cursor to the home position
     moveCursorTo({1, 1});
@@ -1540,14 +1537,14 @@ void Screen::operator()(ScreenAlignmentPattern const&)
     // fills the complete screen area with a test pattern
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(state_->lines),
-        end(state_->lines),
+        begin(buffer_->lines),
+        end(buffer_->lines),
         [&](ScreenBuffer::Line& line) {
             fill(
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 begin(line),
                 end(line),
-                ScreenBuffer::Cell{'X', state_->graphicsRendition}
+                ScreenBuffer::Cell{'X', buffer_->graphicsRendition}
             );
         }
     );
@@ -1616,9 +1613,8 @@ void Screen::operator()(ResizeWindow const& v)
 
 void Screen::operator()(AppendChar const& v)
 {
-    state_->appendChar(v.ch);
+    buffer_->appendChar(v.ch);
 }
-
 
 void Screen::operator()(RequestDynamicColor const& v)
 {
@@ -1636,19 +1632,19 @@ void Screen::operator()(RequestTabStops const&)
     // Response: `DCS 2 $ u Pt ST`
     ostringstream dcs;
     dcs << "\033P2$u"; // DCS
-    if (!state_->tabs.empty())
+    if (!buffer_->tabs.empty())
     {
-        for (size_t const i : times(state_->tabs.size()))
+        for (size_t const i : times(buffer_->tabs.size()))
         {
             if (i)
                 dcs << '/';
-            dcs << state_->tabs[i];
+            dcs << buffer_->tabs[i];
         }
     }
-    else if (state_->tabWidth != 0)
+    else if (buffer_->tabWidth != 0)
     {
-        dcs << state_->tabWidth + 1;
-        for (size_t column = 2 * state_->tabWidth + 1; column <= size().columns; column += state_->tabWidth)
+        dcs << buffer_->tabWidth + 1;
+        for (size_t column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
             dcs << '/' << column;
     }
     dcs << '\x5c'; // ST
@@ -1702,9 +1698,9 @@ void Screen::resetHard()
 
 Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
 {
-    if (_coord.row <= state_->savedLines.size())
-        return *next(begin(*next(begin(state_->savedLines), _coord.row - 1)), _coord.column - 1);
-    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(state_->savedLines.size()); rowNr <= size_.rows)
+    if (_coord.row <= buffer_->savedLines.size())
+        return *next(begin(*next(begin(buffer_->savedLines), _coord.row - 1)), _coord.column - 1);
+    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(buffer_->savedLines.size()); rowNr <= size_.rows)
         return at(rowNr, _coord.column);
     else
         throw invalid_argument{"Row number exceeds boundaries."};
@@ -1712,12 +1708,12 @@ Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
 
 Screen::Cell const& Screen::at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
 {
-    return state_->at(_rowNr, _colNr);
+    return buffer_->at(_rowNr, _colNr);
 }
 
 void Screen::moveCursorTo(Coordinate to)
 {
-    state_->moveCursorTo(to);
+    buffer_->moveCursorTo(to);
 }
 
 void Screen::setBuffer(ScreenBuffer::Type _type)
@@ -1727,17 +1723,16 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
         switch (_type)
         {
             case ScreenBuffer::Type::Main:
-                state_ = &primaryBuffer_;
+                buffer_ = &primaryBuffer_;
                 break;
             case ScreenBuffer::Type::Alternate:
-                state_ = &alternateBuffer_;
+                buffer_ = &alternateBuffer_;
                 break;
         }
         if (onBufferChanged_)
             onBufferChanged_(_type);
     }
 }
-
 // }}}
 
 } // namespace terminal

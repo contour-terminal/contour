@@ -519,32 +519,32 @@ class Screen {
     //}}}
 
     bool isCursorInsideMargins() const noexcept {
-        if (!state_->margin_.vertical.contains(state_->cursor.row))
+        if (!buffer_->margin_.vertical.contains(buffer_->cursor.row))
             return false;
-        else if (isModeEnabled(Mode::LeftRightMargin) && !state_->margin_.horizontal.contains(state_->cursor.column))
+        else if (isModeEnabled(Mode::LeftRightMargin) && !buffer_->margin_.horizontal.contains(buffer_->cursor.column))
             return false;
         else
             return true;
     }
 
-    Coordinate realCursorPosition() const noexcept { return state_->realCursorPosition(); }
-    Coordinate cursorPosition() const noexcept { return state_->cursorPosition(); }
-    Cursor const& realCursor() const noexcept { return state_->cursor; }
+    Coordinate realCursorPosition() const noexcept { return buffer_->realCursorPosition(); }
+    Coordinate cursorPosition() const noexcept { return buffer_->cursorPosition(); }
+    Cursor const& realCursor() const noexcept { return buffer_->cursor; }
 
     Cell const& currentCell() const noexcept
     {
-        return *state_->currentColumn;
+        return *buffer_->currentColumn;
     }
 
     Cell& currentCell() noexcept
     {
-        return *state_->currentColumn;
+        return *buffer_->currentColumn;
     }
 
     Cell& currentCell(Cell value)
     {
-        *state_->currentColumn = std::move(value);
-        return *state_->currentColumn;
+        *buffer_->currentColumn = std::move(value);
+        return *buffer_->currentColumn;
     }
 
     void moveCursorTo(Coordinate to);
@@ -554,24 +554,24 @@ class Screen {
     Cell const& at(cursor_pos_t _row, cursor_pos_t _col) const noexcept;
 
     /// Retrieves the cell at given cursor, respecting origin mode.
-    Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return state_->withOriginAt(row, col); }
+    Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return buffer_->withOriginAt(row, col); }
 
-    bool isPrimaryScreen() const noexcept { return state_ == &primaryBuffer_; }
-    bool isAlternateScreen() const noexcept { return state_ == &alternateBuffer_; }
+    bool isPrimaryScreen() const noexcept { return buffer_ == &primaryBuffer_; }
+    bool isAlternateScreen() const noexcept { return buffer_ == &alternateBuffer_; }
 
     bool isModeEnabled(Mode m) const noexcept
     {
         if (m == Mode::UseAlternateScreen)
             return isAlternateScreen();
         else
-            return state_->enabledModes_.find(m) != end(state_->enabledModes_);
+            return buffer_->enabledModes_.find(m) != end(buffer_->enabledModes_);
     }
 
     bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::Origin); }
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(Mode::LeftRightMargin); }
 
-    Margin const& margin() const noexcept { return state_->margin_; }
-    ScreenBuffer::Lines const& scrollbackLines() const noexcept { return state_->savedLines; }
+    Margin const& margin() const noexcept { return buffer_->margin_; }
+    ScreenBuffer::Lines const& scrollbackLines() const noexcept { return buffer_->savedLines; }
 
     void setTabWidth(unsigned int _value)
     {
@@ -593,15 +593,15 @@ class Screen {
 
     std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const
     {
-        return state_->findPrevMarker(_currentScrollOffset);
+        return buffer_->findPrevMarker(_currentScrollOffset);
     }
 
     std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const
     {
-        return state_->findNextMarker(_currentScrollOffset);
+        return buffer_->findNextMarker(_currentScrollOffset);
     }
 
-    ScreenBuffer::Type bufferType() const noexcept { return state_->type_; }
+    ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }
 
   private:
     void setBuffer(ScreenBuffer::Type _type);
@@ -637,7 +637,7 @@ class Screen {
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;
-    ScreenBuffer* state_;
+    ScreenBuffer* buffer_;
 
     WindowSize size_;
     std::optional<size_t> maxHistoryLineCount_;
@@ -666,7 +666,6 @@ constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) no
 }
 
 }  // namespace terminal
-
 
 namespace fmt {
     template <>

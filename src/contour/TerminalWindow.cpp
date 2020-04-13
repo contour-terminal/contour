@@ -259,15 +259,15 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     );
 }
 
-void TerminalWindow::blinkingCursorUpdate()
-{
-    update();
-}
-
 TerminalWindow::~TerminalWindow()
 {
     makeCurrent(); // XXX must be called.
     // ...
+}
+
+void TerminalWindow::blinkingCursorUpdate()
+{
+    update();
 }
 
 void TerminalWindow::onFrameSwapped()
@@ -593,7 +593,7 @@ void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
 
 void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with "faint" colors
 {
-    (void) _event;
+    QOpenGLWindow::focusOutEvent(_event);
 }
 
 bool TerminalWindow::event(QEvent* _event)
