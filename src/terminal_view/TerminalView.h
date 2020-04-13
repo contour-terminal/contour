@@ -44,6 +44,7 @@ class TerminalView {
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
                  std::function<void()> _onSelectionComplete,
+                 Screen::OnBufferChanged _onScreenBufferChanged,
                  std::function<void()> _bell,
                  Font& _regularFont,
                  CursorShape _cursorShape,

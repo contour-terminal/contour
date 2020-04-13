@@ -331,6 +331,7 @@ void TerminalWindow::initializeGL()
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
         bind(&TerminalWindow::onSelectionComplete, this),
+        bind(&TerminalWindow::onScreenBufferChanged, this, _1),
         bind(&TerminalWindow::onBell, this),
         regularFont_.get(),
         profile().cursorShape,
@@ -574,7 +575,20 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
 
 void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "normal" colors
 {
-    (void) _event;
+    QOpenGLWindow::focusInEvent(_event);
+
+    // as per Qt-documentation, some platform implementations reset the cursor when leaving the
+    // window, so we have to re-apply our desired cursor in focusInEvent().
+    using Type = terminal::ScreenBuffer::Type;
+    switch (terminalView_->terminal().screenBufferType())
+    {
+        case Type::Main:
+            setCursor(Qt::IBeamCursor);
+            break;
+        case Type::Alternate:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
 }
 
 void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with "faint" colors
@@ -829,6 +843,20 @@ string TerminalWindow::extractSelectionText()
     text += currentLine;
 
     return text;
+}
+
+void TerminalWindow::onScreenBufferChanged(terminal::ScreenBuffer::Type _type)
+{
+    using Type = terminal::ScreenBuffer::Type;
+    switch (_type)
+    {
+        case Type::Main:
+            setCursor(Qt::IBeamCursor);
+            break;
+        case Type::Alternate:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
 }
 
 void TerminalWindow::onBell()

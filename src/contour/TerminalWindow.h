@@ -66,6 +66,7 @@ class TerminalWindow :
     std::string extractSelectionText();
     void spawnNewTerminal(std::string const& _profileName);
 
+    void onScreenBufferChanged(terminal::ScreenBuffer::Type _type);
     void onBell();
 
     float contentScale() const;

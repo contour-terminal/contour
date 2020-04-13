@@ -198,6 +198,11 @@ struct ScreenBuffer {
 		verifyState();
 	}
 
+    void reset()
+    {
+        *this = ScreenBuffer(type_, size_, maxHistoryLineCount_);
+    }
+
     std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const;
     std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const;
 
@@ -326,6 +331,7 @@ class Screen {
     using SetApplicationKeypadMode = std::function<void(bool)>;
     using SetBracketedPaste = std::function<void(bool)>;
 	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
+    using OnBufferChanged = std::function<void(ScreenBuffer::Type)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
 
   public:
@@ -351,6 +357,7 @@ class Screen {
            bool _logRaw,
            bool _logTrace,
            Hook _onCommands,
+           OnBufferChanged _onBufferChanged,
            std::function<void()> _bell,
            std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
            std::function<void(DynamicColorName)> _resetDynamicColor,
@@ -380,10 +387,10 @@ class Screen {
         std::move(_logger),
         true, // logs raw output by default?
         true, // logs trace output by default?
-        {}, {}, {}, {}, {}} {}
+        {}, {}, {}, {}, {}, {}} {}
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}, {}} {}
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -594,7 +601,11 @@ class Screen {
         return state_->findNextMarker(_currentScrollOffset);
     }
 
+    ScreenBuffer::Type bufferType() const noexcept { return state_->type_; }
+
   private:
+    void setBuffer(ScreenBuffer::Type _type);
+
     // interactive replies
     void reply(std::string const& message)
     {
@@ -635,6 +646,7 @@ class Screen {
 
     size_t scrollOffset_;
 
+    OnBufferChanged onBufferChanged_{};
     std::function<void()> bell_{};
     std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
     std::function<void(DynamicColorName)> resetDynamicColor_{};

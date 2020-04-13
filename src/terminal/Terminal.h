@@ -56,6 +56,7 @@ class Terminal {
         std::function<void()> _onClosed = {},
         std::string const& _wordDelimiters = "",
         std::function<void()> _onSelectionComplete = {},
+        Screen::OnBufferChanged _onScreenBufferChanged = {},
         std::function<void()> _bell = {},
         std::function<RGBColor(DynamicColorName)> _requestDynamicColor = {},
         std::function<void(DynamicColorName)> _resetDynamicColor = {},
@@ -94,6 +95,7 @@ class Terminal {
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount) { screen_.setMaxHistoryLineCount(_maxHistoryLineCount); }
     size_t historyLineCount() const noexcept { return screen_.historyLineCount(); }
     std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
+    ScreenBuffer::Type screenBufferType() const noexcept { return screen_.bufferType(); }
 
     /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
     std::string screenshot() const;

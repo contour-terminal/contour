@@ -631,6 +631,7 @@ Screen::Screen(WindowSize const& _size,
                bool _logRaw,
                bool _logTrace,
                Hook onCommands,
+               OnBufferChanged _onBufferChanged,
                std::function<void()> _bell,
                std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                std::function<void(DynamicColorName)> _resetDynamicColor,
@@ -654,6 +655,7 @@ Screen::Screen(WindowSize const& _size,
     state_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
+    onBufferChanged_{ move(_onBufferChanged) },
     bell_{ move(_bell) },
     requestDynamicColor_{ move(_requestDynamicColor) },
     resetDynamicColor_{ move(_resetDynamicColor) },
@@ -1454,9 +1456,9 @@ void Screen::operator()(SetMode const& v)
     {
         case Mode::UseAlternateScreen:
             if (v.enable)
-                state_ = &alternateBuffer_;
+                setBuffer(ScreenBuffer::Type::Alternate);
             else
-                state_ = &primaryBuffer_;
+                setBuffer(ScreenBuffer::Type::Main);
             break;
         case Mode::UseApplicationCursorKeys:
             if (useApplicationCursorKeys_)
@@ -1693,9 +1695,9 @@ void Screen::resetSoft()
 
 void Screen::resetHard()
 {
-    primaryBuffer_ = ScreenBuffer{ScreenBuffer::Type::Main, size_, maxHistoryLineCount_};
-    alternateBuffer_ = ScreenBuffer{ScreenBuffer::Type::Alternate, size_, nullopt};
-    state_ = &primaryBuffer_;
+    primaryBuffer_.reset();
+    alternateBuffer_.reset();
+    setBuffer(ScreenBuffer::Type::Main);
 }
 
 Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
@@ -1717,6 +1719,25 @@ void Screen::moveCursorTo(Coordinate to)
 {
     state_->moveCursorTo(to);
 }
+
+void Screen::setBuffer(ScreenBuffer::Type _type)
+{
+    if (bufferType() != _type)
+    {
+        switch (_type)
+        {
+            case ScreenBuffer::Type::Main:
+                state_ = &primaryBuffer_;
+                break;
+            case ScreenBuffer::Type::Alternate:
+                state_ = &alternateBuffer_;
+                break;
+        }
+        if (onBufferChanged_)
+            onBufferChanged_(_type);
+    }
+}
+
 // }}}
 
 } // namespace terminal
