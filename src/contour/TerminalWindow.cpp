@@ -372,7 +372,8 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
                     0.0f, static_cast<float>(height())
                 )
             );
-            setScreenDirty();
+            if (setScreenDirty())
+                update();
         }
     }
     catch (std::exception const& e)
