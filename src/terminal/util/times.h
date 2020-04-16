@@ -85,10 +85,34 @@ constexpr inline _Times<T, T> times(T count)
     return _Times<T, T>{0, count, 1};
 }
 
+template<
+    typename I,
+    typename T,
+    typename Callable,
+    typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0
+>
+constexpr void operator|(_Times<I, T> _times, Callable _callable)
+{
+    for (auto && i : _times)
+        _callable(i);
+}
+
+template<
+    typename I,
+    typename T,
+    typename Callable,
+    typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0
+>
+constexpr void operator|(_Times<I, T> _times, Callable _callable)
+{
+    for ([[maybe_unused]] auto &&  i : _times)
+        _callable();
+}
+
 // ---------------------------------------------------------------------------------------------------
 
 template <typename I, typename T1, typename T2>
-struct _Times2DIerator {
+struct _Times2DIterator {
     using Outer = _Times<I, T1>;
     using Inner = _Times<I, T2>;
 
@@ -97,7 +121,7 @@ struct _Times2DIerator {
     typename Outer::iterator outerIt;
     typename Inner::iterator innerIt;
 
-    constexpr _Times2DIerator(Outer _outer, Inner _inner, bool _init) noexcept :
+    constexpr _Times2DIterator(Outer _outer, Inner _inner, bool _init) noexcept :
         first{ std::move(_outer) },
         second{ std::move(_inner) },
         outerIt{ _init ? std::begin(first) : std::end(first) },
@@ -107,7 +131,7 @@ struct _Times2DIerator {
     using value_type = std::tuple<T1, T2>;
     constexpr value_type operator*() const noexcept { return {*outerIt, *innerIt}; }
 
-    constexpr _Times2DIerator<I, T1, T2>& operator++() noexcept {
+    constexpr _Times2DIterator<I, T1, T2>& operator++() noexcept {
         ++innerIt;
         if (innerIt == std::end(second)) {
             ++outerIt;
@@ -117,14 +141,14 @@ struct _Times2DIerator {
         return *this;
     }
 
-    constexpr _Times2DIerator<I, T1, T2>& operator++(int) noexcept { return *++this; }
+    constexpr _Times2DIterator<I, T1, T2>& operator++(int) noexcept { return *++this; }
 
-    constexpr bool operator==(_Times2DIerator<I, T1, T2> const& other) const noexcept {
+    constexpr bool operator==(_Times2DIterator<I, T1, T2> const& other) const noexcept {
         return innerIt == other.innerIt;
         //return outerIt == other.outerIt && innerIt == other.innerIt;
     }
 
-    constexpr bool operator!=(_Times2DIerator<I, T1, T2> const& other) const noexcept {
+    constexpr bool operator!=(_Times2DIterator<I, T1, T2> const& other) const noexcept {
         return !(*this == other);
     }
 };
@@ -135,7 +159,7 @@ struct _Times2D
     _Times<I, T1> first;
     _Times<I, T2> second;
 
-    using iterator = _Times2DIerator<I, T1, T2>;
+    using iterator = _Times2DIterator<I, T1, T2>;
 
     constexpr std::size_t size() const noexcept { return first.size() * second.size(); }
     constexpr auto operator[](std::size_t i) const noexcept { return second[i % second.size()]; }
