@@ -14,13 +14,15 @@
 #pragma once
 
 #include <terminal/util/overloaded.h>
+#include <terminal/Commands.h>
 #include <terminal/Util.h>
 
 #include <optional>
+#include <set>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
-#include <utility>
 
 namespace terminal {
 
@@ -188,28 +190,40 @@ std::string to_string(MouseButton _button);
 struct MousePressEvent {
     MouseButton button;
     Modifier modifier{};
+    cursor_pos_t row = 1;
+    cursor_pos_t column = 1;
 };
 
 struct MouseMoveEvent {
     /// Row number in screen coordinates [1..rows]
-    unsigned int row;
+    cursor_pos_t row;
 
     /// Column number in screen coordinates [1..cols]
-    unsigned int column;
+    cursor_pos_t column;
 
     constexpr auto as_pair() const noexcept { return std::pair{ row, column }; }
+
+    constexpr auto coordinates() const noexcept { return Coordinate{ row, column }; }
 };
 
 struct MouseReleaseEvent {
     MouseButton button;
+    Modifier modifier{};
+    cursor_pos_t row = 1;
+    cursor_pos_t column = 1;
 };
+
+struct FocusInEvent {};
+struct FocusOutEvent {};
 
 using InputEvent = std::variant<
     KeyInputEvent,
     CharInputEvent,
     MousePressEvent,
     MouseMoveEvent,
-    MouseReleaseEvent
+    MouseReleaseEvent,
+    FocusInEvent,
+    FocusOutEvent
 >;
 
 using MouseEvent = std::variant<
@@ -226,6 +240,8 @@ constexpr Modifier modifier(InputEvent _event) noexcept
         [](MousePressEvent _mousePress) -> Modifier { return _mousePress.modifier; },
         [](MouseMoveEvent) -> Modifier { return Modifier::None; },
         [](MouseReleaseEvent) -> Modifier { return Modifier::None; },
+        [](FocusInEvent) -> Modifier { return Modifier::None; },
+        [](FocusOutEvent) -> Modifier { return Modifier::None; },
     }, _event);
 }
 
@@ -249,6 +265,10 @@ constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcep
             return std::get<MouseMoveEvent>(_lhs).as_pair() < std::get<MouseMoveEvent>(_rhs).as_pair();
         if (std::holds_alternative<MouseReleaseEvent>(_lhs))
             return std::get<MouseReleaseEvent>(_lhs).button < std::get<MouseReleaseEvent>(_rhs).button;
+        if (std::holds_alternative<FocusInEvent>(_lhs))
+            return true;
+        if (std::holds_alternative<FocusOutEvent>(_lhs))
+            return true;
     }
 
     return false;
@@ -264,8 +284,39 @@ constexpr bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexce
             return std::get<CharInputEvent>(_lhs).value == std::get<CharInputEvent>(_rhs).value;
         if (std::holds_alternative<MousePressEvent>(_lhs) && std::holds_alternative<MousePressEvent>(_rhs))
             return std::get<MousePressEvent>(_lhs).button == std::get<MousePressEvent>(_rhs).button;
+        if (std::holds_alternative<FocusInEvent>(_lhs) && std::holds_alternative<FocusInEvent>(_rhs))
+            return true;
+        if (std::holds_alternative<FocusOutEvent>(_lhs) && std::holds_alternative<FocusOutEvent>(_rhs))
+            return true;
     }
     return false;
+}
+
+enum class MouseTransport {
+    // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
+    Default,
+    // CSI M Cb Coords, with Coords being UTF-8 encoded, Coords is a tuple, each value incremented by 0x20.
+    Extended,
+    // `CSI Cb Cx Cy M` and `CSI Cb Cx Cy m` (button release)
+    SGR,
+    // `CSI < Cb Cx Cy M` with Cb += 0x20
+    URXVT,
+};
+
+inline std::string to_string(MouseTransport _value)
+{
+    switch (_value)
+    {
+        case MouseTransport::Default:
+            return "Default";
+        case MouseTransport::Extended:
+            return "Extended";
+        case MouseTransport::SGR:
+            return "SGR";
+        case MouseTransport::URXVT:
+            return "URXVT";
+    }
+    return "<Unknown MouseTransport>";
 }
 
 class InputGenerator {
@@ -289,6 +340,28 @@ class InputGenerator {
     bool bracketedPaste() const noexcept { return bracketedPaste_; }
     void setBracketedPaste(bool _enable) { bracketedPaste_ = _enable; }
 
+    void setMouseProtocol(MouseProtocol _mouseProtocol, bool _enabled);
+    std::optional<MouseProtocol> mouseProtocol() const noexcept { return mouseProtocol_; }
+
+    // Sets mouse event transport protocol (default, extended, xgr, urxvt)
+    void setMouseTransport(MouseTransport _mouseTransport);
+    MouseTransport mouseTransport() const noexcept { return mouseTransport_; }
+
+    enum class MouseWheelMode {
+        // mouse wheel generates mouse wheel events as determined by mouse protocol + transport.
+        Default,
+        // mouse wheel generates normal cursor key events
+        NormalCursorKeys,
+        // mouse wheel generates application cursor key events
+        ApplicationCursorKeys
+    };
+
+    void setMouseWheelMode(MouseWheelMode _mode) noexcept;
+    MouseWheelMode mouseWheelMode() const noexcept { return mouseWheelMode_; }
+
+    void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
+    bool generateFocusEvents() const noexcept { return generateFocusEvents_; };
+
     /// Generates input sequences for given input event.
     bool generate(InputEvent const& _inputEvent);
 
@@ -302,30 +375,104 @@ class InputGenerator {
     void generatePaste(std::string_view const& _text);
 
     /// Generates input sequence for a mouse button press event.
-    //TODO: void generate(MouseButton _mouseButton, Modifier _modifier);
+    bool generate(MousePressEvent const& _mousePress);
+
+    /// Generates input sequence for a mouse button release event.
+    bool generate(MouseReleaseEvent const& _mousePress);
 
     /// Generates input sequence for a mouse move event.
-    //TODO: void generate(MouseMoveEvent _mouseMove);
+    bool generate(MouseMoveEvent const& _mouseMove);
+
+    bool generate(FocusInEvent const&);
+    bool generate(FocusOutEvent const&);
 
     /// Swaps out the generated input control sequences.
     void swap(Sequence& _other);
 
+    enum class MouseEventType { Press, Drag, Release };
+
   private:
+    bool generateMouse(MouseButton _button,
+                       Modifier _modifier,
+                       cursor_pos_t _row,
+                       cursor_pos_t _column,
+                       MouseEventType _eventType);
+
     inline bool append(std::string _sequence);
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);
+    inline bool append(uint8_t _byte);
+    inline bool append(unsigned int _asciiChar);
     template <typename T, size_t N> inline bool append(T (&_sequence)[N]);
 
   private:
     KeyMode cursorKeysMode_ = KeyMode::Normal;
     KeyMode numpadKeysMode_ = KeyMode::Normal;
     bool bracketedPaste_ = false;
+    bool generateFocusEvents_ = false;
+    std::optional<MouseProtocol> mouseProtocol_ = std::nullopt;
+    MouseTransport mouseTransport_ = MouseTransport::Default;
+    MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
     Sequence pendingSequence_{};
+
+    std::set<MouseButton> currentlyPressedMouseButtons_{};
+    terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
 };
+
+inline std::string to_string(InputGenerator::MouseEventType _value)
+{
+    switch (_value)
+    {
+        case InputGenerator::MouseEventType::Press: return "Press";
+        case InputGenerator::MouseEventType::Drag: return "Drag";
+        case InputGenerator::MouseEventType::Release: return "Release";
+    }
+    return "???";
+}
 
 }  // namespace terminal
 
-namespace std {
+namespace fmt { // {{{
+    template <>
+    struct formatter<terminal::InputGenerator::MouseWheelMode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::InputGenerator::MouseWheelMode _value, FormatContext& _ctx)
+        {
+            switch (_value)
+            {
+                case terminal::InputGenerator::MouseWheelMode::Default:
+                    return format_to(_ctx.out(), "Default");
+                case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
+                    return format_to(_ctx.out(), "Normal");
+                case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
+                    return format_to(_ctx.out(), "Application");
+            }
+            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::KeyMode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::KeyMode _value, FormatContext& _ctx)
+        {
+            switch (_value)
+            {
+                case terminal::KeyMode::Application:
+                    return format_to(_ctx.out(), "Application");
+                case terminal::KeyMode::Normal:
+                    return format_to(_ctx.out(), "Normal");
+            }
+            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        }
+    };
+} // }}}
+
+namespace std { // {{{
     template<>
     struct hash<terminal::KeyInputEvent> {
         constexpr size_t operator()(terminal::KeyInputEvent const& _input) const noexcept {
@@ -362,6 +509,20 @@ namespace std {
     };
 
     template<>
+    struct hash<terminal::FocusInEvent> {
+        constexpr size_t operator()(terminal::FocusInEvent const&) const noexcept {
+            return (6 << 16) | 1;
+        }
+    };
+
+    template<>
+    struct hash<terminal::FocusOutEvent> {
+        constexpr size_t operator()(terminal::FocusOutEvent const&) const noexcept {
+            return (6 << 16) | 2;
+        }
+    };
+
+    template<>
     struct hash<terminal::MouseEvent> {
         constexpr size_t operator()(terminal::MouseEvent const& _input) const noexcept {
             return visit(overloaded{
@@ -381,7 +542,9 @@ namespace std {
                 [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },
                 [](terminal::MouseMoveEvent ev) { return hash<terminal::MouseMoveEvent>{}(ev); },
                 [](terminal::MouseReleaseEvent ev) { return hash<terminal::MouseReleaseEvent>{}(ev); },
+                [](terminal::FocusInEvent ev) { return hash<terminal::FocusInEvent>{}(ev); },
+                [](terminal::FocusOutEvent ev) { return hash<terminal::FocusOutEvent>{}(ev); },
             }, _input);
         }
     };
-}
+} // }}}

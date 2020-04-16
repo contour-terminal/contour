@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/InputGenerator.h>
+#include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
 #include <terminal/util/UTF8.h>
 
@@ -294,9 +295,11 @@ bool InputGenerator::generate(InputEvent const& _inputEvent)
         [&](CharInputEvent const& _chr) { return generate(_chr.value, _chr.modifier); },
 		// TODO: the mouse input events should only generate input and return true *iff* requested
 		//       by the connected application, returning false immediately otherwise.
-        [&](MousePressEvent const& /*_mousePress*/) { return false /*TODO: generate(_mouse.button, _mouse.modifier)*/; },
-        [&](MouseMoveEvent const& /*_mouseMove*/) { return false; /* TODO */ },
-        [&](MouseReleaseEvent const& /*_mouseRelease*/) { return false; /* TODO */ },
+        [&](MousePressEvent const& _mousePress) { return generate(_mousePress); },
+        [&](MouseMoveEvent const& _mouseMove) { return generate(_mouseMove); },
+        [&](MouseReleaseEvent const& _mouseRelease) { return generate(_mouseRelease); },
+        [&](FocusInEvent const& _focusIn) { return generate(_focusIn); },
+        [&](FocusOutEvent const& _focusOut) { return generate(_focusOut); }
     }, _inputEvent);
 }
 
@@ -379,10 +382,272 @@ inline bool InputGenerator::append(char _asciiChar)
     return true;
 }
 
+inline bool InputGenerator::append(uint8_t _byte)
+{
+    pendingSequence_.push_back(_byte);
+    return true;
+}
+
+inline bool InputGenerator::append(unsigned int _number)
+{
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%u", _number);
+    for (char const* i = &buf[0]; *i; ++i)
+        pendingSequence_.push_back(*i);
+    return true;
+}
+
 template <typename T, size_t N>
 inline bool InputGenerator::append(T(&_sequence)[N])
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
+    return true;
+}
+
+// {{{ mouse handling
+
+constexpr uint8_t buttonNumber(MouseButton _button)
+{
+    switch (_button)
+    {
+        case MouseButton::Left:
+            return 0;
+        case MouseButton::Middle:
+            return 1;
+        case MouseButton::Right:
+            return 2;
+        case MouseButton::WheelUp:
+            return 4;
+        case MouseButton::WheelDown:
+            return 5;
+    }
+    return 0; // should never happen
+}
+
+struct MouseEventInfo {
+    uint8_t button;
+    unsigned row;
+    unsigned column;
+};
+
+constexpr bool isMouseWheel(MouseButton _button)
+{
+    return _button == MouseButton::WheelUp
+        || _button == MouseButton::WheelDown;
+}
+
+void InputGenerator::setMouseProtocol(MouseProtocol _mouseProtocol, bool _enabled)
+{
+    if (_enabled)
+    {
+        mouseWheelMode_ = MouseWheelMode::Default;
+        mouseProtocol_ = _mouseProtocol;
+    }
+    else
+        mouseProtocol_ = std::nullopt;
+}
+
+void InputGenerator::setMouseTransport(MouseTransport _mouseTransport)
+{
+    mouseTransport_ = _mouseTransport;
+}
+
+void InputGenerator::setMouseWheelMode(MouseWheelMode _mode) noexcept
+{
+    mouseWheelMode_ = _mode;
+}
+
+bool InputGenerator::generateMouse(MouseButton _button,
+                                   Modifier _modifier,
+                                   cursor_pos_t _row,
+                                   cursor_pos_t _column,
+                                   MouseEventType _eventType
+)
+{
+    if (!mouseProtocol_.has_value())
+        return false;
+
+    if (mouseProtocol_.value() == MouseProtocol::X10 && _eventType != MouseEventType::Press)
+        // X10 does only support button-press
+        return false;
+
+    uint8_t const button = [](MouseProtocol _protocol, MouseTransport _transport, MouseButton _button, MouseEventType _type) -> uint8_t {
+        bool const isDragging = _type == MouseEventType::Drag;
+        uint8_t const value = _type == MouseEventType::Release && _protocol == MouseProtocol::NormalTracking
+                                                               && (_transport == MouseTransport::Default||
+                                                                   _transport == MouseTransport::Extended)
+            ? 3
+            : isMouseWheel(_button)
+                ? buttonNumber(_button) + 0x3c
+                : buttonNumber(_button);
+        uint8_t const shiftValue = _transport == MouseTransport::Default
+                                || _transport == MouseTransport::Extended // DECSET 1005
+                                || _transport == MouseTransport::URXVT    // DECSET 1015
+                                || (isDragging && (_protocol == MouseProtocol::ButtonTracking     // DECSET 1002
+                                                || _protocol == MouseProtocol::AnyEventTracking)) // DECSET 1003
+                                ? 0x20
+                                : 0;
+        return value + shiftValue;
+    }(mouseProtocol_.value(), mouseTransport_, _button, _eventType);
+
+    uint8_t const modifier = [](MouseProtocol _protocol, Modifier _modifier) -> uint8_t {
+        switch (_protocol)
+        {
+            case MouseProtocol::AnyEventTracking:
+            case MouseProtocol::ButtonTracking:
+            case MouseProtocol::NormalTracking:
+            {
+                uint8_t mods = 0;
+                if (_modifier.shift())
+                    mods |= 4;
+                if (_modifier.meta())
+                    mods |= 8;
+                if (_modifier.control())
+                    mods |= 16;
+                return mods;
+            }
+            case MouseProtocol::X10:
+            default:
+                return 0;
+        }
+    }(mouseProtocol_.value(), _modifier);
+
+    // cout << fmt::format("InputGenerator.mouseMove: btn:{}, row:{}, col:{}", button, _row, _column) << '\n';
+
+    switch (mouseTransport_)
+    {
+        case MouseTransport::Default: // mode: 9
+            {
+                constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
+                constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
+
+                if (_row <= MaxCoordValue && _column <= MaxCoordValue)
+                {
+                    uint8_t const row = SkipCount + _row;
+                    uint8_t const column = SkipCount + _column;
+                    append("\033[M");
+                    append(static_cast<uint8_t>(button));
+                    append(column);
+                    append(row);
+                    return true;
+                }
+                else
+                    return false;
+            }
+        case MouseTransport::Extended: // mode: 1005
+            // TODO (like Default but with UTF-8 encoded coords)
+            break;
+        case MouseTransport::SGR:      // mode: 1006
+            {
+                append("\033[<");
+                append(static_cast<unsigned>(button | modifier));
+                append(';');
+                append(_column);
+                append(';');
+                append(_row);
+                append(_eventType != MouseEventType::Release ? 'M' : 'm');
+            }
+            return true;
+        case MouseTransport::URXVT:    // mode: 1015
+            {
+                append("\033[");
+                append(static_cast<unsigned>(button | modifier));
+                append(';');
+                append(_column);
+                append(';');
+                append(_row);
+                append('M');
+            }
+            return true;
+    }
+
+    return false;
+}
+
+bool InputGenerator::generate(MousePressEvent const& _mouse)
+{
+    currentMousePosition_ = {_mouse.row, _mouse.column};
+
+    switch (mouseWheelMode())
+    {
+        case MouseWheelMode::NormalCursorKeys:
+            switch (_mouse.button)
+            {
+                case MouseButton::WheelUp:
+                    append("\033[A");
+                    return true;
+                case MouseButton::WheelDown:
+                    append("\033[B");
+                    return true;
+                default:
+                    break;
+            }
+            break;
+        case MouseWheelMode::ApplicationCursorKeys:
+            switch (_mouse.button)
+            {
+                case MouseButton::WheelUp:
+                    append("\033OA");
+                    return true;
+                case MouseButton::WheelDown:
+                    append("\033OB");
+                    return true;
+                default:
+                    break;
+            }
+            break;
+        case MouseWheelMode::Default:
+            break;
+    }
+
+    if (!currentlyPressedMouseButtons_.count(_mouse.button))
+        currentlyPressedMouseButtons_.insert(_mouse.button);
+
+    return generateMouse(_mouse.button, _mouse.modifier, _mouse.row, _mouse.column, MouseEventType::Press);
+}
+
+bool InputGenerator::generate(MouseReleaseEvent const& _mouse)
+{
+    currentMousePosition_ = {_mouse.row, _mouse.column};
+
+    if (auto i = currentlyPressedMouseButtons_.find(_mouse.button); i != currentlyPressedMouseButtons_.end())
+        currentlyPressedMouseButtons_.erase(i);
+
+    return generateMouse(_mouse.button, _mouse.modifier, _mouse.row, _mouse.column, MouseEventType::Release);
+}
+
+bool InputGenerator::generate(MouseMoveEvent const& _mouse)
+{
+    if (currentMousePosition_ != _mouse.coordinates())
+    {
+        currentMousePosition_ = {_mouse.row, _mouse.column};
+        if (currentlyPressedMouseButtons_.size())
+        {
+            return generateMouse(MouseButton::Left, Modifier::None, _mouse.row, _mouse.column, MouseEventType::Drag);
+        }
+    }
+
+    return false;
+}
+// }}}
+
+bool InputGenerator::generate(FocusInEvent const&)
+{
+    if (generateFocusEvents())
+    {
+        append("\033[I");
+        return true;
+    }
+    return false;
+}
+
+bool InputGenerator::generate(FocusOutEvent const&)
+{
+    if (generateFocusEvents())
+    {
+        append("\033[O");
+        return true;
+    }
     return true;
 }
 

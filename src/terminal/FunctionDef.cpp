@@ -149,23 +149,23 @@ namespace {
 			case 69:
 				return _ctx.template emitCommand<SetMode>(Mode::LeftRightMargin, _enable);
 			case 1000:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::VT200, _enable);
-			case 1001:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::VT200_Highlight, _enable);
+				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::NormalTracking, _enable);
+			// case 1001: // TODO
+			//     return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::HighlightTracking, _enable);
 			case 1002:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::ButtonEvent, _enable);
+				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::ButtonTracking, _enable);
 			case 1003:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::AnyEvent, _enable);
+				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::AnyEventTracking, _enable);
 			case 1004:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::FocusEvent, _enable);
+				return _ctx.template emitCommand<SetMode>(Mode::FocusTracking, _enable);
 			case 1005:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::Extended, _enable);
+				return _ctx.template emitCommand<SetMode>(Mode::MouseExtended, _enable);
 			case 1006:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::SGR, _enable);
+				return _ctx.template emitCommand<SetMode>(Mode::MouseSGR, _enable);
 			case 1007:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::AlternateScroll, _enable);
+				return _ctx.template emitCommand<SetMode>(Mode::MouseAlternateScroll, _enable);
 			case 1015:
-				return _ctx.template emitCommand<SendMouseEvents>(MouseProtocol::URXVT, _enable);
+				return _ctx.template emitCommand<SetMode>(Mode::MouseURXVT, _enable);
 			case 1047:
 				return _ctx.template emitCommand<SetMode>(Mode::UseAlternateScreen, _enable);
 			case 1048:

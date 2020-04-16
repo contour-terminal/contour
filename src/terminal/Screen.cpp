@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Screen.h>
+#include <terminal/Commands.h>
 #include <terminal/OutputGenerator.h>
 #include <terminal/Util.h>
 #include <terminal/util/algorithm.h>
@@ -625,6 +626,9 @@ Screen::Screen(WindowSize const& _size,
                ResizeWindowCallback _resizeWindow,
                SetApplicationKeypadMode _setApplicationkeypadMode,
                SetBracketedPaste _setBracketedPaste,
+               SetMouseProtocol _setMouseProtocol,
+               SetMouseTransport _setMouseTransport,
+               SetMouseWheelMode _setMouseWheelMode,
 			   OnSetCursorStyle _setCursorStyle,
                Reply reply,
                Logger _logger,
@@ -635,7 +639,8 @@ Screen::Screen(WindowSize const& _size,
                std::function<void()> _bell,
                std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                std::function<void(DynamicColorName)> _resetDynamicColor,
-               std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+               std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
+               std::function<void(bool)> _setGenerateFocusEvents
 ) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
@@ -646,6 +651,9 @@ Screen::Screen(WindowSize const& _size,
     resizeWindow_{ move(_resizeWindow) },
     setApplicationkeypadMode_{ move(_setApplicationkeypadMode) },
     setBracketedPaste_{ move(_setBracketedPaste) },
+    setMouseProtocol_{ move(_setMouseProtocol) },
+    setMouseTransport_{ move(_setMouseTransport) },
+    setMouseWheelMode_{ move(_setMouseWheelMode) },
 	setCursorStyle_{ move(_setCursorStyle) },
     reply_{ move(reply) },
     handler_{ _logger },
@@ -659,7 +667,8 @@ Screen::Screen(WindowSize const& _size,
     bell_{ move(_bell) },
     requestDynamicColor_{ move(_requestDynamicColor) },
     resetDynamicColor_{ move(_resetDynamicColor) },
-    setDynamicColor_{ move(_setDynamicColor) }
+    setDynamicColor_{ move(_setDynamicColor) },
+    setGenerateFocusEvents_{ move(_setGenerateFocusEvents) }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
 }
@@ -709,16 +718,20 @@ void Screen::write(char const * _data, size_t _size)
 
     buffer_->verifyState();
 
+    #if defined(LIBTERMINAL_LOG_TRACE)
+    if (logTrace_ && logger_)
+    {
+        auto const traces = to_mnemonic(handler_.commands(), true, true);
+        for (auto const& trace : traces)
+        logger_(TraceOutputEvent{trace});
+    }
+    #endif
+
     for_each(
         handler_.commands(),
         [&](Command const& _command) {
             visit(*this, _command);
             buffer_->verifyState();
-
-            #if defined(LIBTERMINAL_LOG_TRACE)
-            if (logTrace_ && logger_)
-                logger_(TraceOutputEvent{to_mnemonic(_command, true, true)});
-            #endif
         }
     );
 
@@ -845,6 +858,9 @@ bool Screen::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
 
 bool Screen::scrollUp(size_t _numLines)
 {
+    if (isAlternateScreen()) // TODO: make configurable
+        return false;
+
     if (auto const newOffset = min(scrollOffset_ + _numLines, historyLineCount()); newOffset != scrollOffset_)
     {
         scrollOffset_ = newOffset;
@@ -856,6 +872,9 @@ bool Screen::scrollUp(size_t _numLines)
 
 bool Screen::scrollDown(size_t _numLines)
 {
+    if (isAlternateScreen()) // TODO: make configurable
+        return false;
+
     if (auto const newOffset = scrollOffset_ >= _numLines ? scrollOffset_ - _numLines : 0; newOffset != scrollOffset_)
     {
         scrollOffset_ = newOffset;
@@ -1460,10 +1479,42 @@ void Screen::operator()(SetMode const& v)
         case Mode::UseApplicationCursorKeys:
             if (useApplicationCursorKeys_)
                 useApplicationCursorKeys_(v.enable);
+            if (isAlternateScreen() && setMouseWheelMode_)
+            {
+                if (v.enable)
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                else
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            }
             break;
         case Mode::BracketedPaste:
             if (setBracketedPaste_)
                 setBracketedPaste_(v.enable);
+            break;
+        case Mode::MouseSGR:
+            if (setMouseTransport_)
+                setMouseTransport_(MouseTransport::SGR);
+            break;
+        case Mode::MouseExtended:
+            if (setMouseTransport_)
+                setMouseTransport_(MouseTransport::Extended);
+            break;
+        case Mode::MouseURXVT:
+            if (setMouseTransport_)
+                setMouseTransport_(MouseTransport::URXVT);
+            break;
+        case Mode::MouseAlternateScroll:
+            if (setMouseWheelMode_)
+            {
+                if (v.enable)
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                else
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            }
+            break;
+        case Mode::FocusTracking:
+            if (setGenerateFocusEvents_)
+                setGenerateFocusEvents_(v.enable);
             break;
         default:
             break;
@@ -1552,11 +1603,8 @@ void Screen::operator()(ScreenAlignmentPattern const&)
 
 void Screen::operator()(SendMouseEvents const& v)
 {
-    // TODO
-    cerr << fmt::format("TODO: SendMouseEvents({}, {})",
-                        to_string(v.protocol),
-                        v.enable ? "enable" : "disable")
-         << endl;
+    if (setMouseProtocol_)
+        setMouseProtocol_(v.protocol, v.enable);
 }
 
 void Screen::operator()(ApplicationKeypadMode const& v)
@@ -1723,9 +1771,15 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
         switch (_type)
         {
             case ScreenBuffer::Type::Main:
+                if (setMouseWheelMode_)
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::Default);
                 buffer_ = &primaryBuffer_;
                 break;
             case ScreenBuffer::Type::Alternate:
+                if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                else
+                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
                 buffer_ = &alternateBuffer_;
                 break;
         }

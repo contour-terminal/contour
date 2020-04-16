@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Commands.h>
+#include <terminal/InputGenerator.h> // KeyMode
 #include <terminal/util/UTF8.h>
 
 #include <fmt/format.h>
@@ -32,7 +33,12 @@ class OutputGenerator {
 
     explicit OutputGenerator(Writer writer) : writer_{std::move(writer)} {}
     explicit OutputGenerator(std::ostream& output) : OutputGenerator{[&](auto d, auto n) { output.write(d, n); }} {}
+    explicit OutputGenerator(std::vector<char>& output) : OutputGenerator{[&](auto d, auto n) { output.insert(output.end(), d, d + n); }} {}
     ~OutputGenerator();
+
+    void setCursorKeysMode(KeyMode _mode) noexcept { cursorKeysMode_ = _mode; }
+    bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
+    bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
 
     void operator()(std::vector<Command> const& commands);
     void operator()(Command const& command);
@@ -86,6 +92,7 @@ class OutputGenerator {
     std::vector<unsigned> sgr_;
     Color currentForegroundColor_ = DefaultColor{};
     Color currentBackgroundColor_ = DefaultColor{};
+    KeyMode cursorKeysMode_ = KeyMode::Normal;
 };
 
 }  // namespace terminal

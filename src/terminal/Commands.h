@@ -153,6 +153,20 @@ enum class Mode {
     ShowScrollbar,
     UseAlternateScreen,
     BracketedPaste,
+    FocusTracking, // 1004
+    // }}}
+    // {{{ Mouse related flags
+    /// extend mouse protocl encoding
+    MouseExtended = 1005,
+
+    /// Uses a (SGR-style?) different encoding.
+    MouseSGR = 1006,
+
+    // URXVT invented extend mouse protocol
+    MouseURXVT = 1015,
+
+    /// Toggles scrolling in alternate screen buffer, encodes CUP/CUD instead of mouse wheel events.
+    MouseAlternateScroll = 1007,
     // }}}
 };
 
@@ -180,6 +194,11 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::UseAlternateScreen:
         case Mode::LeftRightMargin:
         case Mode::BracketedPaste:
+        case Mode::FocusTracking:
+        case Mode::MouseExtended:
+        case Mode::MouseSGR:
+        case Mode::MouseURXVT:
+        case Mode::MouseAlternateScroll:
             return false;
     }
     return false; // Should never be reached.
@@ -210,6 +229,11 @@ constexpr std::string_view to_code(Mode m)
         case Mode::UseAlternateScreen: return "?47";
         case Mode::LeftRightMargin: return "?69";
         case Mode::BracketedPaste: return "?2004";
+        case Mode::FocusTracking: return "?1004";
+        case Mode::MouseExtended: return "?1005";
+        case Mode::MouseSGR: return "?1006";
+        case Mode::MouseURXVT: return "?1015";
+        case Mode::MouseAlternateScroll: return "?1007";
     }
     return "0";
 }
@@ -588,23 +612,22 @@ struct SetLeftRightMargin {
     std::optional<cursor_pos_t> right;
 };
 
+/// Mutualy exclusive mouse protocls.
 enum class MouseProtocol {
+    /// Old X10 mouse protocol
     X10 = 9,
-    VT200 = 1000,
-    VT200_Highlight = 1001,
-    ButtonEvent = 1002,
-    AnyEvent = 1003,
-    FocusEvent = 1004,
-    Extended = 1005,
-    SGR = 1006,
-    URXVT = 1015,
-
-    AlternateScroll = 1007,
+    /// Normal tracking mode, that's X10 with mouse release events and modifiers
+    NormalTracking = 1000,
+    /// Button-event tracking protocol.
+    ButtonTracking = 1002,
+    /// Like ButtonTracking plus motion events.
+    AnyEventTracking = 1003,
 };
 
 std::string to_string(MouseProtocol protocol);
-unsigned to_code(MouseProtocol protocol);
+unsigned to_code(MouseProtocol protocol) noexcept;
 
+// TODO: Consider removing thix and extend SetMode instead.
 struct SendMouseEvents { MouseProtocol protocol; bool enable; };
 
 /// DECKPAM - Keypad Application Mode: ESC =
@@ -940,6 +963,47 @@ std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool
 
 
 namespace fmt {
+    template <>
+    struct formatter<terminal::Mode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::Mode _mode, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}", to_string(_mode));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::MouseProtocol> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(const terminal::MouseProtocol _value, FormatContext& ctx)
+        {
+            switch (_value)
+            {
+                case terminal::MouseProtocol::X10:
+                    return format_to(ctx.out(), "X10");
+                case terminal::MouseProtocol::ButtonTracking:
+                    return format_to(ctx.out(), "ButtonTracking");
+                case terminal::MouseProtocol::NormalTracking:
+                    return format_to(ctx.out(), "NormalTracking");
+                case terminal::MouseProtocol::AnyEventTracking:
+                    return format_to(ctx.out(), "AnyEventTracking");
+            }
+            return format_to(ctx.out(), "{}", unsigned(_value));
+        }
+    };
+
     template <>
     struct formatter<terminal::Coordinate> {
         template <typename ParseContext>

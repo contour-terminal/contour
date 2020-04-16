@@ -15,6 +15,7 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/Util.h>
 #include <terminal/util/overloaded.h>
+#include <terminal/util/times.h>
 
 #include <fmt/format.h>
 
@@ -24,6 +25,8 @@
 #include <string>
 
 using namespace std;
+
+using terminal::support::times;
 
 namespace terminal {
 
@@ -170,8 +173,18 @@ void OutputGenerator::operator()(Command const& command)
             }
         },
         [&](HorizontalTabSet) { write("\033H"); },
-        [&](MoveCursorUp const& up) { write("\033[{}A", up.n); },
-        [&](MoveCursorDown const& down) { write("\033[{}B", down.n); },
+        [&](MoveCursorUp const& up) {
+            if (normalCursorKeys())
+                write("\033[{}A", up.n);
+            else
+                times(up.n) | [&]() { write("\033OA"); };
+        },
+        [&](MoveCursorDown const& down) {
+            if (normalCursorKeys())
+                write("\033[{}B", down.n);
+            else
+                times(down.n) | [&]() { write("\033OB"); };
+        },
         [&](MoveCursorForward const& fwd) { write("\033[{}C", fwd.n); },
         [&](MoveCursorBackward const& back) { write("\033[{}D", back.n); },
         [&](MoveCursorToColumn const& to) { write("\033[{}G", to.column); },

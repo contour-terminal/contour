@@ -517,13 +517,14 @@ void TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
 {
     now_ = chrono::steady_clock::now();
 
+    if (terminalView_->terminal().send(_mouseEvent, now_))
+        return;
+
     if (auto mapping = config_.mouseMappings.find(_mouseEvent); mapping != config_.mouseMappings.end())
     {
         for (auto const& action : mapping->second)
             executeAction(action);
     }
-    else
-        terminalView_->terminal().send(_mouseEvent, now_);
 }
 
 void TerminalWindow::mousePressEvent(QMouseEvent* _event)
@@ -590,11 +591,15 @@ void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
             setCursor(Qt::ArrowCursor);
             break;
     }
+
+    terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
 }
 
 void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with "faint" colors
 {
     QOpenGLWindow::focusOutEvent(_event);
+
+    terminalView_->terminal().send(terminal::FocusOutEvent{}, now_);
 }
 
 bool TerminalWindow::event(QEvent* _event)

@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "terminal/InputGenerator.h"
 #include <terminal/Terminal.h>
 
 #include <terminal/OutputGenerator.h>
@@ -63,6 +64,9 @@ Terminal::Terminal(WindowSize _winSize,
         move(_resizeWindow),
         bind(&InputGenerator::setApplicationKeypadMode, &inputGenerator_, _1),
         bind(&InputGenerator::setBracketedPaste, &inputGenerator_, _1),
+        bind(&InputGenerator::setMouseProtocol, &inputGenerator_, _1, _2),
+        bind(&InputGenerator::setMouseTransport, &inputGenerator_, _1),
+        bind(&InputGenerator::setMouseWheelMode, &inputGenerator_, _1),
         bind(&Terminal::onSetCursorStyle, this, _1, _2),
         bind(&Terminal::onScreenReply, this, _1),
         logger_,
@@ -70,10 +74,11 @@ Terminal::Terminal(WindowSize _winSize,
         true, // logs trace output by default?
         bind(&Terminal::onScreenCommands, this, _1),
         move(_onScreenBufferChanged),
-        std::move(_bell),
-        std::move(_requestDynamicColor),
-        std::move(_resetDynamicColor),
-        std::move(_setDynamicColor)
+        move(_bell),
+        move(_requestDynamicColor),
+        move(_resetDynamicColor),
+        move(_setDynamicColor),
+        bind(&InputGenerator::setGenerateFocusEvents, &inputGenerator_, _1)
     },
     onScreenCommands_{ move(_onScreenCommands) },
     screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) },
@@ -168,7 +173,11 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
 {
     // TODO: anything else? logging?
 
-    if (inputGenerator_.generate(_mousePress))
+    MousePressEvent const withPosition{_mousePress.button,
+                                       _mousePress.modifier,
+                                       currentMousePosition_.row,
+                                       currentMousePosition_.column};
+    if (inputGenerator_.generate(withPosition))
     {
         flushInput();
         return true;
@@ -221,6 +230,13 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     auto const newPosition = terminal::Coordinate{_mouseMove.row, _mouseMove.column};
 
     currentMousePosition_ = newPosition;
+
+    if (inputGenerator_.generate(_mouseMove))
+    {
+        flushInput();
+        return true;
+    }
+
     if (leftMouseButtonPressed_ && !selector_)
     {
         selector_ = make_unique<Selector>(
@@ -246,6 +262,16 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
 
 bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
 {
+    MouseReleaseEvent const withPosition{_mouseRelease.button,
+                                         _mouseRelease.modifier,
+                                         currentMousePosition_.row,
+                                         currentMousePosition_.column};
+    if (inputGenerator_.generate(withPosition))
+    {
+        flushInput();
+        return true;
+    }
+
     if (_mouseRelease.button == MouseButton::Left)
     {
         leftMouseButtonPressed_ = false;
@@ -259,6 +285,30 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     }
 
     return true;
+}
+
+bool Terminal::send(FocusInEvent const& _focusEvent,
+                    [[maybe_unused]] std::chrono::steady_clock::time_point _now)
+{
+    if (inputGenerator_.generate(_focusEvent))
+    {
+        flushInput();
+        return true;
+    }
+
+    return false;
+}
+
+bool Terminal::send(FocusOutEvent const& _focusEvent,
+                    [[maybe_unused]] std::chrono::steady_clock::time_point _now)
+{
+    if (inputGenerator_.generate(_focusEvent))
+    {
+        flushInput();
+        return true;
+    }
+
+    return false;
 }
 
 bool Terminal::send(MouseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now)
@@ -278,6 +328,8 @@ bool Terminal::send(InputEvent const& _inputEvent, chrono::steady_clock::time_po
         [=](MousePressEvent const& _mouse) -> bool { return send(_mouse, _now); },
         [=](MouseMoveEvent const& _mouseMove) -> bool { return send(_mouseMove, _now); },
         [=](MouseReleaseEvent const& _mouseRelease) -> bool { return send(_mouseRelease, _now); },
+        [=](FocusInEvent const& _event) -> bool { return send(_event, _now); },
+        [=](FocusOutEvent const& _event) -> bool { return send(_event, _now); },
     }, _inputEvent);
 }
 

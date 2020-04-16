@@ -1401,6 +1401,9 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setMouseProtocol
+        {}, // setMouseTransport
+        {}, // setMouseAlternateScroll
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
@@ -1440,6 +1443,9 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setMouseProtocol
+        {}, // setMouseTransport
+        {}, // setMouseAlternateScroll
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
@@ -1494,6 +1500,9 @@ TEST_CASE("RequestMode", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setMouseProtocol
+        {}, // setMouseTransport
+        {}, // setMouseAlternateScroll
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }
@@ -1896,6 +1905,9 @@ TEST_CASE("DECTABSR", "[screen]")
         {}, // resizeWindow
         {}, // setAppKeypadMode,
         {}, // setBracketedPaste
+        {}, // setMouseProtocol
+        {}, // setMouseTransport
+        {}, // setMouseAlternateScroll
         {}, // setCursorStyle
         [&](auto const& _reply) { reply += _reply; },
         [&](auto const& _msg) { UNSCOPED_INFO(fmt::format("{}", _msg)); }

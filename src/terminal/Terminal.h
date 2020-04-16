@@ -80,6 +80,8 @@ class Terminal {
     bool send(MousePressEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
     bool send(MouseReleaseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
     bool send(MouseMoveEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
+    bool send(FocusInEvent const& _focusEvent, std::chrono::steady_clock::time_point _now);
+    bool send(FocusOutEvent const& _focusEvent, std::chrono::steady_clock::time_point _now);
 
     bool send(MouseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
     bool send(InputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);

@@ -138,6 +138,16 @@ string to_string(Mode m)
             return "UseAlternateScreen";
         case Mode::BracketedPaste:
             return "BracketedPaste";
+        case Mode::FocusTracking:
+            return "FocusTracking";
+        case Mode::MouseExtended:
+            return "MouseExtended";
+        case Mode::MouseSGR:
+            return "MouseSGR";
+        case Mode::MouseURXVT:
+            return "MouseURXVT";
+        case Mode::MouseAlternateScroll:
+            return "MouseAlternateScroll";
     }
     return "?";
 }
@@ -174,7 +184,7 @@ string to_string(Charset charset)
     return fmt::format("<?Charset:{}>", static_cast<unsigned>(charset));
 }
 
-unsigned to_code(MouseProtocol protocol)
+unsigned to_code(MouseProtocol protocol) noexcept
 {
     return static_cast<unsigned>(protocol);
 }
@@ -185,24 +195,12 @@ string to_string(MouseProtocol protocol)
     {
         case MouseProtocol::X10:
             return "X10";
-        case MouseProtocol::VT200:
-            return "VT200";
-        case MouseProtocol::VT200_Highlight:
-            return "VT200_Highlight";
-        case MouseProtocol::ButtonEvent:
-            return "ButtonEvent";
-        case MouseProtocol::AnyEvent:
-            return "AnyEvent";
-        case MouseProtocol::FocusEvent:
-            return "FocusEvent";
-        case MouseProtocol::Extended:
-            return "Extended";
-        case MouseProtocol::SGR:
-            return "SGR";
-        case MouseProtocol::URXVT:
-            return "URXVT";
-        case MouseProtocol::AlternateScroll:
-            return "AlternateScroll";
+        case MouseProtocol::NormalTracking:
+            return "NormalTracking";
+        case MouseProtocol::ButtonTracking:
+            return "ButtonTracking";
+        case MouseProtocol::AnyEventTracking:
+            return "AnyEventTracking";
     }
 
     return fmt::format("<?MouseProtocol:{}>", static_cast<unsigned>(protocol));

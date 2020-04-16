@@ -19,6 +19,7 @@
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/WindowSize.h>
+#include <terminal/InputGenerator.h> // MouseTransport
 
 #include <fmt/format.h>
 
@@ -243,6 +244,11 @@ struct ScreenBuffer {
 
 	void setMode(Mode _mode, bool _enable);
 
+    bool isModeEnabled(Mode _mode) const noexcept
+    {
+        return enabledModes_.find(_mode) != enabledModes_.end();
+    }
+
     void clampSavedLines();
 	void verifyState() const;
 	void saveState();
@@ -330,6 +336,9 @@ class Screen {
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
     using SetBracketedPaste = std::function<void(bool)>;
+    using SetMouseProtocol = std::function<void(MouseProtocol, bool)>;
+    using SetMouseTransport = std::function<void(MouseTransport)>;
+    using SetMouseWheelMode = std::function<void(InputGenerator::MouseWheelMode)>;
 	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
     using OnBufferChanged = std::function<void(ScreenBuffer::Type)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
@@ -351,6 +360,9 @@ class Screen {
            ResizeWindowCallback _resizeWindow,
            SetApplicationKeypadMode _setApplicationkeypadMode,
            SetBracketedPaste _setBracketedPaste,
+           SetMouseProtocol _setMouseProtocol,
+           SetMouseTransport _setMouseTransport,
+           SetMouseWheelMode _setMouseWheelMode,
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
            Logger _logger,
@@ -361,7 +373,8 @@ class Screen {
            std::function<void()> _bell,
            std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
            std::function<void(DynamicColorName)> _resetDynamicColor,
-           std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+           std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
+           std::function<void(bool)> _setGenerateFocusEvents
     );
 
     Screen(WindowSize const& _size,
@@ -371,6 +384,9 @@ class Screen {
            ResizeWindowCallback _resizeWindow,
            SetApplicationKeypadMode _setApplicationkeypadMode,
            SetBracketedPaste _setBracketedPaste,
+           SetMouseProtocol _setMouseProtocol,
+           SetMouseTransport _setMouseTransport,
+           SetMouseWheelMode _setMouseWheelMode,
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
            Logger _logger
@@ -382,15 +398,19 @@ class Screen {
         std::move(_resizeWindow),
         std::move(_setApplicationkeypadMode),
         std::move(_setBracketedPaste),
+        std::move(_setMouseProtocol),
+        std::move(_setMouseTransport),
+        std::move(_setMouseWheelMode),
         std::move(_setCursorStyle),
         std::move(_reply),
         std::move(_logger),
         true, // logs raw output by default?
         true, // logs trace output by default?
-        {}, {}, {}, {}, {}, {}} {}
+        {}, {}, {}, {}, {}, {}, {}
+    } {}
 
     Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}, {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}, {}, {}} {}
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -629,6 +649,9 @@ class Screen {
     ResizeWindowCallback resizeWindow_;
     SetApplicationKeypadMode setApplicationkeypadMode_;
     SetBracketedPaste setBracketedPaste_;
+    SetMouseProtocol setMouseProtocol_;
+    SetMouseTransport setMouseTransport_;
+    SetMouseWheelMode setMouseWheelMode_;
 	OnSetCursorStyle setCursorStyle_;
     Reply const reply_;
 
@@ -651,6 +674,7 @@ class Screen {
     std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
     std::function<void(DynamicColorName)> resetDynamicColor_{};
     std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};
+    std::function<void(bool)> setGenerateFocusEvents_{};
 };
 
 constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
