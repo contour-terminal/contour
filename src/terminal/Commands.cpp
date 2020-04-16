@@ -241,11 +241,11 @@ class MnemonicBuilder {
     void operator()(FullReset const&) { build("RIS", "Reset to Initial state (hard reset)"); }
     void operator()(Linefeed const&) { build("\\n"); }
     void operator()(Backspace const&) { build("\\b"); }
-    void operator()(DeviceStatusReport const&) { build("TODO"); }
+    void operator()(DeviceStatusReport const&) { build("TODO:DeviceStatusReport"); }
     void operator()(ReportCursorPosition const&) { build("CPR", "Report cursor position"); }
     void operator()(ReportExtendedCursorPosition const&) { build("DECXCPR", "Report cursor position (extended)."); }
-    void operator()(SendDeviceAttributes const&) { build("TODO"); }
-    void operator()(SendTerminalId const&) { build("TODO"); }
+    void operator()(SendDeviceAttributes const&) { build("DA1", "Primary Device Attributes"); }
+    void operator()(SendTerminalId const&) { build("SendTerminalId"); }
     void operator()(ClearToEndOfScreen const&) { build("ED", "Clear to end of screen", 0); }
     void operator()(ClearToBeginOfScreen const&) { build("ED", "Clear to begin of screen", 1); }
     void operator()(ClearScreen const&) { build("ED", "Clear screen", 2); }
@@ -331,9 +331,29 @@ class MnemonicBuilder {
     void operator()(SendMouseEvents const& v) {
         build(fmt::format("MOUSE({})", to_string(v.protocol)), "Send Mouse Events", v.enable);
     }
-    void operator()(ApplicationKeypadMode) { build("TODO"); }
+    void operator()(ApplicationKeypadMode const& v) {
+        if (v.enable)
+            build("DECKPAM", "Keypad Application Mode");
+        else
+            build("DECKPNM", "Keypad Numeric Mode");
+    }
     void operator()(DesignateCharset) { build("TODO"); }
-    void operator()(SingleShiftSelect) { build("TODO"); }
+    void operator()(SingleShiftSelect const& v) {
+        switch (v.table) {
+            case CharsetTable::G0:
+                build("SS0", "TODO: what's this?");
+                break;
+            case CharsetTable::G1:
+                build("SS1", "TODO: what's this?");
+                break;
+            case CharsetTable::G2:
+                build("SS2", "Maps G2 into GL for the next character.");
+                break;
+            case CharsetTable::G3:
+                build("SS3", "Maps G3 into GL for the next character.");
+                break;
+        }
+    }
     void operator()(ChangeWindowTitle const& v) {
         build("WINTITLE", fmt::format("Sets window title to {}", v.title));
     }

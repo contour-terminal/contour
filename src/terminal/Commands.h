@@ -16,11 +16,11 @@
 #include <terminal/Color.h>
 
 #include <functional>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
-#include <iostream>
 
 namespace terminal {
 
@@ -106,7 +106,6 @@ enum class Mode {
     SendReceive,
     AutomaticNewLine,
     // }}}
-
     // {{{ DEC modes
     UseApplicationCursorKeys,
     DesignateCharsetUSASCII,
@@ -905,8 +904,8 @@ using Command = std::variant<
     ReportCursorPosition,
     ReportExtendedCursorPosition,
     RequestDynamicColor,
-    RequestTabStops,
     RequestMode,
+    RequestTabStops,
     ResetDynamicColor,
     ResizeWindow,
     RestoreCursor,

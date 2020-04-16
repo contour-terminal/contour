@@ -136,8 +136,8 @@ void OutputGenerator::operator()(Command const& command)
         [&](DeviceStatusReport) { write("\033[5n"); },
         [&](ReportCursorPosition) { write("\033[6n"); },
         [&](ReportExtendedCursorPosition) { write("\033[?6n"); },
-        [&](SendDeviceAttributes) { write("\033[c"); },
-        [&](SendTerminalId) { write("\033[>c"); },
+        [&](SendDeviceAttributes) { write("\033[c"); }, // Primary DA
+        [&](SendTerminalId) { write("\033[>c"); }, // FIXME: this is Secondary DA!
         [&](ClearToEndOfScreen) { write("\033[0J"); },
         [&](ClearToBeginOfScreen) { write("\033[1J"); },
         [&](ClearScreen) { write("\033[2J"); },
