@@ -217,13 +217,8 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             ? LoggingSink{config_.loggingMask, config_.logFilePath->string()}
             : LoggingSink{config_.loggingMask, &cout}
     },
-    fontManager_{},
-    regularFont_{
-        fontManager_.load(
-            profile().fontFamily,
-            static_cast<unsigned>(profile().fontSize * contentScale())
-        )
-    },
+    fontManager_{static_cast<unsigned>(profile().fontSize * contentScale())},
+    regularFont_{fontManager_.load(profile().fontFamily)},
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
@@ -779,10 +774,8 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     terminalView_->terminal().setTabWidth(newProfile.tabWidth);
     if (newProfile.fontFamily != profile().fontFamily)
     {
-        regularFont_ = fontManager_.load(
-            newProfile.fontFamily,
-            static_cast<unsigned>(newProfile.fontSize * contentScale())
-        );
+        fontManager_.setFontSize(static_cast<unsigned>(newProfile.fontSize * contentScale()));
+        regularFont_ = fontManager_.load(newProfile.fontFamily);
         terminalView_->setFont(regularFont_.get());
     }
     else if (newProfile.fontSize != profile().fontSize)

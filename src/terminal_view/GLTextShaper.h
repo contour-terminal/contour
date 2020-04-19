@@ -62,7 +62,7 @@ class GLTextShaper : private QOpenGLFunctions {
         ~Glyph();
     };
 
-    Glyph& getGlyphByIndex(unsigned long _index, FontStyle _style);
+    Glyph& getGlyphByIndex(Font& _font, unsigned long _index);
 
   private:
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;

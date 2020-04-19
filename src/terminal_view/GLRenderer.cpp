@@ -125,7 +125,6 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     renderPendingBackgroundCells(_terminal.screenSize());
 #endif
 
-    assert(!pendingDraw_.text.empty());
     renderTextGroup(_terminal.screenSize());
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -165,14 +164,36 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
 void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
 {
-    if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes)
-        pendingDraw_.text.push_back(_cell.character);
-    else
-    {
-        if (!pendingDraw_.text.empty())
-            renderTextGroup(_screenSize);
+    constexpr uint8_t SP = 0x20;
 
-        pendingDraw_.reset(_row, _col, _cell.attributes, _cell.character);
+    switch (pendingDraw_.state)
+    {
+        case PendingDraw::State::Empty:
+            if (_cell.character > SP)
+            {
+                pendingDraw_.state = PendingDraw::State::Filling;
+                pendingDraw_.reset(_row, _col, _cell.attributes);
+                pendingDraw_.text.push_back(_cell.character);
+            }
+            break;
+        case PendingDraw::State::Filling:
+            if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes && _cell.character > SP)
+                pendingDraw_.text.push_back(_cell.character);
+            else
+            {
+                renderTextGroup(_screenSize);
+                if (_cell.character > SP)
+                {
+                    pendingDraw_.reset(_row, _col, _cell.attributes);
+                    pendingDraw_.text.push_back(_cell.character);
+                }
+                else
+                {
+                    pendingDraw_.text.clear();
+                    pendingDraw_.state = PendingDraw::State::Empty;
+                }
+            }
+            break;
     }
 }
 
@@ -222,7 +243,8 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
 
 void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 {
-    assert(!pendingDraw_.text.empty()); // oh wait, what about empty lines/space?
+    if (pendingDraw_.text.empty())
+        return;
 
     ++metrics_.renderTextGroup;
 
@@ -267,6 +289,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 #endif
 
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
+    {
         textShaper_.render(
             makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
             pendingDraw_.text,
@@ -278,6 +301,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
             ),
             textStyle
         );
+    }
 }
 
 QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const

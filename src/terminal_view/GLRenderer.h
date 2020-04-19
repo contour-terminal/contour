@@ -119,18 +119,19 @@ class GLRenderer : public QOpenGLFunctions {
 
     /// Holds an array of directly connected characters on a single line that all share the same visual attributes.
     struct PendingDraw {
+        enum class State { Empty, Filling };
         cursor_pos_t lineNumber{};
         cursor_pos_t startColumn{};
         ScreenBuffer::GraphicsAttributes attributes{};
         std::vector<char32_t> text{};
+        State state = State::Empty;
 
-        void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attributes, char32_t _char)
+        void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attributes)
         {
             lineNumber = _row;
             startColumn = _col;
             attributes = _attributes;
             text.clear();
-            text.push_back(_char);
         }
     };
 

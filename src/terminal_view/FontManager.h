@@ -26,6 +26,7 @@
 #include <harfbuzz/hb-ft.h>
 
 #include <array>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -79,18 +80,22 @@ constexpr FontStyle& operator|=(FontStyle& lhs, FontStyle rhs)
     return lhs;
 }
 
+/**
+ * Represents one Font face along with support for its fallback fonts.
+ */
 class Font {
   public:
-    Font(FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize);
+    Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int _fontSize);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
     Font(Font&&) noexcept;
     Font& operator=(Font&&) noexcept;
     ~Font();
 
-    unsigned int fontSize() const noexcept { return fontSize_; }
+    std::string const& filePath() const noexcept { return filePath_; }
 
     void setFontSize(unsigned int _fontSize);
+    unsigned int fontSize() const noexcept { return fontSize_; }
 
     unsigned int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
 
@@ -108,12 +113,20 @@ class Font {
 
     unsigned int baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
 
-    bool contains(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char) != 0; }
+    [[deprecated]] bool contains(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char) != 0; }
 
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
+    struct Glyph {
+        unsigned int width;
+        unsigned int height;
+        std::vector<uint8_t> buffer;
+    };
+
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
-    void loadGlyphByIndex(unsigned int _glyphIndex);
+
+    Glyph loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex);
+    Glyph loadGlyphByIndex(unsigned int _glyphIndex);
 
     // well yeah, if it's only bitmap we still need, we can expose it and then [[deprecated]] this.
     FT_Face operator->() noexcept { return face_; }
@@ -121,14 +134,22 @@ class Font {
     operator FT_Face () noexcept { return face_; }
 
     struct GlyphPosition {
+        std::reference_wrapper<Font> font;
         unsigned int x;
         unsigned int y;
-        unsigned int codepoint;
+        unsigned int glyphIndex;
+
+        GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi) :
+            font{_font}, x{_x}, y{_y}, glyphIndex{_gi} {}
     };
     using GlyphPositionList = std::vector<GlyphPosition>;
 
     /// Renders text into glyph positions of this font.
-    void render(CharSequence const& _chars, GlyphPositionList& _result);
+    ///
+    /// @retval true if rendering succeed
+    /// @retval false if rendering failed due to missing glyphs (and no fallback possible); @p _result still
+    ///               contains as much as possible that could be rendered.
+    bool render(CharSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
 
     /// Clears the render cache.
     void clearRenderCache();
@@ -140,6 +161,9 @@ class Font {
     hb_buffer_t* hb_buf_;
     unsigned int fontSize_;
 
+    std::string filePath_;
+    Font* fallback_;
+
 #if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
     // TODO: Currently this can become ever-growing. We should evict least recently used items
     //       if the cache would exceed a given threshold.
@@ -150,7 +174,7 @@ class Font {
 /// API for managing multiple fonts.
 class FontManager {
   public:
-    FontManager();
+    explicit FontManager(unsigned int _fontSize);
     FontManager(FontManager&&) = delete;
     FontManager(FontManager const&) = delete;
     FontManager& operator=(FontManager&&) = delete;
@@ -159,11 +183,16 @@ class FontManager {
 
     void clearRenderCache();
 
-    Font& load(std::string const& _fontPattern, unsigned int _fontSize);
+    void setFontSize(unsigned int _size);
+    unsigned int fontSize() const noexcept { return fontSize_; }
+
+    Font& load(std::string const& _fontPattern);
+    Font& loadFromFilePath(std::string const& _filePath, Font* _fallback);
 
   private:
     FT_Library ft_;
     std::unordered_map<std::string, Font> fonts_;
+    unsigned int fontSize_;
 };
 
 } // namespace terminal::view

@@ -85,11 +85,10 @@ void GLTextShaper::setProjection(QMatrix4x4 const& _projectionMatrix)
     projectionMatrix_ = _projectionMatrix;
 }
 
-void GLTextShaper::render(
-    QPoint _pos,
-    std::vector<char32_t> const& _chars,
-    QVector4D const& _color,
-    FontStyle _style)
+void GLTextShaper::render(QPoint _pos,
+                          std::vector<char32_t> const& _chars,
+                          QVector4D const& _color,
+                          [[maybe_unused]] FontStyle _style)
 {
     Font& font = regularFont_.get(); // TODO: respect _style
 
@@ -102,12 +101,12 @@ void GLTextShaper::render(
     vao_.bind();
     vbo_.bind();
 
-    for (auto const& gpos : glyphPositions_)
+    for (Font::GlyphPosition const& gpos : glyphPositions_)
     {
-        if (gpos.codepoint == 0)
+        if (gpos.glyphIndex == 0)
             continue;
 
-        Glyph const& glyph = getGlyphByIndex(gpos.codepoint, _style);
+        Glyph const& glyph = getGlyphByIndex(gpos.font.get(), gpos.glyphIndex);
         unsigned const x = _pos.x() + gpos.x;
         unsigned const y = _pos.y() + gpos.y;
 
@@ -141,14 +140,13 @@ void GLTextShaper::render(
     #endif
 }
 
-GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontStyle _style)
+GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(Font& _font, unsigned long _index)
 {
-    auto& cache = cache_[static_cast<size_t>(_style)];
+    auto& cache = cache_[static_cast<size_t>(FontStyle::Regular)]; // TODO: make cache more intelligent to multiple fonts
     if (auto i = cache.find(_index); i != cache.end())
         return i->second;
 
-    Font& font = regularFont_; // TODO: respect _style
-    font.loadGlyphByIndex(_index);
+    _font.loadGlyphByIndex(_index);
 
     // Generate texture
     GLuint texture;
@@ -158,12 +156,12 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
         GL_TEXTURE_2D,                  // target
         0,                              // level
         GL_RED,                         // internal format
-        font->glyph->bitmap.width,      // width
-        font->glyph->bitmap.rows,       // height
+        _font->glyph->bitmap.width,     // width
+        _font->glyph->bitmap.rows,      // height
         0,                              // border (must be set to 0)
         GL_RED,                         // pixel-data format
         GL_UNSIGNED_BYTE,               // pixel-data type
-        font->glyph->bitmap.buffer      // pixel-data pointer
+        _font->glyph->bitmap.buffer     // pixel-data pointer
     );
 
     // Set texture options
@@ -174,14 +172,14 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(unsigned long _index, FontSty
     glBindTexture(GL_TEXTURE_2D, 0);
 
     // store character for later use
-    auto const descender = font->glyph->metrics.height / 64 - font->glyph->bitmap_top;
+    auto const descender = _font->glyph->metrics.height / 64 - _font->glyph->bitmap_top;
     Glyph& glyph = cache.emplace(make_pair(_index, Glyph{
         texture,
-        QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows)),
-        QPoint(font->glyph->bitmap_left, font->glyph->bitmap_top),
-        static_cast<unsigned>(font->height) / 64,
+        QPoint(static_cast<int>(_font->glyph->bitmap.width), static_cast<int>(_font->glyph->bitmap.rows)),
+        QPoint(_font->glyph->bitmap_left, _font->glyph->bitmap_top),
+        static_cast<unsigned>(_font->height) / 64,
         static_cast<unsigned>(descender),
-        static_cast<unsigned>(font->glyph->advance.x / 64)
+        static_cast<unsigned>(_font->glyph->advance.x / 64)
     })).first->second;
 
     return glyph;
