@@ -20,6 +20,18 @@ namespace terminal::support {
 // XXX Some C++20 backports
 
 template <typename Container, typename Fn>
+bool any_of(Container && _container, Fn && _fn)
+{
+    return std::any_of(begin(_container), end(_container), std::forward<Fn>(_fn));
+}
+
+template <typename ExecutionPolicy, typename Container, typename Fn>
+bool any_of(ExecutionPolicy _ep, Container && _container, Fn && _fn)
+{
+    return std::any_of(_ep, begin(_container), end(_container), std::forward<Fn>(_fn));
+}
+
+template <typename Container, typename Fn>
 void for_each(Container && _container, Fn && _fn)
 {
     std::for_each(begin(_container), end(_container), std::forward<Fn>(_fn));
