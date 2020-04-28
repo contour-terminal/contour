@@ -37,6 +37,7 @@ add_library(terminal_view STATIC
     GLTextShaper.cpp GLTextShaper.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalView.cpp TerminalView.h
+    TextureAtlas.h
 )
 
 option(LIBTERMINAL_VIEW_FONT_RENDER_CACHE "Enables internal render cache [default: ON]." ON)
