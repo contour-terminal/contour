@@ -105,7 +105,7 @@ template<
 >
 constexpr void operator|(_Times<I, T> _times, Callable _callable)
 {
-    for ([[maybe_unused]] auto &&  i : _times)
+    for ([[maybe_unused]] auto && i : _times)
         _callable();
 }
 
