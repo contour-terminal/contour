@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/util/compose.h>
+#include <crispy/compose.h>
 #include <catch2/catch.hpp>
 
 TEST_CASE("compose.simple")

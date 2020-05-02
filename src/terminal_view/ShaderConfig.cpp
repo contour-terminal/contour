@@ -17,10 +17,10 @@
 
 #include "background_vert.h"
 #include "background_frag.h"
-#include "text_vert.h"
-#include "text_frag.h"
 #include "cursor_vert.h"
 #include "cursor_frag.h"
+#include "text_vert.h"
+#include "text_frag.h"
 
 namespace terminal::view {
 

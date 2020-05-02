@@ -204,6 +204,78 @@ namespace {
         return str.maybeSpace();
     }
 #endif
+
+#if !defined(NDEBUG)
+    void glMessageCallback(
+        GLenum _source,
+        GLenum _type,
+        GLuint _id,
+        GLenum _severity,
+        GLsizei _length,
+        GLchar const* _message,
+        void const* _userParam)
+    {
+        string const sourceName = [&]() {
+            switch (_source)
+            {
+                case GL_DEBUG_SOURCE_API_ARB:
+                    return "API"s;
+                case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB:
+                    return "window system"s;
+                case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB:
+                    return "shader compiler"s;
+                case GL_DEBUG_SOURCE_THIRD_PARTY_ARB:
+                    return "third party"s;
+                case GL_DEBUG_SOURCE_APPLICATION_ARB:
+                    return "application"s;
+                case GL_DEBUG_SOURCE_OTHER_ARB:
+                    return "other"s;
+                default:
+                    return fmt::format("{}", _severity);
+            }
+        }();
+        string const typeName = [&]() {
+            switch (_type)
+            {
+                case GL_DEBUG_TYPE_ERROR:
+                    return "error"s;
+                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+                    return "deprecated"s;
+                case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+                    return "undefined"s;
+                case GL_DEBUG_TYPE_PORTABILITY:
+                    return "portability"s;
+                case GL_DEBUG_TYPE_PERFORMANCE:
+                    return "performance"s;
+                case GL_DEBUG_TYPE_OTHER:
+                    return "other"s;
+                default:
+                    return fmt::format("{}", _severity);
+            }
+        }();
+        string const debugSeverity = [&]() {
+            switch (_severity)
+            {
+                case GL_DEBUG_SEVERITY_LOW:
+                    return "low"s;
+                case GL_DEBUG_SEVERITY_MEDIUM:
+                    return "medium"s;
+                case GL_DEBUG_SEVERITY_HIGH:
+                    return "high"s;
+                case GL_DEBUG_SEVERITY_NOTIFICATION:
+                    return "notification"s;
+                default:
+                    return fmt::format("{}", _severity);
+            }
+        }();
+        fprintf(
+            stderr,
+            "GL CALLBACK: %s type = %s, source = %s, severity = %s, message = %s\n",
+            ( _type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
+            typeName.c_str(), sourceName.c_str(), debugSeverity.c_str(), _message
+        );
+    }
+#endif
 }
 
 TerminalWindow::TerminalWindow(config::Config _config, string _profileName, string _programPath) :
@@ -282,7 +354,8 @@ void TerminalWindow::onFrameSwapped()
         switch (state)
         {
             case State::DirtyIdle:
-                assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                //assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                printf("The impossible happened, painting but painting. Shakesbeer.\n");
                 [[fallthrough]];
             case State::DirtyPainting:
                 // FIXME: Qt/Wayland!
@@ -319,6 +392,11 @@ void TerminalWindow::initializeGL()
     initializeOpenGLFunctions();
 
     qDebug() << "GL type:" << (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL");
+
+#if !defined(NDEBUG)
+    glEnable(GL_DEBUG_OUTPUT);
+    glDebugMessageCallback(&glMessageCallback, this);
+#endif
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
@@ -836,7 +914,7 @@ string TerminalWindow::extractSelectionText()
             currentLine.clear();
         }
         if (_cell.character)
-            currentLine += utf8::to_string(utf8::encode(_cell.character));
+            currentLine += crispy::utf8::to_string(crispy::utf8::encode(_cell.character));
         lastColumn = _col;
     });
     text += currentLine;

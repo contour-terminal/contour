@@ -31,14 +31,14 @@
 #include <unordered_map>
 #include <vector>
 
-namespace terminal::view {
+namespace crispy {
     using CharSequence = std::vector<char32_t>;
 }
 
 namespace std {
     template<>
-    struct hash<terminal::view::CharSequence> {
-        std::size_t operator()(terminal::view::CharSequence const& seq) const noexcept
+    struct hash<crispy::CharSequence> {
+        std::size_t operator()(crispy::CharSequence const& seq) const noexcept
         {
             // Using FNV to create a hash value for the character sequence.
             auto constexpr basis = 2166136261llu;
@@ -60,7 +60,7 @@ namespace std {
     };
 }
 
-namespace terminal::view {
+namespace crispy {
 
 enum class FontStyle {
     Regular = 0,
@@ -97,6 +97,11 @@ class Font {
     void setFontSize(unsigned int _fontSize);
     unsigned int fontSize() const noexcept { return fontSize_; }
 
+    bool hasColor() const noexcept { return FT_HAS_COLOR(face_); }
+
+    unsigned bitmapWidth() const noexcept { return bitmapWidth_; }
+    unsigned bitmapHeight() const noexcept { return bitmapHeight_; }
+
     unsigned int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
 
     unsigned int maxAdvance() const noexcept {
@@ -129,7 +134,7 @@ class Font {
     Glyph loadGlyphByIndex(unsigned int _glyphIndex);
 
     // well yeah, if it's only bitmap we still need, we can expose it and then [[deprecated]] this.
-    FT_Face operator->() noexcept { return face_; }
+    /*[[deprecated]]*/ /* TODO: remove me */ FT_Face operator->() noexcept { return face_; }
 
     operator FT_Face () noexcept { return face_; }
 
@@ -161,10 +166,13 @@ class Font {
     hb_buffer_t* hb_buf_;
     unsigned int fontSize_;
 
+    unsigned bitmapWidth_ = 0;
+    unsigned bitmapHeight_ = 0;
+
     std::string filePath_;
     Font* fallback_;
 
-#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     // TODO: Currently this can become ever-growing. We should evict least recently used items
     //       if the cache would exceed a given threshold.
     std::unordered_map<CharSequence, GlyphPositionList> renderCache_{};
@@ -195,4 +203,4 @@ class FontManager {
     unsigned int fontSize_;
 };
 
-} // namespace terminal::view
+} // end namespace

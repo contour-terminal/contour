@@ -14,8 +14,8 @@
 #include <terminal/ControlCode.h>
 #include <terminal/Parser.h>
 #include <terminal/ParserTables.h>
-#include <terminal/Util.h>
-#include <terminal/util/UTF8.h>
+#include <crispy/UTF8.h>
+#include <crispy/text.h>
 
 #include <array>
 #include <cctype>
@@ -76,8 +76,8 @@ void Parser::parse()
         currentChar_ = 0;
         visit(
             overloaded{
-                [&](utf8::Decoder::Incomplete) {},
-                [&](utf8::Decoder::Invalid invalid) {
+                [&](crispy::utf8::Decoder::Incomplete) {},
+                [&](crispy::utf8::Decoder::Invalid invalid) {
                     log<ParserErrorEvent>("Invalid UTF8!");
                     currentChar_ = invalid.replacementCharacter;
                     #if defined(VT_PARSER_TABLES)
@@ -86,7 +86,7 @@ void Parser::parse()
                     handleViaSwitch();
                     #endif
                 },
-                [&](utf8::Decoder::Success success) {
+                [&](crispy::utf8::Decoder::Success success) {
                     currentChar_ = success.value;
                     #if defined(VT_PARSER_TABLES)
                     handleViaTables();
@@ -166,7 +166,7 @@ void Parser::handleViaTables()
         log<ParserErrorEvent>(
             "Parser Error: Unknown action for state/input pair ({}, {})",
             to_string(state_),
-            escape(currentChar()));
+            crispy::escape(currentChar()));
 }
 #endif
 

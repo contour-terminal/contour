@@ -12,12 +12,10 @@
  * limitations under the License.
  */
 #include <terminal_view/TerminalView.h>
-#include <terminal_view/FontManager.h>
+
+#include <crispy/FontManager.h>
 
 #include <terminal/Logger.h>
-#include <terminal/Util.h>
-#include <terminal/util/overloaded.h>
-#include <terminal/util/UTF8.h>
 
 #include <array>
 #include <chrono>
@@ -26,6 +24,7 @@
 
 using namespace std;
 using namespace std::placeholders;
+using namespace crispy;
 
 namespace terminal::view {
 

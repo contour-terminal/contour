@@ -11,15 +11,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/FontManager.h>
-#include <terminal/util/times.h>
-#include <terminal/util/algorithm.h>
+#include <crispy/FontManager.h>
+#include <crispy/times.h>
+#include <crispy/algorithm.h>
+
 #include <fmt/format.h>
 
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
 
 #include <stdexcept>
+#include <map>
+#include <iostream>
+
 #include <cctype>
 
 #if defined(__linux__) || defined(__APPLE__)
@@ -30,9 +34,24 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
+struct Stats {
+    struct Extend {
+        unsigned width = 0;
+        unsigned height = 0;
+    };
+    using Occurence = std::pair<unsigned, Extend>;
+    std::vector<Occurence> occurences{};
+    Extend max{};
+};
+
+constexpr bool operator<(Stats::Extend const& a, Stats::Extend const& b)
+{
+    return a.width < b.width || (a.width == b.width && a.height < b.height);
+}
+
 using namespace std;
 
-namespace terminal::view {
+namespace crispy {
 
 namespace {
     static string freetypeErrorString(FT_Error _errorCode)
@@ -76,7 +95,7 @@ namespace {
 
         vector<string> paths;
 
-        // find exact match
+        // find exact match - TODO: this isn't working. Emoji Noto font is still first! FIXME
         FcPattern* matchedPattern = FcFontMatch(fcConfig, fcPattern, &fcResult);
         optional<string> primaryFontPath;
         if (fcResult == FcResultMatch && matchedPattern)
@@ -85,10 +104,13 @@ namespace {
             if (FcPatternGetString(matchedPattern, FC_FILE, 0, (FcChar8**) &resultPath) == FcResultMatch)
             {
                 primaryFontPath = resultPath;
+                cout << fmt::format("exact match found: {}\n", *primaryFontPath);
                 paths.emplace_back(*primaryFontPath);
             }
             FcPatternDestroy(matchedPattern);
         }
+        if (paths.empty())
+            cout << fmt::format("No exact match found!\n");
 
         // find fallback fonts
         FcCharSet* fcCharSet = nullptr;
@@ -171,7 +193,8 @@ Font& FontManager::load(string const& _fontPattern)
     for (auto path = filePaths.rbegin(); path != filePaths.rend(); ++path)
         next = &loadFromFilePath(*path, next);
 
-    //cout << fmt::format("Loading '{}' ({} fonts)", _fontPattern, filePaths.size()) << '\n';
+    cout << fmt::format("Loading '{}' ({} fonts)", _fontPattern, filePaths.size()) << '\n';
+    cout << fmt::format("- returning: {}\n", next->filePath());
 
     return *next;
 }
@@ -184,11 +207,37 @@ Font& FontManager::loadFromFilePath(std::string const& _path, Font* _fallback)
         return fonts_.emplace(make_pair(_path, Font(ft_, _path, _fallback, fontSize_))).first->second;
 }
 
+Stats getFontStats(FT_Face _face)
+{
+    Stats stats{};
+    map<Stats::Extend, unsigned> frequencies;
+    for (unsigned glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
+    {
+        FT_Int32 constexpr loadFlags = FT_LOAD_DEFAULT;
+        FT_Load_Glyph(_face, glyphIndex, loadFlags);
+        auto const width = _face->glyph->bitmap.width;
+        auto const height = _face->glyph->bitmap.rows;
+        frequencies[Stats::Extend{width, height}]++;
+        stats.max.width = max(stats.max.width, width);
+        stats.max.height = max(stats.max.height, height);
+    }
+
+    stats.occurences.reserve(frequencies.size());
+    for (pair<Stats::Extend const, unsigned> const& freq : frequencies)
+        stats.occurences.emplace_back(freq.second, freq.first);
+
+    sort(begin(stats.occurences), end(stats.occurences), [](auto const& a, auto const& b) -> bool {
+        return a.first > b.first;
+    });
+
+    return stats;
+}
+
 void Font::setFontSize(unsigned int _fontSize)
 {
     if (fontSize_ != _fontSize)
     {
-        if (FT_HAS_COLOR(face_))
+        if (hasColor())
         {
             // FIXME i think this one can be omitted?
             FT_Error const ec = FT_Select_Size(face_, 0);
@@ -203,6 +252,19 @@ void Font::setFontSize(unsigned int _fontSize)
         }
 
         fontSize_ = _fontSize;
+
+        // update bitmap width/height
+        FT_Long width, height;
+        if (FT_IS_SCALABLE(face_)) {
+            width = FT_MulFix(face_->bbox.xMax - face_->bbox.xMin, face_->size->metrics.x_scale) >> 6;
+            height = FT_MulFix(face_->bbox.yMax - face_->bbox.yMin, face_->size->metrics.y_scale) >> 6;
+        } else {
+            width = (face_->available_sizes[0].width);
+            height = (face_->available_sizes[0].height);
+        }
+        bitmapWidth_ = width;
+        bitmapHeight_ = height;
+
         loadGlyphByIndex(0);
         clearRenderCache();
     }
@@ -231,6 +293,25 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
     hb_font_ = hb_ft_font_create_referenced(face_);
     hb_buf_ = hb_buffer_create();
 
+#if 0 // !defined(NDEBUG)
+    auto const stats = getFontStats(face_);
+    printf("Font(\"%s\").ctor: glyphs=%lu, faces=%lu, charmaps=%u, fixed_sizes=%u, %ux%u\n",
+        filePath_.c_str(),
+        face_->num_glyphs, face_->num_faces,
+        face_->num_charmaps, face_->num_fixed_sizes,
+        bitmapWidth_,
+        bitmapHeight_
+    );
+    unsigned i = 0;
+    for (Stats::Occurence const& occurence : stats.occurences)
+    {
+        cout << fmt::format("{}: {}x{}\n", occurence.first, occurence.second.width, occurence.second.height);
+        i++;
+        if (i >= 10)
+            break;
+    }
+#endif
+
     loadGlyphByIndex(0);
     // XXX Woot, needed in order to retrieve maxAdvance()'s field,
     // as max_advance metric seems to be broken on at least FiraCode (Regular),
@@ -244,6 +325,8 @@ Font::Font(Font&& v) noexcept :
     hb_font_{ v.hb_font_ },
     hb_buf_{ v.hb_buf_ },
     fontSize_{ v.fontSize_ },
+    bitmapWidth_{ v.bitmapWidth_ },
+    bitmapHeight_{ v.bitmapHeight_ },
     filePath_{ move(v.filePath_) },
     fallback_{ v.fallback_ }
 {
@@ -252,6 +335,8 @@ Font::Font(Font&& v) noexcept :
     v.hb_font_ = nullptr;
     v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
+    v.bitmapWidth_ = 0;
+    v.bitmapHeight_ = 0;
     v.filePath_ = {};
     v.fallback_ = nullptr;
 }
@@ -265,6 +350,8 @@ Font& Font::operator=(Font&& v) noexcept
     hb_font_ = v.hb_font_;
     hb_buf_ = v.hb_buf_;
     fontSize_ = v.fontSize_;
+    bitmapWidth_ = v.bitmapWidth_;
+    bitmapHeight_ = v.bitmapHeight_;
     filePath_ = move(v.filePath_);
     fallback_ = v.fallback_;
 
@@ -273,6 +360,8 @@ Font& Font::operator=(Font&& v) noexcept
     v.hb_font_ = nullptr;
     v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
+    v.bitmapWidth_ = 0;
+    v.bitmapHeight_ = 0;
     v.filePath_ = {};
     v.fallback_ = nullptr;
 
@@ -293,7 +382,7 @@ Font::~Font()
 
 void Font::clearRenderCache()
 {
-#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     renderCache_.clear();
 #endif
 }
@@ -313,19 +402,43 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
         throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
 
     auto const width = face_->glyph->bitmap.width;
+    auto const pitch = face_->glyph->bitmap.pitch;
     auto const height = face_->glyph->bitmap.rows;
     auto const buffer = face_->glyph->bitmap.buffer;
+
+    vector<uint8_t> bitmap;
+    if (!hasColor())
+    {
+		bitmap.resize(height * width * 3);
+        for (uint i = 0; i < height; i++)
+        {
+            for (uint j = 0; j < width; j++)
+            {
+                unsigned char ch = buffer[i * pitch + j];
+                bitmap[i * width + j] = ch;
+            }
+        }
+    }
+    else
+    {
+        bitmap.resize(height * width * 4);
+        copy(
+            buffer,
+            buffer + height * width * 4,
+            bitmap.begin()
+        );
+    }
 
     return Glyph{
         width,
         height,
-        vector<uint8_t>(buffer, buffer + width * height)
+        move(bitmap)
     };
 }
 
 bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsigned _attempt)
 {
-#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     if (auto i = renderCache_.find(_chars); i != renderCache_.end())
     {
         _result = i->second;
@@ -358,7 +471,7 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
     unsigned int cx = 0;
     unsigned int cy = 0;
     unsigned int advance = 0; // not yet exposed nor needed on caller side
-    for (unsigned const i : support::times(glyphCount))
+    for (unsigned const i : times(glyphCount))
     {
         _result.emplace_back(GlyphPosition{
             *this,
@@ -372,9 +485,9 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
         advance += pos[i].x_advance >> 6;
     }
 
-    if (!support::any_of(_result, glyphMissing))
+    if (!any_of(_result, glyphMissing))
     {
-#if defined(LIBTERMINAL_VIEW_FONT_RENDER_CACHE) && LIBTERMINAL_VIEW_FONT_RENDER_CACHE
+#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
         renderCache_[_chars] = _result;
 #endif
         // if (_attempt > 0)
@@ -393,7 +506,7 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
         auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
         if (missingGlyph)
         {
-            for (auto i : support::times(glyphCount))
+            for (auto i : times(glyphCount))
                 if (glyphMissing(_result[i]))
                     _result[i].glyphIndex = missingGlyph;
         }
@@ -401,4 +514,4 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
     }
 }
 
-} // namespace terminal::view
+} // end namespace

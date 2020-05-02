@@ -18,5 +18,11 @@ exec cmake "${ROOTDIR}" \
            -DOpenGL_GL_PREFERENCE="LEGACY" \
            -DYAML_CPP_BUILD_CONTRIB="OFF" \
            -DYAML_CPP_BUILD_TOOLS="OFF" \
+           -DLIBTERMINAL_LOG_RAW="ON" \
+           -DLIBTERMINAL_LOG_TRACE="ON" \
+           -DLIBTERMINAL_EXECUTION_PAR="OFF" \
+           -DCONTOUR_COVERAGE="OFF" \
+           -DCONTOUR_PERF_STATS="OFF" \
+           -DCONTOUR_BLUR_PLATFORM_KWIN="ON" \
            -GNinja
 

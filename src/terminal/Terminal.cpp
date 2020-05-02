@@ -11,12 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "terminal/InputGenerator.h"
+#include <terminal/InputGenerator.h>
 #include <terminal/Terminal.h>
 
 #include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
-#include <terminal/Util.h>
+
+#include <crispy/text.h>
 
 #include <chrono>
 
@@ -52,7 +53,7 @@ Terminal::Terminal(WindowSize _winSize,
     cursorBlinkState_{ 1 },
     lastCursorBlink_{ _now },
     startTime_{ _now },
-    wordDelimiters_{ utf8::decode(_wordDelimiters) },
+    wordDelimiters_{ crispy::utf8::decode(_wordDelimiters) },
     selector_{},
     onSelectionComplete_{ move(_onSelectionComplete) },
     inputGenerator_{},
@@ -121,7 +122,7 @@ void Terminal::screenUpdateThread()
     {
         if (auto const n = pty_.read(buf.data(), buf.size()); n != -1)
         {
-            //log("outputThread.data: {}", terminal::escape(buf, buf + n));
+            //log("outputThread.data: {}", crispy::escape(buf, buf + n));
             lock_guard<decltype(screenLock_)> _l{ screenLock_ };
             screen_.write(buf.data(), n);
         }
@@ -155,7 +156,7 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
-    if (utf8::isASCII(_charEvent.value) && isprint(_charEvent.value))
+    if (crispy::utf8::isASCII(_charEvent.value) && isprint(_charEvent.value))
         logger_(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier)) });
     else
         logger_(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier)) });
@@ -343,7 +344,7 @@ void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
     pty_.write(pendingInput_.data(), pendingInput_.size());
-    logger_(RawInputEvent{escape(begin(pendingInput_), end(pendingInput_))});
+    logger_(RawInputEvent{crispy::escape(begin(pendingInput_), end(pendingInput_))});
     pendingInput_.clear();
 }
 
@@ -447,7 +448,7 @@ void Terminal::setCursorShape(CursorShape _shape)
 
 void Terminal::setWordDelimiters(string const& _wordDelimiters)
 {
-    wordDelimiters_ = utf8::decode(_wordDelimiters);
+    wordDelimiters_ = crispy::utf8::decode(_wordDelimiters);
 }
 
 vector<Selector::Range> Terminal::selection() const

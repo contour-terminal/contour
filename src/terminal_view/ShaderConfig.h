@@ -16,8 +16,10 @@
 #include <memory>
 #include <string>
 #include <stdexcept>
-#include <QOpenGLShaderProgram>
+
 #include <fmt/format.h>
+
+#include <QOpenGLShaderProgram>
 
 namespace terminal::view {
 

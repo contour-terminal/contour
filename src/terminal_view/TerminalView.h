@@ -13,15 +13,16 @@
  */
 #pragma once
 
+#include <terminal_view/GLCursor.h>
+#include <terminal_view/GLTextShaper.h>
+#include <terminal_view/GLRenderer.h>
+
 #include <terminal/Color.h>
 #include <terminal/TerminalProcess.h>
 #include <terminal/Logger.h>
 #include <terminal/WindowSize.h>
 
-#include <terminal_view/FontManager.h>
-#include <terminal_view/GLCursor.h>
-#include <terminal_view/GLTextShaper.h>
-#include <terminal_view/GLRenderer.h>
+#include <crispy/FontManager.h>
 
 #include <atomic>
 #include <chrono>
@@ -33,7 +34,6 @@
 
 namespace terminal::view {
 
-class Font;
 struct ShaderConfig;
 
 /// OpenGL-Terminal Object.
@@ -46,7 +46,7 @@ class TerminalView {
                  std::function<void()> _onSelectionComplete,
                  Screen::OnBufferChanged _onScreenBufferChanged,
                  std::function<void()> _bell,
-                 Font& _regularFont,
+                 crispy::Font& _regularFont,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -80,7 +80,7 @@ class TerminalView {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
-    void setFont(Font& _font) { renderer_.setFont(_font); }
+    void setFont(crispy::Font& _font) { renderer_.setFont(_font); }
     bool setFontSize(unsigned int _fontSize) { return renderer_.setFontSize(_fontSize); }
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);

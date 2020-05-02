@@ -15,7 +15,7 @@
 
 #include <algorithm>
 
-namespace terminal::support {
+namespace crispy {
 
 // XXX Some C++20 backports
 

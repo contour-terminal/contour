@@ -17,10 +17,12 @@ using namespace std;
 using namespace std::chrono;
 using namespace std::placeholders;
 
+using namespace crispy;
 using namespace terminal;
 using namespace terminal::view;
 
 #define GROUPED_CELL_BACKGROUND_RENDER 1
+//#define NEW_TEXT_SHAPER 1
 
 GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
@@ -35,6 +37,7 @@ GLRenderer::GLRenderer(Logger _logger,
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     textShaper_{ regularFont_.get(), _projectionMatrix, _textShaderConfig },
+    newTextShaper_{},
     cellBackground_{
         QSize(
             static_cast<int>(regularFont_.get().maxAdvance()),
@@ -66,6 +69,7 @@ void GLRenderer::setFont(Font& _font)
     auto const fontSize = regularFont_.get().fontSize();
     regularFont_ = _font;
     regularFont_.get().setFontSize(fontSize);
+    newTextShaper_.clearCache();
     textShaper_.setFont(regularFont_.get());
 }
 
@@ -76,6 +80,7 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 
     regularFont_.get().setFontSize(_fontSize);
     // TODO: other font styles
+    newTextShaper_.clearCache();
     textShaper_.clearGlyphCache();
     cellBackground_.resize(QSize{
         static_cast<int>(regularFont_.get().maxAdvance()),
@@ -93,6 +98,7 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
     cellBackground_.setProjection(_projectionMatrix);
+    newTextShaper_.setProjection(_projectionMatrix);
     textShaper_.setProjection(_projectionMatrix);
     cursor_.setProjection(_projectionMatrix);
 }
@@ -126,6 +132,10 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 #endif
 
     renderTextGroup(_terminal.screenSize());
+
+#if defined(NEW_TEXT_SHAPER)
+    newTextShaper_.execute();
+#endif
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -290,6 +300,23 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
+#if defined(NEW_TEXT_SHAPER)
+        (void) textStyle;
+
+        Font::GlyphPositionList glyphPositions;
+        regularFont_.get().render(pendingDraw_.text, glyphPositions);
+
+        newTextShaper_.render(
+            makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
+            glyphPositions,
+            QVector4D(
+                static_cast<float>(fgColor.red) / 255.0f,
+                static_cast<float>(fgColor.green) / 255.0f,
+                static_cast<float>(fgColor.blue) / 255.0f,
+                1.0f
+            )
+        );
+#else
         textShaper_.render(
             makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
             pendingDraw_.text,
@@ -301,6 +328,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
             ),
             textStyle
         );
+#endif
     }
 }
 

@@ -14,10 +14,11 @@
 #include <terminal/Screen.h>
 #include <terminal/Commands.h>
 #include <terminal/OutputGenerator.h>
-#include <terminal/Util.h>
-#include <terminal/util/algorithm.h>
-#include <terminal/util/times.h>
 #include <terminal/VTType.h>
+
+#include <crispy/algorithm.h>
+#include <crispy/text.h>
+#include <crispy/times.h>
 
 #include <algorithm>
 #include <iterator>
@@ -31,7 +32,7 @@
 #endif
 
 using namespace std;
-using namespace terminal::support;
+using namespace crispy;
 
 namespace terminal {
 

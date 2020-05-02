@@ -57,7 +57,7 @@ else()
     # master project must provide its own fmtlib
 endif()
 
-set(LIBTERMINAL_TESTING ${CONTOUR_TESTING})
+#set(LIBTERMINAL_TESTING ${CONTOUR_TESTING})
 if(CONTOUR_TESTING AND CONTOUR_EMBEDDED_CATCH2)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
 else()
@@ -71,6 +71,7 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------
+add_subdirectory(src/crispy)
 add_subdirectory(src/terminal)
 add_subdirectory(src/terminal_view)
 

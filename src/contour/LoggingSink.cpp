@@ -13,9 +13,9 @@
  */
 #include "LoggingSink.h"
 
-#include <terminal/Util.h>
-#include <terminal/util/UTF8.h>
-#include <terminal/util/overloaded.h>
+#include <crispy/text.h>
+#include <crispy/UTF8.h>
+#include <crispy/overloaded.h>
 
 #include <fmt/format.h>
 
@@ -24,6 +24,7 @@
 
 using namespace std;
 using namespace terminal;
+using namespace crispy;
 
 LoggingSink::LoggingSink(LogMask _logMask, FileSystem::path _logfile) :
     logMask_{ _logMask },

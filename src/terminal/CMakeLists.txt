@@ -15,11 +15,6 @@ if(MSVC)
 endif()
 
 set(terminal_HEADERS
-    util/UTF8.h
-    util/overloaded.h
-    util/compose.h
-    util/stdfs.h
-    util/times.h
     Color.h
     Commands.h
     FunctionDef.h
@@ -33,7 +28,6 @@ set(terminal_HEADERS
 	Selector.h
     Terminal.h
     TerminalProcess.h
-    Util.h
     VTType.h
     WindowSize.h
 )
@@ -52,11 +46,10 @@ set(terminal_SOURCES
 	Selector.cpp
     Terminal.cpp
     TerminalProcess.cpp
-    Util.cpp
     VTType.cpp
 )
 
-set(LIBTERMINAL_LIBRARIES fmt::fmt-header-only Threads::Threads)
+set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only Threads::Threads)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
 endif()
@@ -84,8 +77,6 @@ if(LIBTERMINAL_TESTING)
         Screen_test.cpp
         OutputHandler_test.cpp
 		Selector_test.cpp
-        util/UTF8_test.cpp
-        util/compose_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)

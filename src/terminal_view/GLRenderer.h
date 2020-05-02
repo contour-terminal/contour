@@ -13,13 +13,15 @@
  */
 #pragma once
 
+#include <terminal_view/CellBackground.h>
+#include <terminal_view/GLCursor.h>
+#include <terminal_view/GLTextShaper.h>
+
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
-#include <terminal_view/CellBackground.h>
-#include <terminal_view/FontManager.h>
-#include <terminal_view/GLCursor.h>
-#include <terminal_view/GLTextShaper.h>
+#include <crispy/FontManager.h>
+#include <crispy/TextShaper.h>
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -28,6 +30,7 @@
 #include <fmt/format.h>
 
 #include <chrono>
+#include <memory>
 #include <vector>
 #include <utility>
 
@@ -48,7 +51,7 @@ class GLRenderer : public QOpenGLFunctions {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     GLRenderer(Logger _logger,
-               Font& _regularFont,
+               crispy::Font& _regularFont,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
@@ -61,7 +64,7 @@ class GLRenderer : public QOpenGLFunctions {
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setFont(Font& _font);
+    void setFont(crispy::Font& _font);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
@@ -164,8 +167,9 @@ class GLRenderer : public QOpenGLFunctions {
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
-    std::reference_wrapper<Font> regularFont_;
+    std::reference_wrapper<crispy::Font> regularFont_;
     GLTextShaper textShaper_;
+    crispy::text::TextShaper newTextShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;
 };

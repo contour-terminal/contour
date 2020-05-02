@@ -26,6 +26,8 @@ jobs:
       run: cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
     - name: "Build"
       run: cmake --build build/
+    - name: "test: libcrispy"
+      run: .\build\src\crispy\Debug\crispy_test.exe
     - name: "test: libterminal"
       run: .\build\src\terminal\Debug\terminal_test.exe
 

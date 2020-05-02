@@ -15,7 +15,7 @@
 #include <terminal/FunctionDef.h>
 
 #include <terminal/Commands.h>
-#include <terminal/Util.h>
+#include <crispy/text.h>
 
 #include <fmt/format.h>
 
@@ -23,9 +23,10 @@
 #include <optional>
 #include <sstream>
 
-namespace terminal {
-
 using namespace std;
+using namespace crispy;
+
+namespace terminal {
 
 optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
 {

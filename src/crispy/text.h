@@ -11,12 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Util.h>
-#include <terminal/util/UTF8.h>
+#pragma once
 
-namespace terminal {
+#include <fmt/format.h>
+#include <crispy/UTF8.h>
 
-std::string escape(char32_t ch)
+#include <algorithm>
+#include <cctype>
+#include <iterator>
+#include <numeric>
+#include <string>
+
+namespace crispy {
+
+inline std::string escape(char32_t ch)
 {
     switch (ch)
     {
@@ -48,4 +56,19 @@ std::string escape(char32_t ch)
     }
 }
 
-} // namespace terminal
+template <typename T>
+inline std::string escape(T begin, T end)
+{
+    return std::accumulate(begin, end, std::string{}, [](auto const& a, auto ch) { return a + escape(ch); });
+    // auto result = std::string{};
+    // for (T cur = begin; cur != end; ++cur)
+    //     result += *cur;
+    // return result;
+}
+
+inline std::string escape(std::string const& s)
+{
+    return escape(begin(s), end(s));
+}
+
+}  // namespace terminal

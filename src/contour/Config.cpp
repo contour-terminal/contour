@@ -14,12 +14,14 @@
 #include "Config.h"
 #include "contour_yaml.h"
 
-#include <terminal/util/overloaded.h>
-#include <terminal/util/stdfs.h>
 #include <terminal_view/GLCursor.h>
+
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
 #include <terminal/ControlCode.h>
+
+#include <crispy/overloaded.h>
+#include <crispy/stdfs.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>

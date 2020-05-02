@@ -15,7 +15,8 @@
 
 #include <terminal/Commands.h>
 #include <terminal/Logger.h>
-#include <terminal/util/UTF8.h>
+
+#include <crispy/UTF8.h>
 
 #include <cstdint>
 #include <functional>
@@ -380,7 +381,7 @@ class Parser {
 
   private:
     State state_ = State::Ground;
-    utf8::Decoder utf8Decoder_;
+    crispy::utf8::Decoder utf8Decoder_;
 
     char32_t currentChar_{};
     iterator begin_ = nullptr;

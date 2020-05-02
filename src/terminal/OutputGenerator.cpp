@@ -13,9 +13,8 @@
  */
 #include <terminal/Color.h>
 #include <terminal/OutputGenerator.h>
-#include <terminal/Util.h>
-#include <terminal/util/overloaded.h>
-#include <terminal/util/times.h>
+#include <crispy/overloaded.h>
+#include <crispy/times.h>
 
 #include <fmt/format.h>
 
@@ -26,7 +25,7 @@
 
 using namespace std;
 
-using terminal::support::times;
+using crispy::times;
 
 namespace terminal {
 

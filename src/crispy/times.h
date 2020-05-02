@@ -18,7 +18,7 @@
 #include <functional>
 #include <type_traits>
 
-namespace terminal::support {
+namespace crispy {
 
 template <typename I, typename T>
 struct _TimesIterator {

@@ -12,9 +12,10 @@
  * limitations under the License.
  */
 #include <terminal_view/GLTextShaper.h>
-#include <terminal_view/FontManager.h>
+#include <crispy/FontManager.h>
 
 using namespace std;
+using namespace crispy;
 
 namespace terminal::view {
 
@@ -33,6 +34,7 @@ GLTextShaper::GLTextShaper(Font& _regularFont,
     colorLocation_{}
 {
     initializeOpenGLFunctions();
+
     if (!setShaderConfig(_shaderConfig))
         throw std::runtime_error("Could not load shaders.");
 
@@ -90,9 +92,7 @@ void GLTextShaper::render(QPoint _pos,
                           QVector4D const& _color,
                           [[maybe_unused]] FontStyle _style)
 {
-    Font& font = regularFont_.get(); // TODO: respect _style
-
-    font.render(_chars, glyphPositions_);
+    regularFont_.get().render(_chars, glyphPositions_);
 
     shader_->bind();
     shader_->setUniformValue(colorLocation_, _color);
@@ -111,7 +111,7 @@ void GLTextShaper::render(QPoint _pos,
         unsigned const y = _pos.y() + gpos.y;
 
         auto const xpos = static_cast<GLfloat>(x + glyph.bearing.x());
-        auto const ypos = static_cast<GLfloat>(y + font.baseline() - glyph.descender);
+        auto const ypos = static_cast<GLfloat>(y + gpos.font.get().baseline() - glyph.descender);
         auto const w = static_cast<GLfloat>(glyph.size.x());
         auto const h = static_cast<GLfloat>(glyph.size.y());
 
@@ -146,7 +146,7 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(Font& _font, unsigned long _i
     if (auto i = cache.find(_index); i != cache.end())
         return i->second;
 
-    _font.loadGlyphByIndex(_index);
+    Font::Glyph const glyphData = _font.loadGlyphByIndex(_index);
 
     // Generate texture
     GLuint texture;
@@ -156,12 +156,12 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(Font& _font, unsigned long _i
         GL_TEXTURE_2D,                  // target
         0,                              // level
         GL_RED,                         // internal format
-        _font->glyph->bitmap.width,     // width
-        _font->glyph->bitmap.rows,      // height
+        glyphData.width,                // width
+        glyphData.height,               // height
         0,                              // border (must be set to 0)
         GL_RED,                         // pixel-data format
         GL_UNSIGNED_BYTE,               // pixel-data type
-        _font->glyph->bitmap.buffer     // pixel-data pointer
+        glyphData.buffer.data()         // pixel-data pointer
     );
 
     // Set texture options
@@ -175,8 +175,8 @@ GLTextShaper::Glyph& GLTextShaper::getGlyphByIndex(Font& _font, unsigned long _i
     auto const descender = _font->glyph->metrics.height / 64 - _font->glyph->bitmap_top;
     Glyph& glyph = cache.emplace(make_pair(_index, Glyph{
         texture,
-        QPoint(static_cast<int>(_font->glyph->bitmap.width), static_cast<int>(_font->glyph->bitmap.rows)),
-        QPoint(_font->glyph->bitmap_left, _font->glyph->bitmap_top),
+        QPoint(static_cast<int>(_font->glyph->bitmap.width), static_cast<int>(_font->glyph->bitmap.rows)), // XXX size
+        QPoint(_font->glyph->bitmap_left, _font->glyph->bitmap_top), //XXX bearing
         static_cast<unsigned>(_font->height) / 64,
         static_cast<unsigned>(descender),
         static_cast<unsigned>(_font->glyph->advance.x / 64)

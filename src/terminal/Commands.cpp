@@ -12,8 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Commands.h>
-#include <terminal/Util.h>
-#include <terminal/util/UTF8.h>
+#include <crispy/UTF8.h>
 
 #include <fmt/format.h>
 
@@ -22,6 +21,7 @@
 #include <cassert>
 
 using namespace std;
+using namespace crispy;
 using fmt::format;
 
 namespace terminal {

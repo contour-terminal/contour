@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/util/overloaded.h>
 #include <terminal/Commands.h>
-#include <terminal/Util.h>
+
+#include <crispy/overloaded.h>
 
 #include <optional>
 #include <set>

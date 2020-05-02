@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/util/overloaded.h>
+#include <crispy/overloaded.h>
 
 #include <cassert>
 #include <cstddef>
@@ -25,7 +25,7 @@
 #include <variant>
 #include <vector>
 
-namespace terminal::utf8 {
+namespace crispy::utf8 {
 
 // XXX some type traits (TODO use STD specialization instead)
 constexpr bool isASCII(char32_t x) noexcept

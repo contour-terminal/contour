@@ -22,7 +22,7 @@
 #include <terminal/WindowSize.h>
 #include <terminal_view/ShaderConfig.h>
 
-#include <terminal/util/stdfs.h>
+#include <crispy/stdfs.h>
 
 #include <QKeySequence>
 

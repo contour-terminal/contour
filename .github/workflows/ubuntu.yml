@@ -36,6 +36,8 @@ jobs:
             -DYAML_CPP_INSTALL=OFF
       - name: "build"
         run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
 

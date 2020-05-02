@@ -11,13 +11,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/util/UTF8.h>
+#include <crispy/UTF8.h>
 #include <catch2/catch.hpp>
 #include <fmt/format.h>
 #include <cstdlib>
 #include <cassert>
+
 using namespace std;
-using namespace terminal;
+using namespace crispy;
 
 std::string binstr(unsigned n)
 {

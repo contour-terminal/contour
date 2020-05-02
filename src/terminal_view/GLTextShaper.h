@@ -13,13 +13,12 @@
  */
 #pragma once
 
-#include <terminal_view/FontManager.h>
+#include <crispy/FontManager.h>
 #include <terminal_view/ShaderConfig.h>
 
 #include <QMatrix4x4>
 #include <QPoint>
 #include <QOpenGLShaderProgram>
-#include <QOpenGLFunctions>
 #include <QOpenGLFunctions>
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
@@ -33,12 +32,12 @@ namespace terminal::view {
 
 class GLTextShaper : private QOpenGLFunctions {
   public:
-    GLTextShaper(Font& _regularFont,
+    GLTextShaper(crispy::Font& _regularFont,
                  QMatrix4x4 const& _projection,
                  ShaderConfig const& _shaderConfig);
     ~GLTextShaper();
 
-    void setFont(Font& _regularFont);
+    void setFont(crispy::Font& _regularFont);
     bool setShaderConfig(ShaderConfig const& _shaderConfig);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
@@ -46,7 +45,7 @@ class GLTextShaper : private QOpenGLFunctions {
         QPoint _pos,
         std::vector<char32_t> const& _chars,
         QVector4D const& _color,
-        FontStyle _style);
+        crispy::FontStyle _style);
 
     void clearGlyphCache();
 
@@ -62,12 +61,12 @@ class GLTextShaper : private QOpenGLFunctions {
         ~Glyph();
     };
 
-    Glyph& getGlyphByIndex(Font& _font, unsigned long _index);
+    Glyph& getGlyphByIndex(crispy::Font& _font, unsigned long _index);
 
   private:
     std::array<std::unordered_map<unsigned /*glyph index*/, Glyph>, 4> cache_;
-    std::reference_wrapper<Font> regularFont_;
-    std::vector<Font::GlyphPosition> glyphPositions_;
+    std::reference_wrapper<crispy::Font> regularFont_;
+    std::vector<crispy::Font::GlyphPosition> glyphPositions_;
     QOpenGLBuffer vbo_;
     QOpenGLVertexArrayObject vao_;
     QMatrix4x4 projectionMatrix_;

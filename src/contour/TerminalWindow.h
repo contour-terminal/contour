@@ -6,7 +6,7 @@
 #include <terminal_view/TerminalView.h>
 
 #include <QOpenGLWindow>
-#include <QOpenGLFunctions>
+#include <QOpenGLExtraFunctions>
 #include <QTimer>
 
 #include <atomic>
@@ -21,7 +21,7 @@ namespace contour {
 // multiple terminals in tabbed views as well tiled.
 class TerminalWindow :
     public QOpenGLWindow,
-    protected QOpenGLFunctions
+    protected QOpenGLExtraFunctions
 {
     Q_OBJECT
 
@@ -146,8 +146,8 @@ class TerminalWindow :
     std::string programPath_;
     std::ofstream loggingSink_;
     LoggingSink logger_;
-    terminal::view::FontManager fontManager_;
-    std::reference_wrapper<terminal::view::Font> regularFont_;
+    crispy::FontManager fontManager_;
+    std::reference_wrapper<crispy::Font> regularFont_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     FileChangeWatcher configFileChangeWatcher_;
     std::mutex queuedCallsLock_;
