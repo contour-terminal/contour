@@ -31,6 +31,8 @@
 #include <unordered_map>
 #include <vector>
 
+// TODO: move all font stuff into crispy::text namespace
+
 namespace crispy {
     using CharSequence = std::vector<char32_t>;
 }
@@ -93,6 +95,7 @@ class Font {
     ~Font();
 
     std::string const& filePath() const noexcept { return filePath_; }
+    std::size_t hashCode() const noexcept { return hashCode_; }
 
     void setFontSize(unsigned int _fontSize);
     unsigned int fontSize() const noexcept { return fontSize_; }
@@ -170,6 +173,7 @@ class Font {
     unsigned bitmapHeight_ = 0;
 
     std::string filePath_;
+    std::size_t hashCode_;
     Font* fallback_;
 
 #if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
@@ -204,3 +208,14 @@ class FontManager {
 };
 
 } // end namespace
+
+namespace std {
+    template<>
+    struct hash<crispy::Font> {
+        std::size_t operator()(crispy::Font const& _font) const noexcept
+        {
+            return _font.hashCode();
+        }
+    };
+}
+

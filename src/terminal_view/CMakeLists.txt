@@ -33,7 +33,6 @@ add_library(terminal_view STATIC
     CellBackground.cpp CellBackground.h
     GLCursor.cpp GLCursor.h
     GLRenderer.cpp GLRenderer.h
-    GLTextShaper.cpp GLTextShaper.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalView.cpp TerminalView.h
 )

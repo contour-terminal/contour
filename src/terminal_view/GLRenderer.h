@@ -13,9 +13,9 @@
  */
 #pragma once
 
+#include <terminal_view/ShaderConfig.h>
 #include <terminal_view/CellBackground.h>
 #include <terminal_view/GLCursor.h>
-#include <terminal_view/GLTextShaper.h>
 
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
@@ -26,6 +26,7 @@
 #include <QPoint>
 #include <QMatrix2x4>
 #include <QOpenGLFunctions>
+#include <QOpenGLShaderProgram>
 
 #include <fmt/format.h>
 
@@ -168,8 +169,9 @@ class GLRenderer : public QOpenGLFunctions {
     Opacity backgroundOpacity_;
 
     std::reference_wrapper<crispy::Font> regularFont_;
-    GLTextShaper textShaper_;
-    crispy::text::TextShaper newTextShaper_;
+    QMatrix4x4 projectionMatrix_;
+    std::unique_ptr<QOpenGLShaderProgram> textShader_;
+    crispy::text::TextShaper textShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;
 };

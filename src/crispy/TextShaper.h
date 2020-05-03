@@ -19,7 +19,38 @@
 
 #include <QtCore/QPoint>
 
-#include <map>
+#include <unordered_map>
+
+namespace crispy::text {
+    struct GlyphId {
+        std::reference_wrapper<Font> font;
+        unsigned glyphIndex;
+    };
+
+    inline bool operator==(GlyphId const& _lhs, GlyphId const& _rhs) noexcept {
+        return _lhs.font.get().filePath() == _rhs.font.get().filePath() && _lhs.glyphIndex == _rhs.glyphIndex;
+    }
+
+    inline bool operator<(GlyphId const& _lhs, GlyphId const& _rhs) noexcept {
+        if (_lhs.font.get().filePath() < _rhs.font.get().filePath())
+            return true;
+
+        if (_lhs.font.get().filePath() == _rhs.font.get().filePath())
+            return _lhs.glyphIndex < _rhs.glyphIndex;
+
+        return false;
+    }
+}
+
+namespace std {
+    template<>
+    struct hash<crispy::text::GlyphId> {
+        size_t operator()(crispy::text::GlyphId const& _glyphId) const noexcept
+        {
+            return hash<crispy::Font>{}(_glyphId.font.get()) + _glyphId.glyphIndex;
+        }
+    };
+}
 
 namespace crispy::text {
 
@@ -29,6 +60,7 @@ namespace crispy::text {
 class TextShaper {
   public:
     TextShaper();
+    ~TextShaper();
 
     void setProjection(QMatrix4x4 const& _projection);
 
@@ -38,27 +70,11 @@ class TextShaper {
 
     void execute();
 
+    /// Clears the render cache.
     void clearCache();
 
   private:
-    struct GlyphId {
-        std::reference_wrapper<Font> font;
-        unsigned glyphIndex;
-
-        bool operator<(GlyphId const& _rhs) const noexcept {
-            if (font.get().filePath() < _rhs.font.get().filePath())
-                return true;
-
-            if (font.get().filePath() == _rhs.font.get().filePath())
-                if (glyphIndex < _rhs.glyphIndex)
-                    return true;
-
-            return false;
-        }
-    };
-
     struct Glyph {
-        unsigned atlasId;
         QPoint size;            // glyph size
         QPoint bearing;         // offset from baseline to left/top of glyph
         unsigned height;
@@ -67,9 +83,10 @@ class TextShaper {
     };
 
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
+    using DataRef = TextShaper::TextureAtlas::DataRef;
 
-    std::optional<std::tuple<atlas::TextureInfo, Glyph>> getTextureInfo(GlyphId const& _id);
-    std::optional<std::tuple<atlas::TextureInfo, Glyph>> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
 
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
@@ -80,7 +97,6 @@ class TextShaper {
     atlas::Renderer renderer_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
-    std::map<GlyphId, Glyph> glyphCache_;
 };
 
 } // end namespace

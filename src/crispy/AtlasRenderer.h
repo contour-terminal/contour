@@ -19,6 +19,7 @@
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QOpenGLTexture>
 
+#include <limits>
 #include <algorithm>
 #include <memory>
 
@@ -31,7 +32,7 @@ namespace crispy::atlas {
  * Therefore, once all commands have pumped into the rendere, the flush() method must be called
  * to make sure any queued render calls will be flushed out to the graphics card.
  */
-class Renderer : public QOpenGLExtraFunctions {
+class Renderer : public QOpenGLExtraFunctions, public CommandListener {
   private:
     struct ExecutionScheduler;
 
@@ -41,14 +42,12 @@ class Renderer : public QOpenGLExtraFunctions {
 
     unsigned maxTextureDepth();
     unsigned maxTextureSize();
+    unsigned maxTextureUnits();
 
     void setProjection(QMatrix4x4 const& _projection);
 
-    /// Schedules (orders and prepares) a list of Atlas commands for execution.
-    void schedule(std::vector<Command> const& _commands);
-
-    /// Schedules (orders and prepares) a list of Atlas commands for execution.
-    void schedule(std::vector<DestroyAtlas> const& _commands);
+    /// @return an interface to be used to schedule render commands.
+    CommandListener& scheduler() noexcept;
 
     /// Executes all prepared pending commands in proper order.
     ///
@@ -61,23 +60,38 @@ class Renderer : public QOpenGLExtraFunctions {
     void renderTexture(RenderTexture const& _render);
     void destroyAtlas(DestroyAtlas const& _atlas);
 
+    void selectTextureUnit(unsigned _id);
     void bindTexture2DArray(GLuint _textureId);
-    void setActiveTexture(unsigned _id);
 
   private:
     GLuint vao_;                // Vertex Array Object, covering all buffer objects
     GLuint vbo_;                // Buffer containing the vertex coordinates
     GLuint texCoordsBuffer_;    // Buffer containing the texture coordinates
-    GLuint texIdBuffer_;        // Buffer containing the texture IDs
+    GLuint colorsBuffer_;       // Buffer containing the text colors
 
     std::unique_ptr<ExecutionScheduler> scheduler_;
 
-    std::map<unsigned, GLuint> atlasMap_{}; // maps atlas IDs to texture IDs
+    struct AtlasKey {
+        std::reference_wrapper<std::string const> name;
+        unsigned atlasTexture;
 
-    GLuint currentActiveTexture_ = 0;
-    GLuint currentTextureId_ = 0;
+        bool operator<(AtlasKey const& _rhs) const noexcept
+        {
+            if (name.get() < _rhs.name.get())
+                return true;
+            else if (name.get() == _rhs.name.get())
+                return atlasTexture < _rhs.atlasTexture;
+            else
+                return false;
+        }
+    };
 
-    QMatrix4x4 projection_ = {};
+    std::map<AtlasKey, GLuint> atlasMap_{}; // maps atlas IDs to texture IDs
+
+    GLuint currentActiveTexture_ = std::numeric_limits<GLuint>::max();
+    GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
+
+    QMatrix4x4 projection_;
 };
 
 } // end namespace

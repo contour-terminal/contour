@@ -1,14 +1,15 @@
-precision mediump float;
-precision mediump int;
+layout (binding = 0) uniform mediump sampler2DArray fs_monochromeTextures;
+layout (binding = 1) uniform mediump sampler2DArray fs_colorTextures;
 
-in vec2 TexCoords;
-out vec4 color;
+in mediump vec3 fs_TexCoord; // TODO: split up into struct {vec3 TexCoord; float/*bool*/ monochrome; };
+in mediump vec4 fs_textColor;
 
-uniform sampler2D text;
-uniform vec4 textColor;
+out mediump vec4 color;
 
 void main()
 {
-    vec4 sampled = vec4(1.0, 1.0, 1.0, texture2D(text, TexCoords).r);
-    color = textColor * sampled;
+    // ### monochrome glyph
+    mediump float v = texture(fs_monochromeTextures, fs_TexCoord).r;
+    mediump vec4 sampled = vec4(1.0, 1.0, 1.0, v);
+    color = sampled * fs_textColor;
 }

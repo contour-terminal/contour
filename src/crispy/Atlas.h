@@ -15,8 +15,12 @@
 
 #include <QtGui/QVector4D>
 
+#include <fmt/format.h>
+#include <iostream>
+
 #include <cassert>
 #include <functional>
+#include <iomanip> // setprecision
 #include <map>
 #include <optional>
 #include <ostream>
@@ -30,6 +34,7 @@ using Buffer = std::vector<uint8_t>;
 
 struct CreateAtlas {
     unsigned atlas;
+    std::reference_wrapper<std::string const> atlasName;
     unsigned width;
     unsigned height;
     unsigned depth;
@@ -38,51 +43,64 @@ struct CreateAtlas {
 struct DestroyAtlas {
     // ID of the atlas to release the resources on the GPU for.
     unsigned atlas;
-};
-
-struct UploadTexture {
-    unsigned atlas;                 // for example GL_TEXTURE0
-    unsigned x;
-    unsigned y;
-    unsigned z;
-    unsigned width;
-    unsigned height;
-    Buffer const& data;
+    std::reference_wrapper<std::string const> atlasName;
 };
 
 struct TextureInfo {
-    unsigned atlas;
-    unsigned x;
-    unsigned y;
-    unsigned z;
-    unsigned width;
-    unsigned height;
+    unsigned atlas;                 // for example 0 for GL_TEXTURE0
+    std::reference_wrapper<std::string const> atlasName;
+    unsigned x;                     // target x-coordinate into the 3D texture
+    unsigned y;                     // target y-coordinate into the 3D texture
+    unsigned z;                     // target y-coordinate into the 3D texture
+    unsigned width;                 // width of sub-image in pixels
+    unsigned height;                // height of sub-image in pixels
+    float relativeX;
+    float relativeY;
+    float relativeWidth;            // width relative to Atlas::width_
+    float relativeHeight;           // height relative to Atlas::height_
+};
+
+struct UploadTexture {
+    std::reference_wrapper<TextureInfo const> texture;  // texture's attributes
+    Buffer data;                                        // texture data to be uploaded
 };
 
 struct RenderTexture {
     std::reference_wrapper<TextureInfo const> texture;
-    unsigned x;
-    unsigned y;
-    unsigned z;
-    unsigned width;
-    unsigned height;
+    unsigned x;           // window x coordinate to render the texture to
+    unsigned y;           // window y coordinate to render the texture to
+    unsigned z;           // window z coordinate to render the texture to
     QVector4D color;
 };
 
-using Command = std::variant<
-    CreateAtlas,
-    UploadTexture,
-    RenderTexture,
-    DestroyAtlas
->;
+/// Generic listener API to events from an Atlas.
+///
+/// One prominent user is the scheduler in the Renderer.
+class CommandListener {
+public:
+    virtual ~CommandListener() = default;
 
-using CommandList = std::vector<Command>;
+    /// Creates a new (3D) texture atlas.
+    virtual void createAtlas(CreateAtlas const&) = 0;
+
+    /// Uploads given texture to the atlas.
+    virtual void uploadTexture(UploadTexture const&) = 0;
+
+    /// Renders given texture from the atlas with the given target position parameters.
+    virtual void renderTexture(RenderTexture const&) = 0;
+
+    /// Destroys the given (3D) texture atlas.
+    virtual void destroyAtlas(DestroyAtlas const&) = 0;
+};
 
 /**
  * Texture Atlas API.
  *
  * This Texture atlas stores textures with given dimension in a 3 dimensional array of atlases.
  * Thus, you may say a 4D atlas ;-)
+ *
+ * @param Key a comparable key (such as @c char or @c uint32_t) to use to store and access textures.
+ * @param Metadata some optionally accessible metadata that is attached with each texture.
  */
 template <typename Key, typename Metadata = int>
 class TextureAtlas {
@@ -90,155 +108,216 @@ class TextureAtlas {
     /**
      * Constructs a texture atlas with given limits.
      *
-     * @param _instanceLimit maximum number of OpenGL 3D textures
-     * @param _atlasDepth maximum 3D depth (z-value)
-     * @param _atlasWidth atlas texture width
-     * @param _atlasHeight atlas texture height
+     * @param _maxInstances maximum number of OpenGL 3D textures
+     * @param _depth maximum 3D depth (z-value)
+     * @param _width atlas texture width
+     * @param _height atlas texture height
      */
-    TextureAtlas(unsigned _instanceLimit,
-                 unsigned _atlasDepth,
-                 unsigned _atlasWidth,
-                 unsigned _atlasHeight,
+    TextureAtlas(unsigned _maxInstances,
+                 unsigned _depth,
+                 unsigned _width,
+                 unsigned _height,
+                 CommandListener& _listener,
                  std::string _name = {})
-      : instanceLimit_{ _instanceLimit },
-        atlasDepth_{ _atlasDepth },
-        atlasWidth_{ _atlasWidth },
-        atlasHeight_{ _atlasHeight },
+      : maxInstances_{ _maxInstances },
+        depth_{ _depth },
+        width_{ _width },
+        height_{ _height },
         name_{ std::move(_name) },
-        commandQueue_{}
+        commandListener_{ _listener }
     {
-        commandQueue_.emplace_back(CreateAtlas{
+        commandListener_.createAtlas({
             currentAtlasInstance_,
-            atlasWidth_,
-            atlasHeight_,
-            atlasDepth_
+            name_,
+            width_,
+            height_,
+            depth_
         });
     }
 
     std::string const& name() const noexcept { return name_; }
+    constexpr unsigned maxInstances() const noexcept { return maxInstances_; }
+    constexpr unsigned depth() const noexcept { return depth_; }
+    constexpr unsigned width() const noexcept { return width_; }
+    constexpr unsigned height() const noexcept { return height_; }
 
-    void clear()
+    /// @return number of internally used 3D texture atlases.
+    constexpr unsigned currentInstance() const noexcept { return currentAtlasInstance_; }
+
+    /// @return number of 2D text atlases in use in current 3D texture atlas.
+    constexpr unsigned currentZ() const noexcept { return currentZ_; }
+
+    /// @return current X offset into the current 3D texture atlas.
+    constexpr unsigned currentX() const noexcept { return currentX_; }
+
+    /// @return current Y offset into the current 3D texture atlas.
+    constexpr unsigned currentY() const noexcept { return currentY_; }
+
+    constexpr unsigned maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
+
+    /// @return number of textures stored in this texture atlas.
+    constexpr size_t size() const noexcept { return allocations_.size(); }
+
+    constexpr void clear()
     {
-        for (unsigned i = 1; i < currentAtlasInstance_; ++i)
-            commandQueue_.emplace_back(DestroyAtlas{i});
+        currentAtlasInstance_ = 0;
+        currentZ_ = 0;
+        currentX_ = 0;
+        currentY_ = 0;
+        maxTextureHeightInCurrentRow_ = 0;
 
-        *this = TextureAtlas(instanceLimit_, atlasDepth_, atlasWidth_, atlasHeight_);
+        allocations_.clear();
+        metadata_.clear();
+
+        for (unsigned i = 0; i < currentAtlasInstance_; ++i)
+            commandListener_.destroyAtlas({i, name_});
+
+        commandListener_.createAtlas({
+            currentAtlasInstance_,
+            name_,
+            width_,
+            height_,
+            depth_
+        });
     }
 
     /// Tests whether given sub-texture is being present in this texture atlas.
-    bool contains(Key const& _id) const
+    constexpr bool contains(Key const& _id) const
     {
         return allocations_.find(_id) != allocations_.end();
     }
 
-    [[nodiscard]] TextureInfo const* get(Key const& _id) const
+    using DataRef = std::tuple<
+        std::reference_wrapper<TextureInfo const>,
+        std::reference_wrapper<Metadata const>
+    >;
+
+    [[nodiscard]] std::optional<DataRef> get(Key const& _id) const
     {
-        if (auto i = allocations_.find(_id); i != allocations_.end())
-            return &i->second;
+        if (auto const i = allocations_.find(_id); i != allocations_.end())
+            return DataRef{std::ref(i->second), std::ref(metadata_.at(_id))};
         else
-            return nullptr;
+            return std::nullopt;
     }
 
-    [[nodiscard]] Metadata const& metadata(Key const& _id) const
+    std::optional<DataRef> insert(Key const& _id,
+                                  unsigned _width,
+                                  unsigned _height,
+                                  Buffer _data,
+                                  Metadata&& _metadata = {})
     {
-        return metadata_.at(_id);
-    }
-
-    CommandList& commandQueue() noexcept { return commandQueue_; }
-    CommandList const& commandQueue() const noexcept { return commandQueue_; }
-
-    void swap(CommandList& other) { commandQueue_.swap(other); }
-
-    bool insert(Key const& _id,
-                unsigned _width,
-                unsigned _height,
-                Buffer const& _data,
-                Metadata&& _metadata = {})
-    {
-        assert(_height <= atlasHeight_);
-        assert(_width <= atlasWidth_);
+        // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
+        if (_height > height_ || _width > width_)
+            return std::nullopt;
 
         // ensure we have enough width space in current row
-        if (currentWidth_ + _width >= atlasWidth_ && !allocateFreeRow())
-            return false;
+        if (currentX_ + _width >= width_ && !advanceY())
+            return std::nullopt;
 
-        TextureInfo const& info = allocations_[_id] = TextureInfo{
-            currentAtlasInstance_,
-            currentWidth_,
-            currentHeight_,
-            currentDepth_,
-            _width,
-            _height,
-        };
+        // ensure we have enoguh height space in current row
+        if (currentY_ + _height > height_ && !advanceZ())
+            return std::nullopt;
+
+        TextureInfo const& info = allocations_.emplace(std::pair{
+            _id,
+            TextureInfo{
+                currentAtlasInstance_,
+                name_,
+                currentX_,
+                currentY_,
+                currentZ_,
+                _width,
+                _height,
+                static_cast<float>(currentX_) / static_cast<float>(width_),
+                static_cast<float>(currentY_) / static_cast<float>(height_),
+                static_cast<float>(_width) / static_cast<float>(width_),
+                static_cast<float>(_height) / static_cast<float>(height_)
+            }
+        }).first->second;
 
         if constexpr (!std::is_same_v<Metadata, void>)
             metadata_.emplace(std::pair{_id, std::move(_metadata)});
 
+        currentX_ += _width;
+
         if (_height > maxTextureHeightInCurrentRow_)
             maxTextureHeightInCurrentRow_ = _height;
 
-        // increment to next free slot
-        currentWidth_ += _width;
-        if (currentWidth_ >= atlasWidth_ && !allocateFreeRow())
-            return false;
-
-        commandQueue_.emplace_back(UploadTexture{
-            info.atlas,
-            info.x,
-            info.y,
-            info.z,
-            info.width,
-            info.height,
-            _data
+        commandListener_.uploadTexture(UploadTexture{
+            std::ref(info),
+            std::move(_data)
         });
 
-        return true;
+        return get(_id);
     }
 
   private:
-    bool allocateFreeRow()
+    constexpr bool advanceY()
     {
-        currentWidth_ = 0;
-        currentHeight_ += maxTextureHeightInCurrentRow_;
-        maxTextureHeightInCurrentRow_ = 0;
-
-        if (currentHeight_ >= atlasHeight_) // current depth-level full? -> go one level deeper
+        if (currentY_ + maxTextureHeightInCurrentRow_ <= height_)
         {
-            currentHeight_ = 0;
-            currentDepth_++;
-
-            if (currentDepth_ >= atlasDepth_) // whole 3D atlas full? -> use next atlas.
-            {
-                commandQueue_.emplace_back(CreateAtlas{
-                    currentAtlasInstance_,
-                    atlasWidth_,
-                    atlasHeight_,
-                    atlasDepth_
-                });
-                currentDepth_ = 0;
-                currentAtlasInstance_++;
-
-                if (currentAtlasInstance_ > instanceLimit_)
-                    return false;
-            }
+            currentY_ += maxTextureHeightInCurrentRow_;
+            currentX_ = 0;
+            maxTextureHeightInCurrentRow_ = 0;
+            return true;
         }
-        return true;
+        else
+            return advanceZ();
+    }
+
+    constexpr bool advanceZ()
+    {
+        if (currentZ_ < depth_)
+        {
+            currentZ_++;
+            currentY_ = 0;
+            currentX_ = 0;
+            maxTextureHeightInCurrentRow_ = 0;
+            return true;
+        }
+        else
+            return advanceInstance();
+    }
+
+    constexpr bool advanceInstance()
+    {
+        if (currentAtlasInstance_ < maxInstances_)
+        {
+            currentAtlasInstance_++;
+            currentZ_ = 0;
+            currentY_ = 0;
+            currentX_ = 0;
+            maxTextureHeightInCurrentRow_ = 0;
+
+            commandListener_.createAtlas({
+                currentAtlasInstance_,
+                name_,
+                width_,
+                height_,
+                depth_
+            });
+
+            return true;
+        }
+        else
+            return false;
     }
 
   private:
-    unsigned instanceLimit_;            // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
-    unsigned atlasDepth_;               // atlas depth
-    unsigned atlasWidth_;
-    unsigned atlasHeight_;
+    unsigned const maxInstances_;      // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
+    unsigned const depth_;             // atlas total depth
+    unsigned const width_;             // atlas total width
+    unsigned const height_;            // atlas total height
+
+    std::string const name_;            // atlas human readable name (only for debugging)
+    CommandListener& commandListener_;  // atlas event listener (used to perform allocation/modification actions)
 
     unsigned currentAtlasInstance_ = 0; // (OpenGL) texture count already in use
-    unsigned currentDepth_ = 0;         // index to current atlas that is being filled.
-    unsigned currentWidth_ = 0;
-    unsigned currentHeight_ = 0;
-    unsigned maxTextureHeightInCurrentRow_ = 0;
+    unsigned currentZ_ = 0;             // index to current atlas that is being filled
+    unsigned currentX_ = 0;             // current X-offset to start drawing to
+    unsigned currentY_ = 0;             // current Y-offset to start drawing to
+    unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
-    std::string name_;
-    CommandList commandQueue_;
     std::map<Key, TextureInfo> allocations_ = {};
 
     // conditionally transform void to int as I can't conditionally enable/disable this member var.
@@ -253,45 +332,58 @@ class TextureAtlas {
 namespace std {
     inline ostream& operator<<(ostream& _os, crispy::atlas::CreateAtlas const& _cmd)
     {
-        _os << "CreateAtlas{"
-            << _cmd.atlas
+        _os << '{'
+            << _cmd.atlasName.get() << '/' << _cmd.atlas
             << ", " << _cmd.width << '/' << _cmd.height << '/' << _cmd.depth
-            << "}";
+            << '}';
+        return _os;
+    }
+
+    inline ostream& operator<<(ostream& _os, crispy::atlas::TextureInfo const& _info)
+    {
+        _os << '{'
+            << _info.atlasName.get() << '/' << _info.atlas << '/' << _info.x << '/' << _info.y << '/' << _info.z
+            << ", " << _info.width << 'x' << _info.height
+            << '}';
         return _os;
     }
 
     inline ostream& operator<<(ostream& _os, crispy::atlas::UploadTexture const& _cmd)
     {
-        _os << "UploadTexture{"
-            << _cmd.atlas
-            << ", " << _cmd.x << '/' << _cmd.y << '/' << _cmd.z
-            << ", " << _cmd.width << 'x' << _cmd.height
-            << ", #" << _cmd.data.size()
-            << "}";
+        _os << '{'
+            << _cmd.texture.get()
+            << ", len:" << _cmd.data.size()
+            << '}';
         return _os;
     }
 
     inline ostream& operator<<(ostream& _os, crispy::atlas::RenderTexture const& _cmd)
     {
-        _os << "RenderTexture{"
-            << _cmd.texture.get().atlas
-            << ", " << _cmd.x << '/' << _cmd.y << '/' << _cmd.z
-            << ", " << _cmd.width << 'x' << _cmd.height
-            << "}";
+        _os << '{'
+            << "AtlasCoord: " << _cmd.texture.get()
+            << ", Target: " << _cmd.x << '/' << _cmd.y << '/' << _cmd.z
+            << '}';
         return _os;
     }
 
     inline ostream& operator<<(ostream& _os, crispy::atlas::DestroyAtlas const& _cmd)
     {
-        _os << "RenderTexture{"
-            << _cmd.atlas
-            << "}";
+        _os << '{'
+            << _cmd.atlasName.get() << '/' << _cmd.atlas
+            << '}';
         return _os;
     }
 
-    inline ostream& operator<<(ostream& _os, crispy::atlas::Command const& _cmd)
+    template <typename Key, typename Metadata>
+    inline ostream& operator<<(ostream& _os, crispy::atlas::TextureAtlas<Key, Metadata> const& _atlas)
     {
-        visit([&](auto const& cmd) { _os << cmd; }, _cmd);
+        _os << '{'
+            << _atlas.name() << ": "
+            << fmt::format("instance: {}/{}", _atlas.currentInstance(), _atlas.maxInstances())
+            << fmt::format(", dim: {}x{}x{}", _atlas.width(), _atlas.height(), _atlas.depth())
+            << fmt::format(", at: {}x{}x{}", _atlas.currentX(), _atlas.currentY(), _atlas.currentZ())
+            << fmt::format(", rowHeight: {}", _atlas.maxTextureHeightInCurrentRow())
+            << '}';
         return _os;
     }
 }

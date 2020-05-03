@@ -41,12 +41,7 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     find_package(harfbuzz CONFIG REQUIRED)
 endif()
 
-CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "default_shaders")
-CIncludeMe(shaders/text.vert "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h" "text_vert" "default_shaders")
-
 add_library(crispy-gui STATIC
-    "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
     FontManager.h FontManager.cpp
     Atlas.h
     AtlasRenderer.h AtlasRenderer.cpp

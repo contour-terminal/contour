@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal_view/GLCursor.h>
-#include <terminal_view/GLTextShaper.h>
 #include <terminal_view/GLRenderer.h>
 
 #include <terminal/Color.h>
@@ -118,16 +117,5 @@ class TerminalView {
     ColorProfile colorProfile_;
     ColorProfile defaultColorProfile_;
 };
-
-class GLTextShaper;
-
-void render(TerminalView const& _terminalView,
-            std::chrono::steady_clock::time_point _now,
-            GLTextShaper& _regularFont,
-            CursorShape _cursorShape,
-            terminal::ColorProfile const& _colorProfile,
-            terminal::Opacity _backgroundOpacity,
-            QMatrix4x4 const& _projectionMatrix,
-            Logger _logger);
 
 } // namespace terminal::view

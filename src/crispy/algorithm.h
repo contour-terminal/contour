@@ -31,6 +31,12 @@ bool any_of(ExecutionPolicy _ep, Container && _container, Fn && _fn)
     return std::any_of(_ep, begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
+template <typename Container, typename OutputIterator>
+void copy(Container && _container, OutputIterator _outputIterator)
+{
+    std::copy(std::begin(_container), std::end(_container), _outputIterator);
+}
+
 template <typename Container, typename Fn>
 void for_each(Container && _container, Fn && _fn)
 {

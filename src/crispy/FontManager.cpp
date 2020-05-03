@@ -279,6 +279,7 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
     hb_buf_{},
     fontSize_{ 0 },
     filePath_{ move(_fontPath) },
+    hashCode_{ hash<string>{}(filePath_)},
     fallback_{ _fallback }
 {
     if (FT_New_Face(ft_, filePath_.c_str(), 0, &face_))
@@ -328,6 +329,7 @@ Font::Font(Font&& v) noexcept :
     bitmapWidth_{ v.bitmapWidth_ },
     bitmapHeight_{ v.bitmapHeight_ },
     filePath_{ move(v.filePath_) },
+    hashCode_{ v.hashCode_ },
     fallback_{ v.fallback_ }
 {
     v.ft_ = nullptr;
@@ -338,6 +340,7 @@ Font::Font(Font&& v) noexcept :
     v.bitmapWidth_ = 0;
     v.bitmapHeight_ = 0;
     v.filePath_ = {};
+    v.hashCode_ = 0;
     v.fallback_ = nullptr;
 }
 
@@ -353,6 +356,7 @@ Font& Font::operator=(Font&& v) noexcept
     bitmapWidth_ = v.bitmapWidth_;
     bitmapHeight_ = v.bitmapHeight_;
     filePath_ = move(v.filePath_);
+    hashCode_ = v.hashCode_;
     fallback_ = v.fallback_;
 
     v.ft_ = nullptr;
@@ -363,6 +367,7 @@ Font& Font::operator=(Font&& v) noexcept
     v.bitmapWidth_ = 0;
     v.bitmapHeight_ = 0;
     v.filePath_ = {};
+    v.hashCode_ = 0;
     v.fallback_ = nullptr;
 
     return *this;
