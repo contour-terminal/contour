@@ -128,7 +128,7 @@ GLCursor::GLCursor(QSize _size,
     // setup vertices
     vbo_.create();
     vbo_.bind();
-    vbo_.setUsagePattern(QOpenGLBuffer::UsagePattern::StaticDraw);
+    vbo_.setUsagePattern(QOpenGLBuffer::UsagePattern::DynamicDraw);
     vbo_.allocate(12 * sizeof(GLfloat));
 
     vao_.create();
