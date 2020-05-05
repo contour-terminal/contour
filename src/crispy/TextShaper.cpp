@@ -30,6 +30,7 @@ TextShaper::TextShaper() :
         min(MaxTextureDepth, renderer_.maxTextureDepth()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
+        GL_R8,
         renderer_.scheduler(),
         "monochromeAtlas"
     },
@@ -38,6 +39,7 @@ TextShaper::TextShaper() :
         min(MaxTextureDepth, renderer_.maxTextureDepth()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
+        GL_RGBA8,
         renderer_.scheduler(),
         "colorAtlas",
     }
@@ -84,6 +86,8 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     Font& font = _id.font.get();
     Font::Glyph fg = font.loadGlyphByIndex(_id.glyphIndex);
 
+    auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
+
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;
     metadata.bearing = QPoint(font->glyph->bitmap_left, font->glyph->bitmap_top);
@@ -91,7 +95,7 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     metadata.height = static_cast<unsigned>(font->height) >> 6;
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
-    return _atlas.insert(_id, fg.width, fg.height, move(fg.buffer), move(metadata));
+    return _atlas.insert(_id, fg.width, fg.height, format, move(fg.buffer), move(metadata));
 }
 
 void TextShaper::renderTexture(QPoint const& _pos,

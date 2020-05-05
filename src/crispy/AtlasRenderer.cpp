@@ -272,13 +272,11 @@ void Renderer::execute()
 
 void Renderer::createAtlas(CreateAtlas const& _atlas)
 {
-    constexpr GLuint internalFormat = GL_R8; //GL_RED; // TODO: configurable
-
     GLuint textureId{};
     glGenTextures(1, &textureId);
     bindTexture2DArray(textureId);
 
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, internalFormat, _atlas.width, _atlas.height, _atlas.depth);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, _atlas.format, _atlas.width, _atlas.height, _atlas.depth);
 
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -298,7 +296,6 @@ void Renderer::uploadTexture(UploadTexture const& _upload)
     auto const x0 = texture.x;
     auto const y0 = texture.y;
     auto const z0 = texture.z;
-    auto const internalFormat = GL_RED; // TODO: configure me
 
     auto constexpr target = GL_TEXTURE_2D_ARRAY;
     auto constexpr levelOfDetail = 0;
@@ -308,7 +305,7 @@ void Renderer::uploadTexture(UploadTexture const& _upload)
     bindTexture2DArray(textureId);
 
     glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
-                    internalFormat, type, _upload.data.data());
+                    _upload.format, type, _upload.data.data());
 }
 
 void Renderer::renderTexture(RenderTexture const& _render)

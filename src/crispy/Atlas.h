@@ -38,6 +38,7 @@ struct CreateAtlas {
     unsigned width;
     unsigned height;
     unsigned depth;
+    unsigned format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
 };
 
 struct DestroyAtlas {
@@ -63,6 +64,7 @@ struct TextureInfo {
 struct UploadTexture {
     std::reference_wrapper<TextureInfo const> texture;  // texture's attributes
     Buffer data;                                        // texture data to be uploaded
+    unsigned format;                                    // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
 };
 
 struct RenderTexture {
@@ -109,20 +111,24 @@ class TextureAtlas {
      * Constructs a texture atlas with given limits.
      *
      * @param _maxInstances maximum number of OpenGL 3D textures
-     * @param _depth maximum 3D depth (z-value)
-     * @param _width atlas texture width
-     * @param _height atlas texture height
+     * @param _depth    maximum 3D depth (z-value)
+     * @param _width    atlas texture width
+     * @param _height   atlas texture height
+     * @param _format   an arbitrary user defined number that defines the storage format for this texture,
+     *                  such as GL_R8 or GL_RBGA8 when using OpenGL
      */
     TextureAtlas(unsigned _maxInstances,
                  unsigned _depth,
                  unsigned _width,
                  unsigned _height,
+                 unsigned _format, // such as GL_R8 or GL_RGBA8
                  CommandListener& _listener,
                  std::string _name = {})
       : maxInstances_{ _maxInstances },
         depth_{ _depth },
         width_{ _width },
         height_{ _height },
+        format_{ _format },
         name_{ std::move(_name) },
         commandListener_{ _listener }
     {
@@ -131,7 +137,8 @@ class TextureAtlas {
             name_,
             width_,
             height_,
-            depth_
+            depth_,
+            format_
         });
     }
 
@@ -177,7 +184,8 @@ class TextureAtlas {
             name_,
             width_,
             height_,
-            depth_
+            depth_,
+            format_
         });
     }
 
@@ -203,6 +211,7 @@ class TextureAtlas {
     std::optional<DataRef> insert(Key const& _id,
                                   unsigned _width,
                                   unsigned _height,
+                                  unsigned _format,
                                   Buffer _data,
                                   Metadata&& _metadata = {})
     {
@@ -245,7 +254,8 @@ class TextureAtlas {
 
         commandListener_.uploadTexture(UploadTexture{
             std::ref(info),
-            std::move(_data)
+            std::move(_data),
+            _format
         });
 
         return get(_id);
@@ -294,7 +304,8 @@ class TextureAtlas {
                 name_,
                 width_,
                 height_,
-                depth_
+                depth_,
+                format_
             });
 
             return true;
@@ -304,10 +315,11 @@ class TextureAtlas {
     }
 
   private:
-    unsigned const maxInstances_;      // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
-    unsigned const depth_;             // atlas total depth
-    unsigned const width_;             // atlas total width
-    unsigned const height_;            // atlas total height
+    unsigned const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
+    unsigned const depth_;              // atlas total depth
+    unsigned const width_;              // atlas total width
+    unsigned const height_;             // atlas total height
+    unsigned const format_;             // internal storage format, such as GL_R8 or GL_RGBA8
 
     std::string const name_;            // atlas human readable name (only for debugging)
     CommandListener& commandListener_;  // atlas event listener (used to perform allocation/modification actions)
@@ -335,6 +347,7 @@ namespace std {
         _os << '{'
             << _cmd.atlasName.get() << '/' << _cmd.atlas
             << ", " << _cmd.width << '/' << _cmd.height << '/' << _cmd.depth
+            << ", " << _cmd.format
             << '}';
         return _os;
     }
@@ -353,6 +366,7 @@ namespace std {
         _os << '{'
             << _cmd.texture.get()
             << ", len:" << _cmd.data.size()
+            << ", format:" << _cmd.format
             << '}';
         return _os;
     }
