@@ -209,11 +209,11 @@ namespace {
     void glMessageCallback(
         GLenum _source,
         GLenum _type,
-        GLuint _id,
+        [[maybe_unused]] GLuint _id,
         GLenum _severity,
-        GLsizei _length,
+        [[maybe_unused]] GLsizei _length,
         GLchar const* _message,
-        void const* _userParam)
+        [[maybe_unused]] void const* _userParam)
     {
         string const sourceName = [&]() {
             switch (_source)
