@@ -21,9 +21,6 @@
 
 #include <QOpenGLShaderProgram>
 
-// use new text shaping code
-#define NEW_TEXT_SHAPER 1
-
 namespace terminal::view {
 
 enum class ShaderClass {
@@ -44,11 +41,7 @@ inline std::string to_string(ShaderClass _shaderClass)
         case ShaderClass::Background:
             return "background";
         case ShaderClass::Text:
-#if defined(NEW_TEXT_SHAPER)
-            return "text_new";
-#else
             return "text";
-#endif
         case ShaderClass::Cursor:
             return "cursor";
     }

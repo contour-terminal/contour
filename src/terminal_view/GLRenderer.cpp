@@ -36,7 +36,7 @@ GLRenderer::GLRenderer(Logger _logger,
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     projectionMatrix_{ _projectionMatrix },
-    textShader_{createShader(_textShaderConfig)},
+    textShader_{ createShader(_textShaderConfig) },
     textShaper_{},
     cellBackground_{
         QSize(

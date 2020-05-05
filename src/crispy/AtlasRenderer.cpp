@@ -81,16 +81,17 @@ struct Renderer::ExecutionScheduler : public CommandListener
             GLfloat const w = _render.texture.get().relativeWidth;
             GLfloat const h = _render.texture.get().relativeHeight;
             GLfloat const i = _render.texture.get().z;
-            GLfloat const texCoords[6 * 3] = {
+            GLfloat const u = _render.texture.get().user;
+            GLfloat const texCoords[6 * 4] = {
                 // first triangle
-                rx,      ry,     i,
-                rx,      ry + h, i,
-                rx + w,  ry + h, i,
+                rx,      ry,     i, u,
+                rx,      ry + h, i, u,
+                rx + w,  ry + h, i, u,
 
                 // second triangle
-                rx,      ry,     i,
-                rx + w,  ry + h, i,
-                rx + w,  ry,     i,
+                rx,      ry,     i, u,
+                rx + w,  ry + h, i, u,
+                rx + w,  ry,     i, u,
             };
             copy(texCoords, back_inserter(this->texCoords));
         }
@@ -152,7 +153,7 @@ Renderer::Renderer() :
     glGenBuffers(1, &texCoordsBuffer_);
     glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
     glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(1);
 
     // 2 (vec4): texture coordinates buffer

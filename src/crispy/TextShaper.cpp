@@ -87,6 +87,7 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     Font::Glyph fg = font.loadGlyphByIndex(_id.glyphIndex);
 
     auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
+    auto const colored = _id.font.get().hasColor() ? 1 : 0;
 
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;
@@ -95,7 +96,13 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     metadata.height = static_cast<unsigned>(font->height) >> 6;
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
-    return _atlas.insert(_id, fg.width, fg.height, format, move(fg.buffer), move(metadata));
+    if (_id.font.get().hasColor())
+    {
+        cout << "TextShaper.insert: colored glyph "
+             << _id.glyphIndex << " @ " << _id.font.get().filePath() << endl;
+    }
+
+    return _atlas.insert(_id, fg.width, fg.height, format, move(fg.buffer), colored, move(metadata));
 }
 
 void TextShaper::renderTexture(QPoint const& _pos,

@@ -59,6 +59,7 @@ struct TextureInfo {
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
     float relativeHeight;           // height relative to Atlas::height_
+    unsigned user;                  // some user defined value, in my case, whether or not this texture is colored or monochrome
 };
 
 struct UploadTexture {
@@ -213,6 +214,7 @@ class TextureAtlas {
                                   unsigned _height,
                                   unsigned _format,
                                   Buffer _data,
+                                  unsigned _user,
                                   Metadata&& _metadata = {})
     {
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
@@ -240,7 +242,8 @@ class TextureAtlas {
                 static_cast<float>(currentX_) / static_cast<float>(width_),
                 static_cast<float>(currentY_) / static_cast<float>(height_),
                 static_cast<float>(_width) / static_cast<float>(width_),
-                static_cast<float>(_height) / static_cast<float>(height_)
+                static_cast<float>(_height) / static_cast<float>(height_),
+                _user
             }
         }).first->second;
 
