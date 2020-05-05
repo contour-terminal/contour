@@ -21,8 +21,6 @@ using namespace crispy;
 using namespace terminal;
 using namespace terminal::view;
 
-#define GROUPED_CELL_BACKGROUND_RENDER 1 // TODO: default to that, remove other code
-
 GLRenderer::GLRenderer(Logger _logger,
                        Font& _regularFont,
                        terminal::ColorProfile _colorProfile,
@@ -125,10 +123,8 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
         bind(&GLRenderer::fillTextGroup, this, _1, _2, _3, _terminal.screenSize())
     );
 
-#if defined(GROUPED_CELL_BACKGROUND_RENDER)
     assert(!pendingBackgroundDraw_.empty());
     renderPendingBackgroundCells(_terminal.screenSize());
-#endif
 
     renderTextGroup(_terminal.screenSize());
 
@@ -152,19 +148,11 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
             {
                 cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(_terminal.historyLineCount() - _terminal.scrollOffset());
 
-#if defined(GROUPED_CELL_BACKGROUND_RENDER)
                 ++metrics_.cellBackgroundRenderCount;
                 cellBackground_.render(
                     makeCoords(range.fromColumn, row, _terminal.screenSize()),
                     color,
                     1 + range.toColumn - range.fromColumn);
-#else
-                for (cursor_pos_t col = range.fromColumn; col <= range.toColumn; ++col)
-                {
-                    ++metrics_.cellBackgroundRenderCount;
-                    cellBackground_.render(makeCoords(col, row, _terminal.screenSize()), color);
-                }
-#endif
             }
         }
     }
@@ -288,14 +276,6 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     {
         // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
-
-#if !defined(GROUPED_CELL_BACKGROUND_RENDER)
-    for (cursor_pos_t i = 0; i < pendingDraw_.text.size(); ++i)
-    {
-        ++metrics_.cellBackgroundRenderCount;
-        cellBackground_.render(makeCoords(pendingDraw_.startColumn + i, pendingDraw_.lineNumber, _screenSize), bgColor);
-    }
-#endif
 
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
