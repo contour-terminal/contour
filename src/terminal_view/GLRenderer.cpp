@@ -294,7 +294,11 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
                 static_cast<float>(fgColor.green) / 255.0f,
                 static_cast<float>(fgColor.blue) / 255.0f,
                 1.0f
-            )
+            ),
+            QSize{
+                static_cast<int>(cellWidth()),
+                static_cast<int>(cellHeight())
+            }
         );
     }
 }

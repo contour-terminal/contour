@@ -159,6 +159,8 @@ class Font {
     ///               contains as much as possible that could be rendered.
     bool render(CharSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
 
+    void replaceMissingGlyphs(GlyphPositionList& _gpos);
+
     /// Clears the render cache.
     void clearRenderCache();
 

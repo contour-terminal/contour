@@ -55,6 +55,8 @@ struct TextureInfo {
     unsigned z;                     // target y-coordinate into the 3D texture
     unsigned width;                 // width of sub-image in pixels
     unsigned height;                // height of sub-image in pixels
+    unsigned targetWidth;           // width of the sub-image when being rendered
+    unsigned targetHeight;          // height of the sub-image when being rendered
     float relativeX;
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
@@ -111,6 +113,8 @@ class TextureAtlas {
     /**
      * Constructs a texture atlas with given limits.
      *
+     * @param _instanceBaseId any arbitrary number that the first instance ID will be assigned.
+     *                         This is the base for any further
      * @param _maxInstances maximum number of OpenGL 3D textures
      * @param _depth    maximum 3D depth (z-value)
      * @param _width    atlas texture width
@@ -118,29 +122,36 @@ class TextureAtlas {
      * @param _format   an arbitrary user defined number that defines the storage format for this texture,
      *                  such as GL_R8 or GL_RBGA8 when using OpenGL
      */
-    TextureAtlas(unsigned _maxInstances,
+    TextureAtlas(unsigned _instanceBaseId,
+                 unsigned _maxInstances,
                  unsigned _depth,
                  unsigned _width,
                  unsigned _height,
                  unsigned _format, // such as GL_R8 or GL_RGBA8
                  CommandListener& _listener,
                  std::string _name = {})
-      : maxInstances_{ _maxInstances },
+      : instanceBaseId_{ _instanceBaseId },
+        maxInstances_{ _maxInstances },
         depth_{ _depth },
         width_{ _width },
         height_{ _height },
         format_{ _format },
         name_{ std::move(_name) },
-        commandListener_{ _listener }
+        commandListener_{ _listener },
+        currentInstanceId_{ instanceBaseId_ }
     {
-        commandListener_.createAtlas({
-            currentAtlasInstance_,
-            name_,
-            width_,
-            height_,
-            depth_,
-            format_
-        });
+        notifyCreateAtlas();
+    }
+
+    TextureAtlas(TextureAtlas const&) = delete;
+    TextureAtlas& operator=(TextureAtlas const&) = delete;
+    TextureAtlas(TextureAtlas&&) = delete; // TODO
+    TextureAtlas& operator=(TextureAtlas&&) = delete; // TODO
+
+    ~TextureAtlas()
+    {
+        for (unsigned id = instanceBaseId_; id <= currentInstanceId_; ++id)
+            commandListener_.destroyAtlas(DestroyAtlas{id, name_});
     }
 
     std::string const& name() const noexcept { return name_; }
@@ -150,7 +161,7 @@ class TextureAtlas {
     constexpr unsigned height() const noexcept { return height_; }
 
     /// @return number of internally used 3D texture atlases.
-    constexpr unsigned currentInstance() const noexcept { return currentAtlasInstance_; }
+    constexpr unsigned currentInstance() const noexcept { return currentInstanceId_; }
 
     /// @return number of 2D text atlases in use in current 3D texture atlas.
     constexpr unsigned currentZ() const noexcept { return currentZ_; }
@@ -166,9 +177,9 @@ class TextureAtlas {
     /// @return number of textures stored in this texture atlas.
     constexpr size_t size() const noexcept { return allocations_.size(); }
 
-    constexpr void clear()
+    void clear()
     {
-        currentAtlasInstance_ = 0;
+        currentInstanceId_ = instanceBaseId_;
         currentZ_ = 0;
         currentX_ = 0;
         currentY_ = 0;
@@ -176,18 +187,6 @@ class TextureAtlas {
 
         allocations_.clear();
         metadata_.clear();
-
-        for (unsigned i = 0; i < currentAtlasInstance_; ++i)
-            commandListener_.destroyAtlas({i, name_});
-
-        commandListener_.createAtlas({
-            currentAtlasInstance_,
-            name_,
-            width_,
-            height_,
-            depth_,
-            format_
-        });
     }
 
     /// Tests whether given sub-texture is being present in this texture atlas.
@@ -201,6 +200,7 @@ class TextureAtlas {
         std::reference_wrapper<Metadata const>
     >;
 
+    /// Retrieves TextureInfo and Metadata tuple if available, std::nullopt otherwise.
     [[nodiscard]] std::optional<DataRef> get(Key const& _id) const
     {
         if (auto const i = allocations_.find(_id); i != allocations_.end())
@@ -209,9 +209,20 @@ class TextureAtlas {
             return std::nullopt;
     }
 
+    /// Inserts a new texture into the atlas.
+    ///
+    /// @param _id       a unique identifier used for accessing this texture
+    /// @param _width    texture width in pixels
+    /// @param _height   texture height in pixels
+    /// @param _format   data format
+    /// @param _data     raw texture data to be inserted
+    /// @param _user     user defined data that is supplied along with TexCoord's 4th component
+    /// @param _metadata user defined metadata for the host
     std::optional<DataRef> insert(Key const& _id,
                                   unsigned _width,
                                   unsigned _height,
+                                  unsigned _targetWidth,
+                                  unsigned _targetHeight,
                                   unsigned _format,
                                   Buffer _data,
                                   unsigned _user,
@@ -232,13 +243,15 @@ class TextureAtlas {
         TextureInfo const& info = allocations_.emplace(std::pair{
             _id,
             TextureInfo{
-                currentAtlasInstance_,
+                currentInstanceId_,
                 name_,
                 currentX_,
                 currentY_,
                 currentZ_,
                 _width,
                 _height,
+                _targetWidth,
+                _targetHeight,
                 static_cast<float>(currentX_) / static_cast<float>(width_),
                 static_cast<float>(currentY_) / static_cast<float>(height_),
                 static_cast<float>(_width) / static_cast<float>(width_),
@@ -294,30 +307,35 @@ class TextureAtlas {
 
     constexpr bool advanceInstance()
     {
-        if (currentAtlasInstance_ < maxInstances_)
+        if (currentInstanceId_ < instanceBaseId_ + maxInstances_)
         {
-            currentAtlasInstance_++;
+            currentInstanceId_++;
             currentZ_ = 0;
             currentY_ = 0;
             currentX_ = 0;
             maxTextureHeightInCurrentRow_ = 0;
 
-            commandListener_.createAtlas({
-                currentAtlasInstance_,
-                name_,
-                width_,
-                height_,
-                depth_,
-                format_
-            });
-
+            notifyCreateAtlas();
             return true;
         }
         else
             return false;
     }
 
+    void notifyCreateAtlas()
+    {
+        commandListener_.createAtlas({
+            currentInstanceId_,
+            name_,
+            width_,
+            height_,
+            depth_,
+            format_
+        });
+    }
+
   private:
+    unsigned const instanceBaseId_;    // default value to assign to first instance, and incrementing from that point for further instances.
     unsigned const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
     unsigned const depth_;              // atlas total depth
     unsigned const width_;              // atlas total width
@@ -327,7 +345,7 @@ class TextureAtlas {
     std::string const name_;            // atlas human readable name (only for debugging)
     CommandListener& commandListener_;  // atlas event listener (used to perform allocation/modification actions)
 
-    unsigned currentAtlasInstance_ = 0; // (OpenGL) texture count already in use
+    unsigned currentInstanceId_;        // (OpenGL) texture count already in use
     unsigned currentZ_ = 0;             // index to current atlas that is being filled
     unsigned currentX_ = 0;             // current X-offset to start drawing to
     unsigned currentY_ = 0;             // current Y-offset to start drawing to

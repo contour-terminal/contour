@@ -66,7 +66,8 @@ class TextShaper {
 
     void render(QPoint _pos,
                 std::vector<Font::GlyphPosition> const& glyphPositions,
-                QVector4D const& _color);
+                QVector4D const& _color,
+                QSize const& _cellSize);
 
     void execute();
 
@@ -85,8 +86,8 @@ class TextShaper {
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
     using DataRef = TextShaper::TextureAtlas::DataRef;
 
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id);
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize, TextureAtlas& _atlas);
 
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,

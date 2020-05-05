@@ -254,16 +254,16 @@ void Font::setFontSize(unsigned int _fontSize)
         fontSize_ = _fontSize;
 
         // update bitmap width/height
-        FT_Long width, height;
-        if (FT_IS_SCALABLE(face_)) {
-            width = FT_MulFix(face_->bbox.xMax - face_->bbox.xMin, face_->size->metrics.x_scale) >> 6;
-            height = FT_MulFix(face_->bbox.yMax - face_->bbox.yMin, face_->size->metrics.y_scale) >> 6;
-        } else {
-            width = (face_->available_sizes[0].width);
-            height = (face_->available_sizes[0].height);
+        if (FT_IS_SCALABLE(face_))
+        {
+            bitmapWidth_ = FT_MulFix(face_->bbox.xMax - face_->bbox.xMin, face_->size->metrics.x_scale) >> 6;
+            bitmapHeight_ = FT_MulFix(face_->bbox.yMax - face_->bbox.yMin, face_->size->metrics.y_scale) >> 6;
         }
-        bitmapWidth_ = width;
-        bitmapHeight_ = height;
+        else
+        {
+            bitmapWidth_ = (face_->available_sizes[0].width);
+            bitmapHeight_ = (face_->available_sizes[0].height);
+        }
 
         loadGlyphByIndex(0);
         clearRenderCache();
@@ -296,20 +296,22 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
 
 #if 0 // !defined(NDEBUG)
     auto const stats = getFontStats(face_);
-    printf("Font(\"%s\").ctor: glyphs=%lu, faces=%lu, charmaps=%u, fixed_sizes=%u, %ux%u\n",
-        filePath_.c_str(),
-        face_->num_glyphs, face_->num_faces,
-        face_->num_charmaps, face_->num_fixed_sizes,
-        bitmapWidth_,
-        bitmapHeight_
-    );
-    unsigned i = 0;
-    for (Stats::Occurence const& occurence : stats.occurences)
-    {
-        cout << fmt::format("{}: {}x{}\n", occurence.first, occurence.second.width, occurence.second.height);
-        i++;
-        if (i >= 10)
-            break;
+    if (FT_HAS_COLOR(face_)) {
+        printf("Font(\"%s\").ctor: glyphs=%lu, faces=%lu, charmaps=%u, fixed_sizes=%u, %ux%u\n",
+            filePath_.c_str(),
+            face_->num_glyphs, face_->num_faces,
+            face_->num_charmaps, face_->num_fixed_sizes,
+            bitmapWidth_,
+            bitmapHeight_
+        );
+        unsigned i = 0;
+        for (Stats::Occurence const& occurence : stats.occurences)
+        {
+            cout << fmt::format("{}: {}x{}\n", occurence.first, occurence.second.width, occurence.second.height);
+            i++;
+            if (i >= 10)
+                break;
+        }
     }
 #endif
 
@@ -402,9 +404,19 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
     if (_faceIndex && fallback_)
         return fallback_->loadGlyphByIndex(_faceIndex - 1, _glyphIndex);
 
-    FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, FT_LOAD_RENDER);
+    // FT_LOAD_RENDER
+	FT_Int32 flags = FT_LOAD_DEFAULT;// | FT_LOAD_TARGET_LCD;
+	if (FT_HAS_COLOR(face_))
+		flags |= FT_LOAD_COLOR | FT_LOAD_TARGET_LCD /*?*/;
+
+    FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, flags);
     if (ec != FT_Err_Ok)
         throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
+
+    // NB: colored fonts are bitmap fonts, they do not need rendering
+	if (!FT_HAS_COLOR(face_))
+		if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL/*FT_RENDER_MODE_LCD*/) != FT_Err_Ok)
+            return Glyph{};
 
     auto const width = face_->glyph->bitmap.width;
     auto const pitch = face_->glyph->bitmap.pitch;
@@ -415,17 +427,17 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
     if (!hasColor())
     {
 		bitmap.resize(height * width * 3);
-        for (uint i = 0; i < height; i++)
-        {
-            for (uint j = 0; j < width; j++)
-            {
-                unsigned char ch = buffer[i * pitch + j];
-                bitmap[i * width + j] = ch;
-            }
-        }
+        for (auto const [i, j] : times(height) * times(width))
+            bitmap[i * width + j] = buffer[i * pitch + j];
     }
     else
     {
+        printf("Font(%s).loadGlyphByIndex(COLOR): %u / %u, %ux%u\n",
+                filePath_.c_str(),
+                _faceIndex, _glyphIndex,
+                width,
+                height);
+
         bitmap.resize(height * width * 4);
         copy(
             buffer,
@@ -502,20 +514,39 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
     }
     else if (fallback_)
     {
-        _result.clear();
-        return fallback_->render(_chars, _result, _attempt + 1);
+        // TODO: that's a quick hack to get fast-forward to my color font. Remove me.
+        Font* fallback = fallback_;
+        while (fallback != nullptr && !fallback->hasColor())
+            fallback = fallback->fallback_;
+
+        if (fallback)
+        {
+            _result.clear();
+            return fallback->render(_chars, _result, _attempt + 1);
+        }
+        else
+        {
+            replaceMissingGlyphs(_result);
+            return false;
+        }
     }
     else
     {
-        auto constexpr missingGlyphId = 0xFFFDu;
-        auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
-        if (missingGlyph)
-        {
-            for (auto i : times(glyphCount))
-                if (glyphMissing(_result[i]))
-                    _result[i].glyphIndex = missingGlyph;
-        }
+        replaceMissingGlyphs(_result);
         return false;
+    }
+}
+
+void Font::replaceMissingGlyphs(GlyphPositionList& _result)
+{
+    auto constexpr missingGlyphId = 0xFFFDu;
+    auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
+
+    if (missingGlyph)
+    {
+        for (auto i : times(_result.size()))
+            if (glyphMissing(_result[i]))
+                _result[i].glyphIndex = missingGlyph;
     }
 }
 

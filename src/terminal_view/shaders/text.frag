@@ -18,8 +18,7 @@ void main()
     else
     {
         // colored glyph (RGBA)
-        mediump vec4 tex = texture(fs_colorTextures, fs_TexCoord.xyz).rgba;
-        //mediump vec4 WHITE = vec4(1.0, 1.0, 1.0, 1.0);
-        color = tex;
+        mediump vec4 tex = texture(fs_colorTextures, fs_TexCoord.xyz);
+        color = tex; // * color.a;
     }
 }

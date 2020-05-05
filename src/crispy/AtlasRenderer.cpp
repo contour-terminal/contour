@@ -56,8 +56,8 @@ struct Renderer::ExecutionScheduler : public CommandListener
             GLfloat const xpos = _render.x;
             GLfloat const ypos = _render.y;
             GLfloat const zpos = _render.z;
-            GLfloat const w = _render.texture.get().width;
-            GLfloat const h = _render.texture.get().height;
+            GLfloat const w = _render.texture.get().targetWidth;
+            GLfloat const h = _render.texture.get().targetHeight;
 
             GLfloat const vertices[6 * 3] = {
                 // first triangle
@@ -298,6 +298,8 @@ void Renderer::uploadTexture(UploadTexture const& _upload)
     auto const y0 = texture.y;
     auto const z0 = texture.z;
 
+    //cout << "Renderer.uploadTexture(tid:" << textureId << "): " << _upload << endl;
+
     auto constexpr target = GL_TEXTURE_2D_ARRAY;
     auto constexpr levelOfDetail = 0;
     auto constexpr depth = 1;
@@ -314,7 +316,11 @@ void Renderer::renderTexture(RenderTexture const& _render)
     auto const key = AtlasKey{_render.texture.get().atlasName, _render.texture.get().atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
     {
+        GLuint const unit = _render.texture.get().atlas;
+
         GLuint const textureId = it->second;
+
+        //cout << "Renderer.renderTexture(" << unit << '/' << textureId << "): " << _render << endl;
 
         // TODO: this doesn't consider having >= two Atlas instances
         // would require another atlasTextureUnitMap_ with <Key, uint> or alike.

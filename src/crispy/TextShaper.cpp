@@ -19,13 +19,14 @@ using namespace std;
 
 namespace crispy::text {
 
-constexpr unsigned MaxInstanceCount = 10;
+constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxTextureDepth = 10;
 constexpr unsigned MaxTextureSize = 1024;
 
 TextShaper::TextShaper() :
     renderer_{},
     monochromeAtlas_{
+        0,
         MaxInstanceCount,
         min(MaxTextureDepth, renderer_.maxTextureDepth()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
@@ -35,6 +36,7 @@ TextShaper::TextShaper() :
         "monochromeAtlas"
     },
     colorAtlas_{
+        1,
         MaxInstanceCount,
         min(MaxTextureDepth, renderer_.maxTextureDepth()),
         min(MaxTextureSize, renderer_.maxTextureSize()),
@@ -57,10 +59,11 @@ void TextShaper::setProjection(QMatrix4x4 const& _projection)
 
 void TextShaper::render(QPoint _pos,
                         vector<Font::GlyphPosition> const& _glyphPositions,
-                        QVector4D const& _color)
+                        QVector4D const& _color,
+                        QSize const& _cellSize)
 {
     for (Font::GlyphPosition const& gpos : _glyphPositions)
-        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
+        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}, _cellSize); ti.has_value())
             renderTexture(_pos,
                           _color,
                           get<0>(*ti).get(),
@@ -68,16 +71,17 @@ void TextShaper::render(QPoint _pos,
                           gpos);
 }
 
-optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id)
+optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id, QSize const& _cellSize)
 {
     TextureAtlas& atlas = _id.font.get().hasColor()
         ? colorAtlas_
         : monochromeAtlas_;
 
-    return getTextureInfo(_id, atlas);
+    return getTextureInfo(_id, _cellSize, atlas);
 }
 
 optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
+                                                         QSize const& _cellSize,
                                                          TextureAtlas& _atlas)
 {
     if (optional<DataRef> const dataRef = _atlas.get(_id); dataRef.has_value())
@@ -86,8 +90,11 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     Font& font = _id.font.get();
     Font::Glyph fg = font.loadGlyphByIndex(_id.glyphIndex);
 
-    auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
+    auto const format = _id.font.get().hasColor() ? GL_BGRA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
+
+    auto const ratioX = colored ? _cellSize.width() / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
+    auto const ratioY = colored ? _cellSize.height() / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
 
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;
@@ -102,7 +109,10 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
              << _id.glyphIndex << " @ " << _id.font.get().filePath() << endl;
     }
 
-    return _atlas.insert(_id, fg.width, fg.height, format, move(fg.buffer), colored, move(metadata));
+    return _atlas.insert(_id, fg.width, fg.height,
+                         fg.width * ratioX,
+                         fg.height * ratioY,
+                         format, move(fg.buffer), colored, move(metadata));
 }
 
 void TextShaper::renderTexture(QPoint const& _pos,
