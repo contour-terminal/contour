@@ -91,9 +91,6 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     metadata.height = static_cast<unsigned>(font->height) >> 6;
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
-    std::cout << "Atlas.insert: "
-        << fmt::format("({}x{})", fg.width, fg.height)
-        << " into " << _atlas << endl;
     return _atlas.insert(_id, fg.width, fg.height, move(fg.buffer), move(metadata));
 }
 
