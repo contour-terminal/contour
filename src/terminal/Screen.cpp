@@ -49,6 +49,7 @@ string to_string(CharacterStyleMask _mask)
     if (_mask & CharacterStyleMask::Faint)
         append("faint");
     if (_mask & CharacterStyleMask::Italic)
+        append("italic");
     if (_mask & CharacterStyleMask::Underline)
         append("underline");
     if (_mask & CharacterStyleMask::Blinking)
