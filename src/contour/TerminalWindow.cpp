@@ -627,12 +627,10 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
     {
         now_ = chrono::steady_clock::now();
 
-        int const topPadding = abs(height() - static_cast<int>(terminalView_->terminal().screenSize().rows * terminalView_->cellHeight()));
-        if (_event->y() < topPadding)
-            return;
+        auto const& margin = terminalView_->windowMargin();
 
-        unsigned const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - topPadding) / terminalView_->cellHeight());
-        unsigned const col = static_cast<unsigned>(1 + max(_event->x(), 0) / terminalView_->cellWidth());
+        unsigned const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - margin.bottom) / terminalView_->cellHeight());
+        unsigned const col = static_cast<unsigned>(1 + (max(_event->x(), 0) - margin.left) / terminalView_->cellWidth());
 
         terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
 

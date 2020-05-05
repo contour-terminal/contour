@@ -79,8 +79,8 @@ class TerminalView {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
-    void setFont(crispy::Font& _font) { renderer_.setFont(_font); }
-    bool setFontSize(unsigned int _fontSize) { return renderer_.setFontSize(_fontSize); }
+    void setFont(crispy::Font& _font);
+    bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
@@ -110,8 +110,20 @@ class TerminalView {
     void resetDynamicColor(DynamicColorName _name);
     void setDynamicColor(DynamicColorName _name, RGBColor const& value);
 
+    struct WindowMargin {
+        unsigned left;
+        unsigned bottom;
+    };
+
+    WindowMargin computeMargin(WindowSize const& ws, unsigned _width, unsigned _height) const noexcept;
+
+    constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
+
   private:
     Logger logger_;
+    QSize size_;
+    WindowMargin windowMargin_;
+    std::reference_wrapper<crispy::Font> regularFont_;
     GLRenderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;

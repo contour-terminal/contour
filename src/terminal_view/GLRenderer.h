@@ -69,6 +69,12 @@ class GLRenderer : public QOpenGLFunctions {
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
+    void setMargin(unsigned _leftMargin, unsigned _bottomMargin)
+    {
+        leftMargin_ = _leftMargin;
+        bottomMargin_ = _bottomMargin;
+    }
+
     /**
      * Renders the given @p _terminal to the current OpenGL context.
      *
@@ -162,8 +168,9 @@ class GLRenderer : public QOpenGLFunctions {
 
     PendingDraw pendingDraw_;
     PendingBackgroundDraw pendingBackgroundDraw_;
-    Margin margin_{};
     Logger logger_;
+    unsigned leftMargin_;
+    unsigned bottomMargin_;
 
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;

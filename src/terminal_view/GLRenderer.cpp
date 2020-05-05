@@ -30,6 +30,8 @@ GLRenderer::GLRenderer(Logger _logger,
                        ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     logger_{ move(_logger) },
+    leftMargin_{ 0 },
+    bottomMargin_{ 0 },
     colorProfile_{ move(_colorProfile) },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
@@ -77,16 +79,15 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 
     regularFont_.get().setFontSize(_fontSize);
     // TODO: other font styles
+
+    auto const cellWidth = regularFont_.get().maxAdvance();
+    auto const cellHeight = regularFont_.get().lineHeight();
+    auto const cellSize = QSize{static_cast<int>(cellWidth),
+                                static_cast<int>(cellHeight)};
+
     textShaper_.clearCache();
-    cellBackground_.resize(QSize{
-        static_cast<int>(regularFont_.get().maxAdvance()),
-        static_cast<int>(regularFont_.get().lineHeight())
-    });
-    cursor_.resize(QSize{
-        static_cast<int>(regularFont_.get().maxAdvance()),
-        static_cast<int>(regularFont_.get().lineHeight())
-    });
-    // TODO update margins?
+    cellBackground_.resize(cellSize);
+    cursor_.resize(cellSize);
 
     return true;
 }
@@ -300,12 +301,9 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 
 QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
 {
-    constexpr int LeftMargin = 0;
-    constexpr int BottomMargin = 0;
-
     return QPoint{
-        static_cast<int>(LeftMargin + (col - 1) * regularFont_.get().maxAdvance()),
-        static_cast<int>(BottomMargin + (_screenSize.rows - row) * regularFont_.get().lineHeight())
+        static_cast<int>(leftMargin_ + (col - 1) * regularFont_.get().maxAdvance()),
+        static_cast<int>(bottomMargin_ + (_screenSize.rows - row) * regularFont_.get().lineHeight())
     };
 }
 
