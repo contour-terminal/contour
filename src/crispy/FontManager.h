@@ -104,11 +104,9 @@ class Font {
 
     unsigned bitmapWidth() const noexcept { return bitmapWidth_; }
     unsigned bitmapHeight() const noexcept { return bitmapHeight_; }
-    unsigned int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
-
+    unsigned lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
     unsigned maxAdvance() const noexcept { return maxAdvance_; }
-
-    unsigned int baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
+    unsigned baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
 
     [[deprecated]] bool contains(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char) != 0; }
 
