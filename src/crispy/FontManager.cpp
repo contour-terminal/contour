@@ -34,21 +34,6 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
-struct Stats {
-    struct Extend {
-        unsigned width = 0;
-        unsigned height = 0;
-    };
-    using Occurence = std::pair<unsigned, Extend>;
-    std::vector<Occurence> occurences{};
-    Extend max{};
-};
-
-constexpr bool operator<(Stats::Extend const& a, Stats::Extend const& b)
-{
-    return a.width < b.width || (a.width == b.width && a.height < b.height);
-}
-
 using namespace std;
 
 namespace crispy {
@@ -225,32 +210,6 @@ Font& FontManager::loadFromFilePath(std::string const& _path, Font* _fallback)
         return fonts_.emplace(make_pair(_path, Font(ft_, _path, _fallback, fontSize_))).first->second;
 }
 
-Stats getFontStats(FT_Face _face)
-{
-    Stats stats{};
-    map<Stats::Extend, unsigned> frequencies;
-    for (unsigned glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
-    {
-        FT_Int32 constexpr loadFlags = FT_LOAD_DEFAULT;
-        FT_Load_Glyph(_face, glyphIndex, loadFlags);
-        auto const width = _face->glyph->bitmap.width;
-        auto const height = _face->glyph->bitmap.rows;
-        frequencies[Stats::Extend{width, height}]++;
-        stats.max.width = max(stats.max.width, width);
-        stats.max.height = max(stats.max.height, height);
-    }
-
-    stats.occurences.reserve(frequencies.size());
-    for (pair<Stats::Extend const, unsigned> const& freq : frequencies)
-        stats.occurences.emplace_back(freq.second, freq.first);
-
-    sort(begin(stats.occurences), end(stats.occurences), [](auto const& a, auto const& b) -> bool {
-        return a.first > b.first;
-    });
-
-    return stats;
-}
-
 void Font::setFontSize(unsigned int _fontSize)
 {
     if (fontSize_ != _fontSize)
@@ -315,27 +274,6 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
 
     hb_font_ = hb_ft_font_create_referenced(face_);
     hb_buf_ = hb_buffer_create();
-
-#if 0 // !defined(NDEBUG)
-    auto const stats = getFontStats(face_);
-    if (FT_HAS_COLOR(face_)) {
-        printf("Font(\"%s\").ctor: glyphs=%lu, faces=%lu, charmaps=%u, fixed_sizes=%u, %ux%u\n",
-            filePath_.c_str(),
-            face_->num_glyphs, face_->num_faces,
-            face_->num_charmaps, face_->num_fixed_sizes,
-            bitmapWidth_,
-            bitmapHeight_
-        );
-        unsigned i = 0;
-        for (Stats::Occurence const& occurence : stats.occurences)
-        {
-            cout << fmt::format("{}: {}x{}\n", occurence.first, occurence.second.width, occurence.second.height);
-            i++;
-            if (i >= 10)
-                break;
-        }
-    }
-#endif
 
     loadGlyphByIndex(0);
     // XXX Woot, needed in order to retrieve maxAdvance()'s field,
