@@ -104,20 +104,9 @@ class Font {
 
     unsigned bitmapWidth() const noexcept { return bitmapWidth_; }
     unsigned bitmapHeight() const noexcept { return bitmapHeight_; }
-
     unsigned int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
 
-    unsigned int maxAdvance() const noexcept {
-        // FIXME: should be that line, but doesn't work on FiraCode (Regular) for some reason.
-        //return face_->size->metrics.max_advance >> 6;
-
-        auto const a = face_->glyph->advance.x >> 6; // only works if glyph was loaded
-        auto const b = face_->size->metrics.max_advance >> 6;
-        if (a)
-            return a;
-        else
-            return b;
-    }
+    unsigned maxAdvance() const noexcept { return maxAdvance_; }
 
     unsigned int baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
 
@@ -173,6 +162,7 @@ class Font {
 
     unsigned bitmapWidth_ = 0;
     unsigned bitmapHeight_ = 0;
+    unsigned maxAdvance_;
 
     std::string filePath_;
     std::size_t hashCode_;

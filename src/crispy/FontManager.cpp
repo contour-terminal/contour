@@ -153,6 +153,24 @@ namespace {
     {
         return _gp.glyphIndex == 0;
     }
+
+    unsigned computeMaxAdvance(FT_Face _face)
+    {
+        if (FT_Load_Char(_face, 'M', FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)
+            return _face->glyph->advance.x >> 6;
+
+        unsigned long long maxAdvance = 0;
+        unsigned count = 0;
+        for (unsigned glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
+        {
+            if (FT_Load_Glyph(_face, glyphIndex, FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)// FT_LOAD_BITMAP_METRICS_ONLY);
+            {
+                maxAdvance += _face->glyph->advance.x >> 6;
+                count++;
+            }
+        }
+        return maxAdvance / count;
+    }
 }
 
 FontManager::FontManager(unsigned int _fontSize) :
@@ -265,6 +283,8 @@ void Font::setFontSize(unsigned int _fontSize)
             bitmapHeight_ = (face_->available_sizes[0].height);
         }
 
+        maxAdvance_ = computeMaxAdvance(face_);
+
         loadGlyphByIndex(0);
         clearRenderCache();
     }
@@ -290,6 +310,8 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
         throw runtime_error{ string{"Failed to set charmap. "} + freetypeErrorString(ec) };
 
     setFontSize(_fontSize);
+
+    maxAdvance_ = computeMaxAdvance(face_);
 
     hb_font_ = hb_ft_font_create_referenced(face_);
     hb_buf_ = hb_buffer_create();
@@ -330,6 +352,7 @@ Font::Font(Font&& v) noexcept :
     fontSize_{ v.fontSize_ },
     bitmapWidth_{ v.bitmapWidth_ },
     bitmapHeight_{ v.bitmapHeight_ },
+    maxAdvance_{ v.maxAdvance_ },
     filePath_{ move(v.filePath_) },
     hashCode_{ v.hashCode_ },
     fallback_{ v.fallback_ }
@@ -355,6 +378,7 @@ Font& Font::operator=(Font&& v) noexcept
     hb_font_ = v.hb_font_;
     hb_buf_ = v.hb_buf_;
     fontSize_ = v.fontSize_;
+    maxAdvance_ = v.maxAdvance_;
     bitmapWidth_ = v.bitmapWidth_;
     bitmapHeight_ = v.bitmapHeight_;
     filePath_ = move(v.filePath_);
@@ -498,7 +522,7 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
             info[i].codepoint
         });
 
-        cx += maxAdvance(); // pos[i].x_advance >> 6;
+        cx += maxAdvance();
         cy += pos[i].y_advance >> 6;
     }
 
