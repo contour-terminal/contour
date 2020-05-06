@@ -449,21 +449,13 @@ Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _
     if (!hasColor())
     {
         auto const pitch = face_->glyph->bitmap.pitch;
-		bitmap.resize(face_->glyph->bitmap.rows * face_->glyph->bitmap.width * 3);
+        bitmap.resize(height * width);
         for (unsigned i = 0; i < height; ++i)
             for (unsigned j = 0; j < face_->glyph->bitmap.width; ++j)
                 bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
     }
     else
     {
-#if 0
-        printf("Font(%s).loadGlyphByIndex(COLOR): %u / %u, %ux%u\n",
-                filePath_.c_str(),
-                _faceIndex, _glyphIndex,
-                width,
-                height);
-#endif
-
         bitmap.resize(height * width * 4);
         copy(
             buffer,
