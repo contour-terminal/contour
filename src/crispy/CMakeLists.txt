@@ -49,11 +49,6 @@ add_library(crispy-gui STATIC
 )
 add_library(crispy::gui ALIAS crispy-gui)
 
-option(LIBCRISPY_FONT_RENDER_CACHE "Enables internal render cache [default: ON]." ON)
-if(LIBCRISPY_FONT_RENDER_CACHE)
-    target_compile_definitions(crispy-gui PUBLIC LIBCRISPY_FONT_RENDER_CACHE=1)
-endif()
-
 target_include_directories(crispy-gui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(crispy-gui PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
@@ -71,7 +66,6 @@ endif()
 target_link_libraries(crispy-gui PUBLIC ${LIBCRISPY_GUI_LIBRARIES})
 
 message(STATUS "[crispy::gui] Librarires: ${LIBCRISPY_GUI_LIBRARIES}")
-message(STATUS "[crispy::gui] Font Render Cache: ${LIBCRISPY_FONT_RENDER_CACHE}")
 
 # --------------------------------------------------------------------------------------------------------
 # crispy_test

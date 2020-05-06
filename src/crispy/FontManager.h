@@ -166,11 +166,9 @@ class Font {
     std::size_t hashCode_;
     Font* fallback_;
 
-#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     // TODO: Currently this can become ever-growing. We should evict least recently used items
     //       if the cache would exceed a given threshold.
     std::unordered_map<CharSequence, GlyphPositionList> renderCache_{};
-#endif
 };
 
 /// API for managing multiple fonts.

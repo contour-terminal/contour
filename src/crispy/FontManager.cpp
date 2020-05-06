@@ -413,9 +413,7 @@ Font::~Font()
 
 void Font::clearRenderCache()
 {
-#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     renderCache_.clear();
-#endif
 }
 
 Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
@@ -473,13 +471,11 @@ Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _
 
 bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsigned _attempt)
 {
-#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
     if (auto i = renderCache_.find(_chars); i != renderCache_.end())
     {
         _result = i->second;
         return true;
     }
-#endif
 
     hb_buffer_clear_contents(hb_buf_);
     hb_buffer_add_utf32(
@@ -520,9 +516,7 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
 
     if (!any_of(_result, glyphMissing))
     {
-#if defined(LIBCRISPY_FONT_RENDER_CACHE) && LIBCRISPY_FONT_RENDER_CACHE
         renderCache_[_chars] = _result;
-#endif
         // if (_attempt > 0)
         //     cout << fmt::format("Glyph rendering succeed after {} attempts: {} CPs: {}\n",
         //             _attempt, _chars.size(), filePath_);
