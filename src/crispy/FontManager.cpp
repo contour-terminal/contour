@@ -404,39 +404,41 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
     if (_faceIndex && fallback_)
         return fallback_->loadGlyphByIndex(_faceIndex - 1, _glyphIndex);
 
-    // FT_LOAD_RENDER
-	FT_Int32 flags = FT_LOAD_DEFAULT;// | FT_LOAD_TARGET_LCD;
-	if (FT_HAS_COLOR(face_))
-		flags |= FT_LOAD_COLOR | FT_LOAD_TARGET_LCD /*?*/;
+    FT_Int32 flags = FT_LOAD_DEFAULT;
+    if (FT_HAS_COLOR(face_))
+        flags |= FT_LOAD_COLOR;
 
     FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, flags);
     if (ec != FT_Err_Ok)
         throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
 
     // NB: colored fonts are bitmap fonts, they do not need rendering
-	if (!FT_HAS_COLOR(face_))
-		if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL/*FT_RENDER_MODE_LCD*/) != FT_Err_Ok)
+    if (!FT_HAS_COLOR(face_))
+        if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
             return Glyph{};
 
     auto const width = face_->glyph->bitmap.width;
-    auto const pitch = face_->glyph->bitmap.pitch;
     auto const height = face_->glyph->bitmap.rows;
     auto const buffer = face_->glyph->bitmap.buffer;
 
     vector<uint8_t> bitmap;
     if (!hasColor())
     {
-		bitmap.resize(height * width * 3);
-        for (auto const [i, j] : times(height) * times(width))
-            bitmap[i * width + j] = buffer[i * pitch + j];
+        auto const pitch = face_->glyph->bitmap.pitch;
+		bitmap.resize(face_->glyph->bitmap.rows * face_->glyph->bitmap.width * 3);
+        for (unsigned i = 0; i < height; ++i)
+            for (unsigned j = 0; j < face_->glyph->bitmap.width; ++j)
+                bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
     }
     else
     {
+#if 0
         printf("Font(%s).loadGlyphByIndex(COLOR): %u / %u, %ux%u\n",
                 filePath_.c_str(),
                 _faceIndex, _glyphIndex,
                 width,
                 height);
+#endif
 
         bitmap.resize(height * width * 4);
         copy(
@@ -487,7 +489,6 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
 
     unsigned int cx = 0;
     unsigned int cy = 0;
-    unsigned int advance = 0; // not yet exposed nor needed on caller side
     for (unsigned const i : times(glyphCount))
     {
         _result.emplace_back(GlyphPosition{
@@ -497,9 +498,8 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
             info[i].codepoint
         });
 
-        cx += maxAdvance(), // Ought to be (pos[i].x_advance / 64), but that breaks on some font sizes it seems.
+        cx += maxAdvance(); // pos[i].x_advance >> 6;
         cy += pos[i].y_advance >> 6;
-        advance += pos[i].x_advance >> 6;
     }
 
     if (!any_of(_result, glyphMissing))

@@ -29,6 +29,8 @@ class TerminalWindow :
     TerminalWindow(config::Config _config, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
+    static QSurfaceFormat surfaceFormat();
+
     void initializeGL() override;
     void paintGL() override;
 

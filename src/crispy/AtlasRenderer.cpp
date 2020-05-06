@@ -53,22 +53,23 @@ struct Renderer::ExecutionScheduler : public CommandListener
         renderTextures.emplace_back(_render);
 
         { // vertex coordinates
-            GLfloat const xpos = _render.x;
-            GLfloat const ypos = _render.y;
-            GLfloat const zpos = _render.z;
-            GLfloat const w = _render.texture.get().targetWidth;
-            GLfloat const h = _render.texture.get().targetHeight;
+            GLfloat const x = _render.x;
+            GLfloat const y = _render.y;
+            GLfloat const z = _render.z;
+          //GLfloat const w = _render.w;
+            GLfloat const r = _render.texture.get().targetWidth;
+            GLfloat const s = _render.texture.get().targetHeight;
 
             GLfloat const vertices[6 * 3] = {
                 // first triangle
-                xpos,     ypos + h, zpos,
-                xpos,     ypos,     zpos,
-                xpos + w, ypos,     zpos,
+                x,     y + s, z,
+                x,     y,     z,
+                x + r, y,     z,
 
                 // second triangle
-                xpos,     ypos + h, zpos,
-                xpos + w, ypos,     zpos,
-                xpos + w, ypos + h, zpos
+                x,     y + s, z,
+                x + r, y,     z,
+                x + r, y + s, z
             };
 
             copy(vertices, back_inserter(this->vertexCoords));
@@ -156,7 +157,7 @@ Renderer::Renderer() :
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(1);
 
-    // 2 (vec4): texture coordinates buffer
+    // 2 (vec4): color buffer
     glGenBuffers(1, &colorsBuffer_);
     glBindBuffer(GL_ARRAY_BUFFER, colorsBuffer_);
     glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
@@ -316,16 +317,12 @@ void Renderer::renderTexture(RenderTexture const& _render)
     auto const key = AtlasKey{_render.texture.get().atlasName, _render.texture.get().atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
     {
-        GLuint const unit = _render.texture.get().atlas;
-
+        GLuint const textureUnit = _render.texture.get().atlas;
         GLuint const textureId = it->second;
 
-        //cout << "Renderer.renderTexture(" << unit << '/' << textureId << "): " << _render << endl;
+        //cout << "Renderer.renderTexture(" << textureUnit << '/' << textureId << "): " << _render << endl;
 
-        // TODO: this doesn't consider having >= two Atlas instances
-        // would require another atlasTextureUnitMap_ with <Key, uint> or alike.
-        selectTextureUnit(_render.texture.get().atlas);
-
+        selectTextureUnit(textureUnit);
         bindTexture2DArray(textureId);
     }
 }

@@ -107,6 +107,8 @@ int main(int argc, char* argv[])
         if (configFailures)
             return EXIT_FAILURE;
 
+        //QSurfaceFormat::setDefaultFormat(contour::TerminalWindow::surfaceFormat());
+
         auto mainWindow = contour::TerminalWindow{
             config,
             profileName,

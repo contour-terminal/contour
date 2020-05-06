@@ -156,42 +156,6 @@ namespace {
         return mat;
     }
 
-    QSurfaceFormat surfaceFormat()
-    {
-        QSurfaceFormat format;
-
-        constexpr bool forceOpenGLES = (
-#if defined(__linux__)
-            true
-#else
-            false
-#endif
-        );
-
-        if (forceOpenGLES || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
-        {
-            format.setVersion(3, 2);
-            format.setRenderableType(QSurfaceFormat::OpenGLES);
-            format.setProfile(QSurfaceFormat::CoreProfile);
-        }
-        else
-        {
-            format.setVersion(3, 3);
-            format.setProfile(QSurfaceFormat::CompatibilityProfile);
-            format.setRenderableType(QSurfaceFormat::OpenGL);
-        }
-
-        format.setAlphaBufferSize(8);
-        format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-        format.setSwapInterval(1);
-
-#if !defined(NDEBUG)
-        format.setOption(QSurfaceFormat::DebugContext);
-#endif
-
-        return format;
-    }
-
 #if 0 // !defined(NDEBUG)
     QDebug operator<<(QDebug str, QEvent const& ev) {
         static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
@@ -332,6 +296,42 @@ TerminalWindow::~TerminalWindow()
     // ...
 }
 
+QSurfaceFormat TerminalWindow::surfaceFormat()
+{
+    QSurfaceFormat format;
+
+    constexpr bool forceOpenGLES = (
+#if 0 // defined(__linux__)
+        true
+#else
+        false
+#endif
+    );
+
+    if (forceOpenGLES) // || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
+    {
+        format.setVersion(3, 2);
+        format.setRenderableType(QSurfaceFormat::OpenGLES);
+        format.setProfile(QSurfaceFormat::CoreProfile);
+    }
+    else
+    {
+        format.setVersion(3, 3);
+        format.setRenderableType(QSurfaceFormat::OpenGL);
+        format.setProfile(QSurfaceFormat::CoreProfile);
+    }
+
+    format.setAlphaBufferSize(8);
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setSwapInterval(1);
+
+#if !defined(NDEBUG)
+    format.setOption(QSurfaceFormat::DebugContext);
+#endif
+
+    return format;
+}
+
 void TerminalWindow::blinkingCursorUpdate()
 {
     update();
@@ -391,7 +391,32 @@ void TerminalWindow::initializeGL()
 {
     initializeOpenGLFunctions();
 
-    qDebug() << "GL type:" << (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL");
+    // {{{ some stats
+    cout << fmt::format("OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+    cout << fmt::format("OpenGL renderer : {}\n", glGetString(GL_RENDERER));
+
+    GLint versionMajor{};
+    GLint versionMinor{};
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
+    cout << fmt::format("OpenGL version  : {}.{}\n", versionMajor, versionMinor);
+    cout << fmt::format("GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+    GLint glslNumShaderVersions{};
+    glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+    if (glslNumShaderVersions > 0)
+    {
+        cout << " (";
+        for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
+            if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
+            {
+                cout << (l ? ", " : "") << str;
+                l++;
+            }
+        cout << ')';
+    }
+    cout << "\n\n";
+    // }}}
 
 #if !defined(NDEBUG)
     glEnable(GL_DEBUG_OUTPUT);

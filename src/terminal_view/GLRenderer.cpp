@@ -61,7 +61,11 @@ GLRenderer::GLRenderer(Logger _logger,
 
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
-    glBlendEquation(GL_FUNC_ADD);
+    //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
+
+    textShader_->bind();
+    textShader_->setUniformValue("fs_monochromeTextures", 0);
+    textShader_->setUniformValue("fs_colorTextures", 1);
 }
 
 void GLRenderer::setFont(Font& _font)

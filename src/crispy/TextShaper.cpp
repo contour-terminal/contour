@@ -93,21 +93,26 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     auto const format = _id.font.get().hasColor() ? GL_BGRA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
 
-    auto const ratioX = colored ? _cellSize.width() / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
-    auto const ratioY = colored ? _cellSize.height() / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
+    //auto const cw = _id.font.get()->glyph->advance.x >> 6;
+    // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
+    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
+    auto const ratioX = colored ? static_cast<float>(_cellSize.width()) * 2.0f / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
+    auto const ratioY = colored ? static_cast<float>(_cellSize.height()) / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
 
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;
-    metadata.bearing = QPoint(font->glyph->bitmap_left, font->glyph->bitmap_top);
+    metadata.bearing = QPoint(font->glyph->bitmap_left * ratioX, font->glyph->bitmap_top * ratioY);
     metadata.descender = (font->glyph->metrics.height >> 6) - font->glyph->bitmap_top;
     metadata.height = static_cast<unsigned>(font->height) >> 6;
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
+#if 0
     if (_id.font.get().hasColor())
     {
         cout << "TextShaper.insert: colored glyph "
              << _id.glyphIndex << " @ " << _id.font.get().filePath() << endl;
     }
+#endif
 
     return _atlas.insert(_id, fg.width, fg.height,
                          fg.width * ratioX,
