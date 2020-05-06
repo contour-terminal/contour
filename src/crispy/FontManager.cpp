@@ -418,12 +418,12 @@ void Font::clearRenderCache()
 #endif
 }
 
-Font::Glyph Font::loadGlyphByIndex(unsigned int _glyphIndex)
+Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
 {
     return loadGlyphByIndex(0, _glyphIndex);
 }
 
-Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex)
+Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex)
 {
     if (_faceIndex && fallback_)
         return fallback_->loadGlyphByIndex(_faceIndex - 1, _glyphIndex);
@@ -439,7 +439,7 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
         if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
-            return Glyph{};
+            return GlyphBitmap{};
 
     auto const width = face_->glyph->bitmap.width;
     auto const height = face_->glyph->bitmap.rows;
@@ -472,7 +472,7 @@ Font::Glyph Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphI
         );
     }
 
-    return Glyph{
+    return GlyphBitmap{
         width,
         height,
         move(bitmap)

@@ -114,7 +114,7 @@ class Font {
 
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
-    struct Glyph {
+    struct GlyphBitmap {
         unsigned int width;
         unsigned int height;
         std::vector<uint8_t> buffer;
@@ -122,8 +122,8 @@ class Font {
 
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    Glyph loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex);
-    Glyph loadGlyphByIndex(unsigned int _glyphIndex);
+    GlyphBitmap loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex);
+    GlyphBitmap loadGlyphByIndex(unsigned int _glyphIndex);
 
     // well yeah, if it's only bitmap we still need, we can expose it and then [[deprecated]] this.
     /*[[deprecated]]*/ /* TODO: remove me */ FT_Face operator->() noexcept { return face_; }
