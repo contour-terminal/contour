@@ -1,12 +1,26 @@
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
+# this library, utf8proc, provides much better support for determining unicode properties,
+# such as utf8proc's wcwidth() equivalent is less buggy with regards to Emoji code points.
+# But in case this library is not installed. wcwidth() is still better than nothing.
+include(FindPkgConfig)
+pkg_check_modules(UTF8PROC REQUIRED libutf8proc)
+if(${UTF8PROC_FOUND})
+    message(STATUS "[crispy] utf8proc library: found (version: ${UTF8PROC_VERSION})")
+else()
+    message(STATUS "[crispy] utf8proc library: not found")
+endif()
+
 add_library(crispy-core INTERFACE)
 add_library(crispy::core ALIAS crispy-core)
 #target_include_directories(crispy-core PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(crispy-core INTERFACE
     $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>)
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+    ${UTF8PROC_INCLUDE_DIRS}
+)
+target_compile_definitions(crispy-core INTERFACE -DUTF8PROC_FOUND=${UTF8PROC_FOUND})
 target_compile_features(crispy-core INTERFACE cxx_std_17)
 target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
@@ -18,7 +32,10 @@ target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/times.h
     ${CMAKE_CURRENT_SOURCE_DIR}/UTF8.h
 )
-target_link_libraries(crispy-core INTERFACE fmt::fmt-header-only)
+target_link_libraries(crispy-core INTERFACE
+    fmt::fmt-header-only
+    ${UTF8PROC_LIBRARIES}
+)
 
 # --------------------------------------------------------------------------------------------------------
 # crispy::gui

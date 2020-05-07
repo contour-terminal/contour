@@ -176,7 +176,7 @@ This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compile
 ```sh
 sudo apt install \
     "g++-9" libfreetype6-dev qtbase5-dev libqt5gui5 extra-cmake-modules \
-    libfontconfig1-dev libharfbuzz-dev
+    libfontconfig1-dev libharfbuzz-dev libutf8proc-dev
 ```
 
 To enable blur-behind feature on transparent background, you'll need the following packages:

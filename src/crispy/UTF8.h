@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <utf8proc.h>
+
 #include <crispy/overloaded.h>
 
 #include <cassert>
@@ -26,6 +28,36 @@
 #include <vector>
 
 namespace crispy::utf8 {
+
+inline int wcwidth(char32_t wc) noexcept
+{
+#if defined(UTF8PROC_FOUND) && UTF8PROC_FOUND
+    auto const cat = utf8proc_category(wc);
+    if (cat != UTF8PROC_CATEGORY_CO)
+        return utf8proc_charwidth(wc);
+    else
+        return 1; // private category is treated as standard column count
+#else
+    return ::wcwidth(wc);
+#endif
+}
+
+inline int mbtowc(char32_t* wc, char const* s, size_t n) noexcept
+{
+#if defined(UTF8PROC_FOUND) && UTF8PROC_FOUND
+    if (wc)
+    {
+        auto const slen = utf8proc_iterate(reinterpret_cast<utf8proc_uint8_t const*>(s),
+                                           static_cast<utf8proc_ssize_t>(n),
+                                           reinterpret_cast<utf8proc_int32_t*>(wc));
+        if (slen >= 0 && static_cast<int>(*wc) != -1)
+            return slen;
+    }
+    return -1;
+#else
+    return ::mbtowc(reinterpret_cast<wchar_t*>(wc), s, n);
+#endif
+}
 
 // XXX some type traits (TODO use STD specialization instead)
 constexpr bool isASCII(char32_t x) noexcept
