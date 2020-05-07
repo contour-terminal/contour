@@ -21,7 +21,7 @@
 #include <terminal/Terminal.h>
 
 #include <crispy/FontManager.h>
-#include <crispy/TextShaper.h>
+#include <crispy/TextRenderer.h>
 #include <crispy/times.h>
 
 #include <QPoint>
@@ -196,7 +196,7 @@ class GLRenderer : public QOpenGLFunctions {
     std::reference_wrapper<crispy::Font> regularFont_;
     QMatrix4x4 projectionMatrix_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
-    crispy::text::TextShaper textShaper_;
+    crispy::text::TextRenderer textRenderer_;
     CellBackground cellBackground_;
     GLCursor cursor_;
 

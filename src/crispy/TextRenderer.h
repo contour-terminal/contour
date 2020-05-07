@@ -57,10 +57,10 @@ namespace crispy::text {
 /**
  * High-level OpenGL text shaping API
  */
-class TextShaper {
+class TextRenderer {
   public:
-    TextShaper();
-    ~TextShaper();
+    TextRenderer();
+    ~TextRenderer();
 
     void setProjection(QMatrix4x4 const& _projection);
 
@@ -84,7 +84,7 @@ class TextShaper {
     };
 
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
-    using DataRef = TextShaper::TextureAtlas::DataRef;
+    using DataRef = TextRenderer::TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize);
     std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize, TextureAtlas& _atlas);

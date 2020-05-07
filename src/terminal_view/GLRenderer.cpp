@@ -38,7 +38,7 @@ GLRenderer::GLRenderer(Logger _logger,
     regularFont_{ _regularFont },
     projectionMatrix_{ _projectionMatrix },
     textShader_{ createShader(_textShaderConfig) },
-    textShaper_{},
+    textRenderer_{},
     cellBackground_{
         QSize(
             static_cast<int>(regularFont_.get().maxAdvance()),
@@ -71,7 +71,7 @@ GLRenderer::GLRenderer(Logger _logger,
 
 void GLRenderer::clearCache()
 {
-    textShaper_.clearCache();
+    textRenderer_.clearCache();
     fontRenderCache_.clear();
 }
 
@@ -108,7 +108,7 @@ void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
     projectionMatrix_ = _projectionMatrix;
 
     cellBackground_.setProjection(_projectionMatrix);
-    textShaper_.setProjection(_projectionMatrix);
+    textRenderer_.setProjection(_projectionMatrix);
     cursor_.setProjection(_projectionMatrix);
 }
 
@@ -153,7 +153,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     textShader_->bind();
     textShader_->setUniformValue(0, projectionMatrix_);
-    textShaper_.execute();
+    textRenderer_.execute();
 
     if (_terminal.isSelectionAvailable())
     {
@@ -308,7 +308,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
             //return fontRenderCache_[pendingDraw_.codepoints];
         }();
 
-        textShaper_.render(
+        textRenderer_.render(
             makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
             glyphPositions,
             QVector4D(

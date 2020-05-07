@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <crispy/TextShaper.h>
+#include <crispy/TextRenderer.h>
 #include <crispy/reference.h>
 #include <iostream>
 
@@ -23,7 +23,7 @@ constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxTextureDepth = 10;
 constexpr unsigned MaxTextureSize = 1024;
 
-TextShaper::TextShaper() :
+TextRenderer::TextRenderer() :
     renderer_{},
     monochromeAtlas_{
         0,
@@ -48,16 +48,16 @@ TextShaper::TextShaper() :
 {
 }
 
-TextShaper::~TextShaper()
+TextRenderer::~TextRenderer()
 {
 }
 
-void TextShaper::setProjection(QMatrix4x4 const& _projection)
+void TextRenderer::setProjection(QMatrix4x4 const& _projection)
 {
     renderer_.setProjection(_projection);
 }
 
-void TextShaper::render(QPoint _pos,
+void TextRenderer::render(QPoint _pos,
                         vector<Font::GlyphPosition> const& _glyphPositions,
                         QVector4D const& _color,
                         QSize const& _cellSize)
@@ -71,7 +71,7 @@ void TextShaper::render(QPoint _pos,
                           gpos);
 }
 
-optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id, QSize const& _cellSize)
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id, QSize const& _cellSize)
 {
     TextureAtlas& atlas = _id.font.get().hasColor()
         ? colorAtlas_
@@ -80,7 +80,7 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id, QSi
     return getTextureInfo(_id, _cellSize, atlas);
 }
 
-optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
                                                          QSize const& _cellSize,
                                                          TextureAtlas& _atlas)
 {
@@ -109,7 +109,7 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
 #if 0
     if (_id.font.get().hasColor())
     {
-        cout << "TextShaper.insert: colored glyph "
+        cout << "TextRenderer.insert: colored glyph "
              << _id.glyphIndex
              << ", advance:" << metadata.advance
              << ", descender:" << metadata.descender
@@ -124,7 +124,7 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
                          format, move(bitmap.buffer), colored, move(metadata));
 }
 
-void TextShaper::renderTexture(QPoint const& _pos,
+void TextRenderer::renderTexture(QPoint const& _pos,
                                QVector4D const& _color,
                                atlas::TextureInfo const& _textureInfo,
                                Glyph const& _glyph,
@@ -140,12 +140,12 @@ void TextShaper::renderTexture(QPoint const& _pos,
     renderer_.scheduler().renderTexture({_textureInfo, x, y, z, _color});
 }
 
-void TextShaper::execute()
+void TextRenderer::execute()
 {
     renderer_.execute();
 }
 
-void TextShaper::clearCache()
+void TextRenderer::clearCache()
 {
     monochromeAtlas_.clear();
     colorAtlas_.clear();
