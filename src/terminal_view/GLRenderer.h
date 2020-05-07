@@ -22,6 +22,7 @@
 
 #include <crispy/FontManager.h>
 #include <crispy/TextShaper.h>
+#include <crispy/times.h>
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -114,6 +115,8 @@ class GLRenderer : public QOpenGLFunctions {
         };
     }
 
+    void clearCache();
+
   private:
     void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
@@ -133,7 +136,7 @@ class GLRenderer : public QOpenGLFunctions {
         cursor_pos_t lineNumber{};
         cursor_pos_t startColumn{};
         ScreenBuffer::GraphicsAttributes attributes{};
-        std::vector<char32_t> text{};
+        crispy::CodepointSequence codepoints{};
         State state = State::Empty;
 
         void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attributes)
@@ -141,7 +144,22 @@ class GLRenderer : public QOpenGLFunctions {
             lineNumber = _row;
             startColumn = _col;
             attributes = _attributes;
-            text.clear();
+            codepoints.clear();
+        }
+
+        void extend(Screen::Cell const& _cell)
+        {
+            // if (_cell.codepointCount() > 1)
+            // {
+            //     printf("cell codepoint count: %u;", _cell.codepointCount());
+            //     for (char32_t const i : crispy::times(_cell.codepointCount()))
+            //         printf(" %04x", _cell.codepoint(i));
+            //     printf("\n");
+            // }
+
+            auto const cluster = codepoints.size();
+            for (size_t const i: crispy::times(_cell.codepointCount()))
+                codepoints.emplace_back(crispy::Codepoint{_cell.codepoint(i), cluster});
         }
     };
 
@@ -181,6 +199,8 @@ class GLRenderer : public QOpenGLFunctions {
     crispy::text::TextShaper textShaper_;
     CellBackground cellBackground_;
     GLCursor cursor_;
+
+    std::unordered_map<crispy::CodepointSequence, crispy::Font::GlyphPositionList> fontRenderCache_;
 };
 
 }

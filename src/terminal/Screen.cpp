@@ -294,19 +294,32 @@ void ScreenBuffer::appendChar(char32_t ch)
         linefeed(margin_.horizontal.from);
     }
 
-    Cell& cell = utf8::wcwidth(ch) != 0
-        ?  *currentColumn
-        : currentColumn != begin(*currentLine)
-            ? *std::prev(currentColumn)
-            : *currentColumn;
+    constexpr char32_t ZeroWidthJoiner = 0x200d;
 
-    cell.setCharacter(ch);
-    cell.attributes() = graphicsRendition;
+    if (ch == ZeroWidthJoiner)
+    {
+        cursor = lastCursor;
+        currentColumn = lastColumn;
+        currentColumn->appendCharacter(ch);
+    }
+    else
+    {
+        Cell& cell = utf8::wcwidth(ch) != 0
+            ?  *currentColumn
+            : currentColumn != begin(*currentLine)
+                ? *std::prev(currentColumn)
+                : *currentColumn;
 
-    if (advanceCursor())
-        for (size_t i = 1; i < cell.width(); ++i)
+        cell.appendCharacter(ch);
+        cell.attributes() = graphicsRendition;
+
+        lastColumn = currentColumn;
+        lastCursor = cursor;
+
+        for (size_t i = 0; i < cell.width(); ++i)
             if (!advanceCursor())
                 break;
+    }
 }
 
 bool ScreenBuffer::advanceCursor()
@@ -321,8 +334,7 @@ bool ScreenBuffer::advanceCursor()
         verifyState();
         return true;
     }
-
-    if (autoWrap)
+    else if (autoWrap)
         wrapPending = true;
 
     return false;

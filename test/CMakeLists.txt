@@ -1,0 +1,21 @@
+find_package(PkgConfig REQUIRED)
+find_package(Freetype REQUIRED)
+pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
+
+set(HB_INSPECT_LIBRARIES fmt::fmt-header-only crispy::core Freetype::Freetype crispy::core)
+if(APPLE)
+    list(APPEND HB_INSPECT_LIBRARIES PkgConfig::fontconfig)
+    list(APPEND HB_INSPECT_LIBRARIES PkgConfig::harfbuzz)
+elseif("${CMAKE_SYSTEM}" MATCHES "Linux" OR APPLE)
+    list(APPEND HB_INSPECT_LIBRARIES fontconfig)
+    list(APPEND HB_INSPECT_LIBRARIES PkgConfig::harfbuzz)
+elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
+    list(APPEND HB_INSPECT_LIBRARIES harfbuzz::harfbuzz)
+    #list(APPEND HB_INSPECT_LIBRARIES unofficial::fontconfig::fontconfig)
+endif()
+
+add_executable(hb-inspect hb-inspect.cpp)
+target_link_libraries(hb-inspect PRIVATE ${HB_INSPECT_LIBRARIES})
+
+add_executable(wcwidth wcwidth.cpp)
+target_link_libraries(wcwidth PRIVATE fmt::fmt-header-only crispy::core)

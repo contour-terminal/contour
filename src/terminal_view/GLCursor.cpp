@@ -62,39 +62,42 @@ string to_string(CursorShape _value)
     return "block";
 }
 
-pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape)
+pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape, unsigned _columnWidth)
 {
+    GLfloat const width = static_cast<GLfloat>(_size.width() * _columnWidth);
+    GLfloat const height = static_cast<GLfloat>(_size.height());
+
     switch (_shape)
     {
         case CursorShape::Block:
             return {GL_TRIANGLES, vector{
-                0.0f, 0.0f,                                         // bottom left
-                (GLfloat) _size.width(), 0.0f,                      // bottom right
-                (GLfloat) _size.width(), (GLfloat) _size.height(),  // top right
+                0.0f, 0.0f,                 // bottom left
+                width, 0.0f,                // bottom right
+                width, height,              // top right
 
-                (GLfloat) _size.width(), (GLfloat) _size.height(),  // top right
-                0.0f, (GLfloat) _size.height(),                     // top left
-                0.0f, 0.0f                                          // bottom left
+                width, height,              // top right
+                0.0f, height,               // top left
+                0.0f, 0.0f                  // bottom left
             }};
         case CursorShape::Rectangle:
             return {GL_LINE_STRIP, {
-                0.0f, 0.0f,                                         // bottom left
-                (GLfloat) _size.width(), 0.0f,                      // bottom right
+                0.0f, 0.0f,                 // bottom left
+                width, 0.0f,                // bottom right
 
-                (GLfloat) _size.width(), (GLfloat) _size.height(),  // top right
-                0.0f, (GLfloat) _size.height(),                     // top left
+                width, height,              // top right
+                0.0f, height,               // top left
 
-                0.0f, 0.0f                                          // bottom left
+                0.0f, 0.0f                  // bottom left
             }};
         case CursorShape::Underscore:
             return {GL_LINES, vector{
-                0.0f, 0.0f,                                         // bottom left
-                (GLfloat) _size.width(), 0.0f,                      // bottom right
+                0.0f, 0.0f,                 // bottom left
+                width, 0.0f,                // bottom right
             }};
         case CursorShape::Bar:
             return {GL_LINES, vector{
-                0.0f, 0.0f,                                         // bottom left
-                0.0f, (GLfloat) _size.height(),                     // top left
+                0.0f, 0.0f,                 // bottom left
+                0.0f, height,               // top left
             }};
             break;
     }
@@ -109,6 +112,7 @@ GLCursor::GLCursor(QSize _size,
                    ShaderConfig const& _shaderConfig) :
     shape_{ _shape },
     size_{ _size },
+    columnWidth_{ 1 },
     projectionMatrix_{ _transform },
     shader_{},
     transformLocation_{},
@@ -188,7 +192,7 @@ void GLCursor::resize(QSize _size)
 
 void GLCursor::updateShape()
 {
-    auto [drawMode, vertices] = getTriangles(size_, shape_);
+    auto [drawMode, vertices] = getTriangles(size_, shape_, columnWidth_);
     drawMode_ = drawMode;
     drawCount_ = static_cast<GLsizei>(vertices.size() / 2); // vertex count = array element size divided by dimension (2)
 
@@ -197,8 +201,14 @@ void GLCursor::updateShape()
     vbo_.release();
 }
 
-void GLCursor::render(QPoint _pos)
+void GLCursor::render(QPoint _pos, unsigned _columnWidth)
 {
+    if (columnWidth_ != _columnWidth)
+    {
+        columnWidth_ = _columnWidth;
+        updateShape();
+    }
+
     shader_->bind();
 
     auto translation = QMatrix4x4{};

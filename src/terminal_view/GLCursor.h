@@ -47,7 +47,7 @@ class GLCursor : public QOpenGLFunctions {
     void setColor(QVector4D const& _color);
 
     void resize(QSize _size);
-    void render(QPoint _pos);
+    void render(QPoint _pos, unsigned _columnWidth);
 
   private:
     void updateShape();
@@ -55,6 +55,7 @@ class GLCursor : public QOpenGLFunctions {
   private:
     CursorShape shape_;
     QSize size_;
+    unsigned columnWidth_;
     QMatrix4x4 projectionMatrix_;
     std::unique_ptr<QOpenGLShaderProgram> shader_;
     GLint transformLocation_;

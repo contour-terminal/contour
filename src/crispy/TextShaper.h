@@ -78,9 +78,9 @@ class TextShaper {
     struct Glyph {
         QPoint size;            // glyph size
         QPoint bearing;         // offset from baseline to left/top of glyph
-        unsigned height;
-        unsigned descender;
-        unsigned advance;       // offset to advance to next glyph in line.
+        int height;
+        int descender;
+        int advance;            // offset to advance to next glyph in line.
     };
 
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;

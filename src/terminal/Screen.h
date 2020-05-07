@@ -129,13 +129,13 @@ struct ScreenBuffer {
     /// Grid cell with character and graphics rendition information.
     class Cell {
       public:
-        static size_t constexpr MaxCodepoints = 5;
+        static size_t constexpr MaxCodepoints = 9;
 
         Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
             codepoints_{},
             attributes_{_attrib},
-            width_{},
-            codepointCount_{}
+            width_{1},
+            codepointCount_{0}
         {
             setCharacter(_ch);
         }
@@ -154,7 +154,7 @@ struct ScreenBuffer {
 
         constexpr char32_t codepoint() const noexcept { return codepoints_[0]; }
         constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
-        constexpr char32_t codepointCount() const noexcept { return codepointCount_; }
+        constexpr unsigned codepointCount() const noexcept { return codepointCount_; }
 
         constexpr bool empty() const noexcept { return codepointCount_ == 0; }
 
@@ -176,6 +176,24 @@ struct ScreenBuffer {
             {
                 codepointCount_ = 0;
                 width_ = 1;
+            }
+        }
+
+        void appendCharacter(char32_t _codepoint) noexcept
+        {
+            if (codepointCount_ < MaxCodepoints)
+            {
+                constexpr char32_t ZeroWidthJoiner = 0x200d;
+
+                if (_codepoint != ZeroWidthJoiner && codepointCount_ && codepoints_[codepointCount_ - 1] != ZeroWidthJoiner)
+                    setCharacter(_codepoint);
+                else
+                {
+                    codepoints_[codepointCount_] = _codepoint;
+                    codepointCount_++;
+                    auto const w = crispy::utf8::wcwidth(_codepoint);
+                    width_ = std::max(width_, uint8_t(w >= 0 ? w : 1));
+                }
             }
         }
 
@@ -294,6 +312,9 @@ struct ScreenBuffer {
 
 	Lines::iterator currentLine{std::begin(lines)};
 	Line::iterator currentColumn{currentLine->begin()};
+
+    Line::iterator lastColumn{currentColumn};
+    Cursor lastCursor{};
 
 	void appendChar(char32_t ch);
 
@@ -761,7 +782,17 @@ constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffe
 
 constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) noexcept
 {
-    return a.codepoint() == b.codepoint() && a.attributes() == b.attributes();
+    if (a.codepointCount() != b.codepointCount())
+        return false;
+
+    if (!(a.attributes() == b.attributes()))
+        return false;
+
+    for (size_t i = 0; i < a.codepointCount(); ++i)
+        if (a.codepoint(i) != b.codepoint(i))
+            return false;
+
+    return true;
 }
 
 }  // namespace terminal

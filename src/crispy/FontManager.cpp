@@ -134,7 +134,7 @@ namespace {
         #endif
     }
 
-    constexpr bool glyphMissing(Font::GlyphPosition const& _gp)
+    constexpr bool glyphMissing(Font::GlyphPosition const& _gp) noexcept
     {
         return _gp.glyphIndex == 0;
     }
@@ -270,8 +270,6 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
 
     setFontSize(_fontSize);
 
-    maxAdvance_ = computeMaxAdvance(face_);
-
     hb_font_ = hb_ft_font_create_referenced(face_);
     hb_buf_ = hb_buffer_create();
 
@@ -352,6 +350,7 @@ Font::~Font()
 void Font::clearRenderCache()
 {
     renderCache_.clear();
+    cache_.clear();
 }
 
 Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
@@ -407,6 +406,41 @@ Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _
     };
 }
 
+bool Font::render(CodepointSequence const& _codepoints, GlyphPositionList& _result, unsigned _attempt)
+{
+    if (auto i = cache_.find(_codepoints); i != cache_.end())
+    {
+        _result = i->second;
+        return true;
+    }
+
+    hb_buffer_clear_contents(hb_buf_);
+
+    hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
+    for (Codepoint const& codepoint : _codepoints)
+        hb_buffer_add(hb_buf_, codepoint.value, codepoint.cluster);
+
+    if (render(_result))
+    {
+        cache_[_codepoints] = _result;
+        return true;
+    }
+
+    if (fallback_)
+    {
+        Font* fallback = fallback_;
+        while (fallback != nullptr && !fallback->hasColor())
+            fallback = fallback->fallback_;
+
+        _result.clear();
+        if (fallback->render(_codepoints, _result, _attempt + 1))
+            return true;
+    }
+
+    replaceMissingGlyphs(_result);
+    return false;
+}
+
 bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsigned _attempt)
 {
     if (auto i = renderCache_.find(_chars); i != renderCache_.end())
@@ -423,12 +457,34 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
         0,                                                // item offset TODO: optimize fallback by making use of this here
         static_cast<int>(_chars.size())                   // item length
     );
+
+    if (render(_result))
+    {
+        renderCache_[_chars] = _result;
+        return true;
+    }
+
+    if (fallback_)
+    {
+        _result.clear();
+        if (fallback_->render(_chars, _result, _attempt + 1))
+            return true;
+    }
+
+    replaceMissingGlyphs(_result);
+    return false;
+}
+
+bool Font::render(GlyphPositionList& _result)
+{
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
     hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON);
     hb_buffer_set_language(hb_buf_, hb_language_get_default());
     hb_buffer_guess_segment_properties(hb_buf_);
 
     hb_shape(hb_font_, hb_buf_, nullptr, 0);
+
+    hb_buffer_normalize_glyphs(hb_buf_);
 
     unsigned const glyphCount = hb_buffer_get_length(hb_buf_);
     hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
@@ -445,44 +501,19 @@ bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsign
             *this,
             cx + (pos[i].x_offset >> 6),
             cy + (pos[i].y_offset >> 6),
-            info[i].codepoint
+            info[i].codepoint,
+            info[i].cluster
         });
 
-        cx += maxAdvance();
+        if (pos[i].x_advance)
+            cx += maxAdvance();
         cy += pos[i].y_advance >> 6;
     }
 
     if (!any_of(_result, glyphMissing))
-    {
-        renderCache_[_chars] = _result;
-        // if (_attempt > 0)
-        //     cout << fmt::format("Glyph rendering succeed after {} attempts: {} CPs: {}\n",
-        //             _attempt, _chars.size(), filePath_);
         return true;
-    }
-    else if (fallback_)
-    {
-        // TODO: that's a quick hack to get fast-forward to my color font. Remove me.
-        Font* fallback = fallback_;
-        while (fallback != nullptr && !fallback->hasColor())
-            fallback = fallback->fallback_;
-
-        if (fallback)
-        {
-            _result.clear();
-            return fallback->render(_chars, _result, _attempt + 1);
-        }
-        else
-        {
-            replaceMissingGlyphs(_result);
-            return false;
-        }
-    }
     else
-    {
-        replaceMissingGlyphs(_result);
         return false;
-    }
 }
 
 void Font::replaceMissingGlyphs(GlyphPositionList& _result)

@@ -66,8 +66,8 @@ void TextShaper::render(QPoint _pos,
         if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}, _cellSize); ti.has_value())
             renderTexture(_pos,
                           _color,
-                          get<0>(*ti).get(),
-                          get<1>(*ti).get(),
+                          get<0>(*ti).get(), // TextureInfo
+                          get<1>(*ti).get(), // Metadata
                           gpos);
 }
 
@@ -110,7 +110,11 @@ optional<TextShaper::DataRef> TextShaper::getTextureInfo(GlyphId const& _id,
     if (_id.font.get().hasColor())
     {
         cout << "TextShaper.insert: colored glyph "
-             << _id.glyphIndex << " @ " << _id.font.get().filePath() << endl;
+             << _id.glyphIndex
+             << ", advance:" << metadata.advance
+             << ", descender:" << metadata.descender
+             << ", height:" << metadata.height
+             << " @ " << _id.font.get().filePath() << endl;
     }
 #endif
 

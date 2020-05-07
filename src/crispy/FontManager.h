@@ -30,11 +30,45 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 
 // TODO: move all font stuff into crispy::text namespace
 
 namespace crispy {
     using CharSequence = std::vector<char32_t>;
+
+    struct Codepoint {
+        char32_t value;
+        size_t cluster;
+    };
+    using CodepointSequence = std::vector<Codepoint>;
+
+    inline bool operator==(CodepointSequence const& a, CodepointSequence const& b) noexcept
+    {
+        if (a.size() != b.size())
+            return false;
+
+        for (size_t i = 0; i < a.size(); ++i)
+            if (a[i].value != b[i].value)
+                return false;
+
+        return true;
+    }
+
+    inline bool operator==(CharSequence const& a, CodepointSequence const& b) noexcept
+    {
+        if (a.size() != b.size())
+            return false;
+
+        for (size_t i = 0; i < a.size(); ++i)
+            if (a[i] != b[i].value)
+                return false;
+        return true;
+    }
+
+    inline bool operator==(CodepointSequence const& a, CharSequence const& b) noexcept { return b == a; }
+    inline bool operator!=(CodepointSequence const& a, CharSequence const& b) noexcept { return !(a == b); }
+    inline bool operator!=(CharSequence const& a, CodepointSequence const& b) noexcept { return !(a == b); }
 }
 
 namespace std {
@@ -52,6 +86,29 @@ namespace std {
                 for (auto const ch : seq)
                 {
                     h ^= ch;
+                    h *= prime;
+                }
+                return h;
+            }
+            else
+                return 0;
+        }
+    };
+
+    template<>
+    struct hash<crispy::CodepointSequence> {
+        std::size_t operator()(crispy::CodepointSequence const& seq) const noexcept
+        {
+            // Using FNV to create a hash value for the character sequence.
+            auto constexpr basis = 2166136261llu;
+            auto constexpr prime = 16777619llu;
+
+            if (!seq.empty())
+            {
+                auto h = basis;
+                for (auto const& ch : seq)
+                {
+                    h ^= ch.value;
                     h *= prime;
                 }
                 return h;
@@ -133,9 +190,10 @@ class Font {
         unsigned int x;
         unsigned int y;
         unsigned int glyphIndex;
+        unsigned cluster;
 
-        GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi) :
-            font{_font}, x{_x}, y{_y}, glyphIndex{_gi} {}
+        GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi, unsigned _cluster) :
+            font{_font}, x{_x}, y{_y}, glyphIndex{_gi}, cluster{_cluster} {}
     };
     using GlyphPositionList = std::vector<GlyphPosition>;
 
@@ -146,10 +204,15 @@ class Font {
     ///               contains as much as possible that could be rendered.
     bool render(CharSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
 
+    bool render(CodepointSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
+
     void replaceMissingGlyphs(GlyphPositionList& _gpos);
 
     /// Clears the render cache.
     void clearRenderCache();
+
+  private:
+    bool render(GlyphPositionList& _result);
 
   private:
     FT_Library ft_;
@@ -169,6 +232,7 @@ class Font {
     // TODO: Currently this can become ever-growing. We should evict least recently used items
     //       if the cache would exceed a given threshold.
     std::unordered_map<CharSequence, GlyphPositionList> renderCache_{};
+    std::unordered_map<CodepointSequence, GlyphPositionList> cache_{};
 };
 
 /// API for managing multiple fonts.
@@ -205,5 +269,27 @@ namespace std {
             return _font.hashCode();
         }
     };
+
+    inline ostream& operator<<(ostream& _os, crispy::Font::GlyphPosition const& _gpos)
+    {
+        _os << '{'
+            << "x:" << _gpos.x
+            << " y:" << _gpos.y
+            << " i:" << _gpos.glyphIndex
+            << " c:" << _gpos.cluster
+            << '}';
+        return _os;
+    }
+
+    inline ostream& operator<<(ostream& _os, crispy::Font::GlyphPositionList const& _list)
+    {
+        unsigned i = 0;
+        for (auto const& gp : _list)
+        {
+            _os << (i ? " " : "") << gp;
+            i++;
+        }
+        return _os;
+    }
 }
 

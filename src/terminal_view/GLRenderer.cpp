@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/GLRenderer.h>
+#include <crispy/times.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -68,12 +69,18 @@ GLRenderer::GLRenderer(Logger _logger,
     textShader_->setUniformValue("fs_colorTextures", 1);
 }
 
+void GLRenderer::clearCache()
+{
+    textShaper_.clearCache();
+    fontRenderCache_.clear();
+}
+
 void GLRenderer::setFont(Font& _font)
 {
     auto const fontSize = regularFont_.get().fontSize();
     regularFont_ = _font;
     regularFont_.get().setFontSize(fontSize);
-    textShaper_.clearCache();
+    clearCache();
 }
 
 bool GLRenderer::setFontSize(unsigned int _fontSize)
@@ -89,7 +96,7 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     auto const cellSize = QSize{static_cast<int>(cellWidth),
                                 static_cast<int>(cellHeight)};
 
-    textShaper_.clearCache();
+    clearCache();
     cellBackground_.resize(cellSize);
     cursor_.resize(cellSize);
 
@@ -133,16 +140,20 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     renderTextGroup(_terminal.screenSize());
 
-    textShader_->bind();
-    textShader_->setUniformValue(0, projectionMatrix_);
-    textShaper_.execute();
-
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
+        Screen::Cell const& cursorCell = _terminal.absoluteAt(_terminal.cursor());
         cursor_.setShape(_terminal.cursorShape());
-        cursor_.render(makeCoords(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset()), _terminal.screenSize()));
+        cursor_.render(
+            makeCoords(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset()), _terminal.screenSize()),
+            cursorCell.width()
+        );
     }
+
+    textShader_->bind();
+    textShader_->setUniformValue(0, projectionMatrix_);
+    textShaper_.execute();
 
     if (_terminal.isSelectionAvailable())
     {
@@ -175,23 +186,23 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
             {
                 pendingDraw_.state = PendingDraw::State::Filling;
                 pendingDraw_.reset(_row, _col, _cell.attributes());
-                pendingDraw_.text.push_back(_cell.codepoint());
+                pendingDraw_.extend(_cell);
             }
             break;
         case PendingDraw::State::Filling:
             if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes() && _cell.codepoint() > SP)
-                pendingDraw_.text.push_back(_cell.codepoint());
+                pendingDraw_.extend(_cell);
             else
             {
                 renderTextGroup(_screenSize);
                 if (_cell.codepoint() > SP)
                 {
                     pendingDraw_.reset(_row, _col, _cell.attributes());
-                    pendingDraw_.text.push_back(_cell.codepoint());
+                    pendingDraw_.extend(_cell);
                 }
                 else
                 {
-                    pendingDraw_.text.clear();
+                    pendingDraw_.codepoints.clear();
                     pendingDraw_.state = PendingDraw::State::Empty;
                 }
             }
@@ -245,7 +256,7 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
 
 void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 {
-    if (pendingDraw_.text.empty())
+    if (pendingDraw_.codepoints.empty())
         return;
 
     ++metrics_.renderTextGroup;
@@ -285,10 +296,17 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;
+        Font& font = regularFont_.get(); // TODO: selection by textStyle_
 
-        Font::GlyphPositionList glyphPositions; // TODO: make this part of the object, so we can reuse it.
-        // -> obviously: glyphPositions.clear();
-        regularFont_.get().render(pendingDraw_.text, glyphPositions);
+        auto const glyphPositions = [&]() -> Font::GlyphPositionList& {
+            if (auto i = fontRenderCache_.find(pendingDraw_.codepoints); i != fontRenderCache_.end())
+                return i->second;
+
+            Font::GlyphPositionList glyphPositions;
+            font.render(pendingDraw_.codepoints, glyphPositions);
+            return fontRenderCache_[pendingDraw_.codepoints] = move(glyphPositions);
+            //return fontRenderCache_[pendingDraw_.codepoints];
+        }();
 
         textShaper_.render(
             makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
