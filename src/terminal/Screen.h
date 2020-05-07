@@ -127,9 +127,78 @@ struct ScreenBuffer {
     };
 
     /// Grid cell with character and graphics rendition information.
-    struct Cell {
-        char32_t character{};
-        GraphicsAttributes attributes{};
+    class Cell {
+      public:
+        static size_t constexpr MaxCodepoints = 5;
+
+        Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
+            codepoints_{},
+            attributes_{_attrib},
+            width_{},
+            codepointCount_{}
+        {
+            setCharacter(_ch);
+        }
+
+        constexpr Cell() noexcept :
+            codepoints_{},
+            attributes_{},
+            width_{1},
+            codepointCount_{0}
+        {}
+
+        constexpr Cell(Cell const&) noexcept = default;
+        constexpr Cell(Cell&&) noexcept = default;
+        constexpr Cell& operator=(Cell const&) noexcept = default;
+        constexpr Cell& operator=(Cell&&) noexcept = default;
+
+        constexpr char32_t codepoint() const noexcept { return codepoints_[0]; }
+        constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
+        constexpr char32_t codepointCount() const noexcept { return codepointCount_; }
+
+        constexpr bool empty() const noexcept { return codepointCount_ == 0; }
+
+        constexpr unsigned width() const noexcept { return width_; }
+
+        constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
+        constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
+
+        void setCharacter(char32_t _codepoint) noexcept
+        {
+            codepoints_[0] = _codepoint;
+            if (_codepoint)
+            {
+                codepointCount_ = 1;
+                auto const w = crispy::utf8::wcwidth(_codepoint);
+                width_ = w >= 0 ? w : 1;
+            }
+            else
+            {
+                codepointCount_ = 0;
+                width_ = 1;
+            }
+        }
+
+        std::string toUtf8() const
+        {
+            std::string s;
+            for (size_t i = 0; i < codepointCount_; ++i)
+                s += crispy::utf8::to_string(crispy::utf8::encode(codepoints_[i]));
+            return s;
+        }
+
+      private:
+        /// Unicode codepoint to be displayed.
+        std::array<char32_t, MaxCodepoints> codepoints_;
+
+        /// Graphics renditions, such as foreground/background color or other grpahics attributes.
+        GraphicsAttributes attributes_;
+
+        /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
+        uint8_t width_;
+
+        /// Number of combined codepoints stored in this cell.
+        uint8_t codepointCount_;
     };
 
 	using LineBuffer = std::vector<Cell>;
@@ -309,6 +378,12 @@ struct ScreenBuffer {
 	}
 
 	void moveCursorTo(Coordinate to);
+
+    /// Advances the current cursor position to the next column.
+    ///
+    /// @retval true next character fits into current line
+    /// @retval false next character will be placed on the next line
+    bool advanceCursor();
 };
 
 inline auto begin(ScreenBuffer::Line& _line) { return _line.begin(); }
@@ -686,7 +761,7 @@ constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffe
 
 constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) noexcept
 {
-    return a.character == b.character && a.attributes == b.attributes;
+    return a.codepoint() == b.codepoint() && a.attributes() == b.attributes();
 }
 
 }  // namespace terminal

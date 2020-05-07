@@ -294,18 +294,39 @@ void ScreenBuffer::appendChar(char32_t ch)
         linefeed(margin_.horizontal.from);
     }
 
-    *currentColumn = {ch, graphicsRendition};
+    Cell& cell = utf8::wcwidth(ch) != 0
+        ?  *currentColumn
+        : currentColumn != begin(*currentLine)
+            ? *std::prev(currentColumn)
+            : *currentColumn;
+
+    cell.setCharacter(ch);
+    cell.attributes() = graphicsRendition;
+
+    if (advanceCursor())
+        for (size_t i = 1; i < cell.width(); ++i)
+            if (!advanceCursor())
+                break;
+}
+
+bool ScreenBuffer::advanceCursor()
+{
+    // TODO: if the current cell contains RTL codepoints,
+    // then advance to the left, otherwise to the right.
 
     if (cursor.column < size_.columns)
     {
         cursor.column++;
         currentColumn++;
         verifyState();
+        return true;
     }
-    else if (autoWrap)
-    {
+
+    if (autoWrap)
         wrapPending = true;
-    }
+
+    return false;
+
 }
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n)
@@ -786,8 +807,8 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
     line.reserve(size_.columns);
     auto const lineIter = next(buffer_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
-        if (cell.character)
-            line += utf8::to_string(utf8::encode(cell.character));
+        if (cell.codepoint())
+            line += cell.toUtf8();
         else
             line += " "; // fill character
 
@@ -799,8 +820,8 @@ string Screen::renderTextLine(cursor_pos_t row) const
     string line;
     line.reserve(size_.columns);
     for (cursor_pos_t col = 1; col <= size_.columns; ++col)
-        if (auto const& cell = at(row, col); cell.character)
-            line += utf8::to_string(utf8::encode(at(row, col).character));
+        if (auto const& cell = at(row, col); cell.codepoint())
+            line += cell.toUtf8();
         else
             line += " "; // fill character
 
@@ -835,10 +856,10 @@ std::string Screen::screenshot() const
         {
             Cell const& cell = at(row, col);
 
-            //TODO: generator(SetGraphicsRendition{ cell.attributes.styles });
-            generator(SetForegroundColor{ cell.attributes.foregroundColor });
-            generator(SetBackgroundColor{ cell.attributes.backgroundColor });
-            generator(AppendChar{ cell.character ? cell.character : L' ' });
+            //TODO: generator(SetGraphicsRendition{ cell.attributes().styles });
+            generator(SetForegroundColor{ cell.attributes().foregroundColor });
+            generator(SetBackgroundColor{ cell.attributes().backgroundColor });
+            generator(AppendChar{ cell.codepoint() ? cell.codepoint() : L' ' });
         }
         generator(MoveCursorToBeginOfLine{});
         generator(Linefeed{});

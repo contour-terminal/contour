@@ -936,8 +936,7 @@ string TerminalWindow::extractSelectionText()
             text += '\n';
             currentLine.clear();
         }
-        if (_cell.character)
-            currentLine += crispy::utf8::to_string(crispy::utf8::encode(_cell.character));
+        currentLine += _cell.toUtf8();
         lastColumn = _col;
     });
     text += currentLine;

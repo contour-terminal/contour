@@ -171,23 +171,23 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
     switch (pendingDraw_.state)
     {
         case PendingDraw::State::Empty:
-            if (_cell.character > SP)
+            if (_cell.codepoint() > SP)
             {
                 pendingDraw_.state = PendingDraw::State::Filling;
-                pendingDraw_.reset(_row, _col, _cell.attributes);
-                pendingDraw_.text.push_back(_cell.character);
+                pendingDraw_.reset(_row, _col, _cell.attributes());
+                pendingDraw_.text.push_back(_cell.codepoint());
             }
             break;
         case PendingDraw::State::Filling:
-            if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes && _cell.character > SP)
-                pendingDraw_.text.push_back(_cell.character);
+            if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes() && _cell.codepoint() > SP)
+                pendingDraw_.text.push_back(_cell.codepoint());
             else
             {
                 renderTextGroup(_screenSize);
-                if (_cell.character > SP)
+                if (_cell.codepoint() > SP)
                 {
-                    pendingDraw_.reset(_row, _col, _cell.attributes);
-                    pendingDraw_.text.push_back(_cell.character);
+                    pendingDraw_.reset(_row, _col, _cell.attributes());
+                    pendingDraw_.text.push_back(_cell.codepoint());
                 }
                 else
                 {
@@ -201,7 +201,7 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
 
 void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize)
 {
-    auto const bgColor = makeColors(_cell.attributes).second;
+    auto const bgColor = makeColors(_cell.attributes()).second;
 
     if (pendingBackgroundDraw_.lineNumber == _row && pendingBackgroundDraw_.color == bgColor)
         pendingBackgroundDraw_.endColumn++;

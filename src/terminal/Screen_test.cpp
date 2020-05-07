@@ -1022,8 +1022,8 @@ TEST_CASE("MoveCursorTo", "[screen]")
             screen(MoveCursorTo{1, 1});
             CHECK(Coordinate{1, 1} == screen.cursorPosition());
             CHECK(Coordinate{2, 2} == screen.realCursorPosition());
-            CHECK('7' == (char)screen.withOriginAt(1, 1).character);
-            CHECK('I' == (char)screen.withOriginAt(3, 3).character);
+            CHECK('7' == (char)screen.withOriginAt(1, 1).codepoint());
+            CHECK('I' == (char)screen.withOriginAt(3, 3).codepoint());
         }
     }
 }
@@ -1530,24 +1530,24 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
     // first line in history
-    CHECK(screen.absoluteAt({1, 1}).character == '1');
-    CHECK(screen.absoluteAt({1, 2}).character == '2');
-    CHECK(screen.absoluteAt({1, 3}).character == '3');
+    CHECK(screen.absoluteAt({1, 1}).codepoint() == '1');
+    CHECK(screen.absoluteAt({1, 2}).codepoint() == '2');
+    CHECK(screen.absoluteAt({1, 3}).codepoint() == '3');
 
     // second line in history
-    CHECK(screen.absoluteAt({2, 1}).character == '4');
-    CHECK(screen.absoluteAt({2, 2}).character == '5');
-    CHECK(screen.absoluteAt({2, 3}).character == '6');
+    CHECK(screen.absoluteAt({2, 1}).codepoint() == '4');
+    CHECK(screen.absoluteAt({2, 2}).codepoint() == '5');
+    CHECK(screen.absoluteAt({2, 3}).codepoint() == '6');
 
     // first line on screen buffer
-    CHECK(screen.absoluteAt({3, 1}).character == 'A');
-    CHECK(screen.absoluteAt({3, 2}).character == 'B');
-    CHECK(screen.absoluteAt({3, 3}).character == 'C');
+    CHECK(screen.absoluteAt({3, 1}).codepoint() == 'A');
+    CHECK(screen.absoluteAt({3, 2}).codepoint() == 'B');
+    CHECK(screen.absoluteAt({3, 3}).codepoint() == 'C');
 
     // second line on screen buffer
-    CHECK(screen.absoluteAt({4, 1}).character == 'D');
-    CHECK(screen.absoluteAt({4, 2}).character == 'E');
-    CHECK(screen.absoluteAt({4, 3}).character == 'F');
+    CHECK(screen.absoluteAt({4, 1}).codepoint() == 'D');
+    CHECK(screen.absoluteAt({4, 2}).codepoint() == 'E');
+    CHECK(screen.absoluteAt({4, 3}).codepoint() == 'F');
 
     // too big row number
     CHECK_THROWS(screen.absoluteAt({5, 1}));
@@ -1564,7 +1564,7 @@ TEST_CASE("render into history", "[screen]")
     string renderedText;
     renderedText.resize(2 * 6);
     auto const renderer = [&](auto rowNumber, auto columnNumber, Screen::Cell const& cell) {
-        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.character);
+        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.codepoint());
         if (columnNumber == 5)
             renderedText[(rowNumber - 1) * 6 + (columnNumber)] = '\n';
     };
