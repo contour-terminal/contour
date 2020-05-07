@@ -19,7 +19,7 @@ template <typename T>
 class reference {
 public:
     constexpr explicit reference(T& _ref) noexcept : ref_{&_ref} {}
-    constexpr explicit reference(std::reference_wrapper<T> _ref) noexcept : ref_{_ref.get()} {}
+    constexpr reference(std::reference_wrapper<T> _ref) noexcept : ref_{&_ref.get()} {}
 
     reference(reference const&) = default;
     reference(reference&&) = default;
