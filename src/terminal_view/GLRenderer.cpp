@@ -23,7 +23,7 @@ using namespace terminal;
 using namespace terminal::view;
 
 GLRenderer::GLRenderer(Logger _logger,
-                       Font& _regularFont,
+                       text::Font& _regularFont,
                        terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
@@ -75,7 +75,7 @@ void GLRenderer::clearCache()
     fontRenderCache_.clear();
 }
 
-void GLRenderer::setFont(Font& _font)
+void GLRenderer::setFont(text::Font& _font)
 {
     auto const fontSize = regularFont_.get().fontSize();
     regularFont_ = _font;
@@ -262,7 +262,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     ++metrics_.renderTextGroup;
 
     auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
-    auto const textStyle = FontStyle::Regular;
+    auto const textStyle = text::FontStyle::Regular;
 
     if (pendingDraw_.attributes.styles & CharacterStyleMask::Bold)
     {
@@ -296,13 +296,13 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;
-        Font& font = regularFont_.get(); // TODO: selection by textStyle_
+        text::Font& font = regularFont_.get(); // TODO: selection by textStyle_
 
-        auto const glyphPositions = [&]() -> Font::GlyphPositionList& {
+        auto const glyphPositions = [&]() -> text::Font::GlyphPositionList& {
             if (auto i = fontRenderCache_.find(pendingDraw_.codepoints); i != fontRenderCache_.end())
                 return i->second;
 
-            Font::GlyphPositionList glyphPositions;
+            text::Font::GlyphPositionList glyphPositions;
             font.render(pendingDraw_.codepoints, glyphPositions);
             return fontRenderCache_[pendingDraw_.codepoints] = move(glyphPositions);
             //return fontRenderCache_[pendingDraw_.codepoints];

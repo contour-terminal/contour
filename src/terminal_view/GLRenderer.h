@@ -53,7 +53,7 @@ class GLRenderer : public QOpenGLFunctions {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     GLRenderer(Logger _logger,
-               crispy::Font& _regularFont,
+               crispy::text::Font& _regularFont,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
@@ -66,7 +66,7 @@ class GLRenderer : public QOpenGLFunctions {
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setFont(crispy::Font& _font);
+    void setFont(crispy::text::Font& _font);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
@@ -193,14 +193,14 @@ class GLRenderer : public QOpenGLFunctions {
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
-    std::reference_wrapper<crispy::Font> regularFont_;
+    std::reference_wrapper<crispy::text::Font> regularFont_;
     QMatrix4x4 projectionMatrix_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     crispy::text::TextRenderer textRenderer_;
     CellBackground cellBackground_;
     GLCursor cursor_;
 
-    std::unordered_map<crispy::CodepointSequence, crispy::Font::GlyphPositionList> fontRenderCache_;
+    std::unordered_map<crispy::CodepointSequence, crispy::text::Font::GlyphPositionList> fontRenderCache_;
 };
 
 }

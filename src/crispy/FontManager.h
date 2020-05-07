@@ -119,7 +119,7 @@ namespace std {
     };
 }
 
-namespace crispy {
+namespace crispy::text {
 
 enum class FontStyle {
     Regular = 0,
@@ -263,14 +263,14 @@ class FontManager {
 
 namespace std {
     template<>
-    struct hash<crispy::Font> {
-        std::size_t operator()(crispy::Font const& _font) const noexcept
+    struct hash<crispy::text::Font> {
+        std::size_t operator()(crispy::text::Font const& _font) const noexcept
         {
             return _font.hashCode();
         }
     };
 
-    inline ostream& operator<<(ostream& _os, crispy::Font::GlyphPosition const& _gpos)
+    inline ostream& operator<<(ostream& _os, crispy::text::Font::GlyphPosition const& _gpos)
     {
         _os << '{'
             << "x:" << _gpos.x
@@ -281,7 +281,7 @@ namespace std {
         return _os;
     }
 
-    inline ostream& operator<<(ostream& _os, crispy::Font::GlyphPositionList const& _list)
+    inline ostream& operator<<(ostream& _os, crispy::text::Font::GlyphPositionList const& _list)
     {
         unsigned i = 0;
         for (auto const& gp : _list)
@@ -292,4 +292,3 @@ namespace std {
         return _os;
     }
 }
-

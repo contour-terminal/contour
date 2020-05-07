@@ -47,7 +47,7 @@ namespace std {
     struct hash<crispy::text::GlyphId> {
         size_t operator()(crispy::text::GlyphId const& _glyphId) const noexcept
         {
-            return hash<crispy::Font>{}(_glyphId.font.get()) + _glyphId.glyphIndex;
+            return hash<crispy::text::Font>{}(_glyphId.font.get()) + _glyphId.glyphIndex;
         }
     };
 }

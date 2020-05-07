@@ -36,7 +36,7 @@
 
 using namespace std;
 
-namespace crispy {
+namespace crispy::text {
 
 namespace {
     static string freetypeErrorString(FT_Error _errorCode)
@@ -507,6 +507,7 @@ bool Font::render(GlyphPositionList& _result)
 
         if (pos[i].x_advance)
             cx += maxAdvance();
+
         cy += pos[i].y_advance >> 6;
     }
 

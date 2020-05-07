@@ -45,7 +45,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onSelectionComplete,
                            Screen::OnBufferChanged _onScreenBufferChanged,
                            function<void()> _bell,
-                           Font& _regularFont,
+                           text::Font& _regularFont,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
@@ -195,7 +195,7 @@ bool TerminalView::alive() const
     return process_.alive();
 }
 
-void TerminalView::setFont(crispy::Font& _font)
+void TerminalView::setFont(crispy::text::Font& _font)
 {
     regularFont_ = _font;
     renderer_.setFont(_font);
