@@ -134,7 +134,7 @@ namespace {
         #endif
     }
 
-    constexpr bool glyphMissing(Font::GlyphPosition const& _gp) noexcept
+    constexpr bool glyphMissing(GlyphPosition const& _gp) noexcept
     {
         return _gp.glyphIndex == 0;
     }
@@ -158,10 +158,9 @@ namespace {
     }
 }
 
-FontManager::FontManager(unsigned int _fontSize) :
+FontManager::FontManager() :
     ft_{},
-    fonts_{},
-    fontSize_{_fontSize}
+    fonts_{}
 {
     if (FT_Init_FreeType(&ft_))
         throw runtime_error{ "Failed to initialize FreeType." };
@@ -173,41 +172,27 @@ FontManager::~FontManager()
     FT_Done_FreeType(ft_);
 }
 
-void FontManager::clearRenderCache()
-{
-    for (auto& font : fonts_)
-        font.second.clearRenderCache();
-}
-
-void FontManager::setFontSize(unsigned int _size)
-{
-    for (auto& font : fonts_)
-        font.second.setFontSize(_size);
-
-    fontSize_ = _size;
-}
-
-Font& FontManager::load(string const& _fontPattern)
+FontList FontManager::load(string const& _fontPattern, unsigned _fontSize)
 {
     vector<string> const filePaths = getFontFilePaths(_fontPattern);
 
-    // Load in reverse order so the newly loaded font always knows its fallback.
-    Font* next = nullptr;
-    for (auto path = filePaths.rbegin(); path != filePaths.rend(); ++path)
-        next = &loadFromFilePath(*path, next);
+    Font& primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
+    FontFallbackList fallbackList;
+    for (size_t i = 1; i < filePaths.size(); ++i)
+    {
+        cout << fmt::format("FontManager.load[{}]: {}\n", i, filePaths[i].c_str());
+        fallbackList.push_back(loadFromFilePath(filePaths[i], _fontSize));
+    }
 
-    cout << fmt::format("Loading '{}' ({} fonts)", _fontPattern, filePaths.size()) << '\n';
-    cout << fmt::format("- returning: {}\n", next->filePath());
-
-    return *next;
+    return {primaryFont, fallbackList};
 }
 
-Font& FontManager::loadFromFilePath(std::string const& _path, Font* _fallback)
+Font& FontManager::loadFromFilePath(std::string const& _path, unsigned _fontSize)
 {
     if (auto k = fonts_.find(_path); k != fonts_.end())
         return k->second;
     else
-        return fonts_.emplace(make_pair(_path, Font(ft_, _path, _fallback, fontSize_))).first->second;
+        return fonts_.emplace(make_pair(_path, Font(ft_, _path, _fontSize))).first->second;
 }
 
 void Font::setFontSize(unsigned int _fontSize)
@@ -245,21 +230,17 @@ void Font::setFontSize(unsigned int _fontSize)
         maxAdvance_ = computeMaxAdvance(face_);
 
         loadGlyphByIndex(0);
-        clearRenderCache();
     }
 }
 
 // -------------------------------------------------------------------------------------------------------
 
-Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int _fontSize) :
+Font::Font(FT_Library _ft, std::string _fontPath, unsigned int _fontSize) :
     ft_{ _ft },
     face_{},
-    hb_font_{},
-    hb_buf_{},
     fontSize_{ 0 },
     filePath_{ move(_fontPath) },
-    hashCode_{ hash<string>{}(filePath_)},
-    fallback_{ _fallback }
+    hashCode_{ hash<string>{}(filePath_)}
 {
     if (FT_New_Face(ft_, filePath_.c_str(), 0, &face_))
         throw runtime_error{ "Failed to load font." };
@@ -269,9 +250,6 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
         throw runtime_error{ string{"Failed to set charmap. "} + freetypeErrorString(ec) };
 
     setFontSize(_fontSize);
-
-    hb_font_ = hb_ft_font_create_referenced(face_);
-    hb_buf_ = hb_buffer_create();
 
     loadGlyphByIndex(0);
     // XXX Woot, needed in order to retrieve maxAdvance()'s field,
@@ -283,26 +261,20 @@ Font::Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int 
 Font::Font(Font&& v) noexcept :
     ft_{ v.ft_ },
     face_{ v.face_ },
-    hb_font_{ v.hb_font_ },
-    hb_buf_{ v.hb_buf_ },
     fontSize_{ v.fontSize_ },
     bitmapWidth_{ v.bitmapWidth_ },
     bitmapHeight_{ v.bitmapHeight_ },
     maxAdvance_{ v.maxAdvance_ },
     filePath_{ move(v.filePath_) },
-    hashCode_{ v.hashCode_ },
-    fallback_{ v.fallback_ }
+    hashCode_{ v.hashCode_ }
 {
     v.ft_ = nullptr;
     v.face_ = nullptr;
-    v.hb_font_ = nullptr;
-    v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
     v.bitmapWidth_ = 0;
     v.bitmapHeight_ = 0;
     v.filePath_ = {};
     v.hashCode_ = 0;
-    v.fallback_ = nullptr;
 }
 
 Font& Font::operator=(Font&& v) noexcept
@@ -311,26 +283,20 @@ Font& Font::operator=(Font&& v) noexcept
 
     ft_ = v.ft_;
     face_ = v.face_;
-    hb_font_ = v.hb_font_;
-    hb_buf_ = v.hb_buf_;
     fontSize_ = v.fontSize_;
     maxAdvance_ = v.maxAdvance_;
     bitmapWidth_ = v.bitmapWidth_;
     bitmapHeight_ = v.bitmapHeight_;
     filePath_ = move(v.filePath_);
     hashCode_ = v.hashCode_;
-    fallback_ = v.fallback_;
 
     v.ft_ = nullptr;
     v.face_ = nullptr;
-    v.hb_font_ = nullptr;
-    v.hb_buf_ = nullptr;
     v.fontSize_ = 0;
     v.bitmapWidth_ = 0;
     v.bitmapHeight_ = 0;
     v.filePath_ = {};
     v.hashCode_ = 0;
-    v.fallback_ = nullptr;
 
     return *this;
 }
@@ -339,30 +305,10 @@ Font::~Font()
 {
     if (face_)
         FT_Done_Face(face_);
-
-    if (hb_font_)
-        hb_font_destroy(hb_font_);
-
-    if (hb_buf_)
-        hb_buffer_destroy(hb_buf_);
 }
 
-void Font::clearRenderCache()
+GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
 {
-    renderCache_.clear();
-    cache_.clear();
-}
-
-Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
-{
-    return loadGlyphByIndex(0, _glyphIndex);
-}
-
-Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex)
-{
-    if (_faceIndex && fallback_)
-        return fallback_->loadGlyphByIndex(_faceIndex - 1, _glyphIndex);
-
     FT_Int32 flags = FT_LOAD_DEFAULT;
     if (FT_HAS_COLOR(face_))
         flags |= FT_LOAD_COLOR;
@@ -406,99 +352,115 @@ Font::GlyphBitmap Font::loadGlyphByIndex(unsigned int _faceIndex, unsigned int _
     };
 }
 
-bool Font::render(CodepointSequence const& _codepoints, GlyphPositionList& _result, unsigned _attempt)
+// ====================================================================================================
+
+TextShaper::TextShaper(Font& _font, FontFallbackList const& _fallbackList) :
+    font_{ _font },
+    fallbackList_{ _fallbackList }
 {
-    if (auto i = cache_.find(_codepoints); i != cache_.end())
+    hb_buf_ = hb_buffer_create();
+}
+
+TextShaper::~TextShaper()
+{
+    clearCache();
+    hb_buffer_destroy(hb_buf_);
+}
+
+void TextShaper::setFont(Font& _font, FontFallbackList const& _fallbackList)
+{
+    font_ = _font;
+    fallbackList_ = _fallbackList;
+    clearCache();
+}
+
+void TextShaper::setFontSize(unsigned _fontSize)
+{
+    font_.get().setFontSize(_fontSize);
+
+    for (reference_wrapper<Font>& fallback : fallbackList_)
+        fallback.get().setFontSize(_fontSize);
+
+    clearCache();
+}
+
+GlyphPositionList const* TextShaper::shape(CodepointSequence const& _codes)
+{
+    if (auto i = cache_.find(_codes); i != cache_.end())
+        return &i->second;
+
+    GlyphPositionList result;
+    if (shape(_codes, font_.get(), ref(result)))
+        return &(cache_[_codes] = move(result));
+
+    size_t i = 1;
+    for (reference_wrapper<Font>& fallback : fallbackList_)
     {
-        _result = i->second;
-        return true;
+#if 0 // FIXME: ugly hack to make sure our fallback is color fonts (emojis)
+        if (!fallback.get().hasColor())
+            continue;
+#endif
+
+        if (shape(_codes, fallback.get(), ref(result)))
+            return &(cache_[_codes] = move(result));
+        ++i;
     }
 
-    hb_buffer_clear_contents(hb_buf_);
+    cout << fmt::format("Shaping failed for {} codepoints\n", _codes.size());
 
+    shape(_codes, font_.get(), ref(result));
+    replaceMissingGlyphs(result);
+    return &(cache_[_codes] = move(result));
+}
+
+void TextShaper::clearCache()
+{
+    cache_.clear();
+    cache2_.clear();
+
+    for ([[maybe_unused]] auto [_, hbf] : hb_fonts_)
+        hb_font_destroy(hbf);
+
+    hb_fonts_.clear();
+}
+
+bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> _result)
+{
+    hb_buffer_clear_contents(hb_buf_);
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
-    for (Codepoint const& codepoint : _codepoints)
+
+    for (Codepoint const& codepoint : _codes)
         hb_buffer_add(hb_buf_, codepoint.value, codepoint.cluster);
 
-    if (render(_result))
-    {
-        cache_[_codepoints] = _result;
-        return true;
-    }
-
-    if (fallback_)
-    {
-        Font* fallback = fallback_;
-        while (fallback != nullptr && !fallback->hasColor())
-            fallback = fallback->fallback_;
-
-        _result.clear();
-        if (fallback->render(_codepoints, _result, _attempt + 1))
-            return true;
-    }
-
-    replaceMissingGlyphs(_result);
-    return false;
-}
-
-bool Font::render(CharSequence const& _chars, GlyphPositionList& _result, unsigned _attempt)
-{
-    if (auto i = renderCache_.find(_chars); i != renderCache_.end())
-    {
-        _result = i->second;
-        return true;
-    }
-
-    hb_buffer_clear_contents(hb_buf_);
-    hb_buffer_add_utf32(
-        hb_buf_,
-        reinterpret_cast<uint32_t const*>(_chars.data()), // text data
-        static_cast<int>(_chars.size()),                  // text length
-        0,                                                // item offset TODO: optimize fallback by making use of this here
-        static_cast<int>(_chars.size())                   // item length
-    );
-
-    if (render(_result))
-    {
-        renderCache_[_chars] = _result;
-        return true;
-    }
-
-    if (fallback_)
-    {
-        _result.clear();
-        if (fallback_->render(_chars, _result, _attempt + 1))
-            return true;
-    }
-
-    replaceMissingGlyphs(_result);
-    return false;
-}
-
-bool Font::render(GlyphPositionList& _result)
-{
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
     hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON);
     hb_buffer_set_language(hb_buf_, hb_language_get_default());
     hb_buffer_guess_segment_properties(hb_buf_);
 
-    hb_shape(hb_font_, hb_buf_, nullptr, 0);
+    hb_font_t* hb_font = nullptr;
+    if (auto i = hb_fonts_.find(&_font); i != hb_fonts_.end())
+        hb_font = i->second;
+    else
+        hb_font = hb_fonts_[&_font] = hb_ft_font_create_referenced(_font);
+
+    hb_shape(hb_font, hb_buf_, nullptr, 0);
 
     hb_buffer_normalize_glyphs(hb_buf_);
 
     unsigned const glyphCount = hb_buffer_get_length(hb_buf_);
-    hb_glyph_info_t* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
-    hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
+    hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
+    hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
 
-    _result.clear();
-    _result.reserve(glyphCount);
+    _result.get().clear();
+    _result.get().reserve(glyphCount);
 
     unsigned int cx = 0;
     unsigned int cy = 0;
     for (unsigned const i : times(glyphCount))
     {
-        _result.emplace_back(GlyphPosition{
-            *this,
+        // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
+        _result.get().emplace_back(GlyphPosition{
+            _font,
             cx + (pos[i].x_offset >> 6),
             cy + (pos[i].y_offset >> 6),
             info[i].codepoint,
@@ -506,21 +468,18 @@ bool Font::render(GlyphPositionList& _result)
         });
 
         if (pos[i].x_advance)
-            cx += maxAdvance();
+            cx += font_.get().maxAdvance();
 
         cy += pos[i].y_advance >> 6;
     }
 
-    if (!any_of(_result, glyphMissing))
-        return true;
-    else
-        return false;
+    return not any_of(_result.get(), glyphMissing);
 }
 
-void Font::replaceMissingGlyphs(GlyphPositionList& _result)
+void TextShaper::replaceMissingGlyphs(GlyphPositionList& _result)
 {
     auto constexpr missingGlyphId = 0xFFFDu;
-    auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
+    auto const missingGlyph = FT_Get_Char_Index(font_.get(), missingGlyphId);
 
     if (missingGlyph)
     {

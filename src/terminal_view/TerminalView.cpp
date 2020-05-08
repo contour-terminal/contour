@@ -45,7 +45,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onSelectionComplete,
                            Screen::OnBufferChanged _onScreenBufferChanged,
                            function<void()> _bell,
-                           text::Font& _regularFont,
+                           text::FontList const& _regularFont,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
@@ -64,8 +64,8 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            Logger _logger) :
     logger_{ move(_logger) },
     size_{
-        static_cast<int>(_winSize.columns * _regularFont.maxAdvance()),
-        static_cast<int>(_winSize.rows * _regularFont.lineHeight())
+        static_cast<int>(_winSize.columns * _regularFont.first.get().maxAdvance()),
+        static_cast<int>(_winSize.rows * _regularFont.first.get().lineHeight())
     },
     regularFont_{ _regularFont },
     renderer_{
@@ -195,10 +195,10 @@ bool TerminalView::alive() const
     return process_.alive();
 }
 
-void TerminalView::setFont(crispy::text::Font& _font)
+void TerminalView::setFont(crispy::text::FontList const& _fontList)
 {
-    regularFont_ = _font;
-    renderer_.setFont(_font);
+    regularFont_ = _fontList;
+    renderer_.setFont(_fontList.first, _fontList.second);
 }
 
 bool TerminalView::setFontSize(unsigned int _fontSize)
@@ -219,7 +219,7 @@ TerminalView::WindowMargin TerminalView::computeMargin(WindowSize const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
-    auto const usedHeight = ws.rows * regularFont_.get().lineHeight();
+    auto const usedHeight = ws.rows * regularFont_.first.get().lineHeight();
     auto const freeHeight = _height - usedHeight;
     auto const bottomMargin = freeHeight;
 

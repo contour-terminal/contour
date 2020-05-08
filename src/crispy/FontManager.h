@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/reference.h>
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ERRORS_H
@@ -139,12 +141,33 @@ constexpr FontStyle& operator|=(FontStyle& lhs, FontStyle rhs)
     return lhs;
 }
 
+class Font;
+
+struct GlyphPosition {
+    std::reference_wrapper<Font> font;
+    unsigned int x;
+    unsigned int y;
+    unsigned int glyphIndex;
+    unsigned cluster;
+
+    GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi, unsigned _cluster) :
+        font{_font}, x{_x}, y{_y}, glyphIndex{_gi}, cluster{_cluster} {}
+};
+
+using GlyphPositionList = std::vector<GlyphPosition>;
+
+struct GlyphBitmap {
+    unsigned int width;
+    unsigned int height;
+    std::vector<uint8_t> buffer;
+};
+
 /**
  * Represents one Font face along with support for its fallback fonts.
  */
 class Font {
   public:
-    Font(FT_Library _ft, std::string _fontPath, Font* _fallback, unsigned int _fontSize);
+    Font(FT_Library _ft, std::string _fontPath, unsigned int _fontSize);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
     Font(Font&&) noexcept;
@@ -165,19 +188,10 @@ class Font {
     unsigned maxAdvance() const noexcept { return maxAdvance_; }
     unsigned baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
 
-    [[deprecated]] bool contains(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char) != 0; }
-
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
-
-    struct GlyphBitmap {
-        unsigned int width;
-        unsigned int height;
-        std::vector<uint8_t> buffer;
-    };
 
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    GlyphBitmap loadGlyphByIndex(unsigned int _faceIndex, unsigned int _glyphIndex);
     GlyphBitmap loadGlyphByIndex(unsigned int _glyphIndex);
 
     // well yeah, if it's only bitmap we still need, we can expose it and then [[deprecated]] this.
@@ -185,41 +199,10 @@ class Font {
 
     operator FT_Face () noexcept { return face_; }
 
-    struct GlyphPosition {
-        std::reference_wrapper<Font> font;
-        unsigned int x;
-        unsigned int y;
-        unsigned int glyphIndex;
-        unsigned cluster;
-
-        GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi, unsigned _cluster) :
-            font{_font}, x{_x}, y{_y}, glyphIndex{_gi}, cluster{_cluster} {}
-    };
-    using GlyphPositionList = std::vector<GlyphPosition>;
-
-    /// Renders text into glyph positions of this font.
-    ///
-    /// @retval true if rendering succeed
-    /// @retval false if rendering failed due to missing glyphs (and no fallback possible); @p _result still
-    ///               contains as much as possible that could be rendered.
-    bool render(CharSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
-
-    bool render(CodepointSequence const& _chars, GlyphPositionList& _result, unsigned attempt = 0);
-
-    void replaceMissingGlyphs(GlyphPositionList& _gpos);
-
-    /// Clears the render cache.
-    void clearRenderCache();
-
-  private:
-    bool render(GlyphPositionList& _result);
-
   private:
     FT_Library ft_;
     FT_Face face_;
-    hb_font_t* hb_font_;
-    hb_buffer_t* hb_buf_;
-    unsigned int fontSize_;
+    unsigned int fontSize_ = 0;
 
     unsigned bitmapWidth_ = 0;
     unsigned bitmapHeight_ = 0;
@@ -227,36 +210,63 @@ class Font {
 
     std::string filePath_;
     std::size_t hashCode_;
-    Font* fallback_;
-
-    // TODO: Currently this can become ever-growing. We should evict least recently used items
-    //       if the cache would exceed a given threshold.
-    std::unordered_map<CharSequence, GlyphPositionList> renderCache_{};
-    std::unordered_map<CodepointSequence, GlyphPositionList> cache_{};
 };
+
+using FontFallbackList = std::vector<std::reference_wrapper<Font>>;
+
+using FontList = std::pair<std::reference_wrapper<Font>, FontFallbackList>;
 
 /// API for managing multiple fonts.
 class FontManager {
   public:
-    explicit FontManager(unsigned int _fontSize);
+    FontManager();
     FontManager(FontManager&&) = delete;
     FontManager(FontManager const&) = delete;
     FontManager& operator=(FontManager&&) = delete;
     FontManager& operator=(FontManager const&) = delete;
     ~FontManager();
 
-    void clearRenderCache();
+    Font& loadFromFilePath(std::string const& _filePath, unsigned _fontSize);
 
-    void setFontSize(unsigned int _size);
-    unsigned int fontSize() const noexcept { return fontSize_; }
-
-    Font& load(std::string const& _fontPattern);
-    Font& loadFromFilePath(std::string const& _filePath, Font* _fallback);
+    FontList load(std::string const& _fontPattern, unsigned _fontSize);
 
   private:
     FT_Library ft_;
     std::unordered_map<std::string, Font> fonts_;
-    unsigned int fontSize_;
+};
+
+class TextShaper {
+  public:
+    TextShaper(Font& _font, FontFallbackList const& _fallback);
+    ~TextShaper();
+
+    explicit TextShaper(std::tuple<Font&, FontFallbackList const&> _fonts) :
+        TextShaper{std::get<0>(_fonts), std::get<1>(_fonts)} {}
+
+    unsigned fontSize() const noexcept { return font_.get().fontSize(); }
+
+    void setFont(Font& _font, FontFallbackList const& _fallback = {});
+    void setFontSize(unsigned _fontSize);
+
+    /// Renders text into glyph positions of this font.
+    GlyphPositionList const* shape(CodepointSequence const& _codes);
+
+    void clearCache();
+
+    void replaceMissingGlyphs(GlyphPositionList& _result);
+
+  private:
+    bool shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> result);
+
+  private:
+    hb_buffer_t* hb_buf_;
+
+    std::reference_wrapper<Font> font_;
+    FontFallbackList fallbackList_;
+
+    std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
+    std::unordered_map<CodepointSequence, GlyphPositionList> cache_ = {};
+    std::unordered_map<CharSequence, GlyphPositionList> cache2_ = {};
 };
 
 } // end namespace
@@ -270,7 +280,7 @@ namespace std {
         }
     };
 
-    inline ostream& operator<<(ostream& _os, crispy::text::Font::GlyphPosition const& _gpos)
+    inline ostream& operator<<(ostream& _os, crispy::text::GlyphPosition const& _gpos)
     {
         _os << '{'
             << "x:" << _gpos.x
@@ -281,7 +291,7 @@ namespace std {
         return _os;
     }
 
-    inline ostream& operator<<(ostream& _os, crispy::text::Font::GlyphPositionList const& _list)
+    inline ostream& operator<<(ostream& _os, crispy::text::GlyphPositionList const& _list)
     {
         unsigned i = 0;
         for (auto const& gp : _list)

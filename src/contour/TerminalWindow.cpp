@@ -253,8 +253,13 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             ? LoggingSink{config_.loggingMask, config_.logFilePath->string()}
             : LoggingSink{config_.loggingMask, &cout}
     },
-    fontManager_{static_cast<unsigned>(profile().fontSize * contentScale())},
-    regularFont_{fontManager_.load(profile().fontFamily)},
+    fontManager_{},
+    regularFont_{
+        fontManager_.load(
+            profile().fontFamily,
+            static_cast<unsigned>(profile().fontSize * contentScale())
+        )
+    },
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
@@ -281,12 +286,12 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     if (profile().backgroundBlur && !enableBackgroundBlur(true))
         throw runtime_error{ "Could not enable background blur." };
 
-    if (!regularFont_.get().isFixedWidth())
+    if (!regularFont_.first.get().isFixedWidth())
         cerr << "Regular font is not a fixed-width font." << endl;
 
     resize(
-        profile().terminalSize.columns * regularFont_.get().maxAdvance(),
-        profile().terminalSize.rows * regularFont_.get().lineHeight()
+        profile().terminalSize.columns * regularFont_.first.get().maxAdvance(),
+        profile().terminalSize.rows * regularFont_.first.get().lineHeight()
     );
 }
 
@@ -431,7 +436,7 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onSelectionComplete, this),
         bind(&TerminalWindow::onScreenBufferChanged, this, _1),
         bind(&TerminalWindow::onBell, this),
-        regularFont_.get(),
+        regularFont_,
         profile().cursorShape,
         profile().cursorDisplay,
         profile().cursorBlinkInterval,
@@ -875,9 +880,12 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     terminalView_->terminal().setTabWidth(newProfile.tabWidth);
     if (newProfile.fontFamily != profile().fontFamily)
     {
-        fontManager_.setFontSize(static_cast<unsigned>(newProfile.fontSize * contentScale()));
-        regularFont_ = fontManager_.load(newProfile.fontFamily);
-        terminalView_->setFont(regularFont_.get());
+        terminalView_->setFont(
+            fontManager_.load(
+                newProfile.fontFamily,
+                static_cast<unsigned>(newProfile.fontSize * contentScale())
+            )
+        );
     }
     else if (newProfile.fontSize != profile().fontSize)
         setFontSize(newProfile.fontSize);
@@ -887,8 +895,8 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
         auto const screenSize = size();
 
         auto const terminalSize = terminal::WindowSize{
-            screenSize.width() / regularFont_.get().maxAdvance(),
-            screenSize.height() / regularFont_.get().lineHeight()
+            screenSize.width() / regularFont_.first.get().maxAdvance(),
+            screenSize.height() / regularFont_.first.get().lineHeight()
         };
 
         terminalView_->setTerminalSize(terminalSize);
@@ -1025,8 +1033,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
             if (!_height)
                 _height = screenSize.height();
         }
-        profile().terminalSize.columns = _width / regularFont_.get().maxAdvance();
-        profile().terminalSize.rows = _height / regularFont_.get().lineHeight();
+        profile().terminalSize.columns = _width / regularFont_.first.get().maxAdvance();
+        profile().terminalSize.rows = _height / regularFont_.first.get().lineHeight();
         resizePending = true;
     }
     else
@@ -1051,8 +1059,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
     {
         post([this]() {
             terminalView_->setTerminalSize(profile().terminalSize);
-            auto const width = profile().terminalSize.columns * regularFont_.get().maxAdvance();
-            auto const height = profile().terminalSize.rows * regularFont_.get().lineHeight();
+            auto const width = profile().terminalSize.columns * regularFont_.first.get().maxAdvance();
+            auto const height = profile().terminalSize.rows * regularFont_.first.get().lineHeight();
             resize(width, height);
             setScreenDirty();
             update();

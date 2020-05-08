@@ -65,7 +65,7 @@ class TextRenderer {
     void setProjection(QMatrix4x4 const& _projection);
 
     void render(QPoint _pos,
-                std::vector<Font::GlyphPosition> const& glyphPositions,
+                std::vector<GlyphPosition> const& glyphPositions,
                 QVector4D const& _color,
                 QSize const& _cellSize);
 
@@ -93,7 +93,7 @@ class TextRenderer {
                        QVector4D const& _color,
                        atlas::TextureInfo const& _textureInfo,
                        Glyph const& _glyph,
-                       Font::GlyphPosition const& _gpos);
+                       GlyphPosition const& _gpos);
 
     atlas::Renderer renderer_;
     TextureAtlas monochromeAtlas_;

@@ -45,7 +45,7 @@ class TerminalView {
                  std::function<void()> _onSelectionComplete,
                  Screen::OnBufferChanged _onScreenBufferChanged,
                  std::function<void()> _bell,
-                 crispy::text::Font& _regularFont,
+                 crispy::text::FontList const& _regularFont,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -79,7 +79,7 @@ class TerminalView {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
-    void setFont(crispy::text::Font& _font);
+    void setFont(crispy::text::FontList const& _fontList);
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);
@@ -123,7 +123,7 @@ class TerminalView {
     Logger logger_;
     QSize size_;
     WindowMargin windowMargin_;
-    std::reference_wrapper<crispy::text::Font> regularFont_;
+    crispy::text::FontList regularFont_;
     GLRenderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;

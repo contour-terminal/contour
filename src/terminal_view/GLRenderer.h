@@ -53,7 +53,7 @@ class GLRenderer : public QOpenGLFunctions {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     GLRenderer(Logger _logger,
-               crispy::text::Font& _regularFont,
+               crispy::text::FontList const& _regularFont,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
@@ -61,12 +61,12 @@ class GLRenderer : public QOpenGLFunctions {
                ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
-    size_t cellHeight() const noexcept { return regularFont_.get().lineHeight(); }
-    size_t cellWidth() const noexcept { return regularFont_.get().maxAdvance(); }
+    size_t cellHeight() const noexcept { return regularFont_.first.get().lineHeight(); }
+    size_t cellWidth() const noexcept { return regularFont_.first.get().maxAdvance(); }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setFont(crispy::text::Font& _font);
+    void setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
@@ -193,14 +193,13 @@ class GLRenderer : public QOpenGLFunctions {
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
-    std::reference_wrapper<crispy::text::Font> regularFont_;
+    crispy::text::FontList regularFont_;
     QMatrix4x4 projectionMatrix_;
+    crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     crispy::text::TextRenderer textRenderer_;
     CellBackground cellBackground_;
     GLCursor cursor_;
-
-    std::unordered_map<crispy::CodepointSequence, crispy::text::Font::GlyphPositionList> fontRenderCache_;
 };
 
 }

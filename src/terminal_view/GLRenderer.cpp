@@ -23,7 +23,7 @@ using namespace terminal;
 using namespace terminal::view;
 
 GLRenderer::GLRenderer(Logger _logger,
-                       text::Font& _regularFont,
+                       text::FontList const& _regularFont,
                        terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
@@ -33,24 +33,25 @@ GLRenderer::GLRenderer(Logger _logger,
     logger_{ move(_logger) },
     leftMargin_{ 0 },
     bottomMargin_{ 0 },
-    colorProfile_{ move(_colorProfile) },
+    colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     projectionMatrix_{ _projectionMatrix },
+    textShaper_{ _regularFont.first, _regularFont.second },
     textShader_{ createShader(_textShaderConfig) },
     textRenderer_{},
     cellBackground_{
         QSize(
-            static_cast<int>(regularFont_.get().maxAdvance()),
-            static_cast<int>(regularFont_.get().lineHeight())
+            static_cast<int>(regularFont_.first.get().maxAdvance()),
+            static_cast<int>(regularFont_.first.get().lineHeight())
         ),
         _projectionMatrix,
         _backgroundShaderConfig
     },
     cursor_{
         QSize(
-            static_cast<int>(regularFont_.get().maxAdvance()),
-            static_cast<int>(regularFont_.get().lineHeight())
+            static_cast<int>(regularFont_.first.get().maxAdvance()),
+            static_cast<int>(regularFont_.first.get().lineHeight())
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
@@ -72,27 +73,28 @@ GLRenderer::GLRenderer(Logger _logger,
 void GLRenderer::clearCache()
 {
     textRenderer_.clearCache();
-    fontRenderCache_.clear();
+    textShaper_.clearCache();
 }
 
-void GLRenderer::setFont(text::Font& _font)
+void GLRenderer::setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback)
 {
-    auto const fontSize = regularFont_.get().fontSize();
-    regularFont_ = _font;
-    regularFont_.get().setFontSize(fontSize);
+    textShaper_.setFont(_font, _fallback);
     clearCache();
 }
 
 bool GLRenderer::setFontSize(unsigned int _fontSize)
 {
-    if (_fontSize == regularFont_.get().fontSize())
+    if (_fontSize == regularFont_.first.get().fontSize())
         return false;
 
-    regularFont_.get().setFontSize(_fontSize);
+    regularFont_.first.get().setFontSize(_fontSize);
+    for (auto& fallback : regularFont_.second)
+        fallback.get().setFontSize(_fontSize);
+
     // TODO: other font styles
 
-    auto const cellWidth = regularFont_.get().maxAdvance();
-    auto const cellHeight = regularFont_.get().lineHeight();
+    auto const cellWidth = regularFont_.first.get().maxAdvance();
+    auto const cellHeight = regularFont_.first.get().lineHeight();
     auto const cellSize = QSize{static_cast<int>(cellWidth),
                                 static_cast<int>(cellHeight)};
 
@@ -296,40 +298,33 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;
-        text::Font& font = regularFont_.get(); // TODO: selection by textStyle_
+        text::TextShaper& textShaper = textShaper_; // TODO: selection by textStyle
 
-        auto const glyphPositions = [&]() -> text::Font::GlyphPositionList& {
-            if (auto i = fontRenderCache_.find(pendingDraw_.codepoints); i != fontRenderCache_.end())
-                return i->second;
-
-            text::Font::GlyphPositionList glyphPositions;
-            font.render(pendingDraw_.codepoints, glyphPositions);
-            return fontRenderCache_[pendingDraw_.codepoints] = move(glyphPositions);
-            //return fontRenderCache_[pendingDraw_.codepoints];
-        }();
-
-        textRenderer_.render(
-            makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
-            glyphPositions,
-            QVector4D(
-                static_cast<float>(fgColor.red) / 255.0f,
-                static_cast<float>(fgColor.green) / 255.0f,
-                static_cast<float>(fgColor.blue) / 255.0f,
-                1.0f
-            ),
-            QSize{
-                static_cast<int>(cellWidth()),
-                static_cast<int>(cellHeight())
-            }
-        );
+        if (text::GlyphPositionList const* glyphPositions = textShaper.shape(pendingDraw_.codepoints); glyphPositions)
+        {
+            textRenderer_.render(
+                makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
+                *glyphPositions,
+                QVector4D(
+                    static_cast<float>(fgColor.red) / 255.0f,
+                    static_cast<float>(fgColor.green) / 255.0f,
+                    static_cast<float>(fgColor.blue) / 255.0f,
+                    1.0f
+                ),
+                QSize{
+                    static_cast<int>(cellWidth()),
+                    static_cast<int>(cellHeight())
+                }
+            );
+        }
     }
 }
 
 QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
 {
     return QPoint{
-        static_cast<int>(leftMargin_ + (col - 1) * regularFont_.get().maxAdvance()),
-        static_cast<int>(bottomMargin_ + (_screenSize.rows - row) * regularFont_.get().lineHeight())
+        static_cast<int>(leftMargin_ + (col - 1) * regularFont_.first.get().maxAdvance()),
+        static_cast<int>(bottomMargin_ + (_screenSize.rows - row) * regularFont_.first.get().lineHeight())
     };
 }
 

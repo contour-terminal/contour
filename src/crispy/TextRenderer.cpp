@@ -58,11 +58,11 @@ void TextRenderer::setProjection(QMatrix4x4 const& _projection)
 }
 
 void TextRenderer::render(QPoint _pos,
-                        vector<Font::GlyphPosition> const& _glyphPositions,
+                        vector<GlyphPosition> const& _glyphPositions,
                         QVector4D const& _color,
                         QSize const& _cellSize)
 {
-    for (Font::GlyphPosition const& gpos : _glyphPositions)
+    for (GlyphPosition const& gpos : _glyphPositions)
         if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}, _cellSize); ti.has_value())
             renderTexture(_pos,
                           _color,
@@ -88,7 +88,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
         return dataRef;
 
     Font& font = _id.font.get();
-    Font::GlyphBitmap bitmap = font.loadGlyphByIndex(_id.glyphIndex);
+    GlyphBitmap bitmap = font.loadGlyphByIndex(_id.glyphIndex);
 
     auto const format = _id.font.get().hasColor() ? GL_BGRA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
@@ -128,7 +128,7 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                                QVector4D const& _color,
                                atlas::TextureInfo const& _textureInfo,
                                Glyph const& _glyph,
-                               Font::GlyphPosition const& _gpos)
+                               GlyphPosition const& _gpos)
 {
     unsigned const px = _pos.x() + _gpos.x;
     unsigned const py = _pos.y() + _gpos.y;

@@ -149,7 +149,7 @@ class TerminalWindow :
     std::ofstream loggingSink_;
     LoggingSink logger_;
     crispy::text::FontManager fontManager_;
-    std::reference_wrapper<crispy::text::Font> regularFont_;
+    crispy::text::FontList regularFont_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     FileChangeWatcher configFileChangeWatcher_;
     std::mutex queuedCallsLock_;
