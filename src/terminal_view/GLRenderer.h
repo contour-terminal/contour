@@ -20,6 +20,7 @@
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
+#include <crispy/text/WordSegmenter.h>
 #include <crispy/FontManager.h>
 #include <crispy/TextRenderer.h>
 #include <crispy/times.h>
@@ -195,6 +196,7 @@ class GLRenderer : public QOpenGLFunctions {
 
     crispy::text::FontList regularFont_;
     QMatrix4x4 projectionMatrix_;
+    crispy::text::WordSegmenter wordSegmenter_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     crispy::text::TextRenderer textRenderer_;

@@ -12,30 +12,28 @@ else()
     message(STATUS "[crispy] utf8proc library: not found")
 endif()
 
-add_library(crispy-core INTERFACE)
+add_library(crispy-core STATIC
+    algorithm.h
+    compose.h
+    overloaded.h
+    reference.h
+    stdfs.h
+    text.h
+    times.h
+    UTF8.h
+    text/EmojiSegmenter.h
+    text/Unicode.h
+    text/Unicode.cpp
+    text/UnicodeTables.h
+    text/UnicodeTraits.h
+    text/WordSegmenter.h
+)
 add_library(crispy::core ALIAS crispy-core)
-#target_include_directories(crispy-core PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-target_include_directories(crispy-core INTERFACE
-    $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
-    ${UTF8PROC_INCLUDE_DIRS}
-)
-target_compile_definitions(crispy-core INTERFACE -DUTF8PROC_FOUND=${UTF8PROC_FOUND})
-target_compile_features(crispy-core INTERFACE cxx_std_17)
-target_sources(crispy-core INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/overloaded.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/reference.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/text.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/times.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/UTF8.h
-)
-target_link_libraries(crispy-core INTERFACE
-    fmt::fmt-header-only
-    ${UTF8PROC_LIBRARIES}
-)
+target_include_directories(crispy-core PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(crispy-core PRIVATE ${UTF8PROC_INCLUDE_DIRS})
+target_compile_definitions(crispy-core PRIVATE -DUTF8PROC_FOUND=${UTF8PROC_FOUND})
+target_link_libraries(crispy-core PUBLIC fmt::fmt-header-only)
+target_link_libraries(crispy-core PRIVATE ${UTF8PROC_LIBRARIES})
 
 # --------------------------------------------------------------------------------------------------------
 # crispy::gui
@@ -91,9 +89,10 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
-        test_main.cpp
         UTF8_test.cpp
         compose_test.cpp
+        test_main.cpp
+        text/WordSegmenter_test.cpp
     )
     target_link_libraries(crispy_test fmt::fmt-header-only Catch2::Catch2 crispy::core)
     add_test(crispy_test ./crispy_test)

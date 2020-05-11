@@ -32,6 +32,7 @@ The following is an incomplete list of features that contour does or will suppor
 * [x] Color Schemes
 * [x] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 * [x] Vertical Line Markers (quickly jump to markers in your history!)
+* [ ] Emoji support (-: 🌈 💝 😛 👪 :-)
 * [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
 * [ ] History Search
 * [ ] Activity/Inactivity/Bell System Notification

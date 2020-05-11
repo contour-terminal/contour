@@ -179,10 +179,13 @@ FontList FontManager::load(string const& _fontPattern, unsigned _fontSize)
     Font& primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
     FontFallbackList fallbackList;
     for (size_t i = 1; i < filePaths.size(); ++i)
-    {
-        cout << fmt::format("FontManager.load[{}]: {}\n", i, filePaths[i].c_str());
         fallbackList.push_back(loadFromFilePath(filePaths[i], _fontSize));
-    }
+
+    cout << fmt::format("FontManager.load : {} size:{}\n", _fontPattern, _fontSize);
+    cout << fmt::format("    primary font : {}\n", primaryFont.filePath());
+    cout << fmt::format("  fallback count : {}\n", fallbackList.size());
+    for (size_t i = 1; i < filePaths.size(); ++i)
+        cout << fmt::format("{:>16} : {}\n", i, filePaths[i].c_str());
 
     return {primaryFont, fallbackList};
 }
@@ -396,7 +399,7 @@ GlyphPositionList const* TextShaper::shape(CodepointSequence const& _codes)
     size_t i = 1;
     for (reference_wrapper<Font>& fallback : fallbackList_)
     {
-#if 0 // FIXME: ugly hack to make sure our fallback is color fonts (emojis)
+#if 1 // FIXME: ugly hack to make sure our fallback is color fonts (emojis)
         if (!fallback.get().hasColor())
             continue;
 #endif
@@ -406,7 +409,14 @@ GlyphPositionList const* TextShaper::shape(CodepointSequence const& _codes)
         ++i;
     }
 
-    cout << fmt::format("Shaping failed for {} codepoints\n", _codes.size());
+    string joinedCodes;
+    for (Codepoint code : _codes)
+    {
+        if (!joinedCodes.empty())
+            joinedCodes += " ";
+        joinedCodes += fmt::format("{:<6x}", unsigned(code.value));
+    }
+    cout << fmt::format("Shaping failed for {} codepoints: {}\n", _codes.size(), joinedCodes);
 
     shape(_codes, font_.get(), ref(result));
     replaceMissingGlyphs(result);
@@ -427,11 +437,11 @@ void TextShaper::clearCache()
 bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> _result)
 {
     hb_buffer_clear_contents(hb_buf_);
-    hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
 
     for (Codepoint const& codepoint : _codes)
         hb_buffer_add(hb_buf_, codepoint.value, codepoint.cluster);
 
+    hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
     hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON);
     hb_buffer_set_language(hb_buf_, hb_language_get_default());
@@ -441,7 +451,10 @@ bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<G
     if (auto i = hb_fonts_.find(&_font); i != hb_fonts_.end())
         hb_font = i->second;
     else
-        hb_font = hb_fonts_[&_font] = hb_ft_font_create_referenced(_font);
+    {
+        hb_font = hb_ft_font_create_referenced(_font);
+        hb_fonts_[&_font] = hb_font;
+    }
 
     hb_shape(hb_font, hb_buf_, nullptr, 0);
 

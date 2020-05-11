@@ -16,6 +16,8 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/VTType.h>
 
+#include <crispy/text/WordSegmenter.h>
+#include <crispy/text/EmojiSegmenter.h>
 #include <crispy/algorithm.h>
 #include <crispy/text.h>
 #include <crispy/times.h>
