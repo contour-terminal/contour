@@ -15,6 +15,7 @@
 #include <crispy/text/Unicode.h>
 
 #include <array>
+#include <optional>
 
 namespace crispy::text {
 
@@ -28,20 +29,47 @@ namespace {
     template <size_t N>
     constexpr bool contains(std::array<Interval, N> const& _ranges, char32_t _codepoint)
     {
+        int a = 0;
+        int b = _ranges.size() - 1;
+        while (a < b)
+        {
+            size_t i = (b + a) / 2;
+            auto const& I = _ranges[i];
+            if (I.to < _codepoint)
+                a = i + 1;
+            else if (I.from > _codepoint)
+                b = i - 1;
+            else
+                return true;
+        }
+        return a == b && _ranges[a].from <= _codepoint && _codepoint <= _ranges[a].to;
+    }
+
+    template <typename T> struct Prop
+    {
+        Interval interval;
+        T property;
+    };
+
+    template <typename T, size_t N>
+    constexpr std::optional<T> search(std::array<Prop<T>, N> const& _ranges, char32_t _codepoint)
+    {
         size_t a = 0;
         size_t b = _ranges.size() - 1;
         while (a < b)
         {
             size_t i = (b + a) / 2;
             auto const& I = _ranges[i];
-            if (_codepoint < I.from)
-                b = a + (b - a) / 2;
-            else if (_codepoint > I.to)
-                a = a + (b - a) / 2;
-            else if (I.from <= _codepoint && _codepoint <= I.to)
-                return true;
+            if (I.interval.to < _codepoint)
+                a = i + 1;
+            else if (I.interval.from > _codepoint)
+                b = i - 1;
+            else
+                return I.property;
         }
-        return false;
+        if (a == b && _ranges[a].interval.from <= _codepoint && _codepoint <= _ranges[a].interval.to)
+            return _ranges[a].property;
+        return std::nullopt;
     }
 }
 
@@ -1131,7 +1159,7 @@ auto constexpr Alphabetic = std::array{ // {{{
     Interval{ 0x2CEB0, 0x2EBE0 }, // Lo [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
-}; // }}}}}}
+}; // }}}
 auto constexpr Case_Ignorable = std::array{ // {{{
     Interval{ 0x0027, 0x0027 }, // Po       APOSTROPHE
     Interval{ 0x002E, 0x002E }, // Po       FULL STOP
@@ -1593,7 +1621,7 @@ auto constexpr Case_Ignorable = std::array{ // {{{
     Interval{ 0xE0001, 0xE0001 }, // Cf       LANGUAGE TAG
     Interval{ 0xE0020, 0xE007F }, // Cf  [96] TAG SPACE..CANCEL TAG
     Interval{ 0xE0100, 0xE01EF }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
-}; // }}}}}}
+}; // }}}
 auto constexpr Cased = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
@@ -1750,7 +1778,7 @@ auto constexpr Cased = std::array{ // {{{
     Interval{ 0x1F130, 0x1F149 }, // So  [26] SQUARED LATIN CAPITAL LETTER A..SQUARED LATIN CAPITAL LETTER Z
     Interval{ 0x1F150, 0x1F169 }, // So  [26] NEGATIVE CIRCLED LATIN CAPITAL LETTER A..NEGATIVE CIRCLED LATIN CAPITAL LETTER Z
     Interval{ 0x1F170, 0x1F189 }, // So  [26] NEGATIVE SQUARED LATIN CAPITAL LETTER A..NEGATIVE SQUARED LATIN CAPITAL LETTER Z
-}; // }}}}}}
+}; // }}}
 auto constexpr Changes_When_Casefolded = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x00B5, 0x00B5 }, // L&       MICRO SIGN
@@ -2366,7 +2394,7 @@ auto constexpr Changes_When_Casefolded = std::array{ // {{{
     Interval{ 0x118A0, 0x118BF }, // L&  [32] WARANG CITI CAPITAL LETTER NGAA..WARANG CITI CAPITAL LETTER VIYO
     Interval{ 0x16E40, 0x16E5F }, // L&  [32] MEDEFAIDRIN CAPITAL LETTER M..MEDEFAIDRIN CAPITAL LETTER Y
     Interval{ 0x1E900, 0x1E921 }, // L&  [34] ADLAM CAPITAL LETTER ALIF..ADLAM CAPITAL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Changes_When_Casemapped = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
@@ -2492,7 +2520,7 @@ auto constexpr Changes_When_Casemapped = std::array{ // {{{
     Interval{ 0x118A0, 0x118DF }, // L&  [64] WARANG CITI CAPITAL LETTER NGAA..WARANG CITI SMALL LETTER VIYO
     Interval{ 0x16E40, 0x16E7F }, // L&  [64] MEDEFAIDRIN CAPITAL LETTER M..MEDEFAIDRIN SMALL LETTER Y
     Interval{ 0x1E900, 0x1E943 }, // L&  [68] ADLAM CAPITAL LETTER ALIF..ADLAM SMALL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Changes_When_Lowercased = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x00C0, 0x00D6 }, // L&  [23] LATIN CAPITAL LETTER A WITH GRAVE..LATIN CAPITAL LETTER O WITH DIAERESIS
@@ -3095,7 +3123,7 @@ auto constexpr Changes_When_Lowercased = std::array{ // {{{
     Interval{ 0x118A0, 0x118BF }, // L&  [32] WARANG CITI CAPITAL LETTER NGAA..WARANG CITI CAPITAL LETTER VIYO
     Interval{ 0x16E40, 0x16E5F }, // L&  [32] MEDEFAIDRIN CAPITAL LETTER M..MEDEFAIDRIN CAPITAL LETTER Y
     Interval{ 0x1E900, 0x1E921 }, // L&  [34] ADLAM CAPITAL LETTER ALIF..ADLAM CAPITAL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Changes_When_Titlecased = std::array{ // {{{
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
     Interval{ 0x00B5, 0x00B5 }, // L&       MICRO SIGN
@@ -3715,7 +3743,7 @@ auto constexpr Changes_When_Titlecased = std::array{ // {{{
     Interval{ 0x118C0, 0x118DF }, // L&  [32] WARANG CITI SMALL LETTER NGAA..WARANG CITI SMALL LETTER VIYO
     Interval{ 0x16E60, 0x16E7F }, // L&  [32] MEDEFAIDRIN SMALL LETTER M..MEDEFAIDRIN SMALL LETTER Y
     Interval{ 0x1E922, 0x1E943 }, // L&  [34] ADLAM SMALL LETTER ALIF..ADLAM SMALL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Changes_When_Uppercased = std::array{ // {{{
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
     Interval{ 0x00B5, 0x00B5 }, // L&       MICRO SIGN
@@ -4336,7 +4364,7 @@ auto constexpr Changes_When_Uppercased = std::array{ // {{{
     Interval{ 0x118C0, 0x118DF }, // L&  [32] WARANG CITI SMALL LETTER NGAA..WARANG CITI SMALL LETTER VIYO
     Interval{ 0x16E60, 0x16E7F }, // L&  [32] MEDEFAIDRIN SMALL LETTER M..MEDEFAIDRIN SMALL LETTER Y
     Interval{ 0x1E922, 0x1E943 }, // L&  [34] ADLAM SMALL LETTER ALIF..ADLAM SMALL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Default_Ignorable_Code_Point = std::array{ // {{{
     Interval{ 0x00AD, 0x00AD }, // Cf       SOFT HYPHEN
     Interval{ 0x034F, 0x034F }, // Mn       COMBINING GRAPHEME JOINER
@@ -4364,7 +4392,7 @@ auto constexpr Default_Ignorable_Code_Point = std::array{ // {{{
     Interval{ 0xE0080, 0xE00FF }, // Cn [128] <reserved-E0080>..<reserved-E00FF>
     Interval{ 0xE0100, 0xE01EF }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
     Interval{ 0xE01F0, 0xE0FFF }, // Cn [3600] <reserved-E01F0>..<reserved-E0FFF>
-}; // }}}}}}
+}; // }}}
 auto constexpr Grapheme_Base = std::array{ // {{{
     Interval{ 0x0020, 0x0020 }, // Zs       SPACE
     Interval{ 0x0021, 0x0023 }, // Po   [3] EXCLAMATION MARK..NUMBER SIGN
@@ -6036,7 +6064,7 @@ auto constexpr Grapheme_Base = std::array{ // {{{
     Interval{ 0x2CEB0, 0x2EBE0 }, // Lo [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
-}; // }}}}}}
+}; // }}}
 auto constexpr Grapheme_Extend = std::array{ // {{{
     Interval{ 0x0300, 0x036F }, // Mn [112] COMBINING GRAVE ACCENT..COMBINING LATIN SMALL LETTER X
     Interval{ 0x0483, 0x0487 }, // Mn   [5] COMBINING CYRILLIC TITLO..COMBINING CYRILLIC POKRYTIE
@@ -6395,7 +6423,7 @@ auto constexpr Grapheme_Extend = std::array{ // {{{
     Interval{ 0x1E944, 0x1E94A }, // Mn   [7] ADLAM ALIF LENGTHENER..ADLAM NUKTA
     Interval{ 0xE0020, 0xE007F }, // Cf  [96] TAG SPACE..CANCEL TAG
     Interval{ 0xE0100, 0xE01EF }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
-}; // }}}}}}
+}; // }}}
 auto constexpr Grapheme_Link = std::array{ // {{{
     Interval{ 0x094D, 0x094D }, // Mn       DEVANAGARI SIGN VIRAMA
     Interval{ 0x09CD, 0x09CD }, // Mn       BENGALI SIGN VIRAMA
@@ -6453,7 +6481,7 @@ auto constexpr Grapheme_Link = std::array{ // {{{
     Interval{ 0x11C3F, 0x11C3F }, // Mn       BHAIKSUKI SIGN VIRAMA
     Interval{ 0x11D44, 0x11D45 }, // Mn   [2] MASARAM GONDI SIGN HALANTA..MASARAM GONDI VIRAMA
     Interval{ 0x11D97, 0x11D97 }, // Mn       GUNJALA GONDI VIRAMA
-}; // }}}}}}
+}; // }}}
 auto constexpr ID_Continue = std::array{ // {{{
     Interval{ 0x0030, 0x0039 }, // Nd  [10] DIGIT ZERO..DIGIT NINE
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
@@ -7724,7 +7752,7 @@ auto constexpr ID_Continue = std::array{ // {{{
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
     Interval{ 0xE0100, 0xE01EF }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
-}; // }}}}}}
+}; // }}}
 auto constexpr ID_Start = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
@@ -8423,7 +8451,7 @@ auto constexpr ID_Start = std::array{ // {{{
     Interval{ 0x2CEB0, 0x2EBE0 }, // Lo [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
-}; // }}}}}}
+}; // }}}
 auto constexpr Lowercase = std::array{ // {{{
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
     Interval{ 0x00AA, 0x00AA }, // Lo       FEMININE ORDINAL INDICATOR
@@ -9090,7 +9118,7 @@ auto constexpr Lowercase = std::array{ // {{{
     Interval{ 0x1D7C4, 0x1D7C9 }, // L&   [6] MATHEMATICAL SANS-SERIF BOLD ITALIC EPSILON SYMBOL..MATHEMATICAL SANS-SERIF BOLD ITALIC PI SYMBOL
     Interval{ 0x1D7CB, 0x1D7CB }, // L&       MATHEMATICAL BOLD SMALL DIGAMMA
     Interval{ 0x1E922, 0x1E943 }, // L&  [34] ADLAM SMALL LETTER ALIF..ADLAM SMALL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Math = std::array{ // {{{
     Interval{ 0x002B, 0x002B }, // Sm       PLUS SIGN
     Interval{ 0x003C, 0x003E }, // Sm   [3] LESS-THAN SIGN..GREATER-THAN SIGN
@@ -9332,7 +9360,7 @@ auto constexpr Math = std::array{ // {{{
     Interval{ 0x1EEA5, 0x1EEA9 }, // Lo   [5] ARABIC MATHEMATICAL DOUBLE-STRUCK WAW..ARABIC MATHEMATICAL DOUBLE-STRUCK YEH
     Interval{ 0x1EEAB, 0x1EEBB }, // Lo  [17] ARABIC MATHEMATICAL DOUBLE-STRUCK LAM..ARABIC MATHEMATICAL DOUBLE-STRUCK GHAIN
     Interval{ 0x1EEF0, 0x1EEF1 }, // Sm   [2] ARABIC MATHEMATICAL OPERATOR MEEM WITH HAH WITH TATWEEL..ARABIC MATHEMATICAL OPERATOR HAH WITH DAL
-}; // }}}}}}
+}; // }}}
 auto constexpr Uppercase = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x00C0, 0x00D6 }, // L&  [23] LATIN CAPITAL LETTER A WITH GRAVE..LATIN CAPITAL LETTER O WITH DIAERESIS
@@ -9977,7 +10005,7 @@ auto constexpr Uppercase = std::array{ // {{{
     Interval{ 0x1F130, 0x1F149 }, // So  [26] SQUARED LATIN CAPITAL LETTER A..SQUARED LATIN CAPITAL LETTER Z
     Interval{ 0x1F150, 0x1F169 }, // So  [26] NEGATIVE CIRCLED LATIN CAPITAL LETTER A..NEGATIVE CIRCLED LATIN CAPITAL LETTER Z
     Interval{ 0x1F170, 0x1F189 }, // So  [26] NEGATIVE SQUARED LATIN CAPITAL LETTER A..NEGATIVE SQUARED LATIN CAPITAL LETTER Z
-}; // }}}}}}
+}; // }}}
 auto constexpr XID_Continue = std::array{ // {{{
     Interval{ 0x0030, 0x0039 }, // Nd  [10] DIGIT ZERO..DIGIT NINE
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
@@ -11252,7 +11280,7 @@ auto constexpr XID_Continue = std::array{ // {{{
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
     Interval{ 0xE0100, 0xE01EF }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
-}; // }}}}}}
+}; // }}}
 auto constexpr XID_Start = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // L&  [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x0061, 0x007A }, // L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
@@ -11954,7 +11982,7 @@ auto constexpr XID_Start = std::array{ // {{{
     Interval{ 0x2CEB0, 0x2EBE0 }, // Lo [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
     Interval{ 0x2F800, 0x2FA1D }, // Lo [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // Lo [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
-}; // }}}}}}
+}; // }}}
 } // end namespace tables
 
 bool contains(Core_Property _prop, char32_t _codepoint) noexcept {
@@ -12056,7 +12084,7 @@ auto constexpr Close_Punctuation = std::array{ // {{{
     Interval{ 0xFF5D, 0xFF5D }, // FULLWIDTH RIGHT CURLY BRACKET
     Interval{ 0xFF60, 0xFF60 }, // FULLWIDTH RIGHT WHITE PARENTHESIS
     Interval{ 0xFF63, 0xFF63 }, // HALFWIDTH RIGHT CORNER BRACKET
-}; // }}}}}}
+}; // }}}
 auto constexpr Connector_Punctuation = std::array{ // {{{
     Interval{ 0x005F, 0x005F }, // LOW LINE
     Interval{ 0x203F, 0x2040 }, // [2] UNDERTIE..CHARACTER TIE
@@ -12064,11 +12092,11 @@ auto constexpr Connector_Punctuation = std::array{ // {{{
     Interval{ 0xFE33, 0xFE34 }, // [2] PRESENTATION FORM FOR VERTICAL LOW LINE..PRESENTATION FORM FOR VERTICAL WAVY LOW LINE
     Interval{ 0xFE4D, 0xFE4F }, // [3] DASHED LOW LINE..WAVY LOW LINE
     Interval{ 0xFF3F, 0xFF3F }, // FULLWIDTH LOW LINE
-}; // }}}}}}
+}; // }}}
 auto constexpr Control = std::array{ // {{{
     Interval{ 0x0000, 0x001F }, // [32] <control-0000>..<control-001F>
     Interval{ 0x007F, 0x009F }, // [33] <control-007F>..<control-009F>
-}; // }}}}}}
+}; // }}}
 auto constexpr Currency_Symbol = std::array{ // {{{
     Interval{ 0x0024, 0x0024 }, // DOLLAR SIGN
     Interval{ 0x00A2, 0x00A5 }, // [4] CENT SIGN..YEN SIGN
@@ -12091,7 +12119,7 @@ auto constexpr Currency_Symbol = std::array{ // {{{
     Interval{ 0x11FDD, 0x11FE0 }, // [4] TAMIL SIGN KAACU..TAMIL SIGN VARAAKAN
     Interval{ 0x1E2FF, 0x1E2FF }, // WANCHO NGUN SIGN
     Interval{ 0x1ECB0, 0x1ECB0 }, // INDIC SIYAQ RUPEE MARK
-}; // }}}}}}
+}; // }}}
 auto constexpr Dash_Punctuation = std::array{ // {{{
     Interval{ 0x002D, 0x002D }, // HYPHEN-MINUS
     Interval{ 0x058A, 0x058A }, // ARMENIAN HYPHEN
@@ -12111,7 +12139,7 @@ auto constexpr Dash_Punctuation = std::array{ // {{{
     Interval{ 0xFE63, 0xFE63 }, // SMALL HYPHEN-MINUS
     Interval{ 0xFF0D, 0xFF0D }, // FULLWIDTH HYPHEN-MINUS
     Interval{ 0x10EAD, 0x10EAD }, // YEZIDI HYPHENATION MARK
-}; // }}}}}}
+}; // }}}
 auto constexpr Decimal_Number = std::array{ // {{{
     Interval{ 0x0030, 0x0039 }, // [10] DIGIT ZERO..DIGIT NINE
     Interval{ 0x0660, 0x0669 }, // [10] ARABIC-INDIC DIGIT ZERO..ARABIC-INDIC DIGIT NINE
@@ -12174,14 +12202,14 @@ auto constexpr Decimal_Number = std::array{ // {{{
     Interval{ 0x1E2F0, 0x1E2F9 }, // [10] WANCHO DIGIT ZERO..WANCHO DIGIT NINE
     Interval{ 0x1E950, 0x1E959 }, // [10] ADLAM DIGIT ZERO..ADLAM DIGIT NINE
     Interval{ 0x1FBF0, 0x1FBF9 }, // [10] SEGMENTED DIGIT ZERO..SEGMENTED DIGIT NINE
-}; // }}}}}}
+}; // }}}
 auto constexpr Enclosing_Mark = std::array{ // {{{
     Interval{ 0x0488, 0x0489 }, // [2] COMBINING CYRILLIC HUNDRED THOUSANDS SIGN..COMBINING CYRILLIC MILLIONS SIGN
     Interval{ 0x1ABE, 0x1ABE }, // COMBINING PARENTHESES OVERLAY
     Interval{ 0x20DD, 0x20E0 }, // [4] COMBINING ENCLOSING CIRCLE..COMBINING ENCLOSING CIRCLE BACKSLASH
     Interval{ 0x20E2, 0x20E4 }, // [3] COMBINING ENCLOSING SCREEN..COMBINING ENCLOSING UPWARD POINTING TRIANGLE
     Interval{ 0xA670, 0xA672 }, // [3] COMBINING CYRILLIC TEN MILLIONS SIGN..COMBINING CYRILLIC THOUSAND MILLIONS SIGN
-}; // }}}}}}
+}; // }}}
 auto constexpr Final_Punctuation = std::array{ // {{{
     Interval{ 0x00BB, 0x00BB }, // RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
     Interval{ 0x2019, 0x2019 }, // RIGHT SINGLE QUOTATION MARK
@@ -12193,7 +12221,7 @@ auto constexpr Final_Punctuation = std::array{ // {{{
     Interval{ 0x2E0D, 0x2E0D }, // RIGHT RAISED OMISSION BRACKET
     Interval{ 0x2E1D, 0x2E1D }, // RIGHT LOW PARAPHRASE BRACKET
     Interval{ 0x2E21, 0x2E21 }, // RIGHT VERTICAL BAR WITH QUILL
-}; // }}}}}}
+}; // }}}
 auto constexpr Format = std::array{ // {{{
     Interval{ 0x00AD, 0x00AD }, // SOFT HYPHEN
     Interval{ 0x0600, 0x0605 }, // [6] ARABIC NUMBER SIGN..ARABIC NUMBER MARK ABOVE
@@ -12215,7 +12243,7 @@ auto constexpr Format = std::array{ // {{{
     Interval{ 0x1D173, 0x1D17A }, // [8] MUSICAL SYMBOL BEGIN BEAM..MUSICAL SYMBOL END PHRASE
     Interval{ 0xE0001, 0xE0001 }, // LANGUAGE TAG
     Interval{ 0xE0020, 0xE007F }, // [96] TAG SPACE..CANCEL TAG
-}; // }}}}}}
+}; // }}}
 auto constexpr Initial_Punctuation = std::array{ // {{{
     Interval{ 0x00AB, 0x00AB }, // LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
     Interval{ 0x2018, 0x2018 }, // LEFT SINGLE QUOTATION MARK
@@ -12228,7 +12256,7 @@ auto constexpr Initial_Punctuation = std::array{ // {{{
     Interval{ 0x2E0C, 0x2E0C }, // LEFT RAISED OMISSION BRACKET
     Interval{ 0x2E1C, 0x2E1C }, // LEFT LOW PARAPHRASE BRACKET
     Interval{ 0x2E20, 0x2E20 }, // LEFT VERTICAL BAR WITH QUILL
-}; // }}}}}}
+}; // }}}
 auto constexpr Letter_Number = std::array{ // {{{
     Interval{ 0x16EE, 0x16F0 }, // [3] RUNIC ARLAUG SYMBOL..RUNIC BELGTHOR SYMBOL
     Interval{ 0x2160, 0x2182 }, // [35] ROMAN NUMERAL ONE..ROMAN NUMERAL TEN THOUSAND
@@ -12242,10 +12270,10 @@ auto constexpr Letter_Number = std::array{ // {{{
     Interval{ 0x1034A, 0x1034A }, // GOTHIC LETTER NINE HUNDRED
     Interval{ 0x103D1, 0x103D5 }, // [5] OLD PERSIAN NUMBER ONE..OLD PERSIAN NUMBER HUNDRED
     Interval{ 0x12400, 0x1246E }, // [111] CUNEIFORM NUMERIC SIGN TWO ASH..CUNEIFORM NUMERIC SIGN NINE U VARIANT FORM
-}; // }}}}}}
+}; // }}}
 auto constexpr Line_Separator = std::array{ // {{{
     Interval{ 0x2028, 0x2028 }, // LINE SEPARATOR
-}; // }}}}}}
+}; // }}}
 auto constexpr Lowercase_Letter = std::array{ // {{{
     Interval{ 0x0061, 0x007A }, // [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
     Interval{ 0x00B5, 0x00B5 }, // MICRO SIGN
@@ -12892,7 +12920,7 @@ auto constexpr Lowercase_Letter = std::array{ // {{{
     Interval{ 0x1D7C4, 0x1D7C9 }, // [6] MATHEMATICAL SANS-SERIF BOLD ITALIC EPSILON SYMBOL..MATHEMATICAL SANS-SERIF BOLD ITALIC PI SYMBOL
     Interval{ 0x1D7CB, 0x1D7CB }, // MATHEMATICAL BOLD SMALL DIGAMMA
     Interval{ 0x1E922, 0x1E943 }, // [34] ADLAM SMALL LETTER ALIF..ADLAM SMALL LETTER SHA
-}; // }}}}}}
+}; // }}}
 auto constexpr Math_Symbol = std::array{ // {{{
     Interval{ 0x002B, 0x002B }, // PLUS SIGN
     Interval{ 0x003C, 0x003E }, // [3] LESS-THAN SIGN..GREATER-THAN SIGN
@@ -12958,7 +12986,7 @@ auto constexpr Math_Symbol = std::array{ // {{{
     Interval{ 0x1D7A9, 0x1D7A9 }, // MATHEMATICAL SANS-SERIF BOLD ITALIC NABLA
     Interval{ 0x1D7C3, 0x1D7C3 }, // MATHEMATICAL SANS-SERIF BOLD ITALIC PARTIAL DIFFERENTIAL
     Interval{ 0x1EEF0, 0x1EEF1 }, // [2] ARABIC MATHEMATICAL OPERATOR MEEM WITH HAH WITH TATWEEL..ARABIC MATHEMATICAL OPERATOR HAH WITH DAL
-}; // }}}}}}
+}; // }}}
 auto constexpr Modifier_Letter = std::array{ // {{{
     Interval{ 0x02B0, 0x02C1 }, // [18] MODIFIER LETTER SMALL H..MODIFIER LETTER REVERSED GLOTTAL STOP
     Interval{ 0x02C6, 0x02D1 }, // [12] MODIFIER LETTER CIRCUMFLEX ACCENT..MODIFIER LETTER HALF TRIANGULAR COLON
@@ -13021,7 +13049,7 @@ auto constexpr Modifier_Letter = std::array{ // {{{
     Interval{ 0x16FE3, 0x16FE3 }, // OLD CHINESE ITERATION MARK
     Interval{ 0x1E137, 0x1E13D }, // [7] NYIAKENG PUACHUE HMONG SIGN FOR PERSON..NYIAKENG PUACHUE HMONG SYLLABLE LENGTHENER
     Interval{ 0x1E94B, 0x1E94B }, // ADLAM NASALIZATION MARK
-}; // }}}}}}
+}; // }}}
 auto constexpr Modifier_Symbol = std::array{ // {{{
     Interval{ 0x005E, 0x005E }, // CIRCUMFLEX ACCENT
     Interval{ 0x0060, 0x0060 }, // GRAVE ACCENT
@@ -13053,7 +13081,7 @@ auto constexpr Modifier_Symbol = std::array{ // {{{
     Interval{ 0xFF40, 0xFF40 }, // FULLWIDTH GRAVE ACCENT
     Interval{ 0xFFE3, 0xFFE3 }, // FULLWIDTH MACRON
     Interval{ 0x1F3FB, 0x1F3FF }, // [5] EMOJI MODIFIER FITZPATRICK TYPE-1-2..EMOJI MODIFIER FITZPATRICK TYPE-6
-}; // }}}}}}
+}; // }}}
 auto constexpr Nonspacing_Mark = std::array{ // {{{
     Interval{ 0x0300, 0x036F }, // [112] COMBINING GRAVE ACCENT..COMBINING LATIN SMALL LETTER X
     Interval{ 0x0483, 0x0487 }, // [5] COMBINING CYRILLIC TITLO..COMBINING CYRILLIC POKRYTIE
@@ -13382,7 +13410,7 @@ auto constexpr Nonspacing_Mark = std::array{ // {{{
     Interval{ 0x1E8D0, 0x1E8D6 }, // [7] MENDE KIKAKUI COMBINING NUMBER TEENS..MENDE KIKAKUI COMBINING NUMBER MILLIONS
     Interval{ 0x1E944, 0x1E94A }, // [7] ADLAM ALIF LENGTHENER..ADLAM NUKTA
     Interval{ 0xE0100, 0xE01EF }, // [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
-}; // }}}}}}
+}; // }}}
 auto constexpr Open_Punctuation = std::array{ // {{{
     Interval{ 0x0028, 0x0028 }, // LEFT PARENTHESIS
     Interval{ 0x005B, 0x005B }, // LEFT SQUARE BRACKET
@@ -13459,7 +13487,7 @@ auto constexpr Open_Punctuation = std::array{ // {{{
     Interval{ 0xFF5B, 0xFF5B }, // FULLWIDTH LEFT CURLY BRACKET
     Interval{ 0xFF5F, 0xFF5F }, // FULLWIDTH LEFT WHITE PARENTHESIS
     Interval{ 0xFF62, 0xFF62 }, // HALFWIDTH LEFT CORNER BRACKET
-}; // }}}}}}
+}; // }}}
 auto constexpr Other_Letter = std::array{ // {{{
     Interval{ 0x00AA, 0x00AA }, // FEMININE ORDINAL INDICATOR
     Interval{ 0x00BA, 0x00BA }, // MASCULINE ORDINAL INDICATOR
@@ -13950,7 +13978,7 @@ auto constexpr Other_Letter = std::array{ // {{{
     Interval{ 0x2CEB0, 0x2EBE0 }, // [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
     Interval{ 0x2F800, 0x2FA1D }, // [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
     Interval{ 0x30000, 0x3134A }, // [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
-}; // }}}}}}
+}; // }}}
 auto constexpr Other_Number = std::array{ // {{{
     Interval{ 0x00B2, 0x00B3 }, // [2] SUPERSCRIPT TWO..SUPERSCRIPT THREE
     Interval{ 0x00B9, 0x00B9 }, // SUPERSCRIPT ONE
@@ -14023,7 +14051,7 @@ auto constexpr Other_Number = std::array{ // {{{
     Interval{ 0x1ED01, 0x1ED2D }, // [45] OTTOMAN SIYAQ NUMBER ONE..OTTOMAN SIYAQ NUMBER NINETY THOUSAND
     Interval{ 0x1ED2F, 0x1ED3D }, // [15] OTTOMAN SIYAQ ALTERNATE NUMBER TWO..OTTOMAN SIYAQ FRACTION ONE SIXTH
     Interval{ 0x1F100, 0x1F10C }, // [13] DIGIT ZERO FULL STOP..DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT ZERO
-}; // }}}}}}
+}; // }}}
 auto constexpr Other_Punctuation = std::array{ // {{{
     Interval{ 0x0021, 0x0023 }, // [3] EXCLAMATION MARK..NUMBER SIGN
     Interval{ 0x0025, 0x0027 }, // [3] PERCENT SIGN..APOSTROPHE
@@ -14206,7 +14234,7 @@ auto constexpr Other_Punctuation = std::array{ // {{{
     Interval{ 0x1BC9F, 0x1BC9F }, // DUPLOYAN PUNCTUATION CHINOOK FULL STOP
     Interval{ 0x1DA87, 0x1DA8B }, // [5] SIGNWRITING COMMA..SIGNWRITING PARENTHESIS
     Interval{ 0x1E95E, 0x1E95F }, // [2] ADLAM INITIAL EXCLAMATION MARK..ADLAM INITIAL QUESTION MARK
-}; // }}}}}}
+}; // }}}
 auto constexpr Other_Symbol = std::array{ // {{{
     Interval{ 0x00A6, 0x00A6 }, // BROKEN BAR
     Interval{ 0x00A9, 0x00A9 }, // COPYRIGHT SIGN
@@ -14390,14 +14418,15 @@ auto constexpr Other_Symbol = std::array{ // {{{
     Interval{ 0x1FAD0, 0x1FAD6 }, // [7] BLUEBERRIES..TEAPOT
     Interval{ 0x1FB00, 0x1FB92 }, // [147] BLOCK SEXTANT-1..UPPER HALF INVERSE MEDIUM SHADE AND LOWER HALF BLOCK
     Interval{ 0x1FB94, 0x1FBCA }, // [55] LEFT HALF INVERSE MEDIUM SHADE AND RIGHT HALF BLOCK..WHITE UP-POINTING CHEVRON
-}; // }}}}}}
+}; // }}}
 auto constexpr Paragraph_Separator = std::array{ // {{{
     Interval{ 0x2029, 0x2029 }, // PARAGRAPH SEPARATOR
-}; // }}}}}}
+}; // }}}
 auto constexpr Private_Use = std::array{ // {{{
     Interval{ 0xE000, 0xF8FF }, // [6400] <private-use-E000>..<private-use-F8FF>
     Interval{ 0xF0000, 0xFFFFD }, // [65534] <private-use-F0000>..<private-use-FFFFD>
-}; // }}}}}}
+    Interval{ 0x100000, 0x10FFFD }, // [65534] <private-use-100000>..<private-use-10FFFD>
+}; // }}}
 auto constexpr Space_Separator = std::array{ // {{{
     Interval{ 0x0020, 0x0020 }, // SPACE
     Interval{ 0x00A0, 0x00A0 }, // NO-BREAK SPACE
@@ -14406,7 +14435,7 @@ auto constexpr Space_Separator = std::array{ // {{{
     Interval{ 0x202F, 0x202F }, // NARROW NO-BREAK SPACE
     Interval{ 0x205F, 0x205F }, // MEDIUM MATHEMATICAL SPACE
     Interval{ 0x3000, 0x3000 }, // IDEOGRAPHIC SPACE
-}; // }}}}}}
+}; // }}}
 auto constexpr Spacing_Mark = std::array{ // {{{
     Interval{ 0x0903, 0x0903 }, // DEVANAGARI SIGN VISARGA
     Interval{ 0x093B, 0x093B }, // DEVANAGARI VOWEL SIGN OOE
@@ -14583,10 +14612,10 @@ auto constexpr Spacing_Mark = std::array{ // {{{
     Interval{ 0x16FF0, 0x16FF1 }, // [2] VIETNAMESE ALTERNATE READING MARK CA..VIETNAMESE ALTERNATE READING MARK NHAY
     Interval{ 0x1D165, 0x1D166 }, // [2] MUSICAL SYMBOL COMBINING STEM..MUSICAL SYMBOL COMBINING SPRECHGESANG STEM
     Interval{ 0x1D16D, 0x1D172 }, // [6] MUSICAL SYMBOL COMBINING AUGMENTATION DOT..MUSICAL SYMBOL COMBINING FLAG-5
-}; // }}}}}}
+}; // }}}
 auto constexpr Surrogate = std::array{ // {{{
     Interval{ 0xD800, 0xDFFF }, // [2048] <surrogate-D800>..<surrogate-DFFF>
-}; // }}}}}}
+}; // }}}
 auto constexpr Titlecase_Letter = std::array{ // {{{
     Interval{ 0x01C5, 0x01C5 }, // LATIN CAPITAL LETTER D WITH SMALL LETTER Z WITH CARON
     Interval{ 0x01C8, 0x01C8 }, // LATIN CAPITAL LETTER L WITH SMALL LETTER J
@@ -14598,7 +14627,7 @@ auto constexpr Titlecase_Letter = std::array{ // {{{
     Interval{ 0x1FBC, 0x1FBC }, // GREEK CAPITAL LETTER ALPHA WITH PROSGEGRAMMENI
     Interval{ 0x1FCC, 0x1FCC }, // GREEK CAPITAL LETTER ETA WITH PROSGEGRAMMENI
     Interval{ 0x1FFC, 0x1FFC }, // GREEK CAPITAL LETTER OMEGA WITH PROSGEGRAMMENI
-}; // }}}}}}
+}; // }}}
 auto constexpr Unassigned = std::array{ // {{{
     Interval{ 0x0378, 0x0379 }, // [2] <reserved-0378>..<reserved-0379>
     Interval{ 0x0380, 0x0383 }, // [4] <reserved-0380>..<reserved-0383>
@@ -15276,7 +15305,8 @@ auto constexpr Unassigned = std::array{ // {{{
     Interval{ 0xE0080, 0xE00FF }, // [128] <reserved-E0080>..<reserved-E00FF>
     Interval{ 0xE01F0, 0xEFFFF }, // [65040] <reserved-E01F0>..<noncharacter-EFFFF>
     Interval{ 0xFFFFE, 0xFFFFF }, // [2] <noncharacter-FFFFE>..<noncharacter-FFFFF>
-}; // }}}}}}
+    Interval{ 0x10FFFE, 0x10FFFF }, // [2] <noncharacter-10FFFE>..<noncharacter-10FFFF>
+}; // }}}
 auto constexpr Uppercase_Letter = std::array{ // {{{
     Interval{ 0x0041, 0x005A }, // [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
     Interval{ 0x00C0, 0x00D6 }, // [23] LATIN CAPITAL LETTER A WITH GRAVE..LATIN CAPITAL LETTER O WITH DIAERESIS
@@ -15916,7 +15946,7 @@ auto constexpr Uppercase_Letter = std::array{ // {{{
     Interval{ 0x1D790, 0x1D7A8 }, // [25] MATHEMATICAL SANS-SERIF BOLD ITALIC CAPITAL ALPHA..MATHEMATICAL SANS-SERIF BOLD ITALIC CAPITAL OMEGA
     Interval{ 0x1D7CA, 0x1D7CA }, // MATHEMATICAL BOLD CAPITAL DIGAMMA
     Interval{ 0x1E900, 0x1E921 }, // [34] ADLAM CAPITAL LETTER ALIF..ADLAM CAPITAL LETTER SHA
-}; // }}}}}}
+}; // }}}
 } // end namespace tables
 
 bool contains(General_Category _cat, char32_t _codepoint) noexcept {
@@ -15953,6 +15983,2611 @@ bool contains(General_Category _cat, char32_t _codepoint) noexcept {
         case General_Category::Uppercase_Letter: return contains(tables::Uppercase_Letter, _codepoint);
     }
     return false;
+}
+
+namespace tables {
+auto constexpr Grapheme_Cluster_Break = std::array{ // {{{
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0000, 0x0009 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cc  [10] <control-0000>..<control-0009>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x000A, 0x000A }, crispy::text::Grapheme_Cluster_Break::LF }, // Cc       <control-000A>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x000B, 0x000C }, crispy::text::Grapheme_Cluster_Break::Control }, // Cc   [2] <control-000B>..<control-000C>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x000D, 0x000D }, crispy::text::Grapheme_Cluster_Break::CR }, // Cc       <control-000D>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x000E, 0x001F }, crispy::text::Grapheme_Cluster_Break::Control }, // Cc  [18] <control-000E>..<control-001F>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x007F, 0x009F }, crispy::text::Grapheme_Cluster_Break::Control }, // Cc  [33] <control-007F>..<control-009F>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x00AD, 0x00AD }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       SOFT HYPHEN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0300, 0x036F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn [112] COMBINING GRAVE ACCENT..COMBINING LATIN SMALL LETTER X
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0483, 0x0487 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] COMBINING CYRILLIC TITLO..COMBINING CYRILLIC POKRYTIE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0488, 0x0489 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Me   [2] COMBINING CYRILLIC HUNDRED THOUSANDS SIGN..COMBINING CYRILLIC MILLIONS SIGN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0591, 0x05BD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [45] HEBREW ACCENT ETNAHTA..HEBREW POINT METEG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x05BF, 0x05BF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       HEBREW POINT RAFE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x05C1, 0x05C2 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] HEBREW POINT SHIN DOT..HEBREW POINT SIN DOT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x05C4, 0x05C5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] HEBREW MARK UPPER DOT..HEBREW MARK LOWER DOT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x05C7, 0x05C7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       HEBREW POINT QAMATS QATAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0600, 0x0605 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf   [6] ARABIC NUMBER SIGN..ARABIC NUMBER MARK ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0610, 0x061A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] ARABIC SIGN SALLALLAHOU ALAYHE WASSALLAM..ARABIC SMALL KASRA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x061C, 0x061C }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       ARABIC LETTER MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x064B, 0x065F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [21] ARABIC FATHATAN..ARABIC WAVY HAMZA BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0670, 0x0670 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ARABIC LETTER SUPERSCRIPT ALEF
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x06D6, 0x06DC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] ARABIC SMALL HIGH LIGATURE SAD WITH LAM WITH ALEF MAKSURA..ARABIC SMALL HIGH SEEN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x06DD, 0x06DD }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf       ARABIC END OF AYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x06DF, 0x06E4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] ARABIC SMALL HIGH ROUNDED ZERO..ARABIC SMALL HIGH MADDA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x06E7, 0x06E8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] ARABIC SMALL HIGH YEH..ARABIC SMALL HIGH NOON
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x06EA, 0x06ED }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] ARABIC EMPTY CENTRE LOW STOP..ARABIC SMALL LOW MEEM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x070F, 0x070F }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf       SYRIAC ABBREVIATION MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0711, 0x0711 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SYRIAC LETTER SUPERSCRIPT ALAPH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0730, 0x074A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [27] SYRIAC PTHAHA ABOVE..SYRIAC BARREKH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x07A6, 0x07B0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] THAANA ABAFILI..THAANA SUKUN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x07EB, 0x07F3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] NKO COMBINING SHORT HIGH TONE..NKO COMBINING DOUBLE DOT ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x07FD, 0x07FD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       NKO DANTAYALAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0816, 0x0819 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] SAMARITAN MARK IN..SAMARITAN MARK DAGESH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x081B, 0x0823 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] SAMARITAN MARK EPENTHETIC YUT..SAMARITAN VOWEL SIGN A
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0825, 0x0827 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] SAMARITAN VOWEL SIGN SHORT A..SAMARITAN VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0829, 0x082D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] SAMARITAN VOWEL SIGN LONG I..SAMARITAN MARK NEQUDAA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0859, 0x085B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] MANDAIC AFFRICATION MARK..MANDAIC GEMINATION MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x08D3, 0x08E1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [15] ARABIC SMALL LOW WAW..ARABIC SMALL HIGH SIGN SAFHA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x08E2, 0x08E2 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf       ARABIC DISPUTED END OF AYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x08E3, 0x0902 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [32] ARABIC TURNED DAMMA BELOW..DEVANAGARI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0903, 0x0903 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DEVANAGARI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x093A, 0x093A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DEVANAGARI VOWEL SIGN OE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x093B, 0x093B }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DEVANAGARI VOWEL SIGN OOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x093C, 0x093C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DEVANAGARI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x093E, 0x0940 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] DEVANAGARI VOWEL SIGN AA..DEVANAGARI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0941, 0x0948 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] DEVANAGARI VOWEL SIGN U..DEVANAGARI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0949, 0x094C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] DEVANAGARI VOWEL SIGN CANDRA O..DEVANAGARI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x094D, 0x094D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DEVANAGARI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x094E, 0x094F }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] DEVANAGARI VOWEL SIGN PRISHTHAMATRA E..DEVANAGARI VOWEL SIGN AW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0951, 0x0957 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] DEVANAGARI STRESS SIGN UDATTA..DEVANAGARI VOWEL SIGN UUE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0962, 0x0963 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] DEVANAGARI VOWEL SIGN VOCALIC L..DEVANAGARI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0981, 0x0981 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BENGALI SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0982, 0x0983 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BENGALI SIGN ANUSVARA..BENGALI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09BC, 0x09BC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BENGALI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09BE, 0x09BE }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       BENGALI VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09BF, 0x09C0 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BENGALI VOWEL SIGN I..BENGALI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09C1, 0x09C4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] BENGALI VOWEL SIGN U..BENGALI VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09C7, 0x09C8 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BENGALI VOWEL SIGN E..BENGALI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09CB, 0x09CC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BENGALI VOWEL SIGN O..BENGALI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09CD, 0x09CD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BENGALI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09D7, 0x09D7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       BENGALI AU LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09E2, 0x09E3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] BENGALI VOWEL SIGN VOCALIC L..BENGALI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x09FE, 0x09FE }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BENGALI SANDHI MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A01, 0x0A02 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GURMUKHI SIGN ADAK BINDI..GURMUKHI SIGN BINDI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A03, 0x0A03 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       GURMUKHI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A3C, 0x0A3C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GURMUKHI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A3E, 0x0A40 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] GURMUKHI VOWEL SIGN AA..GURMUKHI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A41, 0x0A42 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GURMUKHI VOWEL SIGN U..GURMUKHI VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A47, 0x0A48 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GURMUKHI VOWEL SIGN EE..GURMUKHI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A4B, 0x0A4D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] GURMUKHI VOWEL SIGN OO..GURMUKHI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A51, 0x0A51 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GURMUKHI SIGN UDAAT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A70, 0x0A71 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GURMUKHI TIPPI..GURMUKHI ADDAK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A75, 0x0A75 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GURMUKHI SIGN YAKASH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A81, 0x0A82 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GUJARATI SIGN CANDRABINDU..GUJARATI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0A83, 0x0A83 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       GUJARATI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0ABC, 0x0ABC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GUJARATI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0ABE, 0x0AC0 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] GUJARATI VOWEL SIGN AA..GUJARATI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0AC1, 0x0AC5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] GUJARATI VOWEL SIGN U..GUJARATI VOWEL SIGN CANDRA E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0AC7, 0x0AC8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GUJARATI VOWEL SIGN E..GUJARATI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0AC9, 0x0AC9 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       GUJARATI VOWEL SIGN CANDRA O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0ACB, 0x0ACC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] GUJARATI VOWEL SIGN O..GUJARATI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0ACD, 0x0ACD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GUJARATI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0AE2, 0x0AE3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GUJARATI VOWEL SIGN VOCALIC L..GUJARATI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0AFA, 0x0AFF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] GUJARATI SIGN SUKUN..GUJARATI SIGN TWO-CIRCLE NUKTA ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B01, 0x0B01 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ORIYA SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B02, 0x0B03 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] ORIYA SIGN ANUSVARA..ORIYA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B3C, 0x0B3C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ORIYA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B3E, 0x0B3E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       ORIYA VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B3F, 0x0B3F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ORIYA VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B40, 0x0B40 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       ORIYA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B41, 0x0B44 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] ORIYA VOWEL SIGN U..ORIYA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B47, 0x0B48 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] ORIYA VOWEL SIGN E..ORIYA VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B4B, 0x0B4C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] ORIYA VOWEL SIGN O..ORIYA VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B4D, 0x0B4D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ORIYA SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B55, 0x0B56 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] ORIYA SIGN OVERLINE..ORIYA AI LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B57, 0x0B57 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       ORIYA AU LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B62, 0x0B63 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] ORIYA VOWEL SIGN VOCALIC L..ORIYA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0B82, 0x0B82 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAMIL SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BBE, 0x0BBE }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       TAMIL VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BBF, 0x0BBF }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TAMIL VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BC0, 0x0BC0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAMIL VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BC1, 0x0BC2 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] TAMIL VOWEL SIGN U..TAMIL VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BC6, 0x0BC8 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] TAMIL VOWEL SIGN E..TAMIL VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BCA, 0x0BCC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] TAMIL VOWEL SIGN O..TAMIL VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BCD, 0x0BCD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAMIL SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0BD7, 0x0BD7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       TAMIL AU LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C00, 0x0C00 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TELUGU SIGN COMBINING CANDRABINDU ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C01, 0x0C03 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] TELUGU SIGN CANDRABINDU..TELUGU SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C04, 0x0C04 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TELUGU SIGN COMBINING ANUSVARA ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C3E, 0x0C40 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] TELUGU VOWEL SIGN AA..TELUGU VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C41, 0x0C44 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] TELUGU VOWEL SIGN U..TELUGU VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C46, 0x0C48 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] TELUGU VOWEL SIGN E..TELUGU VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C4A, 0x0C4D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] TELUGU VOWEL SIGN O..TELUGU SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C55, 0x0C56 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TELUGU LENGTH MARK..TELUGU AI LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C62, 0x0C63 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TELUGU VOWEL SIGN VOCALIC L..TELUGU VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C81, 0x0C81 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KANNADA SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0C82, 0x0C83 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KANNADA SIGN ANUSVARA..KANNADA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CBC, 0x0CBC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KANNADA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CBE, 0x0CBE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       KANNADA VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CBF, 0x0CBF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KANNADA VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CC0, 0x0CC1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KANNADA VOWEL SIGN II..KANNADA VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CC2, 0x0CC2 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       KANNADA VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CC3, 0x0CC4 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KANNADA VOWEL SIGN VOCALIC R..KANNADA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CC6, 0x0CC6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KANNADA VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CC7, 0x0CC8 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KANNADA VOWEL SIGN EE..KANNADA VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CCA, 0x0CCB }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KANNADA VOWEL SIGN O..KANNADA VOWEL SIGN OO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CCC, 0x0CCD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KANNADA VOWEL SIGN AU..KANNADA SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CD5, 0x0CD6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc   [2] KANNADA LENGTH MARK..KANNADA AI LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0CE2, 0x0CE3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KANNADA VOWEL SIGN VOCALIC L..KANNADA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D00, 0x0D01 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MALAYALAM SIGN COMBINING ANUSVARA ABOVE..MALAYALAM SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D02, 0x0D03 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MALAYALAM SIGN ANUSVARA..MALAYALAM SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D3B, 0x0D3C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MALAYALAM SIGN VERTICAL BAR VIRAMA..MALAYALAM SIGN CIRCULAR VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D3E, 0x0D3E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       MALAYALAM VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D3F, 0x0D40 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MALAYALAM VOWEL SIGN I..MALAYALAM VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D41, 0x0D44 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] MALAYALAM VOWEL SIGN U..MALAYALAM VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D46, 0x0D48 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] MALAYALAM VOWEL SIGN E..MALAYALAM VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D4A, 0x0D4C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] MALAYALAM VOWEL SIGN O..MALAYALAM VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D4D, 0x0D4D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MALAYALAM SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D4E, 0x0D4E }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo       MALAYALAM LETTER DOT REPH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D57, 0x0D57 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       MALAYALAM AU LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D62, 0x0D63 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MALAYALAM VOWEL SIGN VOCALIC L..MALAYALAM VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D81, 0x0D81 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SINHALA SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0D82, 0x0D83 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SINHALA SIGN ANUSVARAYA..SINHALA SIGN VISARGAYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DCA, 0x0DCA }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SINHALA SIGN AL-LAKUNA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DCF, 0x0DCF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       SINHALA VOWEL SIGN AELA-PILLA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DD0, 0x0DD1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SINHALA VOWEL SIGN KETTI AEDA-PILLA..SINHALA VOWEL SIGN DIGA AEDA-PILLA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DD2, 0x0DD4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] SINHALA VOWEL SIGN KETTI IS-PILLA..SINHALA VOWEL SIGN KETTI PAA-PILLA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DD6, 0x0DD6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SINHALA VOWEL SIGN DIGA PAA-PILLA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DD8, 0x0DDE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [7] SINHALA VOWEL SIGN GAETTA-PILLA..SINHALA VOWEL SIGN KOMBUVA HAA GAYANUKITTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DDF, 0x0DDF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       SINHALA VOWEL SIGN GAYANUKITTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0DF2, 0x0DF3 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SINHALA VOWEL SIGN DIGA GAETTA-PILLA..SINHALA VOWEL SIGN DIGA GAYANUKITTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0E31, 0x0E31 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       THAI CHARACTER MAI HAN-AKAT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0E33, 0x0E33 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Lo       THAI CHARACTER SARA AM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0E34, 0x0E3A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] THAI CHARACTER SARA I..THAI CHARACTER PHINTHU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0E47, 0x0E4E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] THAI CHARACTER MAITAIKHU..THAI CHARACTER YAMAKKAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0EB1, 0x0EB1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       LAO VOWEL SIGN MAI KAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0EB3, 0x0EB3 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Lo       LAO VOWEL SIGN AM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0EB4, 0x0EBC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] LAO VOWEL SIGN I..LAO SEMIVOWEL SIGN LO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0EC8, 0x0ECD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] LAO TONE MAI EK..LAO NIGGAHITA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F18, 0x0F19 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TIBETAN ASTROLOGICAL SIGN -KHYUD PA..TIBETAN ASTROLOGICAL SIGN SDONG TSHUGS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F35, 0x0F35 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIBETAN MARK NGAS BZUNG NYI ZLA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F37, 0x0F37 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIBETAN MARK NGAS BZUNG SGOR RTAGS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F39, 0x0F39 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIBETAN MARK TSA -PHRU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F3E, 0x0F3F }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] TIBETAN SIGN YAR TSHES..TIBETAN SIGN MAR TSHES
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F71, 0x0F7E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [14] TIBETAN VOWEL SIGN AA..TIBETAN SIGN RJES SU NGA RO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F7F, 0x0F7F }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TIBETAN SIGN RNAM BCAD
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F80, 0x0F84 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] TIBETAN VOWEL SIGN REVERSED I..TIBETAN MARK HALANTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F86, 0x0F87 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TIBETAN SIGN LCI RTAGS..TIBETAN SIGN YANG RTAGS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F8D, 0x0F97 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] TIBETAN SUBJOINED SIGN LCE TSA CAN..TIBETAN SUBJOINED LETTER JA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0F99, 0x0FBC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [36] TIBETAN SUBJOINED LETTER NYA..TIBETAN SUBJOINED LETTER FIXED-FORM RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x0FC6, 0x0FC6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIBETAN SYMBOL PADMA GDAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x102D, 0x1030 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] MYANMAR VOWEL SIGN I..MYANMAR VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1031, 0x1031 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MYANMAR VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1032, 0x1037 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] MYANMAR VOWEL SIGN AI..MYANMAR SIGN DOT BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1039, 0x103A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MYANMAR SIGN VIRAMA..MYANMAR SIGN ASAT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x103B, 0x103C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MYANMAR CONSONANT SIGN MEDIAL YA..MYANMAR CONSONANT SIGN MEDIAL RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x103D, 0x103E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MYANMAR CONSONANT SIGN MEDIAL WA..MYANMAR CONSONANT SIGN MEDIAL HA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1056, 0x1057 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MYANMAR VOWEL SIGN VOCALIC R..MYANMAR VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1058, 0x1059 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MYANMAR VOWEL SIGN VOCALIC L..MYANMAR VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x105E, 0x1060 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] MYANMAR CONSONANT SIGN MON MEDIAL NA..MYANMAR CONSONANT SIGN MON MEDIAL LA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1071, 0x1074 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] MYANMAR VOWEL SIGN GEBA KAREN I..MYANMAR VOWEL SIGN KAYAH EE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1082, 0x1082 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MYANMAR CONSONANT SIGN SHAN MEDIAL WA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1084, 0x1084 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MYANMAR VOWEL SIGN SHAN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1085, 0x1086 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MYANMAR VOWEL SIGN SHAN E ABOVE..MYANMAR VOWEL SIGN SHAN FINAL Y
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x108D, 0x108D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MYANMAR SIGN SHAN COUNCIL EMPHATIC TONE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x109D, 0x109D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MYANMAR VOWEL SIGN AITON AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1100, 0x115F }, crispy::text::Grapheme_Cluster_Break::L }, // Lo  [96] HANGUL CHOSEONG KIYEOK..HANGUL CHOSEONG FILLER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1160, 0x11A7 }, crispy::text::Grapheme_Cluster_Break::V }, // Lo  [72] HANGUL JUNGSEONG FILLER..HANGUL JUNGSEONG O-YAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A8, 0x11FF }, crispy::text::Grapheme_Cluster_Break::T }, // Lo  [88] HANGUL JONGSEONG KIYEOK..HANGUL JONGSEONG SSANGNIEUN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x135D, 0x135F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] ETHIOPIC COMBINING GEMINATION AND VOWEL LENGTH MARK..ETHIOPIC COMBINING GEMINATION MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1712, 0x1714 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] TAGALOG VOWEL SIGN I..TAGALOG SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1732, 0x1734 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] HANUNOO VOWEL SIGN I..HANUNOO SIGN PAMUDPOD
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1752, 0x1753 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] BUHID VOWEL SIGN I..BUHID VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1772, 0x1773 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TAGBANWA VOWEL SIGN I..TAGBANWA VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17B4, 0x17B5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KHMER VOWEL INHERENT AQ..KHMER VOWEL INHERENT AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17B6, 0x17B6 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       KHMER VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17B7, 0x17BD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] KHMER VOWEL SIGN I..KHMER VOWEL SIGN UA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17BE, 0x17C5 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [8] KHMER VOWEL SIGN OE..KHMER VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17C6, 0x17C6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHMER SIGN NIKAHIT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17C7, 0x17C8 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KHMER SIGN REAHMUK..KHMER SIGN YUUKALEAPINTU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17C9, 0x17D3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] KHMER SIGN MUUSIKATOAN..KHMER SIGN BATHAMASAT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x17DD, 0x17DD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHMER SIGN ATTHACAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x180B, 0x180D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] MONGOLIAN FREE VARIATION SELECTOR ONE..MONGOLIAN FREE VARIATION SELECTOR THREE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x180E, 0x180E }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       MONGOLIAN VOWEL SEPARATOR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1885, 0x1886 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MONGOLIAN LETTER ALI GALI BALUDA..MONGOLIAN LETTER ALI GALI THREE BALUDA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x18A9, 0x18A9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MONGOLIAN LETTER ALI GALI DAGALGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1920, 0x1922 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] LIMBU VOWEL SIGN A..LIMBU VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1923, 0x1926 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] LIMBU VOWEL SIGN EE..LIMBU VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1927, 0x1928 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] LIMBU VOWEL SIGN E..LIMBU VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1929, 0x192B }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] LIMBU SUBJOINED LETTER YA..LIMBU SUBJOINED LETTER WA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1930, 0x1931 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] LIMBU SMALL LETTER KA..LIMBU SMALL LETTER NGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1932, 0x1932 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       LIMBU SMALL LETTER ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1933, 0x1938 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [6] LIMBU SMALL LETTER TA..LIMBU SMALL LETTER LA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1939, 0x193B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] LIMBU SIGN MUKPHRENG..LIMBU SIGN SA-I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A17, 0x1A18 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] BUGINESE VOWEL SIGN I..BUGINESE VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A19, 0x1A1A }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BUGINESE VOWEL SIGN E..BUGINESE VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A1B, 0x1A1B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BUGINESE VOWEL SIGN AE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A55, 0x1A55 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TAI THAM CONSONANT SIGN MEDIAL RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A56, 0x1A56 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI THAM CONSONANT SIGN MEDIAL LA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A57, 0x1A57 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TAI THAM CONSONANT SIGN LA TANG LAI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A58, 0x1A5E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] TAI THAM SIGN MAI KANG LAI..TAI THAM CONSONANT SIGN SA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A60, 0x1A60 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI THAM SIGN SAKOT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A62, 0x1A62 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI THAM VOWEL SIGN MAI SAT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A65, 0x1A6C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] TAI THAM VOWEL SIGN I..TAI THAM VOWEL SIGN OA BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A6D, 0x1A72 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [6] TAI THAM VOWEL SIGN OY..TAI THAM VOWEL SIGN THAM AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A73, 0x1A7C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [10] TAI THAM VOWEL SIGN OA ABOVE..TAI THAM SIGN KHUEN-LUE KARAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1A7F, 0x1A7F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI THAM COMBINING CRYPTOGRAMMIC DOT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1AB0, 0x1ABD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [14] COMBINING DOUBLED CIRCUMFLEX ACCENT..COMBINING PARENTHESES BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1ABE, 0x1ABE }, crispy::text::Grapheme_Cluster_Break::Extend }, // Me       COMBINING PARENTHESES OVERLAY
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1ABF, 0x1AC0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] COMBINING LATIN SMALL LETTER W BELOW..COMBINING LATIN SMALL LETTER TURNED W BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B00, 0x1B03 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] BALINESE SIGN ULU RICEM..BALINESE SIGN SURANG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B04, 0x1B04 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BALINESE SIGN BISAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B34, 0x1B34 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BALINESE SIGN REREKAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B35, 0x1B35 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       BALINESE VOWEL SIGN TEDUNG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B36, 0x1B3A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] BALINESE VOWEL SIGN ULU..BALINESE VOWEL SIGN RA REPA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B3B, 0x1B3B }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BALINESE VOWEL SIGN RA REPA TEDUNG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B3C, 0x1B3C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BALINESE VOWEL SIGN LA LENGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B3D, 0x1B41 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [5] BALINESE VOWEL SIGN LA LENGA TEDUNG..BALINESE VOWEL SIGN TALING REPA TEDUNG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B42, 0x1B42 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BALINESE VOWEL SIGN PEPET
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B43, 0x1B44 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BALINESE VOWEL SIGN PEPET TEDUNG..BALINESE ADEG ADEG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B6B, 0x1B73 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] BALINESE MUSICAL SYMBOL COMBINING TEGEH..BALINESE MUSICAL SYMBOL COMBINING GONG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B80, 0x1B81 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SUNDANESE SIGN PANYECEK..SUNDANESE SIGN PANGLAYAR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1B82, 0x1B82 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SUNDANESE SIGN PANGWISAD
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BA1, 0x1BA1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SUNDANESE CONSONANT SIGN PAMINGKAL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BA2, 0x1BA5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] SUNDANESE CONSONANT SIGN PANYAKRA..SUNDANESE VOWEL SIGN PANYUKU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BA6, 0x1BA7 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SUNDANESE VOWEL SIGN PANAELAENG..SUNDANESE VOWEL SIGN PANOLONG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BA8, 0x1BA9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SUNDANESE VOWEL SIGN PAMEPET..SUNDANESE VOWEL SIGN PANEULEUNG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BAA, 0x1BAA }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SUNDANESE SIGN PAMAAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BAB, 0x1BAD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] SUNDANESE SIGN VIRAMA..SUNDANESE CONSONANT SIGN PASANGAN WA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BE6, 0x1BE6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BATAK SIGN TOMPI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BE7, 0x1BE7 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BATAK VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BE8, 0x1BE9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] BATAK VOWEL SIGN PAKPAK E..BATAK VOWEL SIGN EE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BEA, 0x1BEC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] BATAK VOWEL SIGN I..BATAK VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BED, 0x1BED }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BATAK VOWEL SIGN KARO O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BEE, 0x1BEE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BATAK VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BEF, 0x1BF1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] BATAK VOWEL SIGN U FOR SIMALUNGUN SA..BATAK CONSONANT SIGN H
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BF2, 0x1BF3 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] BATAK PANGOLAT..BATAK PANONGONAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1C24, 0x1C2B }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [8] LEPCHA SUBJOINED LETTER YA..LEPCHA VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1C2C, 0x1C33 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] LEPCHA VOWEL SIGN E..LEPCHA CONSONANT SIGN T
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1C34, 0x1C35 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] LEPCHA CONSONANT SIGN NYIN-DO..LEPCHA CONSONANT SIGN KANG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1C36, 0x1C37 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] LEPCHA SIGN RAN..LEPCHA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CD0, 0x1CD2 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] VEDIC TONE KARSHANA..VEDIC TONE PRENKHA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CD4, 0x1CE0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [13] VEDIC SIGN YAJURVEDIC MIDLINE SVARITA..VEDIC TONE RIGVEDIC KASHMIRI INDEPENDENT SVARITA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CE1, 0x1CE1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       VEDIC TONE ATHARVAVEDIC INDEPENDENT SVARITA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CE2, 0x1CE8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] VEDIC SIGN VISARGA SVARITA..VEDIC SIGN VISARGA ANUDATTA WITH TAIL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CED, 0x1CED }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       VEDIC SIGN TIRYAK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CF4, 0x1CF4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       VEDIC TONE CANDRA ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CF7, 0x1CF7 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       VEDIC SIGN ATIKRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1CF8, 0x1CF9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] VEDIC TONE RING ABOVE..VEDIC TONE DOUBLE RING ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DC0, 0x1DF9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [58] COMBINING DOTTED GRAVE ACCENT..COMBINING WIDE INVERTED BRIDGE BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DFB, 0x1DFF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] COMBINING DELETION MARK..COMBINING RIGHT ARROWHEAD AND DOWN ARROWHEAD BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x200B, 0x200B }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       ZERO WIDTH SPACE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x200C, 0x200C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Cf       ZERO WIDTH NON-JOINER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x200D, 0x200D }, crispy::text::Grapheme_Cluster_Break::ZWJ }, // Cf       ZERO WIDTH JOINER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x200E, 0x200F }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [2] LEFT-TO-RIGHT MARK..RIGHT-TO-LEFT MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2028, 0x2028 }, crispy::text::Grapheme_Cluster_Break::Control }, // Zl       LINE SEPARATOR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2029, 0x2029 }, crispy::text::Grapheme_Cluster_Break::Control }, // Zp       PARAGRAPH SEPARATOR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x202A, 0x202E }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [5] LEFT-TO-RIGHT EMBEDDING..RIGHT-TO-LEFT OVERRIDE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2060, 0x2064 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [5] WORD JOINER..INVISIBLE PLUS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2065, 0x2065 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn       <reserved-2065>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2066, 0x206F }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf  [10] LEFT-TO-RIGHT ISOLATE..NOMINAL DIGIT SHAPES
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x20D0, 0x20DC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [13] COMBINING LEFT HARPOON ABOVE..COMBINING FOUR DOTS ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x20DD, 0x20E0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Me   [4] COMBINING ENCLOSING CIRCLE..COMBINING ENCLOSING CIRCLE BACKSLASH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x20E1, 0x20E1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       COMBINING LEFT RIGHT ARROW ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x20E2, 0x20E4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Me   [3] COMBINING ENCLOSING SCREEN..COMBINING ENCLOSING UPWARD POINTING TRIANGLE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x20E5, 0x20F0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [12] COMBINING REVERSE SOLIDUS OVERLAY..COMBINING ASTERISK ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2CEF, 0x2CF1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] COPTIC COMBINING NI ABOVE..COPTIC COMBINING SPIRITUS LENIS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2D7F, 0x2D7F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIFINAGH CONSONANT JOINER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x2DE0, 0x2DFF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [32] COMBINING CYRILLIC LETTER BE..COMBINING CYRILLIC LETTER IOTIFIED BIG YUS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x302A, 0x302D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] IDEOGRAPHIC LEVEL TONE MARK..IDEOGRAPHIC ENTERING TONE MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x302E, 0x302F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc   [2] HANGUL SINGLE DOT TONE MARK..HANGUL DOUBLE DOT TONE MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x3099, 0x309A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] COMBINING KATAKANA-HIRAGANA VOICED SOUND MARK..COMBINING KATAKANA-HIRAGANA SEMI-VOICED SOUND MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA66F, 0xA66F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       COMBINING CYRILLIC VZMET
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA670, 0xA672 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Me   [3] COMBINING CYRILLIC TEN MILLIONS SIGN..COMBINING CYRILLIC THOUSAND MILLIONS SIGN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA674, 0xA67D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [10] COMBINING CYRILLIC LETTER UKRAINIAN IE..COMBINING CYRILLIC PAYEROK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA69E, 0xA69F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] COMBINING CYRILLIC LETTER EF..COMBINING CYRILLIC LETTER IOTIFIED E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA6F0, 0xA6F1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] BAMUM COMBINING MARK KOQNDON..BAMUM COMBINING MARK TUKWENTIS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA802, 0xA802 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SYLOTI NAGRI SIGN DVISVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA806, 0xA806 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SYLOTI NAGRI SIGN HASANTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA80B, 0xA80B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SYLOTI NAGRI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA823, 0xA824 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SYLOTI NAGRI VOWEL SIGN A..SYLOTI NAGRI VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA825, 0xA826 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SYLOTI NAGRI VOWEL SIGN U..SYLOTI NAGRI VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA827, 0xA827 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SYLOTI NAGRI VOWEL SIGN OO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA82C, 0xA82C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SYLOTI NAGRI SIGN ALTERNATE HASANTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA880, 0xA881 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SAURASHTRA SIGN ANUSVARA..SAURASHTRA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA8B4, 0xA8C3 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc  [16] SAURASHTRA CONSONANT SIGN HAARU..SAURASHTRA VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA8C4, 0xA8C5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SAURASHTRA SIGN VIRAMA..SAURASHTRA SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA8E0, 0xA8F1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [18] COMBINING DEVANAGARI DIGIT ZERO..COMBINING DEVANAGARI SIGN AVAGRAHA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA8FF, 0xA8FF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DEVANAGARI VOWEL SIGN AY
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA926, 0xA92D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] KAYAH LI VOWEL UE..KAYAH LI TONE CALYA PLOPHU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA947, 0xA951 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] REJANG VOWEL SIGN I..REJANG CONSONANT SIGN R
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA952, 0xA953 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] REJANG CONSONANT SIGN H..REJANG VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA960, 0xA97C }, crispy::text::Grapheme_Cluster_Break::L }, // Lo  [29] HANGUL CHOSEONG TIKEUT-MIEUM..HANGUL CHOSEONG SSANGYEORINHIEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA980, 0xA982 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] JAVANESE SIGN PANYANGGA..JAVANESE SIGN LAYAR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA983, 0xA983 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       JAVANESE SIGN WIGNYAN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9B3, 0xA9B3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       JAVANESE SIGN CECAK TELU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9B4, 0xA9B5 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] JAVANESE VOWEL SIGN TARUNG..JAVANESE VOWEL SIGN TOLONG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9B6, 0xA9B9 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] JAVANESE VOWEL SIGN WULU..JAVANESE VOWEL SIGN SUKU MENDUT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9BA, 0xA9BB }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] JAVANESE VOWEL SIGN TALING..JAVANESE VOWEL SIGN DIRGA MURE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9BC, 0xA9BD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] JAVANESE VOWEL SIGN PEPET..JAVANESE CONSONANT SIGN KERET
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9BE, 0xA9C0 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] JAVANESE CONSONANT SIGN PENGKAL..JAVANESE PANGKON
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xA9E5, 0xA9E5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MYANMAR SIGN SHAN SAW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA29, 0xAA2E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] CHAM VOWEL SIGN AA..CHAM VOWEL SIGN OE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA2F, 0xAA30 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] CHAM VOWEL SIGN O..CHAM VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA31, 0xAA32 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] CHAM VOWEL SIGN AU..CHAM VOWEL SIGN UE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA33, 0xAA34 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] CHAM CONSONANT SIGN YA..CHAM CONSONANT SIGN RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA35, 0xAA36 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] CHAM CONSONANT SIGN LA..CHAM CONSONANT SIGN WA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA43, 0xAA43 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       CHAM CONSONANT SIGN FINAL NG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA4C, 0xAA4C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       CHAM CONSONANT SIGN FINAL M
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA4D, 0xAA4D }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       CHAM CONSONANT SIGN FINAL H
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAA7C, 0xAA7C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MYANMAR SIGN TAI LAING TONE-2
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAB0, 0xAAB0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI VIET MAI KANG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAB2, 0xAAB4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] TAI VIET VOWEL I..TAI VIET VOWEL U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAB7, 0xAAB8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TAI VIET MAI KHIT..TAI VIET VOWEL IA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAABE, 0xAABF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TAI VIET VOWEL AM..TAI VIET TONE MAI EK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAC1, 0xAAC1 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAI VIET TONE MAI THO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAEB, 0xAAEB }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MEETEI MAYEK VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAEC, 0xAAED }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MEETEI MAYEK VOWEL SIGN UU..MEETEI MAYEK VOWEL SIGN AAI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAEE, 0xAAEF }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MEETEI MAYEK VOWEL SIGN AU..MEETEI MAYEK VOWEL SIGN AAU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAF5, 0xAAF5 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MEETEI MAYEK VOWEL SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAAF6, 0xAAF6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MEETEI MAYEK VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABE3, 0xABE4 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MEETEI MAYEK VOWEL SIGN ONAP..MEETEI MAYEK VOWEL SIGN INAP
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABE5, 0xABE5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MEETEI MAYEK VOWEL SIGN ANAP
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABE6, 0xABE7 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MEETEI MAYEK VOWEL SIGN YENAP..MEETEI MAYEK VOWEL SIGN SOUNAP
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABE8, 0xABE8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MEETEI MAYEK VOWEL SIGN UNAP
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABE9, 0xABEA }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MEETEI MAYEK VOWEL SIGN CHEINAP..MEETEI MAYEK VOWEL SIGN NUNG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABEC, 0xABEC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MEETEI MAYEK LUM IYEK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xABED, 0xABED }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MEETEI MAYEK APUN IYEK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC00, 0xAC00 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC01, 0xAC1B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GAG..HANGUL SYLLABLE GAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC1C, 0xAC1C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC1D, 0xAC37 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GAEG..HANGUL SYLLABLE GAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC38, 0xAC38 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC39, 0xAC53 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYAG..HANGUL SYLLABLE GYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC54, 0xAC54 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC55, 0xAC6F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYAEG..HANGUL SYLLABLE GYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC70, 0xAC70 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC71, 0xAC8B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GEOG..HANGUL SYLLABLE GEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC8C, 0xAC8C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAC8D, 0xACA7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GEG..HANGUL SYLLABLE GEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACA8, 0xACA8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACA9, 0xACC3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYEOG..HANGUL SYLLABLE GYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACC4, 0xACC4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACC5, 0xACDF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYEG..HANGUL SYLLABLE GYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACE0, 0xACE0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACE1, 0xACFB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GOG..HANGUL SYLLABLE GOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACFC, 0xACFC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xACFD, 0xAD17 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GWAG..HANGUL SYLLABLE GWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD18, 0xAD18 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD19, 0xAD33 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GWAEG..HANGUL SYLLABLE GWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD34, 0xAD34 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD35, 0xAD4F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GOEG..HANGUL SYLLABLE GOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD50, 0xAD50 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD51, 0xAD6B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYOG..HANGUL SYLLABLE GYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD6C, 0xAD6C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD6D, 0xAD87 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GUG..HANGUL SYLLABLE GUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD88, 0xAD88 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAD89, 0xADA3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GWEOG..HANGUL SYLLABLE GWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADA4, 0xADA4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADA5, 0xADBF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GWEG..HANGUL SYLLABLE GWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADC0, 0xADC0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADC1, 0xADDB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GWIG..HANGUL SYLLABLE GWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADDC, 0xADDC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADDD, 0xADF7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYUG..HANGUL SYLLABLE GYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADF8, 0xADF8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xADF9, 0xAE13 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GEUG..HANGUL SYLLABLE GEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE14, 0xAE14 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE15, 0xAE2F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GYIG..HANGUL SYLLABLE GYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE30, 0xAE30 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE31, 0xAE4B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GIG..HANGUL SYLLABLE GIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE4C, 0xAE4C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE4D, 0xAE67 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGAG..HANGUL SYLLABLE GGAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE68, 0xAE68 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE69, 0xAE83 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGAEG..HANGUL SYLLABLE GGAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE84, 0xAE84 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAE85, 0xAE9F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYAG..HANGUL SYLLABLE GGYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEA0, 0xAEA0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEA1, 0xAEBB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYAEG..HANGUL SYLLABLE GGYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEBC, 0xAEBC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEBD, 0xAED7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGEOG..HANGUL SYLLABLE GGEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAED8, 0xAED8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAED9, 0xAEF3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGEG..HANGUL SYLLABLE GGEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEF4, 0xAEF4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAEF5, 0xAF0F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYEOG..HANGUL SYLLABLE GGYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF10, 0xAF10 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF11, 0xAF2B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYEG..HANGUL SYLLABLE GGYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF2C, 0xAF2C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF2D, 0xAF47 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGOG..HANGUL SYLLABLE GGOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF48, 0xAF48 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF49, 0xAF63 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGWAG..HANGUL SYLLABLE GGWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF64, 0xAF64 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF65, 0xAF7F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGWAEG..HANGUL SYLLABLE GGWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF80, 0xAF80 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF81, 0xAF9B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGOEG..HANGUL SYLLABLE GGOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF9C, 0xAF9C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAF9D, 0xAFB7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYOG..HANGUL SYLLABLE GGYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFB8, 0xAFB8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFB9, 0xAFD3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGUG..HANGUL SYLLABLE GGUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFD4, 0xAFD4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFD5, 0xAFEF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGWEOG..HANGUL SYLLABLE GGWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFF0, 0xAFF0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xAFF1, 0xB00B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGWEG..HANGUL SYLLABLE GGWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB00C, 0xB00C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB00D, 0xB027 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGWIG..HANGUL SYLLABLE GGWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB028, 0xB028 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB029, 0xB043 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYUG..HANGUL SYLLABLE GGYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB044, 0xB044 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB045, 0xB05F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGEUG..HANGUL SYLLABLE GGEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB060, 0xB060 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB061, 0xB07B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGYIG..HANGUL SYLLABLE GGYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB07C, 0xB07C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE GGI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB07D, 0xB097 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE GGIG..HANGUL SYLLABLE GGIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB098, 0xB098 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB099, 0xB0B3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NAG..HANGUL SYLLABLE NAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0B4, 0xB0B4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0B5, 0xB0CF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NAEG..HANGUL SYLLABLE NAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0D0, 0xB0D0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0D1, 0xB0EB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYAG..HANGUL SYLLABLE NYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0EC, 0xB0EC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB0ED, 0xB107 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYAEG..HANGUL SYLLABLE NYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB108, 0xB108 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB109, 0xB123 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NEOG..HANGUL SYLLABLE NEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB124, 0xB124 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB125, 0xB13F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NEG..HANGUL SYLLABLE NEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB140, 0xB140 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB141, 0xB15B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYEOG..HANGUL SYLLABLE NYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB15C, 0xB15C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB15D, 0xB177 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYEG..HANGUL SYLLABLE NYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB178, 0xB178 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB179, 0xB193 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NOG..HANGUL SYLLABLE NOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB194, 0xB194 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB195, 0xB1AF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NWAG..HANGUL SYLLABLE NWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1B0, 0xB1B0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1B1, 0xB1CB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NWAEG..HANGUL SYLLABLE NWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1CC, 0xB1CC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1CD, 0xB1E7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NOEG..HANGUL SYLLABLE NOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1E8, 0xB1E8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB1E9, 0xB203 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYOG..HANGUL SYLLABLE NYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB204, 0xB204 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB205, 0xB21F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NUG..HANGUL SYLLABLE NUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB220, 0xB220 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB221, 0xB23B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NWEOG..HANGUL SYLLABLE NWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB23C, 0xB23C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB23D, 0xB257 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NWEG..HANGUL SYLLABLE NWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB258, 0xB258 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB259, 0xB273 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NWIG..HANGUL SYLLABLE NWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB274, 0xB274 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB275, 0xB28F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYUG..HANGUL SYLLABLE NYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB290, 0xB290 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB291, 0xB2AB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NEUG..HANGUL SYLLABLE NEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2AC, 0xB2AC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2AD, 0xB2C7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NYIG..HANGUL SYLLABLE NYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2C8, 0xB2C8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE NI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2C9, 0xB2E3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE NIG..HANGUL SYLLABLE NIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2E4, 0xB2E4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB2E5, 0xB2FF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DAG..HANGUL SYLLABLE DAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB300, 0xB300 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB301, 0xB31B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DAEG..HANGUL SYLLABLE DAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB31C, 0xB31C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB31D, 0xB337 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYAG..HANGUL SYLLABLE DYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB338, 0xB338 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB339, 0xB353 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYAEG..HANGUL SYLLABLE DYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB354, 0xB354 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB355, 0xB36F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DEOG..HANGUL SYLLABLE DEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB370, 0xB370 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB371, 0xB38B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DEG..HANGUL SYLLABLE DEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB38C, 0xB38C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB38D, 0xB3A7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYEOG..HANGUL SYLLABLE DYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3A8, 0xB3A8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3A9, 0xB3C3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYEG..HANGUL SYLLABLE DYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3C4, 0xB3C4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3C5, 0xB3DF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DOG..HANGUL SYLLABLE DOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3E0, 0xB3E0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3E1, 0xB3FB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DWAG..HANGUL SYLLABLE DWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3FC, 0xB3FC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB3FD, 0xB417 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DWAEG..HANGUL SYLLABLE DWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB418, 0xB418 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB419, 0xB433 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DOEG..HANGUL SYLLABLE DOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB434, 0xB434 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB435, 0xB44F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYOG..HANGUL SYLLABLE DYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB450, 0xB450 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB451, 0xB46B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DUG..HANGUL SYLLABLE DUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB46C, 0xB46C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB46D, 0xB487 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DWEOG..HANGUL SYLLABLE DWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB488, 0xB488 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB489, 0xB4A3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DWEG..HANGUL SYLLABLE DWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4A4, 0xB4A4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4A5, 0xB4BF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DWIG..HANGUL SYLLABLE DWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4C0, 0xB4C0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4C1, 0xB4DB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYUG..HANGUL SYLLABLE DYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4DC, 0xB4DC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4DD, 0xB4F7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DEUG..HANGUL SYLLABLE DEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4F8, 0xB4F8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB4F9, 0xB513 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DYIG..HANGUL SYLLABLE DYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB514, 0xB514 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB515, 0xB52F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DIG..HANGUL SYLLABLE DIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB530, 0xB530 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB531, 0xB54B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDAG..HANGUL SYLLABLE DDAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB54C, 0xB54C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB54D, 0xB567 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDAEG..HANGUL SYLLABLE DDAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB568, 0xB568 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB569, 0xB583 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYAG..HANGUL SYLLABLE DDYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB584, 0xB584 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB585, 0xB59F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYAEG..HANGUL SYLLABLE DDYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5A0, 0xB5A0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5A1, 0xB5BB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDEOG..HANGUL SYLLABLE DDEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5BC, 0xB5BC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5BD, 0xB5D7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDEG..HANGUL SYLLABLE DDEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5D8, 0xB5D8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5D9, 0xB5F3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYEOG..HANGUL SYLLABLE DDYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5F4, 0xB5F4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB5F5, 0xB60F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYEG..HANGUL SYLLABLE DDYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB610, 0xB610 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB611, 0xB62B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDOG..HANGUL SYLLABLE DDOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB62C, 0xB62C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB62D, 0xB647 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDWAG..HANGUL SYLLABLE DDWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB648, 0xB648 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB649, 0xB663 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDWAEG..HANGUL SYLLABLE DDWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB664, 0xB664 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB665, 0xB67F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDOEG..HANGUL SYLLABLE DDOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB680, 0xB680 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB681, 0xB69B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYOG..HANGUL SYLLABLE DDYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB69C, 0xB69C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB69D, 0xB6B7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDUG..HANGUL SYLLABLE DDUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6B8, 0xB6B8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6B9, 0xB6D3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDWEOG..HANGUL SYLLABLE DDWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6D4, 0xB6D4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6D5, 0xB6EF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDWEG..HANGUL SYLLABLE DDWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6F0, 0xB6F0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB6F1, 0xB70B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDWIG..HANGUL SYLLABLE DDWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB70C, 0xB70C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB70D, 0xB727 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYUG..HANGUL SYLLABLE DDYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB728, 0xB728 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB729, 0xB743 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDEUG..HANGUL SYLLABLE DDEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB744, 0xB744 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB745, 0xB75F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDYIG..HANGUL SYLLABLE DDYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB760, 0xB760 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE DDI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB761, 0xB77B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE DDIG..HANGUL SYLLABLE DDIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB77C, 0xB77C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB77D, 0xB797 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RAG..HANGUL SYLLABLE RAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB798, 0xB798 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB799, 0xB7B3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RAEG..HANGUL SYLLABLE RAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7B4, 0xB7B4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7B5, 0xB7CF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYAG..HANGUL SYLLABLE RYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7D0, 0xB7D0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7D1, 0xB7EB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYAEG..HANGUL SYLLABLE RYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7EC, 0xB7EC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE REO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB7ED, 0xB807 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE REOG..HANGUL SYLLABLE REOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB808, 0xB808 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB809, 0xB823 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE REG..HANGUL SYLLABLE REH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB824, 0xB824 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB825, 0xB83F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYEOG..HANGUL SYLLABLE RYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB840, 0xB840 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB841, 0xB85B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYEG..HANGUL SYLLABLE RYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB85C, 0xB85C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB85D, 0xB877 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE ROG..HANGUL SYLLABLE ROH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB878, 0xB878 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB879, 0xB893 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RWAG..HANGUL SYLLABLE RWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB894, 0xB894 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB895, 0xB8AF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RWAEG..HANGUL SYLLABLE RWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8B0, 0xB8B0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE ROE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8B1, 0xB8CB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE ROEG..HANGUL SYLLABLE ROEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8CC, 0xB8CC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8CD, 0xB8E7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYOG..HANGUL SYLLABLE RYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8E8, 0xB8E8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB8E9, 0xB903 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RUG..HANGUL SYLLABLE RUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB904, 0xB904 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB905, 0xB91F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RWEOG..HANGUL SYLLABLE RWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB920, 0xB920 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB921, 0xB93B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RWEG..HANGUL SYLLABLE RWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB93C, 0xB93C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB93D, 0xB957 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RWIG..HANGUL SYLLABLE RWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB958, 0xB958 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB959, 0xB973 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYUG..HANGUL SYLLABLE RYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB974, 0xB974 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE REU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB975, 0xB98F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE REUG..HANGUL SYLLABLE REUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB990, 0xB990 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB991, 0xB9AB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RYIG..HANGUL SYLLABLE RYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9AC, 0xB9AC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE RI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9AD, 0xB9C7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE RIG..HANGUL SYLLABLE RIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9C8, 0xB9C8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9C9, 0xB9E3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MAG..HANGUL SYLLABLE MAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9E4, 0xB9E4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xB9E5, 0xB9FF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MAEG..HANGUL SYLLABLE MAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA00, 0xBA00 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA01, 0xBA1B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYAG..HANGUL SYLLABLE MYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA1C, 0xBA1C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA1D, 0xBA37 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYAEG..HANGUL SYLLABLE MYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA38, 0xBA38 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA39, 0xBA53 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MEOG..HANGUL SYLLABLE MEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA54, 0xBA54 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE ME
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA55, 0xBA6F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MEG..HANGUL SYLLABLE MEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA70, 0xBA70 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA71, 0xBA8B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYEOG..HANGUL SYLLABLE MYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA8C, 0xBA8C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBA8D, 0xBAA7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYEG..HANGUL SYLLABLE MYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAA8, 0xBAA8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAA9, 0xBAC3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MOG..HANGUL SYLLABLE MOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAC4, 0xBAC4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAC5, 0xBADF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MWAG..HANGUL SYLLABLE MWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAE0, 0xBAE0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAE1, 0xBAFB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MWAEG..HANGUL SYLLABLE MWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAFC, 0xBAFC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBAFD, 0xBB17 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MOEG..HANGUL SYLLABLE MOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB18, 0xBB18 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB19, 0xBB33 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYOG..HANGUL SYLLABLE MYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB34, 0xBB34 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB35, 0xBB4F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MUG..HANGUL SYLLABLE MUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB50, 0xBB50 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB51, 0xBB6B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MWEOG..HANGUL SYLLABLE MWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB6C, 0xBB6C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB6D, 0xBB87 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MWEG..HANGUL SYLLABLE MWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB88, 0xBB88 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBB89, 0xBBA3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MWIG..HANGUL SYLLABLE MWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBA4, 0xBBA4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBA5, 0xBBBF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYUG..HANGUL SYLLABLE MYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBC0, 0xBBC0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBC1, 0xBBDB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MEUG..HANGUL SYLLABLE MEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBDC, 0xBBDC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBDD, 0xBBF7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MYIG..HANGUL SYLLABLE MYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBF8, 0xBBF8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE MI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBBF9, 0xBC13 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE MIG..HANGUL SYLLABLE MIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC14, 0xBC14 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC15, 0xBC2F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BAG..HANGUL SYLLABLE BAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC30, 0xBC30 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC31, 0xBC4B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BAEG..HANGUL SYLLABLE BAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC4C, 0xBC4C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC4D, 0xBC67 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYAG..HANGUL SYLLABLE BYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC68, 0xBC68 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC69, 0xBC83 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYAEG..HANGUL SYLLABLE BYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC84, 0xBC84 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBC85, 0xBC9F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BEOG..HANGUL SYLLABLE BEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCA0, 0xBCA0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCA1, 0xBCBB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BEG..HANGUL SYLLABLE BEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCBC, 0xBCBC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCBD, 0xBCD7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYEOG..HANGUL SYLLABLE BYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCD8, 0xBCD8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCD9, 0xBCF3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYEG..HANGUL SYLLABLE BYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCF4, 0xBCF4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBCF5, 0xBD0F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BOG..HANGUL SYLLABLE BOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD10, 0xBD10 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD11, 0xBD2B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BWAG..HANGUL SYLLABLE BWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD2C, 0xBD2C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD2D, 0xBD47 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BWAEG..HANGUL SYLLABLE BWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD48, 0xBD48 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD49, 0xBD63 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BOEG..HANGUL SYLLABLE BOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD64, 0xBD64 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD65, 0xBD7F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYOG..HANGUL SYLLABLE BYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD80, 0xBD80 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD81, 0xBD9B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BUG..HANGUL SYLLABLE BUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD9C, 0xBD9C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBD9D, 0xBDB7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BWEOG..HANGUL SYLLABLE BWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDB8, 0xBDB8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDB9, 0xBDD3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BWEG..HANGUL SYLLABLE BWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDD4, 0xBDD4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDD5, 0xBDEF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BWIG..HANGUL SYLLABLE BWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDF0, 0xBDF0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBDF1, 0xBE0B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYUG..HANGUL SYLLABLE BYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE0C, 0xBE0C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE0D, 0xBE27 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BEUG..HANGUL SYLLABLE BEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE28, 0xBE28 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE29, 0xBE43 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BYIG..HANGUL SYLLABLE BYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE44, 0xBE44 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE45, 0xBE5F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BIG..HANGUL SYLLABLE BIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE60, 0xBE60 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE61, 0xBE7B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBAG..HANGUL SYLLABLE BBAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE7C, 0xBE7C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE7D, 0xBE97 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBAEG..HANGUL SYLLABLE BBAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE98, 0xBE98 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBE99, 0xBEB3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYAG..HANGUL SYLLABLE BBYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBEB4, 0xBEB4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBEB5, 0xBECF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYAEG..HANGUL SYLLABLE BBYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBED0, 0xBED0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBED1, 0xBEEB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBEOG..HANGUL SYLLABLE BBEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBEEC, 0xBEEC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBEED, 0xBF07 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBEG..HANGUL SYLLABLE BBEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF08, 0xBF08 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF09, 0xBF23 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYEOG..HANGUL SYLLABLE BBYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF24, 0xBF24 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF25, 0xBF3F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYEG..HANGUL SYLLABLE BBYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF40, 0xBF40 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF41, 0xBF5B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBOG..HANGUL SYLLABLE BBOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF5C, 0xBF5C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF5D, 0xBF77 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBWAG..HANGUL SYLLABLE BBWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF78, 0xBF78 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF79, 0xBF93 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBWAEG..HANGUL SYLLABLE BBWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF94, 0xBF94 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBF95, 0xBFAF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBOEG..HANGUL SYLLABLE BBOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFB0, 0xBFB0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFB1, 0xBFCB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYOG..HANGUL SYLLABLE BBYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFCC, 0xBFCC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFCD, 0xBFE7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBUG..HANGUL SYLLABLE BBUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFE8, 0xBFE8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xBFE9, 0xC003 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBWEOG..HANGUL SYLLABLE BBWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC004, 0xC004 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC005, 0xC01F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBWEG..HANGUL SYLLABLE BBWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC020, 0xC020 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC021, 0xC03B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBWIG..HANGUL SYLLABLE BBWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC03C, 0xC03C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC03D, 0xC057 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYUG..HANGUL SYLLABLE BBYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC058, 0xC058 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC059, 0xC073 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBEUG..HANGUL SYLLABLE BBEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC074, 0xC074 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC075, 0xC08F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBYIG..HANGUL SYLLABLE BBYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC090, 0xC090 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE BBI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC091, 0xC0AB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE BBIG..HANGUL SYLLABLE BBIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0AC, 0xC0AC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0AD, 0xC0C7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SAG..HANGUL SYLLABLE SAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0C8, 0xC0C8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0C9, 0xC0E3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SAEG..HANGUL SYLLABLE SAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0E4, 0xC0E4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC0E5, 0xC0FF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYAG..HANGUL SYLLABLE SYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC100, 0xC100 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC101, 0xC11B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYAEG..HANGUL SYLLABLE SYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC11C, 0xC11C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC11D, 0xC137 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SEOG..HANGUL SYLLABLE SEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC138, 0xC138 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC139, 0xC153 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SEG..HANGUL SYLLABLE SEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC154, 0xC154 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC155, 0xC16F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYEOG..HANGUL SYLLABLE SYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC170, 0xC170 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC171, 0xC18B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYEG..HANGUL SYLLABLE SYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC18C, 0xC18C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC18D, 0xC1A7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SOG..HANGUL SYLLABLE SOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1A8, 0xC1A8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1A9, 0xC1C3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SWAG..HANGUL SYLLABLE SWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1C4, 0xC1C4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1C5, 0xC1DF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SWAEG..HANGUL SYLLABLE SWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1E0, 0xC1E0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1E1, 0xC1FB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SOEG..HANGUL SYLLABLE SOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1FC, 0xC1FC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC1FD, 0xC217 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYOG..HANGUL SYLLABLE SYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC218, 0xC218 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC219, 0xC233 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SUG..HANGUL SYLLABLE SUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC234, 0xC234 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC235, 0xC24F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SWEOG..HANGUL SYLLABLE SWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC250, 0xC250 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC251, 0xC26B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SWEG..HANGUL SYLLABLE SWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC26C, 0xC26C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC26D, 0xC287 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SWIG..HANGUL SYLLABLE SWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC288, 0xC288 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC289, 0xC2A3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYUG..HANGUL SYLLABLE SYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2A4, 0xC2A4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2A5, 0xC2BF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SEUG..HANGUL SYLLABLE SEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2C0, 0xC2C0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2C1, 0xC2DB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SYIG..HANGUL SYLLABLE SYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2DC, 0xC2DC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2DD, 0xC2F7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SIG..HANGUL SYLLABLE SIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2F8, 0xC2F8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC2F9, 0xC313 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSAG..HANGUL SYLLABLE SSAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC314, 0xC314 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC315, 0xC32F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSAEG..HANGUL SYLLABLE SSAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC330, 0xC330 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC331, 0xC34B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYAG..HANGUL SYLLABLE SSYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC34C, 0xC34C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC34D, 0xC367 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYAEG..HANGUL SYLLABLE SSYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC368, 0xC368 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC369, 0xC383 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSEOG..HANGUL SYLLABLE SSEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC384, 0xC384 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC385, 0xC39F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSEG..HANGUL SYLLABLE SSEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3A0, 0xC3A0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3A1, 0xC3BB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYEOG..HANGUL SYLLABLE SSYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3BC, 0xC3BC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3BD, 0xC3D7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYEG..HANGUL SYLLABLE SSYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3D8, 0xC3D8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3D9, 0xC3F3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSOG..HANGUL SYLLABLE SSOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3F4, 0xC3F4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC3F5, 0xC40F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSWAG..HANGUL SYLLABLE SSWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC410, 0xC410 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC411, 0xC42B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSWAEG..HANGUL SYLLABLE SSWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC42C, 0xC42C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC42D, 0xC447 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSOEG..HANGUL SYLLABLE SSOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC448, 0xC448 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC449, 0xC463 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYOG..HANGUL SYLLABLE SSYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC464, 0xC464 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC465, 0xC47F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSUG..HANGUL SYLLABLE SSUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC480, 0xC480 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC481, 0xC49B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSWEOG..HANGUL SYLLABLE SSWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC49C, 0xC49C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC49D, 0xC4B7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSWEG..HANGUL SYLLABLE SSWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4B8, 0xC4B8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4B9, 0xC4D3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSWIG..HANGUL SYLLABLE SSWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4D4, 0xC4D4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4D5, 0xC4EF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYUG..HANGUL SYLLABLE SSYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4F0, 0xC4F0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC4F1, 0xC50B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSEUG..HANGUL SYLLABLE SSEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC50C, 0xC50C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC50D, 0xC527 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSYIG..HANGUL SYLLABLE SSYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC528, 0xC528 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE SSI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC529, 0xC543 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE SSIG..HANGUL SYLLABLE SSIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC544, 0xC544 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE A
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC545, 0xC55F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE AG..HANGUL SYLLABLE AH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC560, 0xC560 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE AE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC561, 0xC57B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE AEG..HANGUL SYLLABLE AEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC57C, 0xC57C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC57D, 0xC597 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YAG..HANGUL SYLLABLE YAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC598, 0xC598 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC599, 0xC5B3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YAEG..HANGUL SYLLABLE YAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5B4, 0xC5B4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE EO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5B5, 0xC5CF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE EOG..HANGUL SYLLABLE EOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5D0, 0xC5D0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5D1, 0xC5EB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE EG..HANGUL SYLLABLE EH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5EC, 0xC5EC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC5ED, 0xC607 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YEOG..HANGUL SYLLABLE YEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC608, 0xC608 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC609, 0xC623 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YEG..HANGUL SYLLABLE YEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC624, 0xC624 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC625, 0xC63F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE OG..HANGUL SYLLABLE OH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC640, 0xC640 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE WA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC641, 0xC65B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE WAG..HANGUL SYLLABLE WAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC65C, 0xC65C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE WAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC65D, 0xC677 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE WAEG..HANGUL SYLLABLE WAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC678, 0xC678 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE OE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC679, 0xC693 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE OEG..HANGUL SYLLABLE OEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC694, 0xC694 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC695, 0xC6AF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YOG..HANGUL SYLLABLE YOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6B0, 0xC6B0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6B1, 0xC6CB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE UG..HANGUL SYLLABLE UH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6CC, 0xC6CC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE WEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6CD, 0xC6E7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE WEOG..HANGUL SYLLABLE WEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6E8, 0xC6E8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE WE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC6E9, 0xC703 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE WEG..HANGUL SYLLABLE WEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC704, 0xC704 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE WI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC705, 0xC71F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE WIG..HANGUL SYLLABLE WIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC720, 0xC720 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC721, 0xC73B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YUG..HANGUL SYLLABLE YUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC73C, 0xC73C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE EU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC73D, 0xC757 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE EUG..HANGUL SYLLABLE EUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC758, 0xC758 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE YI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC759, 0xC773 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE YIG..HANGUL SYLLABLE YIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC774, 0xC774 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC775, 0xC78F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE IG..HANGUL SYLLABLE IH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC790, 0xC790 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC791, 0xC7AB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JAG..HANGUL SYLLABLE JAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7AC, 0xC7AC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7AD, 0xC7C7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JAEG..HANGUL SYLLABLE JAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7C8, 0xC7C8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7C9, 0xC7E3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYAG..HANGUL SYLLABLE JYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7E4, 0xC7E4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC7E5, 0xC7FF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYAEG..HANGUL SYLLABLE JYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC800, 0xC800 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC801, 0xC81B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JEOG..HANGUL SYLLABLE JEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC81C, 0xC81C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC81D, 0xC837 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JEG..HANGUL SYLLABLE JEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC838, 0xC838 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC839, 0xC853 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYEOG..HANGUL SYLLABLE JYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC854, 0xC854 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC855, 0xC86F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYEG..HANGUL SYLLABLE JYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC870, 0xC870 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC871, 0xC88B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JOG..HANGUL SYLLABLE JOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC88C, 0xC88C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC88D, 0xC8A7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JWAG..HANGUL SYLLABLE JWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8A8, 0xC8A8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8A9, 0xC8C3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JWAEG..HANGUL SYLLABLE JWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8C4, 0xC8C4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8C5, 0xC8DF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JOEG..HANGUL SYLLABLE JOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8E0, 0xC8E0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8E1, 0xC8FB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYOG..HANGUL SYLLABLE JYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8FC, 0xC8FC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC8FD, 0xC917 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JUG..HANGUL SYLLABLE JUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC918, 0xC918 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC919, 0xC933 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JWEOG..HANGUL SYLLABLE JWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC934, 0xC934 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC935, 0xC94F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JWEG..HANGUL SYLLABLE JWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC950, 0xC950 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC951, 0xC96B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JWIG..HANGUL SYLLABLE JWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC96C, 0xC96C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC96D, 0xC987 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYUG..HANGUL SYLLABLE JYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC988, 0xC988 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC989, 0xC9A3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JEUG..HANGUL SYLLABLE JEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9A4, 0xC9A4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9A5, 0xC9BF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JYIG..HANGUL SYLLABLE JYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9C0, 0xC9C0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9C1, 0xC9DB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JIG..HANGUL SYLLABLE JIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9DC, 0xC9DC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9DD, 0xC9F7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJAG..HANGUL SYLLABLE JJAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9F8, 0xC9F8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xC9F9, 0xCA13 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJAEG..HANGUL SYLLABLE JJAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA14, 0xCA14 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA15, 0xCA2F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYAG..HANGUL SYLLABLE JJYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA30, 0xCA30 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA31, 0xCA4B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYAEG..HANGUL SYLLABLE JJYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA4C, 0xCA4C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA4D, 0xCA67 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJEOG..HANGUL SYLLABLE JJEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA68, 0xCA68 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA69, 0xCA83 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJEG..HANGUL SYLLABLE JJEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA84, 0xCA84 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCA85, 0xCA9F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYEOG..HANGUL SYLLABLE JJYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAA0, 0xCAA0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAA1, 0xCABB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYEG..HANGUL SYLLABLE JJYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCABC, 0xCABC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCABD, 0xCAD7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJOG..HANGUL SYLLABLE JJOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAD8, 0xCAD8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAD9, 0xCAF3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJWAG..HANGUL SYLLABLE JJWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAF4, 0xCAF4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCAF5, 0xCB0F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJWAEG..HANGUL SYLLABLE JJWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB10, 0xCB10 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB11, 0xCB2B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJOEG..HANGUL SYLLABLE JJOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB2C, 0xCB2C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB2D, 0xCB47 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYOG..HANGUL SYLLABLE JJYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB48, 0xCB48 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB49, 0xCB63 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJUG..HANGUL SYLLABLE JJUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB64, 0xCB64 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB65, 0xCB7F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJWEOG..HANGUL SYLLABLE JJWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB80, 0xCB80 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB81, 0xCB9B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJWEG..HANGUL SYLLABLE JJWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB9C, 0xCB9C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCB9D, 0xCBB7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJWIG..HANGUL SYLLABLE JJWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBB8, 0xCBB8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBB9, 0xCBD3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYUG..HANGUL SYLLABLE JJYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBD4, 0xCBD4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBD5, 0xCBEF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJEUG..HANGUL SYLLABLE JJEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBF0, 0xCBF0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCBF1, 0xCC0B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJYIG..HANGUL SYLLABLE JJYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC0C, 0xCC0C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE JJI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC0D, 0xCC27 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE JJIG..HANGUL SYLLABLE JJIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC28, 0xCC28 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC29, 0xCC43 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CAG..HANGUL SYLLABLE CAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC44, 0xCC44 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC45, 0xCC5F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CAEG..HANGUL SYLLABLE CAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC60, 0xCC60 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC61, 0xCC7B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYAG..HANGUL SYLLABLE CYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC7C, 0xCC7C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC7D, 0xCC97 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYAEG..HANGUL SYLLABLE CYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC98, 0xCC98 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCC99, 0xCCB3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CEOG..HANGUL SYLLABLE CEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCB4, 0xCCB4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCB5, 0xCCCF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CEG..HANGUL SYLLABLE CEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCD0, 0xCCD0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCD1, 0xCCEB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYEOG..HANGUL SYLLABLE CYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCEC, 0xCCEC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCCED, 0xCD07 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYEG..HANGUL SYLLABLE CYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD08, 0xCD08 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD09, 0xCD23 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE COG..HANGUL SYLLABLE COH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD24, 0xCD24 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD25, 0xCD3F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CWAG..HANGUL SYLLABLE CWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD40, 0xCD40 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD41, 0xCD5B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CWAEG..HANGUL SYLLABLE CWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD5C, 0xCD5C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE COE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD5D, 0xCD77 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE COEG..HANGUL SYLLABLE COEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD78, 0xCD78 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD79, 0xCD93 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYOG..HANGUL SYLLABLE CYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD94, 0xCD94 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCD95, 0xCDAF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CUG..HANGUL SYLLABLE CUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDB0, 0xCDB0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDB1, 0xCDCB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CWEOG..HANGUL SYLLABLE CWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDCC, 0xCDCC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDCD, 0xCDE7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CWEG..HANGUL SYLLABLE CWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDE8, 0xCDE8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCDE9, 0xCE03 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CWIG..HANGUL SYLLABLE CWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE04, 0xCE04 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE05, 0xCE1F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYUG..HANGUL SYLLABLE CYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE20, 0xCE20 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE21, 0xCE3B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CEUG..HANGUL SYLLABLE CEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE3C, 0xCE3C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE3D, 0xCE57 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CYIG..HANGUL SYLLABLE CYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE58, 0xCE58 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE CI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE59, 0xCE73 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE CIG..HANGUL SYLLABLE CIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE74, 0xCE74 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE75, 0xCE8F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KAG..HANGUL SYLLABLE KAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE90, 0xCE90 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCE91, 0xCEAB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KAEG..HANGUL SYLLABLE KAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEAC, 0xCEAC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEAD, 0xCEC7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYAG..HANGUL SYLLABLE KYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEC8, 0xCEC8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEC9, 0xCEE3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYAEG..HANGUL SYLLABLE KYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEE4, 0xCEE4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCEE5, 0xCEFF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KEOG..HANGUL SYLLABLE KEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF00, 0xCF00 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF01, 0xCF1B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KEG..HANGUL SYLLABLE KEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF1C, 0xCF1C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF1D, 0xCF37 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYEOG..HANGUL SYLLABLE KYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF38, 0xCF38 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF39, 0xCF53 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYEG..HANGUL SYLLABLE KYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF54, 0xCF54 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF55, 0xCF6F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KOG..HANGUL SYLLABLE KOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF70, 0xCF70 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF71, 0xCF8B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KWAG..HANGUL SYLLABLE KWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF8C, 0xCF8C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCF8D, 0xCFA7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KWAEG..HANGUL SYLLABLE KWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFA8, 0xCFA8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFA9, 0xCFC3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KOEG..HANGUL SYLLABLE KOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFC4, 0xCFC4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFC5, 0xCFDF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYOG..HANGUL SYLLABLE KYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFE0, 0xCFE0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFE1, 0xCFFB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KUG..HANGUL SYLLABLE KUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFFC, 0xCFFC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xCFFD, 0xD017 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KWEOG..HANGUL SYLLABLE KWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD018, 0xD018 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD019, 0xD033 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KWEG..HANGUL SYLLABLE KWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD034, 0xD034 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD035, 0xD04F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KWIG..HANGUL SYLLABLE KWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD050, 0xD050 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD051, 0xD06B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYUG..HANGUL SYLLABLE KYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD06C, 0xD06C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD06D, 0xD087 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KEUG..HANGUL SYLLABLE KEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD088, 0xD088 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD089, 0xD0A3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KYIG..HANGUL SYLLABLE KYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0A4, 0xD0A4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE KI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0A5, 0xD0BF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE KIG..HANGUL SYLLABLE KIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0C0, 0xD0C0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0C1, 0xD0DB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TAG..HANGUL SYLLABLE TAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0DC, 0xD0DC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0DD, 0xD0F7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TAEG..HANGUL SYLLABLE TAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0F8, 0xD0F8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD0F9, 0xD113 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYAG..HANGUL SYLLABLE TYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD114, 0xD114 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD115, 0xD12F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYAEG..HANGUL SYLLABLE TYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD130, 0xD130 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD131, 0xD14B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TEOG..HANGUL SYLLABLE TEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD14C, 0xD14C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD14D, 0xD167 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TEG..HANGUL SYLLABLE TEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD168, 0xD168 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD169, 0xD183 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYEOG..HANGUL SYLLABLE TYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD184, 0xD184 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD185, 0xD19F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYEG..HANGUL SYLLABLE TYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1A0, 0xD1A0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1A1, 0xD1BB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TOG..HANGUL SYLLABLE TOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1BC, 0xD1BC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1BD, 0xD1D7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TWAG..HANGUL SYLLABLE TWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1D8, 0xD1D8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1D9, 0xD1F3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TWAEG..HANGUL SYLLABLE TWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1F4, 0xD1F4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD1F5, 0xD20F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TOEG..HANGUL SYLLABLE TOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD210, 0xD210 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD211, 0xD22B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYOG..HANGUL SYLLABLE TYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD22C, 0xD22C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD22D, 0xD247 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TUG..HANGUL SYLLABLE TUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD248, 0xD248 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD249, 0xD263 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TWEOG..HANGUL SYLLABLE TWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD264, 0xD264 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD265, 0xD27F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TWEG..HANGUL SYLLABLE TWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD280, 0xD280 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD281, 0xD29B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TWIG..HANGUL SYLLABLE TWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD29C, 0xD29C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD29D, 0xD2B7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYUG..HANGUL SYLLABLE TYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2B8, 0xD2B8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2B9, 0xD2D3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TEUG..HANGUL SYLLABLE TEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2D4, 0xD2D4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2D5, 0xD2EF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TYIG..HANGUL SYLLABLE TYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2F0, 0xD2F0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE TI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD2F1, 0xD30B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE TIG..HANGUL SYLLABLE TIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD30C, 0xD30C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD30D, 0xD327 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PAG..HANGUL SYLLABLE PAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD328, 0xD328 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD329, 0xD343 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PAEG..HANGUL SYLLABLE PAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD344, 0xD344 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD345, 0xD35F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYAG..HANGUL SYLLABLE PYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD360, 0xD360 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD361, 0xD37B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYAEG..HANGUL SYLLABLE PYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD37C, 0xD37C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD37D, 0xD397 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PEOG..HANGUL SYLLABLE PEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD398, 0xD398 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD399, 0xD3B3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PEG..HANGUL SYLLABLE PEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3B4, 0xD3B4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3B5, 0xD3CF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYEOG..HANGUL SYLLABLE PYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3D0, 0xD3D0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3D1, 0xD3EB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYEG..HANGUL SYLLABLE PYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3EC, 0xD3EC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD3ED, 0xD407 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE POG..HANGUL SYLLABLE POH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD408, 0xD408 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD409, 0xD423 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PWAG..HANGUL SYLLABLE PWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD424, 0xD424 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD425, 0xD43F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PWAEG..HANGUL SYLLABLE PWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD440, 0xD440 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE POE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD441, 0xD45B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE POEG..HANGUL SYLLABLE POEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD45C, 0xD45C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD45D, 0xD477 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYOG..HANGUL SYLLABLE PYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD478, 0xD478 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD479, 0xD493 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PUG..HANGUL SYLLABLE PUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD494, 0xD494 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD495, 0xD4AF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PWEOG..HANGUL SYLLABLE PWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4B0, 0xD4B0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4B1, 0xD4CB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PWEG..HANGUL SYLLABLE PWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4CC, 0xD4CC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4CD, 0xD4E7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PWIG..HANGUL SYLLABLE PWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4E8, 0xD4E8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD4E9, 0xD503 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYUG..HANGUL SYLLABLE PYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD504, 0xD504 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD505, 0xD51F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PEUG..HANGUL SYLLABLE PEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD520, 0xD520 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD521, 0xD53B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PYIG..HANGUL SYLLABLE PYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD53C, 0xD53C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE PI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD53D, 0xD557 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE PIG..HANGUL SYLLABLE PIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD558, 0xD558 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD559, 0xD573 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HAG..HANGUL SYLLABLE HAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD574, 0xD574 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD575, 0xD58F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HAEG..HANGUL SYLLABLE HAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD590, 0xD590 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD591, 0xD5AB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYAG..HANGUL SYLLABLE HYAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5AC, 0xD5AC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5AD, 0xD5C7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYAEG..HANGUL SYLLABLE HYAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5C8, 0xD5C8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5C9, 0xD5E3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HEOG..HANGUL SYLLABLE HEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5E4, 0xD5E4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD5E5, 0xD5FF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HEG..HANGUL SYLLABLE HEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD600, 0xD600 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD601, 0xD61B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYEOG..HANGUL SYLLABLE HYEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD61C, 0xD61C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD61D, 0xD637 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYEG..HANGUL SYLLABLE HYEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD638, 0xD638 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD639, 0xD653 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HOG..HANGUL SYLLABLE HOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD654, 0xD654 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HWA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD655, 0xD66F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HWAG..HANGUL SYLLABLE HWAH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD670, 0xD670 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HWAE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD671, 0xD68B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HWAEG..HANGUL SYLLABLE HWAEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD68C, 0xD68C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HOE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD68D, 0xD6A7 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HOEG..HANGUL SYLLABLE HOEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6A8, 0xD6A8 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6A9, 0xD6C3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYOG..HANGUL SYLLABLE HYOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6C4, 0xD6C4 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6C5, 0xD6DF }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HUG..HANGUL SYLLABLE HUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6E0, 0xD6E0 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HWEO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6E1, 0xD6FB }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HWEOG..HANGUL SYLLABLE HWEOH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6FC, 0xD6FC }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HWE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD6FD, 0xD717 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HWEG..HANGUL SYLLABLE HWEH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD718, 0xD718 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HWI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD719, 0xD733 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HWIG..HANGUL SYLLABLE HWIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD734, 0xD734 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD735, 0xD74F }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYUG..HANGUL SYLLABLE HYUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD750, 0xD750 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HEU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD751, 0xD76B }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HEUG..HANGUL SYLLABLE HEUH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD76C, 0xD76C }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HYI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD76D, 0xD787 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HYIG..HANGUL SYLLABLE HYIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD788, 0xD788 }, crispy::text::Grapheme_Cluster_Break::LV }, // Lo       HANGUL SYLLABLE HI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD789, 0xD7A3 }, crispy::text::Grapheme_Cluster_Break::LVT }, // Lo  [27] HANGUL SYLLABLE HIG..HANGUL SYLLABLE HIH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD7B0, 0xD7C6 }, crispy::text::Grapheme_Cluster_Break::V }, // Lo  [23] HANGUL JUNGSEONG O-YEO..HANGUL JUNGSEONG ARAEA-E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xD7CB, 0xD7FB }, crispy::text::Grapheme_Cluster_Break::T }, // Lo  [49] HANGUL JONGSEONG NIEUN-RIEUL..HANGUL JONGSEONG PHIEUPH-THIEUTH
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFB1E, 0xFB1E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       HEBREW POINT JUDEO-SPANISH VARIKA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFE00, 0xFE0F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [16] VARIATION SELECTOR-1..VARIATION SELECTOR-16
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFE20, 0xFE2F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [16] COMBINING LIGATURE LEFT HALF..COMBINING CYRILLIC TITLO RIGHT HALF
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFEFF, 0xFEFF }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       ZERO WIDTH NO-BREAK SPACE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFF9E, 0xFF9F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Lm   [2] HALFWIDTH KATAKANA VOICED SOUND MARK..HALFWIDTH KATAKANA SEMI-VOICED SOUND MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFFF0, 0xFFF8 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn   [9] <reserved-FFF0>..<reserved-FFF8>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xFFF9, 0xFFFB }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [3] INTERLINEAR ANNOTATION ANCHOR..INTERLINEAR ANNOTATION TERMINATOR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x101FD, 0x101FD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       PHAISTOS DISC SIGN COMBINING OBLIQUE STROKE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x102E0, 0x102E0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       COPTIC EPACT THOUSANDS MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10376, 0x1037A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] COMBINING OLD PERMIC LETTER AN..COMBINING OLD PERMIC LETTER SII
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10A01, 0x10A03 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] KHAROSHTHI VOWEL SIGN I..KHAROSHTHI VOWEL SIGN VOCALIC R
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10A05, 0x10A06 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KHAROSHTHI VOWEL SIGN E..KHAROSHTHI VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10A0C, 0x10A0F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] KHAROSHTHI VOWEL LENGTH MARK..KHAROSHTHI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10A38, 0x10A3A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] KHAROSHTHI SIGN BAR ABOVE..KHAROSHTHI SIGN DOT BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10A3F, 0x10A3F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHAROSHTHI VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10AE5, 0x10AE6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MANICHAEAN ABBREVIATION MARK ABOVE..MANICHAEAN ABBREVIATION MARK BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10D24, 0x10D27 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] HANIFI ROHINGYA SIGN HARBAHAY..HANIFI ROHINGYA SIGN TASSI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10EAB, 0x10EAC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] YEZIDI COMBINING HAMZA MARK..YEZIDI COMBINING MADDA MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x10F46, 0x10F50 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [11] SOGDIAN COMBINING DOT BELOW..SOGDIAN COMBINING STROKE BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11000, 0x11000 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BRAHMI SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11001, 0x11001 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BRAHMI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11002, 0x11002 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BRAHMI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11038, 0x11046 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [15] BRAHMI VOWEL SIGN AA..BRAHMI VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1107F, 0x11081 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] BRAHMI NUMBER JOINER..KAITHI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11082, 0x11082 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       KAITHI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110B0, 0x110B2 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] KAITHI VOWEL SIGN AA..KAITHI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110B3, 0x110B6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] KAITHI VOWEL SIGN U..KAITHI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110B7, 0x110B8 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KAITHI VOWEL SIGN O..KAITHI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110B9, 0x110BA }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KAITHI SIGN VIRAMA..KAITHI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110BD, 0x110BD }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf       KAITHI NUMBER SIGN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x110CD, 0x110CD }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Cf       KAITHI NUMBER SIGN ABOVE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11100, 0x11102 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] CHAKMA SIGN CANDRABINDU..CHAKMA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11127, 0x1112B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] CHAKMA VOWEL SIGN A..CHAKMA VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1112C, 0x1112C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       CHAKMA VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1112D, 0x11134 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] CHAKMA VOWEL SIGN AI..CHAKMA MAAYYAA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11145, 0x11146 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] CHAKMA VOWEL SIGN AA..CHAKMA VOWEL SIGN EI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11173, 0x11173 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MAHAJANI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11180, 0x11181 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SHARADA SIGN CANDRABINDU..SHARADA SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11182, 0x11182 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SHARADA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111B3, 0x111B5 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] SHARADA VOWEL SIGN AA..SHARADA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111B6, 0x111BE }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] SHARADA VOWEL SIGN U..SHARADA VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111BF, 0x111C0 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SHARADA VOWEL SIGN AU..SHARADA SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111C2, 0x111C3 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo   [2] SHARADA SIGN JIHVAMULIYA..SHARADA SIGN UPADHMANIYA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111C9, 0x111CC }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] SHARADA SANDHI MARK..SHARADA EXTRA SHORT VOWEL MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111CE, 0x111CE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SHARADA VOWEL SIGN PRISHTHAMATRA E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x111CF, 0x111CF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SHARADA SIGN INVERTED CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1122C, 0x1122E }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] KHOJKI VOWEL SIGN AA..KHOJKI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1122F, 0x11231 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] KHOJKI VOWEL SIGN U..KHOJKI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11232, 0x11233 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] KHOJKI VOWEL SIGN O..KHOJKI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11234, 0x11234 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHOJKI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11235, 0x11235 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       KHOJKI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11236, 0x11237 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] KHOJKI SIGN NUKTA..KHOJKI SIGN SHADDA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1123E, 0x1123E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHOJKI SIGN SUKUN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x112DF, 0x112DF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHUDAWADI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x112E0, 0x112E2 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] KHUDAWADI VOWEL SIGN AA..KHUDAWADI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x112E3, 0x112EA }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] KHUDAWADI VOWEL SIGN U..KHUDAWADI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11300, 0x11301 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GRANTHA SIGN COMBINING ANUSVARA ABOVE..GRANTHA SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11302, 0x11303 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] GRANTHA SIGN ANUSVARA..GRANTHA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1133B, 0x1133C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] COMBINING BINDU BELOW..GRANTHA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1133E, 0x1133E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       GRANTHA VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1133F, 0x1133F }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       GRANTHA VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11340, 0x11340 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GRANTHA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11341, 0x11344 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] GRANTHA VOWEL SIGN U..GRANTHA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11347, 0x11348 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] GRANTHA VOWEL SIGN EE..GRANTHA VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1134B, 0x1134D }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] GRANTHA VOWEL SIGN OO..GRANTHA SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11357, 0x11357 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       GRANTHA AU LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11362, 0x11363 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] GRANTHA VOWEL SIGN VOCALIC L..GRANTHA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11366, 0x1136C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] COMBINING GRANTHA DIGIT ZERO..COMBINING GRANTHA DIGIT SIX
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11370, 0x11374 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] COMBINING GRANTHA LETTER A..COMBINING GRANTHA LETTER PA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11435, 0x11437 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] NEWA VOWEL SIGN AA..NEWA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11438, 0x1143F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] NEWA VOWEL SIGN U..NEWA VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11440, 0x11441 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] NEWA VOWEL SIGN O..NEWA VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11442, 0x11444 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] NEWA SIGN VIRAMA..NEWA SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11445, 0x11445 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       NEWA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11446, 0x11446 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       NEWA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1145E, 0x1145E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       NEWA SANDHI MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114B0, 0x114B0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       TIRHUTA VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114B1, 0x114B2 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] TIRHUTA VOWEL SIGN I..TIRHUTA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114B3, 0x114B8 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] TIRHUTA VOWEL SIGN U..TIRHUTA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114B9, 0x114B9 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TIRHUTA VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114BA, 0x114BA }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TIRHUTA VOWEL SIGN SHORT E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114BB, 0x114BC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] TIRHUTA VOWEL SIGN AI..TIRHUTA VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114BD, 0x114BD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       TIRHUTA VOWEL SIGN SHORT O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114BE, 0x114BE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TIRHUTA VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114BF, 0x114C0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TIRHUTA SIGN CANDRABINDU..TIRHUTA SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114C1, 0x114C1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TIRHUTA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x114C2, 0x114C3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] TIRHUTA SIGN VIRAMA..TIRHUTA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115AF, 0x115AF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       SIDDHAM VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115B0, 0x115B1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SIDDHAM VOWEL SIGN I..SIDDHAM VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115B2, 0x115B5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] SIDDHAM VOWEL SIGN U..SIDDHAM VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115B8, 0x115BB }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] SIDDHAM VOWEL SIGN E..SIDDHAM VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115BC, 0x115BD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SIDDHAM SIGN CANDRABINDU..SIDDHAM SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115BE, 0x115BE }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SIDDHAM SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115BF, 0x115C0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SIDDHAM SIGN VIRAMA..SIDDHAM SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x115DC, 0x115DD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SIDDHAM VOWEL SIGN ALTERNATE U..SIDDHAM VOWEL SIGN ALTERNATE UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11630, 0x11632 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] MODI VOWEL SIGN AA..MODI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11633, 0x1163A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] MODI VOWEL SIGN U..MODI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1163B, 0x1163C }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MODI VOWEL SIGN O..MODI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1163D, 0x1163D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MODI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1163E, 0x1163E }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MODI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1163F, 0x11640 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MODI SIGN VIRAMA..MODI SIGN ARDHACANDRA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116AB, 0x116AB }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAKRI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116AC, 0x116AC }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TAKRI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116AD, 0x116AD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAKRI VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116AE, 0x116AF }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] TAKRI VOWEL SIGN I..TAKRI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116B0, 0x116B5 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] TAKRI VOWEL SIGN U..TAKRI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116B6, 0x116B6 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       TAKRI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x116B7, 0x116B7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       TAKRI SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1171D, 0x1171F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] AHOM CONSONANT SIGN MEDIAL LA..AHOM CONSONANT SIGN MEDIAL LIGATING RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11720, 0x11721 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] AHOM VOWEL SIGN A..AHOM VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11722, 0x11725 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] AHOM VOWEL SIGN I..AHOM VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11726, 0x11726 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       AHOM VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11727, 0x1172B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] AHOM VOWEL SIGN AW..AHOM SIGN KILLER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1182C, 0x1182E }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] DOGRA VOWEL SIGN AA..DOGRA VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1182F, 0x11837 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [9] DOGRA VOWEL SIGN U..DOGRA SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11838, 0x11838 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DOGRA SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11839, 0x1183A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] DOGRA SIGN VIRAMA..DOGRA SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11930, 0x11930 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       DIVES AKURU VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11931, 0x11935 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [5] DIVES AKURU VOWEL SIGN I..DIVES AKURU VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11937, 0x11938 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] DIVES AKURU VOWEL SIGN AI..DIVES AKURU VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1193B, 0x1193C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] DIVES AKURU SIGN ANUSVARA..DIVES AKURU SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1193D, 0x1193D }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DIVES AKURU SIGN HALANTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1193E, 0x1193E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DIVES AKURU VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1193F, 0x1193F }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo       DIVES AKURU PREFIXED NASAL SIGN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11940, 0x11940 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DIVES AKURU MEDIAL YA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11941, 0x11941 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo       DIVES AKURU INITIAL RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11942, 0x11942 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       DIVES AKURU MEDIAL RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11943, 0x11943 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       DIVES AKURU SIGN NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119D1, 0x119D3 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [3] NANDINAGARI VOWEL SIGN AA..NANDINAGARI VOWEL SIGN II
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119D4, 0x119D7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] NANDINAGARI VOWEL SIGN U..NANDINAGARI VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119DA, 0x119DB }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] NANDINAGARI VOWEL SIGN E..NANDINAGARI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119DC, 0x119DF }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [4] NANDINAGARI VOWEL SIGN O..NANDINAGARI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119E0, 0x119E0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       NANDINAGARI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x119E4, 0x119E4 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       NANDINAGARI VOWEL SIGN PRISHTHAMATRA E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A01, 0x11A0A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [10] ZANABAZAR SQUARE VOWEL SIGN I..ZANABAZAR SQUARE VOWEL LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A33, 0x11A38 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] ZANABAZAR SQUARE FINAL CONSONANT MARK..ZANABAZAR SQUARE SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A39, 0x11A39 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       ZANABAZAR SQUARE SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A3A, 0x11A3A }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo       ZANABAZAR SQUARE CLUSTER-INITIAL LETTER RA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A3B, 0x11A3E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] ZANABAZAR SQUARE CLUSTER-FINAL LETTER YA..ZANABAZAR SQUARE CLUSTER-FINAL LETTER VA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A47, 0x11A47 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       ZANABAZAR SQUARE SUBJOINER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A51, 0x11A56 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] SOYOMBO VOWEL SIGN I..SOYOMBO VOWEL SIGN OE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A57, 0x11A58 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] SOYOMBO VOWEL SIGN AI..SOYOMBO VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A59, 0x11A5B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] SOYOMBO VOWEL SIGN VOCALIC R..SOYOMBO VOWEL LENGTH MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A84, 0x11A89 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo   [6] SOYOMBO SIGN JIHVAMULIYA..SOYOMBO CLUSTER-INITIAL LETTER SA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A8A, 0x11A96 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [13] SOYOMBO FINAL CONSONANT SIGN G..SOYOMBO SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A97, 0x11A97 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       SOYOMBO SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11A98, 0x11A99 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] SOYOMBO GEMINATION MARK..SOYOMBO SUBJOINER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C2F, 0x11C2F }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BHAIKSUKI VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C30, 0x11C36 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] BHAIKSUKI VOWEL SIGN I..BHAIKSUKI VOWEL SIGN VOCALIC L
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C38, 0x11C3D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] BHAIKSUKI VOWEL SIGN E..BHAIKSUKI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C3E, 0x11C3E }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       BHAIKSUKI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C3F, 0x11C3F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       BHAIKSUKI SIGN VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11C92, 0x11CA7 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [22] MARCHEN SUBJOINED LETTER KA..MARCHEN SUBJOINED LETTER ZA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CA9, 0x11CA9 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MARCHEN SUBJOINED LETTER YA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CAA, 0x11CB0 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] MARCHEN SUBJOINED LETTER RA..MARCHEN VOWEL SIGN AA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CB1, 0x11CB1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MARCHEN VOWEL SIGN I
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CB2, 0x11CB3 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MARCHEN VOWEL SIGN U..MARCHEN VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CB4, 0x11CB4 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MARCHEN VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11CB5, 0x11CB6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MARCHEN SIGN ANUSVARA..MARCHEN SIGN CANDRABINDU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D31, 0x11D36 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [6] MASARAM GONDI VOWEL SIGN AA..MASARAM GONDI VOWEL SIGN VOCALIC R
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D3A, 0x11D3A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MASARAM GONDI VOWEL SIGN E
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D3C, 0x11D3D }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MASARAM GONDI VOWEL SIGN AI..MASARAM GONDI VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D3F, 0x11D45 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] MASARAM GONDI VOWEL SIGN AU..MASARAM GONDI VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D46, 0x11D46 }, crispy::text::Grapheme_Cluster_Break::Prepend }, // Lo       MASARAM GONDI REPHA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D47, 0x11D47 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MASARAM GONDI RA-KARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D8A, 0x11D8E }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [5] GUNJALA GONDI VOWEL SIGN AA..GUNJALA GONDI VOWEL SIGN UU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D90, 0x11D91 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] GUNJALA GONDI VOWEL SIGN EE..GUNJALA GONDI VOWEL SIGN AI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D93, 0x11D94 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] GUNJALA GONDI VOWEL SIGN OO..GUNJALA GONDI VOWEL SIGN AU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D95, 0x11D95 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GUNJALA GONDI SIGN ANUSVARA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D96, 0x11D96 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       GUNJALA GONDI SIGN VISARGA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11D97, 0x11D97 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       GUNJALA GONDI VIRAMA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11EF3, 0x11EF4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] MAKASAR VOWEL SIGN I..MAKASAR VOWEL SIGN U
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x11EF5, 0x11EF6 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] MAKASAR VOWEL SIGN E..MAKASAR VOWEL SIGN O
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x13430, 0x13438 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [9] EGYPTIAN HIEROGLYPH VERTICAL JOINER..EGYPTIAN HIEROGLYPH END SEGMENT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16AF0, 0x16AF4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] BASSA VAH COMBINING HIGH TONE..BASSA VAH COMBINING HIGH-LOW TONE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16B30, 0x16B36 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] PAHAWH HMONG MARK CIM TUB..PAHAWH HMONG MARK CIM TAUM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16F4F, 0x16F4F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       MIAO SIGN CONSONANT MODIFIER BAR
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16F51, 0x16F87 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc  [55] MIAO SIGN ASPIRATION..MIAO VOWEL SIGN UI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16F8F, 0x16F92 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] MIAO TONE RIGHT..MIAO TONE BELOW
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16FE4, 0x16FE4 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       KHITAN SMALL SCRIPT FILLER
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x16FF0, 0x16FF1 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc   [2] VIETNAMESE ALTERNATE READING MARK CA..VIETNAMESE ALTERNATE READING MARK NHAY
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BC9D, 0x1BC9E }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] DUPLOYAN THICK LETTER SELECTOR..DUPLOYAN DOUBLE MARK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1BCA0, 0x1BCA3 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [4] SHORTHAND FORMAT LETTER OVERLAP..SHORTHAND FORMAT UP STEP
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D165, 0x1D165 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc       MUSICAL SYMBOL COMBINING STEM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D166, 0x1D166 }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MUSICAL SYMBOL COMBINING SPRECHGESANG STEM
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D167, 0x1D169 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] MUSICAL SYMBOL COMBINING TREMOLO-1..MUSICAL SYMBOL COMBINING TREMOLO-3
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D16D, 0x1D16D }, crispy::text::Grapheme_Cluster_Break::SpacingMark }, // Mc       MUSICAL SYMBOL COMBINING AUGMENTATION DOT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D16E, 0x1D172 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mc   [5] MUSICAL SYMBOL COMBINING FLAG-1..MUSICAL SYMBOL COMBINING FLAG-5
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D173, 0x1D17A }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf   [8] MUSICAL SYMBOL BEGIN BEAM..MUSICAL SYMBOL END PHRASE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D17B, 0x1D182 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [8] MUSICAL SYMBOL COMBINING ACCENT..MUSICAL SYMBOL COMBINING LOURE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D185, 0x1D18B }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] MUSICAL SYMBOL COMBINING DOIT..MUSICAL SYMBOL COMBINING TRIPLE TONGUE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D1AA, 0x1D1AD }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] MUSICAL SYMBOL COMBINING DOWN BOW..MUSICAL SYMBOL COMBINING SNAP PIZZICATO
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1D242, 0x1D244 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [3] COMBINING GREEK MUSICAL TRISEME..COMBINING GREEK MUSICAL PENTASEME
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DA00, 0x1DA36 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [55] SIGNWRITING HEAD RIM..SIGNWRITING AIR SUCKING IN
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DA3B, 0x1DA6C }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [50] SIGNWRITING MOUTH CLOSED NEUTRAL..SIGNWRITING EXCITEMENT
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DA75, 0x1DA75 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SIGNWRITING UPPER BODY TILTING FROM HIP JOINTS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DA84, 0x1DA84 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn       SIGNWRITING LOCATION HEAD NECK
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DA9B, 0x1DA9F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] SIGNWRITING FILL MODIFIER-2..SIGNWRITING FILL MODIFIER-6
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1DAA1, 0x1DAAF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [15] SIGNWRITING ROTATION MODIFIER-2..SIGNWRITING ROTATION MODIFIER-16
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E000, 0x1E006 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] COMBINING GLAGOLITIC LETTER AZU..COMBINING GLAGOLITIC LETTER ZHIVETE
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E008, 0x1E018 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn  [17] COMBINING GLAGOLITIC LETTER ZEMLJA..COMBINING GLAGOLITIC LETTER HERU
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E01B, 0x1E021 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] COMBINING GLAGOLITIC LETTER SHTA..COMBINING GLAGOLITIC LETTER YATI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E023, 0x1E024 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [2] COMBINING GLAGOLITIC LETTER YU..COMBINING GLAGOLITIC LETTER SMALL YUS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E026, 0x1E02A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [5] COMBINING GLAGOLITIC LETTER YO..COMBINING GLAGOLITIC LETTER FITA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E130, 0x1E136 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] NYIAKENG PUACHUE HMONG TONE-B..NYIAKENG PUACHUE HMONG TONE-D
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E2EC, 0x1E2EF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [4] WANCHO TONE TUP..WANCHO TONE KOINI
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E8D0, 0x1E8D6 }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] MENDE KIKAKUI COMBINING NUMBER TEENS..MENDE KIKAKUI COMBINING NUMBER MILLIONS
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1E944, 0x1E94A }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn   [7] ADLAM ALIF LENGTHENER..ADLAM NUKTA
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1F1E6, 0x1F1FF }, crispy::text::Grapheme_Cluster_Break::Regional_Indicator }, // So  [26] REGIONAL INDICATOR SYMBOL LETTER A..REGIONAL INDICATOR SYMBOL LETTER Z
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0x1F3FB, 0x1F3FF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Sk   [5] EMOJI MODIFIER FITZPATRICK TYPE-1-2..EMOJI MODIFIER FITZPATRICK TYPE-6
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0000, 0xE0000 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn       <reserved-E0000>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0001, 0xE0001 }, crispy::text::Grapheme_Cluster_Break::Control }, // Cf       LANGUAGE TAG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0002, 0xE001F }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn  [30] <reserved-E0002>..<reserved-E001F>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0020, 0xE007F }, crispy::text::Grapheme_Cluster_Break::Extend }, // Cf  [96] TAG SPACE..CANCEL TAG
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0080, 0xE00FF }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn [128] <reserved-E0080>..<reserved-E00FF>
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE0100, 0xE01EF }, crispy::text::Grapheme_Cluster_Break::Extend }, // Mn [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
+    Prop<crispy::text::Grapheme_Cluster_Break>{ { 0xE01F0, 0xE0FFF }, crispy::text::Grapheme_Cluster_Break::Control }, // Cn [3600] <reserved-E01F0>..<reserved-E0FFF>
+}; // }}}
+} // end namespace tables
+
+std::optional<Grapheme_Cluster_Break> grapheme_cluster_break(char32_t _codepoint) noexcept {
+    return search(tables::Grapheme_Cluster_Break, _codepoint);
+}
+
+namespace tables {
+auto constexpr Emoji = std::array{ // {{{
+    Interval{ 0x0023, 0x0023 }, // E0.0   [1] (#️)       number sign
+    Interval{ 0x002A, 0x002A }, // E0.0   [1] (*️)       asterisk
+    Interval{ 0x0030, 0x0039 }, // E0.0  [10] (0️..9️)    digit zero..digit nine
+    Interval{ 0x00A9, 0x00A9 }, // E0.6   [1] (©️)       copyright
+    Interval{ 0x00AE, 0x00AE }, // E0.6   [1] (®️)       registered
+    Interval{ 0x203C, 0x203C }, // E0.6   [1] (‼️)       double exclamation mark
+    Interval{ 0x2049, 0x2049 }, // E0.6   [1] (⁉️)       exclamation question mark
+    Interval{ 0x2122, 0x2122 }, // E0.6   [1] (™️)       trade mark
+    Interval{ 0x2139, 0x2139 }, // E0.6   [1] (ℹ️)       information
+    Interval{ 0x2194, 0x2199 }, // E0.6   [6] (↔️..↙️)    left-right arrow..down-left arrow
+    Interval{ 0x21A9, 0x21AA }, // E0.6   [2] (↩️..↪️)    right arrow curving left..left arrow curving right
+    Interval{ 0x231A, 0x231B }, // E0.6   [2] (⌚..⌛)    watch..hourglass done
+    Interval{ 0x2328, 0x2328 }, // E1.0   [1] (⌨️)       keyboard
+    Interval{ 0x23CF, 0x23CF }, // E1.0   [1] (⏏️)       eject button
+    Interval{ 0x23E9, 0x23EC }, // E0.6   [4] (⏩..⏬)    fast-forward button..fast down button
+    Interval{ 0x23ED, 0x23EE }, // E0.7   [2] (⏭️..⏮️)    next track button..last track button
+    Interval{ 0x23EF, 0x23EF }, // E1.0   [1] (⏯️)       play or pause button
+    Interval{ 0x23F0, 0x23F0 }, // E0.6   [1] (⏰)       alarm clock
+    Interval{ 0x23F1, 0x23F2 }, // E1.0   [2] (⏱️..⏲️)    stopwatch..timer clock
+    Interval{ 0x23F3, 0x23F3 }, // E0.6   [1] (⏳)       hourglass not done
+    Interval{ 0x23F8, 0x23FA }, // E0.7   [3] (⏸️..⏺️)    pause button..record button
+    Interval{ 0x24C2, 0x24C2 }, // E0.6   [1] (Ⓜ️)       circled M
+    Interval{ 0x25AA, 0x25AB }, // E0.6   [2] (▪️..▫️)    black small square..white small square
+    Interval{ 0x25B6, 0x25B6 }, // E0.6   [1] (▶️)       play button
+    Interval{ 0x25C0, 0x25C0 }, // E0.6   [1] (◀️)       reverse button
+    Interval{ 0x25FB, 0x25FE }, // E0.6   [4] (◻️..◾)    white medium square..black medium-small square
+    Interval{ 0x2600, 0x2601 }, // E0.6   [2] (☀️..☁️)    sun..cloud
+    Interval{ 0x2602, 0x2603 }, // E0.7   [2] (☂️..☃️)    umbrella..snowman
+    Interval{ 0x2604, 0x2604 }, // E1.0   [1] (☄️)       comet
+    Interval{ 0x260E, 0x260E }, // E0.6   [1] (☎️)       telephone
+    Interval{ 0x2611, 0x2611 }, // E0.6   [1] (☑️)       check box with check
+    Interval{ 0x2614, 0x2615 }, // E0.6   [2] (☔..☕)    umbrella with rain drops..hot beverage
+    Interval{ 0x2618, 0x2618 }, // E1.0   [1] (☘️)       shamrock
+    Interval{ 0x261D, 0x261D }, // E0.6   [1] (☝️)       index pointing up
+    Interval{ 0x2620, 0x2620 }, // E1.0   [1] (☠️)       skull and crossbones
+    Interval{ 0x2622, 0x2623 }, // E1.0   [2] (☢️..☣️)    radioactive..biohazard
+    Interval{ 0x2626, 0x2626 }, // E1.0   [1] (☦️)       orthodox cross
+    Interval{ 0x262A, 0x262A }, // E0.7   [1] (☪️)       star and crescent
+    Interval{ 0x262E, 0x262E }, // E1.0   [1] (☮️)       peace symbol
+    Interval{ 0x262F, 0x262F }, // E0.7   [1] (☯️)       yin yang
+    Interval{ 0x2638, 0x2639 }, // E0.7   [2] (☸️..☹️)    wheel of dharma..frowning face
+    Interval{ 0x263A, 0x263A }, // E0.6   [1] (☺️)       smiling face
+    Interval{ 0x2640, 0x2640 }, // E4.0   [1] (♀️)       female sign
+    Interval{ 0x2642, 0x2642 }, // E4.0   [1] (♂️)       male sign
+    Interval{ 0x2648, 0x2653 }, // E0.6  [12] (♈..♓)    Aries..Pisces
+    Interval{ 0x265F, 0x265F }, // E11.0  [1] (♟️)       chess pawn
+    Interval{ 0x2660, 0x2660 }, // E0.6   [1] (♠️)       spade suit
+    Interval{ 0x2663, 0x2663 }, // E0.6   [1] (♣️)       club suit
+    Interval{ 0x2665, 0x2666 }, // E0.6   [2] (♥️..♦️)    heart suit..diamond suit
+    Interval{ 0x2668, 0x2668 }, // E0.6   [1] (♨️)       hot springs
+    Interval{ 0x267B, 0x267B }, // E0.6   [1] (♻️)       recycling symbol
+    Interval{ 0x267E, 0x267E }, // E11.0  [1] (♾️)       infinity
+    Interval{ 0x267F, 0x267F }, // E0.6   [1] (♿)       wheelchair symbol
+    Interval{ 0x2692, 0x2692 }, // E1.0   [1] (⚒️)       hammer and pick
+    Interval{ 0x2693, 0x2693 }, // E0.6   [1] (⚓)       anchor
+    Interval{ 0x2694, 0x2694 }, // E1.0   [1] (⚔️)       crossed swords
+    Interval{ 0x2695, 0x2695 }, // E4.0   [1] (⚕️)       medical symbol
+    Interval{ 0x2696, 0x2697 }, // E1.0   [2] (⚖️..⚗️)    balance scale..alembic
+    Interval{ 0x2699, 0x2699 }, // E1.0   [1] (⚙️)       gear
+    Interval{ 0x269B, 0x269C }, // E1.0   [2] (⚛️..⚜️)    atom symbol..fleur-de-lis
+    Interval{ 0x26A0, 0x26A1 }, // E0.6   [2] (⚠️..⚡)    warning..high voltage
+    Interval{ 0x26A7, 0x26A7 }, // E13.0  [1] (⚧️)       transgender symbol
+    Interval{ 0x26AA, 0x26AB }, // E0.6   [2] (⚪..⚫)    white circle..black circle
+    Interval{ 0x26B0, 0x26B1 }, // E1.0   [2] (⚰️..⚱️)    coffin..funeral urn
+    Interval{ 0x26BD, 0x26BE }, // E0.6   [2] (⚽..⚾)    soccer ball..baseball
+    Interval{ 0x26C4, 0x26C5 }, // E0.6   [2] (⛄..⛅)    snowman without snow..sun behind cloud
+    Interval{ 0x26C8, 0x26C8 }, // E0.7   [1] (⛈️)       cloud with lightning and rain
+    Interval{ 0x26CE, 0x26CE }, // E0.6   [1] (⛎)       Ophiuchus
+    Interval{ 0x26CF, 0x26CF }, // E0.7   [1] (⛏️)       pick
+    Interval{ 0x26D1, 0x26D1 }, // E0.7   [1] (⛑️)       rescue worker’s helmet
+    Interval{ 0x26D3, 0x26D3 }, // E0.7   [1] (⛓️)       chains
+    Interval{ 0x26D4, 0x26D4 }, // E0.6   [1] (⛔)       no entry
+    Interval{ 0x26E9, 0x26E9 }, // E0.7   [1] (⛩️)       shinto shrine
+    Interval{ 0x26EA, 0x26EA }, // E0.6   [1] (⛪)       church
+    Interval{ 0x26F0, 0x26F1 }, // E0.7   [2] (⛰️..⛱️)    mountain..umbrella on ground
+    Interval{ 0x26F2, 0x26F3 }, // E0.6   [2] (⛲..⛳)    fountain..flag in hole
+    Interval{ 0x26F4, 0x26F4 }, // E0.7   [1] (⛴️)       ferry
+    Interval{ 0x26F5, 0x26F5 }, // E0.6   [1] (⛵)       sailboat
+    Interval{ 0x26F7, 0x26F9 }, // E0.7   [3] (⛷️..⛹️)    skier..person bouncing ball
+    Interval{ 0x26FA, 0x26FA }, // E0.6   [1] (⛺)       tent
+    Interval{ 0x26FD, 0x26FD }, // E0.6   [1] (⛽)       fuel pump
+    Interval{ 0x2702, 0x2702 }, // E0.6   [1] (✂️)       scissors
+    Interval{ 0x2705, 0x2705 }, // E0.6   [1] (✅)       check mark button
+    Interval{ 0x2708, 0x270C }, // E0.6   [5] (✈️..✌️)    airplane..victory hand
+    Interval{ 0x270D, 0x270D }, // E0.7   [1] (✍️)       writing hand
+    Interval{ 0x270F, 0x270F }, // E0.6   [1] (✏️)       pencil
+    Interval{ 0x2712, 0x2712 }, // E0.6   [1] (✒️)       black nib
+    Interval{ 0x2714, 0x2714 }, // E0.6   [1] (✔️)       check mark
+    Interval{ 0x2716, 0x2716 }, // E0.6   [1] (✖️)       multiply
+    Interval{ 0x271D, 0x271D }, // E0.7   [1] (✝️)       latin cross
+    Interval{ 0x2721, 0x2721 }, // E0.7   [1] (✡️)       star of David
+    Interval{ 0x2728, 0x2728 }, // E0.6   [1] (✨)       sparkles
+    Interval{ 0x2733, 0x2734 }, // E0.6   [2] (✳️..✴️)    eight-spoked asterisk..eight-pointed star
+    Interval{ 0x2744, 0x2744 }, // E0.6   [1] (❄️)       snowflake
+    Interval{ 0x2747, 0x2747 }, // E0.6   [1] (❇️)       sparkle
+    Interval{ 0x274C, 0x274C }, // E0.6   [1] (❌)       cross mark
+    Interval{ 0x274E, 0x274E }, // E0.6   [1] (❎)       cross mark button
+    Interval{ 0x2753, 0x2755 }, // E0.6   [3] (❓..❕)    question mark..white exclamation mark
+    Interval{ 0x2757, 0x2757 }, // E0.6   [1] (❗)       exclamation mark
+    Interval{ 0x2763, 0x2763 }, // E1.0   [1] (❣️)       heart exclamation
+    Interval{ 0x2764, 0x2764 }, // E0.6   [1] (❤️)       red heart
+    Interval{ 0x2795, 0x2797 }, // E0.6   [3] (➕..➗)    plus..divide
+    Interval{ 0x27A1, 0x27A1 }, // E0.6   [1] (➡️)       right arrow
+    Interval{ 0x27B0, 0x27B0 }, // E0.6   [1] (➰)       curly loop
+    Interval{ 0x27BF, 0x27BF }, // E1.0   [1] (➿)       double curly loop
+    Interval{ 0x2934, 0x2935 }, // E0.6   [2] (⤴️..⤵️)    right arrow curving up..right arrow curving down
+    Interval{ 0x2B05, 0x2B07 }, // E0.6   [3] (⬅️..⬇️)    left arrow..down arrow
+    Interval{ 0x2B1B, 0x2B1C }, // E0.6   [2] (⬛..⬜)    black large square..white large square
+    Interval{ 0x2B50, 0x2B50 }, // E0.6   [1] (⭐)       star
+    Interval{ 0x2B55, 0x2B55 }, // E0.6   [1] (⭕)       hollow red circle
+    Interval{ 0x3030, 0x3030 }, // E0.6   [1] (〰️)       wavy dash
+    Interval{ 0x303D, 0x303D }, // E0.6   [1] (〽️)       part alternation mark
+    Interval{ 0x3297, 0x3297 }, // E0.6   [1] (㊗️)       Japanese “congratulations” button
+    Interval{ 0x3299, 0x3299 }, // E0.6   [1] (㊙️)       Japanese “secret” button
+    Interval{ 0x1F004, 0x1F004 }, // E0.6   [1] (🀄)       mahjong red dragon
+    Interval{ 0x1F0CF, 0x1F0CF }, // E0.6   [1] (🃏)       joker
+    Interval{ 0x1F170, 0x1F171 }, // E0.6   [2] (🅰️..🅱️)    A button (blood type)..B button (blood type)
+    Interval{ 0x1F17E, 0x1F17F }, // E0.6   [2] (🅾️..🅿️)    O button (blood type)..P button
+    Interval{ 0x1F18E, 0x1F18E }, // E0.6   [1] (🆎)       AB button (blood type)
+    Interval{ 0x1F191, 0x1F19A }, // E0.6  [10] (🆑..🆚)    CL button..VS button
+    Interval{ 0x1F1E6, 0x1F1FF }, // E0.0  [26] (🇦..🇿)    regional indicator symbol letter a..regional indicator symbol letter z
+    Interval{ 0x1F201, 0x1F202 }, // E0.6   [2] (🈁..🈂️)    Japanese “here” button..Japanese “service charge” button
+    Interval{ 0x1F21A, 0x1F21A }, // E0.6   [1] (🈚)       Japanese “free of charge” button
+    Interval{ 0x1F22F, 0x1F22F }, // E0.6   [1] (🈯)       Japanese “reserved” button
+    Interval{ 0x1F232, 0x1F23A }, // E0.6   [9] (🈲..🈺)    Japanese “prohibited” button..Japanese “open for business” button
+    Interval{ 0x1F250, 0x1F251 }, // E0.6   [2] (🉐..🉑)    Japanese “bargain” button..Japanese “acceptable” button
+    Interval{ 0x1F300, 0x1F30C }, // E0.6  [13] (🌀..🌌)    cyclone..milky way
+    Interval{ 0x1F30D, 0x1F30E }, // E0.7   [2] (🌍..🌎)    globe showing Europe-Africa..globe showing Americas
+    Interval{ 0x1F30F, 0x1F30F }, // E0.6   [1] (🌏)       globe showing Asia-Australia
+    Interval{ 0x1F310, 0x1F310 }, // E1.0   [1] (🌐)       globe with meridians
+    Interval{ 0x1F311, 0x1F311 }, // E0.6   [1] (🌑)       new moon
+    Interval{ 0x1F312, 0x1F312 }, // E1.0   [1] (🌒)       waxing crescent moon
+    Interval{ 0x1F313, 0x1F315 }, // E0.6   [3] (🌓..🌕)    first quarter moon..full moon
+    Interval{ 0x1F316, 0x1F318 }, // E1.0   [3] (🌖..🌘)    waning gibbous moon..waning crescent moon
+    Interval{ 0x1F319, 0x1F319 }, // E0.6   [1] (🌙)       crescent moon
+    Interval{ 0x1F31A, 0x1F31A }, // E1.0   [1] (🌚)       new moon face
+    Interval{ 0x1F31B, 0x1F31B }, // E0.6   [1] (🌛)       first quarter moon face
+    Interval{ 0x1F31C, 0x1F31C }, // E0.7   [1] (🌜)       last quarter moon face
+    Interval{ 0x1F31D, 0x1F31E }, // E1.0   [2] (🌝..🌞)    full moon face..sun with face
+    Interval{ 0x1F31F, 0x1F320 }, // E0.6   [2] (🌟..🌠)    glowing star..shooting star
+    Interval{ 0x1F321, 0x1F321 }, // E0.7   [1] (🌡️)       thermometer
+    Interval{ 0x1F324, 0x1F32C }, // E0.7   [9] (🌤️..🌬️)    sun behind small cloud..wind face
+    Interval{ 0x1F32D, 0x1F32F }, // E1.0   [3] (🌭..🌯)    hot dog..burrito
+    Interval{ 0x1F330, 0x1F331 }, // E0.6   [2] (🌰..🌱)    chestnut..seedling
+    Interval{ 0x1F332, 0x1F333 }, // E1.0   [2] (🌲..🌳)    evergreen tree..deciduous tree
+    Interval{ 0x1F334, 0x1F335 }, // E0.6   [2] (🌴..🌵)    palm tree..cactus
+    Interval{ 0x1F336, 0x1F336 }, // E0.7   [1] (🌶️)       hot pepper
+    Interval{ 0x1F337, 0x1F34A }, // E0.6  [20] (🌷..🍊)    tulip..tangerine
+    Interval{ 0x1F34B, 0x1F34B }, // E1.0   [1] (🍋)       lemon
+    Interval{ 0x1F34C, 0x1F34F }, // E0.6   [4] (🍌..🍏)    banana..green apple
+    Interval{ 0x1F350, 0x1F350 }, // E1.0   [1] (🍐)       pear
+    Interval{ 0x1F351, 0x1F37B }, // E0.6  [43] (🍑..🍻)    peach..clinking beer mugs
+    Interval{ 0x1F37C, 0x1F37C }, // E1.0   [1] (🍼)       baby bottle
+    Interval{ 0x1F37D, 0x1F37D }, // E0.7   [1] (🍽️)       fork and knife with plate
+    Interval{ 0x1F37E, 0x1F37F }, // E1.0   [2] (🍾..🍿)    bottle with popping cork..popcorn
+    Interval{ 0x1F380, 0x1F393 }, // E0.6  [20] (🎀..🎓)    ribbon..graduation cap
+    Interval{ 0x1F396, 0x1F397 }, // E0.7   [2] (🎖️..🎗️)    military medal..reminder ribbon
+    Interval{ 0x1F399, 0x1F39B }, // E0.7   [3] (🎙️..🎛️)    studio microphone..control knobs
+    Interval{ 0x1F39E, 0x1F39F }, // E0.7   [2] (🎞️..🎟️)    film frames..admission tickets
+    Interval{ 0x1F3A0, 0x1F3C4 }, // E0.6  [37] (🎠..🏄)    carousel horse..person surfing
+    Interval{ 0x1F3C5, 0x1F3C5 }, // E1.0   [1] (🏅)       sports medal
+    Interval{ 0x1F3C6, 0x1F3C6 }, // E0.6   [1] (🏆)       trophy
+    Interval{ 0x1F3C7, 0x1F3C7 }, // E1.0   [1] (🏇)       horse racing
+    Interval{ 0x1F3C8, 0x1F3C8 }, // E0.6   [1] (🏈)       american football
+    Interval{ 0x1F3C9, 0x1F3C9 }, // E1.0   [1] (🏉)       rugby football
+    Interval{ 0x1F3CA, 0x1F3CA }, // E0.6   [1] (🏊)       person swimming
+    Interval{ 0x1F3CB, 0x1F3CE }, // E0.7   [4] (🏋️..🏎️)    person lifting weights..racing car
+    Interval{ 0x1F3CF, 0x1F3D3 }, // E1.0   [5] (🏏..🏓)    cricket game..ping pong
+    Interval{ 0x1F3D4, 0x1F3DF }, // E0.7  [12] (🏔️..🏟️)    snow-capped mountain..stadium
+    Interval{ 0x1F3E0, 0x1F3E3 }, // E0.6   [4] (🏠..🏣)    house..Japanese post office
+    Interval{ 0x1F3E4, 0x1F3E4 }, // E1.0   [1] (🏤)       post office
+    Interval{ 0x1F3E5, 0x1F3F0 }, // E0.6  [12] (🏥..🏰)    hospital..castle
+    Interval{ 0x1F3F3, 0x1F3F3 }, // E0.7   [1] (🏳️)       white flag
+    Interval{ 0x1F3F4, 0x1F3F4 }, // E1.0   [1] (🏴)       black flag
+    Interval{ 0x1F3F5, 0x1F3F5 }, // E0.7   [1] (🏵️)       rosette
+    Interval{ 0x1F3F7, 0x1F3F7 }, // E0.7   [1] (🏷️)       label
+    Interval{ 0x1F3F8, 0x1F407 }, // E1.0  [16] (🏸..🐇)    badminton..rabbit
+    Interval{ 0x1F408, 0x1F408 }, // E0.7   [1] (🐈)       cat
+    Interval{ 0x1F409, 0x1F40B }, // E1.0   [3] (🐉..🐋)    dragon..whale
+    Interval{ 0x1F40C, 0x1F40E }, // E0.6   [3] (🐌..🐎)    snail..horse
+    Interval{ 0x1F40F, 0x1F410 }, // E1.0   [2] (🐏..🐐)    ram..goat
+    Interval{ 0x1F411, 0x1F412 }, // E0.6   [2] (🐑..🐒)    ewe..monkey
+    Interval{ 0x1F413, 0x1F413 }, // E1.0   [1] (🐓)       rooster
+    Interval{ 0x1F414, 0x1F414 }, // E0.6   [1] (🐔)       chicken
+    Interval{ 0x1F415, 0x1F415 }, // E0.7   [1] (🐕)       dog
+    Interval{ 0x1F416, 0x1F416 }, // E1.0   [1] (🐖)       pig
+    Interval{ 0x1F417, 0x1F429 }, // E0.6  [19] (🐗..🐩)    boar..poodle
+    Interval{ 0x1F42A, 0x1F42A }, // E1.0   [1] (🐪)       camel
+    Interval{ 0x1F42B, 0x1F43E }, // E0.6  [20] (🐫..🐾)    two-hump camel..paw prints
+    Interval{ 0x1F43F, 0x1F43F }, // E0.7   [1] (🐿️)       chipmunk
+    Interval{ 0x1F440, 0x1F440 }, // E0.6   [1] (👀)       eyes
+    Interval{ 0x1F441, 0x1F441 }, // E0.7   [1] (👁️)       eye
+    Interval{ 0x1F442, 0x1F464 }, // E0.6  [35] (👂..👤)    ear..bust in silhouette
+    Interval{ 0x1F465, 0x1F465 }, // E1.0   [1] (👥)       busts in silhouette
+    Interval{ 0x1F466, 0x1F46B }, // E0.6   [6] (👦..👫)    boy..woman and man holding hands
+    Interval{ 0x1F46C, 0x1F46D }, // E1.0   [2] (👬..👭)    men holding hands..women holding hands
+    Interval{ 0x1F46E, 0x1F4AC }, // E0.6  [63] (👮..💬)    police officer..speech balloon
+    Interval{ 0x1F4AD, 0x1F4AD }, // E1.0   [1] (💭)       thought balloon
+    Interval{ 0x1F4AE, 0x1F4B5 }, // E0.6   [8] (💮..💵)    white flower..dollar banknote
+    Interval{ 0x1F4B6, 0x1F4B7 }, // E1.0   [2] (💶..💷)    euro banknote..pound banknote
+    Interval{ 0x1F4B8, 0x1F4EB }, // E0.6  [52] (💸..📫)    money with wings..closed mailbox with raised flag
+    Interval{ 0x1F4EC, 0x1F4ED }, // E0.7   [2] (📬..📭)    open mailbox with raised flag..open mailbox with lowered flag
+    Interval{ 0x1F4EE, 0x1F4EE }, // E0.6   [1] (📮)       postbox
+    Interval{ 0x1F4EF, 0x1F4EF }, // E1.0   [1] (📯)       postal horn
+    Interval{ 0x1F4F0, 0x1F4F4 }, // E0.6   [5] (📰..📴)    newspaper..mobile phone off
+    Interval{ 0x1F4F5, 0x1F4F5 }, // E1.0   [1] (📵)       no mobile phones
+    Interval{ 0x1F4F6, 0x1F4F7 }, // E0.6   [2] (📶..📷)    antenna bars..camera
+    Interval{ 0x1F4F8, 0x1F4F8 }, // E1.0   [1] (📸)       camera with flash
+    Interval{ 0x1F4F9, 0x1F4FC }, // E0.6   [4] (📹..📼)    video camera..videocassette
+    Interval{ 0x1F4FD, 0x1F4FD }, // E0.7   [1] (📽️)       film projector
+    Interval{ 0x1F4FF, 0x1F502 }, // E1.0   [4] (📿..🔂)    prayer beads..repeat single button
+    Interval{ 0x1F503, 0x1F503 }, // E0.6   [1] (🔃)       clockwise vertical arrows
+    Interval{ 0x1F504, 0x1F507 }, // E1.0   [4] (🔄..🔇)    counterclockwise arrows button..muted speaker
+    Interval{ 0x1F508, 0x1F508 }, // E0.7   [1] (🔈)       speaker low volume
+    Interval{ 0x1F509, 0x1F509 }, // E1.0   [1] (🔉)       speaker medium volume
+    Interval{ 0x1F50A, 0x1F514 }, // E0.6  [11] (🔊..🔔)    speaker high volume..bell
+    Interval{ 0x1F515, 0x1F515 }, // E1.0   [1] (🔕)       bell with slash
+    Interval{ 0x1F516, 0x1F52B }, // E0.6  [22] (🔖..🔫)    bookmark..pistol
+    Interval{ 0x1F52C, 0x1F52D }, // E1.0   [2] (🔬..🔭)    microscope..telescope
+    Interval{ 0x1F52E, 0x1F53D }, // E0.6  [16] (🔮..🔽)    crystal ball..downwards button
+    Interval{ 0x1F549, 0x1F54A }, // E0.7   [2] (🕉️..🕊️)    om..dove
+    Interval{ 0x1F54B, 0x1F54E }, // E1.0   [4] (🕋..🕎)    kaaba..menorah
+    Interval{ 0x1F550, 0x1F55B }, // E0.6  [12] (🕐..🕛)    one o’clock..twelve o’clock
+    Interval{ 0x1F55C, 0x1F567 }, // E0.7  [12] (🕜..🕧)    one-thirty..twelve-thirty
+    Interval{ 0x1F56F, 0x1F570 }, // E0.7   [2] (🕯️..🕰️)    candle..mantelpiece clock
+    Interval{ 0x1F573, 0x1F579 }, // E0.7   [7] (🕳️..🕹️)    hole..joystick
+    Interval{ 0x1F57A, 0x1F57A }, // E3.0   [1] (🕺)       man dancing
+    Interval{ 0x1F587, 0x1F587 }, // E0.7   [1] (🖇️)       linked paperclips
+    Interval{ 0x1F58A, 0x1F58D }, // E0.7   [4] (🖊️..🖍️)    pen..crayon
+    Interval{ 0x1F590, 0x1F590 }, // E0.7   [1] (🖐️)       hand with fingers splayed
+    Interval{ 0x1F595, 0x1F596 }, // E1.0   [2] (🖕..🖖)    middle finger..vulcan salute
+    Interval{ 0x1F5A4, 0x1F5A4 }, // E3.0   [1] (🖤)       black heart
+    Interval{ 0x1F5A5, 0x1F5A5 }, // E0.7   [1] (🖥️)       desktop computer
+    Interval{ 0x1F5A8, 0x1F5A8 }, // E0.7   [1] (🖨️)       printer
+    Interval{ 0x1F5B1, 0x1F5B2 }, // E0.7   [2] (🖱️..🖲️)    computer mouse..trackball
+    Interval{ 0x1F5BC, 0x1F5BC }, // E0.7   [1] (🖼️)       framed picture
+    Interval{ 0x1F5C2, 0x1F5C4 }, // E0.7   [3] (🗂️..🗄️)    card index dividers..file cabinet
+    Interval{ 0x1F5D1, 0x1F5D3 }, // E0.7   [3] (🗑️..🗓️)    wastebasket..spiral calendar
+    Interval{ 0x1F5DC, 0x1F5DE }, // E0.7   [3] (🗜️..🗞️)    clamp..rolled-up newspaper
+    Interval{ 0x1F5E1, 0x1F5E1 }, // E0.7   [1] (🗡️)       dagger
+    Interval{ 0x1F5E3, 0x1F5E3 }, // E0.7   [1] (🗣️)       speaking head
+    Interval{ 0x1F5E8, 0x1F5E8 }, // E2.0   [1] (🗨️)       left speech bubble
+    Interval{ 0x1F5EF, 0x1F5EF }, // E0.7   [1] (🗯️)       right anger bubble
+    Interval{ 0x1F5F3, 0x1F5F3 }, // E0.7   [1] (🗳️)       ballot box with ballot
+    Interval{ 0x1F5FA, 0x1F5FA }, // E0.7   [1] (🗺️)       world map
+    Interval{ 0x1F5FB, 0x1F5FF }, // E0.6   [5] (🗻..🗿)    mount fuji..moai
+    Interval{ 0x1F600, 0x1F600 }, // E1.0   [1] (😀)       grinning face
+    Interval{ 0x1F601, 0x1F606 }, // E0.6   [6] (😁..😆)    beaming face with smiling eyes..grinning squinting face
+    Interval{ 0x1F607, 0x1F608 }, // E1.0   [2] (😇..😈)    smiling face with halo..smiling face with horns
+    Interval{ 0x1F609, 0x1F60D }, // E0.6   [5] (😉..😍)    winking face..smiling face with heart-eyes
+    Interval{ 0x1F60E, 0x1F60E }, // E1.0   [1] (😎)       smiling face with sunglasses
+    Interval{ 0x1F60F, 0x1F60F }, // E0.6   [1] (😏)       smirking face
+    Interval{ 0x1F610, 0x1F610 }, // E0.7   [1] (😐)       neutral face
+    Interval{ 0x1F611, 0x1F611 }, // E1.0   [1] (😑)       expressionless face
+    Interval{ 0x1F612, 0x1F614 }, // E0.6   [3] (😒..😔)    unamused face..pensive face
+    Interval{ 0x1F615, 0x1F615 }, // E1.0   [1] (😕)       confused face
+    Interval{ 0x1F616, 0x1F616 }, // E0.6   [1] (😖)       confounded face
+    Interval{ 0x1F617, 0x1F617 }, // E1.0   [1] (😗)       kissing face
+    Interval{ 0x1F618, 0x1F618 }, // E0.6   [1] (😘)       face blowing a kiss
+    Interval{ 0x1F619, 0x1F619 }, // E1.0   [1] (😙)       kissing face with smiling eyes
+    Interval{ 0x1F61A, 0x1F61A }, // E0.6   [1] (😚)       kissing face with closed eyes
+    Interval{ 0x1F61B, 0x1F61B }, // E1.0   [1] (😛)       face with tongue
+    Interval{ 0x1F61C, 0x1F61E }, // E0.6   [3] (😜..😞)    winking face with tongue..disappointed face
+    Interval{ 0x1F61F, 0x1F61F }, // E1.0   [1] (😟)       worried face
+    Interval{ 0x1F620, 0x1F625 }, // E0.6   [6] (😠..😥)    angry face..sad but relieved face
+    Interval{ 0x1F626, 0x1F627 }, // E1.0   [2] (😦..😧)    frowning face with open mouth..anguished face
+    Interval{ 0x1F628, 0x1F62B }, // E0.6   [4] (😨..😫)    fearful face..tired face
+    Interval{ 0x1F62C, 0x1F62C }, // E1.0   [1] (😬)       grimacing face
+    Interval{ 0x1F62D, 0x1F62D }, // E0.6   [1] (😭)       loudly crying face
+    Interval{ 0x1F62E, 0x1F62F }, // E1.0   [2] (😮..😯)    face with open mouth..hushed face
+    Interval{ 0x1F630, 0x1F633 }, // E0.6   [4] (😰..😳)    anxious face with sweat..flushed face
+    Interval{ 0x1F634, 0x1F634 }, // E1.0   [1] (😴)       sleeping face
+    Interval{ 0x1F635, 0x1F635 }, // E0.6   [1] (😵)       dizzy face
+    Interval{ 0x1F636, 0x1F636 }, // E1.0   [1] (😶)       face without mouth
+    Interval{ 0x1F637, 0x1F640 }, // E0.6  [10] (😷..🙀)    face with medical mask..weary cat
+    Interval{ 0x1F641, 0x1F644 }, // E1.0   [4] (🙁..🙄)    slightly frowning face..face with rolling eyes
+    Interval{ 0x1F645, 0x1F64F }, // E0.6  [11] (🙅..🙏)    person gesturing NO..folded hands
+    Interval{ 0x1F680, 0x1F680 }, // E0.6   [1] (🚀)       rocket
+    Interval{ 0x1F681, 0x1F682 }, // E1.0   [2] (🚁..🚂)    helicopter..locomotive
+    Interval{ 0x1F683, 0x1F685 }, // E0.6   [3] (🚃..🚅)    railway car..bullet train
+    Interval{ 0x1F686, 0x1F686 }, // E1.0   [1] (🚆)       train
+    Interval{ 0x1F687, 0x1F687 }, // E0.6   [1] (🚇)       metro
+    Interval{ 0x1F688, 0x1F688 }, // E1.0   [1] (🚈)       light rail
+    Interval{ 0x1F689, 0x1F689 }, // E0.6   [1] (🚉)       station
+    Interval{ 0x1F68A, 0x1F68B }, // E1.0   [2] (🚊..🚋)    tram..tram car
+    Interval{ 0x1F68C, 0x1F68C }, // E0.6   [1] (🚌)       bus
+    Interval{ 0x1F68D, 0x1F68D }, // E0.7   [1] (🚍)       oncoming bus
+    Interval{ 0x1F68E, 0x1F68E }, // E1.0   [1] (🚎)       trolleybus
+    Interval{ 0x1F68F, 0x1F68F }, // E0.6   [1] (🚏)       bus stop
+    Interval{ 0x1F690, 0x1F690 }, // E1.0   [1] (🚐)       minibus
+    Interval{ 0x1F691, 0x1F693 }, // E0.6   [3] (🚑..🚓)    ambulance..police car
+    Interval{ 0x1F694, 0x1F694 }, // E0.7   [1] (🚔)       oncoming police car
+    Interval{ 0x1F695, 0x1F695 }, // E0.6   [1] (🚕)       taxi
+    Interval{ 0x1F696, 0x1F696 }, // E1.0   [1] (🚖)       oncoming taxi
+    Interval{ 0x1F697, 0x1F697 }, // E0.6   [1] (🚗)       automobile
+    Interval{ 0x1F698, 0x1F698 }, // E0.7   [1] (🚘)       oncoming automobile
+    Interval{ 0x1F699, 0x1F69A }, // E0.6   [2] (🚙..🚚)    sport utility vehicle..delivery truck
+    Interval{ 0x1F69B, 0x1F6A1 }, // E1.0   [7] (🚛..🚡)    articulated lorry..aerial tramway
+    Interval{ 0x1F6A2, 0x1F6A2 }, // E0.6   [1] (🚢)       ship
+    Interval{ 0x1F6A3, 0x1F6A3 }, // E1.0   [1] (🚣)       person rowing boat
+    Interval{ 0x1F6A4, 0x1F6A5 }, // E0.6   [2] (🚤..🚥)    speedboat..horizontal traffic light
+    Interval{ 0x1F6A6, 0x1F6A6 }, // E1.0   [1] (🚦)       vertical traffic light
+    Interval{ 0x1F6A7, 0x1F6AD }, // E0.6   [7] (🚧..🚭)    construction..no smoking
+    Interval{ 0x1F6AE, 0x1F6B1 }, // E1.0   [4] (🚮..🚱)    litter in bin sign..non-potable water
+    Interval{ 0x1F6B2, 0x1F6B2 }, // E0.6   [1] (🚲)       bicycle
+    Interval{ 0x1F6B3, 0x1F6B5 }, // E1.0   [3] (🚳..🚵)    no bicycles..person mountain biking
+    Interval{ 0x1F6B6, 0x1F6B6 }, // E0.6   [1] (🚶)       person walking
+    Interval{ 0x1F6B7, 0x1F6B8 }, // E1.0   [2] (🚷..🚸)    no pedestrians..children crossing
+    Interval{ 0x1F6B9, 0x1F6BE }, // E0.6   [6] (🚹..🚾)    men’s room..water closet
+    Interval{ 0x1F6BF, 0x1F6BF }, // E1.0   [1] (🚿)       shower
+    Interval{ 0x1F6C0, 0x1F6C0 }, // E0.6   [1] (🛀)       person taking bath
+    Interval{ 0x1F6C1, 0x1F6C5 }, // E1.0   [5] (🛁..🛅)    bathtub..left luggage
+    Interval{ 0x1F6CB, 0x1F6CB }, // E0.7   [1] (🛋️)       couch and lamp
+    Interval{ 0x1F6CC, 0x1F6CC }, // E1.0   [1] (🛌)       person in bed
+    Interval{ 0x1F6CD, 0x1F6CF }, // E0.7   [3] (🛍️..🛏️)    shopping bags..bed
+    Interval{ 0x1F6D0, 0x1F6D0 }, // E1.0   [1] (🛐)       place of worship
+    Interval{ 0x1F6D1, 0x1F6D2 }, // E3.0   [2] (🛑..🛒)    stop sign..shopping cart
+    Interval{ 0x1F6D5, 0x1F6D5 }, // E12.0  [1] (🛕)       hindu temple
+    Interval{ 0x1F6D6, 0x1F6D7 }, // E13.0  [2] (🛖..🛗)    hut..elevator
+    Interval{ 0x1F6E0, 0x1F6E5 }, // E0.7   [6] (🛠️..🛥️)    hammer and wrench..motor boat
+    Interval{ 0x1F6E9, 0x1F6E9 }, // E0.7   [1] (🛩️)       small airplane
+    Interval{ 0x1F6EB, 0x1F6EC }, // E1.0   [2] (🛫..🛬)    airplane departure..airplane arrival
+    Interval{ 0x1F6F0, 0x1F6F0 }, // E0.7   [1] (🛰️)       satellite
+    Interval{ 0x1F6F3, 0x1F6F3 }, // E0.7   [1] (🛳️)       passenger ship
+    Interval{ 0x1F6F4, 0x1F6F6 }, // E3.0   [3] (🛴..🛶)    kick scooter..canoe
+    Interval{ 0x1F6F7, 0x1F6F8 }, // E5.0   [2] (🛷..🛸)    sled..flying saucer
+    Interval{ 0x1F6F9, 0x1F6F9 }, // E11.0  [1] (🛹)       skateboard
+    Interval{ 0x1F6FA, 0x1F6FA }, // E12.0  [1] (🛺)       auto rickshaw
+    Interval{ 0x1F6FB, 0x1F6FC }, // E13.0  [2] (🛻..🛼)    pickup truck..roller skate
+    Interval{ 0x1F7E0, 0x1F7EB }, // E12.0 [12] (🟠..🟫)    orange circle..brown square
+    Interval{ 0x1F90C, 0x1F90C }, // E13.0  [1] (🤌)       pinched fingers
+    Interval{ 0x1F90D, 0x1F90F }, // E12.0  [3] (🤍..🤏)    white heart..pinching hand
+    Interval{ 0x1F910, 0x1F918 }, // E1.0   [9] (🤐..🤘)    zipper-mouth face..sign of the horns
+    Interval{ 0x1F919, 0x1F91E }, // E3.0   [6] (🤙..🤞)    call me hand..crossed fingers
+    Interval{ 0x1F91F, 0x1F91F }, // E5.0   [1] (🤟)       love-you gesture
+    Interval{ 0x1F920, 0x1F927 }, // E3.0   [8] (🤠..🤧)    cowboy hat face..sneezing face
+    Interval{ 0x1F928, 0x1F92F }, // E5.0   [8] (🤨..🤯)    face with raised eyebrow..exploding head
+    Interval{ 0x1F930, 0x1F930 }, // E3.0   [1] (🤰)       pregnant woman
+    Interval{ 0x1F931, 0x1F932 }, // E5.0   [2] (🤱..🤲)    breast-feeding..palms up together
+    Interval{ 0x1F933, 0x1F93A }, // E3.0   [8] (🤳..🤺)    selfie..person fencing
+    Interval{ 0x1F93C, 0x1F93E }, // E3.0   [3] (🤼..🤾)    people wrestling..person playing handball
+    Interval{ 0x1F93F, 0x1F93F }, // E12.0  [1] (🤿)       diving mask
+    Interval{ 0x1F940, 0x1F945 }, // E3.0   [6] (🥀..🥅)    wilted flower..goal net
+    Interval{ 0x1F947, 0x1F94B }, // E3.0   [5] (🥇..🥋)    1st place medal..martial arts uniform
+    Interval{ 0x1F94C, 0x1F94C }, // E5.0   [1] (🥌)       curling stone
+    Interval{ 0x1F94D, 0x1F94F }, // E11.0  [3] (🥍..🥏)    lacrosse..flying disc
+    Interval{ 0x1F950, 0x1F95E }, // E3.0  [15] (🥐..🥞)    croissant..pancakes
+    Interval{ 0x1F95F, 0x1F96B }, // E5.0  [13] (🥟..🥫)    dumpling..canned food
+    Interval{ 0x1F96C, 0x1F970 }, // E11.0  [5] (🥬..🥰)    leafy green..smiling face with hearts
+    Interval{ 0x1F971, 0x1F971 }, // E12.0  [1] (🥱)       yawning face
+    Interval{ 0x1F972, 0x1F972 }, // E13.0  [1] (🥲)       smiling face with tear
+    Interval{ 0x1F973, 0x1F976 }, // E11.0  [4] (🥳..🥶)    partying face..cold face
+    Interval{ 0x1F977, 0x1F978 }, // E13.0  [2] (🥷..🥸)    ninja..disguised face
+    Interval{ 0x1F97A, 0x1F97A }, // E11.0  [1] (🥺)       pleading face
+    Interval{ 0x1F97B, 0x1F97B }, // E12.0  [1] (🥻)       sari
+    Interval{ 0x1F97C, 0x1F97F }, // E11.0  [4] (🥼..🥿)    lab coat..flat shoe
+    Interval{ 0x1F980, 0x1F984 }, // E1.0   [5] (🦀..🦄)    crab..unicorn
+    Interval{ 0x1F985, 0x1F991 }, // E3.0  [13] (🦅..🦑)    eagle..squid
+    Interval{ 0x1F992, 0x1F997 }, // E5.0   [6] (🦒..🦗)    giraffe..cricket
+    Interval{ 0x1F998, 0x1F9A2 }, // E11.0 [11] (🦘..🦢)    kangaroo..swan
+    Interval{ 0x1F9A3, 0x1F9A4 }, // E13.0  [2] (🦣..🦤)    mammoth..dodo
+    Interval{ 0x1F9A5, 0x1F9AA }, // E12.0  [6] (🦥..🦪)    sloth..oyster
+    Interval{ 0x1F9AB, 0x1F9AD }, // E13.0  [3] (🦫..🦭)    beaver..seal
+    Interval{ 0x1F9AE, 0x1F9AF }, // E12.0  [2] (🦮..🦯)    guide dog..white cane
+    Interval{ 0x1F9B0, 0x1F9B9 }, // E11.0 [10] (🦰..🦹)    red hair..supervillain
+    Interval{ 0x1F9BA, 0x1F9BF }, // E12.0  [6] (🦺..🦿)    safety vest..mechanical leg
+    Interval{ 0x1F9C0, 0x1F9C0 }, // E1.0   [1] (🧀)       cheese wedge
+    Interval{ 0x1F9C1, 0x1F9C2 }, // E11.0  [2] (🧁..🧂)    cupcake..salt
+    Interval{ 0x1F9C3, 0x1F9CA }, // E12.0  [8] (🧃..🧊)    beverage box..ice
+    Interval{ 0x1F9CB, 0x1F9CB }, // E13.0  [1] (🧋)       bubble tea
+    Interval{ 0x1F9CD, 0x1F9CF }, // E12.0  [3] (🧍..🧏)    person standing..deaf person
+    Interval{ 0x1F9D0, 0x1F9E6 }, // E5.0  [23] (🧐..🧦)    face with monocle..socks
+    Interval{ 0x1F9E7, 0x1F9FF }, // E11.0 [25] (🧧..🧿)    red envelope..nazar amulet
+    Interval{ 0x1FA70, 0x1FA73 }, // E12.0  [4] (🩰..🩳)    ballet shoes..shorts
+    Interval{ 0x1FA74, 0x1FA74 }, // E13.0  [1] (🩴)       thong sandal
+    Interval{ 0x1FA78, 0x1FA7A }, // E12.0  [3] (🩸..🩺)    drop of blood..stethoscope
+    Interval{ 0x1FA80, 0x1FA82 }, // E12.0  [3] (🪀..🪂)    yo-yo..parachute
+    Interval{ 0x1FA83, 0x1FA86 }, // E13.0  [4] (🪃..🪆)    boomerang..nesting dolls
+    Interval{ 0x1FA90, 0x1FA95 }, // E12.0  [6] (🪐..🪕)    ringed planet..banjo
+    Interval{ 0x1FA96, 0x1FAA8 }, // E13.0 [19] (🪖..🪨)    military helmet..rock
+    Interval{ 0x1FAB0, 0x1FAB6 }, // E13.0  [7] (🪰..🪶)    fly..feather
+    Interval{ 0x1FAC0, 0x1FAC2 }, // E13.0  [3] (🫀..🫂)    anatomical heart..people hugging
+    Interval{ 0x1FAD0, 0x1FAD6 }, // E13.0  [7] (🫐..🫖)    blueberries..teapot
+}; // }}}
+auto constexpr Emoji_Component = std::array{ // {{{
+    Interval{ 0x0023, 0x0023 }, // E0.0   [1] (#️)       number sign
+    Interval{ 0x002A, 0x002A }, // E0.0   [1] (*️)       asterisk
+    Interval{ 0x0030, 0x0039 }, // E0.0  [10] (0️..9️)    digit zero..digit nine
+    Interval{ 0x200D, 0x200D }, // E0.0   [1] (‍)        zero width joiner
+    Interval{ 0x20E3, 0x20E3 }, // E0.0   [1] (⃣)       combining enclosing keycap
+    Interval{ 0xFE0F, 0xFE0F }, // E0.0   [1] ()        VARIATION SELECTOR-16
+    Interval{ 0x1F1E6, 0x1F1FF }, // E0.0  [26] (🇦..🇿)    regional indicator symbol letter a..regional indicator symbol letter z
+    Interval{ 0x1F3FB, 0x1F3FF }, // E1.0   [5] (🏻..🏿)    light skin tone..dark skin tone
+    Interval{ 0x1F9B0, 0x1F9B3 }, // E11.0  [4] (🦰..🦳)    red hair..white hair
+    Interval{ 0xE0020, 0xE007F }, // E0.0  [96] (󠀠..󠁿)      tag space..cancel tag
+}; // }}}
+auto constexpr Emoji_Modifier = std::array{ // {{{
+    Interval{ 0x1F3FB, 0x1F3FF }, // E1.0   [5] (🏻..🏿)    light skin tone..dark skin tone
+}; // }}}
+auto constexpr Emoji_Modifier_Base = std::array{ // {{{
+    Interval{ 0x261D, 0x261D }, // E0.6   [1] (☝️)       index pointing up
+    Interval{ 0x26F9, 0x26F9 }, // E0.7   [1] (⛹️)       person bouncing ball
+    Interval{ 0x270A, 0x270C }, // E0.6   [3] (✊..✌️)    raised fist..victory hand
+    Interval{ 0x270D, 0x270D }, // E0.7   [1] (✍️)       writing hand
+    Interval{ 0x1F385, 0x1F385 }, // E0.6   [1] (🎅)       Santa Claus
+    Interval{ 0x1F3C2, 0x1F3C4 }, // E0.6   [3] (🏂..🏄)    snowboarder..person surfing
+    Interval{ 0x1F3C7, 0x1F3C7 }, // E1.0   [1] (🏇)       horse racing
+    Interval{ 0x1F3CA, 0x1F3CA }, // E0.6   [1] (🏊)       person swimming
+    Interval{ 0x1F3CB, 0x1F3CC }, // E0.7   [2] (🏋️..🏌️)    person lifting weights..person golfing
+    Interval{ 0x1F442, 0x1F443 }, // E0.6   [2] (👂..👃)    ear..nose
+    Interval{ 0x1F446, 0x1F450 }, // E0.6  [11] (👆..👐)    backhand index pointing up..open hands
+    Interval{ 0x1F466, 0x1F46B }, // E0.6   [6] (👦..👫)    boy..woman and man holding hands
+    Interval{ 0x1F46C, 0x1F46D }, // E1.0   [2] (👬..👭)    men holding hands..women holding hands
+    Interval{ 0x1F46E, 0x1F478 }, // E0.6  [11] (👮..👸)    police officer..princess
+    Interval{ 0x1F47C, 0x1F47C }, // E0.6   [1] (👼)       baby angel
+    Interval{ 0x1F481, 0x1F483 }, // E0.6   [3] (💁..💃)    person tipping hand..woman dancing
+    Interval{ 0x1F485, 0x1F487 }, // E0.6   [3] (💅..💇)    nail polish..person getting haircut
+    Interval{ 0x1F48F, 0x1F48F }, // E0.6   [1] (💏)       kiss
+    Interval{ 0x1F491, 0x1F491 }, // E0.6   [1] (💑)       couple with heart
+    Interval{ 0x1F4AA, 0x1F4AA }, // E0.6   [1] (💪)       flexed biceps
+    Interval{ 0x1F574, 0x1F575 }, // E0.7   [2] (🕴️..🕵️)    person in suit levitating..detective
+    Interval{ 0x1F57A, 0x1F57A }, // E3.0   [1] (🕺)       man dancing
+    Interval{ 0x1F590, 0x1F590 }, // E0.7   [1] (🖐️)       hand with fingers splayed
+    Interval{ 0x1F595, 0x1F596 }, // E1.0   [2] (🖕..🖖)    middle finger..vulcan salute
+    Interval{ 0x1F645, 0x1F647 }, // E0.6   [3] (🙅..🙇)    person gesturing NO..person bowing
+    Interval{ 0x1F64B, 0x1F64F }, // E0.6   [5] (🙋..🙏)    person raising hand..folded hands
+    Interval{ 0x1F6A3, 0x1F6A3 }, // E1.0   [1] (🚣)       person rowing boat
+    Interval{ 0x1F6B4, 0x1F6B5 }, // E1.0   [2] (🚴..🚵)    person biking..person mountain biking
+    Interval{ 0x1F6B6, 0x1F6B6 }, // E0.6   [1] (🚶)       person walking
+    Interval{ 0x1F6C0, 0x1F6C0 }, // E0.6   [1] (🛀)       person taking bath
+    Interval{ 0x1F6CC, 0x1F6CC }, // E1.0   [1] (🛌)       person in bed
+    Interval{ 0x1F90C, 0x1F90C }, // E13.0  [1] (🤌)       pinched fingers
+    Interval{ 0x1F90F, 0x1F90F }, // E12.0  [1] (🤏)       pinching hand
+    Interval{ 0x1F918, 0x1F918 }, // E1.0   [1] (🤘)       sign of the horns
+    Interval{ 0x1F919, 0x1F91E }, // E3.0   [6] (🤙..🤞)    call me hand..crossed fingers
+    Interval{ 0x1F91F, 0x1F91F }, // E5.0   [1] (🤟)       love-you gesture
+    Interval{ 0x1F926, 0x1F926 }, // E3.0   [1] (🤦)       person facepalming
+    Interval{ 0x1F930, 0x1F930 }, // E3.0   [1] (🤰)       pregnant woman
+    Interval{ 0x1F931, 0x1F932 }, // E5.0   [2] (🤱..🤲)    breast-feeding..palms up together
+    Interval{ 0x1F933, 0x1F939 }, // E3.0   [7] (🤳..🤹)    selfie..person juggling
+    Interval{ 0x1F93C, 0x1F93E }, // E3.0   [3] (🤼..🤾)    people wrestling..person playing handball
+    Interval{ 0x1F977, 0x1F977 }, // E13.0  [1] (🥷)       ninja
+    Interval{ 0x1F9B5, 0x1F9B6 }, // E11.0  [2] (🦵..🦶)    leg..foot
+    Interval{ 0x1F9B8, 0x1F9B9 }, // E11.0  [2] (🦸..🦹)    superhero..supervillain
+    Interval{ 0x1F9BB, 0x1F9BB }, // E12.0  [1] (🦻)       ear with hearing aid
+    Interval{ 0x1F9CD, 0x1F9CF }, // E12.0  [3] (🧍..🧏)    person standing..deaf person
+    Interval{ 0x1F9D1, 0x1F9DD }, // E5.0  [13] (🧑..🧝)    person..elf
+}; // }}}
+auto constexpr Emoji_Presentation = std::array{ // {{{
+    Interval{ 0x231A, 0x231B }, // E0.6   [2] (⌚..⌛)    watch..hourglass done
+    Interval{ 0x23E9, 0x23EC }, // E0.6   [4] (⏩..⏬)    fast-forward button..fast down button
+    Interval{ 0x23F0, 0x23F0 }, // E0.6   [1] (⏰)       alarm clock
+    Interval{ 0x23F3, 0x23F3 }, // E0.6   [1] (⏳)       hourglass not done
+    Interval{ 0x25FD, 0x25FE }, // E0.6   [2] (◽..◾)    white medium-small square..black medium-small square
+    Interval{ 0x2614, 0x2615 }, // E0.6   [2] (☔..☕)    umbrella with rain drops..hot beverage
+    Interval{ 0x2648, 0x2653 }, // E0.6  [12] (♈..♓)    Aries..Pisces
+    Interval{ 0x267F, 0x267F }, // E0.6   [1] (♿)       wheelchair symbol
+    Interval{ 0x2693, 0x2693 }, // E0.6   [1] (⚓)       anchor
+    Interval{ 0x26A1, 0x26A1 }, // E0.6   [1] (⚡)       high voltage
+    Interval{ 0x26AA, 0x26AB }, // E0.6   [2] (⚪..⚫)    white circle..black circle
+    Interval{ 0x26BD, 0x26BE }, // E0.6   [2] (⚽..⚾)    soccer ball..baseball
+    Interval{ 0x26C4, 0x26C5 }, // E0.6   [2] (⛄..⛅)    snowman without snow..sun behind cloud
+    Interval{ 0x26CE, 0x26CE }, // E0.6   [1] (⛎)       Ophiuchus
+    Interval{ 0x26D4, 0x26D4 }, // E0.6   [1] (⛔)       no entry
+    Interval{ 0x26EA, 0x26EA }, // E0.6   [1] (⛪)       church
+    Interval{ 0x26F2, 0x26F3 }, // E0.6   [2] (⛲..⛳)    fountain..flag in hole
+    Interval{ 0x26F5, 0x26F5 }, // E0.6   [1] (⛵)       sailboat
+    Interval{ 0x26FA, 0x26FA }, // E0.6   [1] (⛺)       tent
+    Interval{ 0x26FD, 0x26FD }, // E0.6   [1] (⛽)       fuel pump
+    Interval{ 0x2705, 0x2705 }, // E0.6   [1] (✅)       check mark button
+    Interval{ 0x270A, 0x270B }, // E0.6   [2] (✊..✋)    raised fist..raised hand
+    Interval{ 0x2728, 0x2728 }, // E0.6   [1] (✨)       sparkles
+    Interval{ 0x274C, 0x274C }, // E0.6   [1] (❌)       cross mark
+    Interval{ 0x274E, 0x274E }, // E0.6   [1] (❎)       cross mark button
+    Interval{ 0x2753, 0x2755 }, // E0.6   [3] (❓..❕)    question mark..white exclamation mark
+    Interval{ 0x2757, 0x2757 }, // E0.6   [1] (❗)       exclamation mark
+    Interval{ 0x2795, 0x2797 }, // E0.6   [3] (➕..➗)    plus..divide
+    Interval{ 0x27B0, 0x27B0 }, // E0.6   [1] (➰)       curly loop
+    Interval{ 0x27BF, 0x27BF }, // E1.0   [1] (➿)       double curly loop
+    Interval{ 0x2B1B, 0x2B1C }, // E0.6   [2] (⬛..⬜)    black large square..white large square
+    Interval{ 0x2B50, 0x2B50 }, // E0.6   [1] (⭐)       star
+    Interval{ 0x2B55, 0x2B55 }, // E0.6   [1] (⭕)       hollow red circle
+    Interval{ 0x1F004, 0x1F004 }, // E0.6   [1] (🀄)       mahjong red dragon
+    Interval{ 0x1F0CF, 0x1F0CF }, // E0.6   [1] (🃏)       joker
+    Interval{ 0x1F18E, 0x1F18E }, // E0.6   [1] (🆎)       AB button (blood type)
+    Interval{ 0x1F191, 0x1F19A }, // E0.6  [10] (🆑..🆚)    CL button..VS button
+    Interval{ 0x1F1E6, 0x1F1FF }, // E0.0  [26] (🇦..🇿)    regional indicator symbol letter a..regional indicator symbol letter z
+    Interval{ 0x1F201, 0x1F201 }, // E0.6   [1] (🈁)       Japanese “here” button
+    Interval{ 0x1F21A, 0x1F21A }, // E0.6   [1] (🈚)       Japanese “free of charge” button
+    Interval{ 0x1F22F, 0x1F22F }, // E0.6   [1] (🈯)       Japanese “reserved” button
+    Interval{ 0x1F232, 0x1F236 }, // E0.6   [5] (🈲..🈶)    Japanese “prohibited” button..Japanese “not free of charge” button
+    Interval{ 0x1F238, 0x1F23A }, // E0.6   [3] (🈸..🈺)    Japanese “application” button..Japanese “open for business” button
+    Interval{ 0x1F250, 0x1F251 }, // E0.6   [2] (🉐..🉑)    Japanese “bargain” button..Japanese “acceptable” button
+    Interval{ 0x1F300, 0x1F30C }, // E0.6  [13] (🌀..🌌)    cyclone..milky way
+    Interval{ 0x1F30D, 0x1F30E }, // E0.7   [2] (🌍..🌎)    globe showing Europe-Africa..globe showing Americas
+    Interval{ 0x1F30F, 0x1F30F }, // E0.6   [1] (🌏)       globe showing Asia-Australia
+    Interval{ 0x1F310, 0x1F310 }, // E1.0   [1] (🌐)       globe with meridians
+    Interval{ 0x1F311, 0x1F311 }, // E0.6   [1] (🌑)       new moon
+    Interval{ 0x1F312, 0x1F312 }, // E1.0   [1] (🌒)       waxing crescent moon
+    Interval{ 0x1F313, 0x1F315 }, // E0.6   [3] (🌓..🌕)    first quarter moon..full moon
+    Interval{ 0x1F316, 0x1F318 }, // E1.0   [3] (🌖..🌘)    waning gibbous moon..waning crescent moon
+    Interval{ 0x1F319, 0x1F319 }, // E0.6   [1] (🌙)       crescent moon
+    Interval{ 0x1F31A, 0x1F31A }, // E1.0   [1] (🌚)       new moon face
+    Interval{ 0x1F31B, 0x1F31B }, // E0.6   [1] (🌛)       first quarter moon face
+    Interval{ 0x1F31C, 0x1F31C }, // E0.7   [1] (🌜)       last quarter moon face
+    Interval{ 0x1F31D, 0x1F31E }, // E1.0   [2] (🌝..🌞)    full moon face..sun with face
+    Interval{ 0x1F31F, 0x1F320 }, // E0.6   [2] (🌟..🌠)    glowing star..shooting star
+    Interval{ 0x1F32D, 0x1F32F }, // E1.0   [3] (🌭..🌯)    hot dog..burrito
+    Interval{ 0x1F330, 0x1F331 }, // E0.6   [2] (🌰..🌱)    chestnut..seedling
+    Interval{ 0x1F332, 0x1F333 }, // E1.0   [2] (🌲..🌳)    evergreen tree..deciduous tree
+    Interval{ 0x1F334, 0x1F335 }, // E0.6   [2] (🌴..🌵)    palm tree..cactus
+    Interval{ 0x1F337, 0x1F34A }, // E0.6  [20] (🌷..🍊)    tulip..tangerine
+    Interval{ 0x1F34B, 0x1F34B }, // E1.0   [1] (🍋)       lemon
+    Interval{ 0x1F34C, 0x1F34F }, // E0.6   [4] (🍌..🍏)    banana..green apple
+    Interval{ 0x1F350, 0x1F350 }, // E1.0   [1] (🍐)       pear
+    Interval{ 0x1F351, 0x1F37B }, // E0.6  [43] (🍑..🍻)    peach..clinking beer mugs
+    Interval{ 0x1F37C, 0x1F37C }, // E1.0   [1] (🍼)       baby bottle
+    Interval{ 0x1F37E, 0x1F37F }, // E1.0   [2] (🍾..🍿)    bottle with popping cork..popcorn
+    Interval{ 0x1F380, 0x1F393 }, // E0.6  [20] (🎀..🎓)    ribbon..graduation cap
+    Interval{ 0x1F3A0, 0x1F3C4 }, // E0.6  [37] (🎠..🏄)    carousel horse..person surfing
+    Interval{ 0x1F3C5, 0x1F3C5 }, // E1.0   [1] (🏅)       sports medal
+    Interval{ 0x1F3C6, 0x1F3C6 }, // E0.6   [1] (🏆)       trophy
+    Interval{ 0x1F3C7, 0x1F3C7 }, // E1.0   [1] (🏇)       horse racing
+    Interval{ 0x1F3C8, 0x1F3C8 }, // E0.6   [1] (🏈)       american football
+    Interval{ 0x1F3C9, 0x1F3C9 }, // E1.0   [1] (🏉)       rugby football
+    Interval{ 0x1F3CA, 0x1F3CA }, // E0.6   [1] (🏊)       person swimming
+    Interval{ 0x1F3CF, 0x1F3D3 }, // E1.0   [5] (🏏..🏓)    cricket game..ping pong
+    Interval{ 0x1F3E0, 0x1F3E3 }, // E0.6   [4] (🏠..🏣)    house..Japanese post office
+    Interval{ 0x1F3E4, 0x1F3E4 }, // E1.0   [1] (🏤)       post office
+    Interval{ 0x1F3E5, 0x1F3F0 }, // E0.6  [12] (🏥..🏰)    hospital..castle
+    Interval{ 0x1F3F4, 0x1F3F4 }, // E1.0   [1] (🏴)       black flag
+    Interval{ 0x1F3F8, 0x1F407 }, // E1.0  [16] (🏸..🐇)    badminton..rabbit
+    Interval{ 0x1F408, 0x1F408 }, // E0.7   [1] (🐈)       cat
+    Interval{ 0x1F409, 0x1F40B }, // E1.0   [3] (🐉..🐋)    dragon..whale
+    Interval{ 0x1F40C, 0x1F40E }, // E0.6   [3] (🐌..🐎)    snail..horse
+    Interval{ 0x1F40F, 0x1F410 }, // E1.0   [2] (🐏..🐐)    ram..goat
+    Interval{ 0x1F411, 0x1F412 }, // E0.6   [2] (🐑..🐒)    ewe..monkey
+    Interval{ 0x1F413, 0x1F413 }, // E1.0   [1] (🐓)       rooster
+    Interval{ 0x1F414, 0x1F414 }, // E0.6   [1] (🐔)       chicken
+    Interval{ 0x1F415, 0x1F415 }, // E0.7   [1] (🐕)       dog
+    Interval{ 0x1F416, 0x1F416 }, // E1.0   [1] (🐖)       pig
+    Interval{ 0x1F417, 0x1F429 }, // E0.6  [19] (🐗..🐩)    boar..poodle
+    Interval{ 0x1F42A, 0x1F42A }, // E1.0   [1] (🐪)       camel
+    Interval{ 0x1F42B, 0x1F43E }, // E0.6  [20] (🐫..🐾)    two-hump camel..paw prints
+    Interval{ 0x1F440, 0x1F440 }, // E0.6   [1] (👀)       eyes
+    Interval{ 0x1F442, 0x1F464 }, // E0.6  [35] (👂..👤)    ear..bust in silhouette
+    Interval{ 0x1F465, 0x1F465 }, // E1.0   [1] (👥)       busts in silhouette
+    Interval{ 0x1F466, 0x1F46B }, // E0.6   [6] (👦..👫)    boy..woman and man holding hands
+    Interval{ 0x1F46C, 0x1F46D }, // E1.0   [2] (👬..👭)    men holding hands..women holding hands
+    Interval{ 0x1F46E, 0x1F4AC }, // E0.6  [63] (👮..💬)    police officer..speech balloon
+    Interval{ 0x1F4AD, 0x1F4AD }, // E1.0   [1] (💭)       thought balloon
+    Interval{ 0x1F4AE, 0x1F4B5 }, // E0.6   [8] (💮..💵)    white flower..dollar banknote
+    Interval{ 0x1F4B6, 0x1F4B7 }, // E1.0   [2] (💶..💷)    euro banknote..pound banknote
+    Interval{ 0x1F4B8, 0x1F4EB }, // E0.6  [52] (💸..📫)    money with wings..closed mailbox with raised flag
+    Interval{ 0x1F4EC, 0x1F4ED }, // E0.7   [2] (📬..📭)    open mailbox with raised flag..open mailbox with lowered flag
+    Interval{ 0x1F4EE, 0x1F4EE }, // E0.6   [1] (📮)       postbox
+    Interval{ 0x1F4EF, 0x1F4EF }, // E1.0   [1] (📯)       postal horn
+    Interval{ 0x1F4F0, 0x1F4F4 }, // E0.6   [5] (📰..📴)    newspaper..mobile phone off
+    Interval{ 0x1F4F5, 0x1F4F5 }, // E1.0   [1] (📵)       no mobile phones
+    Interval{ 0x1F4F6, 0x1F4F7 }, // E0.6   [2] (📶..📷)    antenna bars..camera
+    Interval{ 0x1F4F8, 0x1F4F8 }, // E1.0   [1] (📸)       camera with flash
+    Interval{ 0x1F4F9, 0x1F4FC }, // E0.6   [4] (📹..📼)    video camera..videocassette
+    Interval{ 0x1F4FF, 0x1F502 }, // E1.0   [4] (📿..🔂)    prayer beads..repeat single button
+    Interval{ 0x1F503, 0x1F503 }, // E0.6   [1] (🔃)       clockwise vertical arrows
+    Interval{ 0x1F504, 0x1F507 }, // E1.0   [4] (🔄..🔇)    counterclockwise arrows button..muted speaker
+    Interval{ 0x1F508, 0x1F508 }, // E0.7   [1] (🔈)       speaker low volume
+    Interval{ 0x1F509, 0x1F509 }, // E1.0   [1] (🔉)       speaker medium volume
+    Interval{ 0x1F50A, 0x1F514 }, // E0.6  [11] (🔊..🔔)    speaker high volume..bell
+    Interval{ 0x1F515, 0x1F515 }, // E1.0   [1] (🔕)       bell with slash
+    Interval{ 0x1F516, 0x1F52B }, // E0.6  [22] (🔖..🔫)    bookmark..pistol
+    Interval{ 0x1F52C, 0x1F52D }, // E1.0   [2] (🔬..🔭)    microscope..telescope
+    Interval{ 0x1F52E, 0x1F53D }, // E0.6  [16] (🔮..🔽)    crystal ball..downwards button
+    Interval{ 0x1F54B, 0x1F54E }, // E1.0   [4] (🕋..🕎)    kaaba..menorah
+    Interval{ 0x1F550, 0x1F55B }, // E0.6  [12] (🕐..🕛)    one o’clock..twelve o’clock
+    Interval{ 0x1F55C, 0x1F567 }, // E0.7  [12] (🕜..🕧)    one-thirty..twelve-thirty
+    Interval{ 0x1F57A, 0x1F57A }, // E3.0   [1] (🕺)       man dancing
+    Interval{ 0x1F595, 0x1F596 }, // E1.0   [2] (🖕..🖖)    middle finger..vulcan salute
+    Interval{ 0x1F5A4, 0x1F5A4 }, // E3.0   [1] (🖤)       black heart
+    Interval{ 0x1F5FB, 0x1F5FF }, // E0.6   [5] (🗻..🗿)    mount fuji..moai
+    Interval{ 0x1F600, 0x1F600 }, // E1.0   [1] (😀)       grinning face
+    Interval{ 0x1F601, 0x1F606 }, // E0.6   [6] (😁..😆)    beaming face with smiling eyes..grinning squinting face
+    Interval{ 0x1F607, 0x1F608 }, // E1.0   [2] (😇..😈)    smiling face with halo..smiling face with horns
+    Interval{ 0x1F609, 0x1F60D }, // E0.6   [5] (😉..😍)    winking face..smiling face with heart-eyes
+    Interval{ 0x1F60E, 0x1F60E }, // E1.0   [1] (😎)       smiling face with sunglasses
+    Interval{ 0x1F60F, 0x1F60F }, // E0.6   [1] (😏)       smirking face
+    Interval{ 0x1F610, 0x1F610 }, // E0.7   [1] (😐)       neutral face
+    Interval{ 0x1F611, 0x1F611 }, // E1.0   [1] (😑)       expressionless face
+    Interval{ 0x1F612, 0x1F614 }, // E0.6   [3] (😒..😔)    unamused face..pensive face
+    Interval{ 0x1F615, 0x1F615 }, // E1.0   [1] (😕)       confused face
+    Interval{ 0x1F616, 0x1F616 }, // E0.6   [1] (😖)       confounded face
+    Interval{ 0x1F617, 0x1F617 }, // E1.0   [1] (😗)       kissing face
+    Interval{ 0x1F618, 0x1F618 }, // E0.6   [1] (😘)       face blowing a kiss
+    Interval{ 0x1F619, 0x1F619 }, // E1.0   [1] (😙)       kissing face with smiling eyes
+    Interval{ 0x1F61A, 0x1F61A }, // E0.6   [1] (😚)       kissing face with closed eyes
+    Interval{ 0x1F61B, 0x1F61B }, // E1.0   [1] (😛)       face with tongue
+    Interval{ 0x1F61C, 0x1F61E }, // E0.6   [3] (😜..😞)    winking face with tongue..disappointed face
+    Interval{ 0x1F61F, 0x1F61F }, // E1.0   [1] (😟)       worried face
+    Interval{ 0x1F620, 0x1F625 }, // E0.6   [6] (😠..😥)    angry face..sad but relieved face
+    Interval{ 0x1F626, 0x1F627 }, // E1.0   [2] (😦..😧)    frowning face with open mouth..anguished face
+    Interval{ 0x1F628, 0x1F62B }, // E0.6   [4] (😨..😫)    fearful face..tired face
+    Interval{ 0x1F62C, 0x1F62C }, // E1.0   [1] (😬)       grimacing face
+    Interval{ 0x1F62D, 0x1F62D }, // E0.6   [1] (😭)       loudly crying face
+    Interval{ 0x1F62E, 0x1F62F }, // E1.0   [2] (😮..😯)    face with open mouth..hushed face
+    Interval{ 0x1F630, 0x1F633 }, // E0.6   [4] (😰..😳)    anxious face with sweat..flushed face
+    Interval{ 0x1F634, 0x1F634 }, // E1.0   [1] (😴)       sleeping face
+    Interval{ 0x1F635, 0x1F635 }, // E0.6   [1] (😵)       dizzy face
+    Interval{ 0x1F636, 0x1F636 }, // E1.0   [1] (😶)       face without mouth
+    Interval{ 0x1F637, 0x1F640 }, // E0.6  [10] (😷..🙀)    face with medical mask..weary cat
+    Interval{ 0x1F641, 0x1F644 }, // E1.0   [4] (🙁..🙄)    slightly frowning face..face with rolling eyes
+    Interval{ 0x1F645, 0x1F64F }, // E0.6  [11] (🙅..🙏)    person gesturing NO..folded hands
+    Interval{ 0x1F680, 0x1F680 }, // E0.6   [1] (🚀)       rocket
+    Interval{ 0x1F681, 0x1F682 }, // E1.0   [2] (🚁..🚂)    helicopter..locomotive
+    Interval{ 0x1F683, 0x1F685 }, // E0.6   [3] (🚃..🚅)    railway car..bullet train
+    Interval{ 0x1F686, 0x1F686 }, // E1.0   [1] (🚆)       train
+    Interval{ 0x1F687, 0x1F687 }, // E0.6   [1] (🚇)       metro
+    Interval{ 0x1F688, 0x1F688 }, // E1.0   [1] (🚈)       light rail
+    Interval{ 0x1F689, 0x1F689 }, // E0.6   [1] (🚉)       station
+    Interval{ 0x1F68A, 0x1F68B }, // E1.0   [2] (🚊..🚋)    tram..tram car
+    Interval{ 0x1F68C, 0x1F68C }, // E0.6   [1] (🚌)       bus
+    Interval{ 0x1F68D, 0x1F68D }, // E0.7   [1] (🚍)       oncoming bus
+    Interval{ 0x1F68E, 0x1F68E }, // E1.0   [1] (🚎)       trolleybus
+    Interval{ 0x1F68F, 0x1F68F }, // E0.6   [1] (🚏)       bus stop
+    Interval{ 0x1F690, 0x1F690 }, // E1.0   [1] (🚐)       minibus
+    Interval{ 0x1F691, 0x1F693 }, // E0.6   [3] (🚑..🚓)    ambulance..police car
+    Interval{ 0x1F694, 0x1F694 }, // E0.7   [1] (🚔)       oncoming police car
+    Interval{ 0x1F695, 0x1F695 }, // E0.6   [1] (🚕)       taxi
+    Interval{ 0x1F696, 0x1F696 }, // E1.0   [1] (🚖)       oncoming taxi
+    Interval{ 0x1F697, 0x1F697 }, // E0.6   [1] (🚗)       automobile
+    Interval{ 0x1F698, 0x1F698 }, // E0.7   [1] (🚘)       oncoming automobile
+    Interval{ 0x1F699, 0x1F69A }, // E0.6   [2] (🚙..🚚)    sport utility vehicle..delivery truck
+    Interval{ 0x1F69B, 0x1F6A1 }, // E1.0   [7] (🚛..🚡)    articulated lorry..aerial tramway
+    Interval{ 0x1F6A2, 0x1F6A2 }, // E0.6   [1] (🚢)       ship
+    Interval{ 0x1F6A3, 0x1F6A3 }, // E1.0   [1] (🚣)       person rowing boat
+    Interval{ 0x1F6A4, 0x1F6A5 }, // E0.6   [2] (🚤..🚥)    speedboat..horizontal traffic light
+    Interval{ 0x1F6A6, 0x1F6A6 }, // E1.0   [1] (🚦)       vertical traffic light
+    Interval{ 0x1F6A7, 0x1F6AD }, // E0.6   [7] (🚧..🚭)    construction..no smoking
+    Interval{ 0x1F6AE, 0x1F6B1 }, // E1.0   [4] (🚮..🚱)    litter in bin sign..non-potable water
+    Interval{ 0x1F6B2, 0x1F6B2 }, // E0.6   [1] (🚲)       bicycle
+    Interval{ 0x1F6B3, 0x1F6B5 }, // E1.0   [3] (🚳..🚵)    no bicycles..person mountain biking
+    Interval{ 0x1F6B6, 0x1F6B6 }, // E0.6   [1] (🚶)       person walking
+    Interval{ 0x1F6B7, 0x1F6B8 }, // E1.0   [2] (🚷..🚸)    no pedestrians..children crossing
+    Interval{ 0x1F6B9, 0x1F6BE }, // E0.6   [6] (🚹..🚾)    men’s room..water closet
+    Interval{ 0x1F6BF, 0x1F6BF }, // E1.0   [1] (🚿)       shower
+    Interval{ 0x1F6C0, 0x1F6C0 }, // E0.6   [1] (🛀)       person taking bath
+    Interval{ 0x1F6C1, 0x1F6C5 }, // E1.0   [5] (🛁..🛅)    bathtub..left luggage
+    Interval{ 0x1F6CC, 0x1F6CC }, // E1.0   [1] (🛌)       person in bed
+    Interval{ 0x1F6D0, 0x1F6D0 }, // E1.0   [1] (🛐)       place of worship
+    Interval{ 0x1F6D1, 0x1F6D2 }, // E3.0   [2] (🛑..🛒)    stop sign..shopping cart
+    Interval{ 0x1F6D5, 0x1F6D5 }, // E12.0  [1] (🛕)       hindu temple
+    Interval{ 0x1F6D6, 0x1F6D7 }, // E13.0  [2] (🛖..🛗)    hut..elevator
+    Interval{ 0x1F6EB, 0x1F6EC }, // E1.0   [2] (🛫..🛬)    airplane departure..airplane arrival
+    Interval{ 0x1F6F4, 0x1F6F6 }, // E3.0   [3] (🛴..🛶)    kick scooter..canoe
+    Interval{ 0x1F6F7, 0x1F6F8 }, // E5.0   [2] (🛷..🛸)    sled..flying saucer
+    Interval{ 0x1F6F9, 0x1F6F9 }, // E11.0  [1] (🛹)       skateboard
+    Interval{ 0x1F6FA, 0x1F6FA }, // E12.0  [1] (🛺)       auto rickshaw
+    Interval{ 0x1F6FB, 0x1F6FC }, // E13.0  [2] (🛻..🛼)    pickup truck..roller skate
+    Interval{ 0x1F7E0, 0x1F7EB }, // E12.0 [12] (🟠..🟫)    orange circle..brown square
+    Interval{ 0x1F90C, 0x1F90C }, // E13.0  [1] (🤌)       pinched fingers
+    Interval{ 0x1F90D, 0x1F90F }, // E12.0  [3] (🤍..🤏)    white heart..pinching hand
+    Interval{ 0x1F910, 0x1F918 }, // E1.0   [9] (🤐..🤘)    zipper-mouth face..sign of the horns
+    Interval{ 0x1F919, 0x1F91E }, // E3.0   [6] (🤙..🤞)    call me hand..crossed fingers
+    Interval{ 0x1F91F, 0x1F91F }, // E5.0   [1] (🤟)       love-you gesture
+    Interval{ 0x1F920, 0x1F927 }, // E3.0   [8] (🤠..🤧)    cowboy hat face..sneezing face
+    Interval{ 0x1F928, 0x1F92F }, // E5.0   [8] (🤨..🤯)    face with raised eyebrow..exploding head
+    Interval{ 0x1F930, 0x1F930 }, // E3.0   [1] (🤰)       pregnant woman
+    Interval{ 0x1F931, 0x1F932 }, // E5.0   [2] (🤱..🤲)    breast-feeding..palms up together
+    Interval{ 0x1F933, 0x1F93A }, // E3.0   [8] (🤳..🤺)    selfie..person fencing
+    Interval{ 0x1F93C, 0x1F93E }, // E3.0   [3] (🤼..🤾)    people wrestling..person playing handball
+    Interval{ 0x1F93F, 0x1F93F }, // E12.0  [1] (🤿)       diving mask
+    Interval{ 0x1F940, 0x1F945 }, // E3.0   [6] (🥀..🥅)    wilted flower..goal net
+    Interval{ 0x1F947, 0x1F94B }, // E3.0   [5] (🥇..🥋)    1st place medal..martial arts uniform
+    Interval{ 0x1F94C, 0x1F94C }, // E5.0   [1] (🥌)       curling stone
+    Interval{ 0x1F94D, 0x1F94F }, // E11.0  [3] (🥍..🥏)    lacrosse..flying disc
+    Interval{ 0x1F950, 0x1F95E }, // E3.0  [15] (🥐..🥞)    croissant..pancakes
+    Interval{ 0x1F95F, 0x1F96B }, // E5.0  [13] (🥟..🥫)    dumpling..canned food
+    Interval{ 0x1F96C, 0x1F970 }, // E11.0  [5] (🥬..🥰)    leafy green..smiling face with hearts
+    Interval{ 0x1F971, 0x1F971 }, // E12.0  [1] (🥱)       yawning face
+    Interval{ 0x1F972, 0x1F972 }, // E13.0  [1] (🥲)       smiling face with tear
+    Interval{ 0x1F973, 0x1F976 }, // E11.0  [4] (🥳..🥶)    partying face..cold face
+    Interval{ 0x1F977, 0x1F978 }, // E13.0  [2] (🥷..🥸)    ninja..disguised face
+    Interval{ 0x1F97A, 0x1F97A }, // E11.0  [1] (🥺)       pleading face
+    Interval{ 0x1F97B, 0x1F97B }, // E12.0  [1] (🥻)       sari
+    Interval{ 0x1F97C, 0x1F97F }, // E11.0  [4] (🥼..🥿)    lab coat..flat shoe
+    Interval{ 0x1F980, 0x1F984 }, // E1.0   [5] (🦀..🦄)    crab..unicorn
+    Interval{ 0x1F985, 0x1F991 }, // E3.0  [13] (🦅..🦑)    eagle..squid
+    Interval{ 0x1F992, 0x1F997 }, // E5.0   [6] (🦒..🦗)    giraffe..cricket
+    Interval{ 0x1F998, 0x1F9A2 }, // E11.0 [11] (🦘..🦢)    kangaroo..swan
+    Interval{ 0x1F9A3, 0x1F9A4 }, // E13.0  [2] (🦣..🦤)    mammoth..dodo
+    Interval{ 0x1F9A5, 0x1F9AA }, // E12.0  [6] (🦥..🦪)    sloth..oyster
+    Interval{ 0x1F9AB, 0x1F9AD }, // E13.0  [3] (🦫..🦭)    beaver..seal
+    Interval{ 0x1F9AE, 0x1F9AF }, // E12.0  [2] (🦮..🦯)    guide dog..white cane
+    Interval{ 0x1F9B0, 0x1F9B9 }, // E11.0 [10] (🦰..🦹)    red hair..supervillain
+    Interval{ 0x1F9BA, 0x1F9BF }, // E12.0  [6] (🦺..🦿)    safety vest..mechanical leg
+    Interval{ 0x1F9C0, 0x1F9C0 }, // E1.0   [1] (🧀)       cheese wedge
+    Interval{ 0x1F9C1, 0x1F9C2 }, // E11.0  [2] (🧁..🧂)    cupcake..salt
+    Interval{ 0x1F9C3, 0x1F9CA }, // E12.0  [8] (🧃..🧊)    beverage box..ice
+    Interval{ 0x1F9CB, 0x1F9CB }, // E13.0  [1] (🧋)       bubble tea
+    Interval{ 0x1F9CD, 0x1F9CF }, // E12.0  [3] (🧍..🧏)    person standing..deaf person
+    Interval{ 0x1F9D0, 0x1F9E6 }, // E5.0  [23] (🧐..🧦)    face with monocle..socks
+    Interval{ 0x1F9E7, 0x1F9FF }, // E11.0 [25] (🧧..🧿)    red envelope..nazar amulet
+    Interval{ 0x1FA70, 0x1FA73 }, // E12.0  [4] (🩰..🩳)    ballet shoes..shorts
+    Interval{ 0x1FA74, 0x1FA74 }, // E13.0  [1] (🩴)       thong sandal
+    Interval{ 0x1FA78, 0x1FA7A }, // E12.0  [3] (🩸..🩺)    drop of blood..stethoscope
+    Interval{ 0x1FA80, 0x1FA82 }, // E12.0  [3] (🪀..🪂)    yo-yo..parachute
+    Interval{ 0x1FA83, 0x1FA86 }, // E13.0  [4] (🪃..🪆)    boomerang..nesting dolls
+    Interval{ 0x1FA90, 0x1FA95 }, // E12.0  [6] (🪐..🪕)    ringed planet..banjo
+    Interval{ 0x1FA96, 0x1FAA8 }, // E13.0 [19] (🪖..🪨)    military helmet..rock
+    Interval{ 0x1FAB0, 0x1FAB6 }, // E13.0  [7] (🪰..🪶)    fly..feather
+    Interval{ 0x1FAC0, 0x1FAC2 }, // E13.0  [3] (🫀..🫂)    anatomical heart..people hugging
+    Interval{ 0x1FAD0, 0x1FAD6 }, // E13.0  [7] (🫐..🫖)    blueberries..teapot
+}; // }}}
+auto constexpr Extended_Pictographic = std::array{ // {{{
+    Interval{ 0x00A9, 0x00A9 }, // E0.6   [1] (©️)       copyright
+    Interval{ 0x00AE, 0x00AE }, // E0.6   [1] (®️)       registered
+    Interval{ 0x203C, 0x203C }, // E0.6   [1] (‼️)       double exclamation mark
+    Interval{ 0x2049, 0x2049 }, // E0.6   [1] (⁉️)       exclamation question mark
+    Interval{ 0x2122, 0x2122 }, // E0.6   [1] (™️)       trade mark
+    Interval{ 0x2139, 0x2139 }, // E0.6   [1] (ℹ️)       information
+    Interval{ 0x2194, 0x2199 }, // E0.6   [6] (↔️..↙️)    left-right arrow..down-left arrow
+    Interval{ 0x21A9, 0x21AA }, // E0.6   [2] (↩️..↪️)    right arrow curving left..left arrow curving right
+    Interval{ 0x231A, 0x231B }, // E0.6   [2] (⌚..⌛)    watch..hourglass done
+    Interval{ 0x2328, 0x2328 }, // E1.0   [1] (⌨️)       keyboard
+    Interval{ 0x2388, 0x2388 }, // E0.0   [1] (⎈)       HELM SYMBOL
+    Interval{ 0x23CF, 0x23CF }, // E1.0   [1] (⏏️)       eject button
+    Interval{ 0x23E9, 0x23EC }, // E0.6   [4] (⏩..⏬)    fast-forward button..fast down button
+    Interval{ 0x23ED, 0x23EE }, // E0.7   [2] (⏭️..⏮️)    next track button..last track button
+    Interval{ 0x23EF, 0x23EF }, // E1.0   [1] (⏯️)       play or pause button
+    Interval{ 0x23F0, 0x23F0 }, // E0.6   [1] (⏰)       alarm clock
+    Interval{ 0x23F1, 0x23F2 }, // E1.0   [2] (⏱️..⏲️)    stopwatch..timer clock
+    Interval{ 0x23F3, 0x23F3 }, // E0.6   [1] (⏳)       hourglass not done
+    Interval{ 0x23F8, 0x23FA }, // E0.7   [3] (⏸️..⏺️)    pause button..record button
+    Interval{ 0x24C2, 0x24C2 }, // E0.6   [1] (Ⓜ️)       circled M
+    Interval{ 0x25AA, 0x25AB }, // E0.6   [2] (▪️..▫️)    black small square..white small square
+    Interval{ 0x25B6, 0x25B6 }, // E0.6   [1] (▶️)       play button
+    Interval{ 0x25C0, 0x25C0 }, // E0.6   [1] (◀️)       reverse button
+    Interval{ 0x25FB, 0x25FE }, // E0.6   [4] (◻️..◾)    white medium square..black medium-small square
+    Interval{ 0x2600, 0x2601 }, // E0.6   [2] (☀️..☁️)    sun..cloud
+    Interval{ 0x2602, 0x2603 }, // E0.7   [2] (☂️..☃️)    umbrella..snowman
+    Interval{ 0x2604, 0x2604 }, // E1.0   [1] (☄️)       comet
+    Interval{ 0x2605, 0x2605 }, // E0.0   [1] (★)       BLACK STAR
+    Interval{ 0x2607, 0x260D }, // E0.0   [7] (☇..☍)    LIGHTNING..OPPOSITION
+    Interval{ 0x260E, 0x260E }, // E0.6   [1] (☎️)       telephone
+    Interval{ 0x260F, 0x2610 }, // E0.0   [2] (☏..☐)    WHITE TELEPHONE..BALLOT BOX
+    Interval{ 0x2611, 0x2611 }, // E0.6   [1] (☑️)       check box with check
+    Interval{ 0x2612, 0x2612 }, // E0.0   [1] (☒)       BALLOT BOX WITH X
+    Interval{ 0x2614, 0x2615 }, // E0.6   [2] (☔..☕)    umbrella with rain drops..hot beverage
+    Interval{ 0x2616, 0x2617 }, // E0.0   [2] (☖..☗)    WHITE SHOGI PIECE..BLACK SHOGI PIECE
+    Interval{ 0x2618, 0x2618 }, // E1.0   [1] (☘️)       shamrock
+    Interval{ 0x2619, 0x261C }, // E0.0   [4] (☙..☜)    REVERSED ROTATED FLORAL HEART BULLET..WHITE LEFT POINTING INDEX
+    Interval{ 0x261D, 0x261D }, // E0.6   [1] (☝️)       index pointing up
+    Interval{ 0x261E, 0x261F }, // E0.0   [2] (☞..☟)    WHITE RIGHT POINTING INDEX..WHITE DOWN POINTING INDEX
+    Interval{ 0x2620, 0x2620 }, // E1.0   [1] (☠️)       skull and crossbones
+    Interval{ 0x2621, 0x2621 }, // E0.0   [1] (☡)       CAUTION SIGN
+    Interval{ 0x2622, 0x2623 }, // E1.0   [2] (☢️..☣️)    radioactive..biohazard
+    Interval{ 0x2624, 0x2625 }, // E0.0   [2] (☤..☥)    CADUCEUS..ANKH
+    Interval{ 0x2626, 0x2626 }, // E1.0   [1] (☦️)       orthodox cross
+    Interval{ 0x2627, 0x2629 }, // E0.0   [3] (☧..☩)    CHI RHO..CROSS OF JERUSALEM
+    Interval{ 0x262A, 0x262A }, // E0.7   [1] (☪️)       star and crescent
+    Interval{ 0x262B, 0x262D }, // E0.0   [3] (☫..☭)    FARSI SYMBOL..HAMMER AND SICKLE
+    Interval{ 0x262E, 0x262E }, // E1.0   [1] (☮️)       peace symbol
+    Interval{ 0x262F, 0x262F }, // E0.7   [1] (☯️)       yin yang
+    Interval{ 0x2630, 0x2637 }, // E0.0   [8] (☰..☷)    TRIGRAM FOR HEAVEN..TRIGRAM FOR EARTH
+    Interval{ 0x2638, 0x2639 }, // E0.7   [2] (☸️..☹️)    wheel of dharma..frowning face
+    Interval{ 0x263A, 0x263A }, // E0.6   [1] (☺️)       smiling face
+    Interval{ 0x263B, 0x263F }, // E0.0   [5] (☻..☿)    BLACK SMILING FACE..MERCURY
+    Interval{ 0x2640, 0x2640 }, // E4.0   [1] (♀️)       female sign
+    Interval{ 0x2641, 0x2641 }, // E0.0   [1] (♁)       EARTH
+    Interval{ 0x2642, 0x2642 }, // E4.0   [1] (♂️)       male sign
+    Interval{ 0x2643, 0x2647 }, // E0.0   [5] (♃..♇)    JUPITER..PLUTO
+    Interval{ 0x2648, 0x2653 }, // E0.6  [12] (♈..♓)    Aries..Pisces
+    Interval{ 0x2654, 0x265E }, // E0.0  [11] (♔..♞)    WHITE CHESS KING..BLACK CHESS KNIGHT
+    Interval{ 0x265F, 0x265F }, // E11.0  [1] (♟️)       chess pawn
+    Interval{ 0x2660, 0x2660 }, // E0.6   [1] (♠️)       spade suit
+    Interval{ 0x2661, 0x2662 }, // E0.0   [2] (♡..♢)    WHITE HEART SUIT..WHITE DIAMOND SUIT
+    Interval{ 0x2663, 0x2663 }, // E0.6   [1] (♣️)       club suit
+    Interval{ 0x2664, 0x2664 }, // E0.0   [1] (♤)       WHITE SPADE SUIT
+    Interval{ 0x2665, 0x2666 }, // E0.6   [2] (♥️..♦️)    heart suit..diamond suit
+    Interval{ 0x2667, 0x2667 }, // E0.0   [1] (♧)       WHITE CLUB SUIT
+    Interval{ 0x2668, 0x2668 }, // E0.6   [1] (♨️)       hot springs
+    Interval{ 0x2669, 0x267A }, // E0.0  [18] (♩..♺)    QUARTER NOTE..RECYCLING SYMBOL FOR GENERIC MATERIALS
+    Interval{ 0x267B, 0x267B }, // E0.6   [1] (♻️)       recycling symbol
+    Interval{ 0x267C, 0x267D }, // E0.0   [2] (♼..♽)    RECYCLED PAPER SYMBOL..PARTIALLY-RECYCLED PAPER SYMBOL
+    Interval{ 0x267E, 0x267E }, // E11.0  [1] (♾️)       infinity
+    Interval{ 0x267F, 0x267F }, // E0.6   [1] (♿)       wheelchair symbol
+    Interval{ 0x2680, 0x2685 }, // E0.0   [6] (⚀..⚅)    DIE FACE-1..DIE FACE-6
+    Interval{ 0x2690, 0x2691 }, // E0.0   [2] (⚐..⚑)    WHITE FLAG..BLACK FLAG
+    Interval{ 0x2692, 0x2692 }, // E1.0   [1] (⚒️)       hammer and pick
+    Interval{ 0x2693, 0x2693 }, // E0.6   [1] (⚓)       anchor
+    Interval{ 0x2694, 0x2694 }, // E1.0   [1] (⚔️)       crossed swords
+    Interval{ 0x2695, 0x2695 }, // E4.0   [1] (⚕️)       medical symbol
+    Interval{ 0x2696, 0x2697 }, // E1.0   [2] (⚖️..⚗️)    balance scale..alembic
+    Interval{ 0x2698, 0x2698 }, // E0.0   [1] (⚘)       FLOWER
+    Interval{ 0x2699, 0x2699 }, // E1.0   [1] (⚙️)       gear
+    Interval{ 0x269A, 0x269A }, // E0.0   [1] (⚚)       STAFF OF HERMES
+    Interval{ 0x269B, 0x269C }, // E1.0   [2] (⚛️..⚜️)    atom symbol..fleur-de-lis
+    Interval{ 0x269D, 0x269F }, // E0.0   [3] (⚝..⚟)    OUTLINED WHITE STAR..THREE LINES CONVERGING LEFT
+    Interval{ 0x26A0, 0x26A1 }, // E0.6   [2] (⚠️..⚡)    warning..high voltage
+    Interval{ 0x26A2, 0x26A6 }, // E0.0   [5] (⚢..⚦)    DOUBLED FEMALE SIGN..MALE WITH STROKE SIGN
+    Interval{ 0x26A7, 0x26A7 }, // E13.0  [1] (⚧️)       transgender symbol
+    Interval{ 0x26A8, 0x26A9 }, // E0.0   [2] (⚨..⚩)    VERTICAL MALE WITH STROKE SIGN..HORIZONTAL MALE WITH STROKE SIGN
+    Interval{ 0x26AA, 0x26AB }, // E0.6   [2] (⚪..⚫)    white circle..black circle
+    Interval{ 0x26AC, 0x26AF }, // E0.0   [4] (⚬..⚯)    MEDIUM SMALL WHITE CIRCLE..UNMARRIED PARTNERSHIP SYMBOL
+    Interval{ 0x26B0, 0x26B1 }, // E1.0   [2] (⚰️..⚱️)    coffin..funeral urn
+    Interval{ 0x26B2, 0x26BC }, // E0.0  [11] (⚲..⚼)    NEUTER..SESQUIQUADRATE
+    Interval{ 0x26BD, 0x26BE }, // E0.6   [2] (⚽..⚾)    soccer ball..baseball
+    Interval{ 0x26BF, 0x26C3 }, // E0.0   [5] (⚿..⛃)    SQUARED KEY..BLACK DRAUGHTS KING
+    Interval{ 0x26C4, 0x26C5 }, // E0.6   [2] (⛄..⛅)    snowman without snow..sun behind cloud
+    Interval{ 0x26C6, 0x26C7 }, // E0.0   [2] (⛆..⛇)    RAIN..BLACK SNOWMAN
+    Interval{ 0x26C8, 0x26C8 }, // E0.7   [1] (⛈️)       cloud with lightning and rain
+    Interval{ 0x26C9, 0x26CD }, // E0.0   [5] (⛉..⛍)    TURNED WHITE SHOGI PIECE..DISABLED CAR
+    Interval{ 0x26CE, 0x26CE }, // E0.6   [1] (⛎)       Ophiuchus
+    Interval{ 0x26CF, 0x26CF }, // E0.7   [1] (⛏️)       pick
+    Interval{ 0x26D0, 0x26D0 }, // E0.0   [1] (⛐)       CAR SLIDING
+    Interval{ 0x26D1, 0x26D1 }, // E0.7   [1] (⛑️)       rescue worker’s helmet
+    Interval{ 0x26D2, 0x26D2 }, // E0.0   [1] (⛒)       CIRCLED CROSSING LANES
+    Interval{ 0x26D3, 0x26D3 }, // E0.7   [1] (⛓️)       chains
+    Interval{ 0x26D4, 0x26D4 }, // E0.6   [1] (⛔)       no entry
+    Interval{ 0x26D5, 0x26E8 }, // E0.0  [20] (⛕..⛨)    ALTERNATE ONE-WAY LEFT WAY TRAFFIC..BLACK CROSS ON SHIELD
+    Interval{ 0x26E9, 0x26E9 }, // E0.7   [1] (⛩️)       shinto shrine
+    Interval{ 0x26EA, 0x26EA }, // E0.6   [1] (⛪)       church
+    Interval{ 0x26EB, 0x26EF }, // E0.0   [5] (⛫..⛯)    CASTLE..MAP SYMBOL FOR LIGHTHOUSE
+    Interval{ 0x26F0, 0x26F1 }, // E0.7   [2] (⛰️..⛱️)    mountain..umbrella on ground
+    Interval{ 0x26F2, 0x26F3 }, // E0.6   [2] (⛲..⛳)    fountain..flag in hole
+    Interval{ 0x26F4, 0x26F4 }, // E0.7   [1] (⛴️)       ferry
+    Interval{ 0x26F5, 0x26F5 }, // E0.6   [1] (⛵)       sailboat
+    Interval{ 0x26F6, 0x26F6 }, // E0.0   [1] (⛶)       SQUARE FOUR CORNERS
+    Interval{ 0x26F7, 0x26F9 }, // E0.7   [3] (⛷️..⛹️)    skier..person bouncing ball
+    Interval{ 0x26FA, 0x26FA }, // E0.6   [1] (⛺)       tent
+    Interval{ 0x26FB, 0x26FC }, // E0.0   [2] (⛻..⛼)    JAPANESE BANK SYMBOL..HEADSTONE GRAVEYARD SYMBOL
+    Interval{ 0x26FD, 0x26FD }, // E0.6   [1] (⛽)       fuel pump
+    Interval{ 0x26FE, 0x2701 }, // E0.0   [4] (⛾..✁)    CUP ON BLACK SQUARE..UPPER BLADE SCISSORS
+    Interval{ 0x2702, 0x2702 }, // E0.6   [1] (✂️)       scissors
+    Interval{ 0x2703, 0x2704 }, // E0.0   [2] (✃..✄)    LOWER BLADE SCISSORS..WHITE SCISSORS
+    Interval{ 0x2705, 0x2705 }, // E0.6   [1] (✅)       check mark button
+    Interval{ 0x2708, 0x270C }, // E0.6   [5] (✈️..✌️)    airplane..victory hand
+    Interval{ 0x270D, 0x270D }, // E0.7   [1] (✍️)       writing hand
+    Interval{ 0x270E, 0x270E }, // E0.0   [1] (✎)       LOWER RIGHT PENCIL
+    Interval{ 0x270F, 0x270F }, // E0.6   [1] (✏️)       pencil
+    Interval{ 0x2710, 0x2711 }, // E0.0   [2] (✐..✑)    UPPER RIGHT PENCIL..WHITE NIB
+    Interval{ 0x2712, 0x2712 }, // E0.6   [1] (✒️)       black nib
+    Interval{ 0x2714, 0x2714 }, // E0.6   [1] (✔️)       check mark
+    Interval{ 0x2716, 0x2716 }, // E0.6   [1] (✖️)       multiply
+    Interval{ 0x271D, 0x271D }, // E0.7   [1] (✝️)       latin cross
+    Interval{ 0x2721, 0x2721 }, // E0.7   [1] (✡️)       star of David
+    Interval{ 0x2728, 0x2728 }, // E0.6   [1] (✨)       sparkles
+    Interval{ 0x2733, 0x2734 }, // E0.6   [2] (✳️..✴️)    eight-spoked asterisk..eight-pointed star
+    Interval{ 0x2744, 0x2744 }, // E0.6   [1] (❄️)       snowflake
+    Interval{ 0x2747, 0x2747 }, // E0.6   [1] (❇️)       sparkle
+    Interval{ 0x274C, 0x274C }, // E0.6   [1] (❌)       cross mark
+    Interval{ 0x274E, 0x274E }, // E0.6   [1] (❎)       cross mark button
+    Interval{ 0x2753, 0x2755 }, // E0.6   [3] (❓..❕)    question mark..white exclamation mark
+    Interval{ 0x2757, 0x2757 }, // E0.6   [1] (❗)       exclamation mark
+    Interval{ 0x2763, 0x2763 }, // E1.0   [1] (❣️)       heart exclamation
+    Interval{ 0x2764, 0x2764 }, // E0.6   [1] (❤️)       red heart
+    Interval{ 0x2765, 0x2767 }, // E0.0   [3] (❥..❧)    ROTATED HEAVY BLACK HEART BULLET..ROTATED FLORAL HEART BULLET
+    Interval{ 0x2795, 0x2797 }, // E0.6   [3] (➕..➗)    plus..divide
+    Interval{ 0x27A1, 0x27A1 }, // E0.6   [1] (➡️)       right arrow
+    Interval{ 0x27B0, 0x27B0 }, // E0.6   [1] (➰)       curly loop
+    Interval{ 0x27BF, 0x27BF }, // E1.0   [1] (➿)       double curly loop
+    Interval{ 0x2934, 0x2935 }, // E0.6   [2] (⤴️..⤵️)    right arrow curving up..right arrow curving down
+    Interval{ 0x2B05, 0x2B07 }, // E0.6   [3] (⬅️..⬇️)    left arrow..down arrow
+    Interval{ 0x2B1B, 0x2B1C }, // E0.6   [2] (⬛..⬜)    black large square..white large square
+    Interval{ 0x2B50, 0x2B50 }, // E0.6   [1] (⭐)       star
+    Interval{ 0x2B55, 0x2B55 }, // E0.6   [1] (⭕)       hollow red circle
+    Interval{ 0x3030, 0x3030 }, // E0.6   [1] (〰️)       wavy dash
+    Interval{ 0x303D, 0x303D }, // E0.6   [1] (〽️)       part alternation mark
+    Interval{ 0x3297, 0x3297 }, // E0.6   [1] (㊗️)       Japanese “congratulations” button
+    Interval{ 0x3299, 0x3299 }, // E0.6   [1] (㊙️)       Japanese “secret” button
+    Interval{ 0x1F000, 0x1F003 }, // E0.0   [4] (🀀..🀃)    MAHJONG TILE EAST WIND..MAHJONG TILE NORTH WIND
+    Interval{ 0x1F004, 0x1F004 }, // E0.6   [1] (🀄)       mahjong red dragon
+    Interval{ 0x1F005, 0x1F0CE }, // E0.0 [202] (🀅..🃎)    MAHJONG TILE GREEN DRAGON..PLAYING CARD KING OF DIAMONDS
+    Interval{ 0x1F0CF, 0x1F0CF }, // E0.6   [1] (🃏)       joker
+    Interval{ 0x1F0D0, 0x1F0FF }, // E0.0  [48] (🃐..🃿)    <reserved-1F0D0>..<reserved-1F0FF>
+    Interval{ 0x1F10D, 0x1F10F }, // E0.0   [3] (🄍..🄏)    CIRCLED ZERO WITH SLASH..CIRCLED DOLLAR SIGN WITH OVERLAID BACKSLASH
+    Interval{ 0x1F12F, 0x1F12F }, // E0.0   [1] (🄯)       COPYLEFT SYMBOL
+    Interval{ 0x1F16C, 0x1F16F }, // E0.0   [4] (🅬..🅯)    RAISED MR SIGN..CIRCLED HUMAN FIGURE
+    Interval{ 0x1F170, 0x1F171 }, // E0.6   [2] (🅰️..🅱️)    A button (blood type)..B button (blood type)
+    Interval{ 0x1F17E, 0x1F17F }, // E0.6   [2] (🅾️..🅿️)    O button (blood type)..P button
+    Interval{ 0x1F18E, 0x1F18E }, // E0.6   [1] (🆎)       AB button (blood type)
+    Interval{ 0x1F191, 0x1F19A }, // E0.6  [10] (🆑..🆚)    CL button..VS button
+    Interval{ 0x1F1AD, 0x1F1E5 }, // E0.0  [57] (🆭..🇥)    MASK WORK SYMBOL..<reserved-1F1E5>
+    Interval{ 0x1F201, 0x1F202 }, // E0.6   [2] (🈁..🈂️)    Japanese “here” button..Japanese “service charge” button
+    Interval{ 0x1F203, 0x1F20F }, // E0.0  [13] (🈃..🈏)    <reserved-1F203>..<reserved-1F20F>
+    Interval{ 0x1F21A, 0x1F21A }, // E0.6   [1] (🈚)       Japanese “free of charge” button
+    Interval{ 0x1F22F, 0x1F22F }, // E0.6   [1] (🈯)       Japanese “reserved” button
+    Interval{ 0x1F232, 0x1F23A }, // E0.6   [9] (🈲..🈺)    Japanese “prohibited” button..Japanese “open for business” button
+    Interval{ 0x1F23C, 0x1F23F }, // E0.0   [4] (🈼..🈿)    <reserved-1F23C>..<reserved-1F23F>
+    Interval{ 0x1F249, 0x1F24F }, // E0.0   [7] (🉉..🉏)    <reserved-1F249>..<reserved-1F24F>
+    Interval{ 0x1F250, 0x1F251 }, // E0.6   [2] (🉐..🉑)    Japanese “bargain” button..Japanese “acceptable” button
+    Interval{ 0x1F252, 0x1F2FF }, // E0.0 [174] (🉒..🋿)    <reserved-1F252>..<reserved-1F2FF>
+    Interval{ 0x1F300, 0x1F30C }, // E0.6  [13] (🌀..🌌)    cyclone..milky way
+    Interval{ 0x1F30D, 0x1F30E }, // E0.7   [2] (🌍..🌎)    globe showing Europe-Africa..globe showing Americas
+    Interval{ 0x1F30F, 0x1F30F }, // E0.6   [1] (🌏)       globe showing Asia-Australia
+    Interval{ 0x1F310, 0x1F310 }, // E1.0   [1] (🌐)       globe with meridians
+    Interval{ 0x1F311, 0x1F311 }, // E0.6   [1] (🌑)       new moon
+    Interval{ 0x1F312, 0x1F312 }, // E1.0   [1] (🌒)       waxing crescent moon
+    Interval{ 0x1F313, 0x1F315 }, // E0.6   [3] (🌓..🌕)    first quarter moon..full moon
+    Interval{ 0x1F316, 0x1F318 }, // E1.0   [3] (🌖..🌘)    waning gibbous moon..waning crescent moon
+    Interval{ 0x1F319, 0x1F319 }, // E0.6   [1] (🌙)       crescent moon
+    Interval{ 0x1F31A, 0x1F31A }, // E1.0   [1] (🌚)       new moon face
+    Interval{ 0x1F31B, 0x1F31B }, // E0.6   [1] (🌛)       first quarter moon face
+    Interval{ 0x1F31C, 0x1F31C }, // E0.7   [1] (🌜)       last quarter moon face
+    Interval{ 0x1F31D, 0x1F31E }, // E1.0   [2] (🌝..🌞)    full moon face..sun with face
+    Interval{ 0x1F31F, 0x1F320 }, // E0.6   [2] (🌟..🌠)    glowing star..shooting star
+    Interval{ 0x1F321, 0x1F321 }, // E0.7   [1] (🌡️)       thermometer
+    Interval{ 0x1F322, 0x1F323 }, // E0.0   [2] (🌢..🌣)    BLACK DROPLET..WHITE SUN
+    Interval{ 0x1F324, 0x1F32C }, // E0.7   [9] (🌤️..🌬️)    sun behind small cloud..wind face
+    Interval{ 0x1F32D, 0x1F32F }, // E1.0   [3] (🌭..🌯)    hot dog..burrito
+    Interval{ 0x1F330, 0x1F331 }, // E0.6   [2] (🌰..🌱)    chestnut..seedling
+    Interval{ 0x1F332, 0x1F333 }, // E1.0   [2] (🌲..🌳)    evergreen tree..deciduous tree
+    Interval{ 0x1F334, 0x1F335 }, // E0.6   [2] (🌴..🌵)    palm tree..cactus
+    Interval{ 0x1F336, 0x1F336 }, // E0.7   [1] (🌶️)       hot pepper
+    Interval{ 0x1F337, 0x1F34A }, // E0.6  [20] (🌷..🍊)    tulip..tangerine
+    Interval{ 0x1F34B, 0x1F34B }, // E1.0   [1] (🍋)       lemon
+    Interval{ 0x1F34C, 0x1F34F }, // E0.6   [4] (🍌..🍏)    banana..green apple
+    Interval{ 0x1F350, 0x1F350 }, // E1.0   [1] (🍐)       pear
+    Interval{ 0x1F351, 0x1F37B }, // E0.6  [43] (🍑..🍻)    peach..clinking beer mugs
+    Interval{ 0x1F37C, 0x1F37C }, // E1.0   [1] (🍼)       baby bottle
+    Interval{ 0x1F37D, 0x1F37D }, // E0.7   [1] (🍽️)       fork and knife with plate
+    Interval{ 0x1F37E, 0x1F37F }, // E1.0   [2] (🍾..🍿)    bottle with popping cork..popcorn
+    Interval{ 0x1F380, 0x1F393 }, // E0.6  [20] (🎀..🎓)    ribbon..graduation cap
+    Interval{ 0x1F394, 0x1F395 }, // E0.0   [2] (🎔..🎕)    HEART WITH TIP ON THE LEFT..BOUQUET OF FLOWERS
+    Interval{ 0x1F396, 0x1F397 }, // E0.7   [2] (🎖️..🎗️)    military medal..reminder ribbon
+    Interval{ 0x1F398, 0x1F398 }, // E0.0   [1] (🎘)       MUSICAL KEYBOARD WITH JACKS
+    Interval{ 0x1F399, 0x1F39B }, // E0.7   [3] (🎙️..🎛️)    studio microphone..control knobs
+    Interval{ 0x1F39C, 0x1F39D }, // E0.0   [2] (🎜..🎝)    BEAMED ASCENDING MUSICAL NOTES..BEAMED DESCENDING MUSICAL NOTES
+    Interval{ 0x1F39E, 0x1F39F }, // E0.7   [2] (🎞️..🎟️)    film frames..admission tickets
+    Interval{ 0x1F3A0, 0x1F3C4 }, // E0.6  [37] (🎠..🏄)    carousel horse..person surfing
+    Interval{ 0x1F3C5, 0x1F3C5 }, // E1.0   [1] (🏅)       sports medal
+    Interval{ 0x1F3C6, 0x1F3C6 }, // E0.6   [1] (🏆)       trophy
+    Interval{ 0x1F3C7, 0x1F3C7 }, // E1.0   [1] (🏇)       horse racing
+    Interval{ 0x1F3C8, 0x1F3C8 }, // E0.6   [1] (🏈)       american football
+    Interval{ 0x1F3C9, 0x1F3C9 }, // E1.0   [1] (🏉)       rugby football
+    Interval{ 0x1F3CA, 0x1F3CA }, // E0.6   [1] (🏊)       person swimming
+    Interval{ 0x1F3CB, 0x1F3CE }, // E0.7   [4] (🏋️..🏎️)    person lifting weights..racing car
+    Interval{ 0x1F3CF, 0x1F3D3 }, // E1.0   [5] (🏏..🏓)    cricket game..ping pong
+    Interval{ 0x1F3D4, 0x1F3DF }, // E0.7  [12] (🏔️..🏟️)    snow-capped mountain..stadium
+    Interval{ 0x1F3E0, 0x1F3E3 }, // E0.6   [4] (🏠..🏣)    house..Japanese post office
+    Interval{ 0x1F3E4, 0x1F3E4 }, // E1.0   [1] (🏤)       post office
+    Interval{ 0x1F3E5, 0x1F3F0 }, // E0.6  [12] (🏥..🏰)    hospital..castle
+    Interval{ 0x1F3F1, 0x1F3F2 }, // E0.0   [2] (🏱..🏲)    WHITE PENNANT..BLACK PENNANT
+    Interval{ 0x1F3F3, 0x1F3F3 }, // E0.7   [1] (🏳️)       white flag
+    Interval{ 0x1F3F4, 0x1F3F4 }, // E1.0   [1] (🏴)       black flag
+    Interval{ 0x1F3F5, 0x1F3F5 }, // E0.7   [1] (🏵️)       rosette
+    Interval{ 0x1F3F6, 0x1F3F6 }, // E0.0   [1] (🏶)       BLACK ROSETTE
+    Interval{ 0x1F3F7, 0x1F3F7 }, // E0.7   [1] (🏷️)       label
+    Interval{ 0x1F3F8, 0x1F3FA }, // E1.0   [3] (🏸..🏺)    badminton..amphora
+    Interval{ 0x1F400, 0x1F407 }, // E1.0   [8] (🐀..🐇)    rat..rabbit
+    Interval{ 0x1F408, 0x1F408 }, // E0.7   [1] (🐈)       cat
+    Interval{ 0x1F409, 0x1F40B }, // E1.0   [3] (🐉..🐋)    dragon..whale
+    Interval{ 0x1F40C, 0x1F40E }, // E0.6   [3] (🐌..🐎)    snail..horse
+    Interval{ 0x1F40F, 0x1F410 }, // E1.0   [2] (🐏..🐐)    ram..goat
+    Interval{ 0x1F411, 0x1F412 }, // E0.6   [2] (🐑..🐒)    ewe..monkey
+    Interval{ 0x1F413, 0x1F413 }, // E1.0   [1] (🐓)       rooster
+    Interval{ 0x1F414, 0x1F414 }, // E0.6   [1] (🐔)       chicken
+    Interval{ 0x1F415, 0x1F415 }, // E0.7   [1] (🐕)       dog
+    Interval{ 0x1F416, 0x1F416 }, // E1.0   [1] (🐖)       pig
+    Interval{ 0x1F417, 0x1F429 }, // E0.6  [19] (🐗..🐩)    boar..poodle
+    Interval{ 0x1F42A, 0x1F42A }, // E1.0   [1] (🐪)       camel
+    Interval{ 0x1F42B, 0x1F43E }, // E0.6  [20] (🐫..🐾)    two-hump camel..paw prints
+    Interval{ 0x1F43F, 0x1F43F }, // E0.7   [1] (🐿️)       chipmunk
+    Interval{ 0x1F440, 0x1F440 }, // E0.6   [1] (👀)       eyes
+    Interval{ 0x1F441, 0x1F441 }, // E0.7   [1] (👁️)       eye
+    Interval{ 0x1F442, 0x1F464 }, // E0.6  [35] (👂..👤)    ear..bust in silhouette
+    Interval{ 0x1F465, 0x1F465 }, // E1.0   [1] (👥)       busts in silhouette
+    Interval{ 0x1F466, 0x1F46B }, // E0.6   [6] (👦..👫)    boy..woman and man holding hands
+    Interval{ 0x1F46C, 0x1F46D }, // E1.0   [2] (👬..👭)    men holding hands..women holding hands
+    Interval{ 0x1F46E, 0x1F4AC }, // E0.6  [63] (👮..💬)    police officer..speech balloon
+    Interval{ 0x1F4AD, 0x1F4AD }, // E1.0   [1] (💭)       thought balloon
+    Interval{ 0x1F4AE, 0x1F4B5 }, // E0.6   [8] (💮..💵)    white flower..dollar banknote
+    Interval{ 0x1F4B6, 0x1F4B7 }, // E1.0   [2] (💶..💷)    euro banknote..pound banknote
+    Interval{ 0x1F4B8, 0x1F4EB }, // E0.6  [52] (💸..📫)    money with wings..closed mailbox with raised flag
+    Interval{ 0x1F4EC, 0x1F4ED }, // E0.7   [2] (📬..📭)    open mailbox with raised flag..open mailbox with lowered flag
+    Interval{ 0x1F4EE, 0x1F4EE }, // E0.6   [1] (📮)       postbox
+    Interval{ 0x1F4EF, 0x1F4EF }, // E1.0   [1] (📯)       postal horn
+    Interval{ 0x1F4F0, 0x1F4F4 }, // E0.6   [5] (📰..📴)    newspaper..mobile phone off
+    Interval{ 0x1F4F5, 0x1F4F5 }, // E1.0   [1] (📵)       no mobile phones
+    Interval{ 0x1F4F6, 0x1F4F7 }, // E0.6   [2] (📶..📷)    antenna bars..camera
+    Interval{ 0x1F4F8, 0x1F4F8 }, // E1.0   [1] (📸)       camera with flash
+    Interval{ 0x1F4F9, 0x1F4FC }, // E0.6   [4] (📹..📼)    video camera..videocassette
+    Interval{ 0x1F4FD, 0x1F4FD }, // E0.7   [1] (📽️)       film projector
+    Interval{ 0x1F4FE, 0x1F4FE }, // E0.0   [1] (📾)       PORTABLE STEREO
+    Interval{ 0x1F4FF, 0x1F502 }, // E1.0   [4] (📿..🔂)    prayer beads..repeat single button
+    Interval{ 0x1F503, 0x1F503 }, // E0.6   [1] (🔃)       clockwise vertical arrows
+    Interval{ 0x1F504, 0x1F507 }, // E1.0   [4] (🔄..🔇)    counterclockwise arrows button..muted speaker
+    Interval{ 0x1F508, 0x1F508 }, // E0.7   [1] (🔈)       speaker low volume
+    Interval{ 0x1F509, 0x1F509 }, // E1.0   [1] (🔉)       speaker medium volume
+    Interval{ 0x1F50A, 0x1F514 }, // E0.6  [11] (🔊..🔔)    speaker high volume..bell
+    Interval{ 0x1F515, 0x1F515 }, // E1.0   [1] (🔕)       bell with slash
+    Interval{ 0x1F516, 0x1F52B }, // E0.6  [22] (🔖..🔫)    bookmark..pistol
+    Interval{ 0x1F52C, 0x1F52D }, // E1.0   [2] (🔬..🔭)    microscope..telescope
+    Interval{ 0x1F52E, 0x1F53D }, // E0.6  [16] (🔮..🔽)    crystal ball..downwards button
+    Interval{ 0x1F546, 0x1F548 }, // E0.0   [3] (🕆..🕈)    WHITE LATIN CROSS..CELTIC CROSS
+    Interval{ 0x1F549, 0x1F54A }, // E0.7   [2] (🕉️..🕊️)    om..dove
+    Interval{ 0x1F54B, 0x1F54E }, // E1.0   [4] (🕋..🕎)    kaaba..menorah
+    Interval{ 0x1F54F, 0x1F54F }, // E0.0   [1] (🕏)       BOWL OF HYGIEIA
+    Interval{ 0x1F550, 0x1F55B }, // E0.6  [12] (🕐..🕛)    one o’clock..twelve o’clock
+    Interval{ 0x1F55C, 0x1F567 }, // E0.7  [12] (🕜..🕧)    one-thirty..twelve-thirty
+    Interval{ 0x1F568, 0x1F56E }, // E0.0   [7] (🕨..🕮)    RIGHT SPEAKER..BOOK
+    Interval{ 0x1F56F, 0x1F570 }, // E0.7   [2] (🕯️..🕰️)    candle..mantelpiece clock
+    Interval{ 0x1F571, 0x1F572 }, // E0.0   [2] (🕱..🕲)    BLACK SKULL AND CROSSBONES..NO PIRACY
+    Interval{ 0x1F573, 0x1F579 }, // E0.7   [7] (🕳️..🕹️)    hole..joystick
+    Interval{ 0x1F57A, 0x1F57A }, // E3.0   [1] (🕺)       man dancing
+    Interval{ 0x1F57B, 0x1F586 }, // E0.0  [12] (🕻..🖆)    LEFT HAND TELEPHONE RECEIVER..PEN OVER STAMPED ENVELOPE
+    Interval{ 0x1F587, 0x1F587 }, // E0.7   [1] (🖇️)       linked paperclips
+    Interval{ 0x1F588, 0x1F589 }, // E0.0   [2] (🖈..🖉)    BLACK PUSHPIN..LOWER LEFT PENCIL
+    Interval{ 0x1F58A, 0x1F58D }, // E0.7   [4] (🖊️..🖍️)    pen..crayon
+    Interval{ 0x1F58E, 0x1F58F }, // E0.0   [2] (🖎..🖏)    LEFT WRITING HAND..TURNED OK HAND SIGN
+    Interval{ 0x1F590, 0x1F590 }, // E0.7   [1] (🖐️)       hand with fingers splayed
+    Interval{ 0x1F591, 0x1F594 }, // E0.0   [4] (🖑..🖔)    REVERSED RAISED HAND WITH FINGERS SPLAYED..REVERSED VICTORY HAND
+    Interval{ 0x1F595, 0x1F596 }, // E1.0   [2] (🖕..🖖)    middle finger..vulcan salute
+    Interval{ 0x1F597, 0x1F5A3 }, // E0.0  [13] (🖗..🖣)    WHITE DOWN POINTING LEFT HAND INDEX..BLACK DOWN POINTING BACKHAND INDEX
+    Interval{ 0x1F5A4, 0x1F5A4 }, // E3.0   [1] (🖤)       black heart
+    Interval{ 0x1F5A5, 0x1F5A5 }, // E0.7   [1] (🖥️)       desktop computer
+    Interval{ 0x1F5A6, 0x1F5A7 }, // E0.0   [2] (🖦..🖧)    KEYBOARD AND MOUSE..THREE NETWORKED COMPUTERS
+    Interval{ 0x1F5A8, 0x1F5A8 }, // E0.7   [1] (🖨️)       printer
+    Interval{ 0x1F5A9, 0x1F5B0 }, // E0.0   [8] (🖩..🖰)    POCKET CALCULATOR..TWO BUTTON MOUSE
+    Interval{ 0x1F5B1, 0x1F5B2 }, // E0.7   [2] (🖱️..🖲️)    computer mouse..trackball
+    Interval{ 0x1F5B3, 0x1F5BB }, // E0.0   [9] (🖳..🖻)    OLD PERSONAL COMPUTER..DOCUMENT WITH PICTURE
+    Interval{ 0x1F5BC, 0x1F5BC }, // E0.7   [1] (🖼️)       framed picture
+    Interval{ 0x1F5BD, 0x1F5C1 }, // E0.0   [5] (🖽..🗁)    FRAME WITH TILES..OPEN FOLDER
+    Interval{ 0x1F5C2, 0x1F5C4 }, // E0.7   [3] (🗂️..🗄️)    card index dividers..file cabinet
+    Interval{ 0x1F5C5, 0x1F5D0 }, // E0.0  [12] (🗅..🗐)    EMPTY NOTE..PAGES
+    Interval{ 0x1F5D1, 0x1F5D3 }, // E0.7   [3] (🗑️..🗓️)    wastebasket..spiral calendar
+    Interval{ 0x1F5D4, 0x1F5DB }, // E0.0   [8] (🗔..🗛)    DESKTOP WINDOW..DECREASE FONT SIZE SYMBOL
+    Interval{ 0x1F5DC, 0x1F5DE }, // E0.7   [3] (🗜️..🗞️)    clamp..rolled-up newspaper
+    Interval{ 0x1F5DF, 0x1F5E0 }, // E0.0   [2] (🗟..🗠)    PAGE WITH CIRCLED TEXT..STOCK CHART
+    Interval{ 0x1F5E1, 0x1F5E1 }, // E0.7   [1] (🗡️)       dagger
+    Interval{ 0x1F5E2, 0x1F5E2 }, // E0.0   [1] (🗢)       LIPS
+    Interval{ 0x1F5E3, 0x1F5E3 }, // E0.7   [1] (🗣️)       speaking head
+    Interval{ 0x1F5E4, 0x1F5E7 }, // E0.0   [4] (🗤..🗧)    THREE RAYS ABOVE..THREE RAYS RIGHT
+    Interval{ 0x1F5E8, 0x1F5E8 }, // E2.0   [1] (🗨️)       left speech bubble
+    Interval{ 0x1F5E9, 0x1F5EE }, // E0.0   [6] (🗩..🗮)    RIGHT SPEECH BUBBLE..LEFT ANGER BUBBLE
+    Interval{ 0x1F5EF, 0x1F5EF }, // E0.7   [1] (🗯️)       right anger bubble
+    Interval{ 0x1F5F0, 0x1F5F2 }, // E0.0   [3] (🗰..🗲)    MOOD BUBBLE..LIGHTNING MOOD
+    Interval{ 0x1F5F3, 0x1F5F3 }, // E0.7   [1] (🗳️)       ballot box with ballot
+    Interval{ 0x1F5F4, 0x1F5F9 }, // E0.0   [6] (🗴..🗹)    BALLOT SCRIPT X..BALLOT BOX WITH BOLD CHECK
+    Interval{ 0x1F5FA, 0x1F5FA }, // E0.7   [1] (🗺️)       world map
+    Interval{ 0x1F5FB, 0x1F5FF }, // E0.6   [5] (🗻..🗿)    mount fuji..moai
+    Interval{ 0x1F600, 0x1F600 }, // E1.0   [1] (😀)       grinning face
+    Interval{ 0x1F601, 0x1F606 }, // E0.6   [6] (😁..😆)    beaming face with smiling eyes..grinning squinting face
+    Interval{ 0x1F607, 0x1F608 }, // E1.0   [2] (😇..😈)    smiling face with halo..smiling face with horns
+    Interval{ 0x1F609, 0x1F60D }, // E0.6   [5] (😉..😍)    winking face..smiling face with heart-eyes
+    Interval{ 0x1F60E, 0x1F60E }, // E1.0   [1] (😎)       smiling face with sunglasses
+    Interval{ 0x1F60F, 0x1F60F }, // E0.6   [1] (😏)       smirking face
+    Interval{ 0x1F610, 0x1F610 }, // E0.7   [1] (😐)       neutral face
+    Interval{ 0x1F611, 0x1F611 }, // E1.0   [1] (😑)       expressionless face
+    Interval{ 0x1F612, 0x1F614 }, // E0.6   [3] (😒..😔)    unamused face..pensive face
+    Interval{ 0x1F615, 0x1F615 }, // E1.0   [1] (😕)       confused face
+    Interval{ 0x1F616, 0x1F616 }, // E0.6   [1] (😖)       confounded face
+    Interval{ 0x1F617, 0x1F617 }, // E1.0   [1] (😗)       kissing face
+    Interval{ 0x1F618, 0x1F618 }, // E0.6   [1] (😘)       face blowing a kiss
+    Interval{ 0x1F619, 0x1F619 }, // E1.0   [1] (😙)       kissing face with smiling eyes
+    Interval{ 0x1F61A, 0x1F61A }, // E0.6   [1] (😚)       kissing face with closed eyes
+    Interval{ 0x1F61B, 0x1F61B }, // E1.0   [1] (😛)       face with tongue
+    Interval{ 0x1F61C, 0x1F61E }, // E0.6   [3] (😜..😞)    winking face with tongue..disappointed face
+    Interval{ 0x1F61F, 0x1F61F }, // E1.0   [1] (😟)       worried face
+    Interval{ 0x1F620, 0x1F625 }, // E0.6   [6] (😠..😥)    angry face..sad but relieved face
+    Interval{ 0x1F626, 0x1F627 }, // E1.0   [2] (😦..😧)    frowning face with open mouth..anguished face
+    Interval{ 0x1F628, 0x1F62B }, // E0.6   [4] (😨..😫)    fearful face..tired face
+    Interval{ 0x1F62C, 0x1F62C }, // E1.0   [1] (😬)       grimacing face
+    Interval{ 0x1F62D, 0x1F62D }, // E0.6   [1] (😭)       loudly crying face
+    Interval{ 0x1F62E, 0x1F62F }, // E1.0   [2] (😮..😯)    face with open mouth..hushed face
+    Interval{ 0x1F630, 0x1F633 }, // E0.6   [4] (😰..😳)    anxious face with sweat..flushed face
+    Interval{ 0x1F634, 0x1F634 }, // E1.0   [1] (😴)       sleeping face
+    Interval{ 0x1F635, 0x1F635 }, // E0.6   [1] (😵)       dizzy face
+    Interval{ 0x1F636, 0x1F636 }, // E1.0   [1] (😶)       face without mouth
+    Interval{ 0x1F637, 0x1F640 }, // E0.6  [10] (😷..🙀)    face with medical mask..weary cat
+    Interval{ 0x1F641, 0x1F644 }, // E1.0   [4] (🙁..🙄)    slightly frowning face..face with rolling eyes
+    Interval{ 0x1F645, 0x1F64F }, // E0.6  [11] (🙅..🙏)    person gesturing NO..folded hands
+    Interval{ 0x1F680, 0x1F680 }, // E0.6   [1] (🚀)       rocket
+    Interval{ 0x1F681, 0x1F682 }, // E1.0   [2] (🚁..🚂)    helicopter..locomotive
+    Interval{ 0x1F683, 0x1F685 }, // E0.6   [3] (🚃..🚅)    railway car..bullet train
+    Interval{ 0x1F686, 0x1F686 }, // E1.0   [1] (🚆)       train
+    Interval{ 0x1F687, 0x1F687 }, // E0.6   [1] (🚇)       metro
+    Interval{ 0x1F688, 0x1F688 }, // E1.0   [1] (🚈)       light rail
+    Interval{ 0x1F689, 0x1F689 }, // E0.6   [1] (🚉)       station
+    Interval{ 0x1F68A, 0x1F68B }, // E1.0   [2] (🚊..🚋)    tram..tram car
+    Interval{ 0x1F68C, 0x1F68C }, // E0.6   [1] (🚌)       bus
+    Interval{ 0x1F68D, 0x1F68D }, // E0.7   [1] (🚍)       oncoming bus
+    Interval{ 0x1F68E, 0x1F68E }, // E1.0   [1] (🚎)       trolleybus
+    Interval{ 0x1F68F, 0x1F68F }, // E0.6   [1] (🚏)       bus stop
+    Interval{ 0x1F690, 0x1F690 }, // E1.0   [1] (🚐)       minibus
+    Interval{ 0x1F691, 0x1F693 }, // E0.6   [3] (🚑..🚓)    ambulance..police car
+    Interval{ 0x1F694, 0x1F694 }, // E0.7   [1] (🚔)       oncoming police car
+    Interval{ 0x1F695, 0x1F695 }, // E0.6   [1] (🚕)       taxi
+    Interval{ 0x1F696, 0x1F696 }, // E1.0   [1] (🚖)       oncoming taxi
+    Interval{ 0x1F697, 0x1F697 }, // E0.6   [1] (🚗)       automobile
+    Interval{ 0x1F698, 0x1F698 }, // E0.7   [1] (🚘)       oncoming automobile
+    Interval{ 0x1F699, 0x1F69A }, // E0.6   [2] (🚙..🚚)    sport utility vehicle..delivery truck
+    Interval{ 0x1F69B, 0x1F6A1 }, // E1.0   [7] (🚛..🚡)    articulated lorry..aerial tramway
+    Interval{ 0x1F6A2, 0x1F6A2 }, // E0.6   [1] (🚢)       ship
+    Interval{ 0x1F6A3, 0x1F6A3 }, // E1.0   [1] (🚣)       person rowing boat
+    Interval{ 0x1F6A4, 0x1F6A5 }, // E0.6   [2] (🚤..🚥)    speedboat..horizontal traffic light
+    Interval{ 0x1F6A6, 0x1F6A6 }, // E1.0   [1] (🚦)       vertical traffic light
+    Interval{ 0x1F6A7, 0x1F6AD }, // E0.6   [7] (🚧..🚭)    construction..no smoking
+    Interval{ 0x1F6AE, 0x1F6B1 }, // E1.0   [4] (🚮..🚱)    litter in bin sign..non-potable water
+    Interval{ 0x1F6B2, 0x1F6B2 }, // E0.6   [1] (🚲)       bicycle
+    Interval{ 0x1F6B3, 0x1F6B5 }, // E1.0   [3] (🚳..🚵)    no bicycles..person mountain biking
+    Interval{ 0x1F6B6, 0x1F6B6 }, // E0.6   [1] (🚶)       person walking
+    Interval{ 0x1F6B7, 0x1F6B8 }, // E1.0   [2] (🚷..🚸)    no pedestrians..children crossing
+    Interval{ 0x1F6B9, 0x1F6BE }, // E0.6   [6] (🚹..🚾)    men’s room..water closet
+    Interval{ 0x1F6BF, 0x1F6BF }, // E1.0   [1] (🚿)       shower
+    Interval{ 0x1F6C0, 0x1F6C0 }, // E0.6   [1] (🛀)       person taking bath
+    Interval{ 0x1F6C1, 0x1F6C5 }, // E1.0   [5] (🛁..🛅)    bathtub..left luggage
+    Interval{ 0x1F6C6, 0x1F6CA }, // E0.0   [5] (🛆..🛊)    TRIANGLE WITH ROUNDED CORNERS..GIRLS SYMBOL
+    Interval{ 0x1F6CB, 0x1F6CB }, // E0.7   [1] (🛋️)       couch and lamp
+    Interval{ 0x1F6CC, 0x1F6CC }, // E1.0   [1] (🛌)       person in bed
+    Interval{ 0x1F6CD, 0x1F6CF }, // E0.7   [3] (🛍️..🛏️)    shopping bags..bed
+    Interval{ 0x1F6D0, 0x1F6D0 }, // E1.0   [1] (🛐)       place of worship
+    Interval{ 0x1F6D1, 0x1F6D2 }, // E3.0   [2] (🛑..🛒)    stop sign..shopping cart
+    Interval{ 0x1F6D3, 0x1F6D4 }, // E0.0   [2] (🛓..🛔)    STUPA..PAGODA
+    Interval{ 0x1F6D5, 0x1F6D5 }, // E12.0  [1] (🛕)       hindu temple
+    Interval{ 0x1F6D6, 0x1F6D7 }, // E13.0  [2] (🛖..🛗)    hut..elevator
+    Interval{ 0x1F6D8, 0x1F6DF }, // E0.0   [8] (🛘..🛟)    <reserved-1F6D8>..<reserved-1F6DF>
+    Interval{ 0x1F6E0, 0x1F6E5 }, // E0.7   [6] (🛠️..🛥️)    hammer and wrench..motor boat
+    Interval{ 0x1F6E6, 0x1F6E8 }, // E0.0   [3] (🛦..🛨)    UP-POINTING MILITARY AIRPLANE..UP-POINTING SMALL AIRPLANE
+    Interval{ 0x1F6E9, 0x1F6E9 }, // E0.7   [1] (🛩️)       small airplane
+    Interval{ 0x1F6EA, 0x1F6EA }, // E0.0   [1] (🛪)       NORTHEAST-POINTING AIRPLANE
+    Interval{ 0x1F6EB, 0x1F6EC }, // E1.0   [2] (🛫..🛬)    airplane departure..airplane arrival
+    Interval{ 0x1F6ED, 0x1F6EF }, // E0.0   [3] (🛭..🛯)    <reserved-1F6ED>..<reserved-1F6EF>
+    Interval{ 0x1F6F0, 0x1F6F0 }, // E0.7   [1] (🛰️)       satellite
+    Interval{ 0x1F6F1, 0x1F6F2 }, // E0.0   [2] (🛱..🛲)    ONCOMING FIRE ENGINE..DIESEL LOCOMOTIVE
+    Interval{ 0x1F6F3, 0x1F6F3 }, // E0.7   [1] (🛳️)       passenger ship
+    Interval{ 0x1F6F4, 0x1F6F6 }, // E3.0   [3] (🛴..🛶)    kick scooter..canoe
+    Interval{ 0x1F6F7, 0x1F6F8 }, // E5.0   [2] (🛷..🛸)    sled..flying saucer
+    Interval{ 0x1F6F9, 0x1F6F9 }, // E11.0  [1] (🛹)       skateboard
+    Interval{ 0x1F6FA, 0x1F6FA }, // E12.0  [1] (🛺)       auto rickshaw
+    Interval{ 0x1F6FB, 0x1F6FC }, // E13.0  [2] (🛻..🛼)    pickup truck..roller skate
+    Interval{ 0x1F6FD, 0x1F6FF }, // E0.0   [3] (🛽..🛿)    <reserved-1F6FD>..<reserved-1F6FF>
+    Interval{ 0x1F774, 0x1F77F }, // E0.0  [12] (🝴..🝿)    <reserved-1F774>..<reserved-1F77F>
+    Interval{ 0x1F7D5, 0x1F7DF }, // E0.0  [11] (🟕..🟟)    CIRCLED TRIANGLE..<reserved-1F7DF>
+    Interval{ 0x1F7E0, 0x1F7EB }, // E12.0 [12] (🟠..🟫)    orange circle..brown square
+    Interval{ 0x1F7EC, 0x1F7FF }, // E0.0  [20] (🟬..🟿)    <reserved-1F7EC>..<reserved-1F7FF>
+    Interval{ 0x1F80C, 0x1F80F }, // E0.0   [4] (🠌..🠏)    <reserved-1F80C>..<reserved-1F80F>
+    Interval{ 0x1F848, 0x1F84F }, // E0.0   [8] (🡈..🡏)    <reserved-1F848>..<reserved-1F84F>
+    Interval{ 0x1F85A, 0x1F85F }, // E0.0   [6] (🡚..🡟)    <reserved-1F85A>..<reserved-1F85F>
+    Interval{ 0x1F888, 0x1F88F }, // E0.0   [8] (🢈..🢏)    <reserved-1F888>..<reserved-1F88F>
+    Interval{ 0x1F8AE, 0x1F8FF }, // E0.0  [82] (🢮..🣿)    <reserved-1F8AE>..<reserved-1F8FF>
+    Interval{ 0x1F90C, 0x1F90C }, // E13.0  [1] (🤌)       pinched fingers
+    Interval{ 0x1F90D, 0x1F90F }, // E12.0  [3] (🤍..🤏)    white heart..pinching hand
+    Interval{ 0x1F910, 0x1F918 }, // E1.0   [9] (🤐..🤘)    zipper-mouth face..sign of the horns
+    Interval{ 0x1F919, 0x1F91E }, // E3.0   [6] (🤙..🤞)    call me hand..crossed fingers
+    Interval{ 0x1F91F, 0x1F91F }, // E5.0   [1] (🤟)       love-you gesture
+    Interval{ 0x1F920, 0x1F927 }, // E3.0   [8] (🤠..🤧)    cowboy hat face..sneezing face
+    Interval{ 0x1F928, 0x1F92F }, // E5.0   [8] (🤨..🤯)    face with raised eyebrow..exploding head
+    Interval{ 0x1F930, 0x1F930 }, // E3.0   [1] (🤰)       pregnant woman
+    Interval{ 0x1F931, 0x1F932 }, // E5.0   [2] (🤱..🤲)    breast-feeding..palms up together
+    Interval{ 0x1F933, 0x1F93A }, // E3.0   [8] (🤳..🤺)    selfie..person fencing
+    Interval{ 0x1F93C, 0x1F93E }, // E3.0   [3] (🤼..🤾)    people wrestling..person playing handball
+    Interval{ 0x1F93F, 0x1F93F }, // E12.0  [1] (🤿)       diving mask
+    Interval{ 0x1F940, 0x1F945 }, // E3.0   [6] (🥀..🥅)    wilted flower..goal net
+    Interval{ 0x1F947, 0x1F94B }, // E3.0   [5] (🥇..🥋)    1st place medal..martial arts uniform
+    Interval{ 0x1F94C, 0x1F94C }, // E5.0   [1] (🥌)       curling stone
+    Interval{ 0x1F94D, 0x1F94F }, // E11.0  [3] (🥍..🥏)    lacrosse..flying disc
+    Interval{ 0x1F950, 0x1F95E }, // E3.0  [15] (🥐..🥞)    croissant..pancakes
+    Interval{ 0x1F95F, 0x1F96B }, // E5.0  [13] (🥟..🥫)    dumpling..canned food
+    Interval{ 0x1F96C, 0x1F970 }, // E11.0  [5] (🥬..🥰)    leafy green..smiling face with hearts
+    Interval{ 0x1F971, 0x1F971 }, // E12.0  [1] (🥱)       yawning face
+    Interval{ 0x1F972, 0x1F972 }, // E13.0  [1] (🥲)       smiling face with tear
+    Interval{ 0x1F973, 0x1F976 }, // E11.0  [4] (🥳..🥶)    partying face..cold face
+    Interval{ 0x1F977, 0x1F978 }, // E13.0  [2] (🥷..🥸)    ninja..disguised face
+    Interval{ 0x1F979, 0x1F979 }, // E0.0   [1] (🥹)       <reserved-1F979>
+    Interval{ 0x1F97A, 0x1F97A }, // E11.0  [1] (🥺)       pleading face
+    Interval{ 0x1F97B, 0x1F97B }, // E12.0  [1] (🥻)       sari
+    Interval{ 0x1F97C, 0x1F97F }, // E11.0  [4] (🥼..🥿)    lab coat..flat shoe
+    Interval{ 0x1F980, 0x1F984 }, // E1.0   [5] (🦀..🦄)    crab..unicorn
+    Interval{ 0x1F985, 0x1F991 }, // E3.0  [13] (🦅..🦑)    eagle..squid
+    Interval{ 0x1F992, 0x1F997 }, // E5.0   [6] (🦒..🦗)    giraffe..cricket
+    Interval{ 0x1F998, 0x1F9A2 }, // E11.0 [11] (🦘..🦢)    kangaroo..swan
+    Interval{ 0x1F9A3, 0x1F9A4 }, // E13.0  [2] (🦣..🦤)    mammoth..dodo
+    Interval{ 0x1F9A5, 0x1F9AA }, // E12.0  [6] (🦥..🦪)    sloth..oyster
+    Interval{ 0x1F9AB, 0x1F9AD }, // E13.0  [3] (🦫..🦭)    beaver..seal
+    Interval{ 0x1F9AE, 0x1F9AF }, // E12.0  [2] (🦮..🦯)    guide dog..white cane
+    Interval{ 0x1F9B0, 0x1F9B9 }, // E11.0 [10] (🦰..🦹)    red hair..supervillain
+    Interval{ 0x1F9BA, 0x1F9BF }, // E12.0  [6] (🦺..🦿)    safety vest..mechanical leg
+    Interval{ 0x1F9C0, 0x1F9C0 }, // E1.0   [1] (🧀)       cheese wedge
+    Interval{ 0x1F9C1, 0x1F9C2 }, // E11.0  [2] (🧁..🧂)    cupcake..salt
+    Interval{ 0x1F9C3, 0x1F9CA }, // E12.0  [8] (🧃..🧊)    beverage box..ice
+    Interval{ 0x1F9CB, 0x1F9CB }, // E13.0  [1] (🧋)       bubble tea
+    Interval{ 0x1F9CC, 0x1F9CC }, // E0.0   [1] (🧌)       <reserved-1F9CC>
+    Interval{ 0x1F9CD, 0x1F9CF }, // E12.0  [3] (🧍..🧏)    person standing..deaf person
+    Interval{ 0x1F9D0, 0x1F9E6 }, // E5.0  [23] (🧐..🧦)    face with monocle..socks
+    Interval{ 0x1F9E7, 0x1F9FF }, // E11.0 [25] (🧧..🧿)    red envelope..nazar amulet
+    Interval{ 0x1FA00, 0x1FA6F }, // E0.0 [112] (🨀..🩯)    NEUTRAL CHESS KING..<reserved-1FA6F>
+    Interval{ 0x1FA70, 0x1FA73 }, // E12.0  [4] (🩰..🩳)    ballet shoes..shorts
+    Interval{ 0x1FA74, 0x1FA74 }, // E13.0  [1] (🩴)       thong sandal
+    Interval{ 0x1FA75, 0x1FA77 }, // E0.0   [3] (🩵..🩷)    <reserved-1FA75>..<reserved-1FA77>
+    Interval{ 0x1FA78, 0x1FA7A }, // E12.0  [3] (🩸..🩺)    drop of blood..stethoscope
+    Interval{ 0x1FA7B, 0x1FA7F }, // E0.0   [5] (🩻..🩿)    <reserved-1FA7B>..<reserved-1FA7F>
+    Interval{ 0x1FA80, 0x1FA82 }, // E12.0  [3] (🪀..🪂)    yo-yo..parachute
+    Interval{ 0x1FA83, 0x1FA86 }, // E13.0  [4] (🪃..🪆)    boomerang..nesting dolls
+    Interval{ 0x1FA87, 0x1FA8F }, // E0.0   [9] (🪇..🪏)    <reserved-1FA87>..<reserved-1FA8F>
+    Interval{ 0x1FA90, 0x1FA95 }, // E12.0  [6] (🪐..🪕)    ringed planet..banjo
+    Interval{ 0x1FA96, 0x1FAA8 }, // E13.0 [19] (🪖..🪨)    military helmet..rock
+    Interval{ 0x1FAA9, 0x1FAAF }, // E0.0   [7] (🪩..🪯)    <reserved-1FAA9>..<reserved-1FAAF>
+    Interval{ 0x1FAB0, 0x1FAB6 }, // E13.0  [7] (🪰..🪶)    fly..feather
+    Interval{ 0x1FAB7, 0x1FABF }, // E0.0   [9] (🪷..🪿)    <reserved-1FAB7>..<reserved-1FABF>
+    Interval{ 0x1FAC0, 0x1FAC2 }, // E13.0  [3] (🫀..🫂)    anatomical heart..people hugging
+    Interval{ 0x1FAC3, 0x1FACF }, // E0.0  [13] (🫃..🫏)    <reserved-1FAC3>..<reserved-1FACF>
+    Interval{ 0x1FAD0, 0x1FAD6 }, // E13.0  [7] (🫐..🫖)    blueberries..teapot
+    Interval{ 0x1FAD7, 0x1FAFF }, // E0.0  [41] (🫗..🫿)    <reserved-1FAD7>..<reserved-1FAFF>
+    Interval{ 0x1FC00, 0x1FFFD }, // E0.0[1022] (🰀..🿽)    <reserved-1FC00>..<reserved-1FFFD>
+}; // }}}
+} // end namespace tables
+
+bool emoji(char32_t _codepoint) noexcept {
+    return contains(tables::Emoji, _codepoint);
+}
+
+bool emoji_component(char32_t _codepoint) noexcept {
+    return contains(tables::Emoji_Component, _codepoint);
+}
+
+bool emoji_modifier(char32_t _codepoint) noexcept {
+    return contains(tables::Emoji_Modifier, _codepoint);
+}
+
+bool emoji_modifier_base(char32_t _codepoint) noexcept {
+    return contains(tables::Emoji_Modifier_Base, _codepoint);
+}
+
+bool emoji_presentation(char32_t _codepoint) noexcept {
+    return contains(tables::Emoji_Presentation, _codepoint);
+}
+
+bool extended_pictographic(char32_t _codepoint) noexcept {
+    return contains(tables::Extended_Pictographic, _codepoint);
 }
 
 } // end namespace

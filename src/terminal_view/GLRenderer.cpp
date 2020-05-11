@@ -179,6 +179,13 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
 void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
 {
+#if 1
+    pendingDraw_.state = PendingDraw::State::Filling;
+    pendingDraw_.reset(_row, _col, _cell.attributes());
+    pendingDraw_.extend(_cell);
+    renderTextGroup(_screenSize);
+    pendingDraw_.reset(_row, _col, _cell.attributes());
+#else
     constexpr uint8_t SP = 0x20;
 
     switch (pendingDraw_.state)
@@ -210,6 +217,7 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
             }
             break;
     }
+#endif
 }
 
 void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize)

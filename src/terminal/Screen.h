@@ -21,6 +21,8 @@
 #include <terminal/WindowSize.h>
 #include <terminal/InputGenerator.h> // MouseTransport
 
+#include <crispy/text/GraphemeSegmenter.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -183,17 +185,10 @@ struct ScreenBuffer {
         {
             if (codepointCount_ < MaxCodepoints)
             {
-                constexpr char32_t ZeroWidthJoiner = 0x200d;
-
-                if (_codepoint != ZeroWidthJoiner && codepointCount_ && codepoints_[codepointCount_ - 1] != ZeroWidthJoiner)
-                    setCharacter(_codepoint);
-                else
-                {
-                    codepoints_[codepointCount_] = _codepoint;
-                    codepointCount_++;
-                    auto const w = crispy::utf8::wcwidth(_codepoint);
-                    width_ = std::max(width_, uint8_t(w >= 0 ? w : 1));
-                }
+                codepoints_[codepointCount_] = _codepoint;
+                codepointCount_++;
+                auto const w = crispy::utf8::wcwidth(_codepoint);
+                width_ = std::max(width_, uint8_t(w >= 0 ? w : 1));
             }
         }
 
@@ -524,6 +519,8 @@ class Screen {
     /// Writes given data into the screen.
     void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
 
+    void write(std::u32string_view const& _text);
+
     /// Renders the full screen by passing every grid cell to the callback.
     void render(Renderer const& _renderer, size_t _scrollOffset = 0) const;
 
@@ -650,6 +647,11 @@ class Screen {
     Cell const& currentCell() const noexcept
     {
         return *buffer_->currentColumn;
+    }
+
+    Cell const& operator()(cursor_pos_t _row, cursor_pos_t _col) const noexcept
+    {
+        return buffer_->at(_row, _col);
     }
 
     Cell& currentCell() noexcept

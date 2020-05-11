@@ -80,10 +80,4 @@ constexpr bool isNewline(char32_t _codepoint) noexcept
     }
 }
 
-bool isExtend(char32_t _codepoint) noexcept
-{
-    return contains(Core_Property::Grapheme_Extend, _codepoint)
-        || contains(General_Category::Spacing_Mark, _codepoint);
-}
-
 } // end namespace

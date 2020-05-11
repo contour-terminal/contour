@@ -93,6 +93,7 @@ if(CRISPY_TESTING)
         compose_test.cpp
         test_main.cpp
         text/WordSegmenter_test.cpp
+        text/GraphemeSegmenter_test.cpp
     )
     target_link_libraries(crispy_test fmt::fmt-header-only Catch2::Catch2 crispy::core)
     add_test(crispy_test ./crispy_test)

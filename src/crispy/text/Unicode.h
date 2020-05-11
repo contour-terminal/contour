@@ -14,6 +14,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <utility>
 
 namespace crispy::text {
@@ -76,5 +77,30 @@ enum class General_Category {
 };
 
 bool contains(General_Category _cat, char32_t _codepoint) noexcept;
+
+enum class Grapheme_Cluster_Break {
+    CR,
+    Control,
+    Extend,
+    L,
+    LF,
+    LV,
+    LVT,
+    Prepend,
+    Regional_Indicator,
+    SpacingMark,
+    T,
+    V,
+    ZWJ,
+};
+
+std::optional<Grapheme_Cluster_Break> grapheme_cluster_break(char32_t _codepoint) noexcept;
+
+bool emoji(char32_t _codepoint) noexcept;
+bool emoji_component(char32_t _codepoint) noexcept;
+bool emoji_modifier(char32_t _codepoint) noexcept;
+bool emoji_modifier_base(char32_t _codepoint) noexcept;
+bool emoji_presentation(char32_t _codepoint) noexcept;
+bool extended_pictographic(char32_t _codepoint) noexcept;
 
 } // end namespace

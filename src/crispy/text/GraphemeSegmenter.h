@@ -70,15 +70,18 @@ class GraphemeSegmenter {
     {
         constexpr char32_t CR = 0x000D;
         constexpr char32_t LF = 0x000A;
+        constexpr char32_t ZWJ = 0x200D;
 
-        // Do not break between a CR and LF. Otherwise, break before and after controls.
+        // GB3: Do not break between a CR and LF. Otherwise, break before and after controls.
         if (a == CR && b == LF) // GB3
             return false;
 
-        if (a == CR || a == LF || contains(General_Category::Control, a)) // GB4
+        // GB4
+        if (a == CR || a == LF || control(a))
             return false;
 
-        if (b == CR || b == LF || contains(General_Category::Control, b)) // GB5
+        // GB5
+        if (b == CR || b == LF || control(b))
             return false;
 
         // Do not break Hangul syllable sequences.
@@ -86,29 +89,70 @@ class GraphemeSegmenter {
         // GB7: TODO
         // GB8: TODO
 
-        // Do not break between regional indicator symbols.
-        if (isRegionalIndicator(a) && isRegionalIndicator(b)) // GB8a
+        // GB9: Do not break before extending characters.
+        if (extend(b) || b == ZWJ) // GB9
             return false;
 
-        // Do not break before extending characters.
-        if (isExtend(b)) // GB9
+        // GB9a: Do not break before SpacingMarks
+        if (spacingMark(b))
             return false;
 
-        // EXT: Do not break before SpacingMarks, or after Prepend characters.
-        if (contains(General_Category::Spacing_Mark, b)) // GB9a
-            return false;
-
-        // NB: wrt "Prepend": Currently there are no characters with this value.
+        // GB9b: or after Prepend characters.
+        // (NB: wrt "Prepend": Currently there are no characters with this value)
         if (false/*contains(General_Category::Pepend, a)*/) // GB9b
             return false;
 
-        // Otherwise, break everywhere.
+        // GB11: Do not break within emoji modifier sequences or emoji zwj sequences.
+        if (a == ZWJ && extended_pictographic(b))
+            return false;
+
+        // GB12/GB13: Do not break within emoji flag sequences.
+        // That is, do not break between regional indicator (RI) symbols
+        // if there is an odd number of RI characters before the break point.
+        if (isRegionalIndicator(a) && isRegionalIndicator(b)) // GB8a
+            return false;
+
+        // GB999: Otherwise, break everywhere.
         return true; // GB10
     }
 
     static constexpr bool nonbreakable(char32_t a, char32_t b)
     {
         return !breakable(a, b);
+    }
+
+  private:
+    static bool extend(char32_t _codepoint) noexcept
+    {
+        return contains(Core_Property::Grapheme_Extend, _codepoint)
+            || contains(General_Category::Spacing_Mark, _codepoint)
+            || (emoji_modifier(_codepoint) && _codepoint != 0x200D);
+    }
+
+    static bool control(char32_t ch)
+    {
+        return contains(General_Category::Line_Separator, ch)
+            || contains(General_Category::Paragraph_Separator, ch)
+            || contains(General_Category::Control, ch)
+            || contains(General_Category::Surrogate, ch)
+            || (contains(General_Category::Unassigned, ch)
+                    && contains(Core_Property::Default_Ignorable_Code_Point, ch))
+            || (contains(General_Category::Format, ch)
+                    && ch != 0x000D
+                    && ch != 0x000A
+                    && ch != 0x200C
+                    && ch != 0x200D);
+    }
+
+    static bool spacingMark(char32_t _codepoint)
+    {
+        if (auto const p = grapheme_cluster_break(_codepoint);
+                (!p.has_value() || *p != Grapheme_Cluster_Break::Extend)
+                && (contains(General_Category::Spacing_Mark, _codepoint)
+                    || _codepoint == 0x0E33
+                    || _codepoint == 0x0EB3))
+            return true;
+        return false;
     }
 
   private:

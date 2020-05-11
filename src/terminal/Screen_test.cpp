@@ -139,6 +139,35 @@ TEST_CASE("AppendChar", "[screen]")
     REQUIRE("F  " == screen.renderTextLine(1));
 }
 
+TEST_CASE("AppendChar.emoji_zwj5", "[screen]")
+{
+    auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    screen(SetMode{ Mode::AutoWrap, false });
+
+    // https://emojipedia.org/man-facepalming-medium-light-skin-tone/
+    auto const emoji = u32string_view{U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F"};
+    screen.write(emoji);
+    // TODO: provide native UTF-32 write function (not emulated through UTF-8 -> UTF-32...)
+
+    auto const& c1 = screen(1, 1);
+    CHECK(c1.codepointCount() == 5);
+    CHECK(c1.codepoint(0) == 0x1F926);
+    CHECK(c1.codepoint(1) == 0x1F3FC);
+    CHECK(c1.codepoint(2) == 0x200D);
+    CHECK(c1.codepoint(3) == 0x2642);
+    CHECK(c1.codepoint(4) == 0xFE0F);
+    CHECK(c1.width() == 2);
+
+    // other columns remain untouched
+    CHECK(screen(1, 2).codepointCount() == 0);
+    CHECK(screen(1, 3).codepointCount() == 0);
+    CHECK(screen(1, 4).codepointCount() == 0);
+    CHECK(screen(1, 5).codepointCount() == 0);
+
+    CHECK("\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == screen.renderTextLine(1));
+}
+
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
 {
     auto screen = Screen{{3, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};

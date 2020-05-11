@@ -18,7 +18,9 @@
 
 #include <crispy/text/WordSegmenter.h>
 #include <crispy/text/EmojiSegmenter.h>
+#include <crispy/text/GraphemeSegmenter.h>
 #include <crispy/algorithm.h>
+#include <crispy/UTF8.h>
 #include <crispy/text.h>
 #include <crispy/times.h>
 
@@ -296,6 +298,27 @@ void ScreenBuffer::appendChar(char32_t ch)
         linefeed(margin_.horizontal.from);
     }
 
+#if 1
+    if (!lastColumn->empty()
+        && text::GraphemeSegmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1),
+                                                 ch))
+    {
+        lastColumn->appendCharacter(ch);
+    }
+    else
+    {
+        Cell& cell = *currentColumn;
+        cell.setCharacter(ch);
+        cell.attributes() = graphicsRendition;
+
+        lastColumn = currentColumn;
+        lastCursor = cursor;
+
+        for (size_t i = 0; i < currentColumn->width(); ++i)
+            if (!advanceCursor())
+                break;
+    }
+#else
     constexpr char32_t ZeroWidthJoiner = 0x200d;
 
     if (ch == ZeroWidthJoiner)
@@ -322,6 +345,7 @@ void ScreenBuffer::appendChar(char32_t ch)
             if (!advanceCursor())
                 break;
     }
+#endif
 }
 
 bool ScreenBuffer::advanceCursor()
@@ -774,6 +798,15 @@ void Screen::write(char const * _data, size_t _size)
 
     if (onCommands_)
         onCommands_(handler_.commands());
+}
+
+void Screen::write(std::u32string_view const& _text)
+{
+    for (char32_t codepoint : _text)
+    {
+        auto const bytes = utf8::encode(codepoint);
+        write((char const*) bytes.data(), bytes.size());
+    }
 }
 
 void Screen::render(Renderer const& _render, size_t _scrollOffset) const
