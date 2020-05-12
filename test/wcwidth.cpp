@@ -11,7 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <crispy/text/wcwidth.h>
 #include <crispy/UTF8.h>
+#include <crispy/text.h>
 #include <crispy/overloaded.h>
 #include <iomanip>
 #include <fstream>
@@ -37,16 +39,19 @@ int main([[maybe_unused]] int argc, char const* argv[])
             mb[mblen++] = ch;
             //printf("%lu: %lu ch: 0x%02x\n", totalOffset, mblen, ch & 0xFF);
             char32_t wc = 0;
-            if (crispy::utf8::mbtowc(&wc, mb, mblen) != -1)
+            if (crispy::text::mbtowc(&wc, mb, mblen) != -1)
             {
-                int const width = crispy::utf8::wcwidth(wc);
+                int const width = crispy::text::wcwidth(wc);
                 if (width >= 0)
                 {
-                    printf("%3lu: mblen:%lu, wc:0x%08x, len:%d\n",
+                    auto u8 = crispy::utf8::encode(wc);
+                    printf("%3lu: mblen:%lu, UTF32:0x%08x, wcwidth:%d UTF8:%s\n",
                             totalOffset,
                             mblen,
                             wc,
-                            width);
+                            width,
+                            crispy::escape(u8.begin(), u8.end()).c_str()
+                    );
                 }
                 mblen = 0;
             }

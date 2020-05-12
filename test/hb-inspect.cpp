@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <crispy/text/wcwidth.h>
 #include <crispy/UTF8.h>
 
 #include <iostream>
@@ -94,7 +95,7 @@ int main(int argc, char const* argv[])
         cout << fmt::format("{:>4}: codepoint:{:>08x} wcwidth:{}\n",
                 i,
                 (unsigned) text32[i],
-                crispy::utf8::wcwidth(text32[i]));
+                crispy::text::wcwidth(text32[i]));
 
     // ==================================================================================================
     // initialize
@@ -169,7 +170,7 @@ int main(int argc, char const* argv[])
     {
         auto const codepoint = unsigned(text32[info[i].cluster]);
         auto const glyphIndex = info[i].codepoint;
-        auto const columnWidth = crispy::utf8::wcwidth(codepoint);
+        auto const columnWidth = crispy::text::wcwidth(codepoint);
         cout << fmt::format("{:>4}: code:{:>08x} wcwidth:{} glyphIndex:{:<5} xoff:{:<3} yoff:{:<3} xadv:{:<3} yadv:{}\n",
                             info[i].cluster,
                             codepoint,

@@ -22,6 +22,7 @@
 #include <terminal/InputGenerator.h> // MouseTransport
 
 #include <crispy/text/GraphemeSegmenter.h>
+#include <crispy/text/wcwidth.h>
 
 #include <fmt/format.h>
 
@@ -171,8 +172,8 @@ struct ScreenBuffer {
             if (_codepoint)
             {
                 codepointCount_ = 1;
-                auto const w = crispy::utf8::wcwidth(_codepoint);
-                width_ = w >= 0 ? w : 1;
+                auto const w = crispy::text::wcwidth(_codepoint);
+                width_ = std::max(w, 1);
             }
             else
             {
@@ -187,7 +188,7 @@ struct ScreenBuffer {
             {
                 codepoints_[codepointCount_] = _codepoint;
                 codepointCount_++;
-                auto const w = crispy::utf8::wcwidth(_codepoint);
+                auto const w = crispy::text::wcwidth(_codepoint);
                 width_ = std::max(width_, uint8_t(w >= 0 ? w : 1));
             }
         }

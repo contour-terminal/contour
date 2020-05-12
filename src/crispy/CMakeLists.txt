@@ -22,10 +22,8 @@ add_library(crispy-core STATIC
     times.h
     UTF8.h
     text/EmojiSegmenter.h
-    text/Unicode.h
-    text/Unicode.cpp
-    text/UnicodeTables.h
-    text/UnicodeTraits.h
+    text/Unicode.h text/Unicode.cpp
+    text/wcwidth.h text/wcwidth.cpp
     text/WordSegmenter.h
 )
 add_library(crispy::core ALIAS crispy-core)

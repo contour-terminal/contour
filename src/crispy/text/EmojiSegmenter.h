@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <crispy/text/UnicodeTraits.h>
+#include <crispy/text/Unicode.h>
 #include <array>
 #include <algorithm>
 #include <utility>
@@ -44,6 +44,11 @@ enum class EmojiSegmentationCategory
 
 constexpr inline EmojiSegmentationCategory toCategory(char32_t _codepoint)
 {
+    auto isEmojiKeycapBase = [](char32_t _codepoint) -> bool {
+        return ('0' <= _codepoint && _codepoint <= '9')
+            || _codepoint == '#' || _codepoint == '*';
+    };
+
     if (_codepoint == 0x20e3)
         return EmojiSegmentationCategory::CombiningEnclosingKeyCap;
     if (_codepoint == 0x20e0)
@@ -60,22 +65,20 @@ constexpr inline EmojiSegmentationCategory toCategory(char32_t _codepoint)
         return EmojiSegmentationCategory::TagSequence;
     if (_codepoint == 0xE007F)
         return EmojiSegmentationCategory::TagTerm;
-#if 0 // TODO
-    if (isEmojiModifierBase(_codepoint))
+    if (emoji_modifier_base(_codepoint))
         return EmojiSegmentationCategory::EmojiModifierBase;
-    if (isEmojiModifier(_codepoint))
+    if (emoji_modifier(_codepoint))
         return EmojiSegmentationCategory::EmojiModifier;
-    if (isRegionalIndicator(_codepoint))
+    if (grapheme_cluster_break::regional_indicator(_codepoint))
         return EmojiSegmentationCategory::RegionalIndicator;
     if (isEmojiKeycapBase(_codepoint))
         return EmojiSegmentationCategory::KeyCapBase;
-    if (isEmojiEmojiDefault(_codepoint))
+    if (emoji_presentation(_codepoint))
         return EmojiSegmentationCategory::EmojiEmojiPresentation;
-    if (isEmojiTextDefault(_codepoint))
+    if (emoji(_codepoint) && !emoji_presentation(_codepoint))
         return EmojiSegmentationCategory::EmojiTextPresentation;
-    if (isEmoji(_codepoint))
+    if (emoji(_codepoint))
         return EmojiSegmentationCategory::Emoji;
-#endif
 
     return EmojiSegmentationCategory::Invalid;
 }

@@ -172,7 +172,6 @@ def process_core_props(header, impl):
 
 def process_props(header, impl, filename, prop_key):
     with open(filename, 'r') as f:
-        # General_Category=Spacing_Mark
         headerRE = re.compile('^#\s*{}:\s*(\w+)$'.format(prop_key))
         singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
         rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
@@ -222,12 +221,6 @@ def process_props(header, impl, filename, prop_key):
             impl.write("}; // }}}\n")
         impl.write("} // end namespace tables\n\n")
 
-        # write out test function
-        for name in sorted(props.keys()):
-            impl.write('std::optional<{}> {}(char32_t _codepoint) noexcept {{\n'.format(name, name.lower()))
-            impl.write("    return search(tables::{0:}, _codepoint);\n".format(name))
-            impl.write("}\n\n")
-
         # write enums / signature
         for name in sorted(props.keys()):
             header.write('enum class {} {{\n'.format(name))
@@ -237,8 +230,24 @@ def process_props(header, impl, filename, prop_key):
             for enum in sorted(enums):
                 header.write("    {},\n".format(enum))
             header.write("};\n\n")
-            header.write('std::optional<{}> {}(char32_t _codepoint) noexcept;\n'.format(name, name.lower()))
+
+        for name in sorted(props.keys()):
+            impl.write('namespace {} {{\n'.format(name.lower()))
+            header.write('namespace {} {{\n'.format(name.lower()))
+            enums = set()
+            for enum in props[name]:
+                enums.add(enum['property'])
+            for enum in sorted(enums):
+                header.write('    bool {}(char32_t _codepoint) noexcept;\n'.format(enum.lower()))
+                impl.write('    bool {}(char32_t _codepoint) noexcept {{\n'.format(enum.lower()))
+                impl.write("        if (auto p = search(tables::{}, _codepoint); p.has_value())\n".format(name))
+                impl.write('            return p.value() == {}::{};\n'.format(name, enum))
+                impl.write('        return false;\n')
+                impl.write('    }\n\n')
+            header.write('}\n')
+            impl.write('}\n')
         header.write('\n')
+        impl.write('\n')
 
 def process_grapheme_break_props(header, impl):
     process_props(header, impl, GRAPHEME_BREAK_PROPS_FILE, 'Property')
@@ -369,7 +378,15 @@ def process_derived_general_category(header, impl):
         for name in sorted(cats.keys()):
             header.write("    {},\n".format(name))
         header.write("};\n\n")
+
         header.write("bool contains(General_Category _cat, char32_t _codepoint) noexcept;\n\n")
+
+        header.write('namespace general_category {\n')
+        for name in sorted(cats.keys()):
+            header.write(
+                    '    inline bool {}(char32_t _codepoint) {{ return contains(General_Category::{}, _codepoint); }}\n'.
+                    format(name.lower(), name))
+        header.write('}\n\n')
 
 def main():
     header = open(TARGET_HEADER_FILE, 'w')

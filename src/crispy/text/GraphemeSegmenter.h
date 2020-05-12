@@ -13,8 +13,7 @@
  */
 #pragma once
 
-#include <crispy/text/UnicodeTraits.h>
-#include <crispy/text/UnicodeTables.h>
+#include <crispy/text/Unicode.h>
 
 #include <string_view>
 
@@ -66,7 +65,7 @@ class GraphemeSegmenter {
     ///
     /// @retval true both codepoints to not belong to the same grapheme cluster
     /// @retval false both codepoints belong to the same grapheme cluster
-    static constexpr bool breakable(char32_t a, char32_t b)
+    static constexpr bool breakable(char32_t a, char32_t b) noexcept
     {
         constexpr char32_t CR = 0x000D;
         constexpr char32_t LF = 0x000A;
@@ -85,9 +84,22 @@ class GraphemeSegmenter {
             return false;
 
         // Do not break Hangul syllable sequences.
-        // GB6: TODO
-        // GB7: TODO
-        // GB8: TODO
+        // GB6:
+        if (grapheme_cluster_break::l(a) && (grapheme_cluster_break::l(b)
+                                            || grapheme_cluster_break::v(b)
+                                            || grapheme_cluster_break::lv(b)
+                                            || grapheme_cluster_break::lvt(b)))
+            return false;
+
+        // GB7:
+        if ((grapheme_cluster_break::lv(a) || grapheme_cluster_break::v(a))
+                && (grapheme_cluster_break::v(b) || grapheme_cluster_break::t(b)))
+            return false;
+
+        // GB8:
+        if ((grapheme_cluster_break::lv(a) || grapheme_cluster_break::t(a))
+                && grapheme_cluster_break::t(b))
+            return false;
 
         // GB9: Do not break before extending characters.
         if (extend(b) || b == ZWJ) // GB9
@@ -98,8 +110,7 @@ class GraphemeSegmenter {
             return false;
 
         // GB9b: or after Prepend characters.
-        // (NB: wrt "Prepend": Currently there are no characters with this value)
-        if (false/*contains(General_Category::Pepend, a)*/) // GB9b
+        if (prepend(a))
             return false;
 
         // GB11: Do not break within emoji modifier sequences or emoji zwj sequences.
@@ -109,14 +120,14 @@ class GraphemeSegmenter {
         // GB12/GB13: Do not break within emoji flag sequences.
         // That is, do not break between regional indicator (RI) symbols
         // if there is an odd number of RI characters before the break point.
-        if (isRegionalIndicator(a) && isRegionalIndicator(b)) // GB8a
+        if (grapheme_cluster_break::regional_indicator(a) || grapheme_cluster_break::regional_indicator(b))
             return false;
 
         // GB999: Otherwise, break everywhere.
         return true; // GB10
     }
 
-    static constexpr bool nonbreakable(char32_t a, char32_t b)
+    static constexpr bool nonbreakable(char32_t a, char32_t b) noexcept
     {
         return !breakable(a, b);
     }
@@ -129,7 +140,7 @@ class GraphemeSegmenter {
             || (emoji_modifier(_codepoint) && _codepoint != 0x200D);
     }
 
-    static bool control(char32_t ch)
+    static bool control(char32_t ch) noexcept
     {
         return contains(General_Category::Line_Separator, ch)
             || contains(General_Category::Paragraph_Separator, ch)
@@ -144,14 +155,17 @@ class GraphemeSegmenter {
                     && ch != 0x200D);
     }
 
-    static bool spacingMark(char32_t _codepoint)
+    static bool spacingMark(char32_t _codepoint) noexcept
     {
-        if (auto const p = grapheme_cluster_break(_codepoint);
-                (!p.has_value() || *p != Grapheme_Cluster_Break::Extend)
-                && (contains(General_Category::Spacing_Mark, _codepoint)
-                    || _codepoint == 0x0E33
-                    || _codepoint == 0x0EB3))
-            return true;
+        return general_category::spacing_mark(_codepoint)
+            || _codepoint == 0x0E33
+            || _codepoint == 0x0EB3;
+    }
+
+    static constexpr bool prepend([[maybe_unused]] char32_t _codepoint) noexcept
+    {
+        // (NB: wrt "Prepend": Currently there are no characters with this value)
+        //return contains(General_Category::Pepend, _codepoint)
         return false;
     }
 

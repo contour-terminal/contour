@@ -17354,8 +17354,85 @@ auto constexpr Grapheme_Cluster_Break = std::array{ // {{{
 }; // }}}
 } // end namespace tables
 
-std::optional<Grapheme_Cluster_Break> grapheme_cluster_break(char32_t _codepoint) noexcept {
-    return search(tables::Grapheme_Cluster_Break, _codepoint);
+namespace grapheme_cluster_break {
+    bool cr(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::CR;
+        return false;
+    }
+
+    bool control(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::Control;
+        return false;
+    }
+
+    bool extend(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::Extend;
+        return false;
+    }
+
+    bool l(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::L;
+        return false;
+    }
+
+    bool lf(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::LF;
+        return false;
+    }
+
+    bool lv(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::LV;
+        return false;
+    }
+
+    bool lvt(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::LVT;
+        return false;
+    }
+
+    bool prepend(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::Prepend;
+        return false;
+    }
+
+    bool regional_indicator(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::Regional_Indicator;
+        return false;
+    }
+
+    bool spacingmark(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::SpacingMark;
+        return false;
+    }
+
+    bool t(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::T;
+        return false;
+    }
+
+    bool v(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::V;
+        return false;
+    }
+
+    bool zwj(char32_t _codepoint) noexcept {
+        if (auto p = search(tables::Grapheme_Cluster_Break, _codepoint); p.has_value())
+            return p.value() == Grapheme_Cluster_Break::ZWJ;
+        return false;
+    }
+
 }
 
 namespace tables {

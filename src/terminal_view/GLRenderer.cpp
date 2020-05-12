@@ -185,6 +185,7 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
     pendingDraw_.extend(_cell);
     renderTextGroup(_screenSize);
     pendingDraw_.reset(_row, _col, _cell.attributes());
+    // TODO: use better text segmentation than above AND below code snippets
 #else
     constexpr uint8_t SP = 0x20;
 

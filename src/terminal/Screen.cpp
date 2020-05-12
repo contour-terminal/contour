@@ -298,7 +298,6 @@ void ScreenBuffer::appendChar(char32_t ch)
         linefeed(margin_.horizontal.from);
     }
 
-#if 1
     if (!lastColumn->empty()
         && text::GraphemeSegmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1),
                                                  ch))
@@ -314,38 +313,11 @@ void ScreenBuffer::appendChar(char32_t ch)
         lastColumn = currentColumn;
         lastCursor = cursor;
 
-        for (size_t i = 0; i < currentColumn->width(); ++i)
+        auto const width = cell.width();
+        for (size_t i = 0; i < width; ++i)
             if (!advanceCursor())
                 break;
     }
-#else
-    constexpr char32_t ZeroWidthJoiner = 0x200d;
-
-    if (ch == ZeroWidthJoiner)
-    {
-        cursor = lastCursor;
-        currentColumn = lastColumn;
-        currentColumn->appendCharacter(ch);
-    }
-    else
-    {
-        Cell& cell = utf8::wcwidth(ch) != 0
-            ?  *currentColumn
-            : currentColumn != begin(*currentLine)
-                ? *std::prev(currentColumn)
-                : *currentColumn;
-
-        cell.appendCharacter(ch);
-        cell.attributes() = graphicsRendition;
-
-        lastColumn = currentColumn;
-        lastCursor = cursor;
-
-        for (size_t i = 0; i < cell.width(); ++i)
-            if (!advanceCursor())
-                break;
-    }
-#endif
 }
 
 bool ScreenBuffer::advanceCursor()

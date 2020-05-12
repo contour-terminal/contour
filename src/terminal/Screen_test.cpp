@@ -139,7 +139,7 @@ TEST_CASE("AppendChar", "[screen]")
     REQUIRE("F  " == screen.renderTextLine(1));
 }
 
-TEST_CASE("AppendChar.emoji_zwj5", "[screen]")
+TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
 {
     auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
 
@@ -166,6 +166,35 @@ TEST_CASE("AppendChar.emoji_zwj5", "[screen]")
     CHECK(screen(1, 5).codepointCount() == 0);
 
     CHECK("\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == screen.renderTextLine(1));
+}
+
+TEST_CASE("AppendChar.emoji_1", "[screen]")
+{
+    auto screen = Screen{{3, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    screen.write(U"\U0001F600");
+
+    auto const& c1 = screen(1, 1);
+    CHECK(c1.codepointCount() == 1);
+    CHECK(c1.codepoint(0) == 0x1F600);
+    CHECK(c1.codepoint(1) == 0);
+    CHECK(c1.width() == 2);
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+
+    CHECK(screen(1, 2).codepointCount() == 0);
+    CHECK(screen(1, 3).codepointCount() == 0);
+
+    screen.write("B");
+    auto const& c2 = screen(1, 2);
+    CHECK(c2.codepointCount() == 0);
+    CHECK(c2.codepoint(0) == 0);
+    CHECK(c2.width() == 1);
+
+    auto const& c3 = screen(1, 3);
+    CHECK(c3.codepointCount() == 1);
+    CHECK(c3.codepoint(0) == 'B');
+    CHECK(c3.codepoint(1) == 0);
+    CHECK(c3.width() == 1);
 }
 
 TEST_CASE("AppendChar_AutoWrap", "[screen]")

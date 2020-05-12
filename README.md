@@ -23,22 +23,22 @@
 
 The following is an incomplete list of features that contour does or will support.
 
-* [x] Available on all three major platforms (Linux, OS/X, Windows 10)
-* [x] Runtime configuration reload
-* [x] Font Ligatures Support (such as in Fira Code)
-* [x] GPU-accelerated rendering
-* [x] 256-color and Truecolor support
-* [x] Key binding customization
-* [x] Color Schemes
-* [x] Profiles (grouped customization of: color scheme, login shell, and related behaviours)
-* [x] Vertical Line Markers (quickly jump to markers in your history!)
-* [ ] Emoji support (-: 🌈 💝 😛 👪 :-)
-* [ ] Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
-* [ ] History Search
-* [ ] Activity/Inactivity/Bell System Notification
-* [ ] Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
-* [ ] Shell Integration (inspired by iTerm2)
-* [ ] Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
+* ✅ Available on all three major platforms (Linux, OS/X, Windows 10)
+* ✅ Runtime configuration reload
+* ✅ Font Ligatures Support (such as in Fira Code)
+* ✅ GPU-accelerated rendering
+* ✅ 256-color and Truecolor support
+* ✅ Key binding customization
+* ✅ Color Schemes
+* ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+* ✅ Vertical Line Markers (quickly jump to markers in your history!)
+* 🚧 Emoji support (-: 🌈 💝 😛 👪 :-)
+* ⏳ Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
+* ⏳ History Search
+* ⏳ Activity/Inactivity/Bell System Notification
+* ⏳ Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
+* ⏳ Shell Integration (inspired by iTerm2)
+* ⏳ Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
 
 ## A word on vertical line markers
 
