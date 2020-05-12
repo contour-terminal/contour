@@ -248,11 +248,11 @@ void Parser::handleViaSwitch()
             else if (includes(Range{0x20, 0x2F}, currentChar()))
                 transitionTo(State::CSI_Intermediate, Action::Collect);
             else if (currentChar() == 0x3A)
-                invokeAction(ActionClass::Event, Action::Ignore);
-            else if (isParamChar(currentChar()))
-                invokeAction(ActionClass::Event, Action::Param);
-            else if (includes(Range{0x3C, 0x3F}, currentChar()))
-                invokeAction(ActionClass::Event, Action::Collect);
+                transitionTo(State::CSI_Ignore);
+            else if (includes(Range{0x30, 0x39}, currentChar()) || currentChar() == 0x3B)
+                transitionTo(State::CSI_Param, Action::Param);
+            else if (includes(Range{0x3C, 0x3F},currentChar()))
+                transitionTo(State::CSI_Param, Action::CollectLeader);
             else
                 logInvalidInput();
             break;
@@ -264,12 +264,12 @@ void Parser::handleViaSwitch()
                 invokeAction(ActionClass::Event, Action::Param);
             else if (currentChar() == 0x7F)
                 invokeAction(ActionClass::Event, Action::Ignore);
-            else if (currentChar() == 0x3A || includes(Range{0x3C, 0x3F}, currentChar()))
-                transitionTo(State::DCS_Ignore);
+            else if (includes(Range{0x3C, 0x3F}, currentChar()) || currentChar() == 0x3A)
+                transitionTo(State::CSI_Ignore);
             else if (includes(Range{0x20, 0x2F}, currentChar()))
-                transitionTo(State::DCS_Intermediate);
+                transitionTo(State::CSI_Intermediate, Action::Collect);
             else if (includes(Range{0x40, 0x7E}, currentChar()))
-                transitionTo(State::DCS_PassThrough);
+                transitionTo(State::Ground, Action::CSI_Dispatch);
             else
                 logInvalidInput();
             break;
@@ -376,13 +376,15 @@ void Parser::handleViaSwitch()
 			// (xterm extension to also allow BEL (0x07) as OSC terminator)
 			if (currentChar() == 0x07 || currentChar() == 0x9C)
 			{
-                invokeAction(ActionClass::Event, Action::Unhook);
+                invokeAction(ActionClass::Event, Action::OSC_End);
                 transitionTo(State::Ground);
 			}
 			// NB: isExecuteChar() also tests for 0x07 (range-check)
-            if (isExecuteChar(currentChar()))
+            else if (isExecuteChar(currentChar()))
                 invokeAction(ActionClass::Event, Action::Ignore);
             else if (includes(Range{0x20, 0x7F}, currentChar()))
+                invokeAction(ActionClass::Event, Action::OSC_Put);
+            else if (currentChar() > 0x7F && !isC1(currentChar()))
                 invokeAction(ActionClass::Event, Action::OSC_Put);
             else
                 logInvalidInput();
