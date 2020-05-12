@@ -1083,7 +1083,7 @@ bool TerminalWindow::enableBackgroundBlur([[maybe_unused]] bool _enable)
 {
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     KWindowEffects::enableBlurBehind(winId(), _enable);
-    KWindowEffects::enableBackgroundContrast(winId(), !_enable);
+    KWindowEffects::enableBackgroundContrast(winId(), _enable);
     return true;
 #elif defined(_WIN32)
     // Awesome hack with the noteworty links:
