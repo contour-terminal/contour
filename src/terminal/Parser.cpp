@@ -15,7 +15,7 @@
 #include <terminal/Parser.h>
 #include <terminal/ParserTables.h>
 #include <crispy/UTF8.h>
-#include <crispy/text.h>
+#include <crispy/escape.h>
 
 #include <array>
 #include <cctype>

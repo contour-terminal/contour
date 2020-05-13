@@ -15,7 +15,7 @@
 #include <terminal/FunctionDef.h>
 
 #include <terminal/Commands.h>
-#include <crispy/text.h>
+#include <crispy/escape.h>
 
 #include <fmt/format.h>
 

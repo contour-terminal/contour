@@ -18,7 +18,7 @@ add_library(crispy-core STATIC
     overloaded.h
     reference.h
     stdfs.h
-    text.h
+    escape.h
     times.h
     UTF8.h
     text/EmojiSegmenter.h

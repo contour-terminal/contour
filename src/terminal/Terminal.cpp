@@ -17,7 +17,7 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
 
-#include <crispy/text.h>
+#include <crispy/escape.h>
 
 #include <chrono>
 

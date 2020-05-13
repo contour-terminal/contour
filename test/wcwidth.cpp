@@ -14,7 +14,7 @@
 #include <crispy/text/wcwidth.h>
 #include <crispy/text/Unicode.h>
 #include <crispy/UTF8.h>
-#include <crispy/text.h>
+#include <crispy/escape.h>
 #include <crispy/overloaded.h>
 #include <iomanip>
 #include <fstream>

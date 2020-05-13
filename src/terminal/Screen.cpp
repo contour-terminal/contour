@@ -21,7 +21,7 @@
 #include <crispy/text/GraphemeSegmenter.h>
 #include <crispy/algorithm.h>
 #include <crispy/UTF8.h>
-#include <crispy/text.h>
+#include <crispy/escape.h>
 #include <crispy/times.h>
 
 #include <algorithm>
