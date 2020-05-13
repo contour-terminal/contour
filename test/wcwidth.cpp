@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <crispy/text/wcwidth.h>
+#include <crispy/text/Unicode.h>
 #include <crispy/UTF8.h>
 #include <crispy/text.h>
 #include <crispy/overloaded.h>
@@ -19,6 +20,12 @@
 #include <fstream>
 
 using namespace std;
+using namespace crispy;
+
+bool isEmoji(char32_t ch)
+{
+    return text::emoji(ch) && !text::emoji_component(ch);
+}
 
 int main([[maybe_unused]] int argc, char const* argv[])
 {
@@ -37,7 +44,6 @@ int main([[maybe_unused]] int argc, char const* argv[])
         if (mblen < mbmax)
         {
             mb[mblen++] = ch;
-            //printf("%lu: %lu ch: 0x%02x\n", totalOffset, mblen, ch & 0xFF);
             char32_t wc = 0;
             if (crispy::text::mbtowc(&wc, mb, mblen) != -1)
             {
@@ -45,8 +51,9 @@ int main([[maybe_unused]] int argc, char const* argv[])
                 if (width >= 0)
                 {
                     auto u8 = crispy::utf8::encode(wc);
-                    printf("%3lu: mblen:%lu, UTF32:0x%08x, wcwidth:%d UTF8:%s\n",
+                    printf("%3lu: [%s] mblen:%lu, UTF32:0x%08x, wcwidth:%d UTF8:%s\n",
                             totalOffset,
+                            isEmoji(wc) ? "EMOJI" : " TEXT",
                             mblen,
                             wc,
                             width,

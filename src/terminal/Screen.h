@@ -312,7 +312,7 @@ struct ScreenBuffer {
     Line::iterator lastColumn{currentColumn};
     Cursor lastCursor{};
 
-	void appendChar(char32_t ch);
+	void appendChar(char32_t _codepoint, bool _consecutive);
 
 	// Applies LF but also moves cursor to given column @p _column.
 	void linefeed(cursor_pos_t _column);
@@ -756,6 +756,7 @@ class Screen {
 
     OutputHandler handler_;
     Parser parser_;
+    unsigned long instructionCounter_ = 0;
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;

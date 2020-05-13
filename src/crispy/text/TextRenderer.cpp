@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <crispy/TextRenderer.h>
+#include <crispy/text/TextRenderer.h>
 #include <crispy/reference.h>
 #include <iostream>
 

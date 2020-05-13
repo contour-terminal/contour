@@ -141,6 +141,12 @@ constexpr FontStyle& operator|=(FontStyle& lhs, FontStyle rhs)
     return lhs;
 }
 
+struct GlyphBitmap {
+    unsigned int width;
+    unsigned int height;
+    std::vector<uint8_t> buffer;
+};
+
 class Font;
 
 struct GlyphPosition {
@@ -155,12 +161,6 @@ struct GlyphPosition {
 };
 
 using GlyphPositionList = std::vector<GlyphPosition>;
-
-struct GlyphBitmap {
-    unsigned int width;
-    unsigned int height;
-    std::vector<uint8_t> buffer;
-};
 
 /**
  * Represents one Font face along with support for its fallback fonts.
@@ -212,9 +212,9 @@ class Font {
     std::size_t hashCode_;
 };
 
-using FontFallbackList = std::vector<std::reference_wrapper<Font>>;
-
-using FontList = std::pair<std::reference_wrapper<Font>, FontFallbackList>;
+using FontRef = std::reference_wrapper<Font>;
+using FontFallbackList = std::vector<FontRef>;
+using FontList = std::pair<FontRef, FontFallbackList>;
 
 /// API for managing multiple fonts.
 class FontManager {
@@ -233,40 +233,6 @@ class FontManager {
   private:
     FT_Library ft_;
     std::unordered_map<std::string, Font> fonts_;
-};
-
-class TextShaper {
-  public:
-    TextShaper(Font& _font, FontFallbackList const& _fallback);
-    ~TextShaper();
-
-    explicit TextShaper(std::tuple<Font&, FontFallbackList const&> _fonts) :
-        TextShaper{std::get<0>(_fonts), std::get<1>(_fonts)} {}
-
-    unsigned fontSize() const noexcept { return font_.get().fontSize(); }
-
-    void setFont(Font& _font, FontFallbackList const& _fallback = {});
-    void setFontSize(unsigned _fontSize);
-
-    /// Renders text into glyph positions of this font.
-    GlyphPositionList const* shape(CodepointSequence const& _codes);
-
-    void clearCache();
-
-    void replaceMissingGlyphs(GlyphPositionList& _result);
-
-  private:
-    bool shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> result);
-
-  private:
-    hb_buffer_t* hb_buf_;
-
-    std::reference_wrapper<Font> font_;
-    FontFallbackList fallbackList_;
-
-    std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
-    std::unordered_map<CodepointSequence, GlyphPositionList> cache_ = {};
-    std::unordered_map<CharSequence, GlyphPositionList> cache2_ = {};
 };
 
 } // end namespace

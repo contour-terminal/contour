@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/GLRenderer.h>
+#include <crispy/text/Unicode.h>
 #include <crispy/times.h>
 
 using namespace std;
@@ -24,6 +25,7 @@ using namespace terminal::view;
 
 GLRenderer::GLRenderer(Logger _logger,
                        text::FontList const& _regularFont,
+                       text::FontList const& _emojiFont,
                        terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
@@ -36,8 +38,9 @@ GLRenderer::GLRenderer(Logger _logger,
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
+    emojiFont_{ _emojiFont },
     projectionMatrix_{ _projectionMatrix },
-    textShaper_{ _regularFont.first, _regularFont.second },
+    textShaper_{},
     textShader_{ createShader(_textShaderConfig) },
     textRenderer_{},
     cellBackground_{
@@ -78,7 +81,8 @@ void GLRenderer::clearCache()
 
 void GLRenderer::setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback)
 {
-    textShaper_.setFont(_font, _fallback);
+    regularFont_.first = _font;
+    regularFont_.second = _fallback;
     clearCache();
 }
 
@@ -87,9 +91,12 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     if (_fontSize == regularFont_.first.get().fontSize())
         return false;
 
-    regularFont_.first.get().setFontSize(_fontSize);
-    for (auto& fallback : regularFont_.second)
-        fallback.get().setFontSize(_fontSize);
+    for (auto& font: {regularFont_, emojiFont_})
+    {
+        font.first.get().setFontSize(_fontSize);
+        for (auto& fallback : font.second)
+            fallback.get().setFontSize(_fontSize);
+    }
 
     // TODO: other font styles
 
@@ -306,10 +313,13 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
 
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
-        (void) textStyle;
-        text::TextShaper& textShaper = textShaper_; // TODO: selection by textStyle
+        (void) textStyle;// TODO: selection by textStyle
+        bool const isEmojiPresentation = text::emoji(pendingDraw_.codepoints.front().value)
+                                         && not text::emoji_component(pendingDraw_.codepoints.front().value);
+        text::FontList& font = isEmojiPresentation ? emojiFont_
+                                                   : regularFont_;
 
-        if (text::GlyphPositionList const* glyphPositions = textShaper.shape(pendingDraw_.codepoints); glyphPositions)
+        if (text::GlyphPositionList const* glyphPositions = textShaper_.shape(font, pendingDraw_.codepoints); glyphPositions)
         {
             textRenderer_.render(
                 makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),

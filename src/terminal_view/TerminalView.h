@@ -21,7 +21,7 @@
 #include <terminal/Logger.h>
 #include <terminal/WindowSize.h>
 
-#include <crispy/FontManager.h>
+#include <crispy/text/FontManager.h>
 
 #include <atomic>
 #include <chrono>
@@ -46,6 +46,7 @@ class TerminalView {
                  Screen::OnBufferChanged _onScreenBufferChanged,
                  std::function<void()> _bell,
                  crispy::text::FontList const& _regularFont,
+                 crispy::text::FontList const& _emojiFont,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -124,6 +125,7 @@ class TerminalView {
     QSize size_;
     WindowMargin windowMargin_;
     crispy::text::FontList regularFont_;
+    crispy::text::FontList emojiFont_;
     GLRenderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;

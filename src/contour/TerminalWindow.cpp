@@ -260,6 +260,12 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             static_cast<unsigned>(profile().fontSize * contentScale())
         )
     },
+    emojiFont_{
+        fontManager_.load(
+            "emoji",
+            static_cast<unsigned>(profile().fontSize * contentScale())
+        )
+    },
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
@@ -437,6 +443,7 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onScreenBufferChanged, this, _1),
         bind(&TerminalWindow::onBell, this),
         regularFont_,
+        emojiFont_,
         profile().cursorShape,
         profile().cursorDisplay,
         profile().cursorBlinkInterval,

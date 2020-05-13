@@ -150,6 +150,7 @@ class TerminalWindow :
     LoggingSink logger_;
     crispy::text::FontManager fontManager_;
     crispy::text::FontList regularFont_;
+    crispy::text::FontList emojiFont_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     FileChangeWatcher configFileChangeWatcher_;
     std::mutex queuedCallsLock_;

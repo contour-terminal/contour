@@ -288,7 +288,7 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
     verifyState();
 }
 
-void ScreenBuffer::appendChar(char32_t ch)
+void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
 {
     verifyState();
 
@@ -298,7 +298,8 @@ void ScreenBuffer::appendChar(char32_t ch)
         linefeed(margin_.horizontal.from);
     }
 
-    if (!lastColumn->empty()
+    if (_consecutive
+        && !lastColumn->empty()
         && text::GraphemeSegmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1),
                                                  ch))
     {
@@ -734,6 +735,7 @@ void Screen::write(Command const& _command)
     buffer_->verifyState();
     visit(*this, _command);
     buffer_->verifyState();
+    instructionCounter_++;
 
     if (onCommands_)
         onCommands_({_command});
@@ -1703,7 +1705,8 @@ void Screen::operator()(ResizeWindow const& v)
 
 void Screen::operator()(AppendChar const& v)
 {
-    buffer_->appendChar(v.ch);
+    buffer_->appendChar(v.ch, instructionCounter_ < 2);
+    instructionCounter_ = 0;
 }
 
 void Screen::operator()(RequestDynamicColor const& v)

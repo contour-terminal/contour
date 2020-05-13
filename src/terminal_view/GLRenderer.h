@@ -20,9 +20,10 @@
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
+#include <crispy/text/FontManager.h>
+#include <crispy/text/TextRenderer.h>
+#include <crispy/text/TextShaper.h>
 #include <crispy/text/WordSegmenter.h>
-#include <crispy/FontManager.h>
-#include <crispy/TextRenderer.h>
 #include <crispy/times.h>
 
 #include <QPoint>
@@ -55,6 +56,7 @@ class GLRenderer : public QOpenGLFunctions {
      */
     GLRenderer(Logger _logger,
                crispy::text::FontList const& _regularFont,
+               crispy::text::FontList const& _emojiFont,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
@@ -195,6 +197,7 @@ class GLRenderer : public QOpenGLFunctions {
     Opacity backgroundOpacity_;
 
     crispy::text::FontList regularFont_;
+    crispy::text::FontList emojiFont_;
     QMatrix4x4 projectionMatrix_;
     crispy::text::WordSegmenter wordSegmenter_;
     crispy::text::TextShaper textShaper_;

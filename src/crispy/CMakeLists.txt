@@ -55,10 +55,11 @@ elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
 endif()
 
 add_library(crispy-gui STATIC
-    FontManager.h FontManager.cpp
     Atlas.h
     AtlasRenderer.h AtlasRenderer.cpp
-    TextRenderer.h TextRenderer.cpp
+    text/FontManager.h text/FontManager.cpp
+    text/TextRenderer.h text/TextRenderer.cpp
+    text/TextShaper.h text/TextShaper.cpp
 )
 add_library(crispy::gui ALIAS crispy-gui)
 

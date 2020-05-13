@@ -205,7 +205,6 @@ void OutputHandler::dispatchOSC()
     {
         case 0: // set window title and icon name
         case 2: // set window title
-            printf("OutputHandler.ChangeWindowTitle: '%s'\n", value.c_str());
             emitCommand<ChangeWindowTitle>(value);
             [[fallthrough]];
         case 1: // set icon name

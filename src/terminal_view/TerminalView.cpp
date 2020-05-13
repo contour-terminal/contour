@@ -13,7 +13,7 @@
  */
 #include <terminal_view/TerminalView.h>
 
-#include <crispy/FontManager.h>
+#include <crispy/text/FontManager.h>
 
 #include <terminal/Logger.h>
 
@@ -46,6 +46,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            Screen::OnBufferChanged _onScreenBufferChanged,
                            function<void()> _bell,
                            text::FontList const& _regularFont,
+                           text::FontList const& _emojiFont,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
@@ -68,9 +69,11 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         static_cast<int>(_winSize.rows * _regularFont.first.get().lineHeight())
     },
     regularFont_{ _regularFont },
+    emojiFont_{ _emojiFont },
     renderer_{
         logger_,
         _regularFont,
+        _emojiFont,
         _colorProfile,
         _backgroundOpacity,
         _backgroundShaderConfig,

@@ -14,11 +14,12 @@
 #pragma once
 
 #include <crispy/Atlas.h>
-#include <crispy/FontManager.h>
 #include <crispy/AtlasRenderer.h>
+#include <crispy/text/FontManager.h>
 
 #include <QtCore/QPoint>
 
+#include <functional>
 #include <unordered_map>
 
 namespace crispy::text {
