@@ -15,6 +15,9 @@
 
 #include <crispy/text/Font.h>
 
+#include <harfbuzz/hb.h>
+#include <harfbuzz/hb-ft.h>
+
 namespace crispy::text {
 
 class TextShaper {

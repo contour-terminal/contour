@@ -25,17 +25,9 @@
 #include <freetype/freetype.h>
 #endif
 
-#include <harfbuzz/hb.h>
-#include <harfbuzz/hb-ft.h>
-
-#include <array>
 #include <functional>
 #include <string>
 #include <unordered_map>
-#include <vector>
-#include <ostream>
-
-// TODO: move all font stuff into crispy::text namespace
 
 namespace crispy::text {
 

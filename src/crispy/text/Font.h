@@ -24,9 +24,6 @@
 #include <freetype/freetype.h>
 #endif
 
-#include <harfbuzz/hb.h>
-#include <harfbuzz/hb-ft.h>
-
 #include <array>
 #include <functional>
 #include <string>

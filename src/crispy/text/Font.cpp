@@ -17,14 +17,10 @@
 
 #include <fmt/format.h>
 
-#include <harfbuzz/hb.h>
-#include <harfbuzz/hb-ft.h>
-
-#include <stdexcept>
-#include <map>
-#include <iostream>
-
 #include <cctype>
+#include <iostream>
+#include <map>
+#include <stdexcept>
 
 #if defined(__linux__) || defined(__APPLE__)
 #define HAVE_FONTCONFIG

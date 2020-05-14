@@ -88,8 +88,6 @@ namespace {
     }
 }
 
-using namespace std;
-
 FontLoader::FontLoader() :
     ft_{},
     fonts_{}

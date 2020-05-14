@@ -15,6 +15,9 @@
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
 
+#include <harfbuzz/hb.h>
+#include <harfbuzz/hb-ft.h>
+
 #include <fmt/format.h>
 
 #include <iostream>
