@@ -33,7 +33,7 @@ namespace {
         int b = _ranges.size() - 1;
         while (a < b)
         {
-            int i = (b + a) / 2;
+            auto const i = (b + a) / 2;
             auto const& I = _ranges[i];
             if (I.to < _codepoint)
                 a = i + 1;
@@ -54,11 +54,11 @@ namespace {
     template <typename T, size_t N>
     constexpr std::optional<T> search(std::array<Prop<T>, N> const& _ranges, char32_t _codepoint)
     {
-        int a = 0;
-        int b = _ranges.size() - 1;
+        size_t a = 0;
+        size_t b = _ranges.size() - 1;
         while (a < b)
         {
-            int i = (b + a) / 2;
+            auto const i = (b + a) / 2;
             auto const& I = _ranges[i];
             if (I.interval.to < _codepoint)
                 a = i + 1;
