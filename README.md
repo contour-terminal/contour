@@ -198,13 +198,13 @@ For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Stu
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```psh
-vcpkg install freetype fontconfig glew glfw3 glm harfbuzz qt5-base
+vcpkg install freetype fontconfig glew glfw3 glm harfbuzz qt5-base utf8proc
 ```
 
 ### Prerequisites Mac OS/X
 
 ```psh
-brew install freetype fontconfig glew glfw3 glm harfbuzz boost qt5
+brew install freetype fontconfig glew glfw3 glm harfbuzz boost qt5 utf8proc
 ```
 
 
