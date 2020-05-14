@@ -21,7 +21,7 @@
 #include <terminal/Logger.h>
 #include <terminal/WindowSize.h>
 
-#include <crispy/text/FontManager.h>
+#include <crispy/text/Font.h>
 
 #include <atomic>
 #include <chrono>

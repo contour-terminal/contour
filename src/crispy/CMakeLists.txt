@@ -21,7 +21,7 @@ add_library(crispy-core STATIC
     escape.h
     times.h
     UTF8.h
-    text/EmojiSegmenter.h
+    text/EmojiSegmenter.h text/EmojiSegmenter.cpp
     text/Unicode.h text/Unicode.cpp
     text/wcwidth.h text/wcwidth.cpp
     text/WordSegmenter.h
@@ -57,7 +57,8 @@ endif()
 add_library(crispy-gui STATIC
     Atlas.h
     AtlasRenderer.h AtlasRenderer.cpp
-    text/FontManager.h text/FontManager.cpp
+    text/Font.h text/Font.cpp
+    text/FontLoader.h text/FontLoader.cpp
     text/TextRenderer.h text/TextRenderer.cpp
     text/TextShaper.h text/TextShaper.cpp
 )

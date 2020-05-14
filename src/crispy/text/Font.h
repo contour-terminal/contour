@@ -123,6 +123,7 @@ namespace std {
 
 namespace crispy::text {
 
+// TODO: remove FontStyle?
 enum class FontStyle {
     Regular = 0,
     Bold = 1,
@@ -194,10 +195,8 @@ class Font {
 
     GlyphBitmap loadGlyphByIndex(unsigned int _glyphIndex);
 
-    // well yeah, if it's only bitmap we still need, we can expose it and then [[deprecated]] this.
-    /*[[deprecated]]*/ /* TODO: remove me */ FT_Face operator->() noexcept { return face_; }
-
     operator FT_Face () noexcept { return face_; }
+    FT_Face operator->() noexcept { return face_; }
 
   private:
     FT_Library ft_;
@@ -215,25 +214,6 @@ class Font {
 using FontRef = std::reference_wrapper<Font>;
 using FontFallbackList = std::vector<FontRef>;
 using FontList = std::pair<FontRef, FontFallbackList>;
-
-/// API for managing multiple fonts.
-class FontManager {
-  public:
-    FontManager();
-    FontManager(FontManager&&) = delete;
-    FontManager(FontManager const&) = delete;
-    FontManager& operator=(FontManager&&) = delete;
-    FontManager& operator=(FontManager const&) = delete;
-    ~FontManager();
-
-    Font& loadFromFilePath(std::string const& _filePath, unsigned _fontSize);
-
-    FontList load(std::string const& _fontPattern, unsigned _fontSize);
-
-  private:
-    FT_Library ft_;
-    std::unordered_map<std::string, Font> fonts_;
-};
 
 } // end namespace
 

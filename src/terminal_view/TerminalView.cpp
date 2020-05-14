@@ -13,7 +13,7 @@
  */
 #include <terminal_view/TerminalView.h>
 
-#include <crispy/text/FontManager.h>
+#include <crispy/text/Font.h>
 
 #include <terminal/Logger.h>
 

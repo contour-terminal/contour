@@ -87,6 +87,9 @@ class EmojiSegmenter {
   private:
     char32_t const* begin_;
     char32_t const* end_;
+    size_t size_;
+    size_t cursor_;
+
     bool isEmoji_ = false;
     EmojiSegmentationCategory category_;
 
@@ -94,6 +97,8 @@ class EmojiSegmenter {
     constexpr EmojiSegmenter(char32_t const* _begin, char32_t const* _end) noexcept
       : begin_{ _begin },
         end_{ _end },
+        size_{ static_cast<size_t>(end_ - begin_) },
+        cursor_{ 0 },
         isEmoji_{false},
         category_{ EmojiSegmentationCategory::Invalid }
     {}
@@ -102,9 +107,16 @@ class EmojiSegmenter {
       : EmojiSegmenter(_sv.begin(), _sv.end())
     {}
 
+    constexpr EmojiSegmentationCategory category() const noexcept { return category_; }
+
     constexpr bool isText() const noexcept
     {
         return category_ == EmojiSegmentationCategory::EmojiTextPresentation;
+    }
+
+    constexpr bool isEmoji() const noexcept
+    {
+        return category_ == EmojiSegmentationCategory::EmojiEmojiPresentation;
     }
 
     constexpr std::u32string_view operator*() const noexcept
@@ -112,18 +124,11 @@ class EmojiSegmenter {
         return std::u32string_view(begin_, end_ - begin_);
     }
 
-    constexpr EmojiSegmenter& operator++()
-    {
-        begin_ = end_;
-        isEmoji_ = false;
-        // ...
+    void scan() noexcept;
 
-        // TODO: after increment, [begin, end] point to the next emoji - ?? or [end, end] if none found ??
-        // use (ragel) FSM here?
-        return *this;
-    }
+    EmojiSegmenter& operator++() noexcept { scan(); return *this; }
 
-    constexpr EmojiSegmenter& operator++(int) { return ++*this; }
+    EmojiSegmenter& operator++(int) noexcept { return ++*this; }
 
     constexpr bool operator==(EmojiSegmenter const& _rhs) const noexcept
     {
@@ -132,16 +137,5 @@ class EmojiSegmenter {
 
     constexpr bool operator!=(EmojiSegmenter const& _rhs) const noexcept { return !(*this == _rhs); }
 };
-
-/// Tests whether given codepoint range is one single emoji grapheme cluster.
-// bool isSingleEmojiSegment(char32_t const* _begin, char32_t const* _end)
-// {
-//     EmojiSegmenter segmenter(_begin, _end);
-//     auto i = segmenter.begin();
-//     while (i != segmenter.end())
-//         ++i;
-//     return false; // TODO
-// }
-//
 
 } // end namespace

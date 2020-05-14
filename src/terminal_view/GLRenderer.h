@@ -20,7 +20,7 @@
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
-#include <crispy/text/FontManager.h>
+#include <crispy/text/Font.h>
 #include <crispy/text/TextRenderer.h>
 #include <crispy/text/TextShaper.h>
 #include <crispy/text/WordSegmenter.h>

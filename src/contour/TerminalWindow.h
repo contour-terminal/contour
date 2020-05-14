@@ -5,6 +5,8 @@
 #include <contour/FileChangeWatcher.h>
 #include <terminal_view/TerminalView.h>
 
+#include <crispy/text/FontLoader.h>
+
 #include <QOpenGLWindow>
 #include <QOpenGLExtraFunctions>
 #include <QTimer>
@@ -148,7 +150,7 @@ class TerminalWindow :
     std::string programPath_;
     std::ofstream loggingSink_;
     LoggingSink logger_;
-    crispy::text::FontManager fontManager_;
+    crispy::text::FontLoader fontLoader_;
     crispy::text::FontList regularFont_;
     crispy::text::FontList emojiFont_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;

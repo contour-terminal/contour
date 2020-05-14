@@ -186,13 +186,14 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
 void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
 {
+    // TODO: TextSegmenter / ScriptSegmenter / EmojiSegmenter here?
+    // TODO: use better text segmentation than the below code snippets
 #if 1
     pendingDraw_.state = PendingDraw::State::Filling;
     pendingDraw_.reset(_row, _col, _cell.attributes());
     pendingDraw_.extend(_cell);
     renderTextGroup(_screenSize);
     pendingDraw_.reset(_row, _col, _cell.attributes());
-    // TODO: use better text segmentation than above AND below code snippets
 #else
     constexpr uint8_t SP = 0x20;
 

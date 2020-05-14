@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <crispy/text/FontManager.h>
+#include <crispy/text/Font.h>
 
 namespace crispy::text {
 

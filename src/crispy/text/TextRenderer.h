@@ -15,7 +15,7 @@
 
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
-#include <crispy/text/FontManager.h>
+#include <crispy/text/Font.h>
 
 #include <QtCore/QPoint>
 
