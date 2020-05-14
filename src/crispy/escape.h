@@ -50,7 +50,10 @@ inline std::string escape(char32_t ch)
                 auto const bytes = utf8::encode(ch);
                 auto res = std::string{};
                 for (auto const byte : bytes)
-                    res += byte; // fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
+                {
+                    res += fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
+                    //res += byte; // fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
+                }
                 return res;
             }
     }
