@@ -58,13 +58,13 @@ void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
     {
         char ch{};
         in.read(&ch, sizeof(ch));
-        if (!isprint(ch) || ch == '\'' || ch == '\\')
+        if (ch > 0 && ch < 255 && isprint(ch) && ch != '\'' && ch != '\\')
+            _out << '\'' << ch << '\'' << ',' << ' ';
+        else
             _out << "0x"
                  << std::hex << std::setw(2) << std::setfill('0')
                  << (static_cast<unsigned>(ch) & 0xFF)
                  << ',';
-        else
-            _out << '\'' << ch << '\'' << ',' << ' ';
         ++column;
         if (column % 16)
             _out << ' ';
