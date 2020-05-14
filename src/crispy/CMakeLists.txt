@@ -94,6 +94,7 @@ if(CRISPY_TESTING)
         test_main.cpp
         text/WordSegmenter_test.cpp
         text/GraphemeSegmenter_test.cpp
+        text/EmojiSegmenter_test.cpp
     )
     target_link_libraries(crispy_test fmt::fmt-header-only Catch2::Catch2 crispy::core)
     add_test(crispy_test ./crispy_test)
