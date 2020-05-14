@@ -40,8 +40,14 @@ class GraphemeSegmenter {
 
     constexpr GraphemeSegmenter& operator++()
     {
-        right_ = left_;
-        // TODO
+        left_ = right_;
+
+        while (right_ != end_ && nonbreakable(*right_, *(right_ + 1)))
+            ++right_;
+
+        if (right_ != end_)
+            ++right_; // points to the codepoint after the last nonbreakable codepoint.
+
         return *this;
     }
 
@@ -50,14 +56,19 @@ class GraphemeSegmenter {
         return std::u32string_view(left_, right_ - left_);
     }
 
-    constexpr bool empty() const noexcept
+    constexpr bool codepointsAvailable() const noexcept
     {
-        return right_ == end_;
+        return right_ != end_;
+    }
+
+    constexpr operator bool () const noexcept
+    {
+        return codepointsAvailable();
     }
 
     constexpr bool operator==(GraphemeSegmenter const& _rhs) const noexcept
     {
-        return (empty() && _rhs.empty())
+        return (!codepointsAvailable() && !_rhs.codepointsAvailable())
             || (left_ == _rhs.left_ && right_ == _rhs.right_);
     }
 

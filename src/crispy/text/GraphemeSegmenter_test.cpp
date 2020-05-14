@@ -80,3 +80,39 @@ TEST_CASE("emoji: Man Facepalming: Medium-Light Skin Tone", "[GraphemeSegmenter]
     CHECK(GraphemeSegmenter::nonbreakable(zwj[2], zwj[3]));
     CHECK(GraphemeSegmenter::nonbreakable(zwj[3], zwj[4]));
 }
+
+TEST_CASE("GraphemeSegmenter.iterator_1", "[GraphemeSegmenter]")
+{
+    auto const codepoints = u32string_view{U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F"};
+    auto gs = GraphemeSegmenter{ codepoints };
+
+    // initially first token already process
+    CHECK(*gs == codepoints);
+    CHECK_FALSE(gs.codepointsAvailable());
+}
+
+TEST_CASE("GraphemeSegmenter.iterator_2", "[GraphemeSegmenter]")
+{
+    auto const grapheme_cluster2 = u32string_view{U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F"};
+    auto const codepoints = u32string_view{U"X\U0001F926\U0001F3FC\u200D\u2642\uFE0F5"};
+    auto gs = GraphemeSegmenter{ codepoints };
+
+    // first grapheme cluster
+    CHECK(*gs == U"X");
+    CHECK(gs.codepointsAvailable());
+
+    // second grapheme cluster
+    ++gs;
+    CHECK(*gs == grapheme_cluster2);
+    CHECK(gs.codepointsAvailable());
+
+    // 3rd grapheme cluster
+    ++gs;
+    CHECK(*gs == U"5");
+    CHECK_FALSE(gs.codepointsAvailable());
+
+    // incrementing beyond end of stream
+    ++gs;
+    CHECK(*gs == U"");
+    CHECK_FALSE(gs.codepointsAvailable());
+}
