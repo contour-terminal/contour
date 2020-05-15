@@ -17436,6 +17436,2494 @@ namespace grapheme_cluster_break {
 }
 
 namespace tables {
+auto constexpr EastAsianWidth = std::array{ // {{{
+    Prop<crispy::text::EastAsianWidth>{ { 0x0000, 0x001F }, crispy::text::EastAsianWidth::Neutral }, // Cc    [32] <control-0000>..<control-001F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x0020, 0x0020 }, crispy::text::EastAsianWidth::Narrow }, // Zs         SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0021, 0x0023 }, crispy::text::EastAsianWidth::Narrow }, // Po     [3] EXCLAMATION MARK..NUMBER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0024, 0x0024 }, crispy::text::EastAsianWidth::Narrow }, // Sc         DOLLAR SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0025, 0x0027 }, crispy::text::EastAsianWidth::Narrow }, // Po     [3] PERCENT SIGN..APOSTROPHE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0028, 0x0028 }, crispy::text::EastAsianWidth::Narrow }, // Ps         LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0029, 0x0029 }, crispy::text::EastAsianWidth::Narrow }, // Pe         RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x002A, 0x002A }, crispy::text::EastAsianWidth::Narrow }, // Po         ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0x002B, 0x002B }, crispy::text::EastAsianWidth::Narrow }, // Sm         PLUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x002C, 0x002C }, crispy::text::EastAsianWidth::Narrow }, // Po         COMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x002D, 0x002D }, crispy::text::EastAsianWidth::Narrow }, // Pd         HYPHEN-MINUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x002E, 0x002F }, crispy::text::EastAsianWidth::Narrow }, // Po     [2] FULL STOP..SOLIDUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0030, 0x0039 }, crispy::text::EastAsianWidth::Narrow }, // Nd    [10] DIGIT ZERO..DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x003A, 0x003B }, crispy::text::EastAsianWidth::Narrow }, // Po     [2] COLON..SEMICOLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x003C, 0x003E }, crispy::text::EastAsianWidth::Narrow }, // Sm     [3] LESS-THAN SIGN..GREATER-THAN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x003F, 0x0040 }, crispy::text::EastAsianWidth::Narrow }, // Po     [2] QUESTION MARK..COMMERCIAL AT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0041, 0x005A }, crispy::text::EastAsianWidth::Narrow }, // Lu    [26] LATIN CAPITAL LETTER A..LATIN CAPITAL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x005B, 0x005B }, crispy::text::EastAsianWidth::Narrow }, // Ps         LEFT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x005C, 0x005C }, crispy::text::EastAsianWidth::Narrow }, // Po         REVERSE SOLIDUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x005D, 0x005D }, crispy::text::EastAsianWidth::Narrow }, // Pe         RIGHT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x005E, 0x005E }, crispy::text::EastAsianWidth::Narrow }, // Sk         CIRCUMFLEX ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x005F, 0x005F }, crispy::text::EastAsianWidth::Narrow }, // Pc         LOW LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0060, 0x0060 }, crispy::text::EastAsianWidth::Narrow }, // Sk         GRAVE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0061, 0x007A }, crispy::text::EastAsianWidth::Narrow }, // Ll    [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x007B, 0x007B }, crispy::text::EastAsianWidth::Narrow }, // Ps         LEFT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x007C, 0x007C }, crispy::text::EastAsianWidth::Narrow }, // Sm         VERTICAL LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x007D, 0x007D }, crispy::text::EastAsianWidth::Narrow }, // Pe         RIGHT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x007E, 0x007E }, crispy::text::EastAsianWidth::Narrow }, // Sm         TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x007F, 0x007F }, crispy::text::EastAsianWidth::Neutral }, // Cc         <control-007F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x0080, 0x009F }, crispy::text::EastAsianWidth::Neutral }, // Cc    [32] <control-0080>..<control-009F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A0, 0x00A0 }, crispy::text::EastAsianWidth::Neutral }, // Zs         NO-BREAK SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A1, 0x00A1 }, crispy::text::EastAsianWidth::Ambiguous }, // Po         INVERTED EXCLAMATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A2, 0x00A3 }, crispy::text::EastAsianWidth::Narrow }, // Sc     [2] CENT SIGN..POUND SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A4, 0x00A4 }, crispy::text::EastAsianWidth::Ambiguous }, // Sc         CURRENCY SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A5, 0x00A5 }, crispy::text::EastAsianWidth::Narrow }, // Sc         YEN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A6, 0x00A6 }, crispy::text::EastAsianWidth::Narrow }, // So         BROKEN BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A7, 0x00A7 }, crispy::text::EastAsianWidth::Ambiguous }, // Po         SECTION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A8, 0x00A8 }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00A9, 0x00A9 }, crispy::text::EastAsianWidth::Neutral }, // So         COPYRIGHT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AA, 0x00AA }, crispy::text::EastAsianWidth::Ambiguous }, // Lo         FEMININE ORDINAL INDICATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AB, 0x00AB }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AC, 0x00AC }, crispy::text::EastAsianWidth::Narrow }, // Sm         NOT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AD, 0x00AD }, crispy::text::EastAsianWidth::Ambiguous }, // Cf         SOFT HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AE, 0x00AE }, crispy::text::EastAsianWidth::Ambiguous }, // So         REGISTERED SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00AF, 0x00AF }, crispy::text::EastAsianWidth::Narrow }, // Sk         MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B0, 0x00B0 }, crispy::text::EastAsianWidth::Ambiguous }, // So         DEGREE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B1, 0x00B1 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         PLUS-MINUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B2, 0x00B3 }, crispy::text::EastAsianWidth::Ambiguous }, // No     [2] SUPERSCRIPT TWO..SUPERSCRIPT THREE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B4, 0x00B4 }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         ACUTE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B5, 0x00B5 }, crispy::text::EastAsianWidth::Neutral }, // Ll         MICRO SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B6, 0x00B7 }, crispy::text::EastAsianWidth::Ambiguous }, // Po     [2] PILCROW SIGN..MIDDLE DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B8, 0x00B8 }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         CEDILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x00B9, 0x00B9 }, crispy::text::EastAsianWidth::Ambiguous }, // No         SUPERSCRIPT ONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00BA, 0x00BA }, crispy::text::EastAsianWidth::Ambiguous }, // Lo         MASCULINE ORDINAL INDICATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x00BB, 0x00BB }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x00BC, 0x00BE }, crispy::text::EastAsianWidth::Ambiguous }, // No     [3] VULGAR FRACTION ONE QUARTER..VULGAR FRACTION THREE QUARTERS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00BF, 0x00BF }, crispy::text::EastAsianWidth::Ambiguous }, // Po         INVERTED QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x00C0, 0x00C5 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [6] LATIN CAPITAL LETTER A WITH GRAVE..LATIN CAPITAL LETTER A WITH RING ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00C6, 0x00C6 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         LATIN CAPITAL LETTER AE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00C7, 0x00CF }, crispy::text::EastAsianWidth::Neutral }, // Lu     [9] LATIN CAPITAL LETTER C WITH CEDILLA..LATIN CAPITAL LETTER I WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00D0, 0x00D0 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         LATIN CAPITAL LETTER ETH
+    Prop<crispy::text::EastAsianWidth>{ { 0x00D1, 0x00D6 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [6] LATIN CAPITAL LETTER N WITH TILDE..LATIN CAPITAL LETTER O WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00D7, 0x00D7 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         MULTIPLICATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00D8, 0x00D8 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         LATIN CAPITAL LETTER O WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00D9, 0x00DD }, crispy::text::EastAsianWidth::Neutral }, // Lu     [5] LATIN CAPITAL LETTER U WITH GRAVE..LATIN CAPITAL LETTER Y WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00DE, 0x00E1 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [4] LATIN CAPITAL LETTER THORN..LATIN SMALL LETTER A WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00E2, 0x00E5 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [4] LATIN SMALL LETTER A WITH CIRCUMFLEX..LATIN SMALL LETTER A WITH RING ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00E6, 0x00E6 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER AE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00E7, 0x00E7 }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER C WITH CEDILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x00E8, 0x00EA }, crispy::text::EastAsianWidth::Ambiguous }, // Ll     [3] LATIN SMALL LETTER E WITH GRAVE..LATIN SMALL LETTER E WITH CIRCUMFLEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x00EB, 0x00EB }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER E WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00EC, 0x00ED }, crispy::text::EastAsianWidth::Ambiguous }, // Ll     [2] LATIN SMALL LETTER I WITH GRAVE..LATIN SMALL LETTER I WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00EE, 0x00EF }, crispy::text::EastAsianWidth::Neutral }, // Ll     [2] LATIN SMALL LETTER I WITH CIRCUMFLEX..LATIN SMALL LETTER I WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F0, 0x00F0 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER ETH
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F1, 0x00F1 }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER N WITH TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F2, 0x00F3 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll     [2] LATIN SMALL LETTER O WITH GRAVE..LATIN SMALL LETTER O WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F4, 0x00F6 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [3] LATIN SMALL LETTER O WITH CIRCUMFLEX..LATIN SMALL LETTER O WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F7, 0x00F7 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         DIVISION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00F8, 0x00FA }, crispy::text::EastAsianWidth::Ambiguous }, // Ll     [3] LATIN SMALL LETTER O WITH STROKE..LATIN SMALL LETTER U WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00FB, 0x00FB }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER U WITH CIRCUMFLEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x00FC, 0x00FC }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x00FD, 0x00FD }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER Y WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x00FE, 0x00FE }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER THORN
+    Prop<crispy::text::EastAsianWidth>{ { 0x00FF, 0x00FF }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER Y WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0100, 0x0100 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER A WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0101, 0x0101 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER A WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0102, 0x0110 }, crispy::text::EastAsianWidth::Neutral }, // L&    [15] LATIN CAPITAL LETTER A WITH BREVE..LATIN CAPITAL LETTER D WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0111, 0x0111 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER D WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0112, 0x0112 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER E WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0113, 0x0113 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER E WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0114, 0x011A }, crispy::text::EastAsianWidth::Neutral }, // L&     [7] LATIN CAPITAL LETTER E WITH BREVE..LATIN CAPITAL LETTER E WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x011B, 0x011B }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER E WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x011C, 0x0125 }, crispy::text::EastAsianWidth::Neutral }, // L&    [10] LATIN CAPITAL LETTER G WITH CIRCUMFLEX..LATIN SMALL LETTER H WITH CIRCUMFLEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x0126, 0x0127 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [2] LATIN CAPITAL LETTER H WITH STROKE..LATIN SMALL LETTER H WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0128, 0x012A }, crispy::text::EastAsianWidth::Neutral }, // L&     [3] LATIN CAPITAL LETTER I WITH TILDE..LATIN CAPITAL LETTER I WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x012B, 0x012B }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER I WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x012C, 0x0130 }, crispy::text::EastAsianWidth::Neutral }, // L&     [5] LATIN CAPITAL LETTER I WITH BREVE..LATIN CAPITAL LETTER I WITH DOT ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0131, 0x0133 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [3] LATIN SMALL LETTER DOTLESS I..LATIN SMALL LIGATURE IJ
+    Prop<crispy::text::EastAsianWidth>{ { 0x0134, 0x0137 }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] LATIN CAPITAL LETTER J WITH CIRCUMFLEX..LATIN SMALL LETTER K WITH CEDILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0138, 0x0138 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER KRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0139, 0x013E }, crispy::text::EastAsianWidth::Neutral }, // L&     [6] LATIN CAPITAL LETTER L WITH ACUTE..LATIN SMALL LETTER L WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x013F, 0x0142 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [4] LATIN CAPITAL LETTER L WITH MIDDLE DOT..LATIN SMALL LETTER L WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0143, 0x0143 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER N WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0144, 0x0144 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER N WITH ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0145, 0x0147 }, crispy::text::EastAsianWidth::Neutral }, // L&     [3] LATIN CAPITAL LETTER N WITH CEDILLA..LATIN CAPITAL LETTER N WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0148, 0x014B }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [4] LATIN SMALL LETTER N WITH CARON..LATIN SMALL LETTER ENG
+    Prop<crispy::text::EastAsianWidth>{ { 0x014C, 0x014C }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER O WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x014D, 0x014D }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER O WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x014E, 0x0151 }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] LATIN CAPITAL LETTER O WITH BREVE..LATIN SMALL LETTER O WITH DOUBLE ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0152, 0x0153 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [2] LATIN CAPITAL LIGATURE OE..LATIN SMALL LIGATURE OE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0154, 0x0165 }, crispy::text::EastAsianWidth::Neutral }, // L&    [18] LATIN CAPITAL LETTER R WITH ACUTE..LATIN SMALL LETTER T WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0166, 0x0167 }, crispy::text::EastAsianWidth::Ambiguous }, // L&     [2] LATIN CAPITAL LETTER T WITH STROKE..LATIN SMALL LETTER T WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0168, 0x016A }, crispy::text::EastAsianWidth::Neutral }, // L&     [3] LATIN CAPITAL LETTER U WITH TILDE..LATIN CAPITAL LETTER U WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x016B, 0x016B }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x016C, 0x017F }, crispy::text::EastAsianWidth::Neutral }, // L&    [20] LATIN CAPITAL LETTER U WITH BREVE..LATIN SMALL LETTER LONG S
+    Prop<crispy::text::EastAsianWidth>{ { 0x0180, 0x01BA }, crispy::text::EastAsianWidth::Neutral }, // L&    [59] LATIN SMALL LETTER B WITH STROKE..LATIN SMALL LETTER EZH WITH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x01BB, 0x01BB }, crispy::text::EastAsianWidth::Neutral }, // Lo         LATIN LETTER TWO WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x01BC, 0x01BF }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] LATIN CAPITAL LETTER TONE FIVE..LATIN LETTER WYNN
+    Prop<crispy::text::EastAsianWidth>{ { 0x01C0, 0x01C3 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] LATIN LETTER DENTAL CLICK..LATIN LETTER RETROFLEX CLICK
+    Prop<crispy::text::EastAsianWidth>{ { 0x01C4, 0x01CD }, crispy::text::EastAsianWidth::Neutral }, // L&    [10] LATIN CAPITAL LETTER DZ WITH CARON..LATIN CAPITAL LETTER A WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01CE, 0x01CE }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER A WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01CF, 0x01CF }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER I WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D0, 0x01D0 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER I WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D1, 0x01D1 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER O WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D2, 0x01D2 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER O WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D3, 0x01D3 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER U WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D4, 0x01D4 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D5, 0x01D5 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER U WITH DIAERESIS AND MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D6, 0x01D6 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH DIAERESIS AND MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D7, 0x01D7 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER U WITH DIAERESIS AND ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D8, 0x01D8 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH DIAERESIS AND ACUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x01D9, 0x01D9 }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER U WITH DIAERESIS AND CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01DA, 0x01DA }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH DIAERESIS AND CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x01DB, 0x01DB }, crispy::text::EastAsianWidth::Neutral }, // Lu         LATIN CAPITAL LETTER U WITH DIAERESIS AND GRAVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x01DC, 0x01DC }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER U WITH DIAERESIS AND GRAVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x01DD, 0x024F }, crispy::text::EastAsianWidth::Neutral }, // L&   [115] LATIN SMALL LETTER TURNED E..LATIN SMALL LETTER Y WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0250, 0x0250 }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN SMALL LETTER TURNED A
+    Prop<crispy::text::EastAsianWidth>{ { 0x0251, 0x0251 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER ALPHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0252, 0x0260 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [15] LATIN SMALL LETTER TURNED ALPHA..LATIN SMALL LETTER G WITH HOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0261, 0x0261 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         LATIN SMALL LETTER SCRIPT G
+    Prop<crispy::text::EastAsianWidth>{ { 0x0262, 0x0293 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [50] LATIN LETTER SMALL CAPITAL G..LATIN SMALL LETTER EZH WITH CURL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0294, 0x0294 }, crispy::text::EastAsianWidth::Neutral }, // Lo         LATIN LETTER GLOTTAL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x0295, 0x02AF }, crispy::text::EastAsianWidth::Neutral }, // Ll    [27] LATIN LETTER PHARYNGEAL VOICED FRICATIVE..LATIN SMALL LETTER TURNED H WITH FISHHOOK AND TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x02B0, 0x02C1 }, crispy::text::EastAsianWidth::Neutral }, // Lm    [18] MODIFIER LETTER SMALL H..MODIFIER LETTER REVERSED GLOTTAL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C2, 0x02C3 }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] MODIFIER LETTER LEFT ARROWHEAD..MODIFIER LETTER RIGHT ARROWHEAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C4, 0x02C4 }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         MODIFIER LETTER UP ARROWHEAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C5, 0x02C5 }, crispy::text::EastAsianWidth::Neutral }, // Sk         MODIFIER LETTER DOWN ARROWHEAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C6, 0x02C6 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER CIRCUMFLEX ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C7, 0x02C7 }, crispy::text::EastAsianWidth::Ambiguous }, // Lm         CARON
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C8, 0x02C8 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER VERTICAL LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x02C9, 0x02CB }, crispy::text::EastAsianWidth::Ambiguous }, // Lm     [3] MODIFIER LETTER MACRON..MODIFIER LETTER GRAVE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x02CC, 0x02CC }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER LOW VERTICAL LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x02CD, 0x02CD }, crispy::text::EastAsianWidth::Ambiguous }, // Lm         MODIFIER LETTER LOW MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x02CE, 0x02CF }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] MODIFIER LETTER LOW GRAVE ACCENT..MODIFIER LETTER LOW ACUTE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x02D0, 0x02D0 }, crispy::text::EastAsianWidth::Ambiguous }, // Lm         MODIFIER LETTER TRIANGULAR COLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x02D1, 0x02D1 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER HALF TRIANGULAR COLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x02D2, 0x02D7 }, crispy::text::EastAsianWidth::Neutral }, // Sk     [6] MODIFIER LETTER CENTRED RIGHT HALF RING..MODIFIER LETTER MINUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x02D8, 0x02DB }, crispy::text::EastAsianWidth::Ambiguous }, // Sk     [4] BREVE..OGONEK
+    Prop<crispy::text::EastAsianWidth>{ { 0x02DC, 0x02DC }, crispy::text::EastAsianWidth::Neutral }, // Sk         SMALL TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x02DD, 0x02DD }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         DOUBLE ACUTE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x02DE, 0x02DE }, crispy::text::EastAsianWidth::Neutral }, // Sk         MODIFIER LETTER RHOTIC HOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x02DF, 0x02DF }, crispy::text::EastAsianWidth::Ambiguous }, // Sk         MODIFIER LETTER CROSS ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x02E0, 0x02E4 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [5] MODIFIER LETTER SMALL GAMMA..MODIFIER LETTER SMALL REVERSED GLOTTAL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x02E5, 0x02EB }, crispy::text::EastAsianWidth::Neutral }, // Sk     [7] MODIFIER LETTER EXTRA-HIGH TONE BAR..MODIFIER LETTER YANG DEPARTING TONE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x02EC, 0x02EC }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER VOICING
+    Prop<crispy::text::EastAsianWidth>{ { 0x02ED, 0x02ED }, crispy::text::EastAsianWidth::Neutral }, // Sk         MODIFIER LETTER UNASPIRATED
+    Prop<crispy::text::EastAsianWidth>{ { 0x02EE, 0x02EE }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER DOUBLE APOSTROPHE
+    Prop<crispy::text::EastAsianWidth>{ { 0x02EF, 0x02FF }, crispy::text::EastAsianWidth::Neutral }, // Sk    [17] MODIFIER LETTER LOW DOWN ARROWHEAD..MODIFIER LETTER LOW LEFT ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x0300, 0x036F }, crispy::text::EastAsianWidth::Ambiguous }, // Mn   [112] COMBINING GRAVE ACCENT..COMBINING LATIN SMALL LETTER X
+    Prop<crispy::text::EastAsianWidth>{ { 0x0370, 0x0373 }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] GREEK CAPITAL LETTER HETA..GREEK SMALL LETTER ARCHAIC SAMPI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0374, 0x0374 }, crispy::text::EastAsianWidth::Neutral }, // Lm         GREEK NUMERAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0375, 0x0375 }, crispy::text::EastAsianWidth::Neutral }, // Sk         GREEK LOWER NUMERAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0376, 0x0377 }, crispy::text::EastAsianWidth::Neutral }, // L&     [2] GREEK CAPITAL LETTER PAMPHYLIAN DIGAMMA..GREEK SMALL LETTER PAMPHYLIAN DIGAMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x037A, 0x037A }, crispy::text::EastAsianWidth::Neutral }, // Lm         GREEK YPOGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x037B, 0x037D }, crispy::text::EastAsianWidth::Neutral }, // Ll     [3] GREEK SMALL REVERSED LUNATE SIGMA SYMBOL..GREEK SMALL REVERSED DOTTED LUNATE SIGMA SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x037E, 0x037E }, crispy::text::EastAsianWidth::Neutral }, // Po         GREEK QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x037F, 0x037F }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER YOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0384, 0x0385 }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] GREEK TONOS..GREEK DIALYTIKA TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0386, 0x0386 }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER ALPHA WITH TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0387, 0x0387 }, crispy::text::EastAsianWidth::Neutral }, // Po         GREEK ANO TELEIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0388, 0x038A }, crispy::text::EastAsianWidth::Neutral }, // Lu     [3] GREEK CAPITAL LETTER EPSILON WITH TONOS..GREEK CAPITAL LETTER IOTA WITH TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x038C, 0x038C }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER OMICRON WITH TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x038E, 0x0390 }, crispy::text::EastAsianWidth::Neutral }, // L&     [3] GREEK CAPITAL LETTER UPSILON WITH TONOS..GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0391, 0x03A1 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu    [17] GREEK CAPITAL LETTER ALPHA..GREEK CAPITAL LETTER RHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x03A3, 0x03A9 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu     [7] GREEK CAPITAL LETTER SIGMA..GREEK CAPITAL LETTER OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x03AA, 0x03B0 }, crispy::text::EastAsianWidth::Neutral }, // L&     [7] GREEK CAPITAL LETTER IOTA WITH DIALYTIKA..GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND TONOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x03B1, 0x03C1 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll    [17] GREEK SMALL LETTER ALPHA..GREEK SMALL LETTER RHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x03C2, 0x03C2 }, crispy::text::EastAsianWidth::Neutral }, // Ll         GREEK SMALL LETTER FINAL SIGMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x03C3, 0x03C9 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll     [7] GREEK SMALL LETTER SIGMA..GREEK SMALL LETTER OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x03CA, 0x03F5 }, crispy::text::EastAsianWidth::Neutral }, // L&    [44] GREEK SMALL LETTER IOTA WITH DIALYTIKA..GREEK LUNATE EPSILON SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x03F6, 0x03F6 }, crispy::text::EastAsianWidth::Neutral }, // Sm         GREEK REVERSED LUNATE EPSILON SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x03F7, 0x03FF }, crispy::text::EastAsianWidth::Neutral }, // L&     [9] GREEK CAPITAL LETTER SHO..GREEK CAPITAL REVERSED DOTTED LUNATE SIGMA SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0400, 0x0400 }, crispy::text::EastAsianWidth::Neutral }, // Lu         CYRILLIC CAPITAL LETTER IE WITH GRAVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0401, 0x0401 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         CYRILLIC CAPITAL LETTER IO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0402, 0x040F }, crispy::text::EastAsianWidth::Neutral }, // Lu    [14] CYRILLIC CAPITAL LETTER DJE..CYRILLIC CAPITAL LETTER DZHE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0410, 0x044F }, crispy::text::EastAsianWidth::Ambiguous }, // L&    [64] CYRILLIC CAPITAL LETTER A..CYRILLIC SMALL LETTER YA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0450, 0x0450 }, crispy::text::EastAsianWidth::Neutral }, // Ll         CYRILLIC SMALL LETTER IE WITH GRAVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0451, 0x0451 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         CYRILLIC SMALL LETTER IO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0452, 0x0481 }, crispy::text::EastAsianWidth::Neutral }, // L&    [48] CYRILLIC SMALL LETTER DJE..CYRILLIC SMALL LETTER KOPPA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0482, 0x0482 }, crispy::text::EastAsianWidth::Neutral }, // So         CYRILLIC THOUSANDS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0483, 0x0487 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] COMBINING CYRILLIC TITLO..COMBINING CYRILLIC POKRYTIE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0488, 0x0489 }, crispy::text::EastAsianWidth::Neutral }, // Me     [2] COMBINING CYRILLIC HUNDRED THOUSANDS SIGN..COMBINING CYRILLIC MILLIONS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x048A, 0x04FF }, crispy::text::EastAsianWidth::Neutral }, // L&   [118] CYRILLIC CAPITAL LETTER SHORT I WITH TAIL..CYRILLIC SMALL LETTER HA WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0500, 0x052F }, crispy::text::EastAsianWidth::Neutral }, // L&    [48] CYRILLIC CAPITAL LETTER KOMI DE..CYRILLIC SMALL LETTER EL WITH DESCENDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x0531, 0x0556 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [38] ARMENIAN CAPITAL LETTER AYB..ARMENIAN CAPITAL LETTER FEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0559, 0x0559 }, crispy::text::EastAsianWidth::Neutral }, // Lm         ARMENIAN MODIFIER LETTER LEFT HALF RING
+    Prop<crispy::text::EastAsianWidth>{ { 0x055A, 0x055F }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] ARMENIAN APOSTROPHE..ARMENIAN ABBREVIATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0560, 0x0588 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [41] ARMENIAN SMALL LETTER TURNED AYB..ARMENIAN SMALL LETTER YI WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0589, 0x0589 }, crispy::text::EastAsianWidth::Neutral }, // Po         ARMENIAN FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x058A, 0x058A }, crispy::text::EastAsianWidth::Neutral }, // Pd         ARMENIAN HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x058D, 0x058E }, crispy::text::EastAsianWidth::Neutral }, // So     [2] RIGHT-FACING ARMENIAN ETERNITY SIGN..LEFT-FACING ARMENIAN ETERNITY SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x058F, 0x058F }, crispy::text::EastAsianWidth::Neutral }, // Sc         ARMENIAN DRAM SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0591, 0x05BD }, crispy::text::EastAsianWidth::Neutral }, // Mn    [45] HEBREW ACCENT ETNAHTA..HEBREW POINT METEG
+    Prop<crispy::text::EastAsianWidth>{ { 0x05BE, 0x05BE }, crispy::text::EastAsianWidth::Neutral }, // Pd         HEBREW PUNCTUATION MAQAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x05BF, 0x05BF }, crispy::text::EastAsianWidth::Neutral }, // Mn         HEBREW POINT RAFE
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C0, 0x05C0 }, crispy::text::EastAsianWidth::Neutral }, // Po         HEBREW PUNCTUATION PASEQ
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C1, 0x05C2 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] HEBREW POINT SHIN DOT..HEBREW POINT SIN DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C3, 0x05C3 }, crispy::text::EastAsianWidth::Neutral }, // Po         HEBREW PUNCTUATION SOF PASUQ
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C4, 0x05C5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] HEBREW MARK UPPER DOT..HEBREW MARK LOWER DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C6, 0x05C6 }, crispy::text::EastAsianWidth::Neutral }, // Po         HEBREW PUNCTUATION NUN HAFUKHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x05C7, 0x05C7 }, crispy::text::EastAsianWidth::Neutral }, // Mn         HEBREW POINT QAMATS QATAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x05D0, 0x05EA }, crispy::text::EastAsianWidth::Neutral }, // Lo    [27] HEBREW LETTER ALEF..HEBREW LETTER TAV
+    Prop<crispy::text::EastAsianWidth>{ { 0x05EF, 0x05F2 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] HEBREW YOD TRIANGLE..HEBREW LIGATURE YIDDISH DOUBLE YOD
+    Prop<crispy::text::EastAsianWidth>{ { 0x05F3, 0x05F4 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] HEBREW PUNCTUATION GERESH..HEBREW PUNCTUATION GERSHAYIM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0600, 0x0605 }, crispy::text::EastAsianWidth::Neutral }, // Cf     [6] ARABIC NUMBER SIGN..ARABIC NUMBER MARK ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0606, 0x0608 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] ARABIC-INDIC CUBE ROOT..ARABIC RAY
+    Prop<crispy::text::EastAsianWidth>{ { 0x0609, 0x060A }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] ARABIC-INDIC PER MILLE SIGN..ARABIC-INDIC PER TEN THOUSAND SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x060B, 0x060B }, crispy::text::EastAsianWidth::Neutral }, // Sc         AFGHANI SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x060C, 0x060D }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] ARABIC COMMA..ARABIC DATE SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x060E, 0x060F }, crispy::text::EastAsianWidth::Neutral }, // So     [2] ARABIC POETIC VERSE SIGN..ARABIC SIGN MISRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0610, 0x061A }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] ARABIC SIGN SALLALLAHOU ALAYHE WASSALLAM..ARABIC SMALL KASRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x061B, 0x061B }, crispy::text::EastAsianWidth::Neutral }, // Po         ARABIC SEMICOLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x061C, 0x061C }, crispy::text::EastAsianWidth::Neutral }, // Cf         ARABIC LETTER MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x061E, 0x061F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] ARABIC TRIPLE DOT PUNCTUATION MARK..ARABIC QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0620, 0x063F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [32] ARABIC LETTER KASHMIRI YEH..ARABIC LETTER FARSI YEH WITH THREE DOTS ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0640, 0x0640 }, crispy::text::EastAsianWidth::Neutral }, // Lm         ARABIC TATWEEL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0641, 0x064A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] ARABIC LETTER FEH..ARABIC LETTER YEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x064B, 0x065F }, crispy::text::EastAsianWidth::Neutral }, // Mn    [21] ARABIC FATHATAN..ARABIC WAVY HAMZA BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x0660, 0x0669 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] ARABIC-INDIC DIGIT ZERO..ARABIC-INDIC DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x066A, 0x066D }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] ARABIC PERCENT SIGN..ARABIC FIVE POINTED STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x066E, 0x066F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ARABIC LETTER DOTLESS BEH..ARABIC LETTER DOTLESS QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x0670, 0x0670 }, crispy::text::EastAsianWidth::Neutral }, // Mn         ARABIC LETTER SUPERSCRIPT ALEF
+    Prop<crispy::text::EastAsianWidth>{ { 0x0671, 0x06D3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [99] ARABIC LETTER ALEF WASLA..ARABIC LETTER YEH BARREE WITH HAMZA ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x06D4, 0x06D4 }, crispy::text::EastAsianWidth::Neutral }, // Po         ARABIC FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x06D5, 0x06D5 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC LETTER AE
+    Prop<crispy::text::EastAsianWidth>{ { 0x06D6, 0x06DC }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] ARABIC SMALL HIGH LIGATURE SAD WITH LAM WITH ALEF MAKSURA..ARABIC SMALL HIGH SEEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x06DD, 0x06DD }, crispy::text::EastAsianWidth::Neutral }, // Cf         ARABIC END OF AYAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x06DE, 0x06DE }, crispy::text::EastAsianWidth::Neutral }, // So         ARABIC START OF RUB EL HIZB
+    Prop<crispy::text::EastAsianWidth>{ { 0x06DF, 0x06E4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] ARABIC SMALL HIGH ROUNDED ZERO..ARABIC SMALL HIGH MADDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x06E5, 0x06E6 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] ARABIC SMALL WAW..ARABIC SMALL YEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x06E7, 0x06E8 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] ARABIC SMALL HIGH YEH..ARABIC SMALL HIGH NOON
+    Prop<crispy::text::EastAsianWidth>{ { 0x06E9, 0x06E9 }, crispy::text::EastAsianWidth::Neutral }, // So         ARABIC PLACE OF SAJDAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x06EA, 0x06ED }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] ARABIC EMPTY CENTRE LOW STOP..ARABIC SMALL LOW MEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x06EE, 0x06EF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ARABIC LETTER DAL WITH INVERTED V..ARABIC LETTER REH WITH INVERTED V
+    Prop<crispy::text::EastAsianWidth>{ { 0x06F0, 0x06F9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] EXTENDED ARABIC-INDIC DIGIT ZERO..EXTENDED ARABIC-INDIC DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x06FA, 0x06FC }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] ARABIC LETTER SHEEN WITH DOT BELOW..ARABIC LETTER GHAIN WITH DOT BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x06FD, 0x06FE }, crispy::text::EastAsianWidth::Neutral }, // So     [2] ARABIC SIGN SINDHI AMPERSAND..ARABIC SIGN SINDHI POSTPOSITION MEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x06FF, 0x06FF }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC LETTER HEH WITH INVERTED V
+    Prop<crispy::text::EastAsianWidth>{ { 0x0700, 0x070D }, crispy::text::EastAsianWidth::Neutral }, // Po    [14] SYRIAC END OF PARAGRAPH..SYRIAC HARKLEAN ASTERISCUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x070F, 0x070F }, crispy::text::EastAsianWidth::Neutral }, // Cf         SYRIAC ABBREVIATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0710, 0x0710 }, crispy::text::EastAsianWidth::Neutral }, // Lo         SYRIAC LETTER ALAPH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0711, 0x0711 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SYRIAC LETTER SUPERSCRIPT ALAPH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0712, 0x072F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] SYRIAC LETTER BETH..SYRIAC LETTER PERSIAN DHALATH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0730, 0x074A }, crispy::text::EastAsianWidth::Neutral }, // Mn    [27] SYRIAC PTHAHA ABOVE..SYRIAC BARREKH
+    Prop<crispy::text::EastAsianWidth>{ { 0x074D, 0x074F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] SYRIAC LETTER SOGDIAN ZHAIN..SYRIAC LETTER SOGDIAN FE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0750, 0x077F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] ARABIC LETTER BEH WITH THREE DOTS HORIZONTALLY BELOW..ARABIC LETTER KAF WITH TWO DOTS ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0780, 0x07A5 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [38] THAANA LETTER HAA..THAANA LETTER WAAVU
+    Prop<crispy::text::EastAsianWidth>{ { 0x07A6, 0x07B0 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] THAANA ABAFILI..THAANA SUKUN
+    Prop<crispy::text::EastAsianWidth>{ { 0x07B1, 0x07B1 }, crispy::text::EastAsianWidth::Neutral }, // Lo         THAANA LETTER NAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x07C0, 0x07C9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] NKO DIGIT ZERO..NKO DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x07CA, 0x07EA }, crispy::text::EastAsianWidth::Neutral }, // Lo    [33] NKO LETTER A..NKO LETTER JONA RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x07EB, 0x07F3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] NKO COMBINING SHORT HIGH TONE..NKO COMBINING DOUBLE DOT ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x07F4, 0x07F5 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] NKO HIGH TONE APOSTROPHE..NKO LOW TONE APOSTROPHE
+    Prop<crispy::text::EastAsianWidth>{ { 0x07F6, 0x07F6 }, crispy::text::EastAsianWidth::Neutral }, // So         NKO SYMBOL OO DENNEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x07F7, 0x07F9 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] NKO SYMBOL GBAKURUNEN..NKO EXCLAMATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x07FA, 0x07FA }, crispy::text::EastAsianWidth::Neutral }, // Lm         NKO LAJANYALAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x07FD, 0x07FD }, crispy::text::EastAsianWidth::Neutral }, // Mn         NKO DANTAYALAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x07FE, 0x07FF }, crispy::text::EastAsianWidth::Neutral }, // Sc     [2] NKO DOROME SIGN..NKO TAMAN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0800, 0x0815 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] SAMARITAN LETTER ALAF..SAMARITAN LETTER TAAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x0816, 0x0819 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] SAMARITAN MARK IN..SAMARITAN MARK DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0x081A, 0x081A }, crispy::text::EastAsianWidth::Neutral }, // Lm         SAMARITAN MODIFIER LETTER EPENTHETIC YUT
+    Prop<crispy::text::EastAsianWidth>{ { 0x081B, 0x0823 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] SAMARITAN MARK EPENTHETIC YUT..SAMARITAN VOWEL SIGN A
+    Prop<crispy::text::EastAsianWidth>{ { 0x0824, 0x0824 }, crispy::text::EastAsianWidth::Neutral }, // Lm         SAMARITAN MODIFIER LETTER SHORT A
+    Prop<crispy::text::EastAsianWidth>{ { 0x0825, 0x0827 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] SAMARITAN VOWEL SIGN SHORT A..SAMARITAN VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x0828, 0x0828 }, crispy::text::EastAsianWidth::Neutral }, // Lm         SAMARITAN MODIFIER LETTER I
+    Prop<crispy::text::EastAsianWidth>{ { 0x0829, 0x082D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] SAMARITAN VOWEL SIGN LONG I..SAMARITAN MARK NEQUDAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0830, 0x083E }, crispy::text::EastAsianWidth::Neutral }, // Po    [15] SAMARITAN PUNCTUATION NEQUDAA..SAMARITAN PUNCTUATION ANNAAU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0840, 0x0858 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [25] MANDAIC LETTER HALQA..MANDAIC LETTER AIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0859, 0x085B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] MANDAIC AFFRICATION MARK..MANDAIC GEMINATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x085E, 0x085E }, crispy::text::EastAsianWidth::Neutral }, // Po         MANDAIC PUNCTUATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x0860, 0x086A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [11] SYRIAC LETTER MALAYALAM NGA..SYRIAC LETTER MALAYALAM SSA
+    Prop<crispy::text::EastAsianWidth>{ { 0x08A0, 0x08B4 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [21] ARABIC LETTER BEH WITH SMALL V BELOW..ARABIC LETTER KAF WITH DOT BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x08B6, 0x08C7 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] ARABIC LETTER BEH WITH SMALL MEEM ABOVE..ARABIC LETTER LAM WITH SMALL ARABIC LETTER TAH ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x08D3, 0x08E1 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [15] ARABIC SMALL LOW WAW..ARABIC SMALL HIGH SIGN SAFHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x08E2, 0x08E2 }, crispy::text::EastAsianWidth::Neutral }, // Cf         ARABIC DISPUTED END OF AYAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x08E3, 0x08FF }, crispy::text::EastAsianWidth::Neutral }, // Mn    [29] ARABIC TURNED DAMMA BELOW..ARABIC MARK SIDEWAYS NOON GHUNNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0900, 0x0902 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] DEVANAGARI SIGN INVERTED CANDRABINDU..DEVANAGARI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0903, 0x0903 }, crispy::text::EastAsianWidth::Neutral }, // Mc         DEVANAGARI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0904, 0x0939 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [54] DEVANAGARI LETTER SHORT A..DEVANAGARI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x093A, 0x093A }, crispy::text::EastAsianWidth::Neutral }, // Mn         DEVANAGARI VOWEL SIGN OE
+    Prop<crispy::text::EastAsianWidth>{ { 0x093B, 0x093B }, crispy::text::EastAsianWidth::Neutral }, // Mc         DEVANAGARI VOWEL SIGN OOE
+    Prop<crispy::text::EastAsianWidth>{ { 0x093C, 0x093C }, crispy::text::EastAsianWidth::Neutral }, // Mn         DEVANAGARI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x093D, 0x093D }, crispy::text::EastAsianWidth::Neutral }, // Lo         DEVANAGARI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x093E, 0x0940 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] DEVANAGARI VOWEL SIGN AA..DEVANAGARI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0941, 0x0948 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] DEVANAGARI VOWEL SIGN U..DEVANAGARI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0949, 0x094C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] DEVANAGARI VOWEL SIGN CANDRA O..DEVANAGARI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x094D, 0x094D }, crispy::text::EastAsianWidth::Neutral }, // Mn         DEVANAGARI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x094E, 0x094F }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] DEVANAGARI VOWEL SIGN PRISHTHAMATRA E..DEVANAGARI VOWEL SIGN AW
+    Prop<crispy::text::EastAsianWidth>{ { 0x0950, 0x0950 }, crispy::text::EastAsianWidth::Neutral }, // Lo         DEVANAGARI OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0951, 0x0957 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] DEVANAGARI STRESS SIGN UDATTA..DEVANAGARI VOWEL SIGN UUE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0958, 0x0961 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] DEVANAGARI LETTER QA..DEVANAGARI LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0962, 0x0963 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] DEVANAGARI VOWEL SIGN VOCALIC L..DEVANAGARI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0964, 0x0965 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] DEVANAGARI DANDA..DEVANAGARI DOUBLE DANDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0966, 0x096F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] DEVANAGARI DIGIT ZERO..DEVANAGARI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0970, 0x0970 }, crispy::text::EastAsianWidth::Neutral }, // Po         DEVANAGARI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0971, 0x0971 }, crispy::text::EastAsianWidth::Neutral }, // Lm         DEVANAGARI SIGN HIGH SPACING DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0972, 0x097F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [14] DEVANAGARI LETTER CANDRA A..DEVANAGARI LETTER BBA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0980, 0x0980 }, crispy::text::EastAsianWidth::Neutral }, // Lo         BENGALI ANJI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0981, 0x0981 }, crispy::text::EastAsianWidth::Neutral }, // Mn         BENGALI SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0982, 0x0983 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BENGALI SIGN ANUSVARA..BENGALI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0985, 0x098C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] BENGALI LETTER A..BENGALI LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x098F, 0x0990 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] BENGALI LETTER E..BENGALI LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0993, 0x09A8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] BENGALI LETTER O..BENGALI LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09AA, 0x09B0 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] BENGALI LETTER PA..BENGALI LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09B2, 0x09B2 }, crispy::text::EastAsianWidth::Neutral }, // Lo         BENGALI LETTER LA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09B6, 0x09B9 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] BENGALI LETTER SHA..BENGALI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09BC, 0x09BC }, crispy::text::EastAsianWidth::Neutral }, // Mn         BENGALI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09BD, 0x09BD }, crispy::text::EastAsianWidth::Neutral }, // Lo         BENGALI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09BE, 0x09C0 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] BENGALI VOWEL SIGN AA..BENGALI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x09C1, 0x09C4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] BENGALI VOWEL SIGN U..BENGALI VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x09C7, 0x09C8 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BENGALI VOWEL SIGN E..BENGALI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x09CB, 0x09CC }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BENGALI VOWEL SIGN O..BENGALI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x09CD, 0x09CD }, crispy::text::EastAsianWidth::Neutral }, // Mn         BENGALI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09CE, 0x09CE }, crispy::text::EastAsianWidth::Neutral }, // Lo         BENGALI LETTER KHANDA TA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09D7, 0x09D7 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BENGALI AU LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x09DC, 0x09DD }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] BENGALI LETTER RRA..BENGALI LETTER RHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09DF, 0x09E1 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] BENGALI LETTER YYA..BENGALI LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x09E2, 0x09E3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] BENGALI VOWEL SIGN VOCALIC L..BENGALI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x09E6, 0x09EF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] BENGALI DIGIT ZERO..BENGALI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x09F0, 0x09F1 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] BENGALI LETTER RA WITH MIDDLE DIAGONAL..BENGALI LETTER RA WITH LOWER DIAGONAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x09F2, 0x09F3 }, crispy::text::EastAsianWidth::Neutral }, // Sc     [2] BENGALI RUPEE MARK..BENGALI RUPEE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x09F4, 0x09F9 }, crispy::text::EastAsianWidth::Neutral }, // No     [6] BENGALI CURRENCY NUMERATOR ONE..BENGALI CURRENCY DENOMINATOR SIXTEEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x09FA, 0x09FA }, crispy::text::EastAsianWidth::Neutral }, // So         BENGALI ISSHAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x09FB, 0x09FB }, crispy::text::EastAsianWidth::Neutral }, // Sc         BENGALI GANDA MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x09FC, 0x09FC }, crispy::text::EastAsianWidth::Neutral }, // Lo         BENGALI LETTER VEDIC ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x09FD, 0x09FD }, crispy::text::EastAsianWidth::Neutral }, // Po         BENGALI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x09FE, 0x09FE }, crispy::text::EastAsianWidth::Neutral }, // Mn         BENGALI SANDHI MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A01, 0x0A02 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GURMUKHI SIGN ADAK BINDI..GURMUKHI SIGN BINDI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A03, 0x0A03 }, crispy::text::EastAsianWidth::Neutral }, // Mc         GURMUKHI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A05, 0x0A0A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] GURMUKHI LETTER A..GURMUKHI LETTER UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A0F, 0x0A10 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GURMUKHI LETTER EE..GURMUKHI LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A13, 0x0A28 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] GURMUKHI LETTER OO..GURMUKHI LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A2A, 0x0A30 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] GURMUKHI LETTER PA..GURMUKHI LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A32, 0x0A33 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GURMUKHI LETTER LA..GURMUKHI LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A35, 0x0A36 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GURMUKHI LETTER VA..GURMUKHI LETTER SHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A38, 0x0A39 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GURMUKHI LETTER SA..GURMUKHI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A3C, 0x0A3C }, crispy::text::EastAsianWidth::Neutral }, // Mn         GURMUKHI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A3E, 0x0A40 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] GURMUKHI VOWEL SIGN AA..GURMUKHI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A41, 0x0A42 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GURMUKHI VOWEL SIGN U..GURMUKHI VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A47, 0x0A48 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GURMUKHI VOWEL SIGN EE..GURMUKHI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A4B, 0x0A4D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] GURMUKHI VOWEL SIGN OO..GURMUKHI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A51, 0x0A51 }, crispy::text::EastAsianWidth::Neutral }, // Mn         GURMUKHI SIGN UDAAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A59, 0x0A5C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] GURMUKHI LETTER KHHA..GURMUKHI LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A5E, 0x0A5E }, crispy::text::EastAsianWidth::Neutral }, // Lo         GURMUKHI LETTER FA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A66, 0x0A6F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] GURMUKHI DIGIT ZERO..GURMUKHI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A70, 0x0A71 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GURMUKHI TIPPI..GURMUKHI ADDAK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A72, 0x0A74 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] GURMUKHI IRI..GURMUKHI EK ONKAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A75, 0x0A75 }, crispy::text::EastAsianWidth::Neutral }, // Mn         GURMUKHI SIGN YAKASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A76, 0x0A76 }, crispy::text::EastAsianWidth::Neutral }, // Po         GURMUKHI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A81, 0x0A82 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GUJARATI SIGN CANDRABINDU..GUJARATI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A83, 0x0A83 }, crispy::text::EastAsianWidth::Neutral }, // Mc         GUJARATI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A85, 0x0A8D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] GUJARATI LETTER A..GUJARATI VOWEL CANDRA E
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A8F, 0x0A91 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] GUJARATI LETTER E..GUJARATI VOWEL CANDRA O
+    Prop<crispy::text::EastAsianWidth>{ { 0x0A93, 0x0AA8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] GUJARATI LETTER O..GUJARATI LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AAA, 0x0AB0 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] GUJARATI LETTER PA..GUJARATI LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AB2, 0x0AB3 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GUJARATI LETTER LA..GUJARATI LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AB5, 0x0AB9 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] GUJARATI LETTER VA..GUJARATI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ABC, 0x0ABC }, crispy::text::EastAsianWidth::Neutral }, // Mn         GUJARATI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ABD, 0x0ABD }, crispy::text::EastAsianWidth::Neutral }, // Lo         GUJARATI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ABE, 0x0AC0 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] GUJARATI VOWEL SIGN AA..GUJARATI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AC1, 0x0AC5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] GUJARATI VOWEL SIGN U..GUJARATI VOWEL SIGN CANDRA E
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AC7, 0x0AC8 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GUJARATI VOWEL SIGN E..GUJARATI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AC9, 0x0AC9 }, crispy::text::EastAsianWidth::Neutral }, // Mc         GUJARATI VOWEL SIGN CANDRA O
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ACB, 0x0ACC }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GUJARATI VOWEL SIGN O..GUJARATI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ACD, 0x0ACD }, crispy::text::EastAsianWidth::Neutral }, // Mn         GUJARATI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AD0, 0x0AD0 }, crispy::text::EastAsianWidth::Neutral }, // Lo         GUJARATI OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AE0, 0x0AE1 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GUJARATI LETTER VOCALIC RR..GUJARATI LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AE2, 0x0AE3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GUJARATI VOWEL SIGN VOCALIC L..GUJARATI VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AE6, 0x0AEF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] GUJARATI DIGIT ZERO..GUJARATI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AF0, 0x0AF0 }, crispy::text::EastAsianWidth::Neutral }, // Po         GUJARATI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AF1, 0x0AF1 }, crispy::text::EastAsianWidth::Neutral }, // Sc         GUJARATI RUPEE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AF9, 0x0AF9 }, crispy::text::EastAsianWidth::Neutral }, // Lo         GUJARATI LETTER ZHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0AFA, 0x0AFF }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] GUJARATI SIGN SUKUN..GUJARATI SIGN TWO-CIRCLE NUKTA ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B01, 0x0B01 }, crispy::text::EastAsianWidth::Neutral }, // Mn         ORIYA SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B02, 0x0B03 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] ORIYA SIGN ANUSVARA..ORIYA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B05, 0x0B0C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] ORIYA LETTER A..ORIYA LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B0F, 0x0B10 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ORIYA LETTER E..ORIYA LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B13, 0x0B28 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] ORIYA LETTER O..ORIYA LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B2A, 0x0B30 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ORIYA LETTER PA..ORIYA LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B32, 0x0B33 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ORIYA LETTER LA..ORIYA LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B35, 0x0B39 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] ORIYA LETTER VA..ORIYA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B3C, 0x0B3C }, crispy::text::EastAsianWidth::Neutral }, // Mn         ORIYA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B3D, 0x0B3D }, crispy::text::EastAsianWidth::Neutral }, // Lo         ORIYA SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B3E, 0x0B3E }, crispy::text::EastAsianWidth::Neutral }, // Mc         ORIYA VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B3F, 0x0B3F }, crispy::text::EastAsianWidth::Neutral }, // Mn         ORIYA VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B40, 0x0B40 }, crispy::text::EastAsianWidth::Neutral }, // Mc         ORIYA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B41, 0x0B44 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] ORIYA VOWEL SIGN U..ORIYA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B47, 0x0B48 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] ORIYA VOWEL SIGN E..ORIYA VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B4B, 0x0B4C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] ORIYA VOWEL SIGN O..ORIYA VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B4D, 0x0B4D }, crispy::text::EastAsianWidth::Neutral }, // Mn         ORIYA SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B55, 0x0B56 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] ORIYA SIGN OVERLINE..ORIYA AI LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B57, 0x0B57 }, crispy::text::EastAsianWidth::Neutral }, // Mc         ORIYA AU LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B5C, 0x0B5D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ORIYA LETTER RRA..ORIYA LETTER RHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B5F, 0x0B61 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] ORIYA LETTER YYA..ORIYA LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B62, 0x0B63 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] ORIYA VOWEL SIGN VOCALIC L..ORIYA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B66, 0x0B6F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] ORIYA DIGIT ZERO..ORIYA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B70, 0x0B70 }, crispy::text::EastAsianWidth::Neutral }, // So         ORIYA ISSHAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B71, 0x0B71 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ORIYA LETTER WA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B72, 0x0B77 }, crispy::text::EastAsianWidth::Neutral }, // No     [6] ORIYA FRACTION ONE QUARTER..ORIYA FRACTION THREE SIXTEENTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B82, 0x0B82 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAMIL SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B83, 0x0B83 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAMIL SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B85, 0x0B8A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] TAMIL LETTER A..TAMIL LETTER UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B8E, 0x0B90 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] TAMIL LETTER E..TAMIL LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B92, 0x0B95 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] TAMIL LETTER O..TAMIL LETTER KA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B99, 0x0B9A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TAMIL LETTER NGA..TAMIL LETTER CA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B9C, 0x0B9C }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAMIL LETTER JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0B9E, 0x0B9F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TAMIL LETTER NYA..TAMIL LETTER TTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BA3, 0x0BA4 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TAMIL LETTER NNA..TAMIL LETTER TA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BA8, 0x0BAA }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] TAMIL LETTER NA..TAMIL LETTER PA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BAE, 0x0BB9 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [12] TAMIL LETTER MA..TAMIL LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BBE, 0x0BBF }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] TAMIL VOWEL SIGN AA..TAMIL VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BC0, 0x0BC0 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAMIL VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BC1, 0x0BC2 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] TAMIL VOWEL SIGN U..TAMIL VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BC6, 0x0BC8 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] TAMIL VOWEL SIGN E..TAMIL VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BCA, 0x0BCC }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] TAMIL VOWEL SIGN O..TAMIL VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BCD, 0x0BCD }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAMIL SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BD0, 0x0BD0 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAMIL OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BD7, 0x0BD7 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAMIL AU LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BE6, 0x0BEF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TAMIL DIGIT ZERO..TAMIL DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BF0, 0x0BF2 }, crispy::text::EastAsianWidth::Neutral }, // No     [3] TAMIL NUMBER TEN..TAMIL NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BF3, 0x0BF8 }, crispy::text::EastAsianWidth::Neutral }, // So     [6] TAMIL DAY SIGN..TAMIL AS ABOVE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BF9, 0x0BF9 }, crispy::text::EastAsianWidth::Neutral }, // Sc         TAMIL RUPEE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0BFA, 0x0BFA }, crispy::text::EastAsianWidth::Neutral }, // So         TAMIL NUMBER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C00, 0x0C00 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TELUGU SIGN COMBINING CANDRABINDU ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C01, 0x0C03 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] TELUGU SIGN CANDRABINDU..TELUGU SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C04, 0x0C04 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TELUGU SIGN COMBINING ANUSVARA ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C05, 0x0C0C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] TELUGU LETTER A..TELUGU LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C0E, 0x0C10 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] TELUGU LETTER E..TELUGU LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C12, 0x0C28 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] TELUGU LETTER O..TELUGU LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C2A, 0x0C39 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [16] TELUGU LETTER PA..TELUGU LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C3D, 0x0C3D }, crispy::text::EastAsianWidth::Neutral }, // Lo         TELUGU SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C3E, 0x0C40 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] TELUGU VOWEL SIGN AA..TELUGU VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C41, 0x0C44 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] TELUGU VOWEL SIGN U..TELUGU VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C46, 0x0C48 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] TELUGU VOWEL SIGN E..TELUGU VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C4A, 0x0C4D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] TELUGU VOWEL SIGN O..TELUGU SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C55, 0x0C56 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TELUGU LENGTH MARK..TELUGU AI LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C58, 0x0C5A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] TELUGU LETTER TSA..TELUGU LETTER RRRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C60, 0x0C61 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TELUGU LETTER VOCALIC RR..TELUGU LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C62, 0x0C63 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TELUGU VOWEL SIGN VOCALIC L..TELUGU VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C66, 0x0C6F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TELUGU DIGIT ZERO..TELUGU DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C77, 0x0C77 }, crispy::text::EastAsianWidth::Neutral }, // Po         TELUGU SIGN SIDDHAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C78, 0x0C7E }, crispy::text::EastAsianWidth::Neutral }, // No     [7] TELUGU FRACTION DIGIT ZERO FOR ODD POWERS OF FOUR..TELUGU FRACTION DIGIT THREE FOR EVEN POWERS OF FOUR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C7F, 0x0C7F }, crispy::text::EastAsianWidth::Neutral }, // So         TELUGU SIGN TUUMU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C80, 0x0C80 }, crispy::text::EastAsianWidth::Neutral }, // Lo         KANNADA SIGN SPACING CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C81, 0x0C81 }, crispy::text::EastAsianWidth::Neutral }, // Mn         KANNADA SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C82, 0x0C83 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KANNADA SIGN ANUSVARA..KANNADA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C84, 0x0C84 }, crispy::text::EastAsianWidth::Neutral }, // Po         KANNADA SIGN SIDDHAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C85, 0x0C8C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] KANNADA LETTER A..KANNADA LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C8E, 0x0C90 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] KANNADA LETTER E..KANNADA LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0C92, 0x0CA8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] KANNADA LETTER O..KANNADA LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CAA, 0x0CB3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] KANNADA LETTER PA..KANNADA LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CB5, 0x0CB9 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] KANNADA LETTER VA..KANNADA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CBC, 0x0CBC }, crispy::text::EastAsianWidth::Neutral }, // Mn         KANNADA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CBD, 0x0CBD }, crispy::text::EastAsianWidth::Neutral }, // Lo         KANNADA SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CBE, 0x0CBE }, crispy::text::EastAsianWidth::Neutral }, // Mc         KANNADA VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CBF, 0x0CBF }, crispy::text::EastAsianWidth::Neutral }, // Mn         KANNADA VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CC0, 0x0CC4 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [5] KANNADA VOWEL SIGN II..KANNADA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CC6, 0x0CC6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         KANNADA VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CC7, 0x0CC8 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KANNADA VOWEL SIGN EE..KANNADA VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CCA, 0x0CCB }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KANNADA VOWEL SIGN O..KANNADA VOWEL SIGN OO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CCC, 0x0CCD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KANNADA VOWEL SIGN AU..KANNADA SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CD5, 0x0CD6 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KANNADA LENGTH MARK..KANNADA AI LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CDE, 0x0CDE }, crispy::text::EastAsianWidth::Neutral }, // Lo         KANNADA LETTER FA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CE0, 0x0CE1 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] KANNADA LETTER VOCALIC RR..KANNADA LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CE2, 0x0CE3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KANNADA VOWEL SIGN VOCALIC L..KANNADA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CE6, 0x0CEF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] KANNADA DIGIT ZERO..KANNADA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0CF1, 0x0CF2 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] KANNADA SIGN JIHVAMULIYA..KANNADA SIGN UPADHMANIYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D00, 0x0D01 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MALAYALAM SIGN COMBINING ANUSVARA ABOVE..MALAYALAM SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D02, 0x0D03 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MALAYALAM SIGN ANUSVARA..MALAYALAM SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D04, 0x0D0C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] MALAYALAM LETTER VEDIC ANUSVARA..MALAYALAM LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D0E, 0x0D10 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] MALAYALAM LETTER E..MALAYALAM LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D12, 0x0D3A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [41] MALAYALAM LETTER O..MALAYALAM LETTER TTTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D3B, 0x0D3C }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MALAYALAM SIGN VERTICAL BAR VIRAMA..MALAYALAM SIGN CIRCULAR VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D3D, 0x0D3D }, crispy::text::EastAsianWidth::Neutral }, // Lo         MALAYALAM SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D3E, 0x0D40 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MALAYALAM VOWEL SIGN AA..MALAYALAM VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D41, 0x0D44 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] MALAYALAM VOWEL SIGN U..MALAYALAM VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D46, 0x0D48 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MALAYALAM VOWEL SIGN E..MALAYALAM VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D4A, 0x0D4C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MALAYALAM VOWEL SIGN O..MALAYALAM VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D4D, 0x0D4D }, crispy::text::EastAsianWidth::Neutral }, // Mn         MALAYALAM SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D4E, 0x0D4E }, crispy::text::EastAsianWidth::Neutral }, // Lo         MALAYALAM LETTER DOT REPH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D4F, 0x0D4F }, crispy::text::EastAsianWidth::Neutral }, // So         MALAYALAM SIGN PARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D54, 0x0D56 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] MALAYALAM LETTER CHILLU M..MALAYALAM LETTER CHILLU LLL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D57, 0x0D57 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MALAYALAM AU LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D58, 0x0D5E }, crispy::text::EastAsianWidth::Neutral }, // No     [7] MALAYALAM FRACTION ONE ONE-HUNDRED-AND-SIXTIETH..MALAYALAM FRACTION ONE FIFTH
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D5F, 0x0D61 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] MALAYALAM LETTER ARCHAIC II..MALAYALAM LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D62, 0x0D63 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MALAYALAM VOWEL SIGN VOCALIC L..MALAYALAM VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D66, 0x0D6F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MALAYALAM DIGIT ZERO..MALAYALAM DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D70, 0x0D78 }, crispy::text::EastAsianWidth::Neutral }, // No     [9] MALAYALAM NUMBER TEN..MALAYALAM FRACTION THREE SIXTEENTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D79, 0x0D79 }, crispy::text::EastAsianWidth::Neutral }, // So         MALAYALAM DATE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D7A, 0x0D7F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] MALAYALAM LETTER CHILLU NN..MALAYALAM LETTER CHILLU K
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D81, 0x0D81 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SINHALA SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D82, 0x0D83 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SINHALA SIGN ANUSVARAYA..SINHALA SIGN VISARGAYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D85, 0x0D96 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] SINHALA LETTER AYANNA..SINHALA LETTER AUYANNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0D9A, 0x0DB1 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [24] SINHALA LETTER ALPAPRAANA KAYANNA..SINHALA LETTER DANTAJA NAYANNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DB3, 0x0DBB }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] SINHALA LETTER SANYAKA DAYANNA..SINHALA LETTER RAYANNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DBD, 0x0DBD }, crispy::text::EastAsianWidth::Neutral }, // Lo         SINHALA LETTER DANTAJA LAYANNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DC0, 0x0DC6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] SINHALA LETTER VAYANNA..SINHALA LETTER FAYANNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DCA, 0x0DCA }, crispy::text::EastAsianWidth::Neutral }, // Mn         SINHALA SIGN AL-LAKUNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DCF, 0x0DD1 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] SINHALA VOWEL SIGN AELA-PILLA..SINHALA VOWEL SIGN DIGA AEDA-PILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DD2, 0x0DD4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] SINHALA VOWEL SIGN KETTI IS-PILLA..SINHALA VOWEL SIGN KETTI PAA-PILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DD6, 0x0DD6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SINHALA VOWEL SIGN DIGA PAA-PILLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DD8, 0x0DDF }, crispy::text::EastAsianWidth::Neutral }, // Mc     [8] SINHALA VOWEL SIGN GAETTA-PILLA..SINHALA VOWEL SIGN GAYANUKITTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DE6, 0x0DEF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SINHALA LITH DIGIT ZERO..SINHALA LITH DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DF2, 0x0DF3 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SINHALA VOWEL SIGN DIGA GAETTA-PILLA..SINHALA VOWEL SIGN DIGA GAYANUKITTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0DF4, 0x0DF4 }, crispy::text::EastAsianWidth::Neutral }, // Po         SINHALA PUNCTUATION KUNDDALIYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E01, 0x0E30 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] THAI CHARACTER KO KAI..THAI CHARACTER SARA A
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E31, 0x0E31 }, crispy::text::EastAsianWidth::Neutral }, // Mn         THAI CHARACTER MAI HAN-AKAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E32, 0x0E33 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] THAI CHARACTER SARA AA..THAI CHARACTER SARA AM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E34, 0x0E3A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] THAI CHARACTER SARA I..THAI CHARACTER PHINTHU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E3F, 0x0E3F }, crispy::text::EastAsianWidth::Neutral }, // Sc         THAI CURRENCY SYMBOL BAHT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E40, 0x0E45 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] THAI CHARACTER SARA E..THAI CHARACTER LAKKHANGYAO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E46, 0x0E46 }, crispy::text::EastAsianWidth::Neutral }, // Lm         THAI CHARACTER MAIYAMOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E47, 0x0E4E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] THAI CHARACTER MAITAIKHU..THAI CHARACTER YAMAKKAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E4F, 0x0E4F }, crispy::text::EastAsianWidth::Neutral }, // Po         THAI CHARACTER FONGMAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E50, 0x0E59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] THAI DIGIT ZERO..THAI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E5A, 0x0E5B }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] THAI CHARACTER ANGKHANKHU..THAI CHARACTER KHOMUT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E81, 0x0E82 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] LAO LETTER KO..LAO LETTER KHO SUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E84, 0x0E84 }, crispy::text::EastAsianWidth::Neutral }, // Lo         LAO LETTER KHO TAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E86, 0x0E8A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] LAO LETTER PALI GHA..LAO LETTER SO TAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0E8C, 0x0EA3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [24] LAO LETTER PALI JHA..LAO LETTER LO LING
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EA5, 0x0EA5 }, crispy::text::EastAsianWidth::Neutral }, // Lo         LAO LETTER LO LOOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EA7, 0x0EB0 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] LAO LETTER WO..LAO VOWEL SIGN A
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EB1, 0x0EB1 }, crispy::text::EastAsianWidth::Neutral }, // Mn         LAO VOWEL SIGN MAI KAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EB2, 0x0EB3 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] LAO VOWEL SIGN AA..LAO VOWEL SIGN AM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EB4, 0x0EBC }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] LAO VOWEL SIGN I..LAO SEMIVOWEL SIGN LO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EBD, 0x0EBD }, crispy::text::EastAsianWidth::Neutral }, // Lo         LAO SEMIVOWEL SIGN NYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EC0, 0x0EC4 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] LAO VOWEL SIGN E..LAO VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EC6, 0x0EC6 }, crispy::text::EastAsianWidth::Neutral }, // Lm         LAO KO LA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EC8, 0x0ECD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] LAO TONE MAI EK..LAO NIGGAHITA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0ED0, 0x0ED9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] LAO DIGIT ZERO..LAO DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0EDC, 0x0EDF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] LAO HO NO..LAO LETTER KHMU NYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F00, 0x0F00 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TIBETAN SYLLABLE OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F01, 0x0F03 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] TIBETAN MARK GTER YIG MGO TRUNCATED A..TIBETAN MARK GTER YIG MGO -UM GTER TSHEG MA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F04, 0x0F12 }, crispy::text::EastAsianWidth::Neutral }, // Po    [15] TIBETAN MARK INITIAL YIG MGO MDUN MA..TIBETAN MARK RGYA GRAM SHAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F13, 0x0F13 }, crispy::text::EastAsianWidth::Neutral }, // So         TIBETAN MARK CARET -DZUD RTAGS ME LONG CAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F14, 0x0F14 }, crispy::text::EastAsianWidth::Neutral }, // Po         TIBETAN MARK GTER TSHEG
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F15, 0x0F17 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] TIBETAN LOGOTYPE SIGN CHAD RTAGS..TIBETAN ASTROLOGICAL SIGN SGRA GCAN -CHAR RTAGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F18, 0x0F19 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TIBETAN ASTROLOGICAL SIGN -KHYUD PA..TIBETAN ASTROLOGICAL SIGN SDONG TSHUGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F1A, 0x0F1F }, crispy::text::EastAsianWidth::Neutral }, // So     [6] TIBETAN SIGN RDEL DKAR GCIG..TIBETAN SIGN RDEL DKAR RDEL NAG
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F20, 0x0F29 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TIBETAN DIGIT ZERO..TIBETAN DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F2A, 0x0F33 }, crispy::text::EastAsianWidth::Neutral }, // No    [10] TIBETAN DIGIT HALF ONE..TIBETAN DIGIT HALF ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F34, 0x0F34 }, crispy::text::EastAsianWidth::Neutral }, // So         TIBETAN MARK BSDUS RTAGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F35, 0x0F35 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIBETAN MARK NGAS BZUNG NYI ZLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F36, 0x0F36 }, crispy::text::EastAsianWidth::Neutral }, // So         TIBETAN MARK CARET -DZUD RTAGS BZHI MIG CAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F37, 0x0F37 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIBETAN MARK NGAS BZUNG SGOR RTAGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F38, 0x0F38 }, crispy::text::EastAsianWidth::Neutral }, // So         TIBETAN MARK CHE MGO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F39, 0x0F39 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIBETAN MARK TSA -PHRU
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F3A, 0x0F3A }, crispy::text::EastAsianWidth::Neutral }, // Ps         TIBETAN MARK GUG RTAGS GYON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F3B, 0x0F3B }, crispy::text::EastAsianWidth::Neutral }, // Pe         TIBETAN MARK GUG RTAGS GYAS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F3C, 0x0F3C }, crispy::text::EastAsianWidth::Neutral }, // Ps         TIBETAN MARK ANG KHANG GYON
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F3D, 0x0F3D }, crispy::text::EastAsianWidth::Neutral }, // Pe         TIBETAN MARK ANG KHANG GYAS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F3E, 0x0F3F }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] TIBETAN SIGN YAR TSHES..TIBETAN SIGN MAR TSHES
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F40, 0x0F47 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] TIBETAN LETTER KA..TIBETAN LETTER JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F49, 0x0F6C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [36] TIBETAN LETTER NYA..TIBETAN LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F71, 0x0F7E }, crispy::text::EastAsianWidth::Neutral }, // Mn    [14] TIBETAN VOWEL SIGN AA..TIBETAN SIGN RJES SU NGA RO
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F7F, 0x0F7F }, crispy::text::EastAsianWidth::Neutral }, // Mc         TIBETAN SIGN RNAM BCAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F80, 0x0F84 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] TIBETAN VOWEL SIGN REVERSED I..TIBETAN MARK HALANTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F85, 0x0F85 }, crispy::text::EastAsianWidth::Neutral }, // Po         TIBETAN MARK PALUTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F86, 0x0F87 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TIBETAN SIGN LCI RTAGS..TIBETAN SIGN YANG RTAGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F88, 0x0F8C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] TIBETAN SIGN LCE TSA CAN..TIBETAN SIGN INVERTED MCHU CAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F8D, 0x0F97 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] TIBETAN SUBJOINED SIGN LCE TSA CAN..TIBETAN SUBJOINED LETTER JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0F99, 0x0FBC }, crispy::text::EastAsianWidth::Neutral }, // Mn    [36] TIBETAN SUBJOINED LETTER NYA..TIBETAN SUBJOINED LETTER FIXED-FORM RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FBE, 0x0FC5 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] TIBETAN KU RU KHA..TIBETAN SYMBOL RDO RJE
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FC6, 0x0FC6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIBETAN SYMBOL PADMA GDAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FC7, 0x0FCC }, crispy::text::EastAsianWidth::Neutral }, // So     [6] TIBETAN SYMBOL RDO RJE RGYA GRAM..TIBETAN SYMBOL NOR BU BZHI -KHYIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FCE, 0x0FCF }, crispy::text::EastAsianWidth::Neutral }, // So     [2] TIBETAN SIGN RDEL NAG RDEL DKAR..TIBETAN SIGN RDEL NAG GSUM
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FD0, 0x0FD4 }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] TIBETAN MARK BSKA- SHOG GI MGO RGYAN..TIBETAN MARK CLOSING BRDA RNYING YIG MGO SGAB MA
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FD5, 0x0FD8 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] RIGHT-FACING SVASTI SIGN..LEFT-FACING SVASTI SIGN WITH DOTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x0FD9, 0x0FDA }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] TIBETAN MARK LEADING MCHAN RTAGS..TIBETAN MARK TRAILING MCHAN RTAGS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1000, 0x102A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [43] MYANMAR LETTER KA..MYANMAR LETTER AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x102B, 0x102C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MYANMAR VOWEL SIGN TALL AA..MYANMAR VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x102D, 0x1030 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] MYANMAR VOWEL SIGN I..MYANMAR VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1031, 0x1031 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MYANMAR VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x1032, 0x1037 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] MYANMAR VOWEL SIGN AI..MYANMAR SIGN DOT BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1038, 0x1038 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MYANMAR SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1039, 0x103A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MYANMAR SIGN VIRAMA..MYANMAR SIGN ASAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x103B, 0x103C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MYANMAR CONSONANT SIGN MEDIAL YA..MYANMAR CONSONANT SIGN MEDIAL RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x103D, 0x103E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MYANMAR CONSONANT SIGN MEDIAL WA..MYANMAR CONSONANT SIGN MEDIAL HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x103F, 0x103F }, crispy::text::EastAsianWidth::Neutral }, // Lo         MYANMAR LETTER GREAT SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1040, 0x1049 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MYANMAR DIGIT ZERO..MYANMAR DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x104A, 0x104F }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] MYANMAR SIGN LITTLE SECTION..MYANMAR SYMBOL GENITIVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1050, 0x1055 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] MYANMAR LETTER SHA..MYANMAR LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1056, 0x1057 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MYANMAR VOWEL SIGN VOCALIC R..MYANMAR VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1058, 0x1059 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MYANMAR VOWEL SIGN VOCALIC L..MYANMAR VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x105A, 0x105D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] MYANMAR LETTER MON NGA..MYANMAR LETTER MON BBE
+    Prop<crispy::text::EastAsianWidth>{ { 0x105E, 0x1060 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] MYANMAR CONSONANT SIGN MON MEDIAL NA..MYANMAR CONSONANT SIGN MON MEDIAL LA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1061, 0x1061 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MYANMAR LETTER SGAW KAREN SHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1062, 0x1064 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MYANMAR VOWEL SIGN SGAW KAREN EU..MYANMAR TONE MARK SGAW KAREN KE PHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1065, 0x1066 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] MYANMAR LETTER WESTERN PWO KAREN THA..MYANMAR LETTER WESTERN PWO KAREN PWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1067, 0x106D }, crispy::text::EastAsianWidth::Neutral }, // Mc     [7] MYANMAR VOWEL SIGN WESTERN PWO KAREN EU..MYANMAR SIGN WESTERN PWO KAREN TONE-5
+    Prop<crispy::text::EastAsianWidth>{ { 0x106E, 0x1070 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] MYANMAR LETTER EASTERN PWO KAREN NNA..MYANMAR LETTER EASTERN PWO KAREN GHWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1071, 0x1074 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] MYANMAR VOWEL SIGN GEBA KAREN I..MYANMAR VOWEL SIGN KAYAH EE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1075, 0x1081 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [13] MYANMAR LETTER SHAN KA..MYANMAR LETTER SHAN HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1082, 0x1082 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MYANMAR CONSONANT SIGN SHAN MEDIAL WA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1083, 0x1084 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MYANMAR VOWEL SIGN SHAN AA..MYANMAR VOWEL SIGN SHAN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x1085, 0x1086 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MYANMAR VOWEL SIGN SHAN E ABOVE..MYANMAR VOWEL SIGN SHAN FINAL Y
+    Prop<crispy::text::EastAsianWidth>{ { 0x1087, 0x108C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [6] MYANMAR SIGN SHAN TONE-2..MYANMAR SIGN SHAN COUNCIL TONE-3
+    Prop<crispy::text::EastAsianWidth>{ { 0x108D, 0x108D }, crispy::text::EastAsianWidth::Neutral }, // Mn         MYANMAR SIGN SHAN COUNCIL EMPHATIC TONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x108E, 0x108E }, crispy::text::EastAsianWidth::Neutral }, // Lo         MYANMAR LETTER RUMAI PALAUNG FA
+    Prop<crispy::text::EastAsianWidth>{ { 0x108F, 0x108F }, crispy::text::EastAsianWidth::Neutral }, // Mc         MYANMAR SIGN RUMAI PALAUNG TONE-5
+    Prop<crispy::text::EastAsianWidth>{ { 0x1090, 0x1099 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MYANMAR SHAN DIGIT ZERO..MYANMAR SHAN DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x109A, 0x109C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MYANMAR SIGN KHAMTI TONE-1..MYANMAR VOWEL SIGN AITON A
+    Prop<crispy::text::EastAsianWidth>{ { 0x109D, 0x109D }, crispy::text::EastAsianWidth::Neutral }, // Mn         MYANMAR VOWEL SIGN AITON AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x109E, 0x109F }, crispy::text::EastAsianWidth::Neutral }, // So     [2] MYANMAR SYMBOL SHAN ONE..MYANMAR SYMBOL SHAN EXCLAMATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A0, 0x10C5 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [38] GEORGIAN CAPITAL LETTER AN..GEORGIAN CAPITAL LETTER HOE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10C7, 0x10C7 }, crispy::text::EastAsianWidth::Neutral }, // Lu         GEORGIAN CAPITAL LETTER YN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10CD, 0x10CD }, crispy::text::EastAsianWidth::Neutral }, // Lu         GEORGIAN CAPITAL LETTER AEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10D0, 0x10FA }, crispy::text::EastAsianWidth::Neutral }, // Ll    [43] GEORGIAN LETTER AN..GEORGIAN LETTER AIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FB, 0x10FB }, crispy::text::EastAsianWidth::Neutral }, // Po         GEORGIAN PARAGRAPH SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FC, 0x10FC }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER GEORGIAN NAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FD, 0x10FF }, crispy::text::EastAsianWidth::Neutral }, // Ll     [3] GEORGIAN LETTER AEN..GEORGIAN LETTER LABIAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1100, 0x115F }, crispy::text::EastAsianWidth::Wide }, // Lo    [96] HANGUL CHOSEONG KIYEOK..HANGUL CHOSEONG FILLER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1160, 0x11FF }, crispy::text::EastAsianWidth::Neutral }, // Lo   [160] HANGUL JUNGSEONG FILLER..HANGUL JONGSEONG SSANGNIEUN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1200, 0x1248 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [73] ETHIOPIC SYLLABLE HA..ETHIOPIC SYLLABLE QWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x124A, 0x124D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE QWI..ETHIOPIC SYLLABLE QWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1250, 0x1256 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE QHA..ETHIOPIC SYLLABLE QHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1258, 0x1258 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ETHIOPIC SYLLABLE QHWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x125A, 0x125D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE QHWI..ETHIOPIC SYLLABLE QHWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1260, 0x1288 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [41] ETHIOPIC SYLLABLE BA..ETHIOPIC SYLLABLE XWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x128A, 0x128D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE XWI..ETHIOPIC SYLLABLE XWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1290, 0x12B0 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [33] ETHIOPIC SYLLABLE NA..ETHIOPIC SYLLABLE KWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x12B2, 0x12B5 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE KWI..ETHIOPIC SYLLABLE KWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x12B8, 0x12BE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE KXA..ETHIOPIC SYLLABLE KXO
+    Prop<crispy::text::EastAsianWidth>{ { 0x12C0, 0x12C0 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ETHIOPIC SYLLABLE KXWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x12C2, 0x12C5 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE KXWI..ETHIOPIC SYLLABLE KXWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x12C8, 0x12D6 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [15] ETHIOPIC SYLLABLE WA..ETHIOPIC SYLLABLE PHARYNGEAL O
+    Prop<crispy::text::EastAsianWidth>{ { 0x12D8, 0x1310 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [57] ETHIOPIC SYLLABLE ZA..ETHIOPIC SYLLABLE GWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1312, 0x1315 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ETHIOPIC SYLLABLE GWI..ETHIOPIC SYLLABLE GWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1318, 0x135A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [67] ETHIOPIC SYLLABLE GGA..ETHIOPIC SYLLABLE FYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x135D, 0x135F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] ETHIOPIC COMBINING GEMINATION AND VOWEL LENGTH MARK..ETHIOPIC COMBINING GEMINATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1360, 0x1368 }, crispy::text::EastAsianWidth::Neutral }, // Po     [9] ETHIOPIC SECTION MARK..ETHIOPIC PARAGRAPH SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1369, 0x137C }, crispy::text::EastAsianWidth::Neutral }, // No    [20] ETHIOPIC DIGIT ONE..ETHIOPIC NUMBER TEN THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x1380, 0x138F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [16] ETHIOPIC SYLLABLE SEBATBEIT MWA..ETHIOPIC SYLLABLE PWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1390, 0x1399 }, crispy::text::EastAsianWidth::Neutral }, // So    [10] ETHIOPIC TONAL MARK YIZET..ETHIOPIC TONAL MARK KURT
+    Prop<crispy::text::EastAsianWidth>{ { 0x13A0, 0x13F5 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [86] CHEROKEE LETTER A..CHEROKEE LETTER MV
+    Prop<crispy::text::EastAsianWidth>{ { 0x13F8, 0x13FD }, crispy::text::EastAsianWidth::Neutral }, // Ll     [6] CHEROKEE SMALL LETTER YE..CHEROKEE SMALL LETTER MV
+    Prop<crispy::text::EastAsianWidth>{ { 0x1400, 0x1400 }, crispy::text::EastAsianWidth::Neutral }, // Pd         CANADIAN SYLLABICS HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1401, 0x166C }, crispy::text::EastAsianWidth::Neutral }, // Lo   [620] CANADIAN SYLLABICS E..CANADIAN SYLLABICS CARRIER TTSA
+    Prop<crispy::text::EastAsianWidth>{ { 0x166D, 0x166D }, crispy::text::EastAsianWidth::Neutral }, // So         CANADIAN SYLLABICS CHI SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x166E, 0x166E }, crispy::text::EastAsianWidth::Neutral }, // Po         CANADIAN SYLLABICS FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x166F, 0x167F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [17] CANADIAN SYLLABICS QAI..CANADIAN SYLLABICS BLACKFOOT W
+    Prop<crispy::text::EastAsianWidth>{ { 0x1680, 0x1680 }, crispy::text::EastAsianWidth::Neutral }, // Zs         OGHAM SPACE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1681, 0x169A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [26] OGHAM LETTER BEITH..OGHAM LETTER PEITH
+    Prop<crispy::text::EastAsianWidth>{ { 0x169B, 0x169B }, crispy::text::EastAsianWidth::Neutral }, // Ps         OGHAM FEATHER MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x169C, 0x169C }, crispy::text::EastAsianWidth::Neutral }, // Pe         OGHAM REVERSED FEATHER MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x16A0, 0x16EA }, crispy::text::EastAsianWidth::Neutral }, // Lo    [75] RUNIC LETTER FEHU FEOH FE F..RUNIC LETTER X
+    Prop<crispy::text::EastAsianWidth>{ { 0x16EB, 0x16ED }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] RUNIC SINGLE PUNCTUATION..RUNIC CROSS PUNCTUATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x16EE, 0x16F0 }, crispy::text::EastAsianWidth::Neutral }, // Nl     [3] RUNIC ARLAUG SYMBOL..RUNIC BELGTHOR SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F1, 0x16F8 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] RUNIC LETTER K..RUNIC LETTER FRANKS CASKET AESC
+    Prop<crispy::text::EastAsianWidth>{ { 0x1700, 0x170C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [13] TAGALOG LETTER A..TAGALOG LETTER YA
+    Prop<crispy::text::EastAsianWidth>{ { 0x170E, 0x1711 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] TAGALOG LETTER LA..TAGALOG LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1712, 0x1714 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] TAGALOG VOWEL SIGN I..TAGALOG SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1720, 0x1731 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] HANUNOO LETTER A..HANUNOO LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1732, 0x1734 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] HANUNOO VOWEL SIGN I..HANUNOO SIGN PAMUDPOD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1735, 0x1736 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] PHILIPPINE SINGLE PUNCTUATION..PHILIPPINE DOUBLE PUNCTUATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x1740, 0x1751 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] BUHID LETTER A..BUHID LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1752, 0x1753 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] BUHID VOWEL SIGN I..BUHID VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1760, 0x176C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [13] TAGBANWA LETTER A..TAGBANWA LETTER YA
+    Prop<crispy::text::EastAsianWidth>{ { 0x176E, 0x1770 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] TAGBANWA LETTER LA..TAGBANWA LETTER SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1772, 0x1773 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TAGBANWA VOWEL SIGN I..TAGBANWA VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1780, 0x17B3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [52] KHMER LETTER KA..KHMER INDEPENDENT VOWEL QAU
+    Prop<crispy::text::EastAsianWidth>{ { 0x17B4, 0x17B5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KHMER VOWEL INHERENT AQ..KHMER VOWEL INHERENT AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x17B6, 0x17B6 }, crispy::text::EastAsianWidth::Neutral }, // Mc         KHMER VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x17B7, 0x17BD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] KHMER VOWEL SIGN I..KHMER VOWEL SIGN UA
+    Prop<crispy::text::EastAsianWidth>{ { 0x17BE, 0x17C5 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [8] KHMER VOWEL SIGN OE..KHMER VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x17C6, 0x17C6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHMER SIGN NIKAHIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x17C7, 0x17C8 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KHMER SIGN REAHMUK..KHMER SIGN YUUKALEAPINTU
+    Prop<crispy::text::EastAsianWidth>{ { 0x17C9, 0x17D3 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] KHMER SIGN MUUSIKATOAN..KHMER SIGN BATHAMASAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x17D4, 0x17D6 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] KHMER SIGN KHAN..KHMER SIGN CAMNUC PII KUUH
+    Prop<crispy::text::EastAsianWidth>{ { 0x17D7, 0x17D7 }, crispy::text::EastAsianWidth::Neutral }, // Lm         KHMER SIGN LEK TOO
+    Prop<crispy::text::EastAsianWidth>{ { 0x17D8, 0x17DA }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] KHMER SIGN BEYYAL..KHMER SIGN KOOMUUT
+    Prop<crispy::text::EastAsianWidth>{ { 0x17DB, 0x17DB }, crispy::text::EastAsianWidth::Neutral }, // Sc         KHMER CURRENCY SYMBOL RIEL
+    Prop<crispy::text::EastAsianWidth>{ { 0x17DC, 0x17DC }, crispy::text::EastAsianWidth::Neutral }, // Lo         KHMER SIGN AVAKRAHASANYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x17DD, 0x17DD }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHMER SIGN ATTHACAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x17E0, 0x17E9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] KHMER DIGIT ZERO..KHMER DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x17F0, 0x17F9 }, crispy::text::EastAsianWidth::Neutral }, // No    [10] KHMER SYMBOL LEK ATTAK SON..KHMER SYMBOL LEK ATTAK PRAM-BUON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1800, 0x1805 }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] MONGOLIAN BIRGA..MONGOLIAN FOUR DOTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1806, 0x1806 }, crispy::text::EastAsianWidth::Neutral }, // Pd         MONGOLIAN TODO SOFT HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1807, 0x180A }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] MONGOLIAN SIBE SYLLABLE BOUNDARY MARKER..MONGOLIAN NIRUGU
+    Prop<crispy::text::EastAsianWidth>{ { 0x180B, 0x180D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] MONGOLIAN FREE VARIATION SELECTOR ONE..MONGOLIAN FREE VARIATION SELECTOR THREE
+    Prop<crispy::text::EastAsianWidth>{ { 0x180E, 0x180E }, crispy::text::EastAsianWidth::Neutral }, // Cf         MONGOLIAN VOWEL SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1810, 0x1819 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MONGOLIAN DIGIT ZERO..MONGOLIAN DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1820, 0x1842 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [35] MONGOLIAN LETTER A..MONGOLIAN LETTER CHI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1843, 0x1843 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MONGOLIAN LETTER TODO LONG VOWEL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1844, 0x1878 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [53] MONGOLIAN LETTER TODO E..MONGOLIAN LETTER CHA WITH TWO DOTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1880, 0x1884 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] MONGOLIAN LETTER ALI GALI ANUSVARA ONE..MONGOLIAN LETTER ALI GALI INVERTED UBADAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1885, 0x1886 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MONGOLIAN LETTER ALI GALI BALUDA..MONGOLIAN LETTER ALI GALI THREE BALUDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1887, 0x18A8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [34] MONGOLIAN LETTER ALI GALI A..MONGOLIAN LETTER MANCHU ALI GALI BHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x18A9, 0x18A9 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MONGOLIAN LETTER ALI GALI DAGALGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x18AA, 0x18AA }, crispy::text::EastAsianWidth::Neutral }, // Lo         MONGOLIAN LETTER MANCHU ALI GALI LHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x18B0, 0x18F5 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [70] CANADIAN SYLLABICS OY..CANADIAN SYLLABICS CARRIER DENTAL S
+    Prop<crispy::text::EastAsianWidth>{ { 0x1900, 0x191E }, crispy::text::EastAsianWidth::Neutral }, // Lo    [31] LIMBU VOWEL-CARRIER LETTER..LIMBU LETTER TRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1920, 0x1922 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] LIMBU VOWEL SIGN A..LIMBU VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1923, 0x1926 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] LIMBU VOWEL SIGN EE..LIMBU VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1927, 0x1928 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] LIMBU VOWEL SIGN E..LIMBU VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1929, 0x192B }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] LIMBU SUBJOINED LETTER YA..LIMBU SUBJOINED LETTER WA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1930, 0x1931 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] LIMBU SMALL LETTER KA..LIMBU SMALL LETTER NGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1932, 0x1932 }, crispy::text::EastAsianWidth::Neutral }, // Mn         LIMBU SMALL LETTER ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1933, 0x1938 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [6] LIMBU SMALL LETTER TA..LIMBU SMALL LETTER LA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1939, 0x193B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] LIMBU SIGN MUKPHRENG..LIMBU SIGN SA-I
+    Prop<crispy::text::EastAsianWidth>{ { 0x1940, 0x1940 }, crispy::text::EastAsianWidth::Neutral }, // So         LIMBU SIGN LOO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1944, 0x1945 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] LIMBU EXCLAMATION MARK..LIMBU QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1946, 0x194F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] LIMBU DIGIT ZERO..LIMBU DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1950, 0x196D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] TAI LE LETTER KA..TAI LE LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1970, 0x1974 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] TAI LE LETTER TONE-2..TAI LE LETTER TONE-6
+    Prop<crispy::text::EastAsianWidth>{ { 0x1980, 0x19AB }, crispy::text::EastAsianWidth::Neutral }, // Lo    [44] NEW TAI LUE LETTER HIGH QA..NEW TAI LUE LETTER LOW SUA
+    Prop<crispy::text::EastAsianWidth>{ { 0x19B0, 0x19C9 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [26] NEW TAI LUE VOWEL SIGN VOWEL SHORTENER..NEW TAI LUE TONE MARK-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x19D0, 0x19D9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] NEW TAI LUE DIGIT ZERO..NEW TAI LUE DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x19DA, 0x19DA }, crispy::text::EastAsianWidth::Neutral }, // No         NEW TAI LUE THAM DIGIT ONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x19DE, 0x19DF }, crispy::text::EastAsianWidth::Neutral }, // So     [2] NEW TAI LUE SIGN LAE..NEW TAI LUE SIGN LAEV
+    Prop<crispy::text::EastAsianWidth>{ { 0x19E0, 0x19FF }, crispy::text::EastAsianWidth::Neutral }, // So    [32] KHMER SYMBOL PATHAMASAT..KHMER SYMBOL DAP-PRAM ROC
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A00, 0x1A16 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] BUGINESE LETTER KA..BUGINESE LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A17, 0x1A18 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] BUGINESE VOWEL SIGN I..BUGINESE VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A19, 0x1A1A }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BUGINESE VOWEL SIGN E..BUGINESE VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A1B, 0x1A1B }, crispy::text::EastAsianWidth::Neutral }, // Mn         BUGINESE VOWEL SIGN AE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A1E, 0x1A1F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] BUGINESE PALLAWA..BUGINESE END OF SECTION
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A20, 0x1A54 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [53] TAI THAM LETTER HIGH KA..TAI THAM LETTER GREAT SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A55, 0x1A55 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAI THAM CONSONANT SIGN MEDIAL RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A56, 0x1A56 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI THAM CONSONANT SIGN MEDIAL LA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A57, 0x1A57 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAI THAM CONSONANT SIGN LA TANG LAI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A58, 0x1A5E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] TAI THAM SIGN MAI KANG LAI..TAI THAM CONSONANT SIGN SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A60, 0x1A60 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI THAM SIGN SAKOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A61, 0x1A61 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAI THAM VOWEL SIGN A
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A62, 0x1A62 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI THAM VOWEL SIGN MAI SAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A63, 0x1A64 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] TAI THAM VOWEL SIGN AA..TAI THAM VOWEL SIGN TALL AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A65, 0x1A6C }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] TAI THAM VOWEL SIGN I..TAI THAM VOWEL SIGN OA BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A6D, 0x1A72 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [6] TAI THAM VOWEL SIGN OY..TAI THAM VOWEL SIGN THAM AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A73, 0x1A7C }, crispy::text::EastAsianWidth::Neutral }, // Mn    [10] TAI THAM VOWEL SIGN OA ABOVE..TAI THAM SIGN KHUEN-LUE KARAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A7F, 0x1A7F }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI THAM COMBINING CRYPTOGRAMMIC DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A80, 0x1A89 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TAI THAM HORA DIGIT ZERO..TAI THAM HORA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1A90, 0x1A99 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TAI THAM THAM DIGIT ZERO..TAI THAM THAM DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1AA0, 0x1AA6 }, crispy::text::EastAsianWidth::Neutral }, // Po     [7] TAI THAM SIGN WIANG..TAI THAM SIGN REVERSED ROTATED RANA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1AA7, 0x1AA7 }, crispy::text::EastAsianWidth::Neutral }, // Lm         TAI THAM SIGN MAI YAMOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1AA8, 0x1AAD }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] TAI THAM SIGN KAAN..TAI THAM SIGN CAANG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1AB0, 0x1ABD }, crispy::text::EastAsianWidth::Neutral }, // Mn    [14] COMBINING DOUBLED CIRCUMFLEX ACCENT..COMBINING PARENTHESES BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ABE, 0x1ABE }, crispy::text::EastAsianWidth::Neutral }, // Me         COMBINING PARENTHESES OVERLAY
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ABF, 0x1AC0 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] COMBINING LATIN SMALL LETTER W BELOW..COMBINING LATIN SMALL LETTER TURNED W BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B00, 0x1B03 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] BALINESE SIGN ULU RICEM..BALINESE SIGN SURANG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B04, 0x1B04 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BALINESE SIGN BISAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B05, 0x1B33 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [47] BALINESE LETTER AKARA..BALINESE LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B34, 0x1B34 }, crispy::text::EastAsianWidth::Neutral }, // Mn         BALINESE SIGN REREKAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B35, 0x1B35 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BALINESE VOWEL SIGN TEDUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B36, 0x1B3A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] BALINESE VOWEL SIGN ULU..BALINESE VOWEL SIGN RA REPA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B3B, 0x1B3B }, crispy::text::EastAsianWidth::Neutral }, // Mc         BALINESE VOWEL SIGN RA REPA TEDUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B3C, 0x1B3C }, crispy::text::EastAsianWidth::Neutral }, // Mn         BALINESE VOWEL SIGN LA LENGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B3D, 0x1B41 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [5] BALINESE VOWEL SIGN LA LENGA TEDUNG..BALINESE VOWEL SIGN TALING REPA TEDUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B42, 0x1B42 }, crispy::text::EastAsianWidth::Neutral }, // Mn         BALINESE VOWEL SIGN PEPET
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B43, 0x1B44 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BALINESE VOWEL SIGN PEPET TEDUNG..BALINESE ADEG ADEG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B45, 0x1B4B }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] BALINESE LETTER KAF SASAK..BALINESE LETTER ASYURA SASAK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B50, 0x1B59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] BALINESE DIGIT ZERO..BALINESE DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B5A, 0x1B60 }, crispy::text::EastAsianWidth::Neutral }, // Po     [7] BALINESE PANTI..BALINESE PAMENENG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B61, 0x1B6A }, crispy::text::EastAsianWidth::Neutral }, // So    [10] BALINESE MUSICAL SYMBOL DONG..BALINESE MUSICAL SYMBOL DANG GEDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B6B, 0x1B73 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] BALINESE MUSICAL SYMBOL COMBINING TEGEH..BALINESE MUSICAL SYMBOL COMBINING GONG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B74, 0x1B7C }, crispy::text::EastAsianWidth::Neutral }, // So     [9] BALINESE MUSICAL SYMBOL RIGHT-HAND OPEN DUG..BALINESE MUSICAL SYMBOL LEFT-HAND OPEN PING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B80, 0x1B81 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SUNDANESE SIGN PANYECEK..SUNDANESE SIGN PANGLAYAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B82, 0x1B82 }, crispy::text::EastAsianWidth::Neutral }, // Mc         SUNDANESE SIGN PANGWISAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B83, 0x1BA0 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] SUNDANESE LETTER A..SUNDANESE LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BA1, 0x1BA1 }, crispy::text::EastAsianWidth::Neutral }, // Mc         SUNDANESE CONSONANT SIGN PAMINGKAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BA2, 0x1BA5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] SUNDANESE CONSONANT SIGN PANYAKRA..SUNDANESE VOWEL SIGN PANYUKU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BA6, 0x1BA7 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SUNDANESE VOWEL SIGN PANAELAENG..SUNDANESE VOWEL SIGN PANOLONG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BA8, 0x1BA9 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SUNDANESE VOWEL SIGN PAMEPET..SUNDANESE VOWEL SIGN PANEULEUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BAA, 0x1BAA }, crispy::text::EastAsianWidth::Neutral }, // Mc         SUNDANESE SIGN PAMAAEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BAB, 0x1BAD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] SUNDANESE SIGN VIRAMA..SUNDANESE CONSONANT SIGN PASANGAN WA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BAE, 0x1BAF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] SUNDANESE LETTER KHA..SUNDANESE LETTER SYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BB0, 0x1BB9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SUNDANESE DIGIT ZERO..SUNDANESE DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BBA, 0x1BBF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] SUNDANESE AVAGRAHA..SUNDANESE LETTER FINAL M
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC0, 0x1BE5 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [38] BATAK LETTER A..BATAK LETTER U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BE6, 0x1BE6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         BATAK SIGN TOMPI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BE7, 0x1BE7 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BATAK VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BE8, 0x1BE9 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] BATAK VOWEL SIGN PAKPAK E..BATAK VOWEL SIGN EE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BEA, 0x1BEC }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] BATAK VOWEL SIGN I..BATAK VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BED, 0x1BED }, crispy::text::EastAsianWidth::Neutral }, // Mn         BATAK VOWEL SIGN KARO O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BEE, 0x1BEE }, crispy::text::EastAsianWidth::Neutral }, // Mc         BATAK VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BEF, 0x1BF1 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] BATAK VOWEL SIGN U FOR SIMALUNGUN SA..BATAK CONSONANT SIGN H
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BF2, 0x1BF3 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] BATAK PANGOLAT..BATAK PANONGONAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BFC, 0x1BFF }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] BATAK SYMBOL BINDU NA METEK..BATAK SYMBOL BINDU PANGOLAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C00, 0x1C23 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [36] LEPCHA LETTER KA..LEPCHA LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C24, 0x1C2B }, crispy::text::EastAsianWidth::Neutral }, // Mc     [8] LEPCHA SUBJOINED LETTER YA..LEPCHA VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C2C, 0x1C33 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] LEPCHA VOWEL SIGN E..LEPCHA CONSONANT SIGN T
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C34, 0x1C35 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] LEPCHA CONSONANT SIGN NYIN-DO..LEPCHA CONSONANT SIGN KANG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C36, 0x1C37 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] LEPCHA SIGN RAN..LEPCHA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C3B, 0x1C3F }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] LEPCHA PUNCTUATION TA-ROL..LEPCHA PUNCTUATION TSHOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C40, 0x1C49 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] LEPCHA DIGIT ZERO..LEPCHA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C4D, 0x1C4F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] LEPCHA LETTER TTA..LEPCHA LETTER DDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C50, 0x1C59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] OL CHIKI DIGIT ZERO..OL CHIKI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C5A, 0x1C77 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] OL CHIKI LETTER LA..OL CHIKI LETTER OH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C78, 0x1C7D }, crispy::text::EastAsianWidth::Neutral }, // Lm     [6] OL CHIKI MU TTUDDAG..OL CHIKI AHAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C7E, 0x1C7F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] OL CHIKI PUNCTUATION MUCAAD..OL CHIKI PUNCTUATION DOUBLE MUCAAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C80, 0x1C88 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [9] CYRILLIC SMALL LETTER ROUNDED VE..CYRILLIC SMALL LETTER UNBLENDED UK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1C90, 0x1CBA }, crispy::text::EastAsianWidth::Neutral }, // Lu    [43] GEORGIAN MTAVRULI CAPITAL LETTER AN..GEORGIAN MTAVRULI CAPITAL LETTER AIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CBD, 0x1CBF }, crispy::text::EastAsianWidth::Neutral }, // Lu     [3] GEORGIAN MTAVRULI CAPITAL LETTER AEN..GEORGIAN MTAVRULI CAPITAL LETTER LABIAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CC0, 0x1CC7 }, crispy::text::EastAsianWidth::Neutral }, // Po     [8] SUNDANESE PUNCTUATION BINDU SURYA..SUNDANESE PUNCTUATION BINDU BA SATANGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CD0, 0x1CD2 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] VEDIC TONE KARSHANA..VEDIC TONE PRENKHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CD3, 0x1CD3 }, crispy::text::EastAsianWidth::Neutral }, // Po         VEDIC SIGN NIHSHVASA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CD4, 0x1CE0 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [13] VEDIC SIGN YAJURVEDIC MIDLINE SVARITA..VEDIC TONE RIGVEDIC KASHMIRI INDEPENDENT SVARITA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CE1, 0x1CE1 }, crispy::text::EastAsianWidth::Neutral }, // Mc         VEDIC TONE ATHARVAVEDIC INDEPENDENT SVARITA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CE2, 0x1CE8 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] VEDIC SIGN VISARGA SVARITA..VEDIC SIGN VISARGA ANUDATTA WITH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CE9, 0x1CEC }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] VEDIC SIGN ANUSVARA ANTARGOMUKHA..VEDIC SIGN ANUSVARA VAMAGOMUKHA WITH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CED, 0x1CED }, crispy::text::EastAsianWidth::Neutral }, // Mn         VEDIC SIGN TIRYAK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CEE, 0x1CF3 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] VEDIC SIGN HEXIFORM LONG ANUSVARA..VEDIC SIGN ROTATED ARDHAVISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CF4, 0x1CF4 }, crispy::text::EastAsianWidth::Neutral }, // Mn         VEDIC TONE CANDRA ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CF5, 0x1CF6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] VEDIC SIGN JIHVAMULIYA..VEDIC SIGN UPADHMANIYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CF7, 0x1CF7 }, crispy::text::EastAsianWidth::Neutral }, // Mc         VEDIC SIGN ATIKRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CF8, 0x1CF9 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] VEDIC TONE RING ABOVE..VEDIC TONE DOUBLE RING ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1CFA, 0x1CFA }, crispy::text::EastAsianWidth::Neutral }, // Lo         VEDIC SIGN DOUBLE ANUSVARA ANTARGOMUKHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D00, 0x1D2B }, crispy::text::EastAsianWidth::Neutral }, // Ll    [44] LATIN LETTER SMALL CAPITAL A..CYRILLIC LETTER SMALL CAPITAL EL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D2C, 0x1D6A }, crispy::text::EastAsianWidth::Neutral }, // Lm    [63] MODIFIER LETTER CAPITAL A..GREEK SUBSCRIPT SMALL LETTER CHI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6B, 0x1D77 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [13] LATIN SMALL LETTER UE..LATIN SMALL LETTER TURNED G
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D78, 0x1D78 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER CYRILLIC EN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D79, 0x1D7F }, crispy::text::EastAsianWidth::Neutral }, // Ll     [7] LATIN SMALL LETTER INSULAR G..LATIN SMALL LETTER UPSILON WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D80, 0x1D9A }, crispy::text::EastAsianWidth::Neutral }, // Ll    [27] LATIN SMALL LETTER B WITH PALATAL HOOK..LATIN SMALL LETTER EZH WITH RETROFLEX HOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D9B, 0x1DBF }, crispy::text::EastAsianWidth::Neutral }, // Lm    [37] MODIFIER LETTER SMALL TURNED ALPHA..MODIFIER LETTER SMALL THETA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DC0, 0x1DF9 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [58] COMBINING DOTTED GRAVE ACCENT..COMBINING WIDE INVERTED BRIDGE BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DFB, 0x1DFF }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] COMBINING DELETION MARK..COMBINING RIGHT ARROWHEAD AND DOWN ARROWHEAD BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E00, 0x1EFF }, crispy::text::EastAsianWidth::Neutral }, // L&   [256] LATIN CAPITAL LETTER A WITH RING BELOW..LATIN SMALL LETTER Y WITH LOOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F00, 0x1F15 }, crispy::text::EastAsianWidth::Neutral }, // L&    [22] GREEK SMALL LETTER ALPHA WITH PSILI..GREEK SMALL LETTER EPSILON WITH DASIA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F18, 0x1F1D }, crispy::text::EastAsianWidth::Neutral }, // Lu     [6] GREEK CAPITAL LETTER EPSILON WITH PSILI..GREEK CAPITAL LETTER EPSILON WITH DASIA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F20, 0x1F45 }, crispy::text::EastAsianWidth::Neutral }, // L&    [38] GREEK SMALL LETTER ETA WITH PSILI..GREEK SMALL LETTER OMICRON WITH DASIA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F48, 0x1F4D }, crispy::text::EastAsianWidth::Neutral }, // Lu     [6] GREEK CAPITAL LETTER OMICRON WITH PSILI..GREEK CAPITAL LETTER OMICRON WITH DASIA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F50, 0x1F57 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [8] GREEK SMALL LETTER UPSILON WITH PSILI..GREEK SMALL LETTER UPSILON WITH DASIA AND PERISPOMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F59, 0x1F59 }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER UPSILON WITH DASIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5B, 0x1F5B }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER UPSILON WITH DASIA AND VARIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5D, 0x1F5D }, crispy::text::EastAsianWidth::Neutral }, // Lu         GREEK CAPITAL LETTER UPSILON WITH DASIA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5F, 0x1F7D }, crispy::text::EastAsianWidth::Neutral }, // L&    [31] GREEK CAPITAL LETTER UPSILON WITH DASIA AND PERISPOMENI..GREEK SMALL LETTER OMEGA WITH OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F80, 0x1FB4 }, crispy::text::EastAsianWidth::Neutral }, // L&    [53] GREEK SMALL LETTER ALPHA WITH PSILI AND YPOGEGRAMMENI..GREEK SMALL LETTER ALPHA WITH OXIA AND YPOGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FB6, 0x1FBC }, crispy::text::EastAsianWidth::Neutral }, // L&     [7] GREEK SMALL LETTER ALPHA WITH PERISPOMENI..GREEK CAPITAL LETTER ALPHA WITH PROSGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FBD, 0x1FBD }, crispy::text::EastAsianWidth::Neutral }, // Sk         GREEK KORONIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FBE, 0x1FBE }, crispy::text::EastAsianWidth::Neutral }, // Ll         GREEK PROSGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FBF, 0x1FC1 }, crispy::text::EastAsianWidth::Neutral }, // Sk     [3] GREEK PSILI..GREEK DIALYTIKA AND PERISPOMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FC2, 0x1FC4 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [3] GREEK SMALL LETTER ETA WITH VARIA AND YPOGEGRAMMENI..GREEK SMALL LETTER ETA WITH OXIA AND YPOGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FC6, 0x1FCC }, crispy::text::EastAsianWidth::Neutral }, // L&     [7] GREEK SMALL LETTER ETA WITH PERISPOMENI..GREEK CAPITAL LETTER ETA WITH PROSGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FCD, 0x1FCF }, crispy::text::EastAsianWidth::Neutral }, // Sk     [3] GREEK PSILI AND VARIA..GREEK PSILI AND PERISPOMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FD0, 0x1FD3 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [4] GREEK SMALL LETTER IOTA WITH VRACHY..GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FD6, 0x1FDB }, crispy::text::EastAsianWidth::Neutral }, // L&     [6] GREEK SMALL LETTER IOTA WITH PERISPOMENI..GREEK CAPITAL LETTER IOTA WITH OXIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FDD, 0x1FDF }, crispy::text::EastAsianWidth::Neutral }, // Sk     [3] GREEK DASIA AND VARIA..GREEK DASIA AND PERISPOMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FE0, 0x1FEC }, crispy::text::EastAsianWidth::Neutral }, // L&    [13] GREEK SMALL LETTER UPSILON WITH VRACHY..GREEK CAPITAL LETTER RHO WITH DASIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FED, 0x1FEF }, crispy::text::EastAsianWidth::Neutral }, // Sk     [3] GREEK DIALYTIKA AND VARIA..GREEK VARIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FF2, 0x1FF4 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [3] GREEK SMALL LETTER OMEGA WITH VARIA AND YPOGEGRAMMENI..GREEK SMALL LETTER OMEGA WITH OXIA AND YPOGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FF6, 0x1FFC }, crispy::text::EastAsianWidth::Neutral }, // L&     [7] GREEK SMALL LETTER OMEGA WITH PERISPOMENI..GREEK CAPITAL LETTER OMEGA WITH PROSGEGRAMMENI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FFD, 0x1FFE }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] GREEK OXIA..GREEK DASIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x2000, 0x200A }, crispy::text::EastAsianWidth::Neutral }, // Zs    [11] EN QUAD..HAIR SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x200B, 0x200F }, crispy::text::EastAsianWidth::Neutral }, // Cf     [5] ZERO WIDTH SPACE..RIGHT-TO-LEFT MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2010, 0x2010 }, crispy::text::EastAsianWidth::Ambiguous }, // Pd         HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2011, 0x2012 }, crispy::text::EastAsianWidth::Neutral }, // Pd     [2] NON-BREAKING HYPHEN..FIGURE DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2013, 0x2015 }, crispy::text::EastAsianWidth::Ambiguous }, // Pd     [3] EN DASH..HORIZONTAL BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2016, 0x2016 }, crispy::text::EastAsianWidth::Ambiguous }, // Po         DOUBLE VERTICAL LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2017, 0x2017 }, crispy::text::EastAsianWidth::Neutral }, // Po         DOUBLE LOW LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2018, 0x2018 }, crispy::text::EastAsianWidth::Ambiguous }, // Pi         LEFT SINGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2019, 0x2019 }, crispy::text::EastAsianWidth::Ambiguous }, // Pf         RIGHT SINGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201A, 0x201A }, crispy::text::EastAsianWidth::Neutral }, // Ps         SINGLE LOW-9 QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201B, 0x201B }, crispy::text::EastAsianWidth::Neutral }, // Pi         SINGLE HIGH-REVERSED-9 QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201C, 0x201C }, crispy::text::EastAsianWidth::Ambiguous }, // Pi         LEFT DOUBLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201D, 0x201D }, crispy::text::EastAsianWidth::Ambiguous }, // Pf         RIGHT DOUBLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201E, 0x201E }, crispy::text::EastAsianWidth::Neutral }, // Ps         DOUBLE LOW-9 QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x201F, 0x201F }, crispy::text::EastAsianWidth::Neutral }, // Pi         DOUBLE HIGH-REVERSED-9 QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2020, 0x2022 }, crispy::text::EastAsianWidth::Ambiguous }, // Po     [3] DAGGER..BULLET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2023, 0x2023 }, crispy::text::EastAsianWidth::Neutral }, // Po         TRIANGULAR BULLET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2024, 0x2027 }, crispy::text::EastAsianWidth::Ambiguous }, // Po     [4] ONE DOT LEADER..HYPHENATION POINT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2028, 0x2028 }, crispy::text::EastAsianWidth::Neutral }, // Zl         LINE SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2029, 0x2029 }, crispy::text::EastAsianWidth::Neutral }, // Zp         PARAGRAPH SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x202A, 0x202E }, crispy::text::EastAsianWidth::Neutral }, // Cf     [5] LEFT-TO-RIGHT EMBEDDING..RIGHT-TO-LEFT OVERRIDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x202F, 0x202F }, crispy::text::EastAsianWidth::Neutral }, // Zs         NARROW NO-BREAK SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2030, 0x2030 }, crispy::text::EastAsianWidth::Ambiguous }, // Po         PER MILLE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2031, 0x2031 }, crispy::text::EastAsianWidth::Neutral }, // Po         PER TEN THOUSAND SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2032, 0x2033 }, crispy::text::EastAsianWidth::Ambiguous }, // Po     [2] PRIME..DOUBLE PRIME
+    Prop<crispy::text::EastAsianWidth>{ { 0x2034, 0x2034 }, crispy::text::EastAsianWidth::Neutral }, // Po         TRIPLE PRIME
+    Prop<crispy::text::EastAsianWidth>{ { 0x2035, 0x2035 }, crispy::text::EastAsianWidth::Ambiguous }, // Po         REVERSED PRIME
+    Prop<crispy::text::EastAsianWidth>{ { 0x2036, 0x2038 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] REVERSED DOUBLE PRIME..CARET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2039, 0x2039 }, crispy::text::EastAsianWidth::Neutral }, // Pi         SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x203A, 0x203A }, crispy::text::EastAsianWidth::Neutral }, // Pf         SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x203B, 0x203B }, crispy::text::EastAsianWidth::Ambiguous }, // Po         REFERENCE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x203C, 0x203D }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] DOUBLE EXCLAMATION MARK..INTERROBANG
+    Prop<crispy::text::EastAsianWidth>{ { 0x203E, 0x203E }, crispy::text::EastAsianWidth::Ambiguous }, // Po         OVERLINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x203F, 0x2040 }, crispy::text::EastAsianWidth::Neutral }, // Pc     [2] UNDERTIE..CHARACTER TIE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2041, 0x2043 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] CARET INSERTION POINT..HYPHEN BULLET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2044, 0x2044 }, crispy::text::EastAsianWidth::Neutral }, // Sm         FRACTION SLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2045, 0x2045 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT SQUARE BRACKET WITH QUILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2046, 0x2046 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT SQUARE BRACKET WITH QUILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2047, 0x2051 }, crispy::text::EastAsianWidth::Neutral }, // Po    [11] DOUBLE QUESTION MARK..TWO ASTERISKS ALIGNED VERTICALLY
+    Prop<crispy::text::EastAsianWidth>{ { 0x2052, 0x2052 }, crispy::text::EastAsianWidth::Neutral }, // Sm         COMMERCIAL MINUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2053, 0x2053 }, crispy::text::EastAsianWidth::Neutral }, // Po         SWUNG DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2054, 0x2054 }, crispy::text::EastAsianWidth::Neutral }, // Pc         INVERTED UNDERTIE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2055, 0x205E }, crispy::text::EastAsianWidth::Neutral }, // Po    [10] FLOWER PUNCTUATION MARK..VERTICAL FOUR DOTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x205F, 0x205F }, crispy::text::EastAsianWidth::Neutral }, // Zs         MEDIUM MATHEMATICAL SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2060, 0x2064 }, crispy::text::EastAsianWidth::Neutral }, // Cf     [5] WORD JOINER..INVISIBLE PLUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2066, 0x206F }, crispy::text::EastAsianWidth::Neutral }, // Cf    [10] LEFT-TO-RIGHT ISOLATE..NOMINAL DIGIT SHAPES
+    Prop<crispy::text::EastAsianWidth>{ { 0x2070, 0x2070 }, crispy::text::EastAsianWidth::Neutral }, // No         SUPERSCRIPT ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2071, 0x2071 }, crispy::text::EastAsianWidth::Neutral }, // Lm         SUPERSCRIPT LATIN SMALL LETTER I
+    Prop<crispy::text::EastAsianWidth>{ { 0x2074, 0x2074 }, crispy::text::EastAsianWidth::Ambiguous }, // No         SUPERSCRIPT FOUR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2075, 0x2079 }, crispy::text::EastAsianWidth::Neutral }, // No     [5] SUPERSCRIPT FIVE..SUPERSCRIPT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x207A, 0x207C }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] SUPERSCRIPT PLUS SIGN..SUPERSCRIPT EQUALS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x207D, 0x207D }, crispy::text::EastAsianWidth::Neutral }, // Ps         SUPERSCRIPT LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x207E, 0x207E }, crispy::text::EastAsianWidth::Neutral }, // Pe         SUPERSCRIPT RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x207F, 0x207F }, crispy::text::EastAsianWidth::Ambiguous }, // Lm         SUPERSCRIPT LATIN SMALL LETTER N
+    Prop<crispy::text::EastAsianWidth>{ { 0x2080, 0x2080 }, crispy::text::EastAsianWidth::Neutral }, // No         SUBSCRIPT ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2081, 0x2084 }, crispy::text::EastAsianWidth::Ambiguous }, // No     [4] SUBSCRIPT ONE..SUBSCRIPT FOUR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2085, 0x2089 }, crispy::text::EastAsianWidth::Neutral }, // No     [5] SUBSCRIPT FIVE..SUBSCRIPT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x208A, 0x208C }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] SUBSCRIPT PLUS SIGN..SUBSCRIPT EQUALS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x208D, 0x208D }, crispy::text::EastAsianWidth::Neutral }, // Ps         SUBSCRIPT LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x208E, 0x208E }, crispy::text::EastAsianWidth::Neutral }, // Pe         SUBSCRIPT RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2090, 0x209C }, crispy::text::EastAsianWidth::Neutral }, // Lm    [13] LATIN SUBSCRIPT SMALL LETTER A..LATIN SUBSCRIPT SMALL LETTER T
+    Prop<crispy::text::EastAsianWidth>{ { 0x20A0, 0x20A8 }, crispy::text::EastAsianWidth::Neutral }, // Sc     [9] EURO-CURRENCY SIGN..RUPEE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x20A9, 0x20A9 }, crispy::text::EastAsianWidth::HalfWidth }, // Sc         WON SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x20AA, 0x20AB }, crispy::text::EastAsianWidth::Neutral }, // Sc     [2] NEW SHEQEL SIGN..DONG SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x20AC, 0x20AC }, crispy::text::EastAsianWidth::Ambiguous }, // Sc         EURO SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x20AD, 0x20BF }, crispy::text::EastAsianWidth::Neutral }, // Sc    [19] KIP SIGN..BITCOIN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x20D0, 0x20DC }, crispy::text::EastAsianWidth::Neutral }, // Mn    [13] COMBINING LEFT HARPOON ABOVE..COMBINING FOUR DOTS ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x20DD, 0x20E0 }, crispy::text::EastAsianWidth::Neutral }, // Me     [4] COMBINING ENCLOSING CIRCLE..COMBINING ENCLOSING CIRCLE BACKSLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x20E1, 0x20E1 }, crispy::text::EastAsianWidth::Neutral }, // Mn         COMBINING LEFT RIGHT ARROW ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x20E2, 0x20E4 }, crispy::text::EastAsianWidth::Neutral }, // Me     [3] COMBINING ENCLOSING SCREEN..COMBINING ENCLOSING UPWARD POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x20E5, 0x20F0 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [12] COMBINING REVERSE SOLIDUS OVERLAY..COMBINING ASTERISK ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2100, 0x2101 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] ACCOUNT OF..ADDRESSED TO THE SUBJECT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2102, 0x2102 }, crispy::text::EastAsianWidth::Neutral }, // Lu         DOUBLE-STRUCK CAPITAL C
+    Prop<crispy::text::EastAsianWidth>{ { 0x2103, 0x2103 }, crispy::text::EastAsianWidth::Ambiguous }, // So         DEGREE CELSIUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2104, 0x2104 }, crispy::text::EastAsianWidth::Neutral }, // So         CENTRE LINE SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2105, 0x2105 }, crispy::text::EastAsianWidth::Ambiguous }, // So         CARE OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2106, 0x2106 }, crispy::text::EastAsianWidth::Neutral }, // So         CADA UNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x2107, 0x2107 }, crispy::text::EastAsianWidth::Neutral }, // Lu         EULER CONSTANT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2108, 0x2108 }, crispy::text::EastAsianWidth::Neutral }, // So         SCRUPLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2109, 0x2109 }, crispy::text::EastAsianWidth::Ambiguous }, // So         DEGREE FAHRENHEIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x210A, 0x2112 }, crispy::text::EastAsianWidth::Neutral }, // L&     [9] SCRIPT SMALL G..SCRIPT CAPITAL L
+    Prop<crispy::text::EastAsianWidth>{ { 0x2113, 0x2113 }, crispy::text::EastAsianWidth::Ambiguous }, // Ll         SCRIPT SMALL L
+    Prop<crispy::text::EastAsianWidth>{ { 0x2114, 0x2114 }, crispy::text::EastAsianWidth::Neutral }, // So         L B BAR SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2115, 0x2115 }, crispy::text::EastAsianWidth::Neutral }, // Lu         DOUBLE-STRUCK CAPITAL N
+    Prop<crispy::text::EastAsianWidth>{ { 0x2116, 0x2116 }, crispy::text::EastAsianWidth::Ambiguous }, // So         NUMERO SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2117, 0x2117 }, crispy::text::EastAsianWidth::Neutral }, // So         SOUND RECORDING COPYRIGHT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2118, 0x2118 }, crispy::text::EastAsianWidth::Neutral }, // Sm         SCRIPT CAPITAL P
+    Prop<crispy::text::EastAsianWidth>{ { 0x2119, 0x211D }, crispy::text::EastAsianWidth::Neutral }, // Lu     [5] DOUBLE-STRUCK CAPITAL P..DOUBLE-STRUCK CAPITAL R
+    Prop<crispy::text::EastAsianWidth>{ { 0x211E, 0x2120 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] PRESCRIPTION TAKE..SERVICE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2121, 0x2122 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] TELEPHONE SIGN..TRADE MARK SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2123, 0x2123 }, crispy::text::EastAsianWidth::Neutral }, // So         VERSICLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2124, 0x2124 }, crispy::text::EastAsianWidth::Neutral }, // Lu         DOUBLE-STRUCK CAPITAL Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x2125, 0x2125 }, crispy::text::EastAsianWidth::Neutral }, // So         OUNCE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2126, 0x2126 }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         OHM SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2127, 0x2127 }, crispy::text::EastAsianWidth::Neutral }, // So         INVERTED OHM SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2128, 0x2128 }, crispy::text::EastAsianWidth::Neutral }, // Lu         BLACK-LETTER CAPITAL Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x2129, 0x2129 }, crispy::text::EastAsianWidth::Neutral }, // So         TURNED GREEK SMALL LETTER IOTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x212A, 0x212A }, crispy::text::EastAsianWidth::Neutral }, // Lu         KELVIN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x212B, 0x212B }, crispy::text::EastAsianWidth::Ambiguous }, // Lu         ANGSTROM SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x212C, 0x212D }, crispy::text::EastAsianWidth::Neutral }, // Lu     [2] SCRIPT CAPITAL B..BLACK-LETTER CAPITAL C
+    Prop<crispy::text::EastAsianWidth>{ { 0x212E, 0x212E }, crispy::text::EastAsianWidth::Neutral }, // So         ESTIMATED SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x212F, 0x2134 }, crispy::text::EastAsianWidth::Neutral }, // L&     [6] SCRIPT SMALL E..SCRIPT SMALL O
+    Prop<crispy::text::EastAsianWidth>{ { 0x2135, 0x2138 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ALEF SYMBOL..DALET SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2139, 0x2139 }, crispy::text::EastAsianWidth::Neutral }, // Ll         INFORMATION SOURCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x213A, 0x213B }, crispy::text::EastAsianWidth::Neutral }, // So     [2] ROTATED CAPITAL Q..FACSIMILE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x213C, 0x213F }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] DOUBLE-STRUCK SMALL PI..DOUBLE-STRUCK CAPITAL PI
+    Prop<crispy::text::EastAsianWidth>{ { 0x2140, 0x2144 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [5] DOUBLE-STRUCK N-ARY SUMMATION..TURNED SANS-SERIF CAPITAL Y
+    Prop<crispy::text::EastAsianWidth>{ { 0x2145, 0x2149 }, crispy::text::EastAsianWidth::Neutral }, // L&     [5] DOUBLE-STRUCK ITALIC CAPITAL D..DOUBLE-STRUCK ITALIC SMALL J
+    Prop<crispy::text::EastAsianWidth>{ { 0x214A, 0x214A }, crispy::text::EastAsianWidth::Neutral }, // So         PROPERTY LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x214B, 0x214B }, crispy::text::EastAsianWidth::Neutral }, // Sm         TURNED AMPERSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x214C, 0x214D }, crispy::text::EastAsianWidth::Neutral }, // So     [2] PER SIGN..AKTIESELSKAB
+    Prop<crispy::text::EastAsianWidth>{ { 0x214E, 0x214E }, crispy::text::EastAsianWidth::Neutral }, // Ll         TURNED SMALL F
+    Prop<crispy::text::EastAsianWidth>{ { 0x214F, 0x214F }, crispy::text::EastAsianWidth::Neutral }, // So         SYMBOL FOR SAMARITAN SOURCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2150, 0x2152 }, crispy::text::EastAsianWidth::Neutral }, // No     [3] VULGAR FRACTION ONE SEVENTH..VULGAR FRACTION ONE TENTH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2153, 0x2154 }, crispy::text::EastAsianWidth::Ambiguous }, // No     [2] VULGAR FRACTION ONE THIRD..VULGAR FRACTION TWO THIRDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2155, 0x215A }, crispy::text::EastAsianWidth::Neutral }, // No     [6] VULGAR FRACTION ONE FIFTH..VULGAR FRACTION FIVE SIXTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0x215B, 0x215E }, crispy::text::EastAsianWidth::Ambiguous }, // No     [4] VULGAR FRACTION ONE EIGHTH..VULGAR FRACTION SEVEN EIGHTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0x215F, 0x215F }, crispy::text::EastAsianWidth::Neutral }, // No         FRACTION NUMERATOR ONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2160, 0x216B }, crispy::text::EastAsianWidth::Ambiguous }, // Nl    [12] ROMAN NUMERAL ONE..ROMAN NUMERAL TWELVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x216C, 0x216F }, crispy::text::EastAsianWidth::Neutral }, // Nl     [4] ROMAN NUMERAL FIFTY..ROMAN NUMERAL ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x2170, 0x2179 }, crispy::text::EastAsianWidth::Ambiguous }, // Nl    [10] SMALL ROMAN NUMERAL ONE..SMALL ROMAN NUMERAL TEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x217A, 0x2182 }, crispy::text::EastAsianWidth::Neutral }, // Nl     [9] SMALL ROMAN NUMERAL ELEVEN..ROMAN NUMERAL TEN THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x2183, 0x2184 }, crispy::text::EastAsianWidth::Neutral }, // L&     [2] ROMAN NUMERAL REVERSED ONE HUNDRED..LATIN SMALL LETTER REVERSED C
+    Prop<crispy::text::EastAsianWidth>{ { 0x2185, 0x2188 }, crispy::text::EastAsianWidth::Neutral }, // Nl     [4] ROMAN NUMERAL SIX LATE FORM..ROMAN NUMERAL ONE HUNDRED THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x2189, 0x2189 }, crispy::text::EastAsianWidth::Ambiguous }, // No         VULGAR FRACTION ZERO THIRDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x218A, 0x218B }, crispy::text::EastAsianWidth::Neutral }, // So     [2] TURNED DIGIT TWO..TURNED DIGIT THREE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2190, 0x2194 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [5] LEFTWARDS ARROW..LEFT RIGHT ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2195, 0x2199 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [5] UP DOWN ARROW..SOUTH WEST ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x219A, 0x219B }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] LEFTWARDS ARROW WITH STROKE..RIGHTWARDS ARROW WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x219C, 0x219F }, crispy::text::EastAsianWidth::Neutral }, // So     [4] LEFTWARDS WAVE ARROW..UPWARDS TWO HEADED ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A0, 0x21A0 }, crispy::text::EastAsianWidth::Neutral }, // Sm         RIGHTWARDS TWO HEADED ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A1, 0x21A2 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] DOWNWARDS TWO HEADED ARROW..LEFTWARDS ARROW WITH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A3, 0x21A3 }, crispy::text::EastAsianWidth::Neutral }, // Sm         RIGHTWARDS ARROW WITH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A4, 0x21A5 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] LEFTWARDS ARROW FROM BAR..UPWARDS ARROW FROM BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A6, 0x21A6 }, crispy::text::EastAsianWidth::Neutral }, // Sm         RIGHTWARDS ARROW FROM BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x21A7, 0x21AD }, crispy::text::EastAsianWidth::Neutral }, // So     [7] DOWNWARDS ARROW FROM BAR..LEFT RIGHT WAVE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21AE, 0x21AE }, crispy::text::EastAsianWidth::Neutral }, // Sm         LEFT RIGHT ARROW WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x21AF, 0x21B7 }, crispy::text::EastAsianWidth::Neutral }, // So     [9] DOWNWARDS ZIGZAG ARROW..CLOCKWISE TOP SEMICIRCLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21B8, 0x21B9 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] NORTH WEST ARROW TO LONG BAR..LEFTWARDS ARROW TO BAR OVER RIGHTWARDS ARROW TO BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x21BA, 0x21CD }, crispy::text::EastAsianWidth::Neutral }, // So    [20] ANTICLOCKWISE OPEN CIRCLE ARROW..LEFTWARDS DOUBLE ARROW WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x21CE, 0x21CF }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] LEFT RIGHT DOUBLE ARROW WITH STROKE..RIGHTWARDS DOUBLE ARROW WITH STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x21D0, 0x21D1 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] LEFTWARDS DOUBLE ARROW..UPWARDS DOUBLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21D2, 0x21D2 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         RIGHTWARDS DOUBLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21D3, 0x21D3 }, crispy::text::EastAsianWidth::Neutral }, // So         DOWNWARDS DOUBLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21D4, 0x21D4 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         LEFT RIGHT DOUBLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21D5, 0x21E6 }, crispy::text::EastAsianWidth::Neutral }, // So    [18] UP DOWN DOUBLE ARROW..LEFTWARDS WHITE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21E7, 0x21E7 }, crispy::text::EastAsianWidth::Ambiguous }, // So         UPWARDS WHITE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21E8, 0x21F3 }, crispy::text::EastAsianWidth::Neutral }, // So    [12] RIGHTWARDS WHITE ARROW..UP DOWN WHITE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x21F4, 0x21FF }, crispy::text::EastAsianWidth::Neutral }, // Sm    [12] RIGHT ARROW WITH SMALL CIRCLE..LEFT RIGHT OPEN-HEADED ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2200, 0x2200 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         FOR ALL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2201, 0x2201 }, crispy::text::EastAsianWidth::Neutral }, // Sm         COMPLEMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2202, 0x2203 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] PARTIAL DIFFERENTIAL..THERE EXISTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2204, 0x2206 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] THERE DOES NOT EXIST..INCREMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2207, 0x2208 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] NABLA..ELEMENT OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2209, 0x220A }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] NOT AN ELEMENT OF..SMALL ELEMENT OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x220B, 0x220B }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         CONTAINS AS MEMBER
+    Prop<crispy::text::EastAsianWidth>{ { 0x220C, 0x220E }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] DOES NOT CONTAIN AS MEMBER..END OF PROOF
+    Prop<crispy::text::EastAsianWidth>{ { 0x220F, 0x220F }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         N-ARY PRODUCT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2210, 0x2210 }, crispy::text::EastAsianWidth::Neutral }, // Sm         N-ARY COPRODUCT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2211, 0x2211 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         N-ARY SUMMATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x2212, 0x2214 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] MINUS SIGN..DOT PLUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2215, 0x2215 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         DIVISION SLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2216, 0x2219 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [4] SET MINUS..BULLET OPERATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x221A, 0x221A }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         SQUARE ROOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x221B, 0x221C }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] CUBE ROOT..FOURTH ROOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x221D, 0x2220 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [4] PROPORTIONAL TO..ANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2221, 0x2222 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] MEASURED ANGLE..SPHERICAL ANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2223, 0x2223 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         DIVIDES
+    Prop<crispy::text::EastAsianWidth>{ { 0x2224, 0x2224 }, crispy::text::EastAsianWidth::Neutral }, // Sm         DOES NOT DIVIDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2225, 0x2225 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         PARALLEL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2226, 0x2226 }, crispy::text::EastAsianWidth::Neutral }, // Sm         NOT PARALLEL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2227, 0x222C }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [6] LOGICAL AND..DOUBLE INTEGRAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x222D, 0x222D }, crispy::text::EastAsianWidth::Neutral }, // Sm         TRIPLE INTEGRAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x222E, 0x222E }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         CONTOUR INTEGRAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x222F, 0x2233 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [5] SURFACE INTEGRAL..ANTICLOCKWISE CONTOUR INTEGRAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2234, 0x2237 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [4] THEREFORE..PROPORTION
+    Prop<crispy::text::EastAsianWidth>{ { 0x2238, 0x223B }, crispy::text::EastAsianWidth::Neutral }, // Sm     [4] DOT MINUS..HOMOTHETIC
+    Prop<crispy::text::EastAsianWidth>{ { 0x223C, 0x223D }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] TILDE OPERATOR..REVERSED TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x223E, 0x2247 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [10] INVERTED LAZY S..NEITHER APPROXIMATELY NOR ACTUALLY EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2248, 0x2248 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         ALMOST EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2249, 0x224B }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] NOT ALMOST EQUAL TO..TRIPLE TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x224C, 0x224C }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         ALL EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x224D, 0x2251 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [5] EQUIVALENT TO..GEOMETRICALLY EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2252, 0x2252 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         APPROXIMATELY EQUAL TO OR THE IMAGE OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2253, 0x225F }, crispy::text::EastAsianWidth::Neutral }, // Sm    [13] IMAGE OF OR APPROXIMATELY EQUAL TO..QUESTIONED EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2260, 0x2261 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] NOT EQUAL TO..IDENTICAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2262, 0x2263 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] NOT IDENTICAL TO..STRICTLY EQUIVALENT TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2264, 0x2267 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [4] LESS-THAN OR EQUAL TO..GREATER-THAN OVER EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2268, 0x2269 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] LESS-THAN BUT NOT EQUAL TO..GREATER-THAN BUT NOT EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x226A, 0x226B }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] MUCH LESS-THAN..MUCH GREATER-THAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x226C, 0x226D }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] BETWEEN..NOT EQUIVALENT TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x226E, 0x226F }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] NOT LESS-THAN..NOT GREATER-THAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2270, 0x2281 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [18] NEITHER LESS-THAN NOR EQUAL TO..DOES NOT SUCCEED
+    Prop<crispy::text::EastAsianWidth>{ { 0x2282, 0x2283 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] SUBSET OF..SUPERSET OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2284, 0x2285 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] NOT A SUBSET OF..NOT A SUPERSET OF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2286, 0x2287 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm     [2] SUBSET OF OR EQUAL TO..SUPERSET OF OR EQUAL TO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2288, 0x2294 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [13] NEITHER A SUBSET OF NOR EQUAL TO..SQUARE CUP
+    Prop<crispy::text::EastAsianWidth>{ { 0x2295, 0x2295 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         CIRCLED PLUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2296, 0x2298 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] CIRCLED MINUS..CIRCLED DIVISION SLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2299, 0x2299 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         CIRCLED DOT OPERATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x229A, 0x22A4 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [11] CIRCLED RING OPERATOR..DOWN TACK
+    Prop<crispy::text::EastAsianWidth>{ { 0x22A5, 0x22A5 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         UP TACK
+    Prop<crispy::text::EastAsianWidth>{ { 0x22A6, 0x22BE }, crispy::text::EastAsianWidth::Neutral }, // Sm    [25] ASSERTION..RIGHT ANGLE WITH ARC
+    Prop<crispy::text::EastAsianWidth>{ { 0x22BF, 0x22BF }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         RIGHT TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x22C0, 0x22FF }, crispy::text::EastAsianWidth::Neutral }, // Sm    [64] N-ARY LOGICAL AND..Z NOTATION BAG MEMBERSHIP
+    Prop<crispy::text::EastAsianWidth>{ { 0x2300, 0x2307 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] DIAMETER SIGN..WAVY LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2308, 0x2308 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT CEILING
+    Prop<crispy::text::EastAsianWidth>{ { 0x2309, 0x2309 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT CEILING
+    Prop<crispy::text::EastAsianWidth>{ { 0x230A, 0x230A }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT FLOOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x230B, 0x230B }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT FLOOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x230C, 0x2311 }, crispy::text::EastAsianWidth::Neutral }, // So     [6] BOTTOM RIGHT CROP..SQUARE LOZENGE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2312, 0x2312 }, crispy::text::EastAsianWidth::Ambiguous }, // So         ARC
+    Prop<crispy::text::EastAsianWidth>{ { 0x2313, 0x2319 }, crispy::text::EastAsianWidth::Neutral }, // So     [7] SEGMENT..TURNED NOT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x231A, 0x231B }, crispy::text::EastAsianWidth::Wide }, // So     [2] WATCH..HOURGLASS
+    Prop<crispy::text::EastAsianWidth>{ { 0x231C, 0x231F }, crispy::text::EastAsianWidth::Neutral }, // So     [4] TOP LEFT CORNER..BOTTOM RIGHT CORNER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2320, 0x2321 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] TOP HALF INTEGRAL..BOTTOM HALF INTEGRAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2322, 0x2328 }, crispy::text::EastAsianWidth::Neutral }, // So     [7] FROWN..KEYBOARD
+    Prop<crispy::text::EastAsianWidth>{ { 0x2329, 0x2329 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT-POINTING ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x232A, 0x232A }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT-POINTING ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x232B, 0x237B }, crispy::text::EastAsianWidth::Neutral }, // So    [81] ERASE TO THE LEFT..NOT CHECK MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x237C, 0x237C }, crispy::text::EastAsianWidth::Neutral }, // Sm         RIGHT ANGLE WITH DOWNWARDS ZIGZAG ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x237D, 0x239A }, crispy::text::EastAsianWidth::Neutral }, // So    [30] SHOULDERED OPEN BOX..CLEAR SCREEN SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x239B, 0x23B3 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [25] LEFT PARENTHESIS UPPER HOOK..SUMMATION BOTTOM
+    Prop<crispy::text::EastAsianWidth>{ { 0x23B4, 0x23DB }, crispy::text::EastAsianWidth::Neutral }, // So    [40] TOP SQUARE BRACKET..FUSE
+    Prop<crispy::text::EastAsianWidth>{ { 0x23DC, 0x23E1 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [6] TOP PARENTHESIS..BOTTOM TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x23E2, 0x23E8 }, crispy::text::EastAsianWidth::Neutral }, // So     [7] WHITE TRAPEZIUM..DECIMAL EXPONENT SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x23E9, 0x23EC }, crispy::text::EastAsianWidth::Wide }, // So     [4] BLACK RIGHT-POINTING DOUBLE TRIANGLE..BLACK DOWN-POINTING DOUBLE TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x23ED, 0x23EF }, crispy::text::EastAsianWidth::Neutral }, // So     [3] BLACK RIGHT-POINTING DOUBLE TRIANGLE WITH VERTICAL BAR..BLACK RIGHT-POINTING TRIANGLE WITH DOUBLE VERTICAL BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x23F0, 0x23F0 }, crispy::text::EastAsianWidth::Wide }, // So         ALARM CLOCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x23F1, 0x23F2 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] STOPWATCH..TIMER CLOCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x23F3, 0x23F3 }, crispy::text::EastAsianWidth::Wide }, // So         HOURGLASS WITH FLOWING SAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x23F4, 0x23FF }, crispy::text::EastAsianWidth::Neutral }, // So    [12] BLACK MEDIUM LEFT-POINTING TRIANGLE..OBSERVER EYE SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2400, 0x2426 }, crispy::text::EastAsianWidth::Neutral }, // So    [39] SYMBOL FOR NULL..SYMBOL FOR SUBSTITUTE FORM TWO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2440, 0x244A }, crispy::text::EastAsianWidth::Neutral }, // So    [11] OCR HOOK..OCR DOUBLE BACKSLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2460, 0x249B }, crispy::text::EastAsianWidth::Ambiguous }, // No    [60] CIRCLED DIGIT ONE..NUMBER TWENTY FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x249C, 0x24E9 }, crispy::text::EastAsianWidth::Ambiguous }, // So    [78] PARENTHESIZED LATIN SMALL LETTER A..CIRCLED LATIN SMALL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x24EA, 0x24EA }, crispy::text::EastAsianWidth::Neutral }, // No         CIRCLED DIGIT ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x24EB, 0x24FF }, crispy::text::EastAsianWidth::Ambiguous }, // No    [21] NEGATIVE CIRCLED NUMBER ELEVEN..NEGATIVE CIRCLED DIGIT ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2500, 0x254B }, crispy::text::EastAsianWidth::Ambiguous }, // So    [76] BOX DRAWINGS LIGHT HORIZONTAL..BOX DRAWINGS HEAVY VERTICAL AND HORIZONTAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x254C, 0x254F }, crispy::text::EastAsianWidth::Neutral }, // So     [4] BOX DRAWINGS LIGHT DOUBLE DASH HORIZONTAL..BOX DRAWINGS HEAVY DOUBLE DASH VERTICAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2550, 0x2573 }, crispy::text::EastAsianWidth::Ambiguous }, // So    [36] BOX DRAWINGS DOUBLE HORIZONTAL..BOX DRAWINGS LIGHT DIAGONAL CROSS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2574, 0x257F }, crispy::text::EastAsianWidth::Neutral }, // So    [12] BOX DRAWINGS LIGHT LEFT..BOX DRAWINGS HEAVY UP AND LIGHT DOWN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2580, 0x258F }, crispy::text::EastAsianWidth::Ambiguous }, // So    [16] UPPER HALF BLOCK..LEFT ONE EIGHTH BLOCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2590, 0x2591 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] RIGHT HALF BLOCK..LIGHT SHADE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2592, 0x2595 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] MEDIUM SHADE..RIGHT ONE EIGHTH BLOCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2596, 0x259F }, crispy::text::EastAsianWidth::Neutral }, // So    [10] QUADRANT LOWER LEFT..QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
+    Prop<crispy::text::EastAsianWidth>{ { 0x25A0, 0x25A1 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK SQUARE..WHITE SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25A2, 0x25A2 }, crispy::text::EastAsianWidth::Neutral }, // So         WHITE SQUARE WITH ROUNDED CORNERS
+    Prop<crispy::text::EastAsianWidth>{ { 0x25A3, 0x25A9 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [7] WHITE SQUARE CONTAINING BLACK SMALL SQUARE..SQUARE WITH DIAGONAL CROSSHATCH FILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x25AA, 0x25B1 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] BLACK SMALL SQUARE..WHITE PARALLELOGRAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x25B2, 0x25B3 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK UP-POINTING TRIANGLE..WHITE UP-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25B4, 0x25B5 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] BLACK UP-POINTING SMALL TRIANGLE..WHITE UP-POINTING SMALL TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25B6, 0x25B6 }, crispy::text::EastAsianWidth::Ambiguous }, // So         BLACK RIGHT-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25B7, 0x25B7 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         WHITE RIGHT-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25B8, 0x25BB }, crispy::text::EastAsianWidth::Neutral }, // So     [4] BLACK RIGHT-POINTING SMALL TRIANGLE..WHITE RIGHT-POINTING POINTER
+    Prop<crispy::text::EastAsianWidth>{ { 0x25BC, 0x25BD }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK DOWN-POINTING TRIANGLE..WHITE DOWN-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25BE, 0x25BF }, crispy::text::EastAsianWidth::Neutral }, // So     [2] BLACK DOWN-POINTING SMALL TRIANGLE..WHITE DOWN-POINTING SMALL TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25C0, 0x25C0 }, crispy::text::EastAsianWidth::Ambiguous }, // So         BLACK LEFT-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25C1, 0x25C1 }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         WHITE LEFT-POINTING TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25C2, 0x25C5 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] BLACK LEFT-POINTING SMALL TRIANGLE..WHITE LEFT-POINTING POINTER
+    Prop<crispy::text::EastAsianWidth>{ { 0x25C6, 0x25C8 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [3] BLACK DIAMOND..WHITE DIAMOND CONTAINING BLACK SMALL DIAMOND
+    Prop<crispy::text::EastAsianWidth>{ { 0x25C9, 0x25CA }, crispy::text::EastAsianWidth::Neutral }, // So     [2] FISHEYE..LOZENGE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25CB, 0x25CB }, crispy::text::EastAsianWidth::Ambiguous }, // So         WHITE CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25CC, 0x25CD }, crispy::text::EastAsianWidth::Neutral }, // So     [2] DOTTED CIRCLE..CIRCLE WITH VERTICAL FILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x25CE, 0x25D1 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] BULLSEYE..CIRCLE WITH RIGHT HALF BLACK
+    Prop<crispy::text::EastAsianWidth>{ { 0x25D2, 0x25E1 }, crispy::text::EastAsianWidth::Neutral }, // So    [16] CIRCLE WITH LOWER HALF BLACK..LOWER HALF CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25E2, 0x25E5 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] BLACK LOWER RIGHT TRIANGLE..BLACK UPPER RIGHT TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25E6, 0x25EE }, crispy::text::EastAsianWidth::Neutral }, // So     [9] WHITE BULLET..UP-POINTING TRIANGLE WITH RIGHT HALF BLACK
+    Prop<crispy::text::EastAsianWidth>{ { 0x25EF, 0x25EF }, crispy::text::EastAsianWidth::Ambiguous }, // So         LARGE CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25F0, 0x25F7 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] WHITE SQUARE WITH UPPER LEFT QUADRANT..WHITE CIRCLE WITH UPPER RIGHT QUADRANT
+    Prop<crispy::text::EastAsianWidth>{ { 0x25F8, 0x25FC }, crispy::text::EastAsianWidth::Neutral }, // Sm     [5] UPPER LEFT TRIANGLE..BLACK MEDIUM SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25FD, 0x25FE }, crispy::text::EastAsianWidth::Wide }, // Sm     [2] WHITE MEDIUM SMALL SQUARE..BLACK MEDIUM SMALL SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x25FF, 0x25FF }, crispy::text::EastAsianWidth::Neutral }, // Sm         LOWER RIGHT TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2600, 0x2604 }, crispy::text::EastAsianWidth::Neutral }, // So     [5] BLACK SUN WITH RAYS..COMET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2605, 0x2606 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK STAR..WHITE STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2607, 0x2608 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] LIGHTNING..THUNDERSTORM
+    Prop<crispy::text::EastAsianWidth>{ { 0x2609, 0x2609 }, crispy::text::EastAsianWidth::Ambiguous }, // So         SUN
+    Prop<crispy::text::EastAsianWidth>{ { 0x260A, 0x260D }, crispy::text::EastAsianWidth::Neutral }, // So     [4] ASCENDING NODE..OPPOSITION
+    Prop<crispy::text::EastAsianWidth>{ { 0x260E, 0x260F }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK TELEPHONE..WHITE TELEPHONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2610, 0x2613 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] BALLOT BOX..SALTIRE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2614, 0x2615 }, crispy::text::EastAsianWidth::Wide }, // So     [2] UMBRELLA WITH RAIN DROPS..HOT BEVERAGE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2616, 0x261B }, crispy::text::EastAsianWidth::Neutral }, // So     [6] WHITE SHOGI PIECE..BLACK RIGHT POINTING INDEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x261C, 0x261C }, crispy::text::EastAsianWidth::Ambiguous }, // So         WHITE LEFT POINTING INDEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x261D, 0x261D }, crispy::text::EastAsianWidth::Neutral }, // So         WHITE UP POINTING INDEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x261E, 0x261E }, crispy::text::EastAsianWidth::Ambiguous }, // So         WHITE RIGHT POINTING INDEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x261F, 0x263F }, crispy::text::EastAsianWidth::Neutral }, // So    [33] WHITE DOWN POINTING INDEX..MERCURY
+    Prop<crispy::text::EastAsianWidth>{ { 0x2640, 0x2640 }, crispy::text::EastAsianWidth::Ambiguous }, // So         FEMALE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2641, 0x2641 }, crispy::text::EastAsianWidth::Neutral }, // So         EARTH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2642, 0x2642 }, crispy::text::EastAsianWidth::Ambiguous }, // So         MALE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2643, 0x2647 }, crispy::text::EastAsianWidth::Neutral }, // So     [5] JUPITER..PLUTO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2648, 0x2653 }, crispy::text::EastAsianWidth::Wide }, // So    [12] ARIES..PISCES
+    Prop<crispy::text::EastAsianWidth>{ { 0x2654, 0x265F }, crispy::text::EastAsianWidth::Neutral }, // So    [12] WHITE CHESS KING..BLACK CHESS PAWN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2660, 0x2661 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK SPADE SUIT..WHITE HEART SUIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2662, 0x2662 }, crispy::text::EastAsianWidth::Neutral }, // So         WHITE DIAMOND SUIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2663, 0x2665 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [3] BLACK CLUB SUIT..BLACK HEART SUIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2666, 0x2666 }, crispy::text::EastAsianWidth::Neutral }, // So         BLACK DIAMOND SUIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2667, 0x266A }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] WHITE CLUB SUIT..EIGHTH NOTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x266B, 0x266B }, crispy::text::EastAsianWidth::Neutral }, // So         BEAMED EIGHTH NOTES
+    Prop<crispy::text::EastAsianWidth>{ { 0x266C, 0x266D }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BEAMED SIXTEENTH NOTES..MUSIC FLAT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x266E, 0x266E }, crispy::text::EastAsianWidth::Neutral }, // So         MUSIC NATURAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x266F, 0x266F }, crispy::text::EastAsianWidth::Ambiguous }, // Sm         MUSIC SHARP SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2670, 0x267E }, crispy::text::EastAsianWidth::Neutral }, // So    [15] WEST SYRIAC CROSS..PERMANENT PAPER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x267F, 0x267F }, crispy::text::EastAsianWidth::Wide }, // So         WHEELCHAIR SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2680, 0x2692 }, crispy::text::EastAsianWidth::Neutral }, // So    [19] DIE FACE-1..HAMMER AND PICK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2693, 0x2693 }, crispy::text::EastAsianWidth::Wide }, // So         ANCHOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2694, 0x269D }, crispy::text::EastAsianWidth::Neutral }, // So    [10] CROSSED SWORDS..OUTLINED WHITE STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x269E, 0x269F }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] THREE LINES CONVERGING RIGHT..THREE LINES CONVERGING LEFT
+    Prop<crispy::text::EastAsianWidth>{ { 0x26A0, 0x26A0 }, crispy::text::EastAsianWidth::Neutral }, // So         WARNING SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x26A1, 0x26A1 }, crispy::text::EastAsianWidth::Wide }, // So         HIGH VOLTAGE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x26A2, 0x26A9 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] DOUBLED FEMALE SIGN..HORIZONTAL MALE WITH STROKE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x26AA, 0x26AB }, crispy::text::EastAsianWidth::Wide }, // So     [2] MEDIUM WHITE CIRCLE..MEDIUM BLACK CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x26AC, 0x26BC }, crispy::text::EastAsianWidth::Neutral }, // So    [17] MEDIUM SMALL WHITE CIRCLE..SESQUIQUADRATE
+    Prop<crispy::text::EastAsianWidth>{ { 0x26BD, 0x26BE }, crispy::text::EastAsianWidth::Wide }, // So     [2] SOCCER BALL..BASEBALL
+    Prop<crispy::text::EastAsianWidth>{ { 0x26BF, 0x26BF }, crispy::text::EastAsianWidth::Ambiguous }, // So         SQUARED KEY
+    Prop<crispy::text::EastAsianWidth>{ { 0x26C0, 0x26C3 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] WHITE DRAUGHTS MAN..BLACK DRAUGHTS KING
+    Prop<crispy::text::EastAsianWidth>{ { 0x26C4, 0x26C5 }, crispy::text::EastAsianWidth::Wide }, // So     [2] SNOWMAN WITHOUT SNOW..SUN BEHIND CLOUD
+    Prop<crispy::text::EastAsianWidth>{ { 0x26C6, 0x26CD }, crispy::text::EastAsianWidth::Ambiguous }, // So     [8] RAIN..DISABLED CAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x26CE, 0x26CE }, crispy::text::EastAsianWidth::Wide }, // So         OPHIUCHUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x26CF, 0x26D3 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [5] PICK..CHAINS
+    Prop<crispy::text::EastAsianWidth>{ { 0x26D4, 0x26D4 }, crispy::text::EastAsianWidth::Wide }, // So         NO ENTRY
+    Prop<crispy::text::EastAsianWidth>{ { 0x26D5, 0x26E1 }, crispy::text::EastAsianWidth::Ambiguous }, // So    [13] ALTERNATE ONE-WAY LEFT WAY TRAFFIC..RESTRICTED LEFT ENTRY-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x26E2, 0x26E2 }, crispy::text::EastAsianWidth::Neutral }, // So         ASTRONOMICAL SYMBOL FOR URANUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x26E3, 0x26E3 }, crispy::text::EastAsianWidth::Ambiguous }, // So         HEAVY CIRCLE WITH STROKE AND TWO DOTS ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x26E4, 0x26E7 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] PENTAGRAM..INVERTED PENTAGRAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x26E8, 0x26E9 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] BLACK CROSS ON SHIELD..SHINTO SHRINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x26EA, 0x26EA }, crispy::text::EastAsianWidth::Wide }, // So         CHURCH
+    Prop<crispy::text::EastAsianWidth>{ { 0x26EB, 0x26F1 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [7] CASTLE..UMBRELLA ON GROUND
+    Prop<crispy::text::EastAsianWidth>{ { 0x26F2, 0x26F3 }, crispy::text::EastAsianWidth::Wide }, // So     [2] FOUNTAIN..FLAG IN HOLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x26F4, 0x26F4 }, crispy::text::EastAsianWidth::Ambiguous }, // So         FERRY
+    Prop<crispy::text::EastAsianWidth>{ { 0x26F5, 0x26F5 }, crispy::text::EastAsianWidth::Wide }, // So         SAILBOAT
+    Prop<crispy::text::EastAsianWidth>{ { 0x26F6, 0x26F9 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] SQUARE FOUR CORNERS..PERSON WITH BALL
+    Prop<crispy::text::EastAsianWidth>{ { 0x26FA, 0x26FA }, crispy::text::EastAsianWidth::Wide }, // So         TENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x26FB, 0x26FC }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] JAPANESE BANK SYMBOL..HEADSTONE GRAVEYARD SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x26FD, 0x26FD }, crispy::text::EastAsianWidth::Wide }, // So         FUEL PUMP
+    Prop<crispy::text::EastAsianWidth>{ { 0x26FE, 0x26FF }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] CUP ON BLACK SQUARE..WHITE FLAG WITH HORIZONTAL MIDDLE BLACK STRIPE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2700, 0x2704 }, crispy::text::EastAsianWidth::Neutral }, // So     [5] BLACK SAFETY SCISSORS..WHITE SCISSORS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2705, 0x2705 }, crispy::text::EastAsianWidth::Wide }, // So         WHITE HEAVY CHECK MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2706, 0x2709 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] TELEPHONE LOCATION SIGN..ENVELOPE
+    Prop<crispy::text::EastAsianWidth>{ { 0x270A, 0x270B }, crispy::text::EastAsianWidth::Wide }, // So     [2] RAISED FIST..RAISED HAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x270C, 0x2727 }, crispy::text::EastAsianWidth::Neutral }, // So    [28] VICTORY HAND..WHITE FOUR POINTED STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2728, 0x2728 }, crispy::text::EastAsianWidth::Wide }, // So         SPARKLES
+    Prop<crispy::text::EastAsianWidth>{ { 0x2729, 0x273C }, crispy::text::EastAsianWidth::Neutral }, // So    [20] STRESS OUTLINED WHITE STAR..OPEN CENTRE TEARDROP-SPOKED ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0x273D, 0x273D }, crispy::text::EastAsianWidth::Ambiguous }, // So         HEAVY TEARDROP-SPOKED ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0x273E, 0x274B }, crispy::text::EastAsianWidth::Neutral }, // So    [14] SIX PETALLED BLACK AND WHITE FLORETTE..HEAVY EIGHT TEARDROP-SPOKED PROPELLER ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0x274C, 0x274C }, crispy::text::EastAsianWidth::Wide }, // So         CROSS MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x274D, 0x274D }, crispy::text::EastAsianWidth::Neutral }, // So         SHADOWED WHITE CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x274E, 0x274E }, crispy::text::EastAsianWidth::Wide }, // So         NEGATIVE SQUARED CROSS MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x274F, 0x2752 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] LOWER RIGHT DROP-SHADOWED WHITE SQUARE..UPPER RIGHT SHADOWED WHITE SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2753, 0x2755 }, crispy::text::EastAsianWidth::Wide }, // So     [3] BLACK QUESTION MARK ORNAMENT..WHITE EXCLAMATION MARK ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2756, 0x2756 }, crispy::text::EastAsianWidth::Neutral }, // So         BLACK DIAMOND MINUS WHITE X
+    Prop<crispy::text::EastAsianWidth>{ { 0x2757, 0x2757 }, crispy::text::EastAsianWidth::Wide }, // So         HEAVY EXCLAMATION MARK SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2758, 0x2767 }, crispy::text::EastAsianWidth::Neutral }, // So    [16] LIGHT VERTICAL BAR..ROTATED FLORAL HEART BULLET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2768, 0x2768 }, crispy::text::EastAsianWidth::Neutral }, // Ps         MEDIUM LEFT PARENTHESIS ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2769, 0x2769 }, crispy::text::EastAsianWidth::Neutral }, // Pe         MEDIUM RIGHT PARENTHESIS ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276A, 0x276A }, crispy::text::EastAsianWidth::Neutral }, // Ps         MEDIUM FLATTENED LEFT PARENTHESIS ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276B, 0x276B }, crispy::text::EastAsianWidth::Neutral }, // Pe         MEDIUM FLATTENED RIGHT PARENTHESIS ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276C, 0x276C }, crispy::text::EastAsianWidth::Neutral }, // Ps         MEDIUM LEFT-POINTING ANGLE BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276D, 0x276D }, crispy::text::EastAsianWidth::Neutral }, // Pe         MEDIUM RIGHT-POINTING ANGLE BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276E, 0x276E }, crispy::text::EastAsianWidth::Neutral }, // Ps         HEAVY LEFT-POINTING ANGLE QUOTATION MARK ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x276F, 0x276F }, crispy::text::EastAsianWidth::Neutral }, // Pe         HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2770, 0x2770 }, crispy::text::EastAsianWidth::Neutral }, // Ps         HEAVY LEFT-POINTING ANGLE BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2771, 0x2771 }, crispy::text::EastAsianWidth::Neutral }, // Pe         HEAVY RIGHT-POINTING ANGLE BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2772, 0x2772 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LIGHT LEFT TORTOISE SHELL BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2773, 0x2773 }, crispy::text::EastAsianWidth::Neutral }, // Pe         LIGHT RIGHT TORTOISE SHELL BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2774, 0x2774 }, crispy::text::EastAsianWidth::Neutral }, // Ps         MEDIUM LEFT CURLY BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2775, 0x2775 }, crispy::text::EastAsianWidth::Neutral }, // Pe         MEDIUM RIGHT CURLY BRACKET ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2776, 0x277F }, crispy::text::EastAsianWidth::Ambiguous }, // No    [10] DINGBAT NEGATIVE CIRCLED DIGIT ONE..DINGBAT NEGATIVE CIRCLED NUMBER TEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2780, 0x2793 }, crispy::text::EastAsianWidth::Neutral }, // No    [20] DINGBAT CIRCLED SANS-SERIF DIGIT ONE..DINGBAT NEGATIVE CIRCLED SANS-SERIF NUMBER TEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2794, 0x2794 }, crispy::text::EastAsianWidth::Neutral }, // So         HEAVY WIDE-HEADED RIGHTWARDS ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2795, 0x2797 }, crispy::text::EastAsianWidth::Wide }, // So     [3] HEAVY PLUS SIGN..HEAVY DIVISION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2798, 0x27AF }, crispy::text::EastAsianWidth::Neutral }, // So    [24] HEAVY SOUTH EAST ARROW..NOTCHED LOWER RIGHT-SHADOWED WHITE RIGHTWARDS ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x27B0, 0x27B0 }, crispy::text::EastAsianWidth::Wide }, // So         CURLY LOOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x27B1, 0x27BE }, crispy::text::EastAsianWidth::Neutral }, // So    [14] NOTCHED UPPER RIGHT-SHADOWED WHITE RIGHTWARDS ARROW..OPEN-OUTLINED RIGHTWARDS ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x27BF, 0x27BF }, crispy::text::EastAsianWidth::Wide }, // So         DOUBLE CURLY LOOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x27C0, 0x27C4 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [5] THREE DIMENSIONAL ANGLE..OPEN SUPERSET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27C5, 0x27C5 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT S-SHAPED BAG DELIMITER
+    Prop<crispy::text::EastAsianWidth>{ { 0x27C6, 0x27C6 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT S-SHAPED BAG DELIMITER
+    Prop<crispy::text::EastAsianWidth>{ { 0x27C7, 0x27E5 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [31] OR WITH DOT INSIDE..WHITE SQUARE WITH RIGHTWARDS TICK
+    Prop<crispy::text::EastAsianWidth>{ { 0x27E6, 0x27E6 }, crispy::text::EastAsianWidth::Narrow }, // Ps         MATHEMATICAL LEFT WHITE SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27E7, 0x27E7 }, crispy::text::EastAsianWidth::Narrow }, // Pe         MATHEMATICAL RIGHT WHITE SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27E8, 0x27E8 }, crispy::text::EastAsianWidth::Narrow }, // Ps         MATHEMATICAL LEFT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27E9, 0x27E9 }, crispy::text::EastAsianWidth::Narrow }, // Pe         MATHEMATICAL RIGHT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27EA, 0x27EA }, crispy::text::EastAsianWidth::Narrow }, // Ps         MATHEMATICAL LEFT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27EB, 0x27EB }, crispy::text::EastAsianWidth::Narrow }, // Pe         MATHEMATICAL RIGHT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27EC, 0x27EC }, crispy::text::EastAsianWidth::Narrow }, // Ps         MATHEMATICAL LEFT WHITE TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27ED, 0x27ED }, crispy::text::EastAsianWidth::Narrow }, // Pe         MATHEMATICAL RIGHT WHITE TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x27EE, 0x27EE }, crispy::text::EastAsianWidth::Neutral }, // Ps         MATHEMATICAL LEFT FLATTENED PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x27EF, 0x27EF }, crispy::text::EastAsianWidth::Neutral }, // Pe         MATHEMATICAL RIGHT FLATTENED PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x27F0, 0x27FF }, crispy::text::EastAsianWidth::Neutral }, // Sm    [16] UPWARDS QUADRUPLE ARROW..LONG RIGHTWARDS SQUIGGLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2800, 0x28FF }, crispy::text::EastAsianWidth::Neutral }, // So   [256] BRAILLE PATTERN BLANK..BRAILLE PATTERN DOTS-12345678
+    Prop<crispy::text::EastAsianWidth>{ { 0x2900, 0x297F }, crispy::text::EastAsianWidth::Neutral }, // Sm   [128] RIGHTWARDS TWO-HEADED ARROW WITH VERTICAL STROKE..DOWN FISH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2980, 0x2982 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [3] TRIPLE VERTICAL BAR DELIMITER..Z NOTATION TYPE COLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x2983, 0x2983 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT WHITE CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2984, 0x2984 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT WHITE CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2985, 0x2985 }, crispy::text::EastAsianWidth::Narrow }, // Ps         LEFT WHITE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2986, 0x2986 }, crispy::text::EastAsianWidth::Narrow }, // Pe         RIGHT WHITE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2987, 0x2987 }, crispy::text::EastAsianWidth::Neutral }, // Ps         Z NOTATION LEFT IMAGE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2988, 0x2988 }, crispy::text::EastAsianWidth::Neutral }, // Pe         Z NOTATION RIGHT IMAGE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2989, 0x2989 }, crispy::text::EastAsianWidth::Neutral }, // Ps         Z NOTATION LEFT BINDING BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x298A, 0x298A }, crispy::text::EastAsianWidth::Neutral }, // Pe         Z NOTATION RIGHT BINDING BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x298B, 0x298B }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT SQUARE BRACKET WITH UNDERBAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x298C, 0x298C }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT SQUARE BRACKET WITH UNDERBAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x298D, 0x298D }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT SQUARE BRACKET WITH TICK IN TOP CORNER
+    Prop<crispy::text::EastAsianWidth>{ { 0x298E, 0x298E }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT SQUARE BRACKET WITH TICK IN BOTTOM CORNER
+    Prop<crispy::text::EastAsianWidth>{ { 0x298F, 0x298F }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT SQUARE BRACKET WITH TICK IN BOTTOM CORNER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2990, 0x2990 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT SQUARE BRACKET WITH TICK IN TOP CORNER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2991, 0x2991 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT ANGLE BRACKET WITH DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2992, 0x2992 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT ANGLE BRACKET WITH DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x2993, 0x2993 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT ARC LESS-THAN BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2994, 0x2994 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT ARC GREATER-THAN BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2995, 0x2995 }, crispy::text::EastAsianWidth::Neutral }, // Ps         DOUBLE LEFT ARC GREATER-THAN BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2996, 0x2996 }, crispy::text::EastAsianWidth::Neutral }, // Pe         DOUBLE RIGHT ARC LESS-THAN BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2997, 0x2997 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT BLACK TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2998, 0x2998 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT BLACK TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2999, 0x29D7 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [63] DOTTED FENCE..BLACK HOURGLASS
+    Prop<crispy::text::EastAsianWidth>{ { 0x29D8, 0x29D8 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT WIGGLY FENCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x29D9, 0x29D9 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT WIGGLY FENCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x29DA, 0x29DA }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT DOUBLE WIGGLY FENCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x29DB, 0x29DB }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT DOUBLE WIGGLY FENCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x29DC, 0x29FB }, crispy::text::EastAsianWidth::Neutral }, // Sm    [32] INCOMPLETE INFINITY..TRIPLE PLUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x29FC, 0x29FC }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT-POINTING CURVED ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x29FD, 0x29FD }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT-POINTING CURVED ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x29FE, 0x29FF }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] TINY..MINY
+    Prop<crispy::text::EastAsianWidth>{ { 0x2A00, 0x2AFF }, crispy::text::EastAsianWidth::Neutral }, // Sm   [256] N-ARY CIRCLED DOT OPERATOR..N-ARY WHITE VERTICAL BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B00, 0x2B1A }, crispy::text::EastAsianWidth::Neutral }, // So    [27] NORTH EAST WHITE ARROW..DOTTED SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B1B, 0x2B1C }, crispy::text::EastAsianWidth::Wide }, // So     [2] BLACK LARGE SQUARE..WHITE LARGE SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B1D, 0x2B2F }, crispy::text::EastAsianWidth::Neutral }, // So    [19] BLACK VERY SMALL SQUARE..WHITE VERTICAL ELLIPSE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B30, 0x2B44 }, crispy::text::EastAsianWidth::Neutral }, // Sm    [21] LEFT ARROW WITH SMALL CIRCLE..RIGHTWARDS ARROW THROUGH SUPERSET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B45, 0x2B46 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] LEFTWARDS QUADRUPLE ARROW..RIGHTWARDS QUADRUPLE ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B47, 0x2B4C }, crispy::text::EastAsianWidth::Neutral }, // Sm     [6] REVERSE TILDE OPERATOR ABOVE RIGHTWARDS ARROW..RIGHTWARDS ARROW ABOVE REVERSE TILDE OPERATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B4D, 0x2B4F }, crispy::text::EastAsianWidth::Neutral }, // So     [3] DOWNWARDS TRIANGLE-HEADED ZIGZAG ARROW..SHORT BACKSLANTED SOUTH ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B50, 0x2B50 }, crispy::text::EastAsianWidth::Wide }, // So         WHITE MEDIUM STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B51, 0x2B54 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] BLACK SMALL STAR..WHITE RIGHT-POINTING PENTAGON
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B55, 0x2B55 }, crispy::text::EastAsianWidth::Wide }, // So         HEAVY LARGE CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B56, 0x2B59 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [4] HEAVY OVAL WITH OVAL INSIDE..HEAVY CIRCLED SALTIRE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B5A, 0x2B73 }, crispy::text::EastAsianWidth::Neutral }, // So    [26] SLANTED NORTH ARROW WITH HOOKED HEAD..DOWNWARDS TRIANGLE-HEADED ARROW TO BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B76, 0x2B95 }, crispy::text::EastAsianWidth::Neutral }, // So    [32] NORTH WEST TRIANGLE-HEADED ARROW TO BAR..RIGHTWARDS BLACK ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B97, 0x2BFF }, crispy::text::EastAsianWidth::Neutral }, // So   [105] SYMBOL FOR TYPE A ELECTRONICS..HELLSCHREIBER PAUSE SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C00, 0x2C2E }, crispy::text::EastAsianWidth::Neutral }, // Lu    [47] GLAGOLITIC CAPITAL LETTER AZU..GLAGOLITIC CAPITAL LETTER LATINATE MYSLITE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C30, 0x2C5E }, crispy::text::EastAsianWidth::Neutral }, // Ll    [47] GLAGOLITIC SMALL LETTER AZU..GLAGOLITIC SMALL LETTER LATINATE MYSLITE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C60, 0x2C7B }, crispy::text::EastAsianWidth::Neutral }, // L&    [28] LATIN CAPITAL LETTER L WITH DOUBLE BAR..LATIN LETTER SMALL CAPITAL TURNED E
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C7C, 0x2C7D }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] LATIN SUBSCRIPT SMALL LETTER J..MODIFIER LETTER CAPITAL V
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C7E, 0x2C7F }, crispy::text::EastAsianWidth::Neutral }, // Lu     [2] LATIN CAPITAL LETTER S WITH SWASH TAIL..LATIN CAPITAL LETTER Z WITH SWASH TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2C80, 0x2CE4 }, crispy::text::EastAsianWidth::Neutral }, // L&   [101] COPTIC CAPITAL LETTER ALFA..COPTIC SYMBOL KAI
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CE5, 0x2CEA }, crispy::text::EastAsianWidth::Neutral }, // So     [6] COPTIC SYMBOL MI RO..COPTIC SYMBOL SHIMA SIMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CEB, 0x2CEE }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] COPTIC CAPITAL LETTER CRYPTOGRAMMIC SHEI..COPTIC SMALL LETTER CRYPTOGRAMMIC GANGIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CEF, 0x2CF1 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] COPTIC COMBINING NI ABOVE..COPTIC COMBINING SPIRITUS LENIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CF2, 0x2CF3 }, crispy::text::EastAsianWidth::Neutral }, // L&     [2] COPTIC CAPITAL LETTER BOHAIRIC KHEI..COPTIC SMALL LETTER BOHAIRIC KHEI
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CF9, 0x2CFC }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] COPTIC OLD NUBIAN FULL STOP..COPTIC OLD NUBIAN VERSE DIVIDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CFD, 0x2CFD }, crispy::text::EastAsianWidth::Neutral }, // No         COPTIC FRACTION ONE HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CFE, 0x2CFF }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] COPTIC FULL STOP..COPTIC MORPHOLOGICAL DIVIDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D00, 0x2D25 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [38] GEORGIAN SMALL LETTER AN..GEORGIAN SMALL LETTER HOE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D27, 0x2D27 }, crispy::text::EastAsianWidth::Neutral }, // Ll         GEORGIAN SMALL LETTER YN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D2D, 0x2D2D }, crispy::text::EastAsianWidth::Neutral }, // Ll         GEORGIAN SMALL LETTER AEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D30, 0x2D67 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [56] TIFINAGH LETTER YA..TIFINAGH LETTER YO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D6F, 0x2D6F }, crispy::text::EastAsianWidth::Neutral }, // Lm         TIFINAGH MODIFIER LETTER LABIALIZATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D70, 0x2D70 }, crispy::text::EastAsianWidth::Neutral }, // Po         TIFINAGH SEPARATOR MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D7F, 0x2D7F }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIFINAGH CONSONANT JOINER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2D80, 0x2D96 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] ETHIOPIC SYLLABLE LOA..ETHIOPIC SYLLABLE GGWE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DA0, 0x2DA6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE SSA..ETHIOPIC SYLLABLE SSO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DA8, 0x2DAE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE CCA..ETHIOPIC SYLLABLE CCO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DB0, 0x2DB6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE ZZA..ETHIOPIC SYLLABLE ZZO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DB8, 0x2DBE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE CCHA..ETHIOPIC SYLLABLE CCHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DC0, 0x2DC6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE QYA..ETHIOPIC SYLLABLE QYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DC8, 0x2DCE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE KYA..ETHIOPIC SYLLABLE KYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DD0, 0x2DD6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE XYA..ETHIOPIC SYLLABLE XYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DD8, 0x2DDE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE GYA..ETHIOPIC SYLLABLE GYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x2DE0, 0x2DFF }, crispy::text::EastAsianWidth::Neutral }, // Mn    [32] COMBINING CYRILLIC LETTER BE..COMBINING CYRILLIC LETTER IOTIFIED BIG YUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E00, 0x2E01 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] RIGHT ANGLE SUBSTITUTION MARKER..RIGHT ANGLE DOTTED SUBSTITUTION MARKER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E02, 0x2E02 }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT SUBSTITUTION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E03, 0x2E03 }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT SUBSTITUTION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E04, 0x2E04 }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT DOTTED SUBSTITUTION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E05, 0x2E05 }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT DOTTED SUBSTITUTION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E06, 0x2E08 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] RAISED INTERPOLATION MARKER..DOTTED TRANSPOSITION MARKER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E09, 0x2E09 }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT TRANSPOSITION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E0A, 0x2E0A }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT TRANSPOSITION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E0B, 0x2E0B }, crispy::text::EastAsianWidth::Neutral }, // Po         RAISED SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E0C, 0x2E0C }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT RAISED OMISSION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E0D, 0x2E0D }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT RAISED OMISSION BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E0E, 0x2E16 }, crispy::text::EastAsianWidth::Neutral }, // Po     [9] EDITORIAL CORONIS..DOTTED RIGHT-POINTING ANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E17, 0x2E17 }, crispy::text::EastAsianWidth::Neutral }, // Pd         DOUBLE OBLIQUE HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E18, 0x2E19 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] INVERTED INTERROBANG..PALM BRANCH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E1A, 0x2E1A }, crispy::text::EastAsianWidth::Neutral }, // Pd         HYPHEN WITH DIAERESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E1B, 0x2E1B }, crispy::text::EastAsianWidth::Neutral }, // Po         TILDE WITH RING ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E1C, 0x2E1C }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT LOW PARAPHRASE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E1D, 0x2E1D }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT LOW PARAPHRASE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E1E, 0x2E1F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] TILDE WITH DOT ABOVE..TILDE WITH DOT BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E20, 0x2E20 }, crispy::text::EastAsianWidth::Neutral }, // Pi         LEFT VERTICAL BAR WITH QUILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E21, 0x2E21 }, crispy::text::EastAsianWidth::Neutral }, // Pf         RIGHT VERTICAL BAR WITH QUILL
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E22, 0x2E22 }, crispy::text::EastAsianWidth::Neutral }, // Ps         TOP LEFT HALF BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E23, 0x2E23 }, crispy::text::EastAsianWidth::Neutral }, // Pe         TOP RIGHT HALF BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E24, 0x2E24 }, crispy::text::EastAsianWidth::Neutral }, // Ps         BOTTOM LEFT HALF BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E25, 0x2E25 }, crispy::text::EastAsianWidth::Neutral }, // Pe         BOTTOM RIGHT HALF BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E26, 0x2E26 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT SIDEWAYS U BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E27, 0x2E27 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT SIDEWAYS U BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E28, 0x2E28 }, crispy::text::EastAsianWidth::Neutral }, // Ps         LEFT DOUBLE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E29, 0x2E29 }, crispy::text::EastAsianWidth::Neutral }, // Pe         RIGHT DOUBLE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E2A, 0x2E2E }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] TWO DOTS OVER ONE DOT PUNCTUATION..REVERSED QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E2F, 0x2E2F }, crispy::text::EastAsianWidth::Neutral }, // Lm         VERTICAL TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E30, 0x2E39 }, crispy::text::EastAsianWidth::Neutral }, // Po    [10] RING POINT..TOP HALF SECTION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E3A, 0x2E3B }, crispy::text::EastAsianWidth::Neutral }, // Pd     [2] TWO-EM DASH..THREE-EM DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E3C, 0x2E3F }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] STENOGRAPHIC FULL STOP..CAPITULUM
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E40, 0x2E40 }, crispy::text::EastAsianWidth::Neutral }, // Pd         DOUBLE HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E41, 0x2E41 }, crispy::text::EastAsianWidth::Neutral }, // Po         REVERSED COMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E42, 0x2E42 }, crispy::text::EastAsianWidth::Neutral }, // Ps         DOUBLE LOW-REVERSED-9 QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E43, 0x2E4F }, crispy::text::EastAsianWidth::Neutral }, // Po    [13] DASH WITH LEFT UPTURN..CORNISH VERSE DIVIDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E50, 0x2E51 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] CROSS PATTY WITH RIGHT CROSSBAR..CROSS PATTY WITH LEFT CROSSBAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E52, 0x2E52 }, crispy::text::EastAsianWidth::Neutral }, // Po         TIRONIAN SIGN CAPITAL ET
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E80, 0x2E99 }, crispy::text::EastAsianWidth::Wide }, // So    [26] CJK RADICAL REPEAT..CJK RADICAL RAP
+    Prop<crispy::text::EastAsianWidth>{ { 0x2E9B, 0x2EF3 }, crispy::text::EastAsianWidth::Wide }, // So    [89] CJK RADICAL CHOKE..CJK RADICAL C-SIMPLIFIED TURTLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2F00, 0x2FD5 }, crispy::text::EastAsianWidth::Wide }, // So   [214] KANGXI RADICAL ONE..KANGXI RADICAL FLUTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x2FF0, 0x2FFB }, crispy::text::EastAsianWidth::Wide }, // So    [12] IDEOGRAPHIC DESCRIPTION CHARACTER LEFT TO RIGHT..IDEOGRAPHIC DESCRIPTION CHARACTER OVERLAID
+    Prop<crispy::text::EastAsianWidth>{ { 0x3000, 0x3000 }, crispy::text::EastAsianWidth::FullWidth }, // Zs         IDEOGRAPHIC SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3001, 0x3003 }, crispy::text::EastAsianWidth::Wide }, // Po     [3] IDEOGRAPHIC COMMA..DITTO MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3004, 0x3004 }, crispy::text::EastAsianWidth::Wide }, // So         JAPANESE INDUSTRIAL STANDARD SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x3005, 0x3005 }, crispy::text::EastAsianWidth::Wide }, // Lm         IDEOGRAPHIC ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3006, 0x3006 }, crispy::text::EastAsianWidth::Wide }, // Lo         IDEOGRAPHIC CLOSING MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3007, 0x3007 }, crispy::text::EastAsianWidth::Wide }, // Nl         IDEOGRAPHIC NUMBER ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x3008, 0x3008 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3009, 0x3009 }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300A, 0x300A }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300B, 0x300B }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300C, 0x300C }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300D, 0x300D }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300E, 0x300E }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT WHITE CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x300F, 0x300F }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT WHITE CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3010, 0x3010 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT BLACK LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3011, 0x3011 }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT BLACK LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3012, 0x3013 }, crispy::text::EastAsianWidth::Wide }, // So     [2] POSTAL MARK..GETA MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3014, 0x3014 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3015, 0x3015 }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3016, 0x3016 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT WHITE LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3017, 0x3017 }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT WHITE LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3018, 0x3018 }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT WHITE TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x3019, 0x3019 }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT WHITE TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x301A, 0x301A }, crispy::text::EastAsianWidth::Wide }, // Ps         LEFT WHITE SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x301B, 0x301B }, crispy::text::EastAsianWidth::Wide }, // Pe         RIGHT WHITE SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0x301C, 0x301C }, crispy::text::EastAsianWidth::Wide }, // Pd         WAVE DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x301D, 0x301D }, crispy::text::EastAsianWidth::Wide }, // Ps         REVERSED DOUBLE PRIME QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x301E, 0x301F }, crispy::text::EastAsianWidth::Wide }, // Pe     [2] DOUBLE PRIME QUOTATION MARK..LOW DOUBLE PRIME QUOTATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3020, 0x3020 }, crispy::text::EastAsianWidth::Wide }, // So         POSTAL MARK FACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3021, 0x3029 }, crispy::text::EastAsianWidth::Wide }, // Nl     [9] HANGZHOU NUMERAL ONE..HANGZHOU NUMERAL NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x302A, 0x302D }, crispy::text::EastAsianWidth::Wide }, // Mn     [4] IDEOGRAPHIC LEVEL TONE MARK..IDEOGRAPHIC ENTERING TONE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x302E, 0x302F }, crispy::text::EastAsianWidth::Wide }, // Mc     [2] HANGUL SINGLE DOT TONE MARK..HANGUL DOUBLE DOT TONE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3030, 0x3030 }, crispy::text::EastAsianWidth::Wide }, // Pd         WAVY DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x3031, 0x3035 }, crispy::text::EastAsianWidth::Wide }, // Lm     [5] VERTICAL KANA REPEAT MARK..VERTICAL KANA REPEAT MARK LOWER HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0x3036, 0x3037 }, crispy::text::EastAsianWidth::Wide }, // So     [2] CIRCLED POSTAL MARK..IDEOGRAPHIC TELEGRAPH LINE FEED SEPARATOR SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x3038, 0x303A }, crispy::text::EastAsianWidth::Wide }, // Nl     [3] HANGZHOU NUMERAL TEN..HANGZHOU NUMERAL THIRTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x303B, 0x303B }, crispy::text::EastAsianWidth::Wide }, // Lm         VERTICAL IDEOGRAPHIC ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x303C, 0x303C }, crispy::text::EastAsianWidth::Wide }, // Lo         MASU MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x303D, 0x303D }, crispy::text::EastAsianWidth::Wide }, // Po         PART ALTERNATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x303E, 0x303E }, crispy::text::EastAsianWidth::Wide }, // So         IDEOGRAPHIC VARIATION INDICATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x303F, 0x303F }, crispy::text::EastAsianWidth::Neutral }, // So         IDEOGRAPHIC HALF FILL SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3041, 0x3096 }, crispy::text::EastAsianWidth::Wide }, // Lo    [86] HIRAGANA LETTER SMALL A..HIRAGANA LETTER SMALL KE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3099, 0x309A }, crispy::text::EastAsianWidth::Wide }, // Mn     [2] COMBINING KATAKANA-HIRAGANA VOICED SOUND MARK..COMBINING KATAKANA-HIRAGANA SEMI-VOICED SOUND MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x309B, 0x309C }, crispy::text::EastAsianWidth::Wide }, // Sk     [2] KATAKANA-HIRAGANA VOICED SOUND MARK..KATAKANA-HIRAGANA SEMI-VOICED SOUND MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x309D, 0x309E }, crispy::text::EastAsianWidth::Wide }, // Lm     [2] HIRAGANA ITERATION MARK..HIRAGANA VOICED ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x309F, 0x309F }, crispy::text::EastAsianWidth::Wide }, // Lo         HIRAGANA DIGRAPH YORI
+    Prop<crispy::text::EastAsianWidth>{ { 0x30A0, 0x30A0 }, crispy::text::EastAsianWidth::Wide }, // Pd         KATAKANA-HIRAGANA DOUBLE HYPHEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x30A1, 0x30FA }, crispy::text::EastAsianWidth::Wide }, // Lo    [90] KATAKANA LETTER SMALL A..KATAKANA LETTER VO
+    Prop<crispy::text::EastAsianWidth>{ { 0x30FB, 0x30FB }, crispy::text::EastAsianWidth::Wide }, // Po         KATAKANA MIDDLE DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x30FC, 0x30FE }, crispy::text::EastAsianWidth::Wide }, // Lm     [3] KATAKANA-HIRAGANA PROLONGED SOUND MARK..KATAKANA VOICED ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x30FF, 0x30FF }, crispy::text::EastAsianWidth::Wide }, // Lo         KATAKANA DIGRAPH KOTO
+    Prop<crispy::text::EastAsianWidth>{ { 0x3105, 0x312F }, crispy::text::EastAsianWidth::Wide }, // Lo    [43] BOPOMOFO LETTER B..BOPOMOFO LETTER NN
+    Prop<crispy::text::EastAsianWidth>{ { 0x3131, 0x318E }, crispy::text::EastAsianWidth::Wide }, // Lo    [94] HANGUL LETTER KIYEOK..HANGUL LETTER ARAEAE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3190, 0x3191 }, crispy::text::EastAsianWidth::Wide }, // So     [2] IDEOGRAPHIC ANNOTATION LINKING MARK..IDEOGRAPHIC ANNOTATION REVERSE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3192, 0x3195 }, crispy::text::EastAsianWidth::Wide }, // No     [4] IDEOGRAPHIC ANNOTATION ONE MARK..IDEOGRAPHIC ANNOTATION FOUR MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x3196, 0x319F }, crispy::text::EastAsianWidth::Wide }, // So    [10] IDEOGRAPHIC ANNOTATION TOP MARK..IDEOGRAPHIC ANNOTATION MAN MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x31A0, 0x31BF }, crispy::text::EastAsianWidth::Wide }, // Lo    [32] BOPOMOFO LETTER BU..BOPOMOFO LETTER AH
+    Prop<crispy::text::EastAsianWidth>{ { 0x31C0, 0x31E3 }, crispy::text::EastAsianWidth::Wide }, // So    [36] CJK STROKE T..CJK STROKE Q
+    Prop<crispy::text::EastAsianWidth>{ { 0x31F0, 0x31FF }, crispy::text::EastAsianWidth::Wide }, // Lo    [16] KATAKANA LETTER SMALL KU..KATAKANA LETTER SMALL RO
+    Prop<crispy::text::EastAsianWidth>{ { 0x3200, 0x321E }, crispy::text::EastAsianWidth::Wide }, // So    [31] PARENTHESIZED HANGUL KIYEOK..PARENTHESIZED KOREAN CHARACTER O HU
+    Prop<crispy::text::EastAsianWidth>{ { 0x3220, 0x3229 }, crispy::text::EastAsianWidth::Wide }, // No    [10] PARENTHESIZED IDEOGRAPH ONE..PARENTHESIZED IDEOGRAPH TEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x322A, 0x3247 }, crispy::text::EastAsianWidth::Wide }, // So    [30] PARENTHESIZED IDEOGRAPH MOON..CIRCLED IDEOGRAPH KOTO
+    Prop<crispy::text::EastAsianWidth>{ { 0x3248, 0x324F }, crispy::text::EastAsianWidth::Ambiguous }, // No     [8] CIRCLED NUMBER TEN ON BLACK SQUARE..CIRCLED NUMBER EIGHTY ON BLACK SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3250, 0x3250 }, crispy::text::EastAsianWidth::Wide }, // So         PARTNERSHIP SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x3251, 0x325F }, crispy::text::EastAsianWidth::Wide }, // No    [15] CIRCLED NUMBER TWENTY ONE..CIRCLED NUMBER THIRTY FIVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x3260, 0x327F }, crispy::text::EastAsianWidth::Wide }, // So    [32] CIRCLED HANGUL KIYEOK..KOREAN STANDARD SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x3280, 0x3289 }, crispy::text::EastAsianWidth::Wide }, // No    [10] CIRCLED IDEOGRAPH ONE..CIRCLED IDEOGRAPH TEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x328A, 0x32B0 }, crispy::text::EastAsianWidth::Wide }, // So    [39] CIRCLED IDEOGRAPH MOON..CIRCLED IDEOGRAPH NIGHT
+    Prop<crispy::text::EastAsianWidth>{ { 0x32B1, 0x32BF }, crispy::text::EastAsianWidth::Wide }, // No    [15] CIRCLED NUMBER THIRTY SIX..CIRCLED NUMBER FIFTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x32C0, 0x32FF }, crispy::text::EastAsianWidth::Wide }, // So    [64] IDEOGRAPHIC TELEGRAPH SYMBOL FOR JANUARY..SQUARE ERA NAME REIWA
+    Prop<crispy::text::EastAsianWidth>{ { 0x3300, 0x33FF }, crispy::text::EastAsianWidth::Wide }, // So   [256] SQUARE APAATO..SQUARE GAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x3400, 0x4DBF }, crispy::text::EastAsianWidth::Wide }, // Lo  [6592] CJK UNIFIED IDEOGRAPH-3400..CJK UNIFIED IDEOGRAPH-4DBF
+    Prop<crispy::text::EastAsianWidth>{ { 0x4DC0, 0x4DFF }, crispy::text::EastAsianWidth::Neutral }, // So    [64] HEXAGRAM FOR THE CREATIVE HEAVEN..HEXAGRAM FOR BEFORE COMPLETION
+    Prop<crispy::text::EastAsianWidth>{ { 0x4E00, 0x9FFC }, crispy::text::EastAsianWidth::Wide }, // Lo [20989] CJK UNIFIED IDEOGRAPH-4E00..CJK UNIFIED IDEOGRAPH-9FFC
+    Prop<crispy::text::EastAsianWidth>{ { 0x9FFD, 0x9FFF }, crispy::text::EastAsianWidth::Wide }, // Cn     [3] <reserved-9FFD>..<reserved-9FFF>
+    Prop<crispy::text::EastAsianWidth>{ { 0xA000, 0xA014 }, crispy::text::EastAsianWidth::Wide }, // Lo    [21] YI SYLLABLE IT..YI SYLLABLE E
+    Prop<crispy::text::EastAsianWidth>{ { 0xA015, 0xA015 }, crispy::text::EastAsianWidth::Wide }, // Lm         YI SYLLABLE WU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA016, 0xA48C }, crispy::text::EastAsianWidth::Wide }, // Lo  [1143] YI SYLLABLE BIT..YI SYLLABLE YYR
+    Prop<crispy::text::EastAsianWidth>{ { 0xA490, 0xA4C6 }, crispy::text::EastAsianWidth::Wide }, // So    [55] YI RADICAL QOT..YI RADICAL KE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA4D0, 0xA4F7 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [40] LISU LETTER BA..LISU LETTER OE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA4F8, 0xA4FD }, crispy::text::EastAsianWidth::Neutral }, // Lm     [6] LISU LETTER TONE MYA TI..LISU LETTER TONE MYA JEU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA4FE, 0xA4FF }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] LISU PUNCTUATION COMMA..LISU PUNCTUATION FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0xA500, 0xA60B }, crispy::text::EastAsianWidth::Neutral }, // Lo   [268] VAI SYLLABLE EE..VAI SYLLABLE NG
+    Prop<crispy::text::EastAsianWidth>{ { 0xA60C, 0xA60C }, crispy::text::EastAsianWidth::Neutral }, // Lm         VAI SYLLABLE LENGTHENER
+    Prop<crispy::text::EastAsianWidth>{ { 0xA60D, 0xA60F }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] VAI COMMA..VAI QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA610, 0xA61F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [16] VAI SYLLABLE NDOLE FA..VAI SYMBOL JONG
+    Prop<crispy::text::EastAsianWidth>{ { 0xA620, 0xA629 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] VAI DIGIT ZERO..VAI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA62A, 0xA62B }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] VAI SYLLABLE NDOLE MA..VAI SYLLABLE NDOLE DO
+    Prop<crispy::text::EastAsianWidth>{ { 0xA640, 0xA66D }, crispy::text::EastAsianWidth::Neutral }, // L&    [46] CYRILLIC CAPITAL LETTER ZEMLYA..CYRILLIC SMALL LETTER DOUBLE MONOCULAR O
+    Prop<crispy::text::EastAsianWidth>{ { 0xA66E, 0xA66E }, crispy::text::EastAsianWidth::Neutral }, // Lo         CYRILLIC LETTER MULTIOCULAR O
+    Prop<crispy::text::EastAsianWidth>{ { 0xA66F, 0xA66F }, crispy::text::EastAsianWidth::Neutral }, // Mn         COMBINING CYRILLIC VZMET
+    Prop<crispy::text::EastAsianWidth>{ { 0xA670, 0xA672 }, crispy::text::EastAsianWidth::Neutral }, // Me     [3] COMBINING CYRILLIC TEN MILLIONS SIGN..COMBINING CYRILLIC THOUSAND MILLIONS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xA673, 0xA673 }, crispy::text::EastAsianWidth::Neutral }, // Po         SLAVONIC ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA674, 0xA67D }, crispy::text::EastAsianWidth::Neutral }, // Mn    [10] COMBINING CYRILLIC LETTER UKRAINIAN IE..COMBINING CYRILLIC PAYEROK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA67E, 0xA67E }, crispy::text::EastAsianWidth::Neutral }, // Po         CYRILLIC KAVYKA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA67F, 0xA67F }, crispy::text::EastAsianWidth::Neutral }, // Lm         CYRILLIC PAYEROK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA680, 0xA69B }, crispy::text::EastAsianWidth::Neutral }, // L&    [28] CYRILLIC CAPITAL LETTER DWE..CYRILLIC SMALL LETTER CROSSED O
+    Prop<crispy::text::EastAsianWidth>{ { 0xA69C, 0xA69D }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] MODIFIER LETTER CYRILLIC HARD SIGN..MODIFIER LETTER CYRILLIC SOFT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xA69E, 0xA69F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] COMBINING CYRILLIC LETTER EF..COMBINING CYRILLIC LETTER IOTIFIED E
+    Prop<crispy::text::EastAsianWidth>{ { 0xA6A0, 0xA6E5 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [70] BAMUM LETTER A..BAMUM LETTER KI
+    Prop<crispy::text::EastAsianWidth>{ { 0xA6E6, 0xA6EF }, crispy::text::EastAsianWidth::Neutral }, // Nl    [10] BAMUM LETTER MO..BAMUM LETTER KOGHOM
+    Prop<crispy::text::EastAsianWidth>{ { 0xA6F0, 0xA6F1 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] BAMUM COMBINING MARK KOQNDON..BAMUM COMBINING MARK TUKWENTIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xA6F2, 0xA6F7 }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] BAMUM NJAEMLI..BAMUM QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA700, 0xA716 }, crispy::text::EastAsianWidth::Neutral }, // Sk    [23] MODIFIER LETTER CHINESE TONE YIN PING..MODIFIER LETTER EXTRA-LOW LEFT-STEM TONE BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0xA717, 0xA71F }, crispy::text::EastAsianWidth::Neutral }, // Lm     [9] MODIFIER LETTER DOT VERTICAL BAR..MODIFIER LETTER LOW INVERTED EXCLAMATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA720, 0xA721 }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] MODIFIER LETTER STRESS AND HIGH TONE..MODIFIER LETTER STRESS AND LOW TONE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA722, 0xA76F }, crispy::text::EastAsianWidth::Neutral }, // L&    [78] LATIN CAPITAL LETTER EGYPTOLOGICAL ALEF..LATIN SMALL LETTER CON
+    Prop<crispy::text::EastAsianWidth>{ { 0xA770, 0xA770 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER US
+    Prop<crispy::text::EastAsianWidth>{ { 0xA771, 0xA787 }, crispy::text::EastAsianWidth::Neutral }, // L&    [23] LATIN SMALL LETTER DUM..LATIN SMALL LETTER INSULAR T
+    Prop<crispy::text::EastAsianWidth>{ { 0xA788, 0xA788 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER LOW CIRCUMFLEX ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0xA789, 0xA78A }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] MODIFIER LETTER COLON..MODIFIER LETTER SHORT EQUALS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xA78B, 0xA78E }, crispy::text::EastAsianWidth::Neutral }, // L&     [4] LATIN CAPITAL LETTER SALTILLO..LATIN SMALL LETTER L WITH RETROFLEX HOOK AND BELT
+    Prop<crispy::text::EastAsianWidth>{ { 0xA78F, 0xA78F }, crispy::text::EastAsianWidth::Neutral }, // Lo         LATIN LETTER SINOLOGICAL DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0xA790, 0xA7BF }, crispy::text::EastAsianWidth::Neutral }, // L&    [48] LATIN CAPITAL LETTER N WITH DESCENDER..LATIN SMALL LETTER GLOTTAL U
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7C2, 0xA7CA }, crispy::text::EastAsianWidth::Neutral }, // L&     [9] LATIN CAPITAL LETTER ANGLICANA W..LATIN SMALL LETTER S WITH SHORT STROKE OVERLAY
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7F5, 0xA7F6 }, crispy::text::EastAsianWidth::Neutral }, // L&     [2] LATIN CAPITAL LETTER REVERSED HALF H..LATIN SMALL LETTER REVERSED HALF H
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7F7, 0xA7F7 }, crispy::text::EastAsianWidth::Neutral }, // Lo         LATIN EPIGRAPHIC LETTER SIDEWAYS I
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7F8, 0xA7F9 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] MODIFIER LETTER CAPITAL H WITH STROKE..MODIFIER LETTER SMALL LIGATURE OE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7FA, 0xA7FA }, crispy::text::EastAsianWidth::Neutral }, // Ll         LATIN LETTER SMALL CAPITAL TURNED M
+    Prop<crispy::text::EastAsianWidth>{ { 0xA7FB, 0xA7FF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] LATIN EPIGRAPHIC LETTER REVERSED F..LATIN EPIGRAPHIC LETTER ARCHAIC M
+    Prop<crispy::text::EastAsianWidth>{ { 0xA800, 0xA801 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] SYLOTI NAGRI LETTER A..SYLOTI NAGRI LETTER I
+    Prop<crispy::text::EastAsianWidth>{ { 0xA802, 0xA802 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SYLOTI NAGRI SIGN DVISVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA803, 0xA805 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] SYLOTI NAGRI LETTER U..SYLOTI NAGRI LETTER O
+    Prop<crispy::text::EastAsianWidth>{ { 0xA806, 0xA806 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SYLOTI NAGRI SIGN HASANTA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA807, 0xA80A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] SYLOTI NAGRI LETTER KO..SYLOTI NAGRI LETTER GHO
+    Prop<crispy::text::EastAsianWidth>{ { 0xA80B, 0xA80B }, crispy::text::EastAsianWidth::Neutral }, // Mn         SYLOTI NAGRI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA80C, 0xA822 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] SYLOTI NAGRI LETTER CO..SYLOTI NAGRI LETTER HO
+    Prop<crispy::text::EastAsianWidth>{ { 0xA823, 0xA824 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SYLOTI NAGRI VOWEL SIGN A..SYLOTI NAGRI VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0xA825, 0xA826 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SYLOTI NAGRI VOWEL SIGN U..SYLOTI NAGRI VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0xA827, 0xA827 }, crispy::text::EastAsianWidth::Neutral }, // Mc         SYLOTI NAGRI VOWEL SIGN OO
+    Prop<crispy::text::EastAsianWidth>{ { 0xA828, 0xA82B }, crispy::text::EastAsianWidth::Neutral }, // So     [4] SYLOTI NAGRI POETRY MARK-1..SYLOTI NAGRI POETRY MARK-4
+    Prop<crispy::text::EastAsianWidth>{ { 0xA82C, 0xA82C }, crispy::text::EastAsianWidth::Neutral }, // Mn         SYLOTI NAGRI SIGN ALTERNATE HASANTA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA830, 0xA835 }, crispy::text::EastAsianWidth::Neutral }, // No     [6] NORTH INDIC FRACTION ONE QUARTER..NORTH INDIC FRACTION THREE SIXTEENTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0xA836, 0xA837 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] NORTH INDIC QUARTER MARK..NORTH INDIC PLACEHOLDER MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA838, 0xA838 }, crispy::text::EastAsianWidth::Neutral }, // Sc         NORTH INDIC RUPEE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA839, 0xA839 }, crispy::text::EastAsianWidth::Neutral }, // So         NORTH INDIC QUANTITY MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA840, 0xA873 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [52] PHAGS-PA LETTER KA..PHAGS-PA LETTER CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA874, 0xA877 }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] PHAGS-PA SINGLE HEAD MARK..PHAGS-PA MARK DOUBLE SHAD
+    Prop<crispy::text::EastAsianWidth>{ { 0xA880, 0xA881 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SAURASHTRA SIGN ANUSVARA..SAURASHTRA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA882, 0xA8B3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [50] SAURASHTRA LETTER A..SAURASHTRA LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8B4, 0xA8C3 }, crispy::text::EastAsianWidth::Neutral }, // Mc    [16] SAURASHTRA CONSONANT SIGN HAARU..SAURASHTRA VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8C4, 0xA8C5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SAURASHTRA SIGN VIRAMA..SAURASHTRA SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8CE, 0xA8CF }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] SAURASHTRA DANDA..SAURASHTRA DOUBLE DANDA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8D0, 0xA8D9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SAURASHTRA DIGIT ZERO..SAURASHTRA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8E0, 0xA8F1 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [18] COMBINING DEVANAGARI DIGIT ZERO..COMBINING DEVANAGARI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8F2, 0xA8F7 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] DEVANAGARI SIGN SPACING CANDRABINDU..DEVANAGARI SIGN CANDRABINDU AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8F8, 0xA8FA }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] DEVANAGARI SIGN PUSHPIKA..DEVANAGARI CARET
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8FB, 0xA8FB }, crispy::text::EastAsianWidth::Neutral }, // Lo         DEVANAGARI HEADSTROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8FC, 0xA8FC }, crispy::text::EastAsianWidth::Neutral }, // Po         DEVANAGARI SIGN SIDDHAM
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8FD, 0xA8FE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] DEVANAGARI JAIN OM..DEVANAGARI LETTER AY
+    Prop<crispy::text::EastAsianWidth>{ { 0xA8FF, 0xA8FF }, crispy::text::EastAsianWidth::Neutral }, // Mn         DEVANAGARI VOWEL SIGN AY
+    Prop<crispy::text::EastAsianWidth>{ { 0xA900, 0xA909 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] KAYAH LI DIGIT ZERO..KAYAH LI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA90A, 0xA925 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [28] KAYAH LI LETTER KA..KAYAH LI LETTER OO
+    Prop<crispy::text::EastAsianWidth>{ { 0xA926, 0xA92D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] KAYAH LI VOWEL UE..KAYAH LI TONE CALYA PLOPHU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA92E, 0xA92F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] KAYAH LI SIGN CWI..KAYAH LI SIGN SHYA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA930, 0xA946 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] REJANG LETTER KA..REJANG LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0xA947, 0xA951 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] REJANG VOWEL SIGN I..REJANG CONSONANT SIGN R
+    Prop<crispy::text::EastAsianWidth>{ { 0xA952, 0xA953 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] REJANG CONSONANT SIGN H..REJANG VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA95F, 0xA95F }, crispy::text::EastAsianWidth::Neutral }, // Po         REJANG SECTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xA960, 0xA97C }, crispy::text::EastAsianWidth::Wide }, // Lo    [29] HANGUL CHOSEONG TIKEUT-MIEUM..HANGUL CHOSEONG SSANGYEORINHIEUH
+    Prop<crispy::text::EastAsianWidth>{ { 0xA980, 0xA982 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] JAVANESE SIGN PANYANGGA..JAVANESE SIGN LAYAR
+    Prop<crispy::text::EastAsianWidth>{ { 0xA983, 0xA983 }, crispy::text::EastAsianWidth::Neutral }, // Mc         JAVANESE SIGN WIGNYAN
+    Prop<crispy::text::EastAsianWidth>{ { 0xA984, 0xA9B2 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [47] JAVANESE LETTER A..JAVANESE LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9B3, 0xA9B3 }, crispy::text::EastAsianWidth::Neutral }, // Mn         JAVANESE SIGN CECAK TELU
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9B4, 0xA9B5 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] JAVANESE VOWEL SIGN TARUNG..JAVANESE VOWEL SIGN TOLONG
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9B6, 0xA9B9 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] JAVANESE VOWEL SIGN WULU..JAVANESE VOWEL SIGN SUKU MENDUT
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9BA, 0xA9BB }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] JAVANESE VOWEL SIGN TALING..JAVANESE VOWEL SIGN DIRGA MURE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9BC, 0xA9BD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] JAVANESE VOWEL SIGN PEPET..JAVANESE CONSONANT SIGN KERET
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9BE, 0xA9C0 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] JAVANESE CONSONANT SIGN PENGKAL..JAVANESE PANGKON
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9C1, 0xA9CD }, crispy::text::EastAsianWidth::Neutral }, // Po    [13] JAVANESE LEFT RERENGGAN..JAVANESE TURNED PADA PISELEH
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9CF, 0xA9CF }, crispy::text::EastAsianWidth::Neutral }, // Lm         JAVANESE PANGRANGKEP
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9D0, 0xA9D9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] JAVANESE DIGIT ZERO..JAVANESE DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9DE, 0xA9DF }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] JAVANESE PADA TIRTA TUMETES..JAVANESE PADA ISEN-ISEN
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9E0, 0xA9E4 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] MYANMAR LETTER SHAN GHA..MYANMAR LETTER SHAN BHA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9E5, 0xA9E5 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MYANMAR SIGN SHAN SAW
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9E6, 0xA9E6 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MYANMAR MODIFIER LETTER SHAN REDUPLICATION
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9E7, 0xA9EF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] MYANMAR LETTER TAI LAING NYA..MYANMAR LETTER TAI LAING NNA
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9F0, 0xA9F9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MYANMAR TAI LAING DIGIT ZERO..MYANMAR TAI LAING DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xA9FA, 0xA9FE }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] MYANMAR LETTER TAI LAING LLA..MYANMAR LETTER TAI LAING BHA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA00, 0xAA28 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [41] CHAM LETTER A..CHAM LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA29, 0xAA2E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] CHAM VOWEL SIGN AA..CHAM VOWEL SIGN OE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA2F, 0xAA30 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] CHAM VOWEL SIGN O..CHAM VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA31, 0xAA32 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] CHAM VOWEL SIGN AU..CHAM VOWEL SIGN UE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA33, 0xAA34 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] CHAM CONSONANT SIGN YA..CHAM CONSONANT SIGN RA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA35, 0xAA36 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] CHAM CONSONANT SIGN LA..CHAM CONSONANT SIGN WA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA40, 0xAA42 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] CHAM LETTER FINAL K..CHAM LETTER FINAL NG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA43, 0xAA43 }, crispy::text::EastAsianWidth::Neutral }, // Mn         CHAM CONSONANT SIGN FINAL NG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA44, 0xAA4B }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] CHAM LETTER FINAL CH..CHAM LETTER FINAL SS
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA4C, 0xAA4C }, crispy::text::EastAsianWidth::Neutral }, // Mn         CHAM CONSONANT SIGN FINAL M
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA4D, 0xAA4D }, crispy::text::EastAsianWidth::Neutral }, // Mc         CHAM CONSONANT SIGN FINAL H
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA50, 0xAA59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] CHAM DIGIT ZERO..CHAM DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA5C, 0xAA5F }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] CHAM PUNCTUATION SPIRAL..CHAM PUNCTUATION TRIPLE DANDA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA60, 0xAA6F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [16] MYANMAR LETTER KHAMTI GA..MYANMAR LETTER KHAMTI FA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA70, 0xAA70 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MYANMAR MODIFIER LETTER KHAMTI REDUPLICATION
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA71, 0xAA76 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] MYANMAR LETTER KHAMTI XA..MYANMAR LOGOGRAM KHAMTI HM
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA77, 0xAA79 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] MYANMAR SYMBOL AITON EXCLAMATION..MYANMAR SYMBOL AITON TWO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA7A, 0xAA7A }, crispy::text::EastAsianWidth::Neutral }, // Lo         MYANMAR LETTER AITON RA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA7B, 0xAA7B }, crispy::text::EastAsianWidth::Neutral }, // Mc         MYANMAR SIGN PAO KAREN TONE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA7C, 0xAA7C }, crispy::text::EastAsianWidth::Neutral }, // Mn         MYANMAR SIGN TAI LAING TONE-2
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA7D, 0xAA7D }, crispy::text::EastAsianWidth::Neutral }, // Mc         MYANMAR SIGN TAI LAING TONE-5
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA7E, 0xAA7F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] MYANMAR LETTER SHWE PALAUNG CHA..MYANMAR LETTER SHWE PALAUNG SHA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAA80, 0xAAAF }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] TAI VIET LETTER LOW KO..TAI VIET LETTER HIGH O
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB0, 0xAAB0 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI VIET MAI KANG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB1, 0xAAB1 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAI VIET VOWEL AA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB2, 0xAAB4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] TAI VIET VOWEL I..TAI VIET VOWEL U
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB5, 0xAAB6 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TAI VIET VOWEL E..TAI VIET VOWEL O
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB7, 0xAAB8 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TAI VIET MAI KHIT..TAI VIET VOWEL IA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAB9, 0xAABD }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] TAI VIET VOWEL UEA..TAI VIET VOWEL AN
+    Prop<crispy::text::EastAsianWidth>{ { 0xAABE, 0xAABF }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TAI VIET VOWEL AM..TAI VIET TONE MAI EK
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAC0, 0xAAC0 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAI VIET TONE MAI NUENG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAC1, 0xAAC1 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAI VIET TONE MAI THO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAC2, 0xAAC2 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAI VIET TONE MAI SONG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAADB, 0xAADC }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TAI VIET SYMBOL KON..TAI VIET SYMBOL NUENG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAADD, 0xAADD }, crispy::text::EastAsianWidth::Neutral }, // Lm         TAI VIET SYMBOL SAM
+    Prop<crispy::text::EastAsianWidth>{ { 0xAADE, 0xAADF }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] TAI VIET SYMBOL HO HOI..TAI VIET SYMBOL KOI KOI
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAE0, 0xAAEA }, crispy::text::EastAsianWidth::Neutral }, // Lo    [11] MEETEI MAYEK LETTER E..MEETEI MAYEK LETTER SSA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAEB, 0xAAEB }, crispy::text::EastAsianWidth::Neutral }, // Mc         MEETEI MAYEK VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAEC, 0xAAED }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MEETEI MAYEK VOWEL SIGN UU..MEETEI MAYEK VOWEL SIGN AAI
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAEE, 0xAAEF }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MEETEI MAYEK VOWEL SIGN AU..MEETEI MAYEK VOWEL SIGN AAU
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAF0, 0xAAF1 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] MEETEI MAYEK CHEIKHAN..MEETEI MAYEK AHANG KHUDAM
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAF2, 0xAAF2 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MEETEI MAYEK ANJI
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAF3, 0xAAF4 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [2] MEETEI MAYEK SYLLABLE REPETITION MARK..MEETEI MAYEK WORD REPETITION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAF5, 0xAAF5 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MEETEI MAYEK VOWEL SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAAF6, 0xAAF6 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MEETEI MAYEK VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB01, 0xAB06 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] ETHIOPIC SYLLABLE TTHU..ETHIOPIC SYLLABLE TTHO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB09, 0xAB0E }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] ETHIOPIC SYLLABLE DDHU..ETHIOPIC SYLLABLE DDHO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB11, 0xAB16 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] ETHIOPIC SYLLABLE DZU..ETHIOPIC SYLLABLE DZO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB20, 0xAB26 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE CCHHA..ETHIOPIC SYLLABLE CCHHO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB28, 0xAB2E }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ETHIOPIC SYLLABLE BBA..ETHIOPIC SYLLABLE BBO
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB30, 0xAB5A }, crispy::text::EastAsianWidth::Neutral }, // Ll    [43] LATIN SMALL LETTER BARRED ALPHA..LATIN SMALL LETTER Y WITH SHORT RIGHT LEG
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB5B, 0xAB5B }, crispy::text::EastAsianWidth::Neutral }, // Sk         MODIFIER BREVE WITH INVERTED BREVE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB5C, 0xAB5F }, crispy::text::EastAsianWidth::Neutral }, // Lm     [4] MODIFIER LETTER SMALL HENG..MODIFIER LETTER SMALL U WITH LEFT HOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB60, 0xAB68 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [9] LATIN SMALL LETTER SAKHA YAT..LATIN SMALL LETTER TURNED R WITH MIDDLE TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB69, 0xAB69 }, crispy::text::EastAsianWidth::Neutral }, // Lm         MODIFIER LETTER SMALL TURNED W
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB6A, 0xAB6B }, crispy::text::EastAsianWidth::Neutral }, // Sk     [2] MODIFIER LETTER LEFT TACK..MODIFIER LETTER RIGHT TACK
+    Prop<crispy::text::EastAsianWidth>{ { 0xAB70, 0xABBF }, crispy::text::EastAsianWidth::Neutral }, // Ll    [80] CHEROKEE SMALL LETTER A..CHEROKEE SMALL LETTER YA
+    Prop<crispy::text::EastAsianWidth>{ { 0xABC0, 0xABE2 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [35] MEETEI MAYEK LETTER KOK..MEETEI MAYEK LETTER I LONSUM
+    Prop<crispy::text::EastAsianWidth>{ { 0xABE3, 0xABE4 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MEETEI MAYEK VOWEL SIGN ONAP..MEETEI MAYEK VOWEL SIGN INAP
+    Prop<crispy::text::EastAsianWidth>{ { 0xABE5, 0xABE5 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MEETEI MAYEK VOWEL SIGN ANAP
+    Prop<crispy::text::EastAsianWidth>{ { 0xABE6, 0xABE7 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MEETEI MAYEK VOWEL SIGN YENAP..MEETEI MAYEK VOWEL SIGN SOUNAP
+    Prop<crispy::text::EastAsianWidth>{ { 0xABE8, 0xABE8 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MEETEI MAYEK VOWEL SIGN UNAP
+    Prop<crispy::text::EastAsianWidth>{ { 0xABE9, 0xABEA }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MEETEI MAYEK VOWEL SIGN CHEINAP..MEETEI MAYEK VOWEL SIGN NUNG
+    Prop<crispy::text::EastAsianWidth>{ { 0xABEB, 0xABEB }, crispy::text::EastAsianWidth::Neutral }, // Po         MEETEI MAYEK CHEIKHEI
+    Prop<crispy::text::EastAsianWidth>{ { 0xABEC, 0xABEC }, crispy::text::EastAsianWidth::Neutral }, // Mc         MEETEI MAYEK LUM IYEK
+    Prop<crispy::text::EastAsianWidth>{ { 0xABED, 0xABED }, crispy::text::EastAsianWidth::Neutral }, // Mn         MEETEI MAYEK APUN IYEK
+    Prop<crispy::text::EastAsianWidth>{ { 0xABF0, 0xABF9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MEETEI MAYEK DIGIT ZERO..MEETEI MAYEK DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xAC00, 0xD7A3 }, crispy::text::EastAsianWidth::Wide }, // Lo [11172] HANGUL SYLLABLE GA..HANGUL SYLLABLE HIH
+    Prop<crispy::text::EastAsianWidth>{ { 0xD7B0, 0xD7C6 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] HANGUL JUNGSEONG O-YEO..HANGUL JUNGSEONG ARAEA-E
+    Prop<crispy::text::EastAsianWidth>{ { 0xD7CB, 0xD7FB }, crispy::text::EastAsianWidth::Neutral }, // Lo    [49] HANGUL JONGSEONG NIEUN-RIEUL..HANGUL JONGSEONG PHIEUPH-THIEUTH
+    Prop<crispy::text::EastAsianWidth>{ { 0xD800, 0xDB7F }, crispy::text::EastAsianWidth::Neutral }, // Cs   [896] <surrogate-D800>..<surrogate-DB7F>
+    Prop<crispy::text::EastAsianWidth>{ { 0xDB80, 0xDBFF }, crispy::text::EastAsianWidth::Neutral }, // Cs   [128] <surrogate-DB80>..<surrogate-DBFF>
+    Prop<crispy::text::EastAsianWidth>{ { 0xDC00, 0xDFFF }, crispy::text::EastAsianWidth::Neutral }, // Cs  [1024] <surrogate-DC00>..<surrogate-DFFF>
+    Prop<crispy::text::EastAsianWidth>{ { 0xE000, 0xF8FF }, crispy::text::EastAsianWidth::Ambiguous }, // Co  [6400] <private-use-E000>..<private-use-F8FF>
+    Prop<crispy::text::EastAsianWidth>{ { 0xF900, 0xFA6D }, crispy::text::EastAsianWidth::Wide }, // Lo   [366] CJK COMPATIBILITY IDEOGRAPH-F900..CJK COMPATIBILITY IDEOGRAPH-FA6D
+    Prop<crispy::text::EastAsianWidth>{ { 0xFA6E, 0xFA6F }, crispy::text::EastAsianWidth::Wide }, // Cn     [2] <reserved-FA6E>..<reserved-FA6F>
+    Prop<crispy::text::EastAsianWidth>{ { 0xFA70, 0xFAD9 }, crispy::text::EastAsianWidth::Wide }, // Lo   [106] CJK COMPATIBILITY IDEOGRAPH-FA70..CJK COMPATIBILITY IDEOGRAPH-FAD9
+    Prop<crispy::text::EastAsianWidth>{ { 0xFADA, 0xFAFF }, crispy::text::EastAsianWidth::Wide }, // Cn    [38] <reserved-FADA>..<reserved-FAFF>
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB00, 0xFB06 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [7] LATIN SMALL LIGATURE FF..LATIN SMALL LIGATURE ST
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB13, 0xFB17 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [5] ARMENIAN SMALL LIGATURE MEN NOW..ARMENIAN SMALL LIGATURE MEN XEH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB1D, 0xFB1D }, crispy::text::EastAsianWidth::Neutral }, // Lo         HEBREW LETTER YOD WITH HIRIQ
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB1E, 0xFB1E }, crispy::text::EastAsianWidth::Neutral }, // Mn         HEBREW POINT JUDEO-SPANISH VARIKA
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB1F, 0xFB28 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] HEBREW LIGATURE YIDDISH YOD YOD PATAH..HEBREW LETTER WIDE TAV
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB29, 0xFB29 }, crispy::text::EastAsianWidth::Neutral }, // Sm         HEBREW LETTER ALTERNATIVE PLUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB2A, 0xFB36 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [13] HEBREW LETTER SHIN WITH SHIN DOT..HEBREW LETTER ZAYIN WITH DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB38, 0xFB3C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] HEBREW LETTER TET WITH DAGESH..HEBREW LETTER LAMED WITH DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB3E, 0xFB3E }, crispy::text::EastAsianWidth::Neutral }, // Lo         HEBREW LETTER MEM WITH DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB40, 0xFB41 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] HEBREW LETTER NUN WITH DAGESH..HEBREW LETTER SAMEKH WITH DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB43, 0xFB44 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] HEBREW LETTER FINAL PE WITH DAGESH..HEBREW LETTER PE WITH DAGESH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB46, 0xFB4F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] HEBREW LETTER TSADI WITH DAGESH..HEBREW LIGATURE ALEF LAMED
+    Prop<crispy::text::EastAsianWidth>{ { 0xFB50, 0xFBB1 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [98] ARABIC LETTER ALEF WASLA ISOLATED FORM..ARABIC LETTER YEH BARREE WITH HAMZA ABOVE FINAL FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFBB2, 0xFBC1 }, crispy::text::EastAsianWidth::Neutral }, // Sk    [16] ARABIC SYMBOL DOT ABOVE..ARABIC SYMBOL SMALL TAH BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0xFBD3, 0xFD3D }, crispy::text::EastAsianWidth::Neutral }, // Lo   [363] ARABIC LETTER NG ISOLATED FORM..ARABIC LIGATURE ALEF WITH FATHATAN ISOLATED FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFD3E, 0xFD3E }, crispy::text::EastAsianWidth::Neutral }, // Pe         ORNATE LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFD3F, 0xFD3F }, crispy::text::EastAsianWidth::Neutral }, // Ps         ORNATE RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFD50, 0xFD8F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [64] ARABIC LIGATURE TEH WITH JEEM WITH MEEM INITIAL FORM..ARABIC LIGATURE MEEM WITH KHAH WITH MEEM INITIAL FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFD92, 0xFDC7 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [54] ARABIC LIGATURE MEEM WITH JEEM WITH KHAH INITIAL FORM..ARABIC LIGATURE NOON WITH JEEM WITH YEH FINAL FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFDF0, 0xFDFB }, crispy::text::EastAsianWidth::Neutral }, // Lo    [12] ARABIC LIGATURE SALLA USED AS KORANIC STOP SIGN ISOLATED FORM..ARABIC LIGATURE JALLAJALALOUHOU
+    Prop<crispy::text::EastAsianWidth>{ { 0xFDFC, 0xFDFC }, crispy::text::EastAsianWidth::Neutral }, // Sc         RIAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFDFD, 0xFDFD }, crispy::text::EastAsianWidth::Neutral }, // So         ARABIC LIGATURE BISMILLAH AR-RAHMAN AR-RAHEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE00, 0xFE0F }, crispy::text::EastAsianWidth::Ambiguous }, // Mn    [16] VARIATION SELECTOR-1..VARIATION SELECTOR-16
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE10, 0xFE16 }, crispy::text::EastAsianWidth::Wide }, // Po     [7] PRESENTATION FORM FOR VERTICAL COMMA..PRESENTATION FORM FOR VERTICAL QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE17, 0xFE17 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT WHITE LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE18, 0xFE18 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT WHITE LENTICULAR BRAKCET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE19, 0xFE19 }, crispy::text::EastAsianWidth::Wide }, // Po         PRESENTATION FORM FOR VERTICAL HORIZONTAL ELLIPSIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE20, 0xFE2F }, crispy::text::EastAsianWidth::Neutral }, // Mn    [16] COMBINING LIGATURE LEFT HALF..COMBINING CYRILLIC TITLO RIGHT HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE30, 0xFE30 }, crispy::text::EastAsianWidth::Wide }, // Po         PRESENTATION FORM FOR VERTICAL TWO DOT LEADER
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE31, 0xFE32 }, crispy::text::EastAsianWidth::Wide }, // Pd     [2] PRESENTATION FORM FOR VERTICAL EM DASH..PRESENTATION FORM FOR VERTICAL EN DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE33, 0xFE34 }, crispy::text::EastAsianWidth::Wide }, // Pc     [2] PRESENTATION FORM FOR VERTICAL LOW LINE..PRESENTATION FORM FOR VERTICAL WAVY LOW LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE35, 0xFE35 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE36, 0xFE36 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE37, 0xFE37 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE38, 0xFE38 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE39, 0xFE39 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3A, 0xFE3A }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3B, 0xFE3B }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT BLACK LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3C, 0xFE3C }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT BLACK LENTICULAR BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3D, 0xFE3D }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3E, 0xFE3E }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT DOUBLE ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE3F, 0xFE3F }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE40, 0xFE40 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT ANGLE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE41, 0xFE41 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE42, 0xFE42 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE43, 0xFE43 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT WHITE CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE44, 0xFE44 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT WHITE CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE45, 0xFE46 }, crispy::text::EastAsianWidth::Wide }, // Po     [2] SESAME DOT..WHITE SESAME DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE47, 0xFE47 }, crispy::text::EastAsianWidth::Wide }, // Ps         PRESENTATION FORM FOR VERTICAL LEFT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE48, 0xFE48 }, crispy::text::EastAsianWidth::Wide }, // Pe         PRESENTATION FORM FOR VERTICAL RIGHT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE49, 0xFE4C }, crispy::text::EastAsianWidth::Wide }, // Po     [4] DASHED OVERLINE..DOUBLE WAVY OVERLINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE4D, 0xFE4F }, crispy::text::EastAsianWidth::Wide }, // Pc     [3] DASHED LOW LINE..WAVY LOW LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE50, 0xFE52 }, crispy::text::EastAsianWidth::Wide }, // Po     [3] SMALL COMMA..SMALL FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE54, 0xFE57 }, crispy::text::EastAsianWidth::Wide }, // Po     [4] SMALL SEMICOLON..SMALL EXCLAMATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE58, 0xFE58 }, crispy::text::EastAsianWidth::Wide }, // Pd         SMALL EM DASH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE59, 0xFE59 }, crispy::text::EastAsianWidth::Wide }, // Ps         SMALL LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5A, 0xFE5A }, crispy::text::EastAsianWidth::Wide }, // Pe         SMALL RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5B, 0xFE5B }, crispy::text::EastAsianWidth::Wide }, // Ps         SMALL LEFT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5C, 0xFE5C }, crispy::text::EastAsianWidth::Wide }, // Pe         SMALL RIGHT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5D, 0xFE5D }, crispy::text::EastAsianWidth::Wide }, // Ps         SMALL LEFT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5E, 0xFE5E }, crispy::text::EastAsianWidth::Wide }, // Pe         SMALL RIGHT TORTOISE SHELL BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE5F, 0xFE61 }, crispy::text::EastAsianWidth::Wide }, // Po     [3] SMALL NUMBER SIGN..SMALL ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE62, 0xFE62 }, crispy::text::EastAsianWidth::Wide }, // Sm         SMALL PLUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE63, 0xFE63 }, crispy::text::EastAsianWidth::Wide }, // Pd         SMALL HYPHEN-MINUS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE64, 0xFE66 }, crispy::text::EastAsianWidth::Wide }, // Sm     [3] SMALL LESS-THAN SIGN..SMALL EQUALS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE68, 0xFE68 }, crispy::text::EastAsianWidth::Wide }, // Po         SMALL REVERSE SOLIDUS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE69, 0xFE69 }, crispy::text::EastAsianWidth::Wide }, // Sc         SMALL DOLLAR SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE6A, 0xFE6B }, crispy::text::EastAsianWidth::Wide }, // Po     [2] SMALL PERCENT SIGN..SMALL COMMERCIAL AT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE70, 0xFE74 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] ARABIC FATHATAN ISOLATED FORM..ARABIC KASRATAN ISOLATED FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFE76, 0xFEFC }, crispy::text::EastAsianWidth::Neutral }, // Lo   [135] ARABIC FATHA ISOLATED FORM..ARABIC LIGATURE LAM WITH ALEF FINAL FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0xFEFF, 0xFEFF }, crispy::text::EastAsianWidth::Neutral }, // Cf         ZERO WIDTH NO-BREAK SPACE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF01, 0xFF03 }, crispy::text::EastAsianWidth::FullWidth }, // Po     [3] FULLWIDTH EXCLAMATION MARK..FULLWIDTH NUMBER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF04, 0xFF04 }, crispy::text::EastAsianWidth::FullWidth }, // Sc         FULLWIDTH DOLLAR SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF05, 0xFF07 }, crispy::text::EastAsianWidth::FullWidth }, // Po     [3] FULLWIDTH PERCENT SIGN..FULLWIDTH APOSTROPHE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF08, 0xFF08 }, crispy::text::EastAsianWidth::FullWidth }, // Ps         FULLWIDTH LEFT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF09, 0xFF09 }, crispy::text::EastAsianWidth::FullWidth }, // Pe         FULLWIDTH RIGHT PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF0A, 0xFF0A }, crispy::text::EastAsianWidth::FullWidth }, // Po         FULLWIDTH ASTERISK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF0B, 0xFF0B }, crispy::text::EastAsianWidth::FullWidth }, // Sm         FULLWIDTH PLUS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF0C, 0xFF0C }, crispy::text::EastAsianWidth::FullWidth }, // Po         FULLWIDTH COMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF0D, 0xFF0D }, crispy::text::EastAsianWidth::FullWidth }, // Pd         FULLWIDTH HYPHEN-MINUS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF0E, 0xFF0F }, crispy::text::EastAsianWidth::FullWidth }, // Po     [2] FULLWIDTH FULL STOP..FULLWIDTH SOLIDUS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF10, 0xFF19 }, crispy::text::EastAsianWidth::FullWidth }, // Nd    [10] FULLWIDTH DIGIT ZERO..FULLWIDTH DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF1A, 0xFF1B }, crispy::text::EastAsianWidth::FullWidth }, // Po     [2] FULLWIDTH COLON..FULLWIDTH SEMICOLON
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF1C, 0xFF1E }, crispy::text::EastAsianWidth::FullWidth }, // Sm     [3] FULLWIDTH LESS-THAN SIGN..FULLWIDTH GREATER-THAN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF1F, 0xFF20 }, crispy::text::EastAsianWidth::FullWidth }, // Po     [2] FULLWIDTH QUESTION MARK..FULLWIDTH COMMERCIAL AT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF21, 0xFF3A }, crispy::text::EastAsianWidth::FullWidth }, // Lu    [26] FULLWIDTH LATIN CAPITAL LETTER A..FULLWIDTH LATIN CAPITAL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF3B, 0xFF3B }, crispy::text::EastAsianWidth::FullWidth }, // Ps         FULLWIDTH LEFT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF3C, 0xFF3C }, crispy::text::EastAsianWidth::FullWidth }, // Po         FULLWIDTH REVERSE SOLIDUS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF3D, 0xFF3D }, crispy::text::EastAsianWidth::FullWidth }, // Pe         FULLWIDTH RIGHT SQUARE BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF3E, 0xFF3E }, crispy::text::EastAsianWidth::FullWidth }, // Sk         FULLWIDTH CIRCUMFLEX ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF3F, 0xFF3F }, crispy::text::EastAsianWidth::FullWidth }, // Pc         FULLWIDTH LOW LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF40, 0xFF40 }, crispy::text::EastAsianWidth::FullWidth }, // Sk         FULLWIDTH GRAVE ACCENT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF41, 0xFF5A }, crispy::text::EastAsianWidth::FullWidth }, // Ll    [26] FULLWIDTH LATIN SMALL LETTER A..FULLWIDTH LATIN SMALL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF5B, 0xFF5B }, crispy::text::EastAsianWidth::FullWidth }, // Ps         FULLWIDTH LEFT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF5C, 0xFF5C }, crispy::text::EastAsianWidth::FullWidth }, // Sm         FULLWIDTH VERTICAL LINE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF5D, 0xFF5D }, crispy::text::EastAsianWidth::FullWidth }, // Pe         FULLWIDTH RIGHT CURLY BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF5E, 0xFF5E }, crispy::text::EastAsianWidth::FullWidth }, // Sm         FULLWIDTH TILDE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF5F, 0xFF5F }, crispy::text::EastAsianWidth::FullWidth }, // Ps         FULLWIDTH LEFT WHITE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF60, 0xFF60 }, crispy::text::EastAsianWidth::FullWidth }, // Pe         FULLWIDTH RIGHT WHITE PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF61, 0xFF61 }, crispy::text::EastAsianWidth::HalfWidth }, // Po         HALFWIDTH IDEOGRAPHIC FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF62, 0xFF62 }, crispy::text::EastAsianWidth::HalfWidth }, // Ps         HALFWIDTH LEFT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF63, 0xFF63 }, crispy::text::EastAsianWidth::HalfWidth }, // Pe         HALFWIDTH RIGHT CORNER BRACKET
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF64, 0xFF65 }, crispy::text::EastAsianWidth::HalfWidth }, // Po     [2] HALFWIDTH IDEOGRAPHIC COMMA..HALFWIDTH KATAKANA MIDDLE DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF66, 0xFF6F }, crispy::text::EastAsianWidth::HalfWidth }, // Lo    [10] HALFWIDTH KATAKANA LETTER WO..HALFWIDTH KATAKANA LETTER SMALL TU
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF70, 0xFF70 }, crispy::text::EastAsianWidth::HalfWidth }, // Lm         HALFWIDTH KATAKANA-HIRAGANA PROLONGED SOUND MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF71, 0xFF9D }, crispy::text::EastAsianWidth::HalfWidth }, // Lo    [45] HALFWIDTH KATAKANA LETTER A..HALFWIDTH KATAKANA LETTER N
+    Prop<crispy::text::EastAsianWidth>{ { 0xFF9E, 0xFF9F }, crispy::text::EastAsianWidth::HalfWidth }, // Lm     [2] HALFWIDTH KATAKANA VOICED SOUND MARK..HALFWIDTH KATAKANA SEMI-VOICED SOUND MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFA0, 0xFFBE }, crispy::text::EastAsianWidth::HalfWidth }, // Lo    [31] HALFWIDTH HANGUL FILLER..HALFWIDTH HANGUL LETTER HIEUH
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFC2, 0xFFC7 }, crispy::text::EastAsianWidth::HalfWidth }, // Lo     [6] HALFWIDTH HANGUL LETTER A..HALFWIDTH HANGUL LETTER E
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFCA, 0xFFCF }, crispy::text::EastAsianWidth::HalfWidth }, // Lo     [6] HALFWIDTH HANGUL LETTER YEO..HALFWIDTH HANGUL LETTER OE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFD2, 0xFFD7 }, crispy::text::EastAsianWidth::HalfWidth }, // Lo     [6] HALFWIDTH HANGUL LETTER YO..HALFWIDTH HANGUL LETTER YU
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFDA, 0xFFDC }, crispy::text::EastAsianWidth::HalfWidth }, // Lo     [3] HALFWIDTH HANGUL LETTER EU..HALFWIDTH HANGUL LETTER I
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE0, 0xFFE1 }, crispy::text::EastAsianWidth::FullWidth }, // Sc     [2] FULLWIDTH CENT SIGN..FULLWIDTH POUND SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE2, 0xFFE2 }, crispy::text::EastAsianWidth::FullWidth }, // Sm         FULLWIDTH NOT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE3, 0xFFE3 }, crispy::text::EastAsianWidth::FullWidth }, // Sk         FULLWIDTH MACRON
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE4, 0xFFE4 }, crispy::text::EastAsianWidth::FullWidth }, // So         FULLWIDTH BROKEN BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE5, 0xFFE6 }, crispy::text::EastAsianWidth::FullWidth }, // Sc     [2] FULLWIDTH YEN SIGN..FULLWIDTH WON SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE8, 0xFFE8 }, crispy::text::EastAsianWidth::HalfWidth }, // So         HALFWIDTH FORMS LIGHT VERTICAL
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFE9, 0xFFEC }, crispy::text::EastAsianWidth::HalfWidth }, // Sm     [4] HALFWIDTH LEFTWARDS ARROW..HALFWIDTH DOWNWARDS ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFED, 0xFFEE }, crispy::text::EastAsianWidth::HalfWidth }, // So     [2] HALFWIDTH BLACK SQUARE..HALFWIDTH WHITE CIRCLE
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFF9, 0xFFFB }, crispy::text::EastAsianWidth::Neutral }, // Cf     [3] INTERLINEAR ANNOTATION ANCHOR..INTERLINEAR ANNOTATION TERMINATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFFC, 0xFFFC }, crispy::text::EastAsianWidth::Neutral }, // So         OBJECT REPLACEMENT CHARACTER
+    Prop<crispy::text::EastAsianWidth>{ { 0xFFFD, 0xFFFD }, crispy::text::EastAsianWidth::Ambiguous }, // So         REPLACEMENT CHARACTER
+    Prop<crispy::text::EastAsianWidth>{ { 0x10000, 0x1000B }, crispy::text::EastAsianWidth::Neutral }, // Lo    [12] LINEAR B SYLLABLE B008 A..LINEAR B SYLLABLE B046 JE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1000D, 0x10026 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [26] LINEAR B SYLLABLE B036 JO..LINEAR B SYLLABLE B032 QO
+    Prop<crispy::text::EastAsianWidth>{ { 0x10028, 0x1003A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [19] LINEAR B SYLLABLE B060 RA..LINEAR B SYLLABLE B042 WO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1003C, 0x1003D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] LINEAR B SYLLABLE B017 ZA..LINEAR B SYLLABLE B074 ZE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1003F, 0x1004D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [15] LINEAR B SYLLABLE B020 ZO..LINEAR B SYLLABLE B091 TWO
+    Prop<crispy::text::EastAsianWidth>{ { 0x10050, 0x1005D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [14] LINEAR B SYMBOL B018..LINEAR B SYMBOL B089
+    Prop<crispy::text::EastAsianWidth>{ { 0x10080, 0x100FA }, crispy::text::EastAsianWidth::Neutral }, // Lo   [123] LINEAR B IDEOGRAM B100 MAN..LINEAR B IDEOGRAM VESSEL B305
+    Prop<crispy::text::EastAsianWidth>{ { 0x10100, 0x10102 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] AEGEAN WORD SEPARATOR LINE..AEGEAN CHECK MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x10107, 0x10133 }, crispy::text::EastAsianWidth::Neutral }, // No    [45] AEGEAN NUMBER ONE..AEGEAN NUMBER NINETY THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x10137, 0x1013F }, crispy::text::EastAsianWidth::Neutral }, // So     [9] AEGEAN WEIGHT BASE UNIT..AEGEAN MEASURE THIRD SUBUNIT
+    Prop<crispy::text::EastAsianWidth>{ { 0x10140, 0x10174 }, crispy::text::EastAsianWidth::Neutral }, // Nl    [53] GREEK ACROPHONIC ATTIC ONE QUARTER..GREEK ACROPHONIC STRATIAN FIFTY MNAS
+    Prop<crispy::text::EastAsianWidth>{ { 0x10175, 0x10178 }, crispy::text::EastAsianWidth::Neutral }, // No     [4] GREEK ONE HALF SIGN..GREEK THREE QUARTERS SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10179, 0x10189 }, crispy::text::EastAsianWidth::Neutral }, // So    [17] GREEK YEAR SIGN..GREEK TRYBLION BASE SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1018A, 0x1018B }, crispy::text::EastAsianWidth::Neutral }, // No     [2] GREEK ZERO SIGN..GREEK ONE QUARTER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1018C, 0x1018E }, crispy::text::EastAsianWidth::Neutral }, // So     [3] GREEK SINUSOID SIGN..NOMISMA SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10190, 0x1019C }, crispy::text::EastAsianWidth::Neutral }, // So    [13] ROMAN SEXTANS SIGN..ASCIA SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x101A0, 0x101A0 }, crispy::text::EastAsianWidth::Neutral }, // So         GREEK SYMBOL TAU RHO
+    Prop<crispy::text::EastAsianWidth>{ { 0x101D0, 0x101FC }, crispy::text::EastAsianWidth::Neutral }, // So    [45] PHAISTOS DISC SIGN PEDESTRIAN..PHAISTOS DISC SIGN WAVY BAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x101FD, 0x101FD }, crispy::text::EastAsianWidth::Neutral }, // Mn         PHAISTOS DISC SIGN COMBINING OBLIQUE STROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10280, 0x1029C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [29] LYCIAN LETTER A..LYCIAN LETTER X
+    Prop<crispy::text::EastAsianWidth>{ { 0x102A0, 0x102D0 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [49] CARIAN LETTER A..CARIAN LETTER UUU3
+    Prop<crispy::text::EastAsianWidth>{ { 0x102E0, 0x102E0 }, crispy::text::EastAsianWidth::Neutral }, // Mn         COPTIC EPACT THOUSANDS MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x102E1, 0x102FB }, crispy::text::EastAsianWidth::Neutral }, // No    [27] COPTIC EPACT DIGIT ONE..COPTIC EPACT NUMBER NINE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10300, 0x1031F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [32] OLD ITALIC LETTER A..OLD ITALIC LETTER ESS
+    Prop<crispy::text::EastAsianWidth>{ { 0x10320, 0x10323 }, crispy::text::EastAsianWidth::Neutral }, // No     [4] OLD ITALIC NUMERAL ONE..OLD ITALIC NUMERAL FIFTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x1032D, 0x1032F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] OLD ITALIC LETTER YE..OLD ITALIC LETTER SOUTHERN TSE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10330, 0x10340 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [17] GOTHIC LETTER AHSA..GOTHIC LETTER PAIRTHRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10341, 0x10341 }, crispy::text::EastAsianWidth::Neutral }, // Nl         GOTHIC LETTER NINETY
+    Prop<crispy::text::EastAsianWidth>{ { 0x10342, 0x10349 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] GOTHIC LETTER RAIDA..GOTHIC LETTER OTHAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1034A, 0x1034A }, crispy::text::EastAsianWidth::Neutral }, // Nl         GOTHIC LETTER NINE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10350, 0x10375 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [38] OLD PERMIC LETTER AN..OLD PERMIC LETTER IA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10376, 0x1037A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] COMBINING OLD PERMIC LETTER AN..COMBINING OLD PERMIC LETTER SII
+    Prop<crispy::text::EastAsianWidth>{ { 0x10380, 0x1039D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] UGARITIC LETTER ALPA..UGARITIC LETTER SSU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1039F, 0x1039F }, crispy::text::EastAsianWidth::Neutral }, // Po         UGARITIC WORD DIVIDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x103A0, 0x103C3 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [36] OLD PERSIAN SIGN A..OLD PERSIAN SIGN HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x103C8, 0x103CF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] OLD PERSIAN SIGN AURAMAZDAA..OLD PERSIAN SIGN BUUMISH
+    Prop<crispy::text::EastAsianWidth>{ { 0x103D0, 0x103D0 }, crispy::text::EastAsianWidth::Neutral }, // Po         OLD PERSIAN WORD DIVIDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x103D1, 0x103D5 }, crispy::text::EastAsianWidth::Neutral }, // Nl     [5] OLD PERSIAN NUMBER ONE..OLD PERSIAN NUMBER HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10400, 0x1044F }, crispy::text::EastAsianWidth::Neutral }, // L&    [80] DESERET CAPITAL LETTER LONG I..DESERET SMALL LETTER EW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10450, 0x1047F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] SHAVIAN LETTER PEEP..SHAVIAN LETTER YEW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10480, 0x1049D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] OSMANYA LETTER ALEF..OSMANYA LETTER OO
+    Prop<crispy::text::EastAsianWidth>{ { 0x104A0, 0x104A9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] OSMANYA DIGIT ZERO..OSMANYA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x104B0, 0x104D3 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [36] OSAGE CAPITAL LETTER A..OSAGE CAPITAL LETTER ZHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x104D8, 0x104FB }, crispy::text::EastAsianWidth::Neutral }, // Ll    [36] OSAGE SMALL LETTER A..OSAGE SMALL LETTER ZHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10500, 0x10527 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [40] ELBASAN LETTER A..ELBASAN LETTER KHE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10530, 0x10563 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [52] CAUCASIAN ALBANIAN LETTER ALT..CAUCASIAN ALBANIAN LETTER KIW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1056F, 0x1056F }, crispy::text::EastAsianWidth::Neutral }, // Po         CAUCASIAN ALBANIAN CITATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x10600, 0x10736 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [311] LINEAR A SIGN AB001..LINEAR A SIGN A664
+    Prop<crispy::text::EastAsianWidth>{ { 0x10740, 0x10755 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] LINEAR A SIGN A701 A..LINEAR A SIGN A732 JE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10760, 0x10767 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] LINEAR A SIGN A800..LINEAR A SIGN A807
+    Prop<crispy::text::EastAsianWidth>{ { 0x10800, 0x10805 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] CYPRIOT SYLLABLE A..CYPRIOT SYLLABLE JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10808, 0x10808 }, crispy::text::EastAsianWidth::Neutral }, // Lo         CYPRIOT SYLLABLE JO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1080A, 0x10835 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [44] CYPRIOT SYLLABLE KA..CYPRIOT SYLLABLE WO
+    Prop<crispy::text::EastAsianWidth>{ { 0x10837, 0x10838 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] CYPRIOT SYLLABLE XA..CYPRIOT SYLLABLE XE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1083C, 0x1083C }, crispy::text::EastAsianWidth::Neutral }, // Lo         CYPRIOT SYLLABLE ZA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1083F, 0x1083F }, crispy::text::EastAsianWidth::Neutral }, // Lo         CYPRIOT SYLLABLE ZO
+    Prop<crispy::text::EastAsianWidth>{ { 0x10840, 0x10855 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] IMPERIAL ARAMAIC LETTER ALEPH..IMPERIAL ARAMAIC LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10857, 0x10857 }, crispy::text::EastAsianWidth::Neutral }, // Po         IMPERIAL ARAMAIC SECTION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10858, 0x1085F }, crispy::text::EastAsianWidth::Neutral }, // No     [8] IMPERIAL ARAMAIC NUMBER ONE..IMPERIAL ARAMAIC NUMBER TEN THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x10860, 0x10876 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] PALMYRENE LETTER ALEPH..PALMYRENE LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10877, 0x10878 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] PALMYRENE LEFT-POINTING FLEURON..PALMYRENE RIGHT-POINTING FLEURON
+    Prop<crispy::text::EastAsianWidth>{ { 0x10879, 0x1087F }, crispy::text::EastAsianWidth::Neutral }, // No     [7] PALMYRENE NUMBER ONE..PALMYRENE NUMBER TWENTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x10880, 0x1089E }, crispy::text::EastAsianWidth::Neutral }, // Lo    [31] NABATAEAN LETTER FINAL ALEPH..NABATAEAN LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x108A7, 0x108AF }, crispy::text::EastAsianWidth::Neutral }, // No     [9] NABATAEAN NUMBER ONE..NABATAEAN NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x108E0, 0x108F2 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [19] HATRAN LETTER ALEPH..HATRAN LETTER QOPH
+    Prop<crispy::text::EastAsianWidth>{ { 0x108F4, 0x108F5 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] HATRAN LETTER SHIN..HATRAN LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x108FB, 0x108FF }, crispy::text::EastAsianWidth::Neutral }, // No     [5] HATRAN NUMBER ONE..HATRAN NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10900, 0x10915 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] PHOENICIAN LETTER ALF..PHOENICIAN LETTER TAU
+    Prop<crispy::text::EastAsianWidth>{ { 0x10916, 0x1091B }, crispy::text::EastAsianWidth::Neutral }, // No     [6] PHOENICIAN NUMBER ONE..PHOENICIAN NUMBER THREE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1091F, 0x1091F }, crispy::text::EastAsianWidth::Neutral }, // Po         PHOENICIAN WORD SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x10920, 0x10939 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [26] LYDIAN LETTER A..LYDIAN LETTER C
+    Prop<crispy::text::EastAsianWidth>{ { 0x1093F, 0x1093F }, crispy::text::EastAsianWidth::Neutral }, // Po         LYDIAN TRIANGULAR MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x10980, 0x1099F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [32] MEROITIC HIEROGLYPHIC LETTER A..MEROITIC HIEROGLYPHIC SYMBOL VIDJ-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x109A0, 0x109B7 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [24] MEROITIC CURSIVE LETTER A..MEROITIC CURSIVE LETTER DA
+    Prop<crispy::text::EastAsianWidth>{ { 0x109BC, 0x109BD }, crispy::text::EastAsianWidth::Neutral }, // No     [2] MEROITIC CURSIVE FRACTION ELEVEN TWELFTHS..MEROITIC CURSIVE FRACTION ONE HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0x109BE, 0x109BF }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] MEROITIC CURSIVE LOGOGRAM RMT..MEROITIC CURSIVE LOGOGRAM IMN
+    Prop<crispy::text::EastAsianWidth>{ { 0x109C0, 0x109CF }, crispy::text::EastAsianWidth::Neutral }, // No    [16] MEROITIC CURSIVE NUMBER ONE..MEROITIC CURSIVE NUMBER SEVENTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x109D2, 0x109FF }, crispy::text::EastAsianWidth::Neutral }, // No    [46] MEROITIC CURSIVE NUMBER ONE HUNDRED..MEROITIC CURSIVE FRACTION TEN TWELFTHS
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A00, 0x10A00 }, crispy::text::EastAsianWidth::Neutral }, // Lo         KHAROSHTHI LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A01, 0x10A03 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] KHAROSHTHI VOWEL SIGN I..KHAROSHTHI VOWEL SIGN VOCALIC R
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A05, 0x10A06 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KHAROSHTHI VOWEL SIGN E..KHAROSHTHI VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A0C, 0x10A0F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] KHAROSHTHI VOWEL LENGTH MARK..KHAROSHTHI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A10, 0x10A13 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] KHAROSHTHI LETTER KA..KHAROSHTHI LETTER GHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A15, 0x10A17 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] KHAROSHTHI LETTER CA..KHAROSHTHI LETTER JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A19, 0x10A35 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [29] KHAROSHTHI LETTER NYA..KHAROSHTHI LETTER VHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A38, 0x10A3A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] KHAROSHTHI SIGN BAR ABOVE..KHAROSHTHI SIGN DOT BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A3F, 0x10A3F }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHAROSHTHI VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A40, 0x10A48 }, crispy::text::EastAsianWidth::Neutral }, // No     [9] KHAROSHTHI DIGIT ONE..KHAROSHTHI FRACTION ONE HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A50, 0x10A58 }, crispy::text::EastAsianWidth::Neutral }, // Po     [9] KHAROSHTHI PUNCTUATION DOT..KHAROSHTHI PUNCTUATION LINES
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A60, 0x10A7C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [29] OLD SOUTH ARABIAN LETTER HE..OLD SOUTH ARABIAN LETTER THETH
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A7D, 0x10A7E }, crispy::text::EastAsianWidth::Neutral }, // No     [2] OLD SOUTH ARABIAN NUMBER ONE..OLD SOUTH ARABIAN NUMBER FIFTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A7F, 0x10A7F }, crispy::text::EastAsianWidth::Neutral }, // Po         OLD SOUTH ARABIAN NUMERIC INDICATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A80, 0x10A9C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [29] OLD NORTH ARABIAN LETTER HEH..OLD NORTH ARABIAN LETTER ZAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x10A9D, 0x10A9F }, crispy::text::EastAsianWidth::Neutral }, // No     [3] OLD NORTH ARABIAN NUMBER ONE..OLD NORTH ARABIAN NUMBER TWENTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AC0, 0x10AC7 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] MANICHAEAN LETTER ALEPH..MANICHAEAN LETTER WAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AC8, 0x10AC8 }, crispy::text::EastAsianWidth::Neutral }, // So         MANICHAEAN SIGN UD
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AC9, 0x10AE4 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [28] MANICHAEAN LETTER ZAYIN..MANICHAEAN LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AE5, 0x10AE6 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MANICHAEAN ABBREVIATION MARK ABOVE..MANICHAEAN ABBREVIATION MARK BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AEB, 0x10AEF }, crispy::text::EastAsianWidth::Neutral }, // No     [5] MANICHAEAN NUMBER ONE..MANICHAEAN NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10AF0, 0x10AF6 }, crispy::text::EastAsianWidth::Neutral }, // Po     [7] MANICHAEAN PUNCTUATION STAR..MANICHAEAN PUNCTUATION LINE FILLER
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B00, 0x10B35 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [54] AVESTAN LETTER A..AVESTAN LETTER HE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B39, 0x10B3F }, crispy::text::EastAsianWidth::Neutral }, // Po     [7] AVESTAN ABBREVIATION MARK..LARGE ONE RING OVER TWO RINGS PUNCTUATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B40, 0x10B55 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] INSCRIPTIONAL PARTHIAN LETTER ALEPH..INSCRIPTIONAL PARTHIAN LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B58, 0x10B5F }, crispy::text::EastAsianWidth::Neutral }, // No     [8] INSCRIPTIONAL PARTHIAN NUMBER ONE..INSCRIPTIONAL PARTHIAN NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B60, 0x10B72 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [19] INSCRIPTIONAL PAHLAVI LETTER ALEPH..INSCRIPTIONAL PAHLAVI LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B78, 0x10B7F }, crispy::text::EastAsianWidth::Neutral }, // No     [8] INSCRIPTIONAL PAHLAVI NUMBER ONE..INSCRIPTIONAL PAHLAVI NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B80, 0x10B91 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] PSALTER PAHLAVI LETTER ALEPH..PSALTER PAHLAVI LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10B99, 0x10B9C }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] PSALTER PAHLAVI SECTION MARK..PSALTER PAHLAVI FOUR DOTS WITH DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x10BA9, 0x10BAF }, crispy::text::EastAsianWidth::Neutral }, // No     [7] PSALTER PAHLAVI NUMBER ONE..PSALTER PAHLAVI NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10C00, 0x10C48 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [73] OLD TURKIC LETTER ORKHON A..OLD TURKIC LETTER ORKHON BASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x10C80, 0x10CB2 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [51] OLD HUNGARIAN CAPITAL LETTER A..OLD HUNGARIAN CAPITAL LETTER US
+    Prop<crispy::text::EastAsianWidth>{ { 0x10CC0, 0x10CF2 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [51] OLD HUNGARIAN SMALL LETTER A..OLD HUNGARIAN SMALL LETTER US
+    Prop<crispy::text::EastAsianWidth>{ { 0x10CFA, 0x10CFF }, crispy::text::EastAsianWidth::Neutral }, // No     [6] OLD HUNGARIAN NUMBER ONE..OLD HUNGARIAN NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x10D00, 0x10D23 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [36] HANIFI ROHINGYA LETTER A..HANIFI ROHINGYA MARK NA KHONNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x10D24, 0x10D27 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] HANIFI ROHINGYA SIGN HARBAHAY..HANIFI ROHINGYA SIGN TASSI
+    Prop<crispy::text::EastAsianWidth>{ { 0x10D30, 0x10D39 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] HANIFI ROHINGYA DIGIT ZERO..HANIFI ROHINGYA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10E60, 0x10E7E }, crispy::text::EastAsianWidth::Neutral }, // No    [31] RUMI DIGIT ONE..RUMI FRACTION TWO THIRDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x10E80, 0x10EA9 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [42] YEZIDI LETTER ELIF..YEZIDI LETTER ET
+    Prop<crispy::text::EastAsianWidth>{ { 0x10EAB, 0x10EAC }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] YEZIDI COMBINING HAMZA MARK..YEZIDI COMBINING MADDA MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x10EAD, 0x10EAD }, crispy::text::EastAsianWidth::Neutral }, // Pd         YEZIDI HYPHENATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x10EB0, 0x10EB1 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] YEZIDI LETTER LAM WITH DOT ABOVE..YEZIDI LETTER YOT WITH CIRCUMFLEX ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F00, 0x10F1C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [29] OLD SOGDIAN LETTER ALEPH..OLD SOGDIAN LETTER FINAL TAW WITH VERTICAL TAIL
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F1D, 0x10F26 }, crispy::text::EastAsianWidth::Neutral }, // No    [10] OLD SOGDIAN NUMBER ONE..OLD SOGDIAN FRACTION ONE HALF
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F27, 0x10F27 }, crispy::text::EastAsianWidth::Neutral }, // Lo         OLD SOGDIAN LIGATURE AYIN-DALETH
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F30, 0x10F45 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] SOGDIAN LETTER ALEPH..SOGDIAN INDEPENDENT SHIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F46, 0x10F50 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [11] SOGDIAN COMBINING DOT BELOW..SOGDIAN COMBINING STROKE BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F51, 0x10F54 }, crispy::text::EastAsianWidth::Neutral }, // No     [4] SOGDIAN NUMBER ONE..SOGDIAN NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10F55, 0x10F59 }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] SOGDIAN PUNCTUATION TWO VERTICAL BARS..SOGDIAN PUNCTUATION HALF CIRCLE WITH DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FB0, 0x10FC4 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [21] CHORASMIAN LETTER ALEPH..CHORASMIAN LETTER TAW
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FC5, 0x10FCB }, crispy::text::EastAsianWidth::Neutral }, // No     [7] CHORASMIAN NUMBER ONE..CHORASMIAN NUMBER ONE HUNDRED
+    Prop<crispy::text::EastAsianWidth>{ { 0x10FE0, 0x10FF6 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [23] ELYMAIC LETTER ALEPH..ELYMAIC LIGATURE ZAYIN-YODH
+    Prop<crispy::text::EastAsianWidth>{ { 0x11000, 0x11000 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BRAHMI SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11001, 0x11001 }, crispy::text::EastAsianWidth::Neutral }, // Mn         BRAHMI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11002, 0x11002 }, crispy::text::EastAsianWidth::Neutral }, // Mc         BRAHMI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11003, 0x11037 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [53] BRAHMI SIGN JIHVAMULIYA..BRAHMI LETTER OLD TAMIL NNNA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11038, 0x11046 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [15] BRAHMI VOWEL SIGN AA..BRAHMI VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11047, 0x1104D }, crispy::text::EastAsianWidth::Neutral }, // Po     [7] BRAHMI DANDA..BRAHMI PUNCTUATION LOTUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x11052, 0x11065 }, crispy::text::EastAsianWidth::Neutral }, // No    [20] BRAHMI NUMBER ONE..BRAHMI NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x11066, 0x1106F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] BRAHMI DIGIT ZERO..BRAHMI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1107F, 0x1107F }, crispy::text::EastAsianWidth::Neutral }, // Mn         BRAHMI NUMBER JOINER
+    Prop<crispy::text::EastAsianWidth>{ { 0x11080, 0x11081 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KAITHI SIGN CANDRABINDU..KAITHI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11082, 0x11082 }, crispy::text::EastAsianWidth::Neutral }, // Mc         KAITHI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11083, 0x110AF }, crispy::text::EastAsianWidth::Neutral }, // Lo    [45] KAITHI LETTER A..KAITHI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x110B0, 0x110B2 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] KAITHI VOWEL SIGN AA..KAITHI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x110B3, 0x110B6 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] KAITHI VOWEL SIGN U..KAITHI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x110B7, 0x110B8 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KAITHI VOWEL SIGN O..KAITHI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x110B9, 0x110BA }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KAITHI SIGN VIRAMA..KAITHI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x110BB, 0x110BC }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] KAITHI ABBREVIATION SIGN..KAITHI ENUMERATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x110BD, 0x110BD }, crispy::text::EastAsianWidth::Neutral }, // Cf         KAITHI NUMBER SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x110BE, 0x110C1 }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] KAITHI SECTION MARK..KAITHI DOUBLE DANDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x110CD, 0x110CD }, crispy::text::EastAsianWidth::Neutral }, // Cf         KAITHI NUMBER SIGN ABOVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x110D0, 0x110E8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [25] SORA SOMPENG LETTER SAH..SORA SOMPENG LETTER MAE
+    Prop<crispy::text::EastAsianWidth>{ { 0x110F0, 0x110F9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SORA SOMPENG DIGIT ZERO..SORA SOMPENG DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11100, 0x11102 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] CHAKMA SIGN CANDRABINDU..CHAKMA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11103, 0x11126 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [36] CHAKMA LETTER AA..CHAKMA LETTER HAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11127, 0x1112B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] CHAKMA VOWEL SIGN A..CHAKMA VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1112C, 0x1112C }, crispy::text::EastAsianWidth::Neutral }, // Mc         CHAKMA VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x1112D, 0x11134 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] CHAKMA VOWEL SIGN AI..CHAKMA MAAYYAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11136, 0x1113F }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] CHAKMA DIGIT ZERO..CHAKMA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11140, 0x11143 }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] CHAKMA SECTION MARK..CHAKMA QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11144, 0x11144 }, crispy::text::EastAsianWidth::Neutral }, // Lo         CHAKMA LETTER LHAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11145, 0x11146 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] CHAKMA VOWEL SIGN AA..CHAKMA VOWEL SIGN EI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11147, 0x11147 }, crispy::text::EastAsianWidth::Neutral }, // Lo         CHAKMA LETTER VAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11150, 0x11172 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [35] MAHAJANI LETTER A..MAHAJANI LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11173, 0x11173 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MAHAJANI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11174, 0x11175 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] MAHAJANI ABBREVIATION SIGN..MAHAJANI SECTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11176, 0x11176 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MAHAJANI LIGATURE SHRI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11180, 0x11181 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SHARADA SIGN CANDRABINDU..SHARADA SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11182, 0x11182 }, crispy::text::EastAsianWidth::Neutral }, // Mc         SHARADA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11183, 0x111B2 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] SHARADA LETTER A..SHARADA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x111B3, 0x111B5 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] SHARADA VOWEL SIGN AA..SHARADA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x111B6, 0x111BE }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] SHARADA VOWEL SIGN U..SHARADA VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x111BF, 0x111C0 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SHARADA VOWEL SIGN AU..SHARADA SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x111C1, 0x111C4 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] SHARADA SIGN AVAGRAHA..SHARADA OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x111C5, 0x111C8 }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] SHARADA DANDA..SHARADA SEPARATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x111C9, 0x111CC }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] SHARADA SANDHI MARK..SHARADA EXTRA SHORT VOWEL MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x111CD, 0x111CD }, crispy::text::EastAsianWidth::Neutral }, // Po         SHARADA SUTRA MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x111CE, 0x111CE }, crispy::text::EastAsianWidth::Neutral }, // Mc         SHARADA VOWEL SIGN PRISHTHAMATRA E
+    Prop<crispy::text::EastAsianWidth>{ { 0x111CF, 0x111CF }, crispy::text::EastAsianWidth::Neutral }, // Mn         SHARADA SIGN INVERTED CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x111D0, 0x111D9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SHARADA DIGIT ZERO..SHARADA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x111DA, 0x111DA }, crispy::text::EastAsianWidth::Neutral }, // Lo         SHARADA EKAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x111DB, 0x111DB }, crispy::text::EastAsianWidth::Neutral }, // Po         SHARADA SIGN SIDDHAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x111DC, 0x111DC }, crispy::text::EastAsianWidth::Neutral }, // Lo         SHARADA HEADSTROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x111DD, 0x111DF }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] SHARADA CONTINUATION SIGN..SHARADA SECTION MARK-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x111E1, 0x111F4 }, crispy::text::EastAsianWidth::Neutral }, // No    [20] SINHALA ARCHAIC DIGIT ONE..SINHALA ARCHAIC NUMBER ONE THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x11200, 0x11211 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [18] KHOJKI LETTER A..KHOJKI LETTER JJA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11213, 0x1122B }, crispy::text::EastAsianWidth::Neutral }, // Lo    [25] KHOJKI LETTER NYA..KHOJKI LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1122C, 0x1122E }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] KHOJKI VOWEL SIGN AA..KHOJKI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x1122F, 0x11231 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] KHOJKI VOWEL SIGN U..KHOJKI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11232, 0x11233 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] KHOJKI VOWEL SIGN O..KHOJKI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11234, 0x11234 }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHOJKI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11235, 0x11235 }, crispy::text::EastAsianWidth::Neutral }, // Mc         KHOJKI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11236, 0x11237 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] KHOJKI SIGN NUKTA..KHOJKI SIGN SHADDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11238, 0x1123D }, crispy::text::EastAsianWidth::Neutral }, // Po     [6] KHOJKI DANDA..KHOJKI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1123E, 0x1123E }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHOJKI SIGN SUKUN
+    Prop<crispy::text::EastAsianWidth>{ { 0x11280, 0x11286 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] MULTANI LETTER A..MULTANI LETTER GA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11288, 0x11288 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MULTANI LETTER GHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1128A, 0x1128D }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] MULTANI LETTER CA..MULTANI LETTER JJA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1128F, 0x1129D }, crispy::text::EastAsianWidth::Neutral }, // Lo    [15] MULTANI LETTER NYA..MULTANI LETTER BA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1129F, 0x112A8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] MULTANI LETTER BHA..MULTANI LETTER RHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x112A9, 0x112A9 }, crispy::text::EastAsianWidth::Neutral }, // Po         MULTANI SECTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x112B0, 0x112DE }, crispy::text::EastAsianWidth::Neutral }, // Lo    [47] KHUDAWADI LETTER A..KHUDAWADI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x112DF, 0x112DF }, crispy::text::EastAsianWidth::Neutral }, // Mn         KHUDAWADI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x112E0, 0x112E2 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] KHUDAWADI VOWEL SIGN AA..KHUDAWADI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x112E3, 0x112EA }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] KHUDAWADI VOWEL SIGN U..KHUDAWADI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x112F0, 0x112F9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] KHUDAWADI DIGIT ZERO..KHUDAWADI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11300, 0x11301 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GRANTHA SIGN COMBINING ANUSVARA ABOVE..GRANTHA SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11302, 0x11303 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GRANTHA SIGN ANUSVARA..GRANTHA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11305, 0x1130C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] GRANTHA LETTER A..GRANTHA LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x1130F, 0x11310 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GRANTHA LETTER EE..GRANTHA LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11313, 0x11328 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [22] GRANTHA LETTER OO..GRANTHA LETTER NA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1132A, 0x11330 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] GRANTHA LETTER PA..GRANTHA LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11332, 0x11333 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GRANTHA LETTER LA..GRANTHA LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11335, 0x11339 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] GRANTHA LETTER VA..GRANTHA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1133B, 0x1133C }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] COMBINING BINDU BELOW..GRANTHA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1133D, 0x1133D }, crispy::text::EastAsianWidth::Neutral }, // Lo         GRANTHA SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1133E, 0x1133F }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GRANTHA VOWEL SIGN AA..GRANTHA VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0x11340, 0x11340 }, crispy::text::EastAsianWidth::Neutral }, // Mn         GRANTHA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x11341, 0x11344 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] GRANTHA VOWEL SIGN U..GRANTHA VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x11347, 0x11348 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GRANTHA VOWEL SIGN EE..GRANTHA VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1134B, 0x1134D }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] GRANTHA VOWEL SIGN OO..GRANTHA SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11350, 0x11350 }, crispy::text::EastAsianWidth::Neutral }, // Lo         GRANTHA OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x11357, 0x11357 }, crispy::text::EastAsianWidth::Neutral }, // Mc         GRANTHA AU LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1135D, 0x11361 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] GRANTHA SIGN PLUTA..GRANTHA LETTER VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x11362, 0x11363 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GRANTHA VOWEL SIGN VOCALIC L..GRANTHA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x11366, 0x1136C }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] COMBINING GRANTHA DIGIT ZERO..COMBINING GRANTHA DIGIT SIX
+    Prop<crispy::text::EastAsianWidth>{ { 0x11370, 0x11374 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] COMBINING GRANTHA LETTER A..COMBINING GRANTHA LETTER PA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11400, 0x11434 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [53] NEWA LETTER A..NEWA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11435, 0x11437 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] NEWA VOWEL SIGN AA..NEWA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x11438, 0x1143F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] NEWA VOWEL SIGN U..NEWA VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11440, 0x11441 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] NEWA VOWEL SIGN O..NEWA VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11442, 0x11444 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] NEWA SIGN VIRAMA..NEWA SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11445, 0x11445 }, crispy::text::EastAsianWidth::Neutral }, // Mc         NEWA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11446, 0x11446 }, crispy::text::EastAsianWidth::Neutral }, // Mn         NEWA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11447, 0x1144A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] NEWA SIGN AVAGRAHA..NEWA SIDDHI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1144B, 0x1144F }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] NEWA DANDA..NEWA ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x11450, 0x11459 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] NEWA DIGIT ZERO..NEWA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1145A, 0x1145B }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] NEWA DOUBLE COMMA..NEWA PLACEHOLDER MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1145D, 0x1145D }, crispy::text::EastAsianWidth::Neutral }, // Po         NEWA INSERTION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1145E, 0x1145E }, crispy::text::EastAsianWidth::Neutral }, // Mn         NEWA SANDHI MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1145F, 0x11461 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] NEWA LETTER VEDIC ANUSVARA..NEWA SIGN UPADHMANIYA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11480, 0x114AF }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] TIRHUTA ANJI..TIRHUTA LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x114B0, 0x114B2 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] TIRHUTA VOWEL SIGN AA..TIRHUTA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x114B3, 0x114B8 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] TIRHUTA VOWEL SIGN U..TIRHUTA VOWEL SIGN VOCALIC LL
+    Prop<crispy::text::EastAsianWidth>{ { 0x114B9, 0x114B9 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TIRHUTA VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x114BA, 0x114BA }, crispy::text::EastAsianWidth::Neutral }, // Mn         TIRHUTA VOWEL SIGN SHORT E
+    Prop<crispy::text::EastAsianWidth>{ { 0x114BB, 0x114BE }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] TIRHUTA VOWEL SIGN AI..TIRHUTA VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x114BF, 0x114C0 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TIRHUTA SIGN CANDRABINDU..TIRHUTA SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x114C1, 0x114C1 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TIRHUTA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x114C2, 0x114C3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] TIRHUTA SIGN VIRAMA..TIRHUTA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x114C4, 0x114C5 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] TIRHUTA SIGN AVAGRAHA..TIRHUTA GVANG
+    Prop<crispy::text::EastAsianWidth>{ { 0x114C6, 0x114C6 }, crispy::text::EastAsianWidth::Neutral }, // Po         TIRHUTA ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x114C7, 0x114C7 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TIRHUTA OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x114D0, 0x114D9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TIRHUTA DIGIT ZERO..TIRHUTA DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11580, 0x115AE }, crispy::text::EastAsianWidth::Neutral }, // Lo    [47] SIDDHAM LETTER A..SIDDHAM LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x115AF, 0x115B1 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] SIDDHAM VOWEL SIGN AA..SIDDHAM VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x115B2, 0x115B5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] SIDDHAM VOWEL SIGN U..SIDDHAM VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x115B8, 0x115BB }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] SIDDHAM VOWEL SIGN E..SIDDHAM VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x115BC, 0x115BD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SIDDHAM SIGN CANDRABINDU..SIDDHAM SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x115BE, 0x115BE }, crispy::text::EastAsianWidth::Neutral }, // Mc         SIDDHAM SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x115BF, 0x115C0 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SIDDHAM SIGN VIRAMA..SIDDHAM SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x115C1, 0x115D7 }, crispy::text::EastAsianWidth::Neutral }, // Po    [23] SIDDHAM SIGN SIDDHAM..SIDDHAM SECTION MARK WITH CIRCLES AND FOUR ENCLOSURES
+    Prop<crispy::text::EastAsianWidth>{ { 0x115D8, 0x115DB }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] SIDDHAM LETTER THREE-CIRCLE ALTERNATE I..SIDDHAM LETTER ALTERNATE U
+    Prop<crispy::text::EastAsianWidth>{ { 0x115DC, 0x115DD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SIDDHAM VOWEL SIGN ALTERNATE U..SIDDHAM VOWEL SIGN ALTERNATE UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11600, 0x1162F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] MODI LETTER A..MODI LETTER LLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11630, 0x11632 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] MODI VOWEL SIGN AA..MODI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x11633, 0x1163A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] MODI VOWEL SIGN U..MODI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1163B, 0x1163C }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MODI VOWEL SIGN O..MODI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1163D, 0x1163D }, crispy::text::EastAsianWidth::Neutral }, // Mn         MODI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1163E, 0x1163E }, crispy::text::EastAsianWidth::Neutral }, // Mc         MODI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1163F, 0x11640 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MODI SIGN VIRAMA..MODI SIGN ARDHACANDRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11641, 0x11643 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] MODI DANDA..MODI ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x11644, 0x11644 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MODI SIGN HUVA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11650, 0x11659 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MODI DIGIT ZERO..MODI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11660, 0x1166C }, crispy::text::EastAsianWidth::Neutral }, // Po    [13] MONGOLIAN BIRGA WITH ORNAMENT..MONGOLIAN TURNED SWIRL BIRGA WITH DOUBLE ORNAMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x11680, 0x116AA }, crispy::text::EastAsianWidth::Neutral }, // Lo    [43] TAKRI LETTER A..TAKRI LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116AB, 0x116AB }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAKRI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116AC, 0x116AC }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAKRI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116AD, 0x116AD }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAKRI VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116AE, 0x116AF }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] TAKRI VOWEL SIGN I..TAKRI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x116B0, 0x116B5 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] TAKRI VOWEL SIGN U..TAKRI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x116B6, 0x116B6 }, crispy::text::EastAsianWidth::Neutral }, // Mc         TAKRI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116B7, 0x116B7 }, crispy::text::EastAsianWidth::Neutral }, // Mn         TAKRI SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116B8, 0x116B8 }, crispy::text::EastAsianWidth::Neutral }, // Lo         TAKRI LETTER ARCHAIC KHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x116C0, 0x116C9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] TAKRI DIGIT ZERO..TAKRI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11700, 0x1171A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [27] AHOM LETTER KA..AHOM LETTER ALTERNATE BA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1171D, 0x1171F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] AHOM CONSONANT SIGN MEDIAL LA..AHOM CONSONANT SIGN MEDIAL LIGATING RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11720, 0x11721 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] AHOM VOWEL SIGN A..AHOM VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11722, 0x11725 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] AHOM VOWEL SIGN I..AHOM VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11726, 0x11726 }, crispy::text::EastAsianWidth::Neutral }, // Mc         AHOM VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11727, 0x1172B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] AHOM VOWEL SIGN AW..AHOM SIGN KILLER
+    Prop<crispy::text::EastAsianWidth>{ { 0x11730, 0x11739 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] AHOM DIGIT ZERO..AHOM DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1173A, 0x1173B }, crispy::text::EastAsianWidth::Neutral }, // No     [2] AHOM NUMBER TEN..AHOM NUMBER TWENTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x1173C, 0x1173E }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] AHOM SIGN SMALL SECTION..AHOM SIGN RULAI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1173F, 0x1173F }, crispy::text::EastAsianWidth::Neutral }, // So         AHOM SYMBOL VI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11800, 0x1182B }, crispy::text::EastAsianWidth::Neutral }, // Lo    [44] DOGRA LETTER A..DOGRA LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1182C, 0x1182E }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] DOGRA VOWEL SIGN AA..DOGRA VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x1182F, 0x11837 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [9] DOGRA VOWEL SIGN U..DOGRA SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11838, 0x11838 }, crispy::text::EastAsianWidth::Neutral }, // Mc         DOGRA SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11839, 0x1183A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] DOGRA SIGN VIRAMA..DOGRA SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1183B, 0x1183B }, crispy::text::EastAsianWidth::Neutral }, // Po         DOGRA ABBREVIATION SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x118A0, 0x118DF }, crispy::text::EastAsianWidth::Neutral }, // L&    [64] WARANG CITI CAPITAL LETTER NGAA..WARANG CITI SMALL LETTER VIYO
+    Prop<crispy::text::EastAsianWidth>{ { 0x118E0, 0x118E9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] WARANG CITI DIGIT ZERO..WARANG CITI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x118EA, 0x118F2 }, crispy::text::EastAsianWidth::Neutral }, // No     [9] WARANG CITI NUMBER TEN..WARANG CITI NUMBER NINETY
+    Prop<crispy::text::EastAsianWidth>{ { 0x118FF, 0x118FF }, crispy::text::EastAsianWidth::Neutral }, // Lo         WARANG CITI OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x11900, 0x11906 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] DIVES AKURU LETTER A..DIVES AKURU LETTER E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11909, 0x11909 }, crispy::text::EastAsianWidth::Neutral }, // Lo         DIVES AKURU LETTER O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1190C, 0x11913 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] DIVES AKURU LETTER KA..DIVES AKURU LETTER JA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11915, 0x11916 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] DIVES AKURU LETTER NYA..DIVES AKURU LETTER TTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11918, 0x1192F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [24] DIVES AKURU LETTER DDA..DIVES AKURU LETTER ZA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11930, 0x11935 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [6] DIVES AKURU VOWEL SIGN AA..DIVES AKURU VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11937, 0x11938 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] DIVES AKURU VOWEL SIGN AI..DIVES AKURU VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1193B, 0x1193C }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] DIVES AKURU SIGN ANUSVARA..DIVES AKURU SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1193D, 0x1193D }, crispy::text::EastAsianWidth::Neutral }, // Mc         DIVES AKURU SIGN HALANTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1193E, 0x1193E }, crispy::text::EastAsianWidth::Neutral }, // Mn         DIVES AKURU VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1193F, 0x1193F }, crispy::text::EastAsianWidth::Neutral }, // Lo         DIVES AKURU PREFIXED NASAL SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x11940, 0x11940 }, crispy::text::EastAsianWidth::Neutral }, // Mc         DIVES AKURU MEDIAL YA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11941, 0x11941 }, crispy::text::EastAsianWidth::Neutral }, // Lo         DIVES AKURU INITIAL RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11942, 0x11942 }, crispy::text::EastAsianWidth::Neutral }, // Mc         DIVES AKURU MEDIAL RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11943, 0x11943 }, crispy::text::EastAsianWidth::Neutral }, // Mn         DIVES AKURU SIGN NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11944, 0x11946 }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] DIVES AKURU DOUBLE DANDA..DIVES AKURU END OF TEXT MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11950, 0x11959 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] DIVES AKURU DIGIT ZERO..DIVES AKURU DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x119A0, 0x119A7 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [8] NANDINAGARI LETTER A..NANDINAGARI LETTER VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x119AA, 0x119D0 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [39] NANDINAGARI LETTER E..NANDINAGARI LETTER RRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x119D1, 0x119D3 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [3] NANDINAGARI VOWEL SIGN AA..NANDINAGARI VOWEL SIGN II
+    Prop<crispy::text::EastAsianWidth>{ { 0x119D4, 0x119D7 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] NANDINAGARI VOWEL SIGN U..NANDINAGARI VOWEL SIGN VOCALIC RR
+    Prop<crispy::text::EastAsianWidth>{ { 0x119DA, 0x119DB }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] NANDINAGARI VOWEL SIGN E..NANDINAGARI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x119DC, 0x119DF }, crispy::text::EastAsianWidth::Neutral }, // Mc     [4] NANDINAGARI VOWEL SIGN O..NANDINAGARI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x119E0, 0x119E0 }, crispy::text::EastAsianWidth::Neutral }, // Mn         NANDINAGARI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x119E1, 0x119E1 }, crispy::text::EastAsianWidth::Neutral }, // Lo         NANDINAGARI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x119E2, 0x119E2 }, crispy::text::EastAsianWidth::Neutral }, // Po         NANDINAGARI SIGN SIDDHAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x119E3, 0x119E3 }, crispy::text::EastAsianWidth::Neutral }, // Lo         NANDINAGARI HEADSTROKE
+    Prop<crispy::text::EastAsianWidth>{ { 0x119E4, 0x119E4 }, crispy::text::EastAsianWidth::Neutral }, // Mc         NANDINAGARI VOWEL SIGN PRISHTHAMATRA E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A00, 0x11A00 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ZANABAZAR SQUARE LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A01, 0x11A0A }, crispy::text::EastAsianWidth::Neutral }, // Mn    [10] ZANABAZAR SQUARE VOWEL SIGN I..ZANABAZAR SQUARE VOWEL LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A0B, 0x11A32 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [40] ZANABAZAR SQUARE LETTER KA..ZANABAZAR SQUARE LETTER KSSA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A33, 0x11A38 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] ZANABAZAR SQUARE FINAL CONSONANT MARK..ZANABAZAR SQUARE SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A39, 0x11A39 }, crispy::text::EastAsianWidth::Neutral }, // Mc         ZANABAZAR SQUARE SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A3A, 0x11A3A }, crispy::text::EastAsianWidth::Neutral }, // Lo         ZANABAZAR SQUARE CLUSTER-INITIAL LETTER RA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A3B, 0x11A3E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] ZANABAZAR SQUARE CLUSTER-FINAL LETTER YA..ZANABAZAR SQUARE CLUSTER-FINAL LETTER VA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A3F, 0x11A46 }, crispy::text::EastAsianWidth::Neutral }, // Po     [8] ZANABAZAR SQUARE INITIAL HEAD MARK..ZANABAZAR SQUARE CLOSING DOUBLE-LINED HEAD MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A47, 0x11A47 }, crispy::text::EastAsianWidth::Neutral }, // Mn         ZANABAZAR SQUARE SUBJOINER
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A50, 0x11A50 }, crispy::text::EastAsianWidth::Neutral }, // Lo         SOYOMBO LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A51, 0x11A56 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] SOYOMBO VOWEL SIGN I..SOYOMBO VOWEL SIGN OE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A57, 0x11A58 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] SOYOMBO VOWEL SIGN AI..SOYOMBO VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A59, 0x11A5B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] SOYOMBO VOWEL SIGN VOCALIC R..SOYOMBO VOWEL LENGTH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A5C, 0x11A89 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [46] SOYOMBO LETTER KA..SOYOMBO CLUSTER-INITIAL LETTER SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A8A, 0x11A96 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [13] SOYOMBO FINAL CONSONANT SIGN G..SOYOMBO SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A97, 0x11A97 }, crispy::text::EastAsianWidth::Neutral }, // Mc         SOYOMBO SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A98, 0x11A99 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] SOYOMBO GEMINATION MARK..SOYOMBO SUBJOINER
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A9A, 0x11A9C }, crispy::text::EastAsianWidth::Neutral }, // Po     [3] SOYOMBO MARK TSHEG..SOYOMBO MARK DOUBLE SHAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A9D, 0x11A9D }, crispy::text::EastAsianWidth::Neutral }, // Lo         SOYOMBO MARK PLUTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11A9E, 0x11AA2 }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] SOYOMBO HEAD MARK WITH MOON AND SUN AND TRIPLE FLAME..SOYOMBO TERMINAL MARK-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x11AC0, 0x11AF8 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [57] PAU CIN HAU LETTER PA..PAU CIN HAU GLOTTAL STOP FINAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C00, 0x11C08 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] BHAIKSUKI LETTER A..BHAIKSUKI LETTER VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C0A, 0x11C2E }, crispy::text::EastAsianWidth::Neutral }, // Lo    [37] BHAIKSUKI LETTER E..BHAIKSUKI LETTER HA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C2F, 0x11C2F }, crispy::text::EastAsianWidth::Neutral }, // Mc         BHAIKSUKI VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C30, 0x11C36 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] BHAIKSUKI VOWEL SIGN I..BHAIKSUKI VOWEL SIGN VOCALIC L
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C38, 0x11C3D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] BHAIKSUKI VOWEL SIGN E..BHAIKSUKI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C3E, 0x11C3E }, crispy::text::EastAsianWidth::Neutral }, // Mc         BHAIKSUKI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C3F, 0x11C3F }, crispy::text::EastAsianWidth::Neutral }, // Mn         BHAIKSUKI SIGN VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C40, 0x11C40 }, crispy::text::EastAsianWidth::Neutral }, // Lo         BHAIKSUKI SIGN AVAGRAHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C41, 0x11C45 }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] BHAIKSUKI DANDA..BHAIKSUKI GAP FILLER-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C50, 0x11C59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] BHAIKSUKI DIGIT ZERO..BHAIKSUKI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C5A, 0x11C6C }, crispy::text::EastAsianWidth::Neutral }, // No    [19] BHAIKSUKI NUMBER ONE..BHAIKSUKI HUNDREDS UNIT MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C70, 0x11C71 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] MARCHEN HEAD MARK..MARCHEN MARK SHAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C72, 0x11C8F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] MARCHEN LETTER KA..MARCHEN LETTER A
+    Prop<crispy::text::EastAsianWidth>{ { 0x11C92, 0x11CA7 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [22] MARCHEN SUBJOINED LETTER KA..MARCHEN SUBJOINED LETTER ZA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CA9, 0x11CA9 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MARCHEN SUBJOINED LETTER YA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CAA, 0x11CB0 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] MARCHEN SUBJOINED LETTER RA..MARCHEN VOWEL SIGN AA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CB1, 0x11CB1 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MARCHEN VOWEL SIGN I
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CB2, 0x11CB3 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MARCHEN VOWEL SIGN U..MARCHEN VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CB4, 0x11CB4 }, crispy::text::EastAsianWidth::Neutral }, // Mc         MARCHEN VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x11CB5, 0x11CB6 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MARCHEN SIGN ANUSVARA..MARCHEN SIGN CANDRABINDU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D00, 0x11D06 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] MASARAM GONDI LETTER A..MASARAM GONDI LETTER E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D08, 0x11D09 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] MASARAM GONDI LETTER AI..MASARAM GONDI LETTER O
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D0B, 0x11D30 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [38] MASARAM GONDI LETTER AU..MASARAM GONDI LETTER TRA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D31, 0x11D36 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [6] MASARAM GONDI VOWEL SIGN AA..MASARAM GONDI VOWEL SIGN VOCALIC R
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D3A, 0x11D3A }, crispy::text::EastAsianWidth::Neutral }, // Mn         MASARAM GONDI VOWEL SIGN E
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D3C, 0x11D3D }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MASARAM GONDI VOWEL SIGN AI..MASARAM GONDI VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D3F, 0x11D45 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] MASARAM GONDI VOWEL SIGN AU..MASARAM GONDI VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D46, 0x11D46 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MASARAM GONDI REPHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D47, 0x11D47 }, crispy::text::EastAsianWidth::Neutral }, // Mn         MASARAM GONDI RA-KARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D50, 0x11D59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MASARAM GONDI DIGIT ZERO..MASARAM GONDI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D60, 0x11D65 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [6] GUNJALA GONDI LETTER A..GUNJALA GONDI LETTER UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D67, 0x11D68 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] GUNJALA GONDI LETTER EE..GUNJALA GONDI LETTER AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D6A, 0x11D89 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [32] GUNJALA GONDI LETTER OO..GUNJALA GONDI LETTER SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D8A, 0x11D8E }, crispy::text::EastAsianWidth::Neutral }, // Mc     [5] GUNJALA GONDI VOWEL SIGN AA..GUNJALA GONDI VOWEL SIGN UU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D90, 0x11D91 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] GUNJALA GONDI VOWEL SIGN EE..GUNJALA GONDI VOWEL SIGN AI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D93, 0x11D94 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] GUNJALA GONDI VOWEL SIGN OO..GUNJALA GONDI VOWEL SIGN AU
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D95, 0x11D95 }, crispy::text::EastAsianWidth::Neutral }, // Mn         GUNJALA GONDI SIGN ANUSVARA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D96, 0x11D96 }, crispy::text::EastAsianWidth::Neutral }, // Mc         GUNJALA GONDI SIGN VISARGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D97, 0x11D97 }, crispy::text::EastAsianWidth::Neutral }, // Mn         GUNJALA GONDI VIRAMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11D98, 0x11D98 }, crispy::text::EastAsianWidth::Neutral }, // Lo         GUNJALA GONDI OM
+    Prop<crispy::text::EastAsianWidth>{ { 0x11DA0, 0x11DA9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] GUNJALA GONDI DIGIT ZERO..GUNJALA GONDI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x11EE0, 0x11EF2 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [19] MAKASAR LETTER KA..MAKASAR ANGKA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11EF3, 0x11EF4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] MAKASAR VOWEL SIGN I..MAKASAR VOWEL SIGN U
+    Prop<crispy::text::EastAsianWidth>{ { 0x11EF5, 0x11EF6 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MAKASAR VOWEL SIGN E..MAKASAR VOWEL SIGN O
+    Prop<crispy::text::EastAsianWidth>{ { 0x11EF7, 0x11EF8 }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] MAKASAR PASSIMBANG..MAKASAR END OF SECTION
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FB0, 0x11FB0 }, crispy::text::EastAsianWidth::Neutral }, // Lo         LISU LETTER YHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FC0, 0x11FD4 }, crispy::text::EastAsianWidth::Neutral }, // No    [21] TAMIL FRACTION ONE THREE-HUNDRED-AND-TWENTIETH..TAMIL FRACTION DOWNSCALING FACTOR KIIZH
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FD5, 0x11FDC }, crispy::text::EastAsianWidth::Neutral }, // So     [8] TAMIL SIGN NEL..TAMIL SIGN MUKKURUNI
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FDD, 0x11FE0 }, crispy::text::EastAsianWidth::Neutral }, // Sc     [4] TAMIL SIGN KAACU..TAMIL SIGN VARAAKAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FE1, 0x11FF1 }, crispy::text::EastAsianWidth::Neutral }, // So    [17] TAMIL SIGN PAARAM..TAMIL SIGN VAKAIYARAA
+    Prop<crispy::text::EastAsianWidth>{ { 0x11FFF, 0x11FFF }, crispy::text::EastAsianWidth::Neutral }, // Po         TAMIL PUNCTUATION END OF TEXT
+    Prop<crispy::text::EastAsianWidth>{ { 0x12000, 0x12399 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [922] CUNEIFORM SIGN A..CUNEIFORM SIGN U U
+    Prop<crispy::text::EastAsianWidth>{ { 0x12400, 0x1246E }, crispy::text::EastAsianWidth::Neutral }, // Nl   [111] CUNEIFORM NUMERIC SIGN TWO ASH..CUNEIFORM NUMERIC SIGN NINE U VARIANT FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0x12470, 0x12474 }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] CUNEIFORM PUNCTUATION SIGN OLD ASSYRIAN WORD DIVIDER..CUNEIFORM PUNCTUATION SIGN DIAGONAL QUADCOLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x12480, 0x12543 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [196] CUNEIFORM SIGN AB TIMES NUN TENU..CUNEIFORM SIGN ZU5 TIMES THREE DISH TENU
+    Prop<crispy::text::EastAsianWidth>{ { 0x13000, 0x1342E }, crispy::text::EastAsianWidth::Neutral }, // Lo  [1071] EGYPTIAN HIEROGLYPH A001..EGYPTIAN HIEROGLYPH AA032
+    Prop<crispy::text::EastAsianWidth>{ { 0x13430, 0x13438 }, crispy::text::EastAsianWidth::Neutral }, // Cf     [9] EGYPTIAN HIEROGLYPH VERTICAL JOINER..EGYPTIAN HIEROGLYPH END SEGMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x14400, 0x14646 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [583] ANATOLIAN HIEROGLYPH A001..ANATOLIAN HIEROGLYPH A530
+    Prop<crispy::text::EastAsianWidth>{ { 0x16800, 0x16A38 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [569] BAMUM LETTER PHASE-A NGKUE MFON..BAMUM LETTER PHASE-F VUEQ
+    Prop<crispy::text::EastAsianWidth>{ { 0x16A40, 0x16A5E }, crispy::text::EastAsianWidth::Neutral }, // Lo    [31] MRO LETTER TA..MRO LETTER TEK
+    Prop<crispy::text::EastAsianWidth>{ { 0x16A60, 0x16A69 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] MRO DIGIT ZERO..MRO DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x16A6E, 0x16A6F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] MRO DANDA..MRO DOUBLE DANDA
+    Prop<crispy::text::EastAsianWidth>{ { 0x16AD0, 0x16AED }, crispy::text::EastAsianWidth::Neutral }, // Lo    [30] BASSA VAH LETTER ENNI..BASSA VAH LETTER I
+    Prop<crispy::text::EastAsianWidth>{ { 0x16AF0, 0x16AF4 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] BASSA VAH COMBINING HIGH TONE..BASSA VAH COMBINING HIGH-LOW TONE
+    Prop<crispy::text::EastAsianWidth>{ { 0x16AF5, 0x16AF5 }, crispy::text::EastAsianWidth::Neutral }, // Po         BASSA VAH FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B00, 0x16B2F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [48] PAHAWH HMONG VOWEL KEEB..PAHAWH HMONG CONSONANT CAU
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B30, 0x16B36 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] PAHAWH HMONG MARK CIM TUB..PAHAWH HMONG MARK CIM TAUM
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B37, 0x16B3B }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] PAHAWH HMONG SIGN VOS THOM..PAHAWH HMONG SIGN VOS FEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B3C, 0x16B3F }, crispy::text::EastAsianWidth::Neutral }, // So     [4] PAHAWH HMONG SIGN XYEEM NTXIV..PAHAWH HMONG SIGN XYEEM FAIB
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B40, 0x16B43 }, crispy::text::EastAsianWidth::Neutral }, // Lm     [4] PAHAWH HMONG SIGN VOS SEEV..PAHAWH HMONG SIGN IB YAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B44, 0x16B44 }, crispy::text::EastAsianWidth::Neutral }, // Po         PAHAWH HMONG SIGN XAUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B45, 0x16B45 }, crispy::text::EastAsianWidth::Neutral }, // So         PAHAWH HMONG SIGN CIM TSOV ROG
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B50, 0x16B59 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] PAHAWH HMONG DIGIT ZERO..PAHAWH HMONG DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B5B, 0x16B61 }, crispy::text::EastAsianWidth::Neutral }, // No     [7] PAHAWH HMONG NUMBER TENS..PAHAWH HMONG NUMBER TRILLIONS
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B63, 0x16B77 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [21] PAHAWH HMONG SIGN VOS LUB..PAHAWH HMONG SIGN CIM NRES TOS
+    Prop<crispy::text::EastAsianWidth>{ { 0x16B7D, 0x16B8F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [19] PAHAWH HMONG CLAN SIGN TSHEEJ..PAHAWH HMONG CLAN SIGN VWJ
+    Prop<crispy::text::EastAsianWidth>{ { 0x16E40, 0x16E7F }, crispy::text::EastAsianWidth::Neutral }, // L&    [64] MEDEFAIDRIN CAPITAL LETTER M..MEDEFAIDRIN SMALL LETTER Y
+    Prop<crispy::text::EastAsianWidth>{ { 0x16E80, 0x16E96 }, crispy::text::EastAsianWidth::Neutral }, // No    [23] MEDEFAIDRIN DIGIT ZERO..MEDEFAIDRIN DIGIT THREE ALTERNATE FORM
+    Prop<crispy::text::EastAsianWidth>{ { 0x16E97, 0x16E9A }, crispy::text::EastAsianWidth::Neutral }, // Po     [4] MEDEFAIDRIN COMMA..MEDEFAIDRIN EXCLAMATION OH
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F00, 0x16F4A }, crispy::text::EastAsianWidth::Neutral }, // Lo    [75] MIAO LETTER PA..MIAO LETTER RTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F4F, 0x16F4F }, crispy::text::EastAsianWidth::Neutral }, // Mn         MIAO SIGN CONSONANT MODIFIER BAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F50, 0x16F50 }, crispy::text::EastAsianWidth::Neutral }, // Lo         MIAO LETTER NASALIZATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F51, 0x16F87 }, crispy::text::EastAsianWidth::Neutral }, // Mc    [55] MIAO SIGN ASPIRATION..MIAO VOWEL SIGN UI
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F8F, 0x16F92 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] MIAO TONE RIGHT..MIAO TONE BELOW
+    Prop<crispy::text::EastAsianWidth>{ { 0x16F93, 0x16F9F }, crispy::text::EastAsianWidth::Neutral }, // Lm    [13] MIAO LETTER TONE-2..MIAO LETTER REFORMED TONE-8
+    Prop<crispy::text::EastAsianWidth>{ { 0x16FE0, 0x16FE1 }, crispy::text::EastAsianWidth::Wide }, // Lm     [2] TANGUT ITERATION MARK..NUSHU ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x16FE2, 0x16FE2 }, crispy::text::EastAsianWidth::Wide }, // Po         OLD CHINESE HOOK MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x16FE3, 0x16FE3 }, crispy::text::EastAsianWidth::Wide }, // Lm         OLD CHINESE ITERATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x16FE4, 0x16FE4 }, crispy::text::EastAsianWidth::Wide }, // Mn         KHITAN SMALL SCRIPT FILLER
+    Prop<crispy::text::EastAsianWidth>{ { 0x16FF0, 0x16FF1 }, crispy::text::EastAsianWidth::Wide }, // Mc     [2] VIETNAMESE ALTERNATE READING MARK CA..VIETNAMESE ALTERNATE READING MARK NHAY
+    Prop<crispy::text::EastAsianWidth>{ { 0x17000, 0x187F7 }, crispy::text::EastAsianWidth::Wide }, // Lo  [6136] TANGUT IDEOGRAPH-17000..TANGUT IDEOGRAPH-187F7
+    Prop<crispy::text::EastAsianWidth>{ { 0x18800, 0x18AFF }, crispy::text::EastAsianWidth::Wide }, // Lo   [768] TANGUT COMPONENT-001..TANGUT COMPONENT-768
+    Prop<crispy::text::EastAsianWidth>{ { 0x18B00, 0x18CD5 }, crispy::text::EastAsianWidth::Wide }, // Lo   [470] KHITAN SMALL SCRIPT CHARACTER-18B00..KHITAN SMALL SCRIPT CHARACTER-18CD5
+    Prop<crispy::text::EastAsianWidth>{ { 0x18D00, 0x18D08 }, crispy::text::EastAsianWidth::Wide }, // Lo     [9] TANGUT IDEOGRAPH-18D00..TANGUT IDEOGRAPH-18D08
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B000, 0x1B0FF }, crispy::text::EastAsianWidth::Wide }, // Lo   [256] KATAKANA LETTER ARCHAIC E..HENTAIGANA LETTER RE-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B100, 0x1B11E }, crispy::text::EastAsianWidth::Wide }, // Lo    [31] HENTAIGANA LETTER RE-3..HENTAIGANA LETTER N-MU-MO-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B150, 0x1B152 }, crispy::text::EastAsianWidth::Wide }, // Lo     [3] HIRAGANA LETTER SMALL WI..HIRAGANA LETTER SMALL WO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B164, 0x1B167 }, crispy::text::EastAsianWidth::Wide }, // Lo     [4] KATAKANA LETTER SMALL WI..KATAKANA LETTER SMALL N
+    Prop<crispy::text::EastAsianWidth>{ { 0x1B170, 0x1B2FB }, crispy::text::EastAsianWidth::Wide }, // Lo   [396] NUSHU CHARACTER-1B170..NUSHU CHARACTER-1B2FB
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC00, 0x1BC6A }, crispy::text::EastAsianWidth::Neutral }, // Lo   [107] DUPLOYAN LETTER H..DUPLOYAN LETTER VOCALIC M
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC70, 0x1BC7C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [13] DUPLOYAN AFFIX LEFT HORIZONTAL SECANT..DUPLOYAN AFFIX ATTACHED TANGENT HOOK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC80, 0x1BC88 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [9] DUPLOYAN AFFIX HIGH ACUTE..DUPLOYAN AFFIX HIGH VERTICAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC90, 0x1BC99 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] DUPLOYAN AFFIX LOW ACUTE..DUPLOYAN AFFIX LOW ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC9C, 0x1BC9C }, crispy::text::EastAsianWidth::Neutral }, // So         DUPLOYAN SIGN O WITH CROSS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC9D, 0x1BC9E }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] DUPLOYAN THICK LETTER SELECTOR..DUPLOYAN DOUBLE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BC9F, 0x1BC9F }, crispy::text::EastAsianWidth::Neutral }, // Po         DUPLOYAN PUNCTUATION CHINOOK FULL STOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1BCA0, 0x1BCA3 }, crispy::text::EastAsianWidth::Neutral }, // Cf     [4] SHORTHAND FORMAT LETTER OVERLAP..SHORTHAND FORMAT UP STEP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D000, 0x1D0F5 }, crispy::text::EastAsianWidth::Neutral }, // So   [246] BYZANTINE MUSICAL SYMBOL PSILI..BYZANTINE MUSICAL SYMBOL GORGON NEO KATO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D100, 0x1D126 }, crispy::text::EastAsianWidth::Neutral }, // So    [39] MUSICAL SYMBOL SINGLE BARLINE..MUSICAL SYMBOL DRUM CLEF-2
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D129, 0x1D164 }, crispy::text::EastAsianWidth::Neutral }, // So    [60] MUSICAL SYMBOL MULTIPLE MEASURE REST..MUSICAL SYMBOL ONE HUNDRED TWENTY-EIGHTH NOTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D165, 0x1D166 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [2] MUSICAL SYMBOL COMBINING STEM..MUSICAL SYMBOL COMBINING SPRECHGESANG STEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D167, 0x1D169 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] MUSICAL SYMBOL COMBINING TREMOLO-1..MUSICAL SYMBOL COMBINING TREMOLO-3
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D16A, 0x1D16C }, crispy::text::EastAsianWidth::Neutral }, // So     [3] MUSICAL SYMBOL FINGERED TREMOLO-1..MUSICAL SYMBOL FINGERED TREMOLO-3
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D16D, 0x1D172 }, crispy::text::EastAsianWidth::Neutral }, // Mc     [6] MUSICAL SYMBOL COMBINING AUGMENTATION DOT..MUSICAL SYMBOL COMBINING FLAG-5
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D173, 0x1D17A }, crispy::text::EastAsianWidth::Neutral }, // Cf     [8] MUSICAL SYMBOL BEGIN BEAM..MUSICAL SYMBOL END PHRASE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D17B, 0x1D182 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [8] MUSICAL SYMBOL COMBINING ACCENT..MUSICAL SYMBOL COMBINING LOURE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D183, 0x1D184 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] MUSICAL SYMBOL ARPEGGIATO UP..MUSICAL SYMBOL ARPEGGIATO DOWN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D185, 0x1D18B }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] MUSICAL SYMBOL COMBINING DOIT..MUSICAL SYMBOL COMBINING TRIPLE TONGUE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D18C, 0x1D1A9 }, crispy::text::EastAsianWidth::Neutral }, // So    [30] MUSICAL SYMBOL RINFORZANDO..MUSICAL SYMBOL DEGREE SLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D1AA, 0x1D1AD }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] MUSICAL SYMBOL COMBINING DOWN BOW..MUSICAL SYMBOL COMBINING SNAP PIZZICATO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D1AE, 0x1D1E8 }, crispy::text::EastAsianWidth::Neutral }, // So    [59] MUSICAL SYMBOL PEDAL MARK..MUSICAL SYMBOL KIEVAN FLAT SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D200, 0x1D241 }, crispy::text::EastAsianWidth::Neutral }, // So    [66] GREEK VOCAL NOTATION SYMBOL-1..GREEK INSTRUMENTAL NOTATION SYMBOL-54
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D242, 0x1D244 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [3] COMBINING GREEK MUSICAL TRISEME..COMBINING GREEK MUSICAL PENTASEME
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D245, 0x1D245 }, crispy::text::EastAsianWidth::Neutral }, // So         GREEK MUSICAL LEIMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D2E0, 0x1D2F3 }, crispy::text::EastAsianWidth::Neutral }, // No    [20] MAYAN NUMERAL ZERO..MAYAN NUMERAL NINETEEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D300, 0x1D356 }, crispy::text::EastAsianWidth::Neutral }, // So    [87] MONOGRAM FOR EARTH..TETRAGRAM FOR FOSTERING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D360, 0x1D378 }, crispy::text::EastAsianWidth::Neutral }, // No    [25] COUNTING ROD UNIT DIGIT ONE..TALLY MARK FIVE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D400, 0x1D454 }, crispy::text::EastAsianWidth::Neutral }, // L&    [85] MATHEMATICAL BOLD CAPITAL A..MATHEMATICAL ITALIC SMALL G
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D456, 0x1D49C }, crispy::text::EastAsianWidth::Neutral }, // L&    [71] MATHEMATICAL ITALIC SMALL I..MATHEMATICAL SCRIPT CAPITAL A
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D49E, 0x1D49F }, crispy::text::EastAsianWidth::Neutral }, // Lu     [2] MATHEMATICAL SCRIPT CAPITAL C..MATHEMATICAL SCRIPT CAPITAL D
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4A2, 0x1D4A2 }, crispy::text::EastAsianWidth::Neutral }, // Lu         MATHEMATICAL SCRIPT CAPITAL G
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4A5, 0x1D4A6 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [2] MATHEMATICAL SCRIPT CAPITAL J..MATHEMATICAL SCRIPT CAPITAL K
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4A9, 0x1D4AC }, crispy::text::EastAsianWidth::Neutral }, // Lu     [4] MATHEMATICAL SCRIPT CAPITAL N..MATHEMATICAL SCRIPT CAPITAL Q
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4AE, 0x1D4B9 }, crispy::text::EastAsianWidth::Neutral }, // L&    [12] MATHEMATICAL SCRIPT CAPITAL S..MATHEMATICAL SCRIPT SMALL D
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4BB, 0x1D4BB }, crispy::text::EastAsianWidth::Neutral }, // Ll         MATHEMATICAL SCRIPT SMALL F
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4BD, 0x1D4C3 }, crispy::text::EastAsianWidth::Neutral }, // Ll     [7] MATHEMATICAL SCRIPT SMALL H..MATHEMATICAL SCRIPT SMALL N
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D4C5, 0x1D505 }, crispy::text::EastAsianWidth::Neutral }, // L&    [65] MATHEMATICAL SCRIPT SMALL P..MATHEMATICAL FRAKTUR CAPITAL B
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D507, 0x1D50A }, crispy::text::EastAsianWidth::Neutral }, // Lu     [4] MATHEMATICAL FRAKTUR CAPITAL D..MATHEMATICAL FRAKTUR CAPITAL G
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D50D, 0x1D514 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [8] MATHEMATICAL FRAKTUR CAPITAL J..MATHEMATICAL FRAKTUR CAPITAL Q
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D516, 0x1D51C }, crispy::text::EastAsianWidth::Neutral }, // Lu     [7] MATHEMATICAL FRAKTUR CAPITAL S..MATHEMATICAL FRAKTUR CAPITAL Y
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D51E, 0x1D539 }, crispy::text::EastAsianWidth::Neutral }, // L&    [28] MATHEMATICAL FRAKTUR SMALL A..MATHEMATICAL DOUBLE-STRUCK CAPITAL B
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D53B, 0x1D53E }, crispy::text::EastAsianWidth::Neutral }, // Lu     [4] MATHEMATICAL DOUBLE-STRUCK CAPITAL D..MATHEMATICAL DOUBLE-STRUCK CAPITAL G
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D540, 0x1D544 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [5] MATHEMATICAL DOUBLE-STRUCK CAPITAL I..MATHEMATICAL DOUBLE-STRUCK CAPITAL M
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D546, 0x1D546 }, crispy::text::EastAsianWidth::Neutral }, // Lu         MATHEMATICAL DOUBLE-STRUCK CAPITAL O
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D54A, 0x1D550 }, crispy::text::EastAsianWidth::Neutral }, // Lu     [7] MATHEMATICAL DOUBLE-STRUCK CAPITAL S..MATHEMATICAL DOUBLE-STRUCK CAPITAL Y
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D552, 0x1D6A5 }, crispy::text::EastAsianWidth::Neutral }, // L&   [340] MATHEMATICAL DOUBLE-STRUCK SMALL A..MATHEMATICAL ITALIC SMALL DOTLESS J
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6A8, 0x1D6C0 }, crispy::text::EastAsianWidth::Neutral }, // Lu    [25] MATHEMATICAL BOLD CAPITAL ALPHA..MATHEMATICAL BOLD CAPITAL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6C1, 0x1D6C1 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL BOLD NABLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6C2, 0x1D6DA }, crispy::text::EastAsianWidth::Neutral }, // Ll    [25] MATHEMATICAL BOLD SMALL ALPHA..MATHEMATICAL BOLD SMALL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6DB, 0x1D6DB }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL BOLD PARTIAL DIFFERENTIAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6DC, 0x1D6FA }, crispy::text::EastAsianWidth::Neutral }, // L&    [31] MATHEMATICAL BOLD EPSILON SYMBOL..MATHEMATICAL ITALIC CAPITAL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6FB, 0x1D6FB }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL ITALIC NABLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D6FC, 0x1D714 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [25] MATHEMATICAL ITALIC SMALL ALPHA..MATHEMATICAL ITALIC SMALL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D715, 0x1D715 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL ITALIC PARTIAL DIFFERENTIAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D716, 0x1D734 }, crispy::text::EastAsianWidth::Neutral }, // L&    [31] MATHEMATICAL ITALIC EPSILON SYMBOL..MATHEMATICAL BOLD ITALIC CAPITAL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D735, 0x1D735 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL BOLD ITALIC NABLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D736, 0x1D74E }, crispy::text::EastAsianWidth::Neutral }, // Ll    [25] MATHEMATICAL BOLD ITALIC SMALL ALPHA..MATHEMATICAL BOLD ITALIC SMALL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D74F, 0x1D74F }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL BOLD ITALIC PARTIAL DIFFERENTIAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D750, 0x1D76E }, crispy::text::EastAsianWidth::Neutral }, // L&    [31] MATHEMATICAL BOLD ITALIC EPSILON SYMBOL..MATHEMATICAL SANS-SERIF BOLD CAPITAL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D76F, 0x1D76F }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL SANS-SERIF BOLD NABLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D770, 0x1D788 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [25] MATHEMATICAL SANS-SERIF BOLD SMALL ALPHA..MATHEMATICAL SANS-SERIF BOLD SMALL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D789, 0x1D789 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL SANS-SERIF BOLD PARTIAL DIFFERENTIAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D78A, 0x1D7A8 }, crispy::text::EastAsianWidth::Neutral }, // L&    [31] MATHEMATICAL SANS-SERIF BOLD EPSILON SYMBOL..MATHEMATICAL SANS-SERIF BOLD ITALIC CAPITAL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D7A9, 0x1D7A9 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL SANS-SERIF BOLD ITALIC NABLA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D7AA, 0x1D7C2 }, crispy::text::EastAsianWidth::Neutral }, // Ll    [25] MATHEMATICAL SANS-SERIF BOLD ITALIC SMALL ALPHA..MATHEMATICAL SANS-SERIF BOLD ITALIC SMALL OMEGA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D7C3, 0x1D7C3 }, crispy::text::EastAsianWidth::Neutral }, // Sm         MATHEMATICAL SANS-SERIF BOLD ITALIC PARTIAL DIFFERENTIAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D7C4, 0x1D7CB }, crispy::text::EastAsianWidth::Neutral }, // L&     [8] MATHEMATICAL SANS-SERIF BOLD ITALIC EPSILON SYMBOL..MATHEMATICAL BOLD SMALL DIGAMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D7CE, 0x1D7FF }, crispy::text::EastAsianWidth::Neutral }, // Nd    [50] MATHEMATICAL BOLD DIGIT ZERO..MATHEMATICAL MONOSPACE DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1D800, 0x1D9FF }, crispy::text::EastAsianWidth::Neutral }, // So   [512] SIGNWRITING HAND-FIST INDEX..SIGNWRITING HEAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA00, 0x1DA36 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [55] SIGNWRITING HEAD RIM..SIGNWRITING AIR SUCKING IN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA37, 0x1DA3A }, crispy::text::EastAsianWidth::Neutral }, // So     [4] SIGNWRITING AIR BLOW SMALL ROTATIONS..SIGNWRITING BREATH EXHALE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA3B, 0x1DA6C }, crispy::text::EastAsianWidth::Neutral }, // Mn    [50] SIGNWRITING MOUTH CLOSED NEUTRAL..SIGNWRITING EXCITEMENT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA6D, 0x1DA74 }, crispy::text::EastAsianWidth::Neutral }, // So     [8] SIGNWRITING SHOULDER HIP SPINE..SIGNWRITING TORSO-FLOORPLANE TWISTING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA75, 0x1DA75 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SIGNWRITING UPPER BODY TILTING FROM HIP JOINTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA76, 0x1DA83 }, crispy::text::EastAsianWidth::Neutral }, // So    [14] SIGNWRITING LIMB COMBINATION..SIGNWRITING LOCATION DEPTH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA84, 0x1DA84 }, crispy::text::EastAsianWidth::Neutral }, // Mn         SIGNWRITING LOCATION HEAD NECK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA85, 0x1DA86 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] SIGNWRITING LOCATION TORSO..SIGNWRITING LOCATION LIMBS DIGITS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA87, 0x1DA8B }, crispy::text::EastAsianWidth::Neutral }, // Po     [5] SIGNWRITING COMMA..SIGNWRITING PARENTHESIS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DA9B, 0x1DA9F }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] SIGNWRITING FILL MODIFIER-2..SIGNWRITING FILL MODIFIER-6
+    Prop<crispy::text::EastAsianWidth>{ { 0x1DAA1, 0x1DAAF }, crispy::text::EastAsianWidth::Neutral }, // Mn    [15] SIGNWRITING ROTATION MODIFIER-2..SIGNWRITING ROTATION MODIFIER-16
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E000, 0x1E006 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] COMBINING GLAGOLITIC LETTER AZU..COMBINING GLAGOLITIC LETTER ZHIVETE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E008, 0x1E018 }, crispy::text::EastAsianWidth::Neutral }, // Mn    [17] COMBINING GLAGOLITIC LETTER ZEMLJA..COMBINING GLAGOLITIC LETTER HERU
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E01B, 0x1E021 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] COMBINING GLAGOLITIC LETTER SHTA..COMBINING GLAGOLITIC LETTER YATI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E023, 0x1E024 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [2] COMBINING GLAGOLITIC LETTER YU..COMBINING GLAGOLITIC LETTER SMALL YUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E026, 0x1E02A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [5] COMBINING GLAGOLITIC LETTER YO..COMBINING GLAGOLITIC LETTER FITA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E100, 0x1E12C }, crispy::text::EastAsianWidth::Neutral }, // Lo    [45] NYIAKENG PUACHUE HMONG LETTER MA..NYIAKENG PUACHUE HMONG LETTER W
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E130, 0x1E136 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] NYIAKENG PUACHUE HMONG TONE-B..NYIAKENG PUACHUE HMONG TONE-D
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E137, 0x1E13D }, crispy::text::EastAsianWidth::Neutral }, // Lm     [7] NYIAKENG PUACHUE HMONG SIGN FOR PERSON..NYIAKENG PUACHUE HMONG SYLLABLE LENGTHENER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E140, 0x1E149 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] NYIAKENG PUACHUE HMONG DIGIT ZERO..NYIAKENG PUACHUE HMONG DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E14E, 0x1E14E }, crispy::text::EastAsianWidth::Neutral }, // Lo         NYIAKENG PUACHUE HMONG LOGOGRAM NYAJ
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E14F, 0x1E14F }, crispy::text::EastAsianWidth::Neutral }, // So         NYIAKENG PUACHUE HMONG CIRCLED CA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E2C0, 0x1E2EB }, crispy::text::EastAsianWidth::Neutral }, // Lo    [44] WANCHO LETTER AA..WANCHO LETTER YIH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E2EC, 0x1E2EF }, crispy::text::EastAsianWidth::Neutral }, // Mn     [4] WANCHO TONE TUP..WANCHO TONE KOINI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E2F0, 0x1E2F9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] WANCHO DIGIT ZERO..WANCHO DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E2FF, 0x1E2FF }, crispy::text::EastAsianWidth::Neutral }, // Sc         WANCHO NGUN SIGN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E800, 0x1E8C4 }, crispy::text::EastAsianWidth::Neutral }, // Lo   [197] MENDE KIKAKUI SYLLABLE M001 KI..MENDE KIKAKUI SYLLABLE M060 NYON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E8C7, 0x1E8CF }, crispy::text::EastAsianWidth::Neutral }, // No     [9] MENDE KIKAKUI DIGIT ONE..MENDE KIKAKUI DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E8D0, 0x1E8D6 }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] MENDE KIKAKUI COMBINING NUMBER TEENS..MENDE KIKAKUI COMBINING NUMBER MILLIONS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E900, 0x1E943 }, crispy::text::EastAsianWidth::Neutral }, // L&    [68] ADLAM CAPITAL LETTER ALIF..ADLAM SMALL LETTER SHA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E944, 0x1E94A }, crispy::text::EastAsianWidth::Neutral }, // Mn     [7] ADLAM ALIF LENGTHENER..ADLAM NUKTA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E94B, 0x1E94B }, crispy::text::EastAsianWidth::Neutral }, // Lm         ADLAM NASALIZATION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E950, 0x1E959 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] ADLAM DIGIT ZERO..ADLAM DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1E95E, 0x1E95F }, crispy::text::EastAsianWidth::Neutral }, // Po     [2] ADLAM INITIAL EXCLAMATION MARK..ADLAM INITIAL QUESTION MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EC71, 0x1ECAB }, crispy::text::EastAsianWidth::Neutral }, // No    [59] INDIC SIYAQ NUMBER ONE..INDIC SIYAQ NUMBER PREFIXED NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ECAC, 0x1ECAC }, crispy::text::EastAsianWidth::Neutral }, // So         INDIC SIYAQ PLACEHOLDER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ECAD, 0x1ECAF }, crispy::text::EastAsianWidth::Neutral }, // No     [3] INDIC SIYAQ FRACTION ONE QUARTER..INDIC SIYAQ FRACTION THREE QUARTERS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ECB0, 0x1ECB0 }, crispy::text::EastAsianWidth::Neutral }, // Sc         INDIC SIYAQ RUPEE MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ECB1, 0x1ECB4 }, crispy::text::EastAsianWidth::Neutral }, // No     [4] INDIC SIYAQ NUMBER ALTERNATE ONE..INDIC SIYAQ ALTERNATE LAKH MARK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ED01, 0x1ED2D }, crispy::text::EastAsianWidth::Neutral }, // No    [45] OTTOMAN SIYAQ NUMBER ONE..OTTOMAN SIYAQ NUMBER NINETY THOUSAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ED2E, 0x1ED2E }, crispy::text::EastAsianWidth::Neutral }, // So         OTTOMAN SIYAQ MARRATAN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1ED2F, 0x1ED3D }, crispy::text::EastAsianWidth::Neutral }, // No    [15] OTTOMAN SIYAQ ALTERNATE NUMBER TWO..OTTOMAN SIYAQ FRACTION ONE SIXTH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE00, 0x1EE03 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ARABIC MATHEMATICAL ALEF..ARABIC MATHEMATICAL DAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE05, 0x1EE1F }, crispy::text::EastAsianWidth::Neutral }, // Lo    [27] ARABIC MATHEMATICAL WAW..ARABIC MATHEMATICAL DOTLESS QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE21, 0x1EE22 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ARABIC MATHEMATICAL INITIAL BEH..ARABIC MATHEMATICAL INITIAL JEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE24, 0x1EE24 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL INITIAL HEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE27, 0x1EE27 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL INITIAL HAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE29, 0x1EE32 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] ARABIC MATHEMATICAL INITIAL YEH..ARABIC MATHEMATICAL INITIAL QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE34, 0x1EE37 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ARABIC MATHEMATICAL INITIAL SHEEN..ARABIC MATHEMATICAL INITIAL KHAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE39, 0x1EE39 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL INITIAL DAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE3B, 0x1EE3B }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL INITIAL GHAIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE42, 0x1EE42 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED JEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE47, 0x1EE47 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED HAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE49, 0x1EE49 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED YEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE4B, 0x1EE4B }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED LAM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE4D, 0x1EE4F }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] ARABIC MATHEMATICAL TAILED NOON..ARABIC MATHEMATICAL TAILED AIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE51, 0x1EE52 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ARABIC MATHEMATICAL TAILED SAD..ARABIC MATHEMATICAL TAILED QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE54, 0x1EE54 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED SHEEN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE57, 0x1EE57 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED KHAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE59, 0x1EE59 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED DAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE5B, 0x1EE5B }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED GHAIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE5D, 0x1EE5D }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED DOTLESS NOON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE5F, 0x1EE5F }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL TAILED DOTLESS QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE61, 0x1EE62 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [2] ARABIC MATHEMATICAL STRETCHED BEH..ARABIC MATHEMATICAL STRETCHED JEEM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE64, 0x1EE64 }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL STRETCHED HEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE67, 0x1EE6A }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ARABIC MATHEMATICAL STRETCHED HAH..ARABIC MATHEMATICAL STRETCHED KAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE6C, 0x1EE72 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [7] ARABIC MATHEMATICAL STRETCHED MEEM..ARABIC MATHEMATICAL STRETCHED QAF
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE74, 0x1EE77 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ARABIC MATHEMATICAL STRETCHED SHEEN..ARABIC MATHEMATICAL STRETCHED KHAH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE79, 0x1EE7C }, crispy::text::EastAsianWidth::Neutral }, // Lo     [4] ARABIC MATHEMATICAL STRETCHED DAD..ARABIC MATHEMATICAL STRETCHED DOTLESS BEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE7E, 0x1EE7E }, crispy::text::EastAsianWidth::Neutral }, // Lo         ARABIC MATHEMATICAL STRETCHED DOTLESS FEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE80, 0x1EE89 }, crispy::text::EastAsianWidth::Neutral }, // Lo    [10] ARABIC MATHEMATICAL LOOPED ALEF..ARABIC MATHEMATICAL LOOPED YEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EE8B, 0x1EE9B }, crispy::text::EastAsianWidth::Neutral }, // Lo    [17] ARABIC MATHEMATICAL LOOPED LAM..ARABIC MATHEMATICAL LOOPED GHAIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EEA1, 0x1EEA3 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [3] ARABIC MATHEMATICAL DOUBLE-STRUCK BEH..ARABIC MATHEMATICAL DOUBLE-STRUCK DAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EEA5, 0x1EEA9 }, crispy::text::EastAsianWidth::Neutral }, // Lo     [5] ARABIC MATHEMATICAL DOUBLE-STRUCK WAW..ARABIC MATHEMATICAL DOUBLE-STRUCK YEH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EEAB, 0x1EEBB }, crispy::text::EastAsianWidth::Neutral }, // Lo    [17] ARABIC MATHEMATICAL DOUBLE-STRUCK LAM..ARABIC MATHEMATICAL DOUBLE-STRUCK GHAIN
+    Prop<crispy::text::EastAsianWidth>{ { 0x1EEF0, 0x1EEF1 }, crispy::text::EastAsianWidth::Neutral }, // Sm     [2] ARABIC MATHEMATICAL OPERATOR MEEM WITH HAH WITH TATWEEL..ARABIC MATHEMATICAL OPERATOR HAH WITH DAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F000, 0x1F003 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] MAHJONG TILE EAST WIND..MAHJONG TILE NORTH WIND
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F004, 0x1F004 }, crispy::text::EastAsianWidth::Wide }, // So         MAHJONG TILE RED DRAGON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F005, 0x1F02B }, crispy::text::EastAsianWidth::Neutral }, // So    [39] MAHJONG TILE GREEN DRAGON..MAHJONG TILE BACK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F030, 0x1F093 }, crispy::text::EastAsianWidth::Neutral }, // So   [100] DOMINO TILE HORIZONTAL BACK..DOMINO TILE VERTICAL-06-06
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F0A0, 0x1F0AE }, crispy::text::EastAsianWidth::Neutral }, // So    [15] PLAYING CARD BACK..PLAYING CARD KING OF SPADES
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F0B1, 0x1F0BF }, crispy::text::EastAsianWidth::Neutral }, // So    [15] PLAYING CARD ACE OF HEARTS..PLAYING CARD RED JOKER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F0C1, 0x1F0CE }, crispy::text::EastAsianWidth::Neutral }, // So    [14] PLAYING CARD ACE OF DIAMONDS..PLAYING CARD KING OF DIAMONDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F0CF, 0x1F0CF }, crispy::text::EastAsianWidth::Wide }, // So         PLAYING CARD BLACK JOKER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F0D1, 0x1F0F5 }, crispy::text::EastAsianWidth::Neutral }, // So    [37] PLAYING CARD ACE OF CLUBS..PLAYING CARD TRUMP-21
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F100, 0x1F10A }, crispy::text::EastAsianWidth::Ambiguous }, // No    [11] DIGIT ZERO FULL STOP..DIGIT NINE COMMA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F10B, 0x1F10C }, crispy::text::EastAsianWidth::Neutral }, // No     [2] DINGBAT CIRCLED SANS-SERIF DIGIT ZERO..DINGBAT NEGATIVE CIRCLED SANS-SERIF DIGIT ZERO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F10D, 0x1F10F }, crispy::text::EastAsianWidth::Neutral }, // So     [3] CIRCLED ZERO WITH SLASH..CIRCLED DOLLAR SIGN WITH OVERLAID BACKSLASH
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F110, 0x1F12D }, crispy::text::EastAsianWidth::Ambiguous }, // So    [30] PARENTHESIZED LATIN CAPITAL LETTER A..CIRCLED CD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F12E, 0x1F12F }, crispy::text::EastAsianWidth::Neutral }, // So     [2] CIRCLED WZ..COPYLEFT SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F130, 0x1F169 }, crispy::text::EastAsianWidth::Ambiguous }, // So    [58] SQUARED LATIN CAPITAL LETTER A..NEGATIVE CIRCLED LATIN CAPITAL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F16A, 0x1F16F }, crispy::text::EastAsianWidth::Neutral }, // So     [6] RAISED MC SIGN..CIRCLED HUMAN FIGURE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F170, 0x1F18D }, crispy::text::EastAsianWidth::Ambiguous }, // So    [30] NEGATIVE SQUARED LATIN CAPITAL LETTER A..NEGATIVE SQUARED SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F18E, 0x1F18E }, crispy::text::EastAsianWidth::Wide }, // So         NEGATIVE SQUARED AB
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F18F, 0x1F190 }, crispy::text::EastAsianWidth::Ambiguous }, // So     [2] NEGATIVE SQUARED WC..SQUARE DJ
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F191, 0x1F19A }, crispy::text::EastAsianWidth::Wide }, // So    [10] SQUARED CL..SQUARED VS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F19B, 0x1F1AC }, crispy::text::EastAsianWidth::Ambiguous }, // So    [18] SQUARED THREE D..SQUARED VOD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F1AD, 0x1F1AD }, crispy::text::EastAsianWidth::Neutral }, // So         MASK WORK SYMBOL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F1E6, 0x1F1FF }, crispy::text::EastAsianWidth::Neutral }, // So    [26] REGIONAL INDICATOR SYMBOL LETTER A..REGIONAL INDICATOR SYMBOL LETTER Z
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F200, 0x1F202 }, crispy::text::EastAsianWidth::Wide }, // So     [3] SQUARE HIRAGANA HOKA..SQUARED KATAKANA SA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F210, 0x1F23B }, crispy::text::EastAsianWidth::Wide }, // So    [44] SQUARED CJK UNIFIED IDEOGRAPH-624B..SQUARED CJK UNIFIED IDEOGRAPH-914D
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F240, 0x1F248 }, crispy::text::EastAsianWidth::Wide }, // So     [9] TORTOISE SHELL BRACKETED CJK UNIFIED IDEOGRAPH-672C..TORTOISE SHELL BRACKETED CJK UNIFIED IDEOGRAPH-6557
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F250, 0x1F251 }, crispy::text::EastAsianWidth::Wide }, // So     [2] CIRCLED IDEOGRAPH ADVANTAGE..CIRCLED IDEOGRAPH ACCEPT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F260, 0x1F265 }, crispy::text::EastAsianWidth::Wide }, // So     [6] ROUNDED SYMBOL FOR FU..ROUNDED SYMBOL FOR CAI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F300, 0x1F320 }, crispy::text::EastAsianWidth::Wide }, // So    [33] CYCLONE..SHOOTING STAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F321, 0x1F32C }, crispy::text::EastAsianWidth::Neutral }, // So    [12] THERMOMETER..WIND BLOWING FACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F32D, 0x1F335 }, crispy::text::EastAsianWidth::Wide }, // So     [9] HOT DOG..CACTUS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F336, 0x1F336 }, crispy::text::EastAsianWidth::Neutral }, // So         HOT PEPPER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F337, 0x1F37C }, crispy::text::EastAsianWidth::Wide }, // So    [70] TULIP..BABY BOTTLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F37D, 0x1F37D }, crispy::text::EastAsianWidth::Neutral }, // So         FORK AND KNIFE WITH PLATE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F37E, 0x1F393 }, crispy::text::EastAsianWidth::Wide }, // So    [22] BOTTLE WITH POPPING CORK..GRADUATION CAP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F394, 0x1F39F }, crispy::text::EastAsianWidth::Neutral }, // So    [12] HEART WITH TIP ON THE LEFT..ADMISSION TICKETS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3A0, 0x1F3CA }, crispy::text::EastAsianWidth::Wide }, // So    [43] CAROUSEL HORSE..SWIMMER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3CB, 0x1F3CE }, crispy::text::EastAsianWidth::Neutral }, // So     [4] WEIGHT LIFTER..RACING CAR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3CF, 0x1F3D3 }, crispy::text::EastAsianWidth::Wide }, // So     [5] CRICKET BAT AND BALL..TABLE TENNIS PADDLE AND BALL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3D4, 0x1F3DF }, crispy::text::EastAsianWidth::Neutral }, // So    [12] SNOW CAPPED MOUNTAIN..STADIUM
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3E0, 0x1F3F0 }, crispy::text::EastAsianWidth::Wide }, // So    [17] HOUSE BUILDING..EUROPEAN CASTLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3F1, 0x1F3F3 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] WHITE PENNANT..WAVING WHITE FLAG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3F4, 0x1F3F4 }, crispy::text::EastAsianWidth::Wide }, // So         WAVING BLACK FLAG
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3F5, 0x1F3F7 }, crispy::text::EastAsianWidth::Neutral }, // So     [3] ROSETTE..LABEL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3F8, 0x1F3FA }, crispy::text::EastAsianWidth::Wide }, // So     [3] BADMINTON RACQUET AND SHUTTLECOCK..AMPHORA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F3FB, 0x1F3FF }, crispy::text::EastAsianWidth::Wide }, // Sk     [5] EMOJI MODIFIER FITZPATRICK TYPE-1-2..EMOJI MODIFIER FITZPATRICK TYPE-6
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F400, 0x1F43E }, crispy::text::EastAsianWidth::Wide }, // So    [63] RAT..PAW PRINTS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F43F, 0x1F43F }, crispy::text::EastAsianWidth::Neutral }, // So         CHIPMUNK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F440, 0x1F440 }, crispy::text::EastAsianWidth::Wide }, // So         EYES
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F441, 0x1F441 }, crispy::text::EastAsianWidth::Neutral }, // So         EYE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F442, 0x1F4FC }, crispy::text::EastAsianWidth::Wide }, // So   [187] EAR..VIDEOCASSETTE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F4FD, 0x1F4FE }, crispy::text::EastAsianWidth::Neutral }, // So     [2] FILM PROJECTOR..PORTABLE STEREO
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F4FF, 0x1F53D }, crispy::text::EastAsianWidth::Wide }, // So    [63] PRAYER BEADS..DOWN-POINTING SMALL RED TRIANGLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F53E, 0x1F54A }, crispy::text::EastAsianWidth::Neutral }, // So    [13] LOWER RIGHT SHADOWED WHITE CIRCLE..DOVE OF PEACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F54B, 0x1F54E }, crispy::text::EastAsianWidth::Wide }, // So     [4] KAABA..MENORAH WITH NINE BRANCHES
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F54F, 0x1F54F }, crispy::text::EastAsianWidth::Neutral }, // So         BOWL OF HYGIEIA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F550, 0x1F567 }, crispy::text::EastAsianWidth::Wide }, // So    [24] CLOCK FACE ONE OCLOCK..CLOCK FACE TWELVE-THIRTY
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F568, 0x1F579 }, crispy::text::EastAsianWidth::Neutral }, // So    [18] RIGHT SPEAKER..JOYSTICK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F57A, 0x1F57A }, crispy::text::EastAsianWidth::Wide }, // So         MAN DANCING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F57B, 0x1F594 }, crispy::text::EastAsianWidth::Neutral }, // So    [26] LEFT HAND TELEPHONE RECEIVER..REVERSED VICTORY HAND
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F595, 0x1F596 }, crispy::text::EastAsianWidth::Wide }, // So     [2] REVERSED HAND WITH MIDDLE FINGER EXTENDED..RAISED HAND WITH PART BETWEEN MIDDLE AND RING FINGERS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F597, 0x1F5A3 }, crispy::text::EastAsianWidth::Neutral }, // So    [13] WHITE DOWN POINTING LEFT HAND INDEX..BLACK DOWN POINTING BACKHAND INDEX
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5A4, 0x1F5A4 }, crispy::text::EastAsianWidth::Wide }, // So         BLACK HEART
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5A5, 0x1F5FA }, crispy::text::EastAsianWidth::Neutral }, // So    [86] DESKTOP COMPUTER..WORLD MAP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F5FB, 0x1F5FF }, crispy::text::EastAsianWidth::Wide }, // So     [5] MOUNT FUJI..MOYAI
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F600, 0x1F64F }, crispy::text::EastAsianWidth::Wide }, // So    [80] GRINNING FACE..PERSON WITH FOLDED HANDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F650, 0x1F67F }, crispy::text::EastAsianWidth::Neutral }, // So    [48] NORTH WEST POINTING LEAF..REVERSE CHECKER BOARD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F680, 0x1F6C5 }, crispy::text::EastAsianWidth::Wide }, // So    [70] ROCKET..LEFT LUGGAGE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6C6, 0x1F6CB }, crispy::text::EastAsianWidth::Neutral }, // So     [6] TRIANGLE WITH ROUNDED CORNERS..COUCH AND LAMP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6CC, 0x1F6CC }, crispy::text::EastAsianWidth::Wide }, // So         SLEEPING ACCOMMODATION
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6CD, 0x1F6CF }, crispy::text::EastAsianWidth::Neutral }, // So     [3] SHOPPING BAGS..BED
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6D0, 0x1F6D2 }, crispy::text::EastAsianWidth::Wide }, // So     [3] PLACE OF WORSHIP..SHOPPING TROLLEY
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6D3, 0x1F6D4 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] STUPA..PAGODA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6D5, 0x1F6D7 }, crispy::text::EastAsianWidth::Wide }, // So     [3] HINDU TEMPLE..ELEVATOR
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6E0, 0x1F6EA }, crispy::text::EastAsianWidth::Neutral }, // So    [11] HAMMER AND WRENCH..NORTHEAST-POINTING AIRPLANE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6EB, 0x1F6EC }, crispy::text::EastAsianWidth::Wide }, // So     [2] AIRPLANE DEPARTURE..AIRPLANE ARRIVING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6F0, 0x1F6F3 }, crispy::text::EastAsianWidth::Neutral }, // So     [4] SATELLITE..PASSENGER SHIP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F6F4, 0x1F6FC }, crispy::text::EastAsianWidth::Wide }, // So     [9] SCOOTER..ROLLER SKATE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F700, 0x1F773 }, crispy::text::EastAsianWidth::Neutral }, // So   [116] ALCHEMICAL SYMBOL FOR QUINTESSENCE..ALCHEMICAL SYMBOL FOR HALF OUNCE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F780, 0x1F7D8 }, crispy::text::EastAsianWidth::Neutral }, // So    [89] BLACK LEFT-POINTING ISOSCELES RIGHT TRIANGLE..NEGATIVE CIRCLED SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F7E0, 0x1F7EB }, crispy::text::EastAsianWidth::Wide }, // So    [12] LARGE ORANGE CIRCLE..LARGE BROWN SQUARE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F800, 0x1F80B }, crispy::text::EastAsianWidth::Neutral }, // So    [12] LEFTWARDS ARROW WITH SMALL TRIANGLE ARROWHEAD..DOWNWARDS ARROW WITH LARGE TRIANGLE ARROWHEAD
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F810, 0x1F847 }, crispy::text::EastAsianWidth::Neutral }, // So    [56] LEFTWARDS ARROW WITH SMALL EQUILATERAL ARROWHEAD..DOWNWARDS HEAVY ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F850, 0x1F859 }, crispy::text::EastAsianWidth::Neutral }, // So    [10] LEFTWARDS SANS-SERIF ARROW..UP DOWN SANS-SERIF ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F860, 0x1F887 }, crispy::text::EastAsianWidth::Neutral }, // So    [40] WIDE-HEADED LEFTWARDS LIGHT BARB ARROW..WIDE-HEADED SOUTH WEST VERY HEAVY BARB ARROW
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F890, 0x1F8AD }, crispy::text::EastAsianWidth::Neutral }, // So    [30] LEFTWARDS TRIANGLE ARROWHEAD..WHITE ARROW SHAFT WIDTH TWO THIRDS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F8B0, 0x1F8B1 }, crispy::text::EastAsianWidth::Neutral }, // So     [2] ARROW POINTING UPWARDS THEN NORTH WEST..ARROW POINTING RIGHTWARDS THEN CURVING SOUTH WEST
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F900, 0x1F90B }, crispy::text::EastAsianWidth::Neutral }, // So    [12] CIRCLED CROSS FORMEE WITH FOUR DOTS..DOWNWARD FACING NOTCHED HOOK WITH DOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F90C, 0x1F93A }, crispy::text::EastAsianWidth::Wide }, // So    [47] PINCHED FINGERS..FENCER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F93B, 0x1F93B }, crispy::text::EastAsianWidth::Neutral }, // So         MODERN PENTATHLON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F93C, 0x1F945 }, crispy::text::EastAsianWidth::Wide }, // So    [10] WRESTLERS..GOAL NET
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F946, 0x1F946 }, crispy::text::EastAsianWidth::Neutral }, // So         RIFLE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F947, 0x1F978 }, crispy::text::EastAsianWidth::Wide }, // So    [50] FIRST PLACE MEDAL..DISGUISED FACE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F97A, 0x1F9CB }, crispy::text::EastAsianWidth::Wide }, // So    [82] FACE WITH PLEADING EYES..BUBBLE TEA
+    Prop<crispy::text::EastAsianWidth>{ { 0x1F9CD, 0x1F9FF }, crispy::text::EastAsianWidth::Wide }, // So    [51] STANDING PERSON..NAZAR AMULET
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA00, 0x1FA53 }, crispy::text::EastAsianWidth::Neutral }, // So    [84] NEUTRAL CHESS KING..BLACK CHESS KNIGHT-BISHOP
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA60, 0x1FA6D }, crispy::text::EastAsianWidth::Neutral }, // So    [14] XIANGQI RED GENERAL..XIANGQI BLACK SOLDIER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA70, 0x1FA74 }, crispy::text::EastAsianWidth::Wide }, // So     [5] BALLET SHOES..THONG SANDAL
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA78, 0x1FA7A }, crispy::text::EastAsianWidth::Wide }, // So     [3] DROP OF BLOOD..STETHOSCOPE
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA80, 0x1FA86 }, crispy::text::EastAsianWidth::Wide }, // So     [7] YO-YO..NESTING DOLLS
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FA90, 0x1FAA8 }, crispy::text::EastAsianWidth::Wide }, // So    [25] RINGED PLANET..ROCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FAB0, 0x1FAB6 }, crispy::text::EastAsianWidth::Wide }, // So     [7] FLY..FEATHER
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FAC0, 0x1FAC2 }, crispy::text::EastAsianWidth::Wide }, // So     [3] ANATOMICAL HEART..PEOPLE HUGGING
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FAD0, 0x1FAD6 }, crispy::text::EastAsianWidth::Wide }, // So     [7] BLUEBERRIES..TEAPOT
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FB00, 0x1FB92 }, crispy::text::EastAsianWidth::Neutral }, // So   [147] BLOCK SEXTANT-1..UPPER HALF INVERSE MEDIUM SHADE AND LOWER HALF BLOCK
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FB94, 0x1FBCA }, crispy::text::EastAsianWidth::Neutral }, // So    [55] LEFT HALF INVERSE MEDIUM SHADE AND RIGHT HALF BLOCK..WHITE UP-POINTING CHEVRON
+    Prop<crispy::text::EastAsianWidth>{ { 0x1FBF0, 0x1FBF9 }, crispy::text::EastAsianWidth::Neutral }, // Nd    [10] SEGMENTED DIGIT ZERO..SEGMENTED DIGIT NINE
+    Prop<crispy::text::EastAsianWidth>{ { 0x20000, 0x2A6DD }, crispy::text::EastAsianWidth::Wide }, // Lo [42718] CJK UNIFIED IDEOGRAPH-20000..CJK UNIFIED IDEOGRAPH-2A6DD
+    Prop<crispy::text::EastAsianWidth>{ { 0x2A6DE, 0x2A6FF }, crispy::text::EastAsianWidth::Wide }, // Cn    [34] <reserved-2A6DE>..<reserved-2A6FF>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2A700, 0x2B734 }, crispy::text::EastAsianWidth::Wide }, // Lo  [4149] CJK UNIFIED IDEOGRAPH-2A700..CJK UNIFIED IDEOGRAPH-2B734
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B735, 0x2B73F }, crispy::text::EastAsianWidth::Wide }, // Cn    [11] <reserved-2B735>..<reserved-2B73F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B740, 0x2B81D }, crispy::text::EastAsianWidth::Wide }, // Lo   [222] CJK UNIFIED IDEOGRAPH-2B740..CJK UNIFIED IDEOGRAPH-2B81D
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B81E, 0x2B81F }, crispy::text::EastAsianWidth::Wide }, // Cn     [2] <reserved-2B81E>..<reserved-2B81F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2B820, 0x2CEA1 }, crispy::text::EastAsianWidth::Wide }, // Lo  [5762] CJK UNIFIED IDEOGRAPH-2B820..CJK UNIFIED IDEOGRAPH-2CEA1
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CEA2, 0x2CEAF }, crispy::text::EastAsianWidth::Wide }, // Cn    [14] <reserved-2CEA2>..<reserved-2CEAF>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2CEB0, 0x2EBE0 }, crispy::text::EastAsianWidth::Wide }, // Lo  [7473] CJK UNIFIED IDEOGRAPH-2CEB0..CJK UNIFIED IDEOGRAPH-2EBE0
+    Prop<crispy::text::EastAsianWidth>{ { 0x2EBE1, 0x2F7FF }, crispy::text::EastAsianWidth::Wide }, // Cn  [3103] <reserved-2EBE1>..<reserved-2F7FF>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2F800, 0x2FA1D }, crispy::text::EastAsianWidth::Wide }, // Lo   [542] CJK COMPATIBILITY IDEOGRAPH-2F800..CJK COMPATIBILITY IDEOGRAPH-2FA1D
+    Prop<crispy::text::EastAsianWidth>{ { 0x2FA1E, 0x2FA1F }, crispy::text::EastAsianWidth::Wide }, // Cn     [2] <reserved-2FA1E>..<reserved-2FA1F>
+    Prop<crispy::text::EastAsianWidth>{ { 0x2FA20, 0x2FFFD }, crispy::text::EastAsianWidth::Wide }, // Cn  [1502] <reserved-2FA20>..<reserved-2FFFD>
+    Prop<crispy::text::EastAsianWidth>{ { 0x30000, 0x3134A }, crispy::text::EastAsianWidth::Wide }, // Lo  [4939] CJK UNIFIED IDEOGRAPH-30000..CJK UNIFIED IDEOGRAPH-3134A
+    Prop<crispy::text::EastAsianWidth>{ { 0x3134B, 0x3FFFD }, crispy::text::EastAsianWidth::Wide }, // Cn [60595] <reserved-3134B>..<reserved-3FFFD>
+    Prop<crispy::text::EastAsianWidth>{ { 0xE0001, 0xE0001 }, crispy::text::EastAsianWidth::Neutral }, // Cf         LANGUAGE TAG
+    Prop<crispy::text::EastAsianWidth>{ { 0xE0020, 0xE007F }, crispy::text::EastAsianWidth::Neutral }, // Cf    [96] TAG SPACE..CANCEL TAG
+    Prop<crispy::text::EastAsianWidth>{ { 0xE0100, 0xE01EF }, crispy::text::EastAsianWidth::Ambiguous }, // Mn   [240] VARIATION SELECTOR-17..VARIATION SELECTOR-256
+    Prop<crispy::text::EastAsianWidth>{ { 0xF0000, 0xFFFFD }, crispy::text::EastAsianWidth::Ambiguous }, // Co [65534] <private-use-F0000>..<private-use-FFFFD>
+    Prop<crispy::text::EastAsianWidth>{ { 0x100000, 0x10FFFD }, crispy::text::EastAsianWidth::Ambiguous }, // Co [65534] <private-use-100000>..<private-use-10FFFD>
+}; // }}}
+} // end namespace tables
+
+EastAsianWidth east_asian_width(char32_t _codepoint) noexcept {
+    if (auto const p = search(tables::EastAsianWidth, _codepoint); p.has_value())
+        return p.value();
+    return EastAsianWidth::Neutral;
+}
+namespace tables {
 auto constexpr Emoji = std::array{ // {{{
     Interval{ 0x0023, 0x0023 }, // E0.0   [1] (#️)       number sign
     Interval{ 0x002A, 0x002A }, // E0.0   [1] (*️)       asterisk

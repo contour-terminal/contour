@@ -32,6 +32,8 @@ class UCDGenerator:
         self.ucd_dir = _ucd_dir
         self.header = open(_header_file, 'w')
         self.impl = open(_impl_file, 'w')
+        self.singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
+        self.rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
 
     def close(self):
         self.header.close()
@@ -131,9 +133,6 @@ namespace {
 
     def process_core_props(self):
         with open(DERIVED_CORE_PROPERTIES_FILE, 'r') as f:
-            singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-            rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-
             # collect
             props = dict()
             while True:
@@ -142,7 +141,7 @@ namespace {
                     break
                 if len(line) == 0 or line[0] == '#':
                     continue
-                m = singleValueRE.match(line)
+                m = self.singleValueRE.match(line)
                 if m:
                     code = int(m.group(1), 16)
                     prop = m.group(2)
@@ -150,7 +149,7 @@ namespace {
                     if not (prop in props):
                         props[prop] = []
                     props[prop].append({'start': code, 'end': code, 'comment': comment})
-                m = rangeValueRE.match(line)
+                m = self.rangeValueRE.match(line)
                 if m:
                     start = int(m.group(1), 16)
                     end = int(m.group(2), 16)
@@ -162,7 +161,7 @@ namespace {
 
             # sort table
             for prop_key in props.keys():
-                    props[prop_key].sort(key = lambda a: a['start'])
+                props[prop_key].sort(key = lambda a: a['start'])
 
             # write range tables
             self.impl.write("namespace tables {\n")
@@ -192,8 +191,6 @@ namespace {
     def process_props(self, filename, prop_key):
         with open(filename, 'r') as f:
             headerRE = re.compile('^#\s*{}:\s*(\w+)$'.format(prop_key))
-            singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-            rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
 
             # collect
             props_name = ''
@@ -207,13 +204,13 @@ namespace {
                     props_name = m.group(1)
                     if not (props_name in props):
                         props[props_name] = []
-                m = singleValueRE.match(line)
+                m = self.singleValueRE.match(line)
                 if m:
                     code = int(m.group(1), 16)
                     prop = m.group(2)
                     comment = m.group(3)
                     props[props_name].append({'start': code, 'end': code, 'property': prop, 'comment': comment})
-                m = rangeValueRE.match(line)
+                m = self.rangeValueRE.match(line)
                 if m:
                     start = int(m.group(1), 16)
                     end = int(m.group(2), 16)
@@ -272,15 +269,13 @@ namespace {
         self.process_props(GRAPHEME_BREAK_PROPS_FILE, 'Property')
 
     def parse_range(self, line):
-        singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-        rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-        m = singleValueRE.match(line)
+        m = self.singleValueRE.match(line)
         if m:
             code = int(m.group(1), 16)
             prop = m.group(2)
             comment = m.group(3)
             return {'start': code, 'end': code, 'property': prop, 'comment': comment}
-        m = rangeValueRE.match(line)
+        m = self.rangeValueRE.match(line)
         if m:
             start = int(m.group(1), 16)
             end = int(m.group(2), 16)
@@ -336,8 +331,7 @@ namespace {
         with open(DERIVED_GENERAL_CATEGORY_FILE, 'r') as f:
             # General_Category=Spacing_Mark
             headerRE = re.compile('^#\s*General_Category=(\w+)$')
-            singleValueRE = re.compile('([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
-            rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
+            self.rangeValueRE = re.compile('([0-9A-F]+)\.\.([0-9A-F]+)\s*;\s*(\w+)\s*#\s*(.*)$')
 
             # collect
             cat_name = ''
@@ -353,13 +347,13 @@ namespace {
                         cats[cat_name] = []
                 if len(line) == 0 or line[0] == '#':
                     continue
-                m = singleValueRE.match(line)
+                m = self.singleValueRE.match(line)
                 if m:
                     code = int(m.group(1), 16)
                     prop = m.group(2) # ignored
                     comment = m.group(3)
                     cats[cat_name].append({'start': code, 'end': code, 'comment': comment})
-                m = rangeValueRE.match(line)
+                m = self.rangeValueRE.match(line)
                 if m:
                     start = int(m.group(1), 16)
                     end = int(m.group(2), 16)
@@ -400,8 +394,77 @@ namespace {
                         format(name.lower(), name))
             self.header.write('}\n\n')
 
+    def collect_range_table_with_prop(self, f):
+        table = []
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            m = self.singleValueRE.match(line)
+            if m:
+                code = int(m.group(1), 16)
+                prop = m.group(2)
+                comment = m.group(3)
+                table.append({'start': code, 'end': code, 'property': prop, 'comment': comment})
+            m = self.rangeValueRE.match(line)
+            if m:
+                start = int(m.group(1), 16)
+                end = int(m.group(2), 16)
+                prop = m.group(3)
+                comment = m.group(4)
+                table.append({'start': start, 'end': end, 'property': prop, 'comment': comment})
+        table.sort(key = lambda a: a['start'])
+        return table
+
     def process_east_asian_width(self):
-        return # TODO
+        WIDTH_NAMES = {
+            'A': "Ambiguous",
+            'F': "FullWidth",
+            'H': 'HalfWidth',
+            'N': 'Neutral',
+            'Na': 'Narrow',
+            'W': "Wide",
+        }
+        type_name = 'EastAsianWidth'
+        table_name = type_name
+        prop_type = 'crispy::text::{}'.format(type_name)
+
+        with open(self.ucd_dir + '/EastAsianWidth.txt') as f:
+            table = self.collect_range_table_with_prop(f)
+
+            # api: enum
+            self.header.write('enum class {} {{\n'.format(table_name))
+            for v in WIDTH_NAMES.values():
+                self.header.write('    {},\n'.format(v))
+            self.header.write('};\n\n')
+
+            # api: signature
+            self.header.write('EastAsianWidth east_asian_width(char32_t _codepoint) noexcept;\n\n')
+
+            # impl: range tables
+            self.impl.write("namespace tables {\n")
+            self.impl.write("auto constexpr {} = std::array{{ // {{{{{{\n".format(table_name))
+            for propRange in table:
+                self.impl.write("    Prop<{}>{{ {{ 0x{:>04X}, 0x{:>04X} }}, {}::{} }}, // {}\n".format(
+                                prop_type,
+                                propRange['start'],
+                                propRange['end'],
+                                prop_type,
+                                WIDTH_NAMES[propRange['property']],
+                                propRange['comment']))
+            self.impl.write("}; // }}}\n")
+            self.impl.write("} // end namespace tables\n\n")
+
+            # impl: function
+            self.impl.write(
+                'EastAsianWidth east_asian_width(char32_t _codepoint) noexcept {\n' +
+                '    if (auto const p = search(tables::EastAsianWidth, _codepoint); p.has_value())\n'
+                '        return p.value();\n' +
+                '    return EastAsianWidth::Neutral;\n' + # XXX default
+                '}\n'
+            )
+
+        return
 
 def main():
     ucdgen = UCDGenerator(UCD_DIR,

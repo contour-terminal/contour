@@ -143,6 +143,17 @@ namespace grapheme_cluster_break {
     bool zwj(char32_t _codepoint) noexcept;
 }
 
+enum class EastAsianWidth {
+    Ambiguous,
+    FullWidth,
+    HalfWidth,
+    Neutral,
+    Narrow,
+    Wide,
+};
+
+EastAsianWidth east_asian_width(char32_t _codepoint) noexcept;
+
 bool emoji(char32_t _codepoint) noexcept;
 bool emoji_component(char32_t _codepoint) noexcept;
 bool emoji_modifier(char32_t _codepoint) noexcept;
