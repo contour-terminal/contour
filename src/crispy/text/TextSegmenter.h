@@ -13,15 +13,11 @@
  */
 #pragma once
 
+#include <crispy/reference.h>
 #include <fmt/format.h>
 #include <iterator>
 
 namespace crispy::text {
-
-enum class FontOrientation {
-    LTR,
-    RTL
-};
 
 enum class FontFallbackPriority {
     Text,
@@ -30,34 +26,28 @@ enum class FontFallbackPriority {
     Invalid,
 };
 
-enum class RenderOrientation {
-    Preserve,
-    RotateSideways
-};
-
-enum class ScriptCode {
-    Invalid // TODO
-};
+using ScriptCode = unsigned;
 
 struct Segment
 {
     unsigned start;
     unsigned end;
     ScriptCode script;
-    RenderOrientation renderOrientation;
     FontFallbackPriority fontFallbackPriority;
 };
 
 template <typename Iterator>
 class Segmenter {
   public:
-    Segmenter(Iterator _begin, Iterator _end,
-              FontOrientation _orientation,
+    Segmenter(Iterator _begin,
+              size_t _size,
               unsigned _startOffset = 0);
 
-    bool consume();
-
-    operator Segment const& () const noexcept { return segment_; }
+    /// Splits input text into segments, such as pure text by script, emoji-emoji, or emoji-text.
+    ///
+    /// @retval true more data can be processed
+    /// @retval false end of input data has been reached.
+    bool consume(reference<Segment> _result);
 
   private:
     Segment segment_;
