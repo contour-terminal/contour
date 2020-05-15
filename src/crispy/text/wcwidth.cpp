@@ -23,16 +23,35 @@ namespace crispy::text {
 
 int wcwidth(char32_t _codepoint) noexcept
 {
+#if 1
+    switch (east_asian_width(_codepoint))
+    {
+        case EastAsianWidth::Narrow:
+        case EastAsianWidth::Ambiguous:
+        case EastAsianWidth::HalfWidth:
+        case EastAsianWidth::Neutral:
+            return 1;
+        case EastAsianWidth::Wide:
+        case EastAsianWidth::FullWidth:
+            return 2;
+    }
+
     if (emoji(_codepoint) && !emoji_component(_codepoint))
         return 2;
 
-#if defined(UTF8PROC_FOUND) && UTF8PROC_FOUND
+    return 1;
+
+#elif defined(UTF8PROC_FOUND) && UTF8PROC_FOUND
+    if (emoji(_codepoint) && !emoji_component(_codepoint))
+        return 2;
     auto const cat = utf8proc_category(_codepoint);
     if (cat != UTF8PROC_CATEGORY_CO)
         return utf8proc_charwidth(_codepoint);
     else
         return 1; // private category is treated as standard column count
 #else
+    if (emoji(_codepoint) && !emoji_component(_codepoint))
+        return 2;
     return ::wcwidth(_codepoint);
 #endif
 }
