@@ -27,19 +27,26 @@ bool isEmoji(char32_t ch)
     return text::emoji(ch) && !text::emoji_component(ch);
 }
 
-int main([[maybe_unused]] int argc, char const* argv[])
-{
-    auto in = ifstream(argv[1], ios::binary);
+// TODO
+// void grapheme_clusters(istream& _in)
+// {
+//     while (_in.good())
+//     {
+//     }
+// }
 
+void codepoints(istream& _in)
+{
     auto constexpr mbmax = 5;
     char mb[mbmax] = {0};
     size_t mblen = 0;
+    size_t lastOffset = 0;
     size_t totalOffset = 0;
 
-    for (; in.good() && totalOffset < 50;)
+    for (; _in.good() && totalOffset < 50;)
     {
         char ch;
-        in.read(&ch, sizeof(char));
+        _in.read(&ch, sizeof(char));
         totalOffset++;
         if (mblen < mbmax)
         {
@@ -51,15 +58,17 @@ int main([[maybe_unused]] int argc, char const* argv[])
                 if (width >= 0)
                 {
                     auto u8 = crispy::utf8::encode(wc);
-                    printf("%3lu: [%s] mblen:%lu, UTF32:0x%08x, wcwidth:%d UTF8:%s\n",
-                            totalOffset,
-                            isEmoji(wc) ? "EMOJI" : " TEXT",
+                    printf("%3lu: mblen:%lu width:%d [%5s] [%5s] U+%08x UTF8:%s\n",
+                            lastOffset,
                             mblen,
-                            wc,
                             width,
+                            isEmoji(wc) ? "EMOJI" : "TEXT",
+                            "LATIN", // TODO: script
+                            wc,
                             crispy::escape(u8.begin(), u8.end()).c_str()
                     );
                 }
+                lastOffset = totalOffset;
                 mblen = 0;
             }
         }
@@ -70,6 +79,17 @@ int main([[maybe_unused]] int argc, char const* argv[])
             //cerr << "mblen would exceed. Resetting. Invalid utf-8?\n";
         }
     }
+}
+
+int main([[maybe_unused]] int argc, char const* argv[])
+{
+    // TODO: hb-inspect --codepoints FILE           Inspects source by UTF-32 codepoints
+    // TODO: hb-inspect --grapheme-clusters FILE    Inspects source by grapheme cluster
+    // TODO: hb-inspect --script-clusters FILE      Inspects source by script cluster
+
+    auto in = ifstream(argv[1], ios::binary);
+
+    codepoints(in);
 
     return EXIT_SUCCESS;
 }
