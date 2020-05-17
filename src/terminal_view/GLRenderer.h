@@ -23,8 +23,9 @@
 #include <crispy/text/Font.h>
 #include <crispy/text/TextRenderer.h>
 #include <crispy/text/TextShaper.h>
-#include <crispy/text/WordSegmenter.h>
 #include <crispy/times.h>
+
+#include <unicode/word_segmenter.h>
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -199,7 +200,7 @@ class GLRenderer : public QOpenGLFunctions {
     crispy::text::FontList regularFont_;
     crispy::text::FontList emojiFont_;
     QMatrix4x4 projectionMatrix_;
-    crispy::text::WordSegmenter wordSegmenter_;
+    unicode::word_segmenter wordSegmenter_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     crispy::text::TextRenderer textRenderer_;

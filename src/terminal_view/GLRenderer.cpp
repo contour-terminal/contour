@@ -12,8 +12,8 @@
  * limitations under the License.
  */
 #include <terminal_view/GLRenderer.h>
-#include <crispy/text/Unicode.h>
 #include <crispy/times.h>
+#include <unicode/ucd.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -315,8 +315,8 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;// TODO: selection by textStyle
-        bool const isEmojiPresentation = text::emoji(pendingDraw_.codepoints.front().value)
-                                         && not text::emoji_component(pendingDraw_.codepoints.front().value);
+        bool const isEmojiPresentation = unicode::emoji(pendingDraw_.codepoints.front().value)
+                                         && not unicode::emoji_component(pendingDraw_.codepoints.front().value);
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 

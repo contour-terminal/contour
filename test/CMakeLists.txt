@@ -16,6 +16,3 @@ endif()
 
 add_executable(hb-inspect hb-inspect.cpp)
 target_link_libraries(hb-inspect PRIVATE ${HB_INSPECT_LIBRARIES})
-
-add_executable(uc-inspect uc-inspect.cpp)
-target_link_libraries(uc-inspect PRIVATE fmt::fmt-header-only crispy::core)

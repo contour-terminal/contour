@@ -1,17 +1,6 @@
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
-# this library, utf8proc, provides much better support for determining unicode properties,
-# such as utf8proc's wcwidth() equivalent is less buggy with regards to Emoji code points.
-# But in case this library is not installed. wcwidth() is still better than nothing.
-include(FindPkgConfig)
-pkg_check_modules(UTF8PROC REQUIRED libutf8proc)
-if(${UTF8PROC_FOUND})
-    message(STATUS "[crispy] utf8proc library: found (version: ${UTF8PROC_VERSION})")
-else()
-    message(STATUS "[crispy] utf8proc library: not found")
-endif()
-
 add_library(crispy-core STATIC
     algorithm.h
     compose.h
@@ -20,17 +9,12 @@ add_library(crispy-core STATIC
     stdfs.h
     escape.h
     times.h
-    UTF8.h
-    text/EmojiSegmenter.h text/EmojiSegmenter.cpp
-    text/Unicode.h text/Unicode.cpp
-    text/wcwidth.h text/wcwidth.cpp
-    text/WordSegmenter.h
 )
 add_library(crispy::core ALIAS crispy-core)
 target_include_directories(crispy-core PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(crispy-core PRIVATE ${UTF8PROC_INCLUDE_DIRS})
 target_compile_definitions(crispy-core PRIVATE -DUTF8PROC_FOUND=${UTF8PROC_FOUND})
-target_link_libraries(crispy-core PUBLIC fmt::fmt-header-only)
+target_link_libraries(crispy-core PUBLIC fmt::fmt-header-only unicode::core)
 target_link_libraries(crispy-core PRIVATE ${UTF8PROC_LIBRARIES})
 
 # --------------------------------------------------------------------------------------------------------
@@ -89,12 +73,8 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
-        UTF8_test.cpp
         compose_test.cpp
         test_main.cpp
-        text/WordSegmenter_test.cpp
-        text/GraphemeSegmenter_test.cpp
-        text/EmojiSegmenter_test.cpp
     )
     target_link_libraries(crispy_test fmt::fmt-header-only Catch2::Catch2 crispy::core)
     add_test(crispy_test ./crispy_test)

@@ -24,7 +24,7 @@ jobs:
           sudo apt install -y "g++-9" \
                   libfreetype6-dev \
                   qtbase5-dev libqt5gui5 extra-cmake-modules \
-                  libfontconfig1-dev libharfbuzz-dev libutf8proc-dev
+                  libfontconfig1-dev libharfbuzz-dev
       - name: "create build directory"
         run: mkdir build
       - name: "cmake"
@@ -55,7 +55,7 @@ jobs:
           sudo apt install -y "g++-9" \
                   libfreetype6-dev \
                   qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev libutf8proc-dev
+                  libfontconfig1-dev libharfbuzz-dev
       - name: "create build directory"
         run: mkdir build
       - name: "cmake"

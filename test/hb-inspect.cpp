@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <crispy/text/wcwidth.h>
-#include <crispy/UTF8.h>
+#include <unicode/width.h>
+#include <unicode/utf8.h>
 
 #include <iostream>
 #include <fstream>
@@ -85,17 +85,17 @@ int main(int argc, char const* argv[])
         return total;
     }();
 
-    u32string const text32 = crispy::utf8::decode(text);
+    u32string const text32 = unicode::from_utf8(text);
 
     // ==================================================================================================
     // print input
     cout << fmt::format("Input text of {} unicode codepoints ({} bytes in UTF-8):\n",
             text32.size(), text.size());
     for (unsigned i = 0; i < text32.size(); ++i)
-        cout << fmt::format("{:>4}: codepoint:{:>08x} wcwidth:{}\n",
+        cout << fmt::format("{:>4}: codepoint:{:>08x} width:{}\n",
                 i,
                 (unsigned) text32[i],
-                crispy::text::wcwidth(text32[i]));
+                unicode::width(text32[i]));
 
     // ==================================================================================================
     // initialize
@@ -170,8 +170,8 @@ int main(int argc, char const* argv[])
     {
         auto const codepoint = unsigned(text32[info[i].cluster]);
         auto const glyphIndex = info[i].codepoint;
-        auto const columnWidth = crispy::text::wcwidth(codepoint);
-        cout << fmt::format("{:>4}: code:{:>08x} wcwidth:{} glyphIndex:{:<5} xoff:{:<3} yoff:{:<3} xadv:{:<3} yadv:{}\n",
+        auto const columnWidth = unicode::width(codepoint);
+        cout << fmt::format("{:>4}: code:{:>08x} width:{} glyphIndex:{:<5} xoff:{:<3} yoff:{:<3} xadv:{:<3} yadv:{}\n",
                             info[i].cluster,
                             codepoint,
                             columnWidth,

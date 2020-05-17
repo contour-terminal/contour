@@ -16,13 +16,14 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/VTType.h>
 
-#include <crispy/text/WordSegmenter.h>
-#include <crispy/text/EmojiSegmenter.h>
-#include <crispy/text/GraphemeSegmenter.h>
 #include <crispy/algorithm.h>
-#include <crispy/UTF8.h>
 #include <crispy/escape.h>
 #include <crispy/times.h>
+
+#include <unicode/emoji_segmenter.h>
+#include <unicode/word_segmenter.h>
+#include <unicode/grapheme_segmenter.h>
+#include <unicode/utf8.h>
 
 #include <algorithm>
 #include <iterator>
@@ -300,8 +301,7 @@ void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
 
     if (_consecutive
         && !lastColumn->empty()
-        && text::GraphemeSegmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1),
-                                                 ch))
+        && unicode::grapheme_segmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1), ch))
     {
         lastColumn->appendCharacter(ch);
     }
@@ -778,8 +778,9 @@ void Screen::write(std::u32string_view const& _text)
 {
     for (char32_t codepoint : _text)
     {
-        auto const bytes = utf8::encode(codepoint);
-        write((char const*) bytes.data(), bytes.size());
+        uint8_t bytes[4];
+        auto const len = unicode::to_utf8(codepoint, bytes);
+        write((char const*) bytes, len);
     }
 }
 
