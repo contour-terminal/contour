@@ -95,6 +95,7 @@ int main(int argc, char const* argv[])
 
     out << "#pragma once\n\n";
     out << "#include <array>\n\n";
+    out << "#include <cstdint>\n\n";
 
     if (!ns.empty())
         out << "namespace " << ns << " {\n\n";
