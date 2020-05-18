@@ -42,6 +42,7 @@ GLRenderer::GLRenderer(Logger _logger,
     projectionMatrix_{ _projectionMatrix },
     textShaper_{},
     textShader_{ createShader(_textShaderConfig) },
+    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
     textRenderer_{},
     cellBackground_{
         QSize(
@@ -161,7 +162,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     }
 
     textShader_->bind();
-    textShader_->setUniformValue(0, projectionMatrix_);
+    textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
     textRenderer_.execute();
 
     if (_terminal.isSelectionAvailable())

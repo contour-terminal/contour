@@ -203,6 +203,7 @@ class GLRenderer : public QOpenGLFunctions {
     unicode::word_segmenter wordSegmenter_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
+    int textProjectionLocation_;
     crispy::text::TextRenderer textRenderer_;
     CellBackground cellBackground_;
     GLCursor cursor_;
