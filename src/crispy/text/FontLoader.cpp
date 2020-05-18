@@ -3,6 +3,7 @@
 
 #include <fmt/format.h>
 
+#include <stdexcept>
 #include <vector>
 #include <iostream>
 
