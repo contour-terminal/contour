@@ -140,7 +140,7 @@ bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<G
         cy += pos[i].y_advance >> 6;
     }
 
-    return not any_of(_result.get(), glyphMissing);
+    return !any_of(_result.get(), glyphMissing);
 }
 
 void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)

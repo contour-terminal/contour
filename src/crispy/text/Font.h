@@ -38,7 +38,7 @@ namespace crispy {
 
     struct Codepoint {
         char32_t value;
-        size_t cluster;
+        unsigned cluster;
     };
     using CodepointSequence = std::vector<Codepoint>;
 

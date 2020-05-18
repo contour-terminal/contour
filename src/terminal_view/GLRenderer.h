@@ -163,7 +163,7 @@ class GLRenderer : public QOpenGLFunctions {
 
             auto const cluster = codepoints.size();
             for (size_t const i: crispy::times(_cell.codepointCount()))
-                codepoints.emplace_back(crispy::Codepoint{_cell.codepoint(i), cluster});
+                codepoints.emplace_back(crispy::Codepoint{_cell.codepoint(i), static_cast<unsigned>(cluster)});
         }
     };
 

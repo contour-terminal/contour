@@ -317,7 +317,7 @@ void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
     {
         (void) textStyle;// TODO: selection by textStyle
         bool const isEmojiPresentation = unicode::emoji(pendingDraw_.codepoints.front().value)
-                                         && not unicode::emoji_component(pendingDraw_.codepoints.front().value);
+                                         && !unicode::emoji_component(pendingDraw_.codepoints.front().value);
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
