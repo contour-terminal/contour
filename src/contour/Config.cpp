@@ -397,7 +397,7 @@ optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
     auto const name = toUpper(_name);
     for (auto const& mapping: namedChars)
         if (name == mapping.first)
-            return mapping.second;
+            return static_cast<char32_t>(mapping.second);
 
     return nullopt;
 }
