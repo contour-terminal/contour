@@ -189,7 +189,7 @@ void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cel
 {
     // TODO: TextSegmenter / ScriptSegmenter / EmojiSegmenter here?
     // TODO: use better text segmentation than the below code snippets
-#if 1
+#if 0
     pendingDraw_.state = PendingDraw::State::Filling;
     pendingDraw_.reset(_row, _col, _cell.attributes());
     pendingDraw_.extend(_cell);
