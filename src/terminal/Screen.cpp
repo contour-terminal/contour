@@ -85,7 +85,7 @@ std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
 std::optional<size_t> ScreenBuffer::findNextMarker(size_t _scrollOffset) const
 {
     _scrollOffset = min(_scrollOffset, savedLines.size());
-    cursor_pos_t rowNumber = _scrollOffset - 1;
+    cursor_pos_t rowNumber = static_cast<cursor_pos_t>(_scrollOffset) - 1;
 
     if (rowNumber < savedLines.size())
         for (auto line = prev(end(savedLines), rowNumber); rowNumber > 0; ++line, --rowNumber)
@@ -98,6 +98,8 @@ std::optional<size_t> ScreenBuffer::findNextMarker(size_t _scrollOffset) const
 
 void ScreenBuffer::resize(WindowSize const& _newSize)
 {
+    lastColumn = {};
+
     if (_newSize.rows > size_.rows)
     {
         // Grow line count by splicing available lines from history back into buffer, if available,
@@ -1706,7 +1708,7 @@ void Screen::operator()(ResizeWindow const& v)
 
 void Screen::operator()(AppendChar const& v)
 {
-    buffer_->appendChar(v.ch, instructionCounter_ < 2);
+    buffer_->appendChar(v.ch, instructionCounter_ == 1);
     instructionCounter_ = 0;
 }
 
