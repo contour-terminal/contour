@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/FontManager.h>
+#include <stdexcept>
 
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
