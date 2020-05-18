@@ -1,21 +1,24 @@
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
-add_library(crispy-core STATIC
-    algorithm.h
-    compose.h
-    overloaded.h
-    reference.h
-    stdfs.h
-    escape.h
-    times.h
-)
+add_library(crispy-core INTERFACE)
 add_library(crispy::core ALIAS crispy-core)
-target_include_directories(crispy-core PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-target_include_directories(crispy-core PRIVATE ${UTF8PROC_INCLUDE_DIRS})
-target_compile_definitions(crispy-core PRIVATE -DUTF8PROC_FOUND=${UTF8PROC_FOUND})
-target_link_libraries(crispy-core PUBLIC fmt::fmt-header-only unicode::core)
-target_link_libraries(crispy-core PRIVATE ${UTF8PROC_LIBRARIES})
+target_link_libraries(crispy-core INTERFACE fmt::fmt-header-only unicode::core)
+target_compile_features(crispy-core INTERFACE cxx_std_17)
+target_include_directories(crispy-core INTERFACE
+    $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+    ${UTF8PROC_INCLUDE_DIRS}
+)
+target_sources(crispy-core INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/overloaded.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/reference.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/escape.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/times.h
+)
 
 # --------------------------------------------------------------------------------------------------------
 # crispy::gui
