@@ -799,6 +799,17 @@ constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) no
 
 namespace fmt {
     template <>
+    struct formatter<terminal::ScreenBuffer::Cursor> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::ScreenBuffer::Cursor cursor, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({}:{}{})", cursor.row, cursor.column, cursor.visible ? "" : ", (invis)");
+        }
+    };
+
+    template <>
     struct formatter<terminal::ScreenBuffer::Type> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
