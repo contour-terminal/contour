@@ -768,6 +768,7 @@ void Screen::write(char const * _data, size_t _size)
         handler_.commands(),
         [&](Command const& _command) {
             visit(*this, _command);
+            instructionCounter_++;
             buffer_->verifyState();
         }
     );
