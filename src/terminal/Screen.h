@@ -174,6 +174,7 @@ struct ScreenBuffer {
             {
                 codepointCount_ = 1;
                 width_ = unicode::width(_codepoint);
+                assert(width_ != 0);
             }
             else
             {
