@@ -98,8 +98,6 @@ std::optional<size_t> ScreenBuffer::findNextMarker(size_t _scrollOffset) const
 
 void ScreenBuffer::resize(WindowSize const& _newSize)
 {
-    lastColumn = {};
-
     if (_newSize.rows > size_.rows)
     {
         // Grow line count by splicing available lines from history back into buffer, if available,
@@ -180,6 +178,11 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
     // TODO: find out what to do with DECOM mode. Reset it to?
 
     size_ = _newSize;
+
+    lastCursor = clampCoordinate(lastCursor);
+    auto lastLine = next(begin(lines), lastCursor.row - 1);
+    lastColumn = columnIteratorAt(begin(*lastLine), lastCursor.column);
+
     cursor = clampCoordinate(cursor);
     updateCursorIterators();
 }
