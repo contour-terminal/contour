@@ -319,30 +319,20 @@ void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
         lastColumn = currentColumn;
         lastCursor = cursor;
 
-        auto const width = cell.width();
-        for (size_t i = 0; i < width; ++i)
-            if (!advanceCursor())
-                break;
-    }
-}
+        auto const n = min(cell.width(), margin_.horizontal.length() - cursor.column);
+        if (n == cell.width())
+        {
+            assert(n > 0);
+            cursor.column += n;
+            currentColumn++;
+            for (unsigned i = 1; i < n; ++i)
+                (currentColumn++)->reset();
+        }
+        else if (autoWrap)
+            wrapPending = true;
 
-bool ScreenBuffer::advanceCursor()
-{
-    // TODO: if the current cell contains RTL codepoints,
-    // then advance to the left, otherwise to the right.
-
-    if (cursor.column < size_.columns)
-    {
-        cursor.column++;
-        currentColumn++;
         verifyState();
-        return true;
     }
-    else if (autoWrap)
-        wrapPending = true;
-
-    return false;
-
 }
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n)
@@ -599,11 +589,26 @@ void ScreenBuffer::insertColumns(cursor_pos_t _n)
 
 void ScreenBuffer::updateCursorIterators()
 {
-    // update iterators
     currentLine = next(begin(lines), cursor.row - 1);
-    currentColumn = next(begin(*currentLine), cursor.column - 1);
+    currentColumn = columnIteratorAt(cursor.column);
+}
+
+void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
+{
+    auto const n = min(_n, size_.columns);
+    cursor.column = n;
+    currentColumn = columnIteratorAt(n);
 
     verifyState();
+}
+
+bool ScreenBuffer::incrementCursorColumn(cursor_pos_t _n)
+{
+    auto const n = min(_n,  margin_.horizontal.length() - cursor.column);
+    currentColumn = columnIteratorAt(currentColumn, n + 1);
+    cursor.column += n;
+    verifyState();
+    return n == _n;
 }
 
 void ScreenBuffer::clampSavedLines()
@@ -648,11 +653,12 @@ void ScreenBuffer::verifyState() const
 
     // verify iterators
     [[maybe_unused]] auto const line = next(begin(lines), cursor.row - 1);
-    [[maybe_unused]] auto const col = next(begin(*line), cursor.column - 1);
+
+    [[maybe_unused]] auto const col = columnIteratorAt(cursor.column);
 
     assert(line == currentLine);
     assert(col == currentColumn);
-    assert(cursor.column == size_.columns || wrapPending == false);
+    assert(wrapPending == false || cursor.column == size_.columns);
 #endif
 }
 
@@ -994,10 +1000,6 @@ void Screen::operator()(FullReset const&)
 
 void Screen::operator()(Linefeed const&)
 {
-    // if (realCursorPosition().row == buffer_->margin_.vertical.to)
-    //     buffer_->scrollUp(1);
-    // else
-    //     moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
     if (isModeEnabled(Mode::AutomaticNewLine))
         buffer_->linefeed(buffer_->margin_.horizontal.from);
     else
@@ -1240,7 +1242,7 @@ void Screen::operator()(MoveCursorUp const& v)
     auto const n = min(v.n, cursorPosition().row - buffer_->margin_.vertical.from);
     buffer_->cursor.row -= n;
     buffer_->currentLine = prev(buffer_->currentLine, n);
-    buffer_->currentColumn = next(begin(*buffer_->currentLine), realCursorPosition().column - 1);
+    buffer_->setCurrentColumn(realCursorPosition().column);
     buffer_->verifyState();
 }
 
@@ -1249,51 +1251,36 @@ void Screen::operator()(MoveCursorDown const& v)
     auto const n = min(v.n, size_.rows - cursorPosition().row);
     buffer_->cursor.row += n;
     buffer_->currentLine = next(buffer_->currentLine, n);
-    buffer_->currentColumn = next(begin(*buffer_->currentLine), realCursorPosition().column - 1);
-    buffer_->verifyState();
+    buffer_->setCurrentColumn(realCursorPosition().column);
 }
 
 void Screen::operator()(MoveCursorForward const& v)
 {
-    auto const n = min(v.n, size_.columns - buffer_->cursor.column);
-    buffer_->cursor.column += n;
-    buffer_->currentColumn = next(
-        buffer_->currentColumn,
-        n
-    );
-    buffer_->verifyState();
+    buffer_->incrementCursorColumn(v.n);
 }
 
 void Screen::operator()(MoveCursorBackward const& v)
 {
-    auto const n = min(v.n, buffer_->cursor.column - 1);
-    buffer_->cursor.column -= n;
-    buffer_->currentColumn = prev(buffer_->currentColumn, n);
-
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
     buffer_->wrapPending = false;
 
-    buffer_->verifyState();
+    // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
+    auto const n = min(v.n, buffer_->cursor.column - 1);
+    buffer_->setCurrentColumn(buffer_->cursor.column - n);
 }
 
 void Screen::operator()(MoveCursorToColumn const& v)
 {
     buffer_->wrapPending = false;
-    auto const n = min(v.column, size_.columns);
-    buffer_->cursor.column = n;
-    buffer_->currentColumn = next(begin(*buffer_->currentLine), n - 1);
-    buffer_->verifyState();
+
+    buffer_->setCurrentColumn(v.column);
 }
 
 void Screen::operator()(MoveCursorToBeginOfLine const&)
 {
     buffer_->wrapPending = false;
-    buffer_->cursor.column = 1;
-    buffer_->currentColumn = next(
-        begin(*buffer_->currentLine),
-        buffer_->cursor.column - 1
-    );
-    buffer_->verifyState();
+
+    buffer_->setCurrentColumn(buffer_->margin_.horizontal.from);
 }
 
 void Screen::operator()(MoveCursorTo const& v)
@@ -1813,6 +1800,7 @@ Screen::Cell const& Screen::at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const n
 
 void Screen::moveCursorTo(Coordinate to)
 {
+    buffer_->wrapPending = false;
     buffer_->moveCursorTo(to);
 }
 

@@ -151,6 +151,13 @@ struct ScreenBuffer {
             codepointCount_{0}
         {}
 
+        constexpr void reset() noexcept
+        {
+            attributes_ = {};
+            codepointCount_ = 0;
+            width_ = 1;
+        }
+
         constexpr Cell(Cell const&) noexcept = default;
         constexpr Cell(Cell&&) noexcept = default;
         constexpr Cell& operator=(Cell const&) noexcept = default;
@@ -242,7 +249,10 @@ struct ScreenBuffer {
         const_iterator cbegin() const { return buffer.cbegin(); }
         const_iterator cend() const { return buffer.cend(); }
     };
+    using ColumnIterator = Line::iterator;
+
 	using Lines = std::deque<Line>;
+    using LineIterator = Lines::iterator;
 
     struct Cursor : public Coordinate {
         bool visible = true;
@@ -302,10 +312,10 @@ struct ScreenBuffer {
 	GraphicsAttributes graphicsRendition{};
 	std::stack<SavedState> savedStates{};
 
-	Lines::iterator currentLine{std::begin(lines)};
-	Line::iterator currentColumn{currentLine->begin()};
+	LineIterator currentLine{std::begin(lines)};
+	ColumnIterator currentColumn{currentLine->begin()};
 
-    Line::iterator lastColumn{currentColumn};
+    ColumnIterator lastColumn{currentColumn};
     Cursor lastCursor{};
 
 	void appendChar(char32_t _codepoint, bool _consecutive);
@@ -323,6 +333,33 @@ struct ScreenBuffer {
 	void deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n);
 	void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
 	void insertColumns(cursor_pos_t _n);
+
+    /// Sets the current column to given real column number.
+    void setCurrentColumn(cursor_pos_t _n);
+
+    /// Increments current column number by @p _n.
+    ///
+    /// @retval true fully incremented by @p _n columns.
+    /// @retval false Truncated, as it couldn't be fully incremented as not enough columns to the right were available.
+    bool incrementCursorColumn(cursor_pos_t _n);
+
+    /// @returns an iterator to @p _n columns after column @p _begin.
+    ColumnIterator columnIteratorAt(ColumnIterator _begin, cursor_pos_t _n)
+    {
+        return next(_begin, _n - 1);
+    }
+
+    /// @returns an iterator to the real column number @p _n.
+    ColumnIterator columnIteratorAt(cursor_pos_t _n)
+    {
+        return columnIteratorAt(std::begin(*currentLine), _n);
+    }
+
+    /// @returns an iterator to the real column number @p _n.
+    ColumnIterator columnIteratorAt(cursor_pos_t _n) const
+    {
+        return const_cast<ScreenBuffer*>(this)->columnIteratorAt(_n);
+    }
 
 	void setMode(Mode _mode, bool _enable);
 
@@ -391,12 +428,6 @@ struct ScreenBuffer {
 	}
 
 	void moveCursorTo(Coordinate to);
-
-    /// Advances the current cursor position to the next column.
-    ///
-    /// @retval true next character fits into current line
-    /// @retval false next character will be placed on the next line
-    bool advanceCursor();
 };
 
 inline auto begin(ScreenBuffer::Line& _line) { return _line.begin(); }
@@ -806,6 +837,24 @@ namespace fmt {
         auto format(const terminal::ScreenBuffer::Cursor cursor, FormatContext& ctx)
         {
             return format_to(ctx.out(), "({}:{}{})", cursor.row, cursor.column, cursor.visible ? "" : ", (invis)");
+        }
+    };
+
+    template <>
+    struct formatter<terminal::ScreenBuffer::Cell> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::ScreenBuffer::Cell const& cell, FormatContext& ctx)
+        {
+            std::string codepoints;
+            for (size_t i = 0; i < cell.codepointCount(); ++i)
+            {
+                if (i)
+                    codepoints += ", ";
+                codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
+            }
+            return format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
         }
     };
 
