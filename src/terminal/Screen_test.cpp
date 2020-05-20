@@ -73,9 +73,13 @@ TEST_CASE("resize", "[screen]")
     SECTION("regrow columns") {
         // 1.) grow
         screen.resize({3, 2});
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
         // 2.) fill
-        screen.write("Y\033[1;3HX");
+        screen(AppendChar{'Y'});
+        REQUIRE("AB \nCDY\n" == screen.renderText());
+        screen(MoveCursorTo{1, 3});
+        screen(AppendChar{'X'});
         REQUIRE("ABX\nCDY\n" == screen.renderText());
         REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
 
@@ -840,8 +844,9 @@ TEST_CASE("ScrollDown", "[screen]")
 TEST_CASE("MoveCursorUp", "[screen]")
 {
     Screen screen{{5, 5}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
-    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[3;2H");
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
+    screen(MoveCursorTo{3, 2});
     REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
 
     SECTION("no-op") {
@@ -1013,6 +1018,14 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
     // overflow
     screen(MoveCursorToColumn{5});
     REQUIRE(screen.cursorPosition() == Coordinate{1, 3 /*clamped*/});
+
+    SECTION("with wide character")
+    {
+        screen(MoveCursorTo{1, 1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+        screen(AppendChar{U'\u26A1'}); // ⚡ :flash: (double width)
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    }
 }
 
 TEST_CASE("MoveCursorToLine", "[screen]")
