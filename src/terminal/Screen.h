@@ -811,6 +811,11 @@ constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffe
         && a.styles == b.styles;
 }
 
+constexpr bool operator!=(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
+{
+    return !(a == b);
+}
+
 constexpr bool operator==(ScreenBuffer::Cell const& a, Screen::Cell const& b) noexcept
 {
     if (a.codepointCount() != b.codepointCount())
