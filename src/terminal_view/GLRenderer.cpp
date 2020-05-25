@@ -18,10 +18,116 @@
 using namespace std;
 using namespace std::chrono;
 using namespace std::placeholders;
-
 using namespace crispy;
-using namespace terminal;
-using namespace terminal::view;
+
+namespace terminal::view {
+
+class GLRenderer::TextScheduler { // {{{
+  public:
+    using Flusher = std::function<void(TextScheduler const&)>;
+
+    explicit TextScheduler(Flusher _flusher);
+
+    constexpr cursor_pos_t row() const noexcept { return row_; }
+    constexpr cursor_pos_t startColumn() const noexcept { return startColumn_; }
+    constexpr ScreenBuffer::GraphicsAttributes attributes() const noexcept { return attributes_; }
+    crispy::CodepointSequence const& codepoints() const noexcept { return codepoints_; }
+
+    void reset();
+    void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
+    void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
+    void flush();
+
+  private:
+    void extend(ScreenBuffer::Cell const&);
+
+  private:
+    enum class State { Empty, Filling };
+
+    State state_ = State::Empty;
+    cursor_pos_t row_ = 1;
+    cursor_pos_t startColumn_ = 1;
+    ScreenBuffer::GraphicsAttributes attributes_ = {};
+    crispy::CodepointSequence codepoints_{};
+
+    Flusher flusher_;
+};
+
+GLRenderer::TextScheduler::TextScheduler(Flusher _flusher)
+    : flusher_{ move(_flusher) }
+{
+}
+
+void GLRenderer::TextScheduler::reset()
+{
+    state_ = State::Empty;
+    row_ = 1;
+    startColumn_ = 1;
+    attributes_ = {};
+    codepoints_.clear();
+}
+
+void GLRenderer::TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
+{
+    state_ = State::Filling;
+    row_ = _row;
+    startColumn_ = _col;
+    attributes_ = _attr;
+    codepoints_.clear();
+}
+
+void GLRenderer::TextScheduler::extend(ScreenBuffer::Cell const& _cell)
+{
+    auto const cluster = codepoints_.size();
+    for (size_t const i: crispy::times(_cell.codepointCount()))
+        codepoints_.emplace_back(crispy::Codepoint{_cell.codepoint(i), static_cast<unsigned>(cluster)});
+}
+
+void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell)
+{
+    // TODO: new scheduling algo with given procedure
+    //
+    // 1) fill up one line (& split words by spaces, right here?)
+    //      case (State.Space, Char.Space) -> skip
+    //      case (State.Space, Char.NoSpace) -> state <- Fill
+    // 2) segment line into runs
+    // 3) render each run
+    // 4) start next line
+
+    constexpr char32_t SP = 0x20;
+
+    switch (state_)
+    {
+        case State::Empty:
+            if (_cell.codepoint() > SP)
+            {
+                reset(_row, _col, _cell.attributes());
+                extend(_cell);
+            }
+            break;
+        case State::Filling:
+            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint() > SP)
+                extend(_cell);
+            else
+            {
+                flush();
+                if (_cell.codepoint() > SP)
+                {
+                    reset(_row, _col, _cell.attributes());
+                    extend(_cell);
+                }
+                else
+                    reset();
+            }
+            break;
+    }
+}
+
+void GLRenderer::TextScheduler::flush()
+{
+    flusher_(*this);
+}
+// }}}
 
 GLRenderer::GLRenderer(Logger _logger,
                        text::FontList const& _regularFont,
@@ -137,18 +243,28 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 {
     metrics_.clear();
     pendingBackgroundDraw_ = {};
-    pendingDraw_ = {};
+
+    auto ts = TextScheduler{
+        [&](TextScheduler const& _textScheduler) {
+            renderText(
+                _terminal.screenSize(),
+                _textScheduler.row(),
+                _textScheduler.startColumn(),
+                _textScheduler.attributes(),
+                _textScheduler.codepoints());
+        }
+    };
 
     auto const changes = _terminal.render(
         _now,
         bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3, _terminal.screenSize()),
-        bind(&GLRenderer::fillTextGroup, this, _1, _2, _3, _terminal.screenSize())
+        bind(&TextScheduler::schedule, &ts, _1, _2, _3)
     );
 
     assert(!pendingBackgroundDraw_.empty());
     renderPendingBackgroundCells(_terminal.screenSize());
 
-    renderTextGroup(_terminal.screenSize());
+    ts.flush();
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -183,51 +299,6 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
         }
     }
     return changes;
-}
-
-void GLRenderer::fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell, WindowSize const& _screenSize)
-{
-    // TODO: TextSegmenter / ScriptSegmenter / EmojiSegmenter here?
-    // TODO: use better text segmentation than the below code snippets
-#if 0
-    pendingDraw_.state = PendingDraw::State::Filling;
-    pendingDraw_.reset(_row, _col, _cell.attributes());
-    pendingDraw_.extend(_cell);
-    renderTextGroup(_screenSize);
-    pendingDraw_.reset(_row, _col, _cell.attributes());
-#else
-    constexpr uint8_t SP = 0x20;
-
-    switch (pendingDraw_.state)
-    {
-        case PendingDraw::State::Empty:
-            if (_cell.codepoint() > SP)
-            {
-                pendingDraw_.state = PendingDraw::State::Filling;
-                pendingDraw_.reset(_row, _col, _cell.attributes());
-                pendingDraw_.extend(_cell);
-            }
-            break;
-        case PendingDraw::State::Filling:
-            if (pendingDraw_.lineNumber == _row && pendingDraw_.attributes == _cell.attributes() && _cell.codepoint() > SP)
-                pendingDraw_.extend(_cell);
-            else
-            {
-                renderTextGroup(_screenSize);
-                if (_cell.codepoint() > SP)
-                {
-                    pendingDraw_.reset(_row, _col, _cell.attributes());
-                    pendingDraw_.extend(_cell);
-                }
-                else
-                {
-                    pendingDraw_.codepoints.clear();
-                    pendingDraw_.state = PendingDraw::State::Empty;
-                }
-            }
-            break;
-    }
-#endif
 }
 
 void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize)
@@ -274,57 +345,61 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
     );
 }
 
-void GLRenderer::renderTextGroup(WindowSize const& _screenSize)
+void GLRenderer::renderText(WindowSize const& _screenSize,
+                            cursor_pos_t _lineNumber,
+                            cursor_pos_t _startColumn,
+                            ScreenBuffer::GraphicsAttributes const& _attributes,
+                            crispy::CodepointSequence const& _codepoints)
 {
-    if (pendingDraw_.codepoints.empty())
+    if (_codepoints.empty())
         return;
 
     ++metrics_.renderTextGroup;
 
-    auto const [fgColor, bgColor] = makeColors(pendingDraw_.attributes);
+    auto const [fgColor, bgColor] = makeColors(_attributes);
     auto const textStyle = text::FontStyle::Regular;
 
-    if (pendingDraw_.attributes.styles & CharacterStyleMask::Bold)
+    if (_attributes.styles & CharacterStyleMask::Bold)
     {
         // TODO: switch font
     }
 
-    if (pendingDraw_.attributes.styles & CharacterStyleMask::Italic)
+    if (_attributes.styles & CharacterStyleMask::Italic)
     {
         // TODO: *Maybe* update transformation matrix to have chars italic *OR* change font (depending on bold-state)
     }
 
-    if (pendingDraw_.attributes.styles & CharacterStyleMask::Blinking)
+    if (_attributes.styles & CharacterStyleMask::Blinking)
     {
         // TODO: update textshaper's shader to blink
     }
 
-    if (pendingDraw_.attributes.styles & CharacterStyleMask::CrossedOut)
+    if (_attributes.styles & CharacterStyleMask::CrossedOut)
     {
         // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
 
-    if (pendingDraw_.attributes.styles & CharacterStyleMask::DoublyUnderlined)
+    if (_attributes.styles & CharacterStyleMask::DoublyUnderlined)
     {
         // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
-    else if (pendingDraw_.attributes.styles & CharacterStyleMask::Underline)
+    else if (_attributes.styles & CharacterStyleMask::Underline)
     {
         // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
 
-    if (!(pendingDraw_.attributes.styles & CharacterStyleMask::Hidden))
+    if (!(_attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;// TODO: selection by textStyle
-        bool const isEmojiPresentation = unicode::emoji(pendingDraw_.codepoints.front().value)
-                                         && !unicode::emoji_component(pendingDraw_.codepoints.front().value);
+        bool const isEmojiPresentation = unicode::emoji(_codepoints.front().value)
+                                         && !unicode::emoji_component(_codepoints.front().value);
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
-        if (text::GlyphPositionList const* glyphPositions = textShaper_.shape(font, pendingDraw_.codepoints); glyphPositions)
+        if (text::GlyphPositionList const* glyphPositions = textShaper_.shape(font, _codepoints); glyphPositions)
         {
             textRenderer_.render(
-                makeCoords(pendingDraw_.startColumn, pendingDraw_.lineNumber, _screenSize),
+                makeCoords(_startColumn, _lineNumber, _screenSize),
                 *glyphPositions,
                 QVector4D(
                     static_cast<float>(fgColor.red) / 255.0f,
@@ -366,3 +441,5 @@ std::pair<RGBColor, RGBColor> GLRenderer::makeColors(ScreenBuffer::GraphicsAttri
         : pair{ apply(colorProfile_, _attributes.foregroundColor, ColorTarget::Foreground, bright) * opacity,
                 apply(colorProfile_, _attributes.backgroundColor, ColorTarget::Background, bright) };
 }
+
+} // end namespace

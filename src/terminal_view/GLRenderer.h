@@ -122,50 +122,24 @@ class GLRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
-    void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
+    void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
+
+    void renderPendingBackgroundCells(WindowSize const& _screenSize);
+    void renderText(WindowSize const& _screenSize,
+                    cursor_pos_t _lineNumber,
+                    cursor_pos_t _startColumn,
+                    ScreenBuffer::GraphicsAttributes const& _attributes,
+                    crispy::CodepointSequence const& _codepoints);
 
     void renderTextGroup(WindowSize const& _screenSize);
-    void renderPendingBackgroundCells(WindowSize const& _screenSize);
-
     QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
     std::pair<RGBColor, RGBColor> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
 
   private:
     Metrics metrics_;
 
-    /// Holds an array of directly connected characters on a single line that all share the same visual attributes.
-    struct PendingDraw {
-        enum class State { Empty, Filling };
-        cursor_pos_t lineNumber{};
-        cursor_pos_t startColumn{};
-        ScreenBuffer::GraphicsAttributes attributes{};
-        crispy::CodepointSequence codepoints{};
-        State state = State::Empty;
-
-        void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attributes)
-        {
-            lineNumber = _row;
-            startColumn = _col;
-            attributes = _attributes;
-            codepoints.clear();
-        }
-
-        void extend(Screen::Cell const& _cell)
-        {
-            // if (_cell.codepointCount() > 1)
-            // {
-            //     printf("cell codepoint count: %u;", _cell.codepointCount());
-            //     for (char32_t const i : crispy::times(_cell.codepointCount()))
-            //         printf(" %04x", _cell.codepoint(i));
-            //     printf("\n");
-            // }
-
-            auto const cluster = codepoints.size();
-            for (size_t const i: crispy::times(_cell.codepointCount()))
-                codepoints.emplace_back(crispy::Codepoint{_cell.codepoint(i), static_cast<unsigned>(cluster)});
-        }
-    };
+    class TextScheduler;
 
     struct PendingBackgroundDraw
     {
@@ -188,7 +162,6 @@ class GLRenderer : public QOpenGLFunctions {
         }
     };
 
-    PendingDraw pendingDraw_;
     PendingBackgroundDraw pendingBackgroundDraw_;
     Logger logger_;
     unsigned leftMargin_;
