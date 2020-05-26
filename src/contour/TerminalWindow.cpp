@@ -32,6 +32,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <stdexcept>
 
 using namespace std;
 using namespace std::placeholders;
@@ -626,33 +627,40 @@ constexpr inline bool isModifier(Qt::Key _key)
 
 void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
 {
-    auto const keySeq = QKeySequence(isModifier(static_cast<Qt::Key>(_keyEvent->key()))
-                                        ? _keyEvent->modifiers()
-                                        : _keyEvent->modifiers() | _keyEvent->key());
+    try
+    {
+        auto const keySeq = QKeySequence(isModifier(static_cast<Qt::Key>(_keyEvent->key()))
+                                            ? _keyEvent->modifiers()
+                                            : _keyEvent->modifiers() | _keyEvent->key());
 
-    // if (!_keyEvent->text().isEmpty())
-    //     qDebug() << "keyPress:" << "text:" << _keyEvent->text() << "seq:" << keySeq
-    //         << "key:" << static_cast<Qt::Key>(_keyEvent->key())
-    //         << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
+        // if (!_keyEvent->text().isEmpty())
+        //     qDebug() << "keyPress:" << "text:" << _keyEvent->text() << "seq:" << keySeq
+        //         << "key:" << static_cast<Qt::Key>(_keyEvent->key())
+        //         << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
 
-    if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
-    {
-        auto const& actions = i->second;
-        for (auto const& action : actions)
-            executeAction(action);
-    }
-    else if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
-    {
-        terminalView_->terminal().send(*inputEvent, now_);
-    }
-    else if (!_keyEvent->text().isEmpty())
-    {
-        for (auto const ch : _keyEvent->text().toUcs4())
+        if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
         {
-            auto const modifiers = makeModifier(_keyEvent->modifiers());
-            auto const inputEvent = terminal::InputEvent{terminal::CharInputEvent{ch, modifiers}};
-            terminalView_->terminal().send(inputEvent, now_);
+            auto const& actions = i->second;
+            for (auto const& action : actions)
+                executeAction(action);
         }
+        else if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
+        {
+            terminalView_->terminal().send(*inputEvent, now_);
+        }
+        else if (!_keyEvent->text().isEmpty())
+        {
+            for (auto const ch : _keyEvent->text().toUcs4())
+            {
+                auto const modifiers = makeModifier(_keyEvent->modifiers());
+                auto const inputEvent = terminal::InputEvent{terminal::CharInputEvent{ch, modifiers}};
+                terminalView_->terminal().send(inputEvent, now_);
+            }
+        }
+    }
+    catch (exception const& e)
+    {
+        cerr << fmt::format("Unhandled exception caught in keyPressEvent; {}; {}\n", typeid(e).name(), e.what());
     }
 }
 
