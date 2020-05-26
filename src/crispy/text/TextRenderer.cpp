@@ -20,17 +20,17 @@ using namespace std;
 namespace crispy::text {
 
 constexpr unsigned MaxInstanceCount = 1;
-constexpr unsigned MaxTextureDepth = 10;
-constexpr unsigned MaxTextureSize = 1024;
+constexpr unsigned MaxMonochromeTextureSize = 1024;
+constexpr unsigned MaxColorTextureSize = 2048;
 
 TextRenderer::TextRenderer() :
     renderer_{},
     monochromeAtlas_{
         0,
         MaxInstanceCount,
-        min(MaxTextureDepth, renderer_.maxTextureDepth()),
-        min(MaxTextureSize, renderer_.maxTextureSize()),
-        min(MaxTextureSize, renderer_.maxTextureSize()),
+        renderer_.maxTextureSize() / renderer_.maxTextureDepth(),
+        min(MaxMonochromeTextureSize, renderer_.maxTextureSize()),
+        min(MaxMonochromeTextureSize, renderer_.maxTextureSize()),
         GL_R8,
         renderer_.scheduler(),
         "monochromeAtlas"
@@ -38,9 +38,9 @@ TextRenderer::TextRenderer() :
     colorAtlas_{
         1,
         MaxInstanceCount,
-        min(MaxTextureDepth, renderer_.maxTextureDepth()),
-        min(4096u, renderer_.maxTextureSize()),
-        min(4096u, renderer_.maxTextureSize()),
+        renderer_.maxTextureSize() / renderer_.maxTextureDepth(),
+        min(MaxColorTextureSize, renderer_.maxTextureSize()),
+        min(MaxColorTextureSize, renderer_.maxTextureSize()),
         GL_RGBA8,
         renderer_.scheduler(),
         "colorAtlas",
