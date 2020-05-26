@@ -74,9 +74,12 @@ Font::Font(FT_Library _ft, std::string _fontPath, unsigned int _fontSize) :
     if (FT_New_Face(ft_, filePath_.c_str(), 0, &face_))
         throw runtime_error{ "Failed to load font." };
 
+    // FIXME: Temporarily disabled. Do I need it at all? Why do I need it? Why don't I?
+#if 0
     FT_Error ec = FT_Select_Charmap(face_, FT_ENCODING_UNICODE);
     if (ec)
         throw runtime_error{ string{"Failed to set charmap. "} + freetypeErrorString(ec) };
+#endif
 
     setFontSize(_fontSize);
 
