@@ -31,6 +31,10 @@ if(APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(fontconfig REQUIRED IMPORTED_TARGET fontconfig)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
+    execute_process(
+        COMMAND sh -c "brew --prefix harfbuzz | cut -d. -f1 | tr -d $'\n'"
+        OUTPUT_VARIABLE HARFBUZZ_APPLE_INCLUDE)
+    include_directories(${HARFBUZZ_APPLE_INCLUDE}/include)
 elseif("${CMAKE_SYSTEM}" MATCHES "Linux")
     #find_package(fontconfig)
     find_package(PkgConfig REQUIRED)
