@@ -14,6 +14,8 @@
 #include <terminal_view/GLRenderer.h>
 #include <crispy/times.h>
 #include <unicode/ucd.h>
+#include <unicode/ucd_ostream.h>
+#include <unicode/run_segmenter.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -33,6 +35,9 @@ class GLRenderer::TextScheduler { // {{{
     constexpr ScreenBuffer::GraphicsAttributes attributes() const noexcept { return attributes_; }
     crispy::CodepointSequence const& codepoints() const noexcept { return codepoints_; }
 
+    size_t runOffset() const noexcept { return runOffset_; }
+    crispy::CodepointSequence const& run() const noexcept { return run_; }
+
     void reset();
     void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
     void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
@@ -49,6 +54,9 @@ class GLRenderer::TextScheduler { // {{{
     cursor_pos_t startColumn_ = 1;
     ScreenBuffer::GraphicsAttributes attributes_ = {};
     crispy::CodepointSequence codepoints_{};
+
+    crispy::CodepointSequence run_{};
+    size_t runOffset_ = 0;
 
     Flusher flusher_;
 };
@@ -106,7 +114,7 @@ void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, S
             }
             break;
         case State::Filling:
-            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint() > SP)
+            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint() != SP)
                 extend(_cell);
             else
             {
@@ -125,7 +133,40 @@ void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, S
 
 void GLRenderer::TextScheduler::flush()
 {
-    flusher_(*this);
+    using unicode::out;
+
+    if (codepoints_.size() != 0)
+    {
+        u32string codepoints;
+        for (auto const& cp : codepoints_)
+            codepoints.push_back(cp.value);
+
+        auto rs = unicode::run_segmenter(codepoints.data(), codepoints.size());
+        unicode::segment run;
+
+        // cout << fmt::format("flush {} codepoints; \"", codepoints.size());
+        // for (size_t i = 0; i < codepoints_.size(); ++i)
+        //     cout << unicode::to_utf8(codepoints_[i].value);
+        // cout << '"' << endl;
+
+        while (rs.consume(out(run)))
+        {
+            run_.clear();
+
+            // TODO: heavily poor performance. Make me more performant by reusing existing buffers
+            // with zero copy (just indexing).
+            runOffset_ = run.start;
+            for (size_t i = run.start; i < run.end; ++i)
+                run_.push_back({codepoints[i], codepoints_[i].cluster});
+
+            // cout << "  run: " << run << "; ";
+            // for (size_t i = 0; i < run_.size(); ++i)
+            //     cout << fmt::format(" {}:{}", (unsigned) run_[i].value, codepoints_[run.start + i].cluster);
+            // cout << endl;
+
+            flusher_(*this);
+        }
+    }
 }
 // }}}
 
@@ -249,9 +290,9 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
             renderText(
                 _terminal.screenSize(),
                 _textScheduler.row(),
-                _textScheduler.startColumn(),
+                _textScheduler.startColumn() + _textScheduler.runOffset(),
                 _textScheduler.attributes(),
-                _textScheduler.codepoints());
+                _textScheduler.run());
         }
     };
 
