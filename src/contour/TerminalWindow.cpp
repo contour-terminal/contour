@@ -182,18 +182,30 @@ namespace {
         string const sourceName = [&]() {
             switch (_source)
             {
+#if defined(GL_DEBUG_SOURCE_API_ARB)
                 case GL_DEBUG_SOURCE_API_ARB:
                     return "API"s;
+#endif
+#if defined(GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB)
                 case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB:
                     return "window system"s;
+#endif
+#if defined(GL_DEBUG_SOURCE_SHADER_COMPILER_ARB)
                 case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB:
                     return "shader compiler"s;
+#endif
+#if defined(GL_DEBUG_SOURCE_THIRD_PARTY_ARB)
                 case GL_DEBUG_SOURCE_THIRD_PARTY_ARB:
                     return "third party"s;
+#endif
+#if defined(GL_DEBUG_SOURCE_APPLICATION_ARB)
                 case GL_DEBUG_SOURCE_APPLICATION_ARB:
                     return "application"s;
+#endif
+#if defined(GL_DEBUG_SOURCE_OTHER_ARB)
                 case GL_DEBUG_SOURCE_OTHER_ARB:
                     return "other"s;
+#endif
                 default:
                     return fmt::format("{}", _severity);
             }
@@ -201,18 +213,30 @@ namespace {
         string const typeName = [&]() {
             switch (_type)
             {
+#if defined(GL_DEBUG_TYPE_ERROR)
                 case GL_DEBUG_TYPE_ERROR:
                     return "error"s;
+#endif
+#if defined(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR)
                 case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
                     return "deprecated"s;
+#endif
+#if defined(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
                 case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
                     return "undefined"s;
+#endif
+#if defined(GL_DEBUG_TYPE_PORTABILITY)
                 case GL_DEBUG_TYPE_PORTABILITY:
                     return "portability"s;
+#endif
+#if defined(GL_DEBUG_TYPE_PERFORMANCE)
                 case GL_DEBUG_TYPE_PERFORMANCE:
                     return "performance"s;
+#endif
+#if defined(GL_DEBUG_TYPE_OTHER)
                 case GL_DEBUG_TYPE_OTHER:
                     return "other"s;
+#endif
                 default:
                     return fmt::format("{}", _severity);
             }
@@ -220,22 +244,37 @@ namespace {
         string const debugSeverity = [&]() {
             switch (_severity)
             {
+#if defined(GL_DEBUG_SEVERITY_LOW)
                 case GL_DEBUG_SEVERITY_LOW:
                     return "low"s;
+#endif
+#if defined(GL_DEBUG_SEVERITY_MEDIUM)
                 case GL_DEBUG_SEVERITY_MEDIUM:
                     return "medium"s;
+#endif
+#if defined(GL_DEBUG_SEVERITY_HIGH)
                 case GL_DEBUG_SEVERITY_HIGH:
                     return "high"s;
+#endif
+#if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
                 case GL_DEBUG_SEVERITY_NOTIFICATION:
                     return "notification"s;
+#endif
                 default:
                     return fmt::format("{}", _severity);
             }
         }();
+        auto const tag = [](GLint _type) {
+#if defined(GL_DEBUG_TYPE_ERROR)
+            return  _type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "";
+#else
+            return "";
+#endif
+        }(_type);
         fprintf(
             stderr,
             "GL CALLBACK: %s type = %s, source = %s, severity = %s, message = %s\n",
-            ( _type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
+            tag,
             typeName.c_str(), sourceName.c_str(), debugSeverity.c_str(), _message
         );
     }
@@ -414,7 +453,9 @@ void TerminalWindow::initializeGL()
     cout << fmt::format("GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     GLint glslNumShaderVersions{};
+#if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
     glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+#endif
     if (glslNumShaderVersions > 0)
     {
         cout << " (";
@@ -429,7 +470,7 @@ void TerminalWindow::initializeGL()
     cout << "\n\n";
     // }}}
 
-#if !defined(NDEBUG)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(&glMessageCallback, this);
 #endif
