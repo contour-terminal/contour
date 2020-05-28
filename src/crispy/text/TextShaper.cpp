@@ -46,7 +46,7 @@ TextShaper::~TextShaper()
     hb_buffer_destroy(hb_buf_);
 }
 
-GlyphPositionList const* TextShaper::shape(FontList& _font, CodepointSequence const& _codes)
+GlyphPositionList const* TextShaper::shape(FontList const& _font, CodepointSequence const& _codes)
 {
     if (auto i = cache_.find(_codes); i != cache_.end())
         return &i->second;
@@ -56,7 +56,7 @@ GlyphPositionList const* TextShaper::shape(FontList& _font, CodepointSequence co
         return &(cache_[_codes] = move(result));
 
     size_t i = 1;
-    for (reference_wrapper<Font>& fallback : _font.second)
+    for (reference_wrapper<Font> const& fallback : _font.second)
     {
         if (shape(_codes, fallback.get(), ref(result)))
             return &(cache_[_codes] = move(result));

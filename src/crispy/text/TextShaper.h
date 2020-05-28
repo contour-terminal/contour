@@ -26,7 +26,7 @@ class TextShaper {
     ~TextShaper();
 
     /// Renders text into glyph positions of this font.
-    GlyphPositionList const* shape(FontList& _font, CodepointSequence const& _codes);
+    GlyphPositionList const* shape(FontList const& _font, CodepointSequence const& _codes);
 
     void clearCache();
 
