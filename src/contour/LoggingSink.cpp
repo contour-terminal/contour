@@ -14,7 +14,6 @@
 #include "LoggingSink.h"
 
 #include <crispy/escape.h>
-#include <crispy/UTF8.h>
 #include <crispy/overloaded.h>
 
 #include <fmt/format.h>
@@ -47,7 +46,7 @@ void LoggingSink::keyPress(Key _key, Modifier _modifier)
 
 void LoggingSink::keyPress(char32_t _char, Modifier _modifier)
 {
-    if (utf8::isASCII(_char) && isprint(_char))
+    if (_char <= 0x7F && isprint(_char))
         log(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_char), to_string(_modifier)) });
     else
         log(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_char), to_string(_modifier)) });

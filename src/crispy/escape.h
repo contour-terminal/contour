@@ -14,7 +14,7 @@
 #pragma once
 
 #include <fmt/format.h>
-#include <crispy/UTF8.h>
+#include <unicode/utf8.h>
 
 #include <algorithm>
 #include <cctype>
@@ -47,12 +47,11 @@ inline std::string escape(char32_t ch)
                 return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
             else
             {
-                auto const bytes = utf8::encode(ch);
+                auto const bytes = unicode::to_utf8(ch);
                 auto res = std::string{};
                 for (auto const byte : bytes)
                 {
                     res += fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
-                    //res += byte; // fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
                 }
                 return res;
             }

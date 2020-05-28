@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Commands.h>
-#include <crispy/UTF8.h>
+#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 
@@ -21,7 +21,6 @@
 #include <cassert>
 
 using namespace std;
-using namespace crispy;
 using fmt::format;
 
 namespace terminal {
@@ -357,7 +356,7 @@ class MnemonicBuilder {
     }
     void operator()(SoftTerminalReset) { build("DECSTR", "Soft terminal reset."); }
     void operator()(AppendChar const& v) {
-        pendingText_ += utf8::to_string(utf8::encode(v.ch));
+        pendingText_ += unicode::to_utf8(v.ch);
     }
 
     void operator()(SetDynamicColor const& v) {

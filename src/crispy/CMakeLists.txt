@@ -8,7 +8,6 @@ target_compile_features(crispy-core INTERFACE cxx_std_17)
 target_include_directories(crispy-core INTERFACE
     $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
-    ${UTF8PROC_INCLUDE_DIRS}
 )
 target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h

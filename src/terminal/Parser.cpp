@@ -14,8 +14,9 @@
 #include <terminal/ControlCode.h>
 #include <terminal/Parser.h>
 #include <terminal/ParserTables.h>
-#include <crispy/UTF8.h>
 #include <crispy/escape.h>
+
+#include <unicode/utf8.h>
 
 #include <array>
 #include <cctype>
@@ -73,22 +74,25 @@ void Parser::parseFragment(uint8_t const* begin, uint8_t const* end)
 
 void Parser::parse()
 {
+    static constexpr char32_t ReplacementCharacter {0xFFFD};
+
+    printf("Parser.parse: ");
     while (dataAvailable())
     {
-        currentChar_ = 0;
+        printf("%s", crispy::escape(currentByte()).c_str());
         visit(
             overloaded{
-                [&](crispy::utf8::Decoder::Incomplete) {},
-                [&](crispy::utf8::Decoder::Invalid invalid) {
+                [&](unicode::Incomplete) {},
+                [&](unicode::Invalid) {
                     log<ParserErrorEvent>("Invalid UTF8!");
-                    currentChar_ = invalid.replacementCharacter;
+                    currentChar_ = ReplacementCharacter;
                     #if defined(VT_PARSER_TABLES)
                     handleViaTables();
                     #else
                     handleViaSwitch();
                     #endif
                 },
-                [&](crispy::utf8::Decoder::Success success) {
+                [&](unicode::Success const& success) {
                     currentChar_ = success.value;
                     #if defined(VT_PARSER_TABLES)
                     handleViaTables();
@@ -97,23 +101,25 @@ void Parser::parse()
                     #endif
                 },
             },
-            utf8Decoder_.decode(currentByte()));
+            unicode::from_utf8(utf8DecoderState_, currentByte())
+        );
 
         advance();
     }
+    printf("\n");
 }
 
 void Parser::logInvalidInput() const
 {
     if (isprint(currentChar()))
         log<ParserErrorEvent>(
-            "{}: invalid character: {:02X} '{}'",
+            "{}: invalid character: 0x{:02X} '{}'",
             to_string(state_),
             static_cast<unsigned>(currentChar()),
             static_cast<char>(currentChar()));
     else
         log<ParserErrorEvent>(
-            "{}: invalid character: {:02X}",
+            "{}: invalid character: 0x{:02X}",
             to_string(state_),
             static_cast<unsigned>(currentChar()));
 }

@@ -15,7 +15,8 @@
 
 #include <terminal/Commands.h>
 #include <terminal/InputGenerator.h> // KeyMode
-#include <crispy/UTF8.h>
+
+#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 
@@ -66,13 +67,7 @@ class OutputGenerator {
 
     void write(char32_t v)
     {
-        write(crispy::utf8::encode(v));
-    }
-
-    void write(crispy::utf8::Bytes const& v)
-    {
-        flush();
-        writer_((char const*) &v[0], v.size());
+        write(unicode::to_utf8(v));
     }
 
     void write(std::string_view const& _s)

@@ -15,7 +15,7 @@
 #include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
 
-#include <crispy/UTF8.h>
+#include <unicode/utf8.h>
 
 #include <algorithm>
 #include <array>
@@ -313,7 +313,7 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 
-    if (_characterEvent < 32 || (!_modifier.control() && crispy::utf8::isASCII(_characterEvent)))
+    if (_characterEvent < 32 || (!_modifier.control() && _characterEvent <= 0x7F))
         return append(chr); // raw C0 code
     else if (_modifier == Modifier::Control && _characterEvent == L' ')
         return append("\x00");
@@ -322,7 +322,7 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
     else if (_modifier.control() && _characterEvent >= '[' && _characterEvent <= '_')
         return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
     else if (!_modifier || _modifier == Modifier::Shift)
-        return append(crispy::utf8::to_string(crispy::utf8::encode(_characterEvent)));
+        return append(unicode::to_utf8(_characterEvent));
     else
         return false;
 }
