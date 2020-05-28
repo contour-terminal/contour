@@ -33,10 +33,12 @@ class GLRenderer::TextScheduler { // {{{
     constexpr cursor_pos_t row() const noexcept { return row_; }
     constexpr cursor_pos_t startColumn() const noexcept { return startColumn_; }
     constexpr ScreenBuffer::GraphicsAttributes attributes() const noexcept { return attributes_; }
-    crispy::CodepointSequence const& codepoints() const noexcept { return codepoints_; }
 
-    size_t runOffset() const noexcept { return runOffset_; }
-    crispy::CodepointSequence const& run() const noexcept { return run_; }
+    std::vector<char32_t> const& codepoints() const noexcept { return codepoints_; }
+    std::vector<unsigned> const& clusters() const noexcept { return clusters_; }
+
+    crispy::CodepointSequence const& runCodepoints() const noexcept { return runCodepoints_; }
+    unicode::run_segmenter::range const& run() const noexcept { return run_; }
 
     void reset();
     void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
@@ -53,10 +55,11 @@ class GLRenderer::TextScheduler { // {{{
     cursor_pos_t row_ = 1;
     cursor_pos_t startColumn_ = 1;
     ScreenBuffer::GraphicsAttributes attributes_ = {};
-    crispy::CodepointSequence codepoints_{};
+    std::vector<char32_t> codepoints_{};
+    std::vector<unsigned> clusters_{};
 
-    crispy::CodepointSequence run_{};
-    size_t runOffset_ = 0;
+    unicode::run_segmenter::range run_{};
+    crispy::CodepointSequence runCodepoints_{};
 
     Flusher flusher_;
 };
@@ -69,10 +72,12 @@ GLRenderer::TextScheduler::TextScheduler(Flusher _flusher)
 void GLRenderer::TextScheduler::reset()
 {
     state_ = State::Empty;
+
     row_ = 1;
     startColumn_ = 1;
     attributes_ = {};
     codepoints_.clear();
+    clusters_.clear();
 }
 
 void GLRenderer::TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
@@ -82,13 +87,17 @@ void GLRenderer::TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, Scre
     startColumn_ = _col;
     attributes_ = _attr;
     codepoints_.clear();
+    clusters_.clear();
 }
 
 void GLRenderer::TextScheduler::extend(ScreenBuffer::Cell const& _cell)
 {
     auto const cluster = codepoints_.size();
     for (size_t const i: crispy::times(_cell.codepointCount()))
-        codepoints_.emplace_back(crispy::Codepoint{_cell.codepoint(i), static_cast<unsigned>(cluster)});
+    {
+        codepoints_.emplace_back(_cell.codepoint(i));
+        clusters_.emplace_back(cluster);
+    }
 }
 
 void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell)
@@ -107,9 +116,10 @@ void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, S
     switch (state_)
     {
         case State::Empty:
-            if (_cell.codepoint() > SP)
+            if (_cell.codepoint() != SP)
             {
                 reset(_row, _col, _cell.attributes());
+                state_ = State::Filling;
                 extend(_cell);
             }
             break;
@@ -119,13 +129,16 @@ void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, S
             else
             {
                 flush();
-                if (_cell.codepoint() > SP)
+                if (_cell.codepoint() == SP)
+                {
+                    state_ = State::Empty;
+                    reset();
+                }
+                else // i.o.w.: cell attributes OR row number changed
                 {
                     reset(_row, _col, _cell.attributes());
                     extend(_cell);
                 }
-                else
-                    reset();
             }
             break;
     }
@@ -139,29 +152,27 @@ void GLRenderer::TextScheduler::flush()
     {
         u32string codepoints;
         for (auto const& cp : codepoints_)
-            codepoints.push_back(cp.value);
+            codepoints.push_back(cp);
 
         auto rs = unicode::run_segmenter(codepoints.data(), codepoints.size());
-        unicode::segment run;
 
         // cout << fmt::format("flush {} codepoints; \"", codepoints.size());
         // for (size_t i = 0; i < codepoints_.size(); ++i)
-        //     cout << unicode::to_utf8(codepoints_[i].value);
+        //     cout << unicode::to_utf8(codepoints_[i]);
         // cout << '"' << endl;
 
-        while (rs.consume(out(run)))
+        while (rs.consume(out(run_)))
         {
-            run_.clear();
+            runCodepoints_.clear();
 
             // TODO: heavily poor performance. Make me more performant by reusing existing buffers
             // with zero copy (just indexing).
-            runOffset_ = run.start;
-            for (size_t i = run.start; i < run.end; ++i)
-                run_.push_back({codepoints[i], codepoints_[i].cluster});
+            for (size_t i = run_.start; i < run_.end; ++i)
+                runCodepoints_.push_back({codepoints.at(i), clusters_.at(i)});
 
-            // cout << "  run: " << run << "; ";
-            // for (size_t i = 0; i < run_.size(); ++i)
-            //     cout << fmt::format(" {}:{}", (unsigned) run_[i].value, codepoints_[run.start + i].cluster);
+            // cout << "  run: " << run_ << "; ";
+            // for (size_t i = 0; i < runCodepoints_.size(); ++i)
+            //     cout << fmt::format(" {}:{}", (unsigned) runCodepoints_[i].value, codepoints_[run_.start + i].cluster);
             // cout << endl;
 
             flusher_(*this);
@@ -290,9 +301,10 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
             renderText(
                 _terminal.screenSize(),
                 _textScheduler.row(),
-                _textScheduler.startColumn() + _textScheduler.runOffset(),
+                _textScheduler.startColumn() + _textScheduler.run().start,
                 _textScheduler.attributes(),
-                _textScheduler.run());
+                _textScheduler.runCodepoints(),
+                _textScheduler.run().presentationStyle);
         }
     };
 
@@ -390,7 +402,8 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
                             cursor_pos_t _lineNumber,
                             cursor_pos_t _startColumn,
                             ScreenBuffer::GraphicsAttributes const& _attributes,
-                            crispy::CodepointSequence const& _codepoints)
+                            crispy::CodepointSequence const& _codepoints,
+                            unicode::PresentationStyle _presentationStyle)
 {
     if (_codepoints.empty())
         return;
@@ -432,8 +445,9 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
     if (!(_attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;// TODO: selection by textStyle
-        bool const isEmojiPresentation = unicode::emoji(_codepoints.front().value)
-                                         && !unicode::emoji_component(_codepoints.front().value);
+        bool const isEmojiPresentation = _presentationStyle == unicode::PresentationStyle::Emoji;
+        // unicode::emoji(_codepoints.front().value)
+        //                                 && !unicode::emoji_component(_codepoints.front().value);
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 

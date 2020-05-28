@@ -26,6 +26,7 @@
 #include <crispy/times.h>
 
 #include <unicode/word_segmenter.h>
+#include <unicode/emoji_segmenter.h>
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -130,7 +131,8 @@ class GLRenderer : public QOpenGLFunctions {
                     cursor_pos_t _lineNumber,
                     cursor_pos_t _startColumn,
                     ScreenBuffer::GraphicsAttributes const& _attributes,
-                    crispy::CodepointSequence const& _codepoints);
+                    crispy::CodepointSequence const& _codepoints,
+                    unicode::PresentationStyle _presentationStyle);
 
     void renderTextGroup(WindowSize const& _screenSize);
     QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
