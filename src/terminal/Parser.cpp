@@ -76,10 +76,8 @@ void Parser::parse()
 {
     static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-    printf("Parser.parse: ");
     while (dataAvailable())
     {
-        printf("%s", crispy::escape(currentByte()).c_str());
         visit(
             overloaded{
                 [&](unicode::Incomplete) {},
@@ -106,12 +104,11 @@ void Parser::parse()
 
         advance();
     }
-    printf("\n");
 }
 
 void Parser::logInvalidInput() const
 {
-    if (isprint(currentChar()))
+    if (currentChar() <= 0x7F && isprint(currentChar()))
         log<ParserErrorEvent>(
             "{}: invalid character: 0x{:02X} '{}'",
             to_string(state_),
