@@ -443,8 +443,6 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
     {
         (void) textStyle;// TODO: selection by textStyle
         bool const isEmojiPresentation = _presentationStyle == unicode::PresentationStyle::Emoji;
-        // unicode::emoji(_codepoints.front().value)
-        //                                 && !unicode::emoji_component(_codepoints.front().value);
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
