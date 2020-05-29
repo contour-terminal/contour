@@ -169,7 +169,7 @@ TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
     CHECK(screen(1, 4).codepointCount() == 0);
     CHECK(screen(1, 5).codepointCount() == 0);
 
-    CHECK("\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == screen.renderTextLine(1));
+    CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == unicode::from_utf8(screen.renderTextLine(1)));
 }
 
 TEST_CASE("AppendChar.emoji_1", "[screen]")

@@ -151,7 +151,7 @@ struct ScreenBuffer {
             codepointCount_{0}
         {}
 
-        constexpr void reset() noexcept
+        void reset() noexcept
         {
             attributes_ = {};
             codepointCount_ = 0;
