@@ -37,7 +37,6 @@ class GLRenderer::TextScheduler { // {{{
     std::vector<char32_t> const& codepoints() const noexcept { return codepoints_; }
     std::vector<unsigned> const& clusters() const noexcept { return clusters_; }
 
-    crispy::CodepointSequence const& runCodepoints() const noexcept { return runCodepoints_; }
     unicode::run_segmenter::range const& run() const noexcept { return run_; }
 
     void reset();
@@ -59,7 +58,6 @@ class GLRenderer::TextScheduler { // {{{
     std::vector<unsigned> clusters_{};
 
     unicode::run_segmenter::range run_{};
-    crispy::CodepointSequence runCodepoints_{};
 
     Flusher flusher_;
 };
@@ -162,21 +160,7 @@ void GLRenderer::TextScheduler::flush()
         // cout << '"' << endl;
 
         while (rs.consume(out(run_)))
-        {
-            runCodepoints_.clear();
-
-            // TODO: heavily poor performance. Make me more performant by reusing existing buffers
-            // with zero copy (just indexing).
-            for (size_t i = run_.start; i < run_.end; ++i)
-                runCodepoints_.push_back({codepoints.at(i), clusters_.at(i)});
-
-            // cout << "  run: " << run_ << "; ";
-            // for (size_t i = 0; i < runCodepoints_.size(); ++i)
-            //     cout << fmt::format(" {}:{}", (unsigned) runCodepoints_[i].value, codepoints_[run_.start + i].cluster);
-            // cout << endl;
-
             flusher_(*this);
-        }
     }
 }
 // }}}
@@ -298,12 +282,25 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     auto ts = TextScheduler{
         [&](TextScheduler const& _textScheduler) {
+            crispy::CodepointSequence codepoints{};
+
+            // TODO: heavily poor performance. Make me more performant by reusing existing buffers
+            // with zero copy (just indexing).
+            for (size_t i = _textScheduler.run().start; i < _textScheduler.run().end; ++i)
+                codepoints.push_back({_textScheduler.codepoints().at(i),
+                                      _textScheduler.clusters().at(i)});
+
+            // cout << "  run: " << run_ << "; ";
+            // for (size_t i = 0; i < codepoints.size(); ++i)
+            //     cout << fmt::format(" {}:{}", (unsigned) codepoints[i].value, codepoints_[run_.start + i].cluster);
+            // cout << endl;
+
             renderText(
                 _terminal.screenSize(),
                 _textScheduler.row(),
                 _textScheduler.startColumn() + _textScheduler.run().start,
                 _textScheduler.attributes(),
-                _textScheduler.runCodepoints(),
+                codepoints,
                 _textScheduler.run().presentationStyle);
         }
     };
