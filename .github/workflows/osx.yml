@@ -35,6 +35,6 @@ jobs:
       - name: "Build"
         run: cmake --build build/
       - name: "test: libcrispy"
-        run: ./src/crispy/crispy_test
+        run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
-        run: ./src/terminal/terminal_test
+        run: ./build/src/terminal/terminal_test
