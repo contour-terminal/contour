@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/GLRenderer.h>
-#include <crispy/times.h>
+#include <terminal_view/TextScheduler.h>
 #include <unicode/ucd.h>
 #include <unicode/ucd_ostream.h>
 #include <unicode/run_segmenter.h>
@@ -25,135 +25,6 @@ using namespace crispy;
 using unicode::out;
 
 namespace terminal::view {
-
-class GLRenderer::TextScheduler { // {{{
-  public:
-    using Flusher = std::function<void(TextScheduler const&)>;
-
-    explicit TextScheduler(Flusher _flusher);
-
-    constexpr cursor_pos_t row() const noexcept { return row_; }
-    constexpr cursor_pos_t startColumn() const noexcept { return startColumn_; }
-    constexpr ScreenBuffer::GraphicsAttributes attributes() const noexcept { return attributes_; }
-
-    std::vector<char32_t> const& codepoints() const noexcept { return codepoints_; }
-    std::vector<unsigned> const& clusters() const noexcept { return clusters_; }
-
-    unicode::run_segmenter::range const& run() const noexcept { return run_; }
-
-    void reset();
-    void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
-    void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
-    void flush();
-
-  private:
-    void extend(ScreenBuffer::Cell const&);
-
-  private:
-    enum class State { Empty, Filling };
-
-    State state_ = State::Empty;
-    cursor_pos_t row_ = 1;
-    cursor_pos_t startColumn_ = 1;
-    ScreenBuffer::GraphicsAttributes attributes_ = {};
-    std::vector<char32_t> codepoints_{};
-    std::vector<unsigned> clusters_{};
-
-    unicode::run_segmenter::range run_{};
-
-    Flusher flusher_;
-};
-
-GLRenderer::TextScheduler::TextScheduler(Flusher _flusher)
-    : flusher_{ move(_flusher) }
-{
-}
-
-void GLRenderer::TextScheduler::reset()
-{
-    state_ = State::Empty;
-
-    row_ = 1;
-    startColumn_ = 1;
-    attributes_ = {};
-    codepoints_.clear();
-    clusters_.clear();
-}
-
-void GLRenderer::TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
-{
-    state_ = State::Filling;
-    row_ = _row;
-    startColumn_ = _col;
-    attributes_ = _attr;
-    codepoints_.clear();
-    clusters_.clear();
-}
-
-void GLRenderer::TextScheduler::extend(ScreenBuffer::Cell const& _cell)
-{
-    auto const cluster = codepoints_.size();
-    for (size_t const i: crispy::times(_cell.codepointCount()))
-    {
-        codepoints_.emplace_back(_cell.codepoint(i));
-        clusters_.emplace_back(cluster);
-    }
-}
-
-void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell)
-{
-    // TODO: new scheduling algo with given procedure
-    //
-    // 1) fill up one line (& split words by spaces, right here?)
-    //      case (State.Space, Char.Space) -> skip
-    //      case (State.Space, Char.NoSpace) -> state <- Fill
-    // 2) segment line into runs
-    // 3) render each run
-    // 4) start next line
-
-    constexpr char32_t SP = 0x20;
-
-    switch (state_)
-    {
-        case State::Empty:
-            if (_cell.codepoint() != SP)
-            {
-                reset(_row, _col, _cell.attributes());
-                state_ = State::Filling;
-                extend(_cell);
-            }
-            break;
-        case State::Filling:
-            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint() != SP)
-                extend(_cell);
-            else
-            {
-                flush();
-                if (_cell.codepoint() == SP)
-                {
-                    state_ = State::Empty;
-                    reset();
-                }
-                else // i.o.w.: cell attributes OR row number changed
-                {
-                    reset(_row, _col, _cell.attributes());
-                    extend(_cell);
-                }
-            }
-            break;
-    }
-}
-
-void GLRenderer::TextScheduler::flush()
-{
-    if (codepoints_.size() == 0)
-        return;
-
-    auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
-    while (rs.consume(out(run_)))
-        flusher_(*this);
-}
-// }}}
 
 GLRenderer::GLRenderer(Logger _logger,
                        text::FontList const& _regularFont,

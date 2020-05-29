@@ -142,8 +142,6 @@ class GLRenderer : public QOpenGLFunctions {
   private:
     Metrics metrics_;
 
-    class TextScheduler;
-
     struct PendingBackgroundDraw
     {
         RGBColor color;                 // The background color the draw is pending for.
