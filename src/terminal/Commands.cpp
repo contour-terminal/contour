@@ -17,8 +17,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <sstream>
 #include <cassert>
+#include <sstream>
+#include <vector>
 
 using namespace std;
 using fmt::format;
