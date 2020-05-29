@@ -176,6 +176,7 @@ class GLRenderer : public QOpenGLFunctions {
     crispy::text::FontList emojiFont_;
     QMatrix4x4 projectionMatrix_;
     unicode::word_segmenter wordSegmenter_;
+    crispy::text::GlyphPositionList glyphPositions_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;

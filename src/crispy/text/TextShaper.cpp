@@ -46,23 +46,18 @@ TextShaper::~TextShaper()
     hb_buffer_destroy(hb_buf_);
 }
 
-GlyphPositionList const* TextShaper::shape(FontList const& _font, CodepointSequence const& _codes)
+void TextShaper::shape(FontList const& _fonts,
+                       CodepointSequence const& _codes,
+                       reference<GlyphPositionList> _result)
 {
-    if (auto i = cache_.find(_codes); i != cache_.end())
-        return &i->second;
+    if (shape(_codes, _fonts.first.get(), ref(_result)))
+        return;
 
-    GlyphPositionList result;
-    if (shape(_codes, _font.first.get(), ref(result)))
-        return &(cache_[_codes] = move(result));
+    for (reference_wrapper<Font> const& fallback : _fonts.second)
+        if (shape(_codes, fallback.get(), ref(_result)))
+            return;
 
-    size_t i = 1;
-    for (reference_wrapper<Font> const& fallback : _font.second)
-    {
-        if (shape(_codes, fallback.get(), ref(result)))
-            return &(cache_[_codes] = move(result));
-        ++i;
-    }
-
+#if !defined(NDEBUG)
     string joinedCodes;
     for (Codepoint code : _codes)
     {
@@ -71,17 +66,14 @@ GlyphPositionList const* TextShaper::shape(FontList const& _font, CodepointSeque
         joinedCodes += fmt::format("{:<6x}", unsigned(code.value));
     }
     cerr << fmt::format("Shaping failed for {} codepoints: {}\n", _codes.size(), joinedCodes);
+#endif
 
-    shape(_codes, _font.first.get(), ref(result));
-    replaceMissingGlyphs(_font.first.get(), result);
-    return &(cache_[_codes] = move(result));
+    shape(_codes, _fonts.first.get(), ref(_result));
+    replaceMissingGlyphs(_fonts.first.get(), _result);
 }
 
 void TextShaper::clearCache()
 {
-    cache_.clear();
-    cache2_.clear();
-
     for ([[maybe_unused]] auto [_, hbf] : hb_fonts_)
         hb_font_destroy(hbf);
 
@@ -97,7 +89,7 @@ bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<G
 
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
-    hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON);
+    hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON); // TODO: use detected script !
     hb_buffer_set_language(hb_buf_, hb_language_get_default());
     hb_buffer_guess_segment_properties(hb_buf_);
 
@@ -143,16 +135,17 @@ bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<G
     return !any_of(_result.get(), glyphMissing);
 }
 
-void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)
+void TextShaper::replaceMissingGlyphs(Font& _font, reference<GlyphPositionList> _result)
 {
     auto constexpr missingGlyphId = 0xFFFDu;
     auto const missingGlyph = FT_Get_Char_Index(_font, missingGlyphId);
+    auto& result = _result.get();
 
     if (missingGlyph)
     {
-        for (auto i : times(_result.size()))
-            if (glyphMissing(_result[i]))
-                _result[i].glyphIndex = missingGlyph;
+        for (auto i : times(result.size()))
+            if (glyphMissing(result[i]))
+                result[i].glyphIndex = missingGlyph;
     }
 }
 

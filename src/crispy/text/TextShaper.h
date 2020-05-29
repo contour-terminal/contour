@@ -14,33 +14,37 @@
 #pragma once
 
 #include <crispy/text/Font.h>
+#include <crispy/reference.h>
 
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
 
 namespace crispy::text {
 
+/**
+ * Performs the actual text shaping.
+ */
 class TextShaper {
   public:
     TextShaper();
     ~TextShaper();
 
-    /// Renders text into glyph positions of this font.
-    GlyphPositionList const* shape(FontList const& _font, CodepointSequence const& _codes);
+    /// Renders codepoints into glyph positions with the first font fully matching all codepoints.
+    void shape(FontList const& _font, CodepointSequence const& _codes, reference<GlyphPositionList> _result);
 
+    /// Replaces all missing glyphs with the missing-glyph glyph.
+    void replaceMissingGlyphs(Font& _font, reference<GlyphPositionList> _result);
+
+    // Clears the internal font cache.
     void clearCache();
 
-    void replaceMissingGlyphs(Font& _font, GlyphPositionList& _result);
-
   private:
-    bool shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> result);
+    /// Performs text shaping for given text using the given font.
+    bool shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> _result);
 
   private:
     hb_buffer_t* hb_buf_;
-
     std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
-    std::unordered_map<CodepointSequence, GlyphPositionList> cache_ = {};
-    std::unordered_map<CharSequence, GlyphPositionList> cache2_ = {};
 };
 
 } // end namespace

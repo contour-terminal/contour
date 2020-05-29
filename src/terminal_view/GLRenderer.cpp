@@ -446,23 +446,21 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
-        if (text::GlyphPositionList const* glyphPositions = textShaper_.shape(font, _codepoints); glyphPositions)
-        {
-            textRenderer_.render(
-                makeCoords(_startColumn, _lineNumber, _screenSize),
-                *glyphPositions,
-                QVector4D(
-                    static_cast<float>(fgColor.red) / 255.0f,
-                    static_cast<float>(fgColor.green) / 255.0f,
-                    static_cast<float>(fgColor.blue) / 255.0f,
-                    1.0f
-                ),
-                QSize{
-                    static_cast<int>(cellWidth()),
-                    static_cast<int>(cellHeight())
-                }
-            );
-        }
+        textShaper_.shape(font, _codepoints, ref(glyphPositions_));
+        textRenderer_.render(
+            makeCoords(_startColumn, _lineNumber, _screenSize),
+            glyphPositions_,
+            QVector4D(
+                static_cast<float>(fgColor.red) / 255.0f,
+                static_cast<float>(fgColor.green) / 255.0f,
+                static_cast<float>(fgColor.blue) / 255.0f,
+                1.0f
+            ),
+            QSize{
+                static_cast<int>(cellWidth()),
+                static_cast<int>(cellHeight())
+            }
+        );
     }
 }
 
