@@ -1,6 +1,7 @@
 # Contour - A modern C++ Terminal Emulator
 [![Ubuntu](https://github.com/christianparpart/contour/workflows/Ubuntu/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AUbuntu)
 [![Windows](https://github.com/christianparpart/contour/workflows/Windows/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AWindows)
+[![OS/X](https://github.com/christianparpart/contour/workflows/MacOS/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AMacOS)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
 
@@ -198,13 +199,13 @@ For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Stu
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```psh
-vcpkg install freetype fontconfig glew glfw3 glm harfbuzz qt5-base
+vcpkg install freetype fontconfig harfbuzz qt5-base
 ```
 
 ### Prerequisites Mac OS/X
 
 ```psh
-brew install freetype fontconfig glew glfw3 glm harfbuzz boost qt5
+brew install freetype fontconfig harfbuzz boost qt5
 ```
 
 
