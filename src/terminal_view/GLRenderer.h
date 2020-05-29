@@ -124,7 +124,6 @@ class GLRenderer : public QOpenGLFunctions {
 
   private:
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
-    void fillTextGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
 
     void renderPendingBackgroundCells(WindowSize const& _screenSize);
     void renderText(WindowSize const& _screenSize,
