@@ -1922,7 +1922,6 @@ TEST_CASE("findNextMarker", "[screen]")
 TEST_CASE("findPrevMarker", "[screen]")
 {
     auto screen = Screen{{4, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
-
     REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
 
     SECTION("no marks") {
@@ -1931,11 +1930,19 @@ TEST_CASE("findPrevMarker", "[screen]")
         screen.write("3ghi\r\n"s);
         screen.write("4jkl\r\n"s);
         screen.write("5mno\r\n"s);
-
         REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
 
-        // being a little beyond history line count
-        REQUIRE_FALSE(screen.findPrevMarker(1).has_value());
+        auto mark = screen.findPrevMarker(0);
+        REQUIRE_FALSE(mark.has_value());
+
+        mark = screen.findPrevMarker(screen.historyLineCount() - 1);
+        REQUIRE_FALSE(mark.has_value());
+
+        mark = screen.findPrevMarker(screen.historyLineCount());
+        REQUIRE_FALSE(mark.has_value());
+
+        mark = screen.findPrevMarker(screen.historyLineCount() + 1);
+        REQUIRE_FALSE(mark.has_value());
     }
 
     SECTION("with marks") {
@@ -1952,16 +1959,24 @@ TEST_CASE("findPrevMarker", "[screen]")
         REQUIRE(screen.renderTextLine(1) == "5mno");
         REQUIRE(screen.renderTextLine(2) == "    ");
 
-        REQUIRE(screen.findPrevMarker(0).has_value());
-        REQUIRE(screen.findPrevMarker(0).value() == 1); // 4jkl
+        // 0: -> 1
+        auto marker = screen.findPrevMarker(0);
+        REQUIRE(marker.has_value());
+        REQUIRE(marker.value() == 1); // 4jkl
 
-        REQUIRE(screen.findPrevMarker(1).has_value());
-        REQUIRE(screen.findPrevMarker(1).value() == 2); // 3ghi
+        // 1: -> 3
+        marker = screen.findPrevMarker(1);
+        REQUIRE(marker.has_value());
+        REQUIRE(marker.value() == 3); // 3ghi
 
-        REQUIRE(screen.findPrevMarker(2).has_value());
-        REQUIRE(screen.findPrevMarker(2).value() == 4); // 2def
+        // 2: -> 3
+        marker = screen.findPrevMarker(2);
+        REQUIRE(marker.has_value());
+        REQUIRE(marker.value() == 3); // 3ghi
 
-        REQUIRE_FALSE(screen.findPrevMarker(4).has_value());
+        // 3: -> NONE
+        marker = screen.findPrevMarker(3);
+        REQUIRE_FALSE(marker.has_value());
     }
 }
 

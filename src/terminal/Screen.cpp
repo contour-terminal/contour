@@ -73,11 +73,17 @@ string to_string(CharacterStyleMask _mask)
 std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
 {
     _scrollOffset = min(_scrollOffset, savedLines.size());
-    cursor_pos_t rowNumber = static_cast<cursor_pos_t>(_scrollOffset) + 1;
 
-    for (auto line = prev(end(savedLines), _scrollOffset + 1); rowNumber <= savedLines.size(); --line, ++rowNumber)
-        if (line->marked)
-            return {rowNumber};
+    if (_scrollOffset + 1 < savedLines.size())
+    {
+        auto const i = find_if(
+            next(rbegin(savedLines), _scrollOffset + 1),
+            rend(savedLines),
+            [](Line const& line) -> bool { return line.marked; }
+        );
+        if (i != rend(savedLines))
+            return distance(rbegin(savedLines), i);
+    }
 
     return nullopt;
 }
@@ -945,7 +951,7 @@ bool Screen::scrollMarkUp()
 {
     if (auto const newScrollOffset = findPrevMarker(scrollOffset_); newScrollOffset.has_value())
     {
-        scrollOffset_ = newScrollOffset.value();
+        scrollOffset_ = 1 + newScrollOffset.value();
         return true;
     }
 
