@@ -22,6 +22,8 @@ using namespace std::chrono;
 using namespace std::placeholders;
 using namespace crispy;
 
+using unicode::out;
+
 namespace terminal::view {
 
 class GLRenderer::TextScheduler { // {{{
@@ -144,24 +146,12 @@ void GLRenderer::TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, S
 
 void GLRenderer::TextScheduler::flush()
 {
-    using unicode::out;
+    if (codepoints_.size() == 0)
+        return;
 
-    if (codepoints_.size() != 0)
-    {
-        u32string codepoints;
-        for (auto const& cp : codepoints_)
-            codepoints.push_back(cp);
-
-        auto rs = unicode::run_segmenter(codepoints.data(), codepoints.size());
-
-        // cout << fmt::format("flush {} codepoints; \"", codepoints.size());
-        // for (size_t i = 0; i < codepoints_.size(); ++i)
-        //     cout << unicode::to_utf8(codepoints_[i]);
-        // cout << '"' << endl;
-
-        while (rs.consume(out(run_)))
-            flusher_(*this);
-    }
+    auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
+    while (rs.consume(out(run_)))
+        flusher_(*this);
 }
 // }}}
 
@@ -282,14 +272,6 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     auto ts = TextScheduler{
         [&](TextScheduler const& _textScheduler) {
-            crispy::CodepointSequence codepoints{};
-
-            // TODO: heavily poor performance. Make me more performant by reusing existing buffers
-            // with zero copy (just indexing).
-            for (size_t i = _textScheduler.run().start; i < _textScheduler.run().end; ++i)
-                codepoints.push_back({_textScheduler.codepoints().at(i),
-                                      _textScheduler.clusters().at(i)});
-
             // cout << "  run: " << run_ << "; ";
             // for (size_t i = 0; i < codepoints.size(); ++i)
             //     cout << fmt::format(" {}:{}", (unsigned) codepoints[i].value, codepoints_[run_.start + i].cluster);
@@ -300,7 +282,9 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
                 _textScheduler.row(),
                 _textScheduler.startColumn() + _textScheduler.run().start,
                 _textScheduler.attributes(),
-                codepoints,
+                _textScheduler.codepoints().size(),
+                _textScheduler.codepoints().data(),
+                _textScheduler.clusters().data(),
                 _textScheduler.run().presentationStyle);
         }
     };
@@ -399,12 +383,11 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
                             cursor_pos_t _lineNumber,
                             cursor_pos_t _startColumn,
                             ScreenBuffer::GraphicsAttributes const& _attributes,
-                            crispy::CodepointSequence const& _codepoints,
+                            size_t _size,
+                            char32_t const* _codepoints,
+                            unsigned const* _clusters,
                             unicode::PresentationStyle _presentationStyle)
 {
-    if (_codepoints.empty())
-        return;
-
     ++metrics_.renderTextGroup;
 
     auto const [fgColor, bgColor] = makeColors(_attributes);
@@ -442,14 +425,16 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
     if (!(_attributes.styles & CharacterStyleMask::Hidden))
     {
         (void) textStyle;// TODO: selection by textStyle
+
         bool const isEmojiPresentation = _presentationStyle == unicode::PresentationStyle::Emoji;
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
-        textShaper_.shape(font, _codepoints, ref(glyphPositions_));
+        text::GlyphPositionList const& glyphPositions = textShaper_.shape(font, _size, _codepoints, _clusters);
+
         textRenderer_.render(
             makeCoords(_startColumn, _lineNumber, _screenSize),
-            glyphPositions_,
+            glyphPositions,
             QVector4D(
                 static_cast<float>(fgColor.red) / 255.0f,
                 static_cast<float>(fgColor.green) / 255.0f,

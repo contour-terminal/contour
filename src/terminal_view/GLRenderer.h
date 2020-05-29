@@ -131,7 +131,9 @@ class GLRenderer : public QOpenGLFunctions {
                     cursor_pos_t _lineNumber,
                     cursor_pos_t _startColumn,
                     ScreenBuffer::GraphicsAttributes const& _attributes,
-                    crispy::CodepointSequence const& _codepoints,
+                    size_t _size,
+                    char32_t const* _codepoints,
+                    unsigned const* _cluters,
                     unicode::PresentationStyle _presentationStyle);
 
     void renderTextGroup(WindowSize const& _screenSize);
@@ -176,7 +178,6 @@ class GLRenderer : public QOpenGLFunctions {
     crispy::text::FontList emojiFont_;
     QMatrix4x4 projectionMatrix_;
     unicode::word_segmenter wordSegmenter_;
-    crispy::text::GlyphPositionList glyphPositions_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;

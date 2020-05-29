@@ -12,8 +12,9 @@
  * limitations under the License.
  */
 #include <crispy/text/TextShaper.h>
-#include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <crispy/times.h>
+#include <crispy/span.h>
 
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
@@ -46,30 +47,49 @@ TextShaper::~TextShaper()
     hb_buffer_destroy(hb_buf_);
 }
 
-void TextShaper::shape(FontList const& _fonts,
-                       CodepointSequence const& _codes,
-                       reference<GlyphPositionList> _result)
+GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
+                                           size_t _size,
+                                           char32_t const* _codepoints,
+                                           unsigned const* _clusters)
 {
-    if (shape(_codes, _fonts.first.get(), ref(_result)))
-        return;
+    auto const cacheKey = u32string_view(_codepoints, _size);
 
+    // try cache first
+    if (auto const i = cache_.find(u32string_view(_codepoints, _size)); i != cache_.end())
+        return i->second;
+
+    GlyphPositionList glyphPositions;
+
+    // try primary font
+    if (shape(_size, _codepoints, _clusters, _fonts.first.get(), ref(glyphPositions)))
+        return cache(cacheKey, move(glyphPositions));
+
+    // try fallback fonts
     for (reference_wrapper<Font> const& fallback : _fonts.second)
-        if (shape(_codes, fallback.get(), ref(_result)))
-            return;
+        if (shape(_size, _codepoints, _clusters, fallback.get(), ref(glyphPositions)))
+            return cache(cacheKey, move(glyphPositions));
 
 #if !defined(NDEBUG)
     string joinedCodes;
-    for (Codepoint code : _codes)
+    for (char32_t codepoint : span(_codepoints, _codepoints + _size))
     {
         if (!joinedCodes.empty())
             joinedCodes += " ";
-        joinedCodes += fmt::format("{:<6x}", unsigned(code.value));
+        joinedCodes += fmt::format("{:<6x}", static_cast<unsigned>(codepoint));
     }
-    cerr << fmt::format("Shaping failed for {} codepoints: {}\n", _codes.size(), joinedCodes);
+    cerr << fmt::format("Shaping failed for {} codepoints: {}\n", _size, joinedCodes);
 #endif
 
-    shape(_codes, _fonts.first.get(), ref(_result));
-    replaceMissingGlyphs(_fonts.first.get(), _result);
+    // render primary font with glyph-missing hints
+    shape(_size, _codepoints, _clusters, _fonts.first.get(), ref(glyphPositions));
+    replaceMissingGlyphs(_fonts.first.get(), glyphPositions);
+    return cache(cacheKey, move(glyphPositions));
+}
+
+GlyphPositionList const& TextShaper::cache(std::u32string_view const& _key, GlyphPositionList&& _glyphPosition)
+{
+    cacheKeys_[_key] = u32string(_key);
+    return cache_[cacheKeys_[_key]] = move(_glyphPosition);
 }
 
 void TextShaper::clearCache()
@@ -80,12 +100,16 @@ void TextShaper::clearCache()
     hb_fonts_.clear();
 }
 
-bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<GlyphPositionList> _result)
+bool TextShaper::shape(size_t _size,
+                       char32_t const* _codepoints,
+                       unsigned const* _clusters,
+                       Font& _font,
+                       reference<GlyphPositionList> _result)
 {
     hb_buffer_clear_contents(hb_buf_);
 
-    for (Codepoint const& codepoint : _codes)
-        hb_buffer_add(hb_buf_, codepoint.value, codepoint.cluster);
+    for (size_t const i : times(_size))
+        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i]);
 
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
@@ -135,17 +159,16 @@ bool TextShaper::shape(CodepointSequence const& _codes, Font& _font, reference<G
     return !any_of(_result.get(), glyphMissing);
 }
 
-void TextShaper::replaceMissingGlyphs(Font& _font, reference<GlyphPositionList> _result)
+void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)
 {
     auto constexpr missingGlyphId = 0xFFFDu;
     auto const missingGlyph = FT_Get_Char_Index(_font, missingGlyphId);
-    auto& result = _result.get();
 
     if (missingGlyph)
     {
-        for (auto i : times(result.size()))
-            if (glyphMissing(result[i]))
-                result[i].glyphIndex = missingGlyph;
+        for (auto i : times(_result.size()))
+            if (glyphMissing(_result[i]))
+                _result[i].glyphIndex = missingGlyph;
     }
 }
 
