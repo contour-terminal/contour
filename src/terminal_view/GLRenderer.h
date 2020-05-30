@@ -130,7 +130,8 @@ class GLRenderer : public QOpenGLFunctions {
                     cursor_pos_t _lineNumber,
                     cursor_pos_t _startColumn,
                     ScreenBuffer::GraphicsAttributes const& _attributes,
-                    size_t _size,
+                    size_t _offset,
+                    size_t _offsetEnd,
                     char32_t const* _codepoints,
                     unsigned const* _cluters,
                     unicode::PresentationStyle _presentationStyle);

@@ -33,6 +33,7 @@ void TextScheduler::reset()
     attributes_ = {};
     codepoints_.clear();
     clusters_.clear();
+    clusterOffset_ = 0;
 }
 
 void TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
@@ -43,15 +44,17 @@ void TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Gr
     attributes_ = _attr;
     codepoints_.clear();
     clusters_.clear();
+    clusterOffset_ = 0;
 }
 
-void TextScheduler::extend(ScreenBuffer::Cell const& _cell, cursor_pos_t _column)
+void TextScheduler::extend(ScreenBuffer::Cell const& _cell, [[maybe_unused]] cursor_pos_t _column)
 {
     for (size_t const i: times(_cell.codepointCount()))
     {
         codepoints_.emplace_back(_cell.codepoint(i));
-        clusters_.emplace_back(_column);
+        clusters_.emplace_back(clusterOffset_);
     }
+    ++clusterOffset_;
 }
 
 void TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell)
@@ -73,7 +76,6 @@ void TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell 
             if (_cell.codepoint() != SP)
             {
                 reset(_row, _col, _cell.attributes());
-                state_ = State::Filling;
                 extend(_cell, _col);
             }
             break;
@@ -84,10 +86,7 @@ void TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell 
             {
                 flush();
                 if (_cell.codepoint() == SP)
-                {
-                    state_ = State::Empty;
                     reset();
-                }
                 else // i.o.w.: cell attributes OR row number changed
                 {
                     reset(_row, _col, _cell.attributes());
@@ -106,6 +105,7 @@ void TextScheduler::flush()
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run_)))
         flusher_(*this);
+    // TODO: where is this loop body called more than once? find out with debug prints!
 }
 
 } // end namespace

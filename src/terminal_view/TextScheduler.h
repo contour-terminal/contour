@@ -54,6 +54,7 @@ class TextScheduler {
     ScreenBuffer::GraphicsAttributes attributes_ = {};
     std::vector<char32_t> codepoints_{};
     std::vector<unsigned> clusters_{};
+    unsigned clusterOffset_ = 0;
 
     unicode::run_segmenter::range run_{};
 

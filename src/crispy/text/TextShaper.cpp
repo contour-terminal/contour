@@ -48,9 +48,11 @@ TextShaper::~TextShaper()
 }
 
 GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
+                                           unsigned _advanceX,
                                            size_t _size,
                                            char32_t const* _codepoints,
-                                           unsigned const* _clusters)
+                                           unsigned const* _clusters,
+                                           size_t _clusterGap)
 {
     auto const cacheKey = u32string_view(_codepoints, _size);
 
@@ -61,12 +63,12 @@ GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
     GlyphPositionList glyphPositions;
 
     // try primary font
-    if (shape(_size, _codepoints, _clusters, _fonts.first.get(), ref(glyphPositions)))
+    if (shape(_size, _codepoints, _clusters, _clusterGap, _fonts.first.get(), _advanceX, ref(glyphPositions)))
         return cache(cacheKey, move(glyphPositions));
 
     // try fallback fonts
     for (reference_wrapper<Font> const& fallback : _fonts.second)
-        if (shape(_size, _codepoints, _clusters, fallback.get(), ref(glyphPositions)))
+        if (shape(_size, _codepoints, _clusters, _clusterGap, fallback.get(), _advanceX, ref(glyphPositions)))
             return cache(cacheKey, move(glyphPositions));
 
 #if !defined(NDEBUG)
@@ -77,11 +79,11 @@ GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
             joinedCodes += " ";
         joinedCodes += fmt::format("{:<6x}", static_cast<unsigned>(codepoint));
     }
-    cerr << fmt::format("Shaping failed for {} codepoints: {}\n", _size, joinedCodes);
+    cerr << fmt::format("Shaping failed codepoints: {}\n", joinedCodes);
 #endif
 
     // render primary font with glyph-missing hints
-    shape(_size, _codepoints, _clusters, _fonts.first.get(), ref(glyphPositions));
+    shape(_size, _codepoints, _clusters, _clusterGap, _fonts.first.get(), _advanceX, ref(glyphPositions));
     replaceMissingGlyphs(_fonts.first.get(), glyphPositions);
     return cache(cacheKey, move(glyphPositions));
 }
@@ -98,18 +100,24 @@ void TextShaper::clearCache()
         hb_font_destroy(hbf);
 
     hb_fonts_.clear();
+
+    cacheKeys_.clear();
+    cache_.clear();
 }
 
-bool TextShaper::shape(size_t _size,
+bool TextShaper::shape(// TODO unicode::Script _script,
+                       size_t _size,
                        char32_t const* _codepoints,
                        unsigned const* _clusters,
+                       size_t _clusterGap,
                        Font& _font,
+                       unsigned _advanceX,
                        reference<GlyphPositionList> _result)
 {
     hb_buffer_clear_contents(hb_buf_);
 
     for (size_t const i : times(_size))
-        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i]);
+        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i] - _clusterGap);
 
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
@@ -141,6 +149,9 @@ bool TextShaper::shape(size_t _size,
     unsigned int cy = 0;
     for (unsigned const i : times(glyphCount))
     {
+        cx = info[i].cluster * _advanceX;
+        //cx = _clusters[i] * _advanceX;
+
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
         _result.get().emplace_back(GlyphPosition{
             _font,
@@ -149,11 +160,6 @@ bool TextShaper::shape(size_t _size,
             info[i].codepoint,
             info[i].cluster
         });
-
-        if (pos[i].x_advance)
-            cx += _font.maxAdvance();
-
-        cy += pos[i].y_advance >> 6;
     }
 
     return !any_of(_result.get(), glyphMissing);

@@ -143,17 +143,13 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     auto ts = TextScheduler{
         [&](TextScheduler const& _textScheduler) {
-            // cout << "  run: " << run_ << "; ";
-            // for (size_t i = 0; i < codepoints.size(); ++i)
-            //     cout << fmt::format(" {}:{}", (unsigned) codepoints[i].value, codepoints_[run_.start + i].cluster);
-            // cout << endl;
-
             renderText(
                 _terminal.screenSize(),
                 _textScheduler.row(),
-                _textScheduler.startColumn() + _textScheduler.run().start,
+                _textScheduler.startColumn(),
                 _textScheduler.attributes(),
-                _textScheduler.codepoints().size(),
+                _textScheduler.run().start,
+                _textScheduler.run().end,
                 _textScheduler.codepoints().data(),
                 _textScheduler.clusters().data(),
                 _textScheduler.run().presentationStyle);
@@ -254,7 +250,8 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
                             cursor_pos_t _lineNumber,
                             cursor_pos_t _startColumn,
                             ScreenBuffer::GraphicsAttributes const& _attributes,
-                            size_t _size,
+                            size_t _offset,
+                            size_t _offsetEnd,
                             char32_t const* _codepoints,
                             unsigned const* _clusters,
                             unicode::PresentationStyle _presentationStyle)
@@ -301,10 +298,34 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
         text::FontList& font = isEmojiPresentation ? emojiFont_
                                                    : regularFont_;
 
-        text::GlyphPositionList const& glyphPositions = textShaper_.shape(font, _size, _codepoints, _clusters);
+        unsigned const advanceX = regularFont_.first.get().maxAdvance();
+
+#if 0
+        cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
+                            _lineNumber, _startColumn,
+                            _startColumn + _clusters[_offset],
+                            _offset, _offsetEnd,
+                            isEmojiPresentation ? "E" : "T");
+        for (size_t i = _offset; i < _offsetEnd; ++i)
+            cout << fmt::format(" {}:{}", (unsigned) _codepoints[i], _clusters[i]);
+        cout << endl;
+#endif
+
+        text::GlyphPositionList const& glyphPositions = textShaper_.shape(
+            font,
+            advanceX,
+            _offsetEnd - _offset,
+            _codepoints + _offset,
+            _clusters + _offset,
+            _clusters[_offset]
+        );
 
         textRenderer_.render(
-            makeCoords(_startColumn, _lineNumber, _screenSize),
+            makeCoords(
+                _startColumn + _clusters[_offset],
+                _lineNumber,
+                _screenSize
+            ),
             glyphPositions,
             QVector4D(
                 static_cast<float>(fgColor.red) / 255.0f,

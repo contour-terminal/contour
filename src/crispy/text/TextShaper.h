@@ -35,15 +35,19 @@ class TextShaper {
     /// Renders codepoints into glyph positions with the first font fully matching all codepoints.
     ///
     /// @param _font        the font list in priority order to be used for text shaping
-    /// @param _size        number of codepoints to be shaped
+    /// @param _advanceX    number of pixels to advance on X axis for each new glyph to be rendered
     /// @param _codepoints  array of codepoints to be shaped
+    /// @param _size        number of codepoints and clusters
     /// @param _clusters    cluster assignments for each codepoint (must be of equal size of @p _code_codepoints)
+    /// @param _clusterGap  value that will be subtracted from every cluster when constructing glyph positions
     ///
     /// @returns pointer to the shape result
     GlyphPositionList const& shape(FontList const& _font,
+                                   unsigned _advanceX,
                                    size_t _size,
                                    char32_t const* _codepoints,
-                                   unsigned const* _clusters);
+                                   unsigned const* _clusters,
+                                   size_t _clusterGap = 0);
 
     /// Replaces all missing glyphs with the missing-glyph glyph.
     void replaceMissingGlyphs(Font& _font, GlyphPositionList& _result);
@@ -56,7 +60,9 @@ class TextShaper {
     bool shape(size_t _size,
                char32_t const* _codepoints,
                unsigned const* _clusters,
+               size_t _clusterGap,
                Font& _font,
+               unsigned _advanceX,
                reference<GlyphPositionList> _result);
 
     /// Inserts a new cache value @p _glyphPosition by given key _cacheKey into the cache.
