@@ -190,13 +190,23 @@ struct ScreenBuffer {
             }
         }
 
-        void appendCharacter(char32_t _codepoint) noexcept
+        unsigned appendCharacter(char32_t _codepoint) noexcept
         {
             if (codepointCount_ < MaxCodepoints)
             {
                 codepoints_[codepointCount_] = _codepoint;
                 codepointCount_++;
+
+                auto const width = _codepoint == 0xFE0F ? 2 : unicode::width(_codepoint);
+                // FIXME
+                if (width > width_)
+                {
+                    unsigned const diff = width - width_;
+                    width_ = width;
+                    return diff;
+                }
             }
+            return 1;
         }
 
         std::string toUtf8() const
@@ -319,6 +329,8 @@ struct ScreenBuffer {
     Cursor lastCursor{};
 
 	void appendChar(char32_t _codepoint, bool _consecutive);
+	void appendCharToCurrent(char32_t _codepoint);
+    void clearAndAdvance(unsigned _offset);
 
 	// Applies LF but also moves cursor to given column @p _column.
 	void linefeed(cursor_pos_t _column);

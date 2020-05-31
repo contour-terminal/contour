@@ -310,35 +310,60 @@ void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
         linefeed(margin_.horizontal.from);
     }
 
-    if (_consecutive
+    bool const insertToPrev =
+        _consecutive
         && !lastColumn->empty()
-        && unicode::grapheme_segmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1), ch))
-    {
-        lastColumn->appendCharacter(ch);
-    }
+        && unicode::grapheme_segmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1), ch);
+
+    if (!insertToPrev)
+        appendCharToCurrent(ch);
     else
     {
-        Cell& cell = *currentColumn;
-        cell.setCharacter(ch);
-        cell.attributes() = graphicsRendition;
-
-        lastColumn = currentColumn;
-        lastCursor = cursor;
-
-        auto const n = min(cell.width(), margin_.horizontal.length() - cursor.column);
-        if (n == cell.width())
-        {
-            assert(n > 0);
-            cursor.column += n;
-            currentColumn++;
-            for (unsigned i = 1; i < n; ++i)
-                (currentColumn++)->reset();
-        }
-        else if (autoWrap)
-            wrapPending = true;
-
-        verifyState();
+        auto const extendedWidth = lastColumn->appendCharacter(ch);
+        if (extendedWidth != 0)
+            clearAndAdvance(extendedWidth);
     }
+}
+
+void ScreenBuffer::clearAndAdvance(unsigned _offset)
+{
+    if (_offset == 0)
+        return;
+
+    auto const n = min(_offset, margin_.horizontal.length() - cursor.column);
+    if (n == _offset)
+    {
+        assert(n > 0);
+        cursor.column += n;
+        for (unsigned i = 0; i < n; ++i)
+            (currentColumn++)->reset();
+    }
+    else if (autoWrap)
+        wrapPending = true;
+}
+
+void ScreenBuffer::appendCharToCurrent(char32_t ch)
+{
+    Cell& cell = *currentColumn;
+    cell.setCharacter(ch);
+    cell.attributes() = graphicsRendition;
+
+    lastColumn = currentColumn;
+    lastCursor = cursor;
+
+    auto const n = min(cell.width(), margin_.horizontal.length() - cursor.column);
+    if (n == cell.width())
+    {
+        assert(n > 0);
+        cursor.column += n;
+        currentColumn++;
+        for (unsigned i = 1; i < n; ++i)
+            (currentColumn++)->reset();
+    }
+    else if (autoWrap)
+        wrapPending = true;
+
+    verifyState();
 }
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n)
