@@ -16,6 +16,8 @@
 #include <crispy/text/Font.h>
 #include <crispy/reference.h>
 
+#include <unicode/ucd.h> // Script
+
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
 
@@ -34,6 +36,7 @@ class TextShaper {
 
     /// Renders codepoints into glyph positions with the first font fully matching all codepoints.
     ///
+    /// @param _script      the matching script for the given codepoints
     /// @param _font        the font list in priority order to be used for text shaping
     /// @param _advanceX    number of pixels to advance on X axis for each new glyph to be rendered
     /// @param _codepoints  array of codepoints to be shaped
@@ -42,7 +45,8 @@ class TextShaper {
     /// @param _clusterGap  value that will be subtracted from every cluster when constructing glyph positions
     ///
     /// @returns pointer to the shape result
-    GlyphPositionList const& shape(FontList const& _font,
+    GlyphPositionList const& shape(unicode::Script _script,
+                                   FontList const& _font,
                                    unsigned _advanceX,
                                    size_t _size,
                                    char32_t const* _codepoints,
@@ -61,6 +65,7 @@ class TextShaper {
                char32_t const* _codepoints,
                unsigned const* _clusters,
                size_t _clusterGap,
+               unicode::Script _script,
                Font& _font,
                unsigned _advanceX,
                reference<GlyphPositionList> _result);

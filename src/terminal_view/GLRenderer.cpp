@@ -148,6 +148,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
                 _textScheduler.row(),
                 _textScheduler.startColumn(),
                 _textScheduler.attributes(),
+                _textScheduler.run().script,
                 _textScheduler.run().start,
                 _textScheduler.run().end,
                 _textScheduler.codepoints().data(),
@@ -250,6 +251,7 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
                             cursor_pos_t _lineNumber,
                             cursor_pos_t _startColumn,
                             ScreenBuffer::GraphicsAttributes const& _attributes,
+                            unicode::Script _script,
                             size_t _offset,
                             size_t _offsetEnd,
                             char32_t const* _codepoints,
@@ -312,6 +314,7 @@ void GLRenderer::renderText(WindowSize const& _screenSize,
 #endif
 
         text::GlyphPositionList const& glyphPositions = textShaper_.shape(
+            _script,
             font,
             advanceX,
             _offsetEnd - _offset,

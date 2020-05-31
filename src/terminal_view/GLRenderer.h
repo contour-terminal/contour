@@ -27,6 +27,7 @@
 
 #include <unicode/word_segmenter.h>
 #include <unicode/emoji_segmenter.h>
+#include <unicode/ucd.h> // Script
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -130,6 +131,7 @@ class GLRenderer : public QOpenGLFunctions {
                     cursor_pos_t _lineNumber,
                     cursor_pos_t _startColumn,
                     ScreenBuffer::GraphicsAttributes const& _attributes,
+                    unicode::Script _script,
                     size_t _offset,
                     size_t _offsetEnd,
                     char32_t const* _codepoints,

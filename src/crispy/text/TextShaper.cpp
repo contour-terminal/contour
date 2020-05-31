@@ -47,7 +47,8 @@ TextShaper::~TextShaper()
     hb_buffer_destroy(hb_buf_);
 }
 
-GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
+GlyphPositionList const& TextShaper::shape(unicode::Script _script,
+                                           FontList const& _fonts,
                                            unsigned _advanceX,
                                            size_t _size,
                                            char32_t const* _codepoints,
@@ -63,12 +64,12 @@ GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
     GlyphPositionList glyphPositions;
 
     // try primary font
-    if (shape(_size, _codepoints, _clusters, _clusterGap, _fonts.first.get(), _advanceX, ref(glyphPositions)))
+    if (shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions)))
         return cache(cacheKey, move(glyphPositions));
 
     // try fallback fonts
     for (reference_wrapper<Font> const& fallback : _fonts.second)
-        if (shape(_size, _codepoints, _clusters, _clusterGap, fallback.get(), _advanceX, ref(glyphPositions)))
+        if (shape(_size, _codepoints, _clusters, _clusterGap, _script, fallback.get(), _advanceX, ref(glyphPositions)))
             return cache(cacheKey, move(glyphPositions));
 
 #if !defined(NDEBUG)
@@ -83,7 +84,7 @@ GlyphPositionList const& TextShaper::shape(FontList const& _fonts,
 #endif
 
     // render primary font with glyph-missing hints
-    shape(_size, _codepoints, _clusters, _clusterGap, _fonts.first.get(), _advanceX, ref(glyphPositions));
+    shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions));
     replaceMissingGlyphs(_fonts.first.get(), glyphPositions);
     return cache(cacheKey, move(glyphPositions));
 }
@@ -105,11 +106,28 @@ void TextShaper::clearCache()
     cache_.clear();
 }
 
-bool TextShaper::shape(// TODO unicode::Script _script,
-                       size_t _size,
+constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
+{
+    using unicode::Script;
+    switch (_script)
+    {
+        case Script::Latin:
+            return HB_SCRIPT_LATIN;
+        case Script::Greek:
+            return HB_SCRIPT_GREEK;
+        case Script::Common:
+            return HB_SCRIPT_COMMON;
+        default:
+            // TODO: make this list complete
+            return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
+    }
+}
+
+bool TextShaper::shape(size_t _size,
                        char32_t const* _codepoints,
                        unsigned const* _clusters,
                        size_t _clusterGap,
+                       unicode::Script _script,
                        Font& _font,
                        unsigned _advanceX,
                        reference<GlyphPositionList> _result)
@@ -121,7 +139,7 @@ bool TextShaper::shape(// TODO unicode::Script _script,
 
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
-    hb_buffer_set_script(hb_buf_, HB_SCRIPT_COMMON); // TODO: use detected script !
+    hb_buffer_set_script(hb_buf_, mapScriptToHarfbuzzScript(_script));
     hb_buffer_set_language(hb_buf_, hb_language_get_default());
     hb_buffer_guess_segment_properties(hb_buf_);
 
