@@ -79,7 +79,7 @@ void Selector::extendSelectionBackward()
 {
     auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
         auto const& cell = at(_coord);
-        return cell.empty() || wordDelimiters_.find(cell.codepoint()) != wordDelimiters_.npos;
+        return cell.empty() || wordDelimiters_.find(cell.codepoint(0)) != wordDelimiters_.npos;
     };
 
     auto last = to_;
@@ -113,7 +113,7 @@ void Selector::extendSelectionForward()
 {
     auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
         auto const& cell = at(_coord);
-        return cell.empty() || wordDelimiters_.find(cell.codepoint()) != wordDelimiters_.npos;
+        return cell.empty() || wordDelimiters_.find(cell.codepoint(0)) != wordDelimiters_.npos;
     };
 
     auto last = to_;

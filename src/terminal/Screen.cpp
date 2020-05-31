@@ -872,7 +872,7 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
     line.reserve(size_.columns);
     auto const lineIter = next(buffer_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
-        if (cell.codepoint())
+        if (cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -885,7 +885,7 @@ string Screen::renderTextLine(cursor_pos_t row) const
     string line;
     line.reserve(size_.columns);
     for (cursor_pos_t col = 1; col <= size_.columns; ++col)
-        if (auto const& cell = at(row, col); cell.codepoint())
+        if (auto const& cell = at(row, col); cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -924,7 +924,11 @@ std::string Screen::screenshot() const
             //TODO: generator(SetGraphicsRendition{ cell.attributes().styles });
             generator(SetForegroundColor{ cell.attributes().foregroundColor });
             generator(SetBackgroundColor{ cell.attributes().backgroundColor });
-            generator(AppendChar{ cell.codepoint() ? cell.codepoint() : L' ' });
+            if (!cell.codepointCount())
+                generator(AppendChar{ U' ' });
+            else
+                for (char32_t const ch : cell.codepoints())
+                    generator(AppendChar{ ch });
         }
         generator(MoveCursorToBeginOfLine{});
         generator(Linefeed{});

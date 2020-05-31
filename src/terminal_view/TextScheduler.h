@@ -37,7 +37,6 @@ class TextScheduler {
 
     unicode::run_segmenter::range const& run() const noexcept { return run_; }
 
-    void reset();
     void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
     void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
     void flush();

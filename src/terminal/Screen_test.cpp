@@ -154,9 +154,7 @@ TEST_CASE("AppendChar.emoji_VS16", "[screen]")
 
     // double-width emoji with VS16
     auto const& c1 = screen(1, 1);
-    CHECK(c1.codepointCount() == 2);
-    CHECK(c1.codepoint(0) == 0x2139);
-    CHECK(c1.codepoint(1) == 0xFE0F);
+    CHECK(c1.codepoints() == U"\u2139\uFE0F");
     CHECK(c1.width() == 2);
 
     // unused cell
@@ -166,8 +164,7 @@ TEST_CASE("AppendChar.emoji_VS16", "[screen]")
 
     // character after the emoji
     auto const& c3 = screen(1, 3);
-    CHECK(c3.codepointCount() == 1);
-    CHECK(c3.codepoint(0) == 'X');
+    CHECK(c3.codepoints() == U"X");
     CHECK(c3.width() == 1);
 }
 
@@ -183,12 +180,7 @@ TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
     // TODO: provide native UTF-32 write function (not emulated through UTF-8 -> UTF-32...)
 
     auto const& c1 = screen(1, 1);
-    CHECK(c1.codepointCount() == 5);
-    CHECK(c1.codepoint(0) == 0x1F926);
-    CHECK(c1.codepoint(1) == 0x1F3FC);
-    CHECK(c1.codepoint(2) == 0x200D);
-    CHECK(c1.codepoint(3) == 0x2642);
-    CHECK(c1.codepoint(4) == 0xFE0F);
+    CHECK(c1.codepoints() == emoji);
     CHECK(c1.width() == 2);
 
     // other columns remain untouched
@@ -207,9 +199,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     screen.write(U"\U0001F600");
 
     auto const& c1 = screen(1, 1);
-    CHECK(c1.codepointCount() == 1);
-    CHECK(c1.codepoint(0) == 0x1F600);
-    CHECK(c1.codepoint(1) == 0);
+    CHECK(c1.codepoints() == U"\U0001F600");
     CHECK(c1.width() == 2);
     REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
 
@@ -1121,8 +1111,8 @@ TEST_CASE("MoveCursorTo", "[screen]")
             screen(MoveCursorTo{1, 1});
             CHECK(Coordinate{1, 1} == screen.cursorPosition());
             CHECK(Coordinate{2, 2} == screen.realCursorPosition());
-            CHECK('7' == (char)screen.withOriginAt(1, 1).codepoint());
-            CHECK('I' == (char)screen.withOriginAt(3, 3).codepoint());
+            CHECK('7' == (char)screen.withOriginAt(1, 1).codepoint(0));
+            CHECK('I' == (char)screen.withOriginAt(3, 3).codepoint(0));
         }
     }
 }
@@ -1629,24 +1619,24 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
     // first line in history
-    CHECK(screen.absoluteAt({1, 1}).codepoint() == '1');
-    CHECK(screen.absoluteAt({1, 2}).codepoint() == '2');
-    CHECK(screen.absoluteAt({1, 3}).codepoint() == '3');
+    CHECK(screen.absoluteAt({1, 1}).codepoint(0) == '1');
+    CHECK(screen.absoluteAt({1, 2}).codepoint(0) == '2');
+    CHECK(screen.absoluteAt({1, 3}).codepoint(0) == '3');
 
     // second line in history
-    CHECK(screen.absoluteAt({2, 1}).codepoint() == '4');
-    CHECK(screen.absoluteAt({2, 2}).codepoint() == '5');
-    CHECK(screen.absoluteAt({2, 3}).codepoint() == '6');
+    CHECK(screen.absoluteAt({2, 1}).codepoint(0) == '4');
+    CHECK(screen.absoluteAt({2, 2}).codepoint(0) == '5');
+    CHECK(screen.absoluteAt({2, 3}).codepoint(0) == '6');
 
     // first line on screen buffer
-    CHECK(screen.absoluteAt({3, 1}).codepoint() == 'A');
-    CHECK(screen.absoluteAt({3, 2}).codepoint() == 'B');
-    CHECK(screen.absoluteAt({3, 3}).codepoint() == 'C');
+    CHECK(screen.absoluteAt({3, 1}).codepoint(0) == 'A');
+    CHECK(screen.absoluteAt({3, 2}).codepoint(0) == 'B');
+    CHECK(screen.absoluteAt({3, 3}).codepoint(0) == 'C');
 
     // second line on screen buffer
-    CHECK(screen.absoluteAt({4, 1}).codepoint() == 'D');
-    CHECK(screen.absoluteAt({4, 2}).codepoint() == 'E');
-    CHECK(screen.absoluteAt({4, 3}).codepoint() == 'F');
+    CHECK(screen.absoluteAt({4, 1}).codepoint(0) == 'D');
+    CHECK(screen.absoluteAt({4, 2}).codepoint(0) == 'E');
+    CHECK(screen.absoluteAt({4, 3}).codepoint(0) == 'F');
 
     // too big row number
     CHECK_THROWS(screen.absoluteAt({5, 1}));
@@ -1663,7 +1653,7 @@ TEST_CASE("render into history", "[screen]")
     string renderedText;
     renderedText.resize(2 * 6);
     auto const renderer = [&](auto rowNumber, auto columnNumber, Screen::Cell const& cell) {
-        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.codepoint());
+        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.codepoint(0));
         if (columnNumber == 5)
             renderedText[(rowNumber - 1) * 6 + (columnNumber)] = '\n';
     };

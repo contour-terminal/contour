@@ -163,7 +163,11 @@ struct ScreenBuffer {
         constexpr Cell& operator=(Cell const&) noexcept = default;
         constexpr Cell& operator=(Cell&&) noexcept = default;
 
-        constexpr char32_t codepoint() const noexcept { return codepoints_[0]; }
+        constexpr std::u32string_view codepoints() const noexcept
+        {
+            return std::u32string_view{codepoints_.data(), codepointCount_};
+        }
+
         constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
         constexpr unsigned codepointCount() const noexcept { return codepointCount_; }
 

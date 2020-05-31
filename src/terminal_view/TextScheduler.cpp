@@ -24,21 +24,8 @@ TextScheduler::TextScheduler(Flusher _flusher)
 {
 }
 
-void TextScheduler::reset()
-{
-    state_ = State::Empty;
-
-    row_ = 1;
-    startColumn_ = 1;
-    attributes_ = {};
-    codepoints_.clear();
-    clusters_.clear();
-    clusterOffset_ = 0;
-}
-
 void TextScheduler::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
 {
-    state_ = State::Filling;
     row_ = _row;
     startColumn_ = _col;
     attributes_ = _attr;
@@ -73,20 +60,21 @@ void TextScheduler::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell 
     switch (state_)
     {
         case State::Empty:
-            if (_cell.codepoint() != SP)
+            if (_cell.codepoint(0) != SP)
             {
+                state_ = State::Filling;
                 reset(_row, _col, _cell.attributes());
                 extend(_cell, _col);
             }
             break;
         case State::Filling:
-            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint() != SP)
+            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
                 extend(_cell, _col);
             else
             {
                 flush();
-                if (_cell.codepoint() == SP)
-                    reset();
+                if (_cell.codepoint(0) == SP)
+                    state_  = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
                     reset(_row, _col, _cell.attributes());
