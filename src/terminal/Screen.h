@@ -128,6 +128,24 @@ struct ScreenBuffer {
         Color foregroundColor{DefaultColor{}};
         Color backgroundColor{DefaultColor{}};
         CharacterStyleMask styles{};
+
+        std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile) const noexcept
+        {
+            float const opacity = [=]() {
+                if (styles & CharacterStyleMask::Faint)
+                    return 0.5f;
+                else
+                    return 1.0f;
+            }();
+
+            bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+
+            return (styles & CharacterStyleMask::Inverse)
+                ? std::pair{ apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) * opacity,
+                             apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) }
+                : std::pair{ apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) * opacity,
+                             apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) };
+        }
     };
 
     /// Grid cell with character and graphics rendition information.

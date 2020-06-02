@@ -72,6 +72,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
     emojiFont_{ _emojiFont },
     renderer_{
         logger_,
+        _winSize,
         _regularFont,
         _emojiFont,
         _colorProfile,
@@ -277,6 +278,7 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
         return false;
 
     windowMargin_ = {0, 0};
+    renderer_.setScreenSize(_newSize);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
 
     process_.terminal().resizeScreen(_newSize);

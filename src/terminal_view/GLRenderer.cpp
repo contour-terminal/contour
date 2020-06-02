@@ -12,11 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/GLRenderer.h>
-#include <terminal_view/TextScheduler.h>
-
-#include <unicode/ucd.h>
-#include <unicode/ucd_ostream.h>
-#include <unicode/run_segmenter.h>
+#include <terminal_view/TextRenderer.h>
 
 #include <functional>
 
@@ -25,11 +21,10 @@ using namespace std::chrono;
 using namespace std::placeholders;
 using namespace crispy;
 
-using unicode::out;
-
 namespace terminal::view {
 
 GLRenderer::GLRenderer(Logger _logger,
+                       WindowSize const& _screenSize,
                        text::FontList const& _regularFont,
                        text::FontList const& _emojiFont,
                        terminal::ColorProfile _colorProfile,
@@ -39,17 +34,23 @@ GLRenderer::GLRenderer(Logger _logger,
                        ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     logger_{ move(_logger) },
-    leftMargin_{ 0 },
-    bottomMargin_{ 0 },
     colorProfile_{ _colorProfile },
+    screenCoordinates_{
+        _screenSize,
+        _regularFont.first.get().maxAdvance(), // cell width
+        _regularFont.first.get().lineHeight() // cell height
+    },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     emojiFont_{ _emojiFont },
     projectionMatrix_{ _projectionMatrix },
-    textShaper_{},
-    textShader_{ createShader(_textShaderConfig) },
-    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
-    textRenderer_{},
+    textRenderer_{
+        screenCoordinates_,
+        _colorProfile,
+        _regularFont,
+        _emojiFont,
+        _textShaderConfig
+    },
     cellBackground_{
         QSize(
             static_cast<int>(regularFont_.first.get().maxAdvance()),
@@ -65,7 +66,7 @@ GLRenderer::GLRenderer(Logger _logger,
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        canonicalColor(colorProfile_.cursor),
+        canonicalColor(_colorProfile.cursor),
         _cursorShaderConfig
     }
 {
@@ -74,23 +75,16 @@ GLRenderer::GLRenderer(Logger _logger,
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
-
-    textShader_->bind();
-    textShader_->setUniformValue("fs_monochromeTextures", 0);
-    textShader_->setUniformValue("fs_colorTextures", 1);
 }
 
 void GLRenderer::clearCache()
 {
     textRenderer_.clearCache();
-    textShaper_.clearCache();
 }
 
 void GLRenderer::setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback)
 {
-    regularFont_.first = _font;
-    regularFont_.second = _fallback;
-    clearCache();
+    textRenderer_.setFont(_font, _fallback);
 }
 
 bool GLRenderer::setFontSize(unsigned int _fontSize)
@@ -136,6 +130,7 @@ void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
 void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
 {
     colorProfile_ = _colors;
+    textRenderer_.setColorProfile(_colors);
     cursor_.setColor(canonicalColor(colorProfile_.cursor));
 }
 
@@ -144,18 +139,18 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     metrics_.clear();
     pendingBackgroundDraw_ = {};
 
-    auto text = TextScheduler{bind(&GLRenderer::flushText, this, _1, _terminal.screenSize())};
+    screenCoordinates_.screenSize = _terminal.screenSize();
 
     auto const changes = _terminal.render(
         _now,
-        bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3, _terminal.screenSize()),
-        bind(&TextScheduler::schedule, &text, _1, _2, _3)
+        bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3),
+        bind(&TextRenderer::schedule, &textRenderer_, _1, _2, _3)
     );
 
     assert(!pendingBackgroundDraw_.empty());
-    renderPendingBackgroundCells(_terminal.screenSize());
+    renderPendingBackgroundCells();
 
-    text.flush();
+    textRenderer_.flushPendingSegments();
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -163,13 +158,11 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
         Screen::Cell const& cursorCell = _terminal.absoluteAt(_terminal.cursor());
         cursor_.setShape(_terminal.cursorShape());
         cursor_.render(
-            makeCoords(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset()), _terminal.screenSize()),
+            screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset())),
             cursorCell.width()
         );
     }
 
-    textShader_->bind();
-    textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
     textRenderer_.execute();
 
     if (_terminal.isSelectionAvailable())
@@ -183,7 +176,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
                 ++metrics_.cellBackgroundRenderCount;
                 cellBackground_.render(
-                    makeCoords(range.fromColumn, row, _terminal.screenSize()),
+                    screenCoordinates_.map(range.fromColumn, row),
                     color,
                     1 + range.toColumn - range.fromColumn);
             }
@@ -192,22 +185,22 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     return changes;
 }
 
-void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize)
+void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
 {
-    auto const bgColor = makeColors(_cell.attributes()).second;
+    auto const bgColor = _cell.attributes().makeColors(colorProfile_).second;
 
     if (pendingBackgroundDraw_.lineNumber == _row && pendingBackgroundDraw_.color == bgColor)
         pendingBackgroundDraw_.endColumn++;
     else
     {
         if (!pendingBackgroundDraw_.empty())
-            renderPendingBackgroundCells(_screenSize);
+            renderPendingBackgroundCells();
 
         pendingBackgroundDraw_.reset(bgColor, _row, _col);
     }
 }
 
-void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
+void GLRenderer::renderPendingBackgroundCells()
 {
     if (pendingBackgroundDraw_.color == colorProfile_.defaultBackground)
         return;
@@ -225,7 +218,7 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
     // );
 
     cellBackground_.render(
-        makeCoords(pendingBackgroundDraw_.startColumn, pendingBackgroundDraw_.lineNumber, _screenSize),
+        screenCoordinates_.map(pendingBackgroundDraw_.startColumn, pendingBackgroundDraw_.lineNumber),
         QVector4D(
             static_cast<float>(pendingBackgroundDraw_.color.red) / 255.0f,
             static_cast<float>(pendingBackgroundDraw_.color.green) / 255.0f,
@@ -234,145 +227,6 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
         ),
         1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
     );
-}
-
-void GLRenderer::flushText(TextScheduler const& _textScheduler, WindowSize const& _screenSize)
-{
-    renderText(
-        _screenSize,
-        _textScheduler.row(),
-        _textScheduler.startColumn(),
-        _textScheduler.attributes(),
-        get<unicode::Script>(_textScheduler.run().properties),
-        _textScheduler.run().start,
-        _textScheduler.run().end,
-        _textScheduler.codepoints().data(),
-        _textScheduler.clusters().data(),
-        get<unicode::PresentationStyle>(_textScheduler.run().properties)
-    );
-}
-
-void GLRenderer::renderText(WindowSize const& _screenSize,
-                            cursor_pos_t _lineNumber,
-                            cursor_pos_t _startColumn,
-                            ScreenBuffer::GraphicsAttributes const& _attributes,
-                            unicode::Script _script,
-                            size_t _offset,
-                            size_t _offsetEnd,
-                            char32_t const* _codepoints,
-                            unsigned const* _clusters,
-                            unicode::PresentationStyle _presentationStyle)
-{
-    ++metrics_.renderTextGroup;
-
-    auto const [fgColor, bgColor] = makeColors(_attributes);
-    auto const textStyle = text::FontStyle::Regular;
-
-    if (_attributes.styles & CharacterStyleMask::Bold)
-    {
-        // TODO: switch font
-    }
-
-    if (_attributes.styles & CharacterStyleMask::Italic)
-    {
-        // TODO: *Maybe* update transformation matrix to have chars italic *OR* change font (depending on bold-state)
-    }
-
-    if (_attributes.styles & CharacterStyleMask::Blinking)
-    {
-        // TODO: update textshaper's shader to blink
-    }
-
-    if (_attributes.styles & CharacterStyleMask::CrossedOut)
-    {
-        // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-
-    if (_attributes.styles & CharacterStyleMask::DoublyUnderlined)
-    {
-        // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-    else if (_attributes.styles & CharacterStyleMask::Underline)
-    {
-        // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-
-    if (!(_attributes.styles & CharacterStyleMask::Hidden))
-    {
-        (void) textStyle;// TODO: selection by textStyle
-
-        bool const isEmojiPresentation = _presentationStyle == unicode::PresentationStyle::Emoji;
-        text::FontList& font = isEmojiPresentation ? emojiFont_
-                                                   : regularFont_;
-
-        unsigned const advanceX = regularFont_.first.get().maxAdvance();
-
-#if 0
-        cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
-                            _lineNumber, _startColumn,
-                            _startColumn + _clusters[_offset],
-                            _offset, _offsetEnd,
-                            isEmojiPresentation ? "E" : "T");
-        for (size_t i = _offset; i < _offsetEnd; ++i)
-            cout << fmt::format(" {}:{}", (unsigned) _codepoints[i], _clusters[i]);
-        cout << endl;
-#endif
-
-        text::GlyphPositionList const& glyphPositions = textShaper_.shape(
-            _script,
-            font,
-            advanceX,
-            _offsetEnd - _offset,
-            _codepoints + _offset,
-            _clusters + _offset,
-            _clusters[_offset]
-        );
-
-        textRenderer_.render(
-            makeCoords(
-                _startColumn + _clusters[_offset],
-                _lineNumber,
-                _screenSize
-            ),
-            glyphPositions,
-            QVector4D(
-                static_cast<float>(fgColor.red) / 255.0f,
-                static_cast<float>(fgColor.green) / 255.0f,
-                static_cast<float>(fgColor.blue) / 255.0f,
-                1.0f
-            ),
-            QSize{
-                static_cast<int>(cellWidth()),
-                static_cast<int>(cellHeight())
-            }
-        );
-    }
-}
-
-QPoint GLRenderer::makeCoords(cursor_pos_t col, cursor_pos_t row, WindowSize const& _screenSize) const
-{
-    return QPoint{
-        static_cast<int>(leftMargin_ + (col - 1) * regularFont_.first.get().maxAdvance()),
-        static_cast<int>(bottomMargin_ + (_screenSize.rows - row) * regularFont_.first.get().lineHeight())
-    };
-}
-
-std::pair<RGBColor, RGBColor> GLRenderer::makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const
-{
-    float const opacity = [=]() {
-        if (_attributes.styles & CharacterStyleMask::Faint)
-            return 0.5f;
-        else
-            return 1.0f;
-    }();
-
-    bool const bright = (_attributes.styles & CharacterStyleMask::Bold) != 0;
-
-    return (_attributes.styles & CharacterStyleMask::Inverse)
-        ? pair{ apply(colorProfile_, _attributes.backgroundColor, ColorTarget::Background, bright) * opacity,
-                apply(colorProfile_, _attributes.foregroundColor, ColorTarget::Foreground, bright) }
-        : pair{ apply(colorProfile_, _attributes.foregroundColor, ColorTarget::Foreground, bright) * opacity,
-                apply(colorProfile_, _attributes.backgroundColor, ColorTarget::Background, bright) };
 }
 
 } // end namespace

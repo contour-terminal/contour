@@ -15,19 +15,14 @@
 
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/CellBackground.h>
+#include <terminal_view/TextRenderer.h>
 #include <terminal_view/GLCursor.h>
+#include <terminal_view/ScreenCoordinates.h>
 
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
 #include <crispy/text/Font.h>
-#include <crispy/text/TextRenderer.h>
-#include <crispy/text/TextShaper.h>
-#include <crispy/times.h>
-
-#include <unicode/word_segmenter.h>
-#include <unicode/emoji_segmenter.h>
-#include <unicode/ucd.h> // Script
 
 #include <QPoint>
 #include <QMatrix2x4>
@@ -44,7 +39,6 @@
 namespace terminal::view {
 
 struct ShaderConfig;
-class TextScheduler;
 
 /**
  * Renders a terminal's screen to the current OpenGL context.
@@ -59,6 +53,7 @@ class GLRenderer : public QOpenGLFunctions {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     GLRenderer(Logger _logger,
+               WindowSize const& _screenSize,
                crispy::text::FontList const& _regularFont,
                crispy::text::FontList const& _emojiFont,
                ColorProfile _colorProfile,
@@ -77,10 +72,15 @@ class GLRenderer : public QOpenGLFunctions {
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
-    void setMargin(unsigned _leftMargin, unsigned _bottomMargin)
+    constexpr void setScreenSize(WindowSize const& _screenSize) noexcept
     {
-        leftMargin_ = _leftMargin;
-        bottomMargin_ = _bottomMargin;
+        screenCoordinates_.screenSize = _screenSize;
+    }
+
+    constexpr void setMargin(unsigned _leftMargin, unsigned _bottomMargin) noexcept
+    {
+        screenCoordinates_.leftMargin = _leftMargin;
+        screenCoordinates_.bottomMargin = _bottomMargin;
     }
 
     /**
@@ -125,24 +125,8 @@ class GLRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
-    void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
-
-    void renderPendingBackgroundCells(WindowSize const& _screenSize);
-    void flushText(TextScheduler const& _textScheduler, WindowSize const& _screenSize);
-    void renderText(WindowSize const& _screenSize,
-                    cursor_pos_t _lineNumber,
-                    cursor_pos_t _startColumn,
-                    ScreenBuffer::GraphicsAttributes const& _attributes,
-                    unicode::Script _script,
-                    size_t _offset,
-                    size_t _offsetEnd,
-                    char32_t const* _codepoints,
-                    unsigned const* _cluters,
-                    unicode::PresentationStyle _presentationStyle);
-
-    void renderTextGroup(WindowSize const& _screenSize);
-    QPoint makeCoords(cursor_pos_t _col, cursor_pos_t _row, WindowSize const& _screenSize) const;
-    std::pair<RGBColor, RGBColor> makeColors(ScreenBuffer::GraphicsAttributes const& _attributes) const;
+    void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
+    void renderPendingBackgroundCells();
 
   private:
     Metrics metrics_;
@@ -168,22 +152,19 @@ class GLRenderer : public QOpenGLFunctions {
         }
     };
 
+    ScreenCoordinates screenCoordinates_;
+
     PendingBackgroundDraw pendingBackgroundDraw_;
     Logger logger_;
-    unsigned leftMargin_;
-    unsigned bottomMargin_;
 
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
     crispy::text::FontList regularFont_;
     crispy::text::FontList emojiFont_;
+
     QMatrix4x4 projectionMatrix_;
-    unicode::word_segmenter wordSegmenter_;
-    crispy::text::TextShaper textShaper_;
-    std::unique_ptr<QOpenGLShaderProgram> textShader_;
-    int textProjectionLocation_;
-    crispy::text::TextRenderer textRenderer_;
+    TextRenderer textRenderer_;
     CellBackground cellBackground_;
     GLCursor cursor_;
 };

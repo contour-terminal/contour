@@ -39,7 +39,7 @@ add_library(terminal_view STATIC
     GLRenderer.cpp GLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalView.cpp TerminalView.h
-    TextScheduler.cpp TextScheduler.h
+    TextRenderer.cpp TextRenderer.h
 )
 
 target_include_directories(terminal_view PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
