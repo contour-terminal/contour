@@ -45,13 +45,13 @@ class TextShaper {
     /// @param _clusterGap  value that will be subtracted from every cluster when constructing glyph positions
     ///
     /// @returns pointer to the shape result
-    GlyphPositionList const& shape(unicode::Script _script,
-                                   FontList const& _font,
-                                   unsigned _advanceX,
-                                   size_t _size,
-                                   char32_t const* _codepoints,
-                                   unsigned const* _clusters,
-                                   size_t _clusterGap = 0);
+    GlyphPositionList shape(unicode::Script _script,
+                            FontList const& _font,
+                            unsigned _advanceX,
+                            size_t _size,
+                            char32_t const* _codepoints,
+                            unsigned const* _clusters,
+                            int _clusterGap = 0);
 
     /// Replaces all missing glyphs with the missing-glyph glyph.
     void replaceMissingGlyphs(Font& _font, GlyphPositionList& _result);
@@ -64,22 +64,15 @@ class TextShaper {
     bool shape(size_t _size,
                char32_t const* _codepoints,
                unsigned const* _clusters,
-               size_t _clusterGap,
+               int _clusterGap,
                unicode::Script _script,
                Font& _font,
                unsigned _advanceX,
                reference<GlyphPositionList> _result);
 
-    /// Inserts a new cache value @p _glyphPosition by given key _cacheKey into the cache.
-    ///
-    /// @returns const pointer to the stored glyph positions object.
-    GlyphPositionList const& cache(std::u32string_view const& _cacheKey, GlyphPositionList&& _glyphPosition);
-
   private:
     hb_buffer_t* hb_buf_;
     std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
-    std::unordered_map<std::u32string_view, std::u32string> cacheKeys_;
-    std::unordered_map<std::u32string_view, GlyphPositionList> cache_;
 };
 
 } // end namespace

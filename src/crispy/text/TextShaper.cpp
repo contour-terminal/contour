@@ -47,30 +47,24 @@ TextShaper::~TextShaper()
     hb_buffer_destroy(hb_buf_);
 }
 
-GlyphPositionList const& TextShaper::shape(unicode::Script _script,
-                                           FontList const& _fonts,
-                                           unsigned _advanceX,
-                                           size_t _size,
-                                           char32_t const* _codepoints,
-                                           unsigned const* _clusters,
-                                           size_t _clusterGap)
+GlyphPositionList TextShaper::shape(unicode::Script _script,
+                                    FontList const& _fonts,
+                                    unsigned _advanceX,
+                                    size_t _size,
+                                    char32_t const* _codepoints,
+                                    unsigned const* _clusters,
+                                    int _clusterGap)
 {
-    auto const cacheKey = u32string_view(_codepoints, _size);
-
-    // try cache first
-    if (auto const i = cache_.find(u32string_view(_codepoints, _size)); i != cache_.end())
-        return i->second;
-
     GlyphPositionList glyphPositions;
 
     // try primary font
     if (shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions)))
-        return cache(cacheKey, move(glyphPositions));
+        return glyphPositions;
 
     // try fallback fonts
     for (reference_wrapper<Font> const& fallback : _fonts.second)
         if (shape(_size, _codepoints, _clusters, _clusterGap, _script, fallback.get(), _advanceX, ref(glyphPositions)))
-            return cache(cacheKey, move(glyphPositions));
+            return glyphPositions;
 
 #if !defined(NDEBUG)
     string joinedCodes;
@@ -86,13 +80,7 @@ GlyphPositionList const& TextShaper::shape(unicode::Script _script,
     // render primary font with glyph-missing hints
     shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions));
     replaceMissingGlyphs(_fonts.first.get(), glyphPositions);
-    return cache(cacheKey, move(glyphPositions));
-}
-
-GlyphPositionList const& TextShaper::cache(std::u32string_view const& _key, GlyphPositionList&& _glyphPosition)
-{
-    cacheKeys_[_key] = u32string(_key);
-    return cache_[cacheKeys_[_key]] = move(_glyphPosition);
+    return glyphPositions;
 }
 
 void TextShaper::clearCache()
@@ -101,9 +89,6 @@ void TextShaper::clearCache()
         hb_font_destroy(hbf);
 
     hb_fonts_.clear();
-
-    cacheKeys_.clear();
-    cache_.clear();
 }
 
 constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
@@ -126,7 +111,7 @@ constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
 bool TextShaper::shape(size_t _size,
                        char32_t const* _codepoints,
                        unsigned const* _clusters,
-                       size_t _clusterGap,
+                       int _clusterGap,
                        unicode::Script _script,
                        Font& _font,
                        unsigned _advanceX,
@@ -135,7 +120,7 @@ bool TextShaper::shape(size_t _size,
     hb_buffer_clear_contents(hb_buf_);
 
     for (size_t const i : times(_size))
-        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i] - _clusterGap);
+        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i] + _clusterGap);
 
     hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
     hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);

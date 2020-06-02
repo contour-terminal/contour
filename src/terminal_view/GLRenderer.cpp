@@ -33,18 +33,20 @@ GLRenderer::GLRenderer(Logger _logger,
                        ShaderConfig const& _textShaderConfig,
                        ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
-    logger_{ move(_logger) },
-    colorProfile_{ _colorProfile },
     screenCoordinates_{
         _screenSize,
         _regularFont.first.get().maxAdvance(), // cell width
         _regularFont.first.get().lineHeight() // cell height
     },
+    pendingBackgroundDraw_{},
+    logger_{ move(_logger) },
+    colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     regularFont_{ _regularFont },
     emojiFont_{ _emojiFont },
     projectionMatrix_{ _projectionMatrix },
     textRenderer_{
+        metrics_,
         screenCoordinates_,
         _colorProfile,
         _regularFont,
@@ -92,23 +94,23 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     if (_fontSize == regularFont_.first.get().fontSize())
         return false;
 
-    for (auto& font: {regularFont_, emojiFont_})
+    for (auto& font: {regularFont_, emojiFont_}) // TODO: other font styles
     {
         font.first.get().setFontSize(_fontSize);
         for (auto& fallback : font.second)
             fallback.get().setFontSize(_fontSize);
     }
 
-    // TODO: other font styles
-
     auto const cellWidth = regularFont_.first.get().maxAdvance();
     auto const cellHeight = regularFont_.first.get().lineHeight();
     auto const cellSize = QSize{static_cast<int>(cellWidth),
                                 static_cast<int>(cellHeight)};
 
-    clearCache();
+    screenCoordinates_.cellWidth = cellWidth;
+    screenCoordinates_.cellHeight = cellHeight;
     cellBackground_.resize(cellSize);
     cursor_.resize(cellSize);
+    clearCache();
 
     return true;
 }

@@ -18,6 +18,7 @@
 #include <terminal_view/TextRenderer.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/RenderMetrics.h>
 
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
@@ -77,7 +78,7 @@ class GLRenderer : public QOpenGLFunctions {
         screenCoordinates_.screenSize = _screenSize;
     }
 
-    constexpr void setMargin(unsigned _leftMargin, unsigned _bottomMargin) noexcept
+    constexpr void setMargin(int _leftMargin, int _bottomMargin) noexcept
     {
         screenCoordinates_.leftMargin = _leftMargin;
         screenCoordinates_.bottomMargin = _bottomMargin;
@@ -90,26 +91,7 @@ class GLRenderer : public QOpenGLFunctions {
      */
     uint64_t render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
 
-    struct Metrics {
-        unsigned renderTextGroup = 0;
-        unsigned cellBackgroundRenderCount = 0;
-
-        void clear()
-        {
-            renderTextGroup = 0;
-            cellBackgroundRenderCount = 0;
-        }
-
-        std::string to_string() const
-        {
-            return fmt::format(
-                "text renders: {}, background renders: {}",
-                renderTextGroup,
-                cellBackgroundRenderCount);
-        }
-    };
-
-    Metrics const& metrics() const noexcept { return metrics_; }
+    RenderMetrics const& metrics() const noexcept { return metrics_; }
 
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
     static constexpr QVector4D canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
@@ -129,7 +111,7 @@ class GLRenderer : public QOpenGLFunctions {
     void renderPendingBackgroundCells();
 
   private:
-    Metrics metrics_;
+    RenderMetrics metrics_;
 
     struct PendingBackgroundDraw
     {
@@ -153,7 +135,6 @@ class GLRenderer : public QOpenGLFunctions {
     };
 
     ScreenCoordinates screenCoordinates_;
-
     PendingBackgroundDraw pendingBackgroundDraw_;
     Logger logger_;
 

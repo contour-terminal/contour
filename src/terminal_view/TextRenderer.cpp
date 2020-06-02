@@ -14,19 +14,29 @@
 
 #include <terminal_view/TextRenderer.h>
 #include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/RenderMetrics.h>
 
 #include <crispy/times.h>
+#include <crispy/algorithm.h>
 
 namespace terminal::view {
 
 using namespace crispy;
 using unicode::out;
 
-TextRenderer::TextRenderer(ScreenCoordinates const& _screenCoordinates,
+#if !defined(NDEBUG)
+#define METRIC_INCREMENT(name) do { ++renderMetrics_. name ; } while (0)
+#else
+#define METRIC_INCREMENT(name) do {} while (0)
+#endif
+
+TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
+                           ScreenCoordinates const& _screenCoordinates,
                            ColorProfile const& _colorProfile,
                            text::FontList const& _regularFont,
                            text::FontList const& _emojiFont,
                            ShaderConfig const& _textShaderConfig) :
+    renderMetrics_{ _renderMetrics },
     screenCoordinates_{ _screenCoordinates },
     colorProfile_{ _colorProfile },
     regularFont_{ _regularFont },
@@ -46,6 +56,8 @@ void TextRenderer::clearCache()
 {
     renderer_.clearCache();
     textShaper_.clearCache();
+    cacheKeyStorage_.clear();
+    cache_.clear();
 }
 
 void TextRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
@@ -107,7 +119,7 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
             {
                 flushPendingSegments();
                 if (_cell.codepoint(0) == SP)
-                    state_  = State::Empty;
+                    state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
                     reset(_row, _col, _cell.attributes());
@@ -120,40 +132,59 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
 
 void TextRenderer::flushPendingSegments()
 {
-    if (codepoints_.size() == 0)
-        return;
+    auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_);
+    renderer_.render(
+        screenCoordinates_.map(startColumn_, row_),
+        cachedGlyphPositions(),
+        QVector4D(
+            static_cast<float>(fgColor.red) / 255.0f,
+            static_cast<float>(fgColor.green) / 255.0f,
+            static_cast<float>(fgColor.blue) / 255.0f,
+            1.0f
+        ),
+        QSize{
+            static_cast<int>(cellWidth()),
+            static_cast<int>(cellHeight())
+        }
+    );
+}
 
-    // TODO: now we know the word range from [start, end) split into its sub runs
-    // query glyphs and glyph positions for each sub runs and use that as cache
-    // value for the current word
+crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
+{
+    auto const cacheKey = std::u32string_view(codepoints_.data(), codepoints_.size());
+    if (auto const cached = cache_.find(cacheKey); cached != cache_.end())
+    {
+        METRIC_INCREMENT(cachedText);
+        return cached->second;
+    }
 
-    // 1.) create cache key
-    // 2.) lookup in our own cache, and if present, then *return* that
+    cacheKeyStorage_[cacheKey] = std::u32string(cacheKey);
+    return cache_[cacheKeyStorage_[cacheKey]] = requestGlyphPositions();
+}
 
-    // OTHERWISE:
-
+crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()
+{
+    text::GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run)))
-        prepareRun(run);
+    {
+        METRIC_INCREMENT(shapedText);
+        copy(prepareRun(run), std::back_inserter(glyphPositions));
+    }
 
-    // TODO: where is this loop body called more than once? find out with debug prints!
+    return glyphPositions;
 }
 
-void TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
+text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
 {
-    auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_);
-    auto const textStyle = text::FontStyle::Regular;
+    auto textStyle = text::FontStyle::Regular;
 
     if (attributes_.styles & CharacterStyleMask::Bold)
-    {
-        // TODO: switch font
-    }
+        textStyle |= text::FontStyle::Bold;
 
     if (attributes_.styles & CharacterStyleMask::Italic)
-    {
-        // TODO: (requires more font refs)
-    }
+        textStyle |= text::FontStyle::Italic;
 
     if (attributes_.styles & CharacterStyleMask::Blinking)
     {
@@ -174,52 +205,38 @@ void TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
         // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
     }
 
-    if (!(attributes_.styles & CharacterStyleMask::Hidden))
-    {
-        (void) textStyle;// TODO: selection by textStyle
+    if ((attributes_.styles & CharacterStyleMask::Hidden))
+        return {};
 
-        bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-        text::FontList& font = isEmojiPresentation ? emojiFont_
-                                                   : regularFont_;
+    (void) textStyle;// TODO: selection by textStyle
 
-        unsigned const advanceX = regularFont_.first.get().maxAdvance();
+    bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
+    text::FontList& font = isEmojiPresentation ? emojiFont_
+                                               : regularFont_;
 
-#if 0
-        cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
-                            _lineNumber, _startColumn,
-                            _startColumn + _clusters[_offset],
-                            _offset, _offsetEnd,
-                            isEmojiPresentation ? "E" : "T");
-        for (size_t i = _offset; i < _offsetEnd; ++i)
-            cout << fmt::format(" {}:{}", (unsigned) _codepoints[i], _clusters[i]);
-        cout << endl;
-#endif
+    unsigned const advanceX = regularFont_.first.get().maxAdvance();
 
-        text::GlyphPositionList const& glyphPositions = textShaper_.shape(
-            std::get<unicode::Script>(_run.properties),
-            font,
-            advanceX,
-            _run.end - _run.start,
-            codepoints_.data() + _run.start,
-            clusters_.data() + _run.start,
-            clusters_[_run.start]
-        );
+#if 0 // {{{ debug print
+    cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
+                        _lineNumber, _startColumn,
+                        _startColumn + _clusters[_offset],
+                        _offset, _offsetEnd,
+                        isEmojiPresentation ? "E" : "T");
+    for (size_t i = _offset; i < _offsetEnd; ++i)
+        cout << fmt::format(" {}:{}", (unsigned) _codepoints[i], _clusters[i]);
+    cout << endl;
+#endif // }}}
 
-        renderer_.render(
-            screenCoordinates_.map(startColumn_ + clusters_[_run.start], row_),
-            glyphPositions,
-            QVector4D(
-                static_cast<float>(fgColor.red) / 255.0f,
-                static_cast<float>(fgColor.green) / 255.0f,
-                static_cast<float>(fgColor.blue) / 255.0f,
-                1.0f
-            ),
-            QSize{
-                static_cast<int>(cellWidth()),
-                static_cast<int>(cellHeight())
-            }
-        );
-    }
+    auto gpos = textShaper_.shape(
+        std::get<unicode::Script>(_run.properties),
+        font,
+        advanceX,
+        _run.end - _run.start,
+        codepoints_.data() + _run.start,
+        clusters_.data() + _run.start,
+        -clusters_[0]
+    );
+    return gpos;
 }
 
 void TextRenderer::execute()
@@ -227,6 +244,7 @@ void TextRenderer::execute()
     textShader_->bind();
     textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
     renderer_.execute();
+    state_ = State::Empty;
 }
 
 } // end namespace
