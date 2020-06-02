@@ -13,9 +13,12 @@
  */
 #include <terminal_view/GLRenderer.h>
 #include <terminal_view/TextScheduler.h>
+
 #include <unicode/ucd.h>
 #include <unicode/ucd_ostream.h>
 #include <unicode/run_segmenter.h>
+
+#include <functional>
 
 using namespace std;
 using namespace std::chrono;
@@ -141,32 +144,18 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     metrics_.clear();
     pendingBackgroundDraw_ = {};
 
-    auto ts = TextScheduler{
-        [&](TextScheduler const& _textScheduler) {
-            renderText(
-                _terminal.screenSize(),
-                _textScheduler.row(),
-                _textScheduler.startColumn(),
-                _textScheduler.attributes(),
-                _textScheduler.run().script,
-                _textScheduler.run().start,
-                _textScheduler.run().end,
-                _textScheduler.codepoints().data(),
-                _textScheduler.clusters().data(),
-                _textScheduler.run().presentationStyle);
-        }
-    };
+    auto text = TextScheduler{bind(&GLRenderer::flushText, this, _1, _terminal.screenSize())};
 
     auto const changes = _terminal.render(
         _now,
         bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3, _terminal.screenSize()),
-        bind(&TextScheduler::schedule, &ts, _1, _2, _3)
+        bind(&TextScheduler::schedule, &text, _1, _2, _3)
     );
 
     assert(!pendingBackgroundDraw_.empty());
     renderPendingBackgroundCells(_terminal.screenSize());
 
-    ts.flush();
+    text.flush();
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -244,6 +233,22 @@ void GLRenderer::renderPendingBackgroundCells(WindowSize const& _screenSize)
             1.0f
         ),
         1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
+    );
+}
+
+void GLRenderer::flushText(TextScheduler const& _textScheduler, WindowSize const& _screenSize)
+{
+    renderText(
+        _screenSize,
+        _textScheduler.row(),
+        _textScheduler.startColumn(),
+        _textScheduler.attributes(),
+        get<unicode::Script>(_textScheduler.run().properties),
+        _textScheduler.run().start,
+        _textScheduler.run().end,
+        _textScheduler.codepoints().data(),
+        _textScheduler.clusters().data(),
+        get<unicode::PresentationStyle>(_textScheduler.run().properties)
     );
 }
 

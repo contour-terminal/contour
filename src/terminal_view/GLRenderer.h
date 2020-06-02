@@ -44,6 +44,7 @@
 namespace terminal::view {
 
 struct ShaderConfig;
+class TextScheduler;
 
 /**
  * Renders a terminal's screen to the current OpenGL context.
@@ -127,6 +128,7 @@ class GLRenderer : public QOpenGLFunctions {
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell, WindowSize const& _screenSize);
 
     void renderPendingBackgroundCells(WindowSize const& _screenSize);
+    void flushText(TextScheduler const& _textScheduler, WindowSize const& _screenSize);
     void renderText(WindowSize const& _screenSize,
                     cursor_pos_t _lineNumber,
                     cursor_pos_t _startColumn,
