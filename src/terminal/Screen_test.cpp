@@ -168,6 +168,40 @@ TEST_CASE("AppendChar.emoji_VS16", "[screen]")
     CHECK(c3.width() == 1);
 }
 
+TEST_CASE("AppendChar.emoji_family", "[screen]")
+{
+    auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    // print letter-like symbol `i` with forced emoji presentation style.
+    screen.write(AppendChar{U'\U0001F468'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    screen.write(AppendChar{U'\u200D'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    screen.write(AppendChar{U'\U0001F468'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    screen.write(AppendChar{U'\u200D'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    screen.write(AppendChar{U'\U0001F467'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    screen.write(AppendChar{U'X'});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 4});
+
+    // double-width emoji with VS16
+    auto const& c1 = screen(1, 1);
+    CHECK(c1.codepoints() == U"\U0001F468\u200D\U0001F468\u200D\U0001F467");
+    CHECK(c1.width() == 2);
+
+    // unused cell
+    auto const& c2 = screen(1, 2);
+    CHECK(c2.codepointCount() == 0);
+    CHECK(c2.width() == 1);
+
+    // character after the emoji
+    auto const& c3 = screen(1, 3);
+    CHECK(c3.codepoints() == U"X");
+    CHECK(c3.width() == 1);
+}
+
 TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
 {
     auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};

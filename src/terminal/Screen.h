@@ -220,15 +220,17 @@ struct ScreenBuffer {
                 codepointCount_++;
 
                 auto const width = _codepoint == 0xFE0F ? 2 : unicode::width(_codepoint);
-                // FIXME
                 if (width > width_)
                 {
                     unsigned const diff = width - width_;
                     width_ = width;
                     return diff;
                 }
+                else
+                    return 0;
             }
-            return 1;
+            else
+                return 1;
         }
 
         std::string toUtf8() const
