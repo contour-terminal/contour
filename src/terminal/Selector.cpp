@@ -48,6 +48,32 @@ Selector::Selector(Mode _mode,
 	}
 }
 
+Coordinate Selector::stretchedColumn(Coordinate _coord) const noexcept
+{
+    Coordinate stretched = _coord;
+    if (Screen::Cell const& cell = at(_coord); cell.width() > 1)
+    {
+        // wide character
+        stretched.column += cell.width() - 1;
+        return stretched;
+    }
+
+    while (stretched.column < viewport_.columns)
+    {
+        Screen::Cell const & cell = at(stretched);
+        if (cell.empty())
+            stretched.column++;
+        else
+        {
+            if (cell.width() > 1)
+                stretched.column += cell.width() - 1;
+            break;
+        }
+    }
+
+    return stretched;
+}
+
 bool Selector::extend(Coordinate const& _coord)
 {
     assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
@@ -60,8 +86,7 @@ bool Selector::extend(Coordinate const& _coord)
     state_ = State::InProgress;
 
 	if (!isWordWiseSelection())
-		to_ = coord;
-
+        to_ = stretchedColumn(coord);
 	else if (coord > start_)
 	{
 		to_ = coord;
@@ -125,7 +150,9 @@ void Selector::extendSelectionForward()
     auto current = last;
     for (;;) {
         if (current.column < viewport_.columns)
-            current.column++;
+        {
+            current = stretchedColumn({current.row, current.column + 1});
+        }
         else if (current.row < totalRowCount_)
         {
             current.row++;
@@ -138,7 +165,8 @@ void Selector::extendSelectionForward()
             break;
         last = current;
     }
-	to_ = last;
+
+    to_ = stretchedColumn(last);
 }
 
 void Selector::stop()

@@ -124,6 +124,10 @@ class Selector {
         swap(from_, to_);
     }
 
+    /// Eventually stretches the coordinate a few cells to the right if the cell at given coordinate
+    /// contains a wide character - or if the cell is empty, until the end of emptyness.
+    Coordinate stretchedColumn(Coordinate _coord) const noexcept;
+
 	/// Retrieves a vector of ranges (with one range per line) of selected cells.
 	std::vector<Range> selection() const;
 
