@@ -253,6 +253,14 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     CHECK(c3.width() == 1);
 }
 
+TEST_CASE("AppendChar_WideChar", "[screen]")
+{
+    auto screen = Screen{{3, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen(SetMode{Mode::AutoWrap, true});
+    screen.write(AppendChar{U'\U0001F600'});
+    CHECK(screen.cursorPosition() == Coordinate{1, 3});
+}
+
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
 {
     auto screen = Screen{{3, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
