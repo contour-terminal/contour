@@ -49,6 +49,10 @@ using namespace std::placeholders;
 #define STATS_SET(name)   /*!*/
 #endif
 
+#if defined(_MSC_VER)
+#define __PRETTY_FUNCTION__ __FUNCDNAME__
+#endif
+
 namespace contour {
 
 using terminal::view::GLRenderer;
