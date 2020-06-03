@@ -52,19 +52,24 @@ bool Selector::extend(Coordinate const& _coord)
 {
     assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
 
+    auto const coord = Coordinate{
+        clamp(_coord.row, 1u, viewport_.rows),
+        clamp(_coord.column, 1u, viewport_.columns)
+    };
+
     state_ = State::InProgress;
 
 	if (!isWordWiseSelection())
-		to_ = _coord;
+		to_ = coord;
 
-	else if (_coord > start_)
+	else if (coord > start_)
 	{
-		to_ = _coord;
+		to_ = coord;
 		extendSelectionForward();
 	}
 	else
 	{
-		to_ = _coord;
+		to_ = coord;
 		extendSelectionBackward();
 		swapDirection();
 		to_ = start_;
