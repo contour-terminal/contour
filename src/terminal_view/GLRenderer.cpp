@@ -192,7 +192,10 @@ void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, Scree
     auto const bgColor = _cell.attributes().makeColors(colorProfile_).second;
 
     if (pendingBackgroundDraw_.lineNumber == _row && pendingBackgroundDraw_.color == bgColor)
-        pendingBackgroundDraw_.endColumn++;
+    {
+        assert(_cell.width() != 0);
+        pendingBackgroundDraw_.endColumn += _cell.width();
+    }
     else
     {
         if (!pendingBackgroundDraw_.empty())
