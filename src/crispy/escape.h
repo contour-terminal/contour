@@ -24,7 +24,7 @@
 
 namespace crispy {
 
-inline std::string escape(char32_t ch)
+inline std::string escape(uint8_t ch)
 {
     switch (ch)
     {
@@ -41,26 +41,17 @@ inline std::string escape(char32_t ch)
         case '"':
             return "\\\"";
         default:
-            if (ch <= 0xFF && std::isprint(static_cast<char>(ch)))
+            if (std::isprint(static_cast<char>(ch)))
                 return fmt::format("{}", static_cast<char>(ch));
-            else if (ch <= 0xFF)
-                return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch));
             else
-            {
-                auto const bytes = unicode::to_utf8(ch);
-                auto res = std::string{};
-                for (auto const byte : bytes)
-                {
-                    res += fmt::format("\\x{:02X}", static_cast<unsigned>(byte));
-                }
-                return res;
-            }
+                return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
 template <typename T>
 inline std::string escape(T begin, T end)
 {
+    static_assert(sizeof(*std::declval<T>()) == 1, "should be only 1 byte, such as: char, char8_t, uint8_t, byte, ...");
     return std::accumulate(begin, end, std::string{}, [](auto const& a, auto ch) { return a + escape(ch); });
     // auto result = std::string{};
     // for (T cur = begin; cur != end; ++cur)
