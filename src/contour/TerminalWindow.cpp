@@ -280,6 +280,16 @@ namespace {
         );
     }
 #endif
+
+    std::string unhandledExceptionMessage(std::string_view const& where, std::exception const& e)
+    {
+        return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
+    }
+
+    void reportUnhandledException(std::string_view const& where, std::exception const& e)
+    {
+        cerr << unhandledExceptionMessage(where, e) << endl;
+    }
 }
 
 TerminalWindow::TerminalWindow(config::Config _config, string _profileName, string _programPath) :
@@ -530,7 +540,7 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
     }
     catch (std::exception const& e)
     {
-        cerr << fmt::format("resizeEvent: Unhandled exception caught ({}). {}\n", typeid(e).name(), e.what());
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
 }
 
@@ -559,9 +569,9 @@ void TerminalWindow::paintGL()
         //terminal::view::render(terminalView_, now_);
         STATS_SET(updatesSinceRendering) terminalView_->render(now_);
     }
-    catch (exception const& ex)
+    catch (exception const& e)
     {
-        cerr << "Unhandled exception caught in render thread! " << typeid(ex).name() << "; " << ex.what() << endl;
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
 }
 
@@ -584,7 +594,7 @@ bool TerminalWindow::reloadConfigValues()
     catch (exception const& e)
     {
         //TODO: logger_.error(e.what());
-        configLogger(fmt::format("Unhandled exception during configuration reload caught. {}", e.what()));
+        configLogger(unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
     }
 
     if (!newConfig.profile(profileName_))
@@ -660,7 +670,7 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
     }
     catch (exception const& e)
     {
-        cerr << fmt::format("Unhandled exception caught in keyPressEvent; {}; {}\n", typeid(e).name(), e.what());
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
 }
 
@@ -688,22 +698,35 @@ void TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
 
 void TerminalWindow::mousePressEvent(QMouseEvent* _event)
 {
-    auto const mouseButton = makeMouseButton(_event->button());
-    executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
-
-    setScreenDirty();
-    update();
+    try
+    {
+        auto const mouseButton = makeMouseButton(_event->button());
+        executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
+        setScreenDirty();
+        update();
+    }
+    catch (std::exception const& e)
+    {
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
+    }
 }
 
 void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
 {
-    auto const mouseButton = makeMouseButton(_mouseRelease->button());
-    executeInput(terminal::MouseReleaseEvent{mouseButton});
-
-    if (terminalView_->terminal().isSelectionAvailable())
+    try
     {
-        setScreenDirty();
-        update();
+        auto const mouseButton = makeMouseButton(_mouseRelease->button());
+        executeInput(terminal::MouseReleaseEvent{mouseButton});
+
+        if (terminalView_->terminal().isSelectionAvailable())
+        {
+            setScreenDirty();
+            update();
+        }
+    }
+    catch (std::exception const& e)
+    {
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
 }
 
@@ -729,28 +752,35 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
     }
     catch (std::exception const& e)
     {
-        cerr << fmt::format("Unhandled exception caught ({}). {}\n", typeid(e).name(), e.what());
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
 }
 
 void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "normal" colors
 {
-    QOpenGLWindow::focusInEvent(_event);
-
-    // as per Qt-documentation, some platform implementations reset the cursor when leaving the
-    // window, so we have to re-apply our desired cursor in focusInEvent().
-    using Type = terminal::ScreenBuffer::Type;
-    switch (terminalView_->terminal().screenBufferType())
+    try
     {
-        case Type::Main:
-            setCursor(Qt::IBeamCursor);
-            break;
-        case Type::Alternate:
-            setCursor(Qt::ArrowCursor);
-            break;
-    }
+        QOpenGLWindow::focusInEvent(_event);
 
-    terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
+        // as per Qt-documentation, some platform implementations reset the cursor when leaving the
+        // window, so we have to re-apply our desired cursor in focusInEvent().
+        using Type = terminal::ScreenBuffer::Type;
+        switch (terminalView_->terminal().screenBufferType())
+        {
+            case Type::Main:
+                setCursor(Qt::IBeamCursor);
+                break;
+            case Type::Alternate:
+                setCursor(Qt::ArrowCursor);
+                break;
+        }
+
+        terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
+    }
+    catch (std::exception const& e)
+    {
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
+    }
 }
 
 void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with "faint" colors
