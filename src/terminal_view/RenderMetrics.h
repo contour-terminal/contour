@@ -20,10 +20,10 @@ struct RenderMetrics {
     std::string to_string() const
     {
         return fmt::format(
-            "background renders: {}, cached text: {}, shaped text: {}",
+            "background renders: {}, shaped text: {}, cached text: {}",
             cellBackgroundRenderCount,
-            cachedText,
-            shapedText
+            shapedText,
+            cachedText
         );
     }
 };
