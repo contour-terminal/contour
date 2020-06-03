@@ -132,6 +132,9 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
 
 void TextRenderer::flushPendingSegments()
 {
+    if (codepoints_.empty())
+        return;
+
     auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_);
     renderer_.render(
         screenCoordinates_.map(startColumn_, row_),
