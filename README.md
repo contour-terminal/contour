@@ -11,35 +11,22 @@
 
 ## Purpose
 
-`contour` is a terminal emulator, for everyday use.
+`contour` is a modern terminal emulator, for everyday use.
 
 ## Features
 
-* Available on all 3 major platforms, Windows, Linux, OS/X.
-* Font Ligatures Support (such as in Fira Code).
-* GPU-accelerated rendering.
-* Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
-
-## Mission Statement
-
-The following is an incomplete list of features that contour does or will support.
-
-* ✅ Available on all three major platforms (Linux, OS/X, Windows 10)
+* ✅ Available on all 3 major platforms, Linux, OS/X, Windows.
+* ✅ Emoji support (-: 🌈 💝 😛 👪 :-)
+* ✅ Font ligatures support (such as in Fira Code).
+* ✅ Bold and italic fonts
+* ✅ GPU-accelerated rendering.
+* ✅ Vertical Line Markers (quickly jump to markers in your history!)
+* ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 * ✅ Runtime configuration reload
-* ✅ Font Ligatures Support (such as in Fira Code)
-* ✅ GPU-accelerated rendering
 * ✅ 256-color and Truecolor support
 * ✅ Key binding customization
 * ✅ Color Schemes
 * ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
-* ✅ Vertical Line Markers (quickly jump to markers in your history!)
-* ✅ Emoji support (-: 🌈 💝 😛 👪 :-)
-* ⏳ Terminal Multiplexer Mode (like TMUX/screen) with a graphical as well as a text based frontend
-* ⏳ History Search
-* ⏳ Activity/Inactivity/Bell System Notification
-* ⏳ Multiple Sessions, Windows, Tabs, Panes (like TMUX/screen)
-* ⏳ Shell Integration (inspired by iTerm2)
-* ⏳ Inline Images (inspired by iTerm2, conforming to their custom VT sequences for compatibility)
 
 ## A word on vertical line markers
 
