@@ -31,6 +31,34 @@
 #include <vector>
 
 namespace terminal::view {
+    struct CacheKey {
+        std::u32string_view text;
+        CharacterStyleMask styles;
+
+        bool operator==(CacheKey const& _rhs) const noexcept
+        {
+            return text == _rhs.text && styles == _rhs.styles;
+        }
+
+        bool operator!=(CacheKey const& _rhs) const noexcept
+        {
+            return !(*this == _rhs);
+        }
+    };
+}
+
+namespace std {
+    template <>
+    struct hash<terminal::view::CacheKey> {
+        size_t operator()(terminal::view::CacheKey const& _key) const noexcept
+        {
+            return hash<std::u32string_view>{}(_key.text)
+                + static_cast<size_t>(_key.styles); // XXX maybe use FNV for both?
+        }
+    };
+}
+
+namespace terminal::view {
 
 struct RenderMetrics;
 
@@ -88,7 +116,7 @@ class TextRenderer : public QOpenGLFunctions {
     // text shaping cache
     //
     std::unordered_map<std::u32string_view, std::u32string> cacheKeyStorage_;
-    std::unordered_map<std::u32string_view, crispy::text::GlyphPositionList> cache_;
+    std::unordered_map<CacheKey, crispy::text::GlyphPositionList> cache_;
 
     // target surface rendering
     //

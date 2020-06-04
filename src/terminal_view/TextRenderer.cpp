@@ -152,16 +152,24 @@ void TextRenderer::flushPendingSegments()
 
 crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
-    // TODO: cache key MUST include some attributes, too (because of bold/italic/hidden - more?)
-    auto const cacheKey = std::u32string_view(codepoints_.data(), codepoints_.size());
+    auto const cacheKey = CacheKey{
+        std::u32string_view(codepoints_.data(), codepoints_.size()),
+        attributes_.styles
+    };
     if (auto const cached = cache_.find(cacheKey); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
         return cached->second;
     }
 
-    cacheKeyStorage_[cacheKey] = std::u32string(cacheKey);
-    return cache_[cacheKeyStorage_[cacheKey]] = requestGlyphPositions();
+    cacheKeyStorage_[cacheKey.text] = std::u32string(cacheKey.text);
+
+    auto const cacheKeyFromStorage = CacheKey{
+        cacheKeyStorage_[cacheKey.text],
+        attributes_.styles
+    };
+
+    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
 crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()
