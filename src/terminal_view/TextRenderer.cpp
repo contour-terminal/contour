@@ -22,6 +22,7 @@
 namespace terminal::view {
 
 using namespace crispy;
+using namespace std;
 using unicode::out;
 
 #if !defined(NDEBUG)
@@ -152,24 +153,27 @@ void TextRenderer::flushPendingSegments()
 
 crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
-    auto const cacheKey = CacheKey{
-        std::u32string_view(codepoints_.data(), codepoints_.size()),
+    auto const key = CacheKey{
+        u32string_view(codepoints_.data(), codepoints_.size()),
         attributes_.styles
     };
-    if (auto const cached = cache_.find(cacheKey); cached != cache_.end())
+    if (auto const cached = cache_.find(key); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
         return cached->second;
     }
+    else
+    {
+        auto keyString = u32string(key.text);
+        cacheKeyStorage_[keyString] = keyString;
 
-    cacheKeyStorage_[cacheKey.text] = std::u32string(cacheKey.text);
+        auto const cacheKeyFromStorage = CacheKey{
+            cacheKeyStorage_[keyString],
+            attributes_.styles
+        };
 
-    auto const cacheKeyFromStorage = CacheKey{
-        cacheKeyStorage_[cacheKey.text],
-        attributes_.styles
-    };
-
-    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
+        return cache_[cacheKeyFromStorage] = requestGlyphPositions();
+    }
 }
 
 crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()

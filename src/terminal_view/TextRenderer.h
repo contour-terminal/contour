@@ -44,6 +44,17 @@ namespace terminal::view {
         {
             return !(*this == _rhs);
         }
+
+        bool operator<(CacheKey const& _rhs) const noexcept
+        {
+            if (text < _rhs.text)
+                return true;
+
+            if (static_cast<unsigned>(styles) < static_cast<unsigned>(_rhs.styles))
+                return true;
+
+            return false;
+        }
     };
 }
 
@@ -53,7 +64,7 @@ namespace std {
         size_t operator()(terminal::view::CacheKey const& _key) const noexcept
         {
             return hash<std::u32string_view>{}(_key.text)
-                + static_cast<size_t>(_key.styles); // XXX maybe use FNV for both?
+                + static_cast<size_t>(_key.styles); // TODO maybe use FNV for both?
         }
     };
 }
