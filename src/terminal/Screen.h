@@ -793,6 +793,9 @@ class Screen {
 
     ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }
 
+    // Appends up to n spaces starting at the current cursor position.
+    void appendSpaceChars(size_t n);
+
   private:
     void setBuffer(ScreenBuffer::Type _type);
 

@@ -1340,10 +1340,12 @@ void Screen::operator()(MoveCursorToNextTab const&)
         while (i < buffer_->tabs.size() && buffer_->realCursorPosition().column >= buffer_->tabs[i])
             ++i;
 
+        auto const currentCursorColumn = cursorPosition().column;
+
         if (i < buffer_->tabs.size())
-            (*this)(MoveCursorToColumn{buffer_->tabs[i]});
+            appendSpaceChars(buffer_->tabs[i] - currentCursorColumn);
         else if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
-            (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.to});
+            appendSpaceChars(buffer_->margin_.horizontal.to - currentCursorColumn);
         else
             (*this)(CursorNextLine{1});
     }
@@ -1352,8 +1354,8 @@ void Screen::operator()(MoveCursorToNextTab const&)
         // default tab settings
         if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
         {
-            auto const n = 1 + buffer_->tabWidth - buffer_->cursor.column % buffer_->tabWidth;
-            (*this)(MoveCursorForward{n});
+            auto const n = min(1 + buffer_->tabWidth - buffer_->cursor.column % buffer_->tabWidth, size_.columns - cursorPosition().column);
+            appendSpaceChars(n);
         }
         else
             (*this)(CursorNextLine{1});
@@ -1368,6 +1370,14 @@ void Screen::operator()(MoveCursorToNextTab const&)
             // then TAB moves to next line left margin
             (*this)(CursorNextLine{1});
     }
+}
+
+void Screen::appendSpaceChars(size_t n)
+{
+    // Don't do (*this)(MoveCursorForward{n}) because we actually want spaces.
+
+    for (size_t i = 0; i < n; ++i)
+        write(AppendChar{U' '});
 }
 
 void Screen::operator()(CursorBackwardTab const& v)
