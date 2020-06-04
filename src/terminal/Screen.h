@@ -32,11 +32,12 @@
 #include <functional>
 #include <list>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <stack>
 #include <string>
 #include <string_view>
 #include <vector>
-#include <set>
 
 namespace terminal {
 
@@ -925,6 +926,43 @@ namespace fmt {
                     return format_to(ctx.out(), "alternate");
             }
             return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::CharacterStyleMask> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(terminal::CharacterStyleMask _mask, FormatContext& ctx)
+        {
+            using Mask = terminal::CharacterStyleMask;
+            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 9>{
+                std::pair{Mask::Bold, "bold"},
+                std::pair{Mask::Faint, "faint"},
+                std::pair{Mask::Italic, "italic"},
+                std::pair{Mask::Underline, "underline"},
+                std::pair{Mask::Blinking, "blinking"},
+                std::pair{Mask::Inverse, "inverse"},
+                std::pair{Mask::Hidden, "hidden"},
+                std::pair{Mask::CrossedOut, "crossedOut"},
+                std::pair{Mask::DoublyUnderlined, "doublyUnderlined"}
+            };
+            int i = 0;
+            std::ostringstream os;
+            for (auto const& mapping : mappings)
+            {
+                if (_mask.mask() & mapping.first)
+                {
+                    if (i) os << ", ";
+                    os << mapping.second;
+                }
+            }
+            return format_to(ctx.out(), "{}", os.str());
         }
     };
 }
