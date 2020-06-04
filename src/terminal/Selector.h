@@ -75,7 +75,7 @@ class Selector {
 			 GetCellAt _at,
 			 std::u32string const& _wordDelimiters,
 			 cursor_pos_t _totalRowCount,
-			 WindowSize const& _viewport,
+             cursor_pos_t _columnCount,
 			 Coordinate const& _from);
 
 	/// Convenience constructor when access to Screen is available.
@@ -88,7 +88,7 @@ class Selector {
 			std::bind(&Screen::absoluteAt, _screen, std::placeholders::_1),
 			_wordDelimiters,
 			_screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
-			_screen.size(),
+			_screen.size().columns,
 			_from
 		}
 	{
@@ -111,7 +111,6 @@ class Selector {
     /// the selection accordingly.
     void slice(int _offset);
 
-    constexpr WindowSize const& viewport() const noexcept { return viewport_; }
     constexpr Coordinate const& from() const noexcept { return from_; }
     constexpr Coordinate const& to() const noexcept { return to_; }
 
@@ -166,7 +165,7 @@ class Selector {
 	GetCellAt getCellAt_;
 	std::u32string wordDelimiters_;
 	cursor_pos_t totalRowCount_;
-    WindowSize const viewport_;
+    cursor_pos_t columnCount_;
     Coordinate start_{};
     Coordinate from_{};
     Coordinate to_{};

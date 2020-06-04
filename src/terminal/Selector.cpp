@@ -22,13 +22,13 @@ Selector::Selector(Mode _mode,
 				   GetCellAt _getCellAt,
 				   std::u32string const& _wordDelimiters,
 				   cursor_pos_t _totalRowCount,
-				   WindowSize const& _viewport,
+				   cursor_pos_t _columnCount,
 				   Coordinate const& _from) :
 	mode_{_mode},
 	getCellAt_{move(_getCellAt)},
 	wordDelimiters_{_wordDelimiters},
 	totalRowCount_{_totalRowCount},
-	viewport_{_viewport},
+    columnCount_{_columnCount},
 	start_{_from},
 	from_{_from},
 	to_{_from}
@@ -37,7 +37,7 @@ Selector::Selector(Mode _mode,
 	{
 		extend({from_.row, 1u});
 		swapDirection();
-		extend({from_.row, viewport_.columns});
+		extend({from_.row, columnCount_});
 	}
 	else if (isWordWiseSelection())
 	{
@@ -58,7 +58,7 @@ Coordinate Selector::stretchedColumn(Coordinate _coord) const noexcept
         return stretched;
     }
 
-    while (stretched.column < viewport_.columns)
+    while (stretched.column < columnCount_)
     {
         Screen::Cell const & cell = at(stretched);
         if (cell.empty())
@@ -79,8 +79,8 @@ bool Selector::extend(Coordinate const& _coord)
     assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
 
     auto const coord = Coordinate{
-        clamp(_coord.row, 1u, viewport_.rows),
-        clamp(_coord.column, 1u, viewport_.columns)
+        _coord.row,
+        clamp(_coord.column, 1u, columnCount_)
     };
 
     state_ = State::InProgress;
@@ -120,7 +120,7 @@ void Selector::extendSelectionBackward()
         else if (current.row > 1)
         {
             current.row--;
-            current.column = viewport_.columns;
+            current.column = columnCount_;
         }
         else
             break;
@@ -149,7 +149,7 @@ void Selector::extendSelectionForward()
     auto last = to_;
     auto current = last;
     for (;;) {
-        if (current.column < viewport_.columns)
+        if (current.column < columnCount_)
         {
             current = stretchedColumn({current.row, current.column + 1});
         }
@@ -225,17 +225,17 @@ vector<Selector::Range> Selector::linear() const
             break;
         case 2:
             // Render first line partial from selected column to end.
-            result[0] = Range{from.row, from.column, viewport().columns};
+            result[0] = Range{from.row, from.column, columnCount_};
             // Render last (second) line partial from beginning to last selected column.
             result[1] = Range{to.row, 1, to.column};
             break;
         default:
             // Render first line partial from selected column to end.
-            result[0] = Range{from.row, from.column, viewport().columns};
+            result[0] = Range{from.row, from.column, columnCount_};
 
             // Render inner full.
             for (size_t n = 1; n < result.size(); ++n)
-                result[n] = Range{from.row + static_cast<cursor_pos_t>(n), 1, viewport().columns};
+                result[n] = Range{from.row + static_cast<cursor_pos_t>(n), 1, columnCount_};
 
             // Render last (second) line partial from beginning to last selected column.
             result[result.size() - 1] = Range{to.row, 1, to.column};
@@ -254,7 +254,7 @@ vector<Selector::Range> Selector::lines() const
         result[row] = Range{
             from.row + row,
             1,
-            viewport().columns
+            columnCount_
         };
     }
 

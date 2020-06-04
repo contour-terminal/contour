@@ -211,7 +211,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     bind(&Terminal::absoluteAt, this, _1),
                     wordDelimiters(),
                     screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
-                    screenSize(),
+                    screenSize().columns,
                     absoluteCoordinate(currentMousePosition_)
                 );
             }
@@ -245,7 +245,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
             bind(&Terminal::absoluteAt, this, _1),
             wordDelimiters(),
             screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
-            screenSize(),
+            screenSize().columns,
             absoluteCoordinate(currentMousePosition_)
         );
     }
