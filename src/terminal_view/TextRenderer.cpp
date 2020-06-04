@@ -117,7 +117,7 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
             else
             {
                 flushPendingSegments();
-                if (_cell.codepoint(0) == SP)
+                if (_cell.empty() || _cell.codepoint(0) == SP)
                     state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
