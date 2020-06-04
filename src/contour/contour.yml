@@ -38,7 +38,13 @@ profiles:
         # Initial font size in pixels.
         fontSize: 12
         # Font family to use for displaying text.
-        fontFamily: "Fira Code, Hack, Ubuntu Mono, Consolas, monospace"
+        font_family:
+            regular: "monospace"
+            # if bold/italic/bold_italic are not explicitely specified, the regular font with
+            # a style appended will be used.
+            #bold: "Hack:style=bold"
+            #italic: "Hack:style=italic"
+            #bold_italic: "Hack:style=bold italic"
         # Tab width to move the cursor to the right when a HT control character is recieved.
         tabWidth: 8
         # Terminal cursor display configuration

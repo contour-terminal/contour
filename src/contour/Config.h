@@ -34,6 +34,45 @@
 
 namespace contour::config {
 
+struct FontSpec
+{
+    std::string pattern;
+    std::vector<std::string> features = {};
+};
+
+inline bool operator==(FontSpec const& a, FontSpec const& b) noexcept
+{
+    return a.pattern == b.pattern && a.features == b.features;
+}
+
+inline bool operator!=(FontSpec const& a, FontSpec const& b) noexcept
+{
+    return !(a == b);
+}
+
+struct FontSpecList
+{
+    FontSpec regular;
+    FontSpec bold;
+    FontSpec italic;
+    FontSpec boldItalic;
+    FontSpec emoji = {"emoji"};
+};
+
+inline bool operator==(FontSpecList const& a, FontSpecList const& b) noexcept
+{
+    return a.regular == b.regular
+        && a.bold == b.bold
+        && a.italic == b.italic
+        && a.boldItalic == b.boldItalic
+        && a.emoji == b.emoji;
+}
+
+inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
+{
+    return !(a == b);
+}
+
 struct TerminalProfile {
     std::string shell;
     terminal::Process::Environment env;
@@ -45,7 +84,7 @@ struct TerminalProfile {
     bool autoScrollOnUpdate;
 
     unsigned short fontSize;
-    std::string fontFamily;
+    FontSpecList fonts;
 
     unsigned int tabWidth;
 

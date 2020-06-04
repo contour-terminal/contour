@@ -81,7 +81,12 @@ profiles:
             TERM: xterm-256color
             COLORTERM: truecolor
         fontSize: 12
-        fontFamily: "Fira Code, Hack, Cascadia Code, Ubuntu Mono, Consolas, monospace"
+        font:
+            regular: "Fira Code"
+            bold: "Hack:style=bold"
+            italic: "Hack:style=italic"
+            bold_italic: "Hack:style=bold italic"
+            emoji: "emoji"
         tabWidth: 8
         history:
             limit: 8000

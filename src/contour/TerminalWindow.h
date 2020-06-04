@@ -73,7 +73,7 @@ class TerminalWindow :
     void onScreenChanged(QScreen* _screen);
 
   private:
-    terminal::view::FontConfig loadFonts();
+    terminal::view::FontConfig loadFonts(config::TerminalProfile const& _profile);
     void executeAction(actions::Action const& _action);
     void executeInput(terminal::MouseEvent const& event);
 

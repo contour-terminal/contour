@@ -252,10 +252,23 @@ FileSystem::path configHome()
 }
 
 template <typename T>
-void softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
+bool softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
+{
+    if (auto value = _node[_name]; value)
+    {
+        _store = value.as<T>();
+        return false;
+    }
+    return false;
+}
+
+template <typename T, typename U>
+void softLoadValue(YAML::Node const& _node, string const& _name, T& _store, U const& _default)
 {
     if (auto value = _node[_name]; value)
         _store = value.as<T>();
+    else
+        _store = _default;
 }
 
 void createFileIfNotExists(FileSystem::path const& _path)
@@ -666,7 +679,17 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     }
 
     softLoadValue(_node, "fontSize", profile.fontSize);
-    softLoadValue(_node, "fontFamily", profile.fontFamily);
+
+    if (auto fonts = _node["font"]; fonts)
+    {
+        auto& regularPattern = profile.fonts.regular.pattern;
+        softLoadValue(fonts, "regular", profile.fonts.regular.pattern, "monospace");
+        softLoadValue(fonts, "bold", profile.fonts.bold.pattern, regularPattern + ":style=bold");
+        softLoadValue(fonts, "italic", profile.fonts.italic.pattern, regularPattern + ":style=italic");
+        softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, regularPattern + ":style=bold italic");
+        softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
+    }
+
     softLoadValue(_node, "tabWidth", profile.tabWidth);
 
     if (auto history = _node["history"]; history)

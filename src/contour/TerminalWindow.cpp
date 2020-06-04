@@ -308,7 +308,7 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             : LoggingSink{config_.loggingMask, &cout}
     },
     fontLoader_{},
-    fonts_{loadFonts()},
+    fonts_{loadFonts(profile())},
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
@@ -954,39 +954,25 @@ void TerminalWindow::executeAction(Action const& _action)
     }
 }
 
-terminal::view::FontConfig TerminalWindow::loadFonts()
+terminal::view::FontConfig TerminalWindow::loadFonts(config::TerminalProfile const& _profile)
 {
+    unsigned const fontSize = static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale());
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
-        fontLoader_.load(
-            profile().fontFamily,
-            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
-        ),
-        fontLoader_.load(
-            profile().fontFamily + ":style=bold",
-            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
-        ),
-        fontLoader_.load(
-            profile().fontFamily + ":style=italic",
-            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
-        ),
-        fontLoader_.load(
-            profile().fontFamily + ":style=bold italic",
-            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
-        ),
-        fontLoader_.load(
-            "emoji",
-            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
-        )
+        fontLoader_.load(_profile.fonts.regular.pattern, fontSize),
+        fontLoader_.load(_profile.fonts.bold.pattern, fontSize),
+        fontLoader_.load(_profile.fonts.italic.pattern, fontSize),
+        fontLoader_.load(_profile.fonts.boldItalic.pattern, fontSize),
+        fontLoader_.load("emoji", fontSize)
     };
 }
 
 void TerminalWindow::setProfile(config::TerminalProfile newProfile)
 {
     terminalView_->terminal().setTabWidth(newProfile.tabWidth);
-    if (newProfile.fontFamily != profile().fontFamily)
+    if (newProfile.fonts != profile().fonts)
     {
-        fonts_ = loadFonts();
+        fonts_ = loadFonts(newProfile);
         terminalView_->setFont(fonts_);
     }
     else if (newProfile.fontSize != profile().fontSize)
