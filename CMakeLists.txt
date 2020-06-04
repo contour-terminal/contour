@@ -21,7 +21,6 @@ elseif(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
 endif()
 
-
 include(EnableCcache)
 include(ClangTidy)
 include(CIncludeMe)
@@ -35,6 +34,7 @@ option(CONTOUR_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MAS
 option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(CONTOUR_CLIENT "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
+option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
 
 # ----------------------------------------------------------------------------
 # code coverage

@@ -79,6 +79,14 @@ if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs wer
 	target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
 endif()
 
+if(CONTOUR_SANITIZE AND NOT MSVC)
+    add_compile_options(-fsanitize=address)
+    #add_compile_options(-fsanitize=pointer-compare) # cannot be enabled with -fsanitize=thread
+    #add_compile_options(-fsanitize=thread)
+    add_compile_options(-fsanitize=undefined)
+    target_link_libraries(contour PRIVATE ubsan)
+endif()
+
 target_link_libraries(contour PRIVATE ${contour_LIBRARIES})
 
 message(STATUS "[contour] Enable blur effect on KWin window manager: ${CONTOUR_BLUR_PLATFORM_KWIN}")
