@@ -336,7 +336,7 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
         assert(n > 0);
         cursor.column += n;
         for (unsigned i = 0; i < n; ++i)
-            (currentColumn++)->reset();
+            (currentColumn++)->reset(graphicsRendition);
     }
     else if (autoWrap)
         wrapPending = true;

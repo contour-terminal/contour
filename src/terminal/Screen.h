@@ -176,6 +176,13 @@ struct ScreenBuffer {
             width_ = 1;
         }
 
+        void reset(GraphicsAttributes _attribs) noexcept
+        {
+            attributes_ = _attribs;
+            codepointCount_ = 0;
+            width_ = 1;
+        }
+
         constexpr Cell(Cell const&) noexcept = default;
         constexpr Cell(Cell&&) noexcept = default;
         constexpr Cell& operator=(Cell const&) noexcept = default;
