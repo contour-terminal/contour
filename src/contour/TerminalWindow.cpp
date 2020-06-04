@@ -308,18 +308,7 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             : LoggingSink{config_.loggingMask, &cout}
     },
     fontLoader_{},
-    regularFont_{
-        fontLoader_.load(
-            profile().fontFamily,
-            static_cast<unsigned>(profile().fontSize * contentScale())
-        )
-    },
-    emojiFont_{
-        fontLoader_.load(
-            "emoji",
-            static_cast<unsigned>(profile().fontSize * contentScale())
-        )
-    },
+    fonts_{loadFonts()},
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
@@ -346,12 +335,12 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     if (profile().backgroundBlur && !enableBackgroundBlur(true))
         throw runtime_error{ "Could not enable background blur." };
 
-    if (!regularFont_.first.get().isFixedWidth())
+    if (!fonts_.regular.first.get().isFixedWidth())
         cerr << "Regular font is not a fixed-width font." << endl;
 
     resize(
-        profile().terminalSize.columns * regularFont_.first.get().maxAdvance(),
-        profile().terminalSize.rows * regularFont_.first.get().lineHeight()
+        static_cast<int>(profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance()),
+        static_cast<int>(profile().terminalSize.rows * fonts_.regular.first.get().lineHeight())
     );
 }
 
@@ -498,8 +487,7 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onSelectionComplete, this),
         bind(&TerminalWindow::onScreenBufferChanged, this, _1),
         bind(&TerminalWindow::onBell, this),
-        regularFont_,
-        emojiFont_,
+        fonts_,
         profile().cursorShape,
         profile().cursorDisplay,
         profile().cursorBlinkInterval,
@@ -966,17 +954,40 @@ void TerminalWindow::executeAction(Action const& _action)
     }
 }
 
+terminal::view::FontConfig TerminalWindow::loadFonts()
+{
+    // TODO: make these fonts customizable even further for the user
+    return terminal::view::FontConfig{
+        fontLoader_.load(
+            profile().fontFamily,
+            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
+        ),
+        fontLoader_.load(
+            profile().fontFamily + ":style=bold",
+            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
+        ),
+        fontLoader_.load(
+            profile().fontFamily + ":style=italic",
+            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
+        ),
+        fontLoader_.load(
+            profile().fontFamily + ":style=bold italic",
+            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
+        ),
+        fontLoader_.load(
+            "emoji",
+            static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale())
+        )
+    };
+}
+
 void TerminalWindow::setProfile(config::TerminalProfile newProfile)
 {
     terminalView_->terminal().setTabWidth(newProfile.tabWidth);
     if (newProfile.fontFamily != profile().fontFamily)
     {
-        terminalView_->setFont(
-            fontLoader_.load(
-                newProfile.fontFamily,
-                static_cast<unsigned>(newProfile.fontSize * contentScale())
-            )
-        );
+        fonts_ = loadFonts();
+        terminalView_->setFont(fonts_);
     }
     else if (newProfile.fontSize != profile().fontSize)
         setFontSize(newProfile.fontSize);
@@ -986,8 +997,8 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
         auto const screenSize = size();
 
         auto const terminalSize = terminal::WindowSize{
-            screenSize.width() / regularFont_.first.get().maxAdvance(),
-            screenSize.height() / regularFont_.first.get().lineHeight()
+            screenSize.width() / fonts_.regular.first.get().maxAdvance(),
+            screenSize.height() / fonts_.regular.first.get().lineHeight()
         };
 
         terminalView_->setTerminalSize(terminalSize);
@@ -1124,8 +1135,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
             if (!_height)
                 _height = screenSize.height();
         }
-        profile().terminalSize.columns = _width / regularFont_.first.get().maxAdvance();
-        profile().terminalSize.rows = _height / regularFont_.first.get().lineHeight();
+        profile().terminalSize.columns = _width / fonts_.regular.first.get().maxAdvance();
+        profile().terminalSize.rows = _height / fonts_.regular.first.get().lineHeight();
         resizePending = true;
     }
     else
@@ -1150,8 +1161,8 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
     {
         post([this]() {
             terminalView_->setTerminalSize(profile().terminalSize);
-            auto const width = profile().terminalSize.columns * regularFont_.first.get().maxAdvance();
-            auto const height = profile().terminalSize.rows * regularFont_.first.get().lineHeight();
+            auto const width = profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance();
+            auto const height = profile().terminalSize.rows * fonts_.regular.first.get().lineHeight();
             resize(width, height);
             setScreenDirty();
             update();

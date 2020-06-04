@@ -49,14 +49,13 @@ class GLRenderer : public QOpenGLFunctions {
     /** Constructs a GLRenderer instances.
      *
      * @p _logger the logging instance to use when logging is needed during rendering.
-     * @p _regularFont reference to the font to use for rendering standard text.
+     * @p _fonts reference to the set of loaded fonts to be used for rendering text.
      * @p _colorProfile user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     GLRenderer(Logger _logger,
                WindowSize const& _screenSize,
-               crispy::text::FontList const& _regularFont,
-               crispy::text::FontList const& _emojiFont,
+               FontConfig const& _fonts,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
@@ -64,12 +63,12 @@ class GLRenderer : public QOpenGLFunctions {
                ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
-    size_t cellHeight() const noexcept { return regularFont_.first.get().lineHeight(); }
-    size_t cellWidth() const noexcept { return regularFont_.first.get().maxAdvance(); }
+    size_t cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
+    size_t cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback);
+    void setFont(FontConfig const& _fonts);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
@@ -141,8 +140,7 @@ class GLRenderer : public QOpenGLFunctions {
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
-    crispy::text::FontList regularFont_;
-    crispy::text::FontList emojiFont_;
+    FontConfig fonts_;
 
     QMatrix4x4 projectionMatrix_;
     TextRenderer textRenderer_;

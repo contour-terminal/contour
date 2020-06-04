@@ -33,14 +33,12 @@ using unicode::out;
 TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            ScreenCoordinates const& _screenCoordinates,
                            ColorProfile const& _colorProfile,
-                           text::FontList const& _regularFont,
-                           text::FontList const& _emojiFont,
+                           FontConfig const& _fonts,
                            ShaderConfig const& _textShaderConfig) :
     renderMetrics_{ _renderMetrics },
     screenCoordinates_{ _screenCoordinates },
     colorProfile_{ _colorProfile },
-    regularFont_{ _regularFont },
-    emojiFont_{ _emojiFont },
+    fonts_{ _fonts },
     textShaper_{},
     textShader_{ createShader(_textShaderConfig) },
     textProjectionLocation_{ textShader_->uniformLocation("vs_projection") }
@@ -71,15 +69,15 @@ void TextRenderer::setColorProfile(ColorProfile const& _colorProfile)
     colorProfile_ = _colorProfile;
 }
 
-void TextRenderer::setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback)
+void TextRenderer::setFont(FontConfig const& _fonts)
 {
-    regularFont_.first = _font;
-    regularFont_.second = _fallback;
+    fonts_ = _fonts;
     clearCache();
 }
 
 void TextRenderer::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
 {
+    //std::cout << fmt::format("TextRenderer.reset(): attr:{}\n", _attr.styles);
     row_ = _row;
     startColumn_ = _col;
     attributes_ = _attr;
@@ -154,6 +152,7 @@ void TextRenderer::flushPendingSegments()
 
 crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
+    // TODO: cache key MUST include some attributes, too (because of bold/italic/hidden - more?)
     auto const cacheKey = std::u32string_view(codepoints_.data(), codepoints_.size());
     if (auto const cached = cache_.find(cacheKey); cached != cache_.end())
     {
@@ -167,6 +166,8 @@ crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 
 crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()
 {
+    // if (attributes_.styles.mask() != 0)
+    //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", attributes_.styles);
     text::GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
@@ -181,7 +182,7 @@ crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()
 
 text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
 {
-    auto textStyle = text::FontStyle::Regular;
+    text::FontStyle textStyle = text::FontStyle::Regular;
 
     if (attributes_.styles & CharacterStyleMask::Bold)
         textStyle |= text::FontStyle::Bold;
@@ -211,13 +212,26 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
     if ((attributes_.styles & CharacterStyleMask::Hidden))
         return {};
 
-    (void) textStyle;// TODO: selection by textStyle
+    auto& textFont = [&](text::FontStyle _style) -> text::FontList& {
+        switch (_style)
+        {
+            case text::FontStyle::Bold:
+                return fonts_.bold;
+            case text::FontStyle::Italic:
+                return fonts_.italic;
+            case text::FontStyle::BoldItalic:
+                return fonts_.boldItalic;
+            case text::FontStyle::Regular:
+                return fonts_.regular;
+        }
+        return fonts_.regular;
+    }(textStyle);
 
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-    text::FontList& font = isEmojiPresentation ? emojiFont_
-                                               : regularFont_;
+    text::FontList& font = isEmojiPresentation ? fonts_.emoji
+                                               : textFont;
 
-    unsigned const advanceX = regularFont_.first.get().maxAdvance();
+    unsigned const advanceX = fonts_.regular.first.get().maxAdvance();
 
 #if 0 // {{{ debug print
     cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",

@@ -15,6 +15,7 @@
 
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/GLRenderer.h>
+#include <terminal_view/FontConfig.h>
 
 #include <terminal/Color.h>
 #include <terminal/TerminalProcess.h>
@@ -45,8 +46,7 @@ class TerminalView {
                  std::function<void()> _onSelectionComplete,
                  Screen::OnBufferChanged _onScreenBufferChanged,
                  std::function<void()> _bell,
-                 crispy::text::FontList const& _regularFont,
-                 crispy::text::FontList const& _emojiFont,
+                 FontConfig const& _fonts,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -80,7 +80,7 @@ class TerminalView {
     /// PTY slave about the window resize event.
     void resize(unsigned _width, unsigned _height);
 
-    void setFont(crispy::text::FontList const& _fontList);
+    void setFont(FontConfig const& _fonts);
     bool setFontSize(unsigned int _fontSize);
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);
@@ -122,10 +122,10 @@ class TerminalView {
 
   private:
     Logger logger_;
+    FontConfig fonts_;
     QSize size_;
     WindowMargin windowMargin_;
-    crispy::text::FontList regularFont_;
-    crispy::text::FontList emojiFont_;
+
     GLRenderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;

@@ -1,9 +1,23 @@
+/**
+ * This file is part of the "contour" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/FileChangeWatcher.h>
 #include <terminal_view/TerminalView.h>
+#include <terminal_view/FontConfig.h>
 
 #include <crispy/text/FontLoader.h>
 
@@ -59,6 +73,7 @@ class TerminalWindow :
     void onScreenChanged(QScreen* _screen);
 
   private:
+    terminal::view::FontConfig loadFonts();
     void executeAction(actions::Action const& _action);
     void executeInput(terminal::MouseEvent const& event);
 
@@ -151,8 +166,7 @@ class TerminalWindow :
     std::ofstream loggingSink_;
     LoggingSink logger_;
     crispy::text::FontLoader fontLoader_;
-    crispy::text::FontList regularFont_;
-    crispy::text::FontList emojiFont_;
+    terminal::view::FontConfig fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     FileChangeWatcher configFileChangeWatcher_;
     std::mutex queuedCallsLock_;

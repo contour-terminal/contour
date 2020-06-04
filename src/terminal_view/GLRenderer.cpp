@@ -25,8 +25,7 @@ namespace terminal::view {
 
 GLRenderer::GLRenderer(Logger _logger,
                        WindowSize const& _screenSize,
-                       text::FontList const& _regularFont,
-                       text::FontList const& _emojiFont,
+                       FontConfig const& _fonts,
                        terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
@@ -35,36 +34,34 @@ GLRenderer::GLRenderer(Logger _logger,
                        QMatrix4x4 const& _projectionMatrix) :
     screenCoordinates_{
         _screenSize,
-        _regularFont.first.get().maxAdvance(), // cell width
-        _regularFont.first.get().lineHeight() // cell height
+        _fonts.regular.first.get().maxAdvance(), // cell width
+        _fonts.regular.first.get().lineHeight() // cell height
     },
     pendingBackgroundDraw_{},
     logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
-    regularFont_{ _regularFont },
-    emojiFont_{ _emojiFont },
+    fonts_{ _fonts },
     projectionMatrix_{ _projectionMatrix },
     textRenderer_{
         metrics_,
         screenCoordinates_,
         _colorProfile,
-        _regularFont,
-        _emojiFont,
+        _fonts,
         _textShaderConfig
     },
     cellBackground_{
         QSize(
-            static_cast<int>(regularFont_.first.get().maxAdvance()),
-            static_cast<int>(regularFont_.first.get().lineHeight())
+            static_cast<int>(fonts_.regular.first.get().maxAdvance()),
+            static_cast<int>(fonts_.regular.first.get().lineHeight())
         ),
         _projectionMatrix,
         _backgroundShaderConfig
     },
     cursor_{
         QSize(
-            static_cast<int>(regularFont_.first.get().maxAdvance()),
-            static_cast<int>(regularFont_.first.get().lineHeight())
+            static_cast<int>(fonts_.regular.first.get().maxAdvance()),
+            static_cast<int>(fonts_.regular.first.get().lineHeight())
         ),
         _projectionMatrix,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
@@ -84,25 +81,25 @@ void GLRenderer::clearCache()
     textRenderer_.clearCache();
 }
 
-void GLRenderer::setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback)
+void GLRenderer::setFont(FontConfig const& _fonts)
 {
-    textRenderer_.setFont(_font, _fallback);
+    textRenderer_.setFont(_fonts);
 }
 
 bool GLRenderer::setFontSize(unsigned int _fontSize)
 {
-    if (_fontSize == regularFont_.first.get().fontSize())
+    if (_fontSize == fonts_.regular.first.get().fontSize())
         return false;
 
-    for (auto& font: {regularFont_, emojiFont_}) // TODO: other font styles
+    for (auto& font: {fonts_.regular, fonts_.bold, fonts_.italic, fonts_.boldItalic, fonts_.emoji})
     {
         font.first.get().setFontSize(_fontSize);
         for (auto& fallback : font.second)
             fallback.get().setFontSize(_fontSize);
     }
 
-    auto const cellWidth = regularFont_.first.get().maxAdvance();
-    auto const cellHeight = regularFont_.first.get().lineHeight();
+    auto const cellWidth = fonts_.regular.first.get().maxAdvance();
+    auto const cellHeight = fonts_.regular.first.get().lineHeight();
     auto const cellSize = QSize{static_cast<int>(cellWidth),
                                 static_cast<int>(cellHeight)};
 

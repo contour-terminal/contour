@@ -45,8 +45,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onSelectionComplete,
                            Screen::OnBufferChanged _onScreenBufferChanged,
                            function<void()> _bell,
-                           text::FontList const& _regularFont,
-                           text::FontList const& _emojiFont,
+                           FontConfig const& _fonts,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            chrono::milliseconds _cursorBlinkInterval,
@@ -64,17 +63,15 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            ShaderConfig const& _cursorShaderConfig,
                            Logger _logger) :
     logger_{ move(_logger) },
+    fonts_{ _fonts },
     size_{
-        static_cast<int>(_winSize.columns * _regularFont.first.get().maxAdvance()),
-        static_cast<int>(_winSize.rows * _regularFont.first.get().lineHeight())
+        static_cast<int>(_winSize.columns * _fonts.regular.first.get().maxAdvance()),
+        static_cast<int>(_winSize.rows * _fonts.regular.first.get().lineHeight())
     },
-    regularFont_{ _regularFont },
-    emojiFont_{ _emojiFont },
     renderer_{
         logger_,
         _winSize,
-        _regularFont,
-        _emojiFont,
+        _fonts,
         _colorProfile,
         _backgroundOpacity,
         _backgroundShaderConfig,
@@ -199,10 +196,10 @@ bool TerminalView::alive() const
     return process_.alive();
 }
 
-void TerminalView::setFont(crispy::text::FontList const& _fontList)
+void TerminalView::setFont(FontConfig const& _fonts)
 {
-    regularFont_ = _fontList;
-    renderer_.setFont(_fontList.first, _fontList.second);
+    fonts_ = _fonts;
+    renderer_.setFont(_fonts);
 }
 
 bool TerminalView::setFontSize(unsigned int _fontSize)
@@ -216,14 +213,13 @@ bool TerminalView::setFontSize(unsigned int _fontSize)
         return true;
     }
     return false;
-
 }
 
 TerminalView::WindowMargin TerminalView::computeMargin(WindowSize const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
-    auto const usedHeight = ws.rows * regularFont_.first.get().lineHeight();
+    auto const usedHeight = ws.rows * fonts_.regular.first.get().lineHeight();
     auto const freeHeight = _height - usedHeight;
     auto const bottomMargin = freeHeight;
 

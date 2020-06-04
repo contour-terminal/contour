@@ -16,6 +16,7 @@
 #include <terminal/Screen.h>
 #include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/ShaderConfig.h>
+#include <terminal_view/FontConfig.h>
 
 #include <crispy/text/TextShaper.h>
 #include <crispy/text/TextRenderer.h>
@@ -39,11 +40,11 @@ class TextRenderer : public QOpenGLFunctions {
     TextRenderer(RenderMetrics& _renderMetrics,
                  ScreenCoordinates const& _screenCoordinates,
                  ColorProfile const& _colorProfile,
-                 crispy::text::FontList const& _regularFont,
-                 crispy::text::FontList const& _emojiFont,
+                 FontConfig const& _fonts,
                  ShaderConfig const& _shaderConfig);
 
-    void setFont(crispy::text::Font& _font, crispy::text::FontFallbackList const& _fallback);
+    void setFont(FontConfig const& _fonts);
+
     void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setColorProfile(ColorProfile const& _colorProfile);
 
@@ -54,8 +55,8 @@ class TextRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
-    size_t cellHeight() const noexcept { return regularFont_.first.get().lineHeight(); }
-    size_t cellWidth() const noexcept { return regularFont_.first.get().maxAdvance(); }
+    size_t cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
+    size_t cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
     ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
 
     void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
@@ -71,8 +72,7 @@ class TextRenderer : public QOpenGLFunctions {
     RenderMetrics& renderMetrics_;
     ScreenCoordinates const& screenCoordinates_;
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
-    crispy::text::FontList regularFont_;
-    crispy::text::FontList emojiFont_;
+    FontConfig fonts_;
 
     // text run segmentation
     //
