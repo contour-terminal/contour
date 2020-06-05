@@ -32,6 +32,8 @@
 
 using namespace std;
 
+auto constexpr MissingGlyphId = 0xFFFDu;
+
 namespace crispy::text {
 
 namespace {
@@ -83,7 +85,8 @@ Font::Font(FT_Library _ft, std::string _fontPath, unsigned int _fontSize) :
 
     setFontSize(_fontSize);
 
-    loadGlyphByIndex(0);
+    auto const emGlyphIndex = FT_Get_Char_Index(face_, 'M');
+    loadGlyphByIndex(emGlyphIndex);
     // XXX Woot, needed in order to retrieve maxAdvance()'s field,
     // as max_advance metric seems to be broken on at least FiraCode (Regular),
     // which is twice as large as it should be, but taking
@@ -148,8 +151,7 @@ GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
     FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, flags);
     if (ec != FT_Err_Ok)
     {
-        auto constexpr missingGlyphId = 0xFFFDu;
-        auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
+        auto const missingGlyph = FT_Get_Char_Index(face_, MissingGlyphId);
 
         if (missingGlyph)
             ec = FT_Load_Glyph(face_, missingGlyph, flags);
@@ -234,7 +236,9 @@ void Font::setFontSize(unsigned int _fontSize)
 
         maxAdvance_ = computeMaxAdvance(face_);
 
-        loadGlyphByIndex(0);
+        // load a face to get started with
+        auto const missingGlyph = FT_Get_Char_Index(face_, MissingGlyphId);
+        loadGlyphByIndex(missingGlyph);
     }
 }
 
