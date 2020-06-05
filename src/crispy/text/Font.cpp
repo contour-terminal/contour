@@ -147,7 +147,23 @@ GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
 
     FT_Error ec = FT_Load_Glyph(face_, _glyphIndex, flags);
     if (ec != FT_Err_Ok)
-        throw runtime_error{ string{"Error loading glyph. "} + freetypeErrorString(ec) };
+    {
+        auto constexpr missingGlyphId = 0xFFFDu;
+        auto const missingGlyph = FT_Get_Char_Index(face_, missingGlyphId);
+
+        if (missingGlyph)
+            ec = FT_Load_Glyph(face_, missingGlyph, flags);
+        else
+            ec = FT_Err_Invalid_Glyph_Index;
+
+        if (ec != FT_Err_Ok)
+            throw runtime_error{fmt::format(
+                "Error loading glyph index {} for font {}; {}",
+                _glyphIndex,
+                filePath(),
+                freetypeErrorString(ec)
+            )};
+    }
 
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
