@@ -26,6 +26,7 @@
 #endif
 
 #include <functional>
+#include <iosfwd>
 #include <string>
 #include <unordered_map>
 
@@ -34,18 +35,20 @@ namespace crispy::text {
 /// API for managing multiple fonts.
 class FontLoader {
   public:
-    FontLoader();
+    explicit FontLoader(std::ostream* logger = nullptr);
     FontLoader(FontLoader&&) = delete;
     FontLoader(FontLoader const&) = delete;
     FontLoader& operator=(FontLoader&&) = delete;
     FontLoader& operator=(FontLoader const&) = delete;
     ~FontLoader();
 
-    Font& loadFromFilePath(std::string const& _filePath, unsigned _fontSize);
-
     FontList load(std::string const& _fontPattern, unsigned _fontSize);
 
   private:
+    Font* loadFromFilePath(std::string const& _filePath, unsigned _fontSize);
+
+  private:
+    std::ostream* logger_;
     FT_Library ft_;
     std::unordered_map<std::string, Font> fonts_;
 };

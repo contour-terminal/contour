@@ -307,7 +307,7 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
             ? LoggingSink{config_.loggingMask, config_.logFilePath->string()}
             : LoggingSink{config_.loggingMask, &cout}
     },
-    fontLoader_{},
+    fontLoader_{&cerr},
     fonts_{loadFonts(profile())},
     terminalView_{},
     configFileChangeWatcher_{
