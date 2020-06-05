@@ -672,13 +672,13 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     if (profile.env.find("COLORTERM") == profile.env.end())
         profile.env["COLORTERM"] = "truecolor";
 
-    if (auto terminalSize = _node["terminalSize"]; terminalSize)
+    if (auto terminalSize = _node["terminal_size"]; terminalSize)
     {
         softLoadValue(terminalSize, "columns", profile.terminalSize.columns);
         softLoadValue(terminalSize, "lines", profile.terminalSize.rows);
     }
 
-    softLoadValue(_node, "fontSize", profile.fontSize);
+    softLoadValue(_node, "font_size", profile.fontSize);
 
     if (auto fonts = _node["font"]; fonts)
     {
@@ -690,7 +690,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
     }
 
-    softLoadValue(_node, "tabWidth", profile.tabWidth);
+    softLoadValue(_node, "tab_width", profile.tabWidth);
 
     if (auto history = _node["history"]; history)
     {
@@ -702,8 +702,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
                 profile.maxHistoryLineCount = limit.as<size_t>();
         }
 
-        softLoadValue(history, "autoScrollOnUpdate", profile.autoScrollOnUpdate);
-        softLoadValue(history, "scrollMultiplier", profile.historyScrollMultiplier);
+        softLoadValue(history, "auto_scroll_on_update", profile.autoScrollOnUpdate);
+        softLoadValue(history, "scroll_multiplier", profile.historyScrollMultiplier);
     }
 
     if (auto background = _node["background"]; background)
@@ -779,13 +779,13 @@ void loadConfigFromFile(Config& _config,
             _config.logFilePath = {FileSystem::path{filePath.as<string>()}};
 
         auto constexpr mappings = array{
-            pair{"parseErrors", LogMask::ParserError},
-            pair{"invalidOutput", LogMask::InvalidOutput},
-            pair{"unsupportedOutput", LogMask::UnsupportedOutput},
-            pair{"rawInput", LogMask::RawInput},
-            pair{"rawOutput", LogMask::RawOutput},
-            pair{"traceInput", LogMask::TraceInput},
-            pair{"traceOutput", LogMask::TraceOutput},
+            pair{"parse_errors", LogMask::ParserError},
+            pair{"invalid_output", LogMask::InvalidOutput},
+            pair{"unsupported_output", LogMask::UnsupportedOutput},
+            pair{"raw_input", LogMask::RawInput},
+            pair{"raw_output", LogMask::RawOutput},
+            pair{"trace_input", LogMask::TraceInput},
+            pair{"trace_output", LogMask::TraceOutput},
         };
 
         for (auto const& mapping : mappings)

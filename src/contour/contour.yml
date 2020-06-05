@@ -18,7 +18,7 @@ profiles:
         # shell: "/bin/bash"
 
         # Determines the initial terminal sice in characters.
-        terminalSize:
+        terminal_size:
             columns: 130
             lines: 30
 
@@ -31,9 +31,9 @@ profiles:
             # Number of lines to preserve (-1 for infinite).
             limit: 1000
             # Boolean indicating whether or not to scroll down to the bottom on screen updates.
-            autoScrollOnUpdate: true
+            auto_scroll_on_update: true
             # Number of lines to scroll on ScrollUp & ScrollDown events.
-            scrollMultiplier: 3
+            scroll_multiplier: 3
 
         # Initial font size in pixels.
         fontSize: 12
@@ -46,7 +46,7 @@ profiles:
             #italic: "Hack:style=italic"
             #bold_italic: "Hack:style=bold italic"
         # Tab width to move the cursor to the right when a HT control character is recieved.
-        tabWidth: 8
+        tab_width: 8
         # Terminal cursor display configuration
         cursor:
             # Supported shapes are:
@@ -204,19 +204,23 @@ logging:
     # file: "/tmp/contour.log"
 
     # Enable this option to log parser (syntax) errors in the VT sequence stream.
-    parseErrors: true
+    parse_errors: true
 
     # Enable this option to log VT semantic errors, such as invalid parameters to some VT sequence.
-    invalidOutput: true
+    invalid_output: true
 
     # Enable this option to log VT sequences that were seen but are unsupported.
-    unsupportedOutput: true
+    unsupported_output: true
 
     # Enable this option to log raw VT sequence input.
-    rawInput: false
-    # Enable this option to log raw VT sequence output.
-    rawOutput: false
+    raw_input: false
+
     # Enable this option to log parsed VT sequence input.
-    traceInput: false
+    trace_input: false
+
+    # Enable this option to log raw VT sequence output.
+    raw_output: false
+
     # Enable this option to log parsed VT sequence output.
-    traceOutput: false
+    trace_output: false
+

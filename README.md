@@ -74,7 +74,7 @@ default_profile: ubuntu_vm
 profiles:
     ubuntu_vm:
         shell: "ssh ubuntu-vm"
-        terminalSize:
+        terminal_size:
             columns: 130
             lines: 30
         environment:
@@ -87,11 +87,11 @@ profiles:
             italic: "Hack:style=italic"
             bold_italic: "Hack:style=bold italic"
             emoji: "emoji"
-        tabWidth: 8
+        tab_width: 8
         history:
             limit: 8000
-            scrollMultiplier: 3
-            autoScrollOnUpdate: true
+            scroll_multiplier: 3
+            auto_scroll_on_update: true
         cursor:
             shape: block
             blinking: true
@@ -151,13 +151,13 @@ input_mapping:
 
 logging:
     file: "/path/to/contour.log"
-    parseErrors: true
-    invalidOutput: true
-    unsupportedOutput: true
-    rawInput: false
-    rawOutput: false
-    traceInput: false
-    traceOutput: false
+    parse_errors: true
+    invalid_output: true
+    unsupported_output: true
+    raw_input: false
+    raw_output: false
+    trace_input: false
+    trace_output: false
 
 ```
 
