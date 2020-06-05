@@ -89,7 +89,8 @@ namespace {
     }
 }
 
-FontLoader::FontLoader() :
+FontLoader::FontLoader(ostream* _logger) :
+    logger_{ _logger },
     ft_{},
     fonts_{}
 {
@@ -107,20 +108,36 @@ FontList FontLoader::load(string const& _fontPattern, unsigned _fontSize)
 {
     vector<string> const filePaths = getFontFilePaths(_fontPattern);
 
-    Font& primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
+    Font* primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
+    if (!primaryFont)
+        throw runtime_error{fmt::format("Failed to load primary font \"{}\".", _fontPattern)};
+
     FontFallbackList fallbackList;
     for (size_t i = 1; i < filePaths.size(); ++i)
-        fallbackList.push_back(loadFromFilePath(filePaths[i], _fontSize));
+        if (auto fallbackFont = loadFromFilePath(filePaths[i], _fontSize); fallbackFont != nullptr)
+            fallbackList.push_back(*fallbackFont);
 
-    return {primaryFont, fallbackList};
+    if (logger_)
+        *logger_ << fmt::format(
+            "FontLoader: loading font \"{}\" from \"{}\", size={}, fallbacks={}\n",
+            _fontPattern,
+            primaryFont->filePath(),
+            _fontSize,
+            fallbackList.size()
+        );
+
+    return {*primaryFont, fallbackList};
 }
 
-Font& FontLoader::loadFromFilePath(std::string const& _path, unsigned _fontSize)
+Font* FontLoader::loadFromFilePath(std::string const& _path, unsigned _fontSize)
 {
     if (auto k = fonts_.find(_path); k != fonts_.end())
-        return k->second;
-    else
-        return fonts_.emplace(make_pair(_path, Font(ft_, _path, _fontSize))).first->second;
+        return &k->second;
+
+    if (auto face = Font::loadFace(logger_, ft_, _path, _fontSize); face != nullptr)
+        return &fonts_.emplace(make_pair(_path, Font(logger_, ft_, face, _fontSize, _path))).first->second;
+
+    return nullptr;
 }
 
 } // end namespace
