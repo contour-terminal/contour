@@ -152,7 +152,7 @@ Font::~Font()
         FT_Done_Face(face_);
 }
 
-GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
+optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
 {
     FT_Int32 flags = FT_LOAD_DEFAULT;
     if (FT_HAS_COLOR(face_))
@@ -169,18 +169,24 @@ GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
             ec = FT_Err_Invalid_Glyph_Index;
 
         if (ec != FT_Err_Ok)
-            throw runtime_error{fmt::format(
-                "Error loading glyph index {} for font {}; {}",
-                _glyphIndex,
-                filePath(),
-                freetypeErrorString(ec)
-            )};
+        {
+            if (logger_)
+            {
+                *logger_ << fmt::format(
+                    "Error loading glyph index {} for font {}; {}",
+                    _glyphIndex,
+                    filePath(),
+                    freetypeErrorString(ec)
+                );
+            }
+            return nullopt;
+        }
     }
 
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
         if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
-            return GlyphBitmap{};
+            return {GlyphBitmap{}};
 
     auto const width = face_->glyph->bitmap.width;
     auto const height = face_->glyph->bitmap.rows;
@@ -205,11 +211,11 @@ GlyphBitmap Font::loadGlyphByIndex(unsigned int _glyphIndex)
         );
     }
 
-    return GlyphBitmap{
+    return {GlyphBitmap{
         width,
         height,
         move(bitmap)
-    };
+    }};
 }
 
 bool Font::doSetFontSize(ostream* _logger, FT_Face _face, unsigned int _fontSize)

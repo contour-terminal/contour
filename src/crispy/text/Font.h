@@ -26,10 +26,11 @@
 
 #include <array>
 #include <functional>
+#include <optional>
+#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <ostream>
 
 // TODO: move all font stuff into crispy::text namespace
 
@@ -190,7 +191,7 @@ class Font {
 
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    GlyphBitmap loadGlyphByIndex(unsigned int _glyphIndex);
+    std::optional<GlyphBitmap> loadGlyphByIndex(unsigned int _glyphIndex);
 
     operator FT_Face () noexcept { return face_; }
     FT_Face operator->() noexcept { return face_; }
