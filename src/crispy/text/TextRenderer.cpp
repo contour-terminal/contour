@@ -81,14 +81,16 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
 }
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
-                                                         QSize const& _cellSize,
-                                                         TextureAtlas& _atlas)
+                                                             QSize const& _cellSize,
+                                                             TextureAtlas& _atlas)
 {
     if (optional<DataRef> const dataRef = _atlas.get(_id); dataRef.has_value())
         return dataRef;
 
     Font& font = _id.font.get();
-    GlyphBitmap bitmap = font.loadGlyphByIndex(_id.glyphIndex);
+    optional<GlyphBitmap> bitmap = font.loadGlyphByIndex(_id.glyphIndex);
+    if (!bitmap.has_value())
+        return nullopt;
 
     auto const format = _id.font.get().hasColor() ? GL_BGRA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
@@ -118,10 +120,14 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     }
 #endif
 
-    return _atlas.insert(_id, bitmap.width, bitmap.height,
-                         bitmap.width * ratioX,
-                         bitmap.height * ratioY,
-                         format, move(bitmap.buffer), colored, move(metadata));
+    auto& bmp = bitmap.value();
+    return _atlas.insert(_id, bmp.width, bmp.height,
+                         static_cast<unsigned>(static_cast<float>(bmp.width) * ratioX),
+                         static_cast<unsigned>(static_cast<float>(bmp.height) * ratioY),
+                         format,
+                         move(bmp.buffer),
+                         colored,
+                         metadata);
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,
