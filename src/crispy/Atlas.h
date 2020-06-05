@@ -226,7 +226,7 @@ class TextureAtlas {
                                   unsigned _format,
                                   Buffer _data,
                                   unsigned _user,
-                                  Metadata&& _metadata = {})
+                                  Metadata _metadata = {})
     {
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
         if (_height > height_ || _width > width_)
