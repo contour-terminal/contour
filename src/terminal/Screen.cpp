@@ -358,7 +358,7 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
         cursor.column += n;
         currentColumn++;
         for (unsigned i = 1; i < n; ++i)
-            (currentColumn++)->reset();
+            (currentColumn++)->reset(graphicsRendition);
     }
     else if (autoWrap)
         wrapPending = true;

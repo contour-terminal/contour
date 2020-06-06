@@ -143,6 +143,23 @@ TEST_CASE("AppendChar", "[screen]")
     REQUIRE("F  " == screen.renderTextLine(1));
 }
 
+TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
+{
+    auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    screen.write(SetBackgroundColor{IndexedColor::Blue});
+
+    screen.write(AppendChar{U'\u2757'}); // ❗
+    // screen.write(AppendChar{U'\uFE0F'});
+    CHECK(screen.at(1, 1).attributes().backgroundColor == IndexedColor::Blue);
+    CHECK(screen.at(1, 1).width() == 2);
+    CHECK(screen.at(1, 2).attributes().backgroundColor == IndexedColor::Blue);
+    CHECK(screen.at(1, 2).width() == 1);
+
+    screen.write(AppendChar{U'M'});
+    CHECK(screen.at(1, 3).attributes().backgroundColor == IndexedColor::Blue);
+}
+
 TEST_CASE("AppendChar.emoji_VS16", "[screen]")
 {
     auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
