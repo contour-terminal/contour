@@ -124,6 +124,14 @@ enum class Key {
     F10,
     F11,
     F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
 
     // cursor keys
     DownArrow,

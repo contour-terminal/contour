@@ -89,6 +89,14 @@ namespace mappings {
         KeyMapping{Key::F10, CSI "21;{}~"},
         KeyMapping{Key::F11, CSI "23;{}~"},
         KeyMapping{Key::F12, CSI "24;{}~"},
+        KeyMapping{Key::F13, CSI "25;{}~"},
+        KeyMapping{Key::F14, CSI "26;{}~"},
+        KeyMapping{Key::F15, CSI "28;{}~"},
+        KeyMapping{Key::F16, CSI "29;{}~"},
+        KeyMapping{Key::F17, CSI "31;{}~"},
+        KeyMapping{Key::F18, CSI "32;{}~"},
+        KeyMapping{Key::F19, CSI "33;{}~"},
+        KeyMapping{Key::F20, CSI "34;{}~"},
 
         // cursor keys
         KeyMapping{Key::UpArrow, CSI "1;{}A"},
@@ -222,6 +230,14 @@ string to_string(Key _key)
         case Key::F10: return "F10";
         case Key::F11: return "F11";
         case Key::F12: return "F12";
+        case Key::F13: return "F13";
+        case Key::F14: return "F14";
+        case Key::F15: return "F15";
+        case Key::F16: return "F16";
+        case Key::F17: return "F17";
+        case Key::F18: return "F18";
+        case Key::F19: return "F19";
+        case Key::F20: return "F20";
         case Key::DownArrow: return "DownArrow";
         case Key::LeftArrow: return "LeftArrow";
         case Key::RightArrow: return "RightArrow";
