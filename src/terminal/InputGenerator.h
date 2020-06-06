@@ -453,9 +453,9 @@ namespace fmt { // {{{
                 case terminal::InputGenerator::MouseWheelMode::Default:
                     return format_to(_ctx.out(), "Default");
                 case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
-                    return format_to(_ctx.out(), "Normal");
+                    return format_to(_ctx.out(), "NormalCursorKeys");
                 case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
-                    return format_to(_ctx.out(), "Application");
+                    return format_to(_ctx.out(), "ApplicationCursorKeys");
             }
             return format_to(_ctx.out(), "<{}>", unsigned(_value));
         }

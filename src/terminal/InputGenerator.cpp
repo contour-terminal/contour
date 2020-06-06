@@ -143,15 +143,17 @@ namespace mappings {
         KeyMapping{Key::F12, CSI "24~"},
     };
 
-    /// Cursor key mappings in when cursor key application mode is set.
+    /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
     auto constexpr applicationCursorKeys = array{
         KeyMapping{Key::UpArrow, ESC SS3 "A"},
         KeyMapping{Key::DownArrow, ESC SS3 "B"},
         KeyMapping{Key::RightArrow, ESC SS3 "C"},
         KeyMapping{Key::LeftArrow, ESC SS3 "D"},
+        KeyMapping{Key::Home, ESC SS3 "H"},
+        KeyMapping{Key::End, ESC SS3 "F"},
     };
 
-    auto constexpr applicationNumpadKeys = array{
+    auto constexpr applicationKeypad = array{
         KeyMapping{Key::Numpad_NumLock, ESC SS3 "P"},
         KeyMapping{Key::Numpad_Divide, ESC SS3 "Q"},
         KeyMapping{Key::Numpad_Multiply, ESC SS3 "Q"},
@@ -171,6 +173,13 @@ namespace mappings {
         KeyMapping{Key::Numpad_7, ESC SS3 "w"},
         KeyMapping{Key::Numpad_8, ESC SS3 "x"},
         KeyMapping{Key::Numpad_9, ESC SS3 "y"},
+        KeyMapping{Key::PageUp,   ESC CSI "5~"},
+        KeyMapping{Key::PageDown, ESC CSI "6~"},
+#if 0 // TODO
+        KeyMapping{Key::Space,    ESC SS3 " "}, // TODO
+        KeyMapping{Key::Tab,      ESC SS3 "I"},
+        KeyMapping{Key::Enter,    ESC SS3 "M"},
+#endif
     };
 
     #undef ESC
@@ -286,23 +295,28 @@ string to_string(MouseButton _button)
 
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
+    // cerr << fmt::format("InputGenerator.setCursorKeysMode: {}\n", _mode);
     cursorKeysMode_ = _mode;
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode _mode)
 {
+    // cerr << fmt::format("InputGenerator.setNumpadKeysMode: {}\n", _mode);
     numpadKeysMode_ = _mode;
 }
 
 void InputGenerator::setApplicationKeypadMode(bool _enable)
 {
-    // cerr << "InputGenerator.setApplicationKeypadMode: "
-    //      << (_enable ? "enable" : "disable") << endl;
-
     if (_enable)
         numpadKeysMode_ = KeyMode::Application;
     else
         numpadKeysMode_ = KeyMode::Normal; // aka. Numeric
+
+    // cerr << fmt::format(
+    //     "InputGenerator.setApplicationKeypadMode: {} -> {}\n",
+    //     (_enable ? "enable" : "disable"),
+    //     numpadKeysMode_
+    // );
 }
 
 bool InputGenerator::generate(InputEvent const& _inputEvent)
@@ -356,7 +370,7 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
             return append(*mapping);
 
     if (applicationKeypad())
-        if (auto mapping = tryMap(mappings::applicationNumpadKeys, _key); mapping)
+        if (auto mapping = tryMap(mappings::applicationKeypad, _key); mapping)
             return append(*mapping);
 
     if (auto mapping = tryMap(mappings::standard, _key); mapping)
