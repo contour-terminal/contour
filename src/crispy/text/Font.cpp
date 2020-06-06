@@ -247,18 +247,6 @@ void Font::setFontSize(unsigned int _fontSize)
     {
         fontSize_ = _fontSize;
         updateBitmapDimensions();
-
-        if (logger_)
-        {
-            *logger_ << fmt::format(
-                "Font({}).setFontSize: {}; bitmap_dim={}x{}; maxAdvance={}\n",
-                filePath_,
-                fontSize_,
-                bitmapWidth_,
-                bitmapHeight_,
-                maxAdvance_
-            );
-        }
     }
 }
 
