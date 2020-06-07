@@ -43,31 +43,7 @@ namespace terminal {
 
 string to_string(CharacterStyleMask _mask)
 {
-    string out;
-    auto const append = [&](string_view _name) {
-        if (!out.empty())
-            out += ",";
-        out += _name;
-    };
-    if (_mask & CharacterStyleMask::Bold)
-        append("bold");
-    if (_mask & CharacterStyleMask::Faint)
-        append("faint");
-    if (_mask & CharacterStyleMask::Italic)
-        append("italic");
-    if (_mask & CharacterStyleMask::Underline)
-        append("underline");
-    if (_mask & CharacterStyleMask::Blinking)
-        append("blinking");
-    if (_mask & CharacterStyleMask::Inverse)
-        append("inverse");
-    if (_mask & CharacterStyleMask::Hidden)
-        append("hidden");
-    if (_mask & CharacterStyleMask::CrossedOut)
-        append("crossed-out");
-    if (_mask & CharacterStyleMask::DoublyUnderlined)
-        append("doubly-underlined");
-    return out;
+    return fmt::format("{}", _mask);
 }
 
 std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
