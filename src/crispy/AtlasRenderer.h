@@ -54,6 +54,8 @@ class Renderer : public QOpenGLExtraFunctions, public CommandListener {
     /// First, schedule commands in order to prepare and fill command queue, then execute.
     void execute();
 
+    bool empty() const noexcept;
+
   private:
     void createAtlas(CreateAtlas const& _atlas);
     void uploadTexture(UploadTexture const& _texture);

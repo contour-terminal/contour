@@ -75,6 +75,13 @@ class TextRenderer {
     /// Clears the render cache.
     void clearCache();
 
+    /// Renders an arbitrary texture.
+    void renderTexture(QPoint const& _pos,
+                       QVector4D const& _color,
+                       atlas::TextureInfo const& _textureInfo);
+
+    bool empty() const noexcept { return renderer_.empty(); }
+
   private:
     struct Glyph {
         QPoint size;            // glyph size

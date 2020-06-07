@@ -43,7 +43,7 @@ TextRenderer::TextRenderer() :
         min(MaxColorTextureSize, renderer_.maxTextureSize()),
         GL_RGBA8,
         renderer_.scheduler(),
-        "colorAtlas",
+        "colorAtlas"
     }
 {
 }
@@ -139,10 +139,23 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     unsigned const px = _pos.x() + _gpos.x;
     unsigned const py = _pos.y() + _gpos.y;
 
-    auto const x = static_cast<unsigned>(px + _glyph.bearing.x());
-    auto const y = static_cast<unsigned>(py + _gpos.font.get().baseline() - _glyph.descender);
-    auto const z = 0u;
+    auto const x = px + _glyph.bearing.x();
+    auto const y = py + _gpos.font.get().baseline() - _glyph.descender;
 
+    renderTexture(QPoint(x, y), _color, _textureInfo);
+
+    //auto const z = 0u;
+    //renderer_.scheduler().renderTexture({_textureInfo, x, y, z, _color});
+}
+
+void TextRenderer::renderTexture(QPoint const& _pos,
+                                 QVector4D const& _color,
+                                 atlas::TextureInfo const& _textureInfo)
+{
+    // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
+    auto const x = static_cast<unsigned>(_pos.x());
+    auto const y = static_cast<unsigned>(_pos.y());
+    auto const z = 0u;
     renderer_.scheduler().renderTexture({_textureInfo, x, y, z, _color});
 }
 

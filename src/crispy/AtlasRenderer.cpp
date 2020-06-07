@@ -207,12 +207,14 @@ void Renderer::setProjection(QMatrix4x4 const& _projection)
     projection_ = _projection;
 }
 
+bool Renderer::empty() const noexcept
+{
+    return scheduler_->size() == 0;
+}
+
 /// Executes all scheduled commands in proper order.
 void Renderer::execute()
 {
-    if (scheduler_->size() == 0)
-        return;
-
     // potentially create new atlases
     for (CreateAtlas const& params : scheduler_->createAtlases)
         createAtlas(params);
