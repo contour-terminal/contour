@@ -94,7 +94,7 @@ int main(int argc, char const* argv[])
     auto out = ofstream{outputFileName};
 
     out << "#pragma once\n\n";
-    out << "#include <array>\n\n";
+    out << "#include <array>\n";
     out << "#include <cstdint>\n\n";
 
     if (!ns.empty())
