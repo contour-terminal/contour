@@ -45,12 +45,18 @@ struct NewTerminal{ std::optional<std::string> profileName; };
 struct OpenConfiguration{};
 struct OpenFileManager{};
 struct Quit{};
+struct ResetFontSize{};
+struct ReloadConfig{ std::optional<std::string> profileName; };
+struct ResetConfig{};
 // CloseTab
 // OpenTab
 // FocusNextTab
 // FocusPreviousTab
 
 using Action = std::variant<
+    ResetFontSize,
+    ReloadConfig,
+    ResetConfig,
     ToggleFullScreen,
     ScreenshotVT,
     IncreaseFontSize,

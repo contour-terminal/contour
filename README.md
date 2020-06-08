@@ -136,6 +136,7 @@ input_mapping:
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
     - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
     - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
+    - { mods: [Control],        key: '0',           action: ResetFontSize }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [],               mouse: WheelUp,     action: ScrollUp }

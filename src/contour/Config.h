@@ -27,6 +27,7 @@
 #include <QKeySequence>
 
 #include <chrono>
+#include <system_error>
 #include <optional>
 #include <string>
 #include <variant>
@@ -145,5 +146,7 @@ void loadConfigFromFile(Config& _config,
 Config loadConfigFromFile(FileSystem::path const& _fileName,
                           Logger const& _logger);
 Config loadConfig(Logger const& _logger);
+
+std::error_code createDefaultConfig(FileSystem::path const& _path);
 
 } // namespace contour::config

@@ -274,21 +274,25 @@ void softLoadValue(YAML::Node const& _node, string const& _name, T& _store, U co
 void createFileIfNotExists(FileSystem::path const& _path)
 {
     if (!FileSystem::is_regular_file(_path))
-    {
-		FileSystemError ec;
-		FileSystem::create_directories(_path.parent_path(), ec);
-		if (ec)
-		{
-			throw runtime_error{fmt::format(
-					"Could not create directory {}. {}",
-					_path.parent_path().string(),
-					ec.message())};
-		}
-		ofstream{_path.string()}.write(
-			(char const*) &contour::default_config_yaml[0],
-			contour::default_config_yaml.size()
-		);
-    }
+        if (auto const ec = createDefaultConfig(_path); ec)
+            throw runtime_error{fmt::format("Could not create directory {}. {}",
+                                            _path.parent_path().string(),
+                                            ec.message())};
+}
+
+error_code createDefaultConfig(FileSystem::path const& _path)
+{
+    FileSystemError ec;
+    FileSystem::create_directories(_path.parent_path(), ec);
+    if (ec)
+        return ec;
+
+    ofstream{_path.string()}.write(
+        (char const*) &contour::default_config_yaml[0],
+        contour::default_config_yaml.size()
+    );
+
+    return error_code{};
 }
 
 template <typename T>
@@ -441,6 +445,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         {
             if (auto profile = _parent["profile"]; profile && profile.IsScalar())
                 return actions::NewTerminal{profile.as<string>()};
+            else
+                return action;
+        }
+
+        if (holds_alternative<actions::ReloadConfig>(action))
+        {
+            if (auto profileName = _parent["profile"]; profileName.IsScalar())
+                return actions::ReloadConfig{profileName.as<string>()};
             else
                 return action;
         }

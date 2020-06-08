@@ -74,6 +74,9 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::SendChars>("SendChars"),
         mapAction<actions::ToggleFullScreen>("ToggleFullscreen"),
         mapAction<actions::WriteScreen>("WriteScreen"),
+        mapAction<actions::ResetFontSize>("ResetFontSize"),
+        mapAction<actions::ReloadConfig>("ReloadConfig"),
+        mapAction<actions::ResetConfig>("ResetConfig"),
     };
 
     auto const name = toLower(_name);

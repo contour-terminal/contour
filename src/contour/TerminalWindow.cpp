@@ -569,6 +569,11 @@ void TerminalWindow::paintGL()
 
 bool TerminalWindow::reloadConfigValues()
 {
+    return reloadConfigValues(profileName_);
+}
+
+bool TerminalWindow::reloadConfigValues(std::string const& _profileName)
+{
     auto filePath = config_.backingFilePath.string();
     auto newConfig = config::Config{};
 
@@ -589,8 +594,8 @@ bool TerminalWindow::reloadConfigValues()
         configLogger(unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
     }
 
-    if (!newConfig.profile(profileName_))
-        configLogger(fmt::format("Currently active profile with name '{}' gone.", profileName_));
+    if (!newConfig.profile(_profileName))
+        configLogger(fmt::format("Currently active profile with name '{}' gone.", _profileName));
 
     if (configFailures)
     {
@@ -598,14 +603,29 @@ bool TerminalWindow::reloadConfigValues()
         return false;
     }
 
-    logger_ =
-        newConfig.logFilePath
-            ? LoggingSink{newConfig.loggingMask, newConfig.logFilePath->string()}
-            : LoggingSink{newConfig.loggingMask, &cout};
+    return reloadConfigValues(move(newConfig), _profileName);
+}
 
-    terminalView_->terminal().setWordDelimiters(newConfig.wordDelimiters);
-    config_ = move(newConfig);
-    setProfile(*config_.profile(profileName_));
+bool TerminalWindow::reloadConfigValues(config::Config _newConfig)
+{
+    auto const profileName = _newConfig.defaultProfileName;
+    return reloadConfigValues(move(_newConfig), profileName);
+}
+
+bool TerminalWindow::reloadConfigValues(config::Config _newConfig, string const& _profileName)
+{
+    cout << fmt::format("Loading configuration from {} with profile {}\n",
+                        _newConfig.backingFilePath.string(),
+                        _profileName);
+
+    logger_ =
+        _newConfig.logFilePath
+            ? LoggingSink{_newConfig.loggingMask, _newConfig.logFilePath->string()}
+            : LoggingSink{_newConfig.loggingMask, &cout};
+
+    terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
+    config_ = move(_newConfig);
+    setProfile(*config_.profile(_profileName));
 
     terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
     terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
@@ -936,7 +956,7 @@ void TerminalWindow::executeAction(Action const& _action)
                 cerr << "Could not open configuration file \"" << config_.backingFilePath << "\"" << endl;
             return false;
         },
-        [this](actions::OpenFileManager) -> bool {
+        [](actions::OpenFileManager) -> bool {
             // TODO open file manager at current window's current working directory (via /proc/self/cwd)
             return false;
         },
@@ -944,6 +964,32 @@ void TerminalWindow::executeAction(Action const& _action)
             // XXX: later warn here when more then one terminal view is open
             terminalView_->terminal().device().close();
             return false;
+        },
+        [this](actions::ResetFontSize) -> bool {
+            setFontSize(config_.profile(profileName_)->fontSize);
+            return false;
+        },
+        [this](actions::ReloadConfig const& action) -> bool {
+            if (action.profileName.has_value())
+                return reloadConfigValues(action.profileName.value());
+            else
+                return reloadConfigValues();
+        },
+        [this](actions::ResetConfig) -> bool {
+            auto const ec = config::createDefaultConfig(config_.backingFilePath);
+            if (ec)
+            {
+                cerr << fmt::format("Failed to load default config at {}; ({}) {}\n",
+                                    config_.backingFilePath.string(),
+                                    ec.category().name(),
+                                    ec.message());
+                return false;
+            }
+            auto const defaultConfig = config::loadConfig([&](auto const& msg) {
+                cerr << "Failed to load default config: " << msg << endl;
+            });;
+            reloadConfigValues(defaultConfig);
+            return true;
         }
     }, _action);
 
@@ -974,6 +1020,7 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     {
         fonts_ = loadFonts(newProfile);
         terminalView_->setFont(fonts_);
+        setFontSize(newProfile.fontSize);
     }
     else if (newProfile.fontSize != profile().fontSize)
         setFontSize(newProfile.fontSize);

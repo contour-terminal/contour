@@ -154,6 +154,9 @@ color_schemes:
 # - PasteClipboard    Pastes clipboard to standard input.
 # - PasteSelection    Pastes current selection to standard input.
 # - Quit              Quits the application.
+# - ReloadConfig      Forces a configuration reload.
+# - ResetConfig       Overwrites current configuration with builtin default configuration and loads it. Attention, all your current configuration will be lost due to overwrite!
+# - ResetFontSize     Resets font size to what is configured in the config file.
 # - ScreenshotVT      Takes a screenshot in form of VT escape sequences.
 # - ScrollDown        Scrolls down by the multiplier factor.
 # - ScrollOneDown     Scrolls down by exactly one line.

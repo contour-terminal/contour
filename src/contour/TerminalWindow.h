@@ -92,6 +92,9 @@ class TerminalWindow :
 
     bool enableBackgroundBlur(bool _enable);
     bool reloadConfigValues();
+    bool reloadConfigValues(std::string const& _profileName);
+    bool reloadConfigValues(config::Config _newConfig);
+    bool reloadConfigValues(config::Config _newConfig, std::string const& _profileName);
 
     void onScreenUpdate();
     void onWindowTitleChanged();
