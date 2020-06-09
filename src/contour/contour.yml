@@ -184,7 +184,9 @@ input_mapping:
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
     - { mods: [Control, Shift], key: Plus,          action: IncreaseFontSize }
     - { mods: [Control, Shift], key: C,             action: CopySelection }
+    - { mods: [Control],        key: '0',           action: ResetFontSize }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
+    - { mods: [Control, Shift], key: '_',           action: DecreaseFontSize }
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard }
     - { mods: [Control, Shift], key: Comma,         action: OpenConfiguration }
