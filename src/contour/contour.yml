@@ -145,6 +145,7 @@ color_schemes:
 #   Left, Middle, Right, WheelUp, WheelDown
 #
 # Actions:
+# - ChangeProfile     Changes the profile to the given profile `name`.
 # - CopySelection     Copies the current selection into the clipboard buffer.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
