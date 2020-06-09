@@ -112,8 +112,8 @@ class TerminalView {
     void setDynamicColor(DynamicColorName _name, RGBColor const& value);
 
     struct WindowMargin {
-        unsigned left;
-        unsigned bottom;
+        int left;
+        int bottom;
     };
 
     WindowMargin computeMargin(WindowSize const& ws, unsigned _width, unsigned _height) const noexcept;
