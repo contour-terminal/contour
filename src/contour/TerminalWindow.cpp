@@ -624,11 +624,13 @@ bool TerminalWindow::reloadConfigValues(config::Config _newConfig, string const&
             : LoggingSink{_newConfig.loggingMask, &cout};
 
     terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
-    config_ = move(_newConfig);
-    setProfile(*config_.profile(_profileName));
 
-    terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
-    terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
+    terminalView_->terminal().setLogRawOutput((_newConfig.loggingMask & LogMask::RawOutput) != LogMask::None);
+    terminalView_->terminal().setLogTraceOutput((_newConfig.loggingMask & LogMask::TraceOutput) != LogMask::None);
+
+    config_ = move(_newConfig);
+    if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
+        setProfile(*profile);
 
     return true;
 }
@@ -827,7 +829,7 @@ void TerminalWindow::toggleFullScreen()
 
 bool TerminalWindow::setFontSize(unsigned _fontSize)
 {
-    //qDebug() << "TerminalWindow.setFontSize" << _fontSize;
+    cout << fmt::format("TerminalWindow.setFontSize: {} -> {}\n", profile().fontSize, _fontSize);
 
     if (_fontSize < 5) // Let's not be crazy.
         return false;
@@ -835,14 +837,9 @@ bool TerminalWindow::setFontSize(unsigned _fontSize)
     if (_fontSize > 100)
         return false;
 
-    if (!terminalView_->setFontSize(static_cast<unsigned>(_fontSize * contentScale())))
-        return false;
+    terminalView_->setFontSize(static_cast<unsigned>(static_cast<float>(_fontSize) * contentScale()));
 
     profile().fontSize = _fontSize;
-
-    // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    auto const windowSize = size();
-    terminalView_->resize(windowSize.width(), windowSize.height());
 
     return true;
 }
@@ -966,8 +963,7 @@ void TerminalWindow::executeAction(Action const& _action)
             return false;
         },
         [this](actions::ResetFontSize) -> bool {
-            setFontSize(config_.profile(profileName_)->fontSize);
-            return false;
+            return setFontSize(config_.profile(profileName_)->fontSize);
         },
         [this](actions::ReloadConfig const& action) -> bool {
             if (action.profileName.has_value())
@@ -985,11 +981,13 @@ void TerminalWindow::executeAction(Action const& _action)
                                     ec.message());
                 return false;
             }
-            auto const defaultConfig = config::loadConfig([&](auto const& msg) {
-                cerr << "Failed to load default config: " << msg << endl;
-            });;
-            reloadConfigValues(defaultConfig);
-            return true;
+            auto const defaultConfig = config::loadConfigFromFile(
+                config_.backingFilePath,
+                [&](auto const& msg) {
+                    cerr << "Failed to load default config: " << msg << endl;
+                }
+            );
+            return reloadConfigValues(defaultConfig);
         }
     }, _action);
 
@@ -1002,7 +1000,7 @@ void TerminalWindow::executeAction(Action const& _action)
 
 terminal::view::FontConfig TerminalWindow::loadFonts(config::TerminalProfile const& _profile)
 {
-    unsigned const fontSize = static_cast<unsigned>(static_cast<float>(profile().fontSize) * contentScale());
+    unsigned const fontSize = static_cast<unsigned>(static_cast<float>(_profile.fontSize) * contentScale());
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
         fontLoader_.load(_profile.fonts.regular.pattern, fontSize),
@@ -1015,28 +1013,22 @@ terminal::view::FontConfig TerminalWindow::loadFonts(config::TerminalProfile con
 
 void TerminalWindow::setProfile(config::TerminalProfile newProfile)
 {
-    terminalView_->terminal().setTabWidth(newProfile.tabWidth);
     if (newProfile.fonts != profile().fonts)
     {
         fonts_ = loadFonts(newProfile);
         terminalView_->setFont(fonts_);
-        setFontSize(newProfile.fontSize);
     }
-    else if (newProfile.fontSize != profile().fontSize)
+    else
         setFontSize(newProfile.fontSize);
 
-    if (newProfile.terminalSize != profile().terminalSize)
-    {
-        auto const screenSize = size();
+    auto const newScreenSize = terminal::WindowSize{
+        size().width() / fonts_.regular.first.get().maxAdvance(),
+        size().height() / fonts_.regular.first.get().lineHeight()
+    };
 
-        auto const terminalSize = terminal::WindowSize{
-            screenSize.width() / fonts_.regular.first.get().maxAdvance(),
-            screenSize.height() / fonts_.regular.first.get().lineHeight()
-        };
-
-        terminalView_->setTerminalSize(terminalSize);
-    }
-
+    if (newScreenSize != terminalView_->terminal().screenSize())
+        terminalView_->setTerminalSize(newScreenSize);
+        // TODO: maybe update margin after this call?
     terminalView_->terminal().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
 
     terminalView_->setColorProfile(newProfile.colors);

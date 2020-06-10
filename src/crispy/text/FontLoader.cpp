@@ -132,7 +132,11 @@ FontList FontLoader::load(string const& _fontPattern, unsigned _fontSize)
 Font* FontLoader::loadFromFilePath(std::string const& _path, unsigned _fontSize)
 {
     if (auto k = fonts_.find(_path); k != fonts_.end())
+    {
+        if (k->second.fontSize() != _fontSize)
+            k->second.setFontSize(_fontSize);
         return &k->second;
+    }
 
     if (auto face = Font::loadFace(logger_, ft_, _path, _fontSize); face != nullptr)
         return &fonts_.emplace(make_pair(_path, Font(logger_, ft_, face, _fontSize, _path))).first->second;

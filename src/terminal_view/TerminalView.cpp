@@ -98,7 +98,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         move(_bell),
         _cursorDisplay,
         _cursorShape,
-        [_onScreenUpdate](auto const& /*_commands*/) { if (_onScreenUpdate) _onScreenUpdate(); },
+        [onScreenUpdate = move(_onScreenUpdate)](auto const& /*_commands*/) { if (onScreenUpdate) onScreenUpdate(); },
         move(_onTerminalClosed),
         [this](terminal::LogEvent const& _event) { logger_(_event); }
     },
@@ -200,27 +200,45 @@ void TerminalView::setFont(FontConfig const& _fonts)
 {
     fonts_ = _fonts;
     renderer_.setFont(_fonts);
+
+    auto const newScreenSize = terminal::WindowSize{
+        static_cast<unsigned short>(size_.width() / renderer_.cellWidth()),
+        static_cast<unsigned short>(size_.height() / renderer_.cellHeight())
+    };
+
+    auto const newMargin = computeMargin(newScreenSize, size_.width(), size_.height());
+
+#if 0 // !defined(NDEBUG)
+    cout << fmt::format(
+        "TerminalView.setFont(size={}): adjusting margin from {}x{} to {}x{}\n",
+        _fonts.regular.first.get().fontSize(),
+        windowMargin_.left, windowMargin_.bottom,
+        newMargin.left, newMargin.bottom);
+#endif
+
+    windowMargin_ = newMargin;
+    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+
+    // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
+    resize(size_.width(), size_.height());
 }
 
 bool TerminalView::setFontSize(unsigned int _fontSize)
 {
-    // TODO: also computeMargin() here
-    if (renderer_.setFontSize(_fontSize))
-    {
-        windowMargin_ = computeMargin(process_.screenSize(),
-                                      size_.width(),
-                                      size_.height());
-        return true;
-    }
-    return false;
+    if (!renderer_.setFontSize(_fontSize))
+        return false;
+
+    // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
+    resize(size_.width(), size_.height());
+    return true;
 }
 
 TerminalView::WindowMargin TerminalView::computeMargin(WindowSize const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
-    auto const usedHeight = ws.rows * fonts_.regular.first.get().lineHeight();
-    auto const freeHeight = _height - usedHeight;
+    auto const usedHeight = static_cast<int>(ws.rows * fonts_.regular.first.get().lineHeight());
+    auto const freeHeight = static_cast<int>(_height - usedHeight);
     auto const bottomMargin = freeHeight;
 
     //auto const usedWidth = ws.columns * regularFont_.get().maxAdvance();
@@ -237,30 +255,30 @@ void TerminalView::resize(unsigned _width, unsigned _height)
         static_cast<int>(_height)
     };
 
-    auto const newSize = terminal::WindowSize{
+    auto const newScreenSize = terminal::WindowSize{
         static_cast<unsigned short>(_width / renderer_.cellWidth()),
         static_cast<unsigned short>(_height / renderer_.cellHeight())
     };
 
-    windowMargin_ = computeMargin(newSize, _width, _height);
+    windowMargin_ = computeMargin(newScreenSize, _width, _height);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
 
-    bool const doResize = newSize != process_.screenSize();
-    if (doResize)
-        process_.resizeScreen(newSize);
-
-    if (doResize)
+    if (newScreenSize != process_.screenSize())
     {
-        terminal().clearSelection();
+        process_.resizeScreen(newScreenSize);
 
-        cout << fmt::format(
-            "Resized to pixelSize: {}x{}, screenSize: {}x{}, margin: {}x{}, cellSize: {}x{}\n",
-            _width, _height,
-            newSize.columns, newSize.rows,
-            windowMargin_.left, windowMargin_.bottom,
-            renderer_.cellWidth(), renderer_.cellHeight()
-        );
+        terminal().clearSelection();
     }
+
+#if !defined(NDEBUG)
+    cout << fmt::format(
+        "Resized to pixelSize: {}x{}, screenSize: {}x{}, margin: {}x{}, cellSize: {}x{}\n",
+        _width, _height,
+        newScreenSize.columns, newScreenSize.rows,
+        windowMargin_.left, windowMargin_.bottom,
+        renderer_.cellWidth(), renderer_.cellHeight()
+    );
+#endif
 }
 
 void TerminalView::setCursorShape(CursorShape _shape)
@@ -273,15 +291,15 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
     if (process_.terminal().screenSize() == _newSize)
         return false;
 
-    windowMargin_ = {0, 0};
-    renderer_.setScreenSize(_newSize);
-    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+#if !defined(NDEBUG)
+    cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _newSize);
+#endif
 
+    renderer_.setScreenSize(_newSize);
     process_.terminal().resizeScreen(_newSize);
 
     return true;
 }
-
 
 uint64_t TerminalView::render(chrono::steady_clock::time_point const& _now)
 {
