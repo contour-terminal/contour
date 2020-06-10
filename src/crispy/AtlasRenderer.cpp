@@ -113,7 +113,7 @@ struct Renderer::ExecutionScheduler : public CommandListener
         destroyAtlases.push_back(_atlas);
     }
 
-    bool size() const noexcept
+    size_t size() const noexcept
     {
         return createAtlases.size()
              + uploadTextures.size()
