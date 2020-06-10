@@ -88,9 +88,10 @@ color_schemes:
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).
-            background: '#1d1f21'
+            #background: '#1d1f21'
+            background: '#a01010'
             # Default foreground text color.
-            foreground: '#c5c8c6'
+            foreground: '#d5d8d6'
         # Normal colors
         normal:
             black:   '#1d1f21'
