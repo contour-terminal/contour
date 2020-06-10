@@ -16,6 +16,7 @@
 #include <crispy/text/Font.h>
 
 #include <terminal/Logger.h>
+#include <fmt/ostream.h>
 
 #include <array>
 #include <chrono>
@@ -60,6 +61,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onTerminalClosed,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig,
+                           ShaderConfig const& _decoratorShaderConfig,
                            ShaderConfig const& _cursorShaderConfig,
                            Logger _logger) :
     logger_{ move(_logger) },
@@ -76,6 +78,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _backgroundOpacity,
         _backgroundShaderConfig,
         _textShaderConfig,
+        _decoratorShaderConfig,
         _cursorShaderConfig,
         _projectionMatrix
     },
@@ -261,7 +264,10 @@ void TerminalView::resize(unsigned _width, unsigned _height)
     };
 
     windowMargin_ = computeMargin(newScreenSize, _width, _height);
+
+    renderer_.setScreenSize(newScreenSize);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+    renderer_.clearCache();
 
     if (newScreenSize != process_.screenSize())
     {

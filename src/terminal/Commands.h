@@ -95,6 +95,10 @@ enum class GraphicsRendition {
     NoInverse = 27,         //!< Reverses Inverse.
     NoHidden = 28,          //!< Reverses Hidden (Visible).
     NoCrossedOut = 29,      //!< Reverses CrossedOut.
+
+    CurlyUnderlined = 30,   //!< Curly line below the baseline.
+    DottedUnderline = 31,   //!< Dotted line below the baseline.
+    DashedUnderline = 32,   //!< Dashed line below the baseline.
 };
 
 std::string to_string(GraphicsRendition s);
@@ -558,6 +562,7 @@ struct RestoreCursor {};
 
 struct SetForegroundColor { Color color; };
 struct SetBackgroundColor { Color color; };
+struct SetUnderlineColor { Color color; };
 struct SetGraphicsRendition { GraphicsRendition rendition; };
 
 struct AppendChar { char32_t ch; };
@@ -951,6 +956,7 @@ using Command = std::variant<
     SetMark,
     SetMode,
     SetTopBottomMargin,
+    SetUnderlineColor,
     SingleShiftSelect,
     SoftTerminalReset
 >;

@@ -261,6 +261,25 @@ namespace {
 				case 4:
 					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
 					break;
+                // TODO: parse 4:0 to 4:5 properly
+                case 4000: // 4:0
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
+                    break;
+                case 4001: // 4:1
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
+                    break;
+                case 4002: // 4:2
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
+                    break;
+                case 4003: // 4:3
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::CurlyUnderlined);
+                    break;
+                case 4004: // 4:4
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DottedUnderline);
+                    break;
+                case 4005: // 4:5
+					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DashedUnderline);
+                    break;
 				case 5:
 					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Blinking);
 					break;
@@ -357,6 +376,9 @@ namespace {
 				case 49:
 					_ctx.template emitCommand<SetBackgroundColor>(DefaultColor{});
 					break;
+                case 58: // Reserved. But used at least by Kitty for that purpose.
+					i = parseColor<SetUnderlineColor>(_ctx, i);
+                    break;
 				case 90:
 					_ctx.template emitCommand<SetForegroundColor>(BrightColor::Black);
 					break;

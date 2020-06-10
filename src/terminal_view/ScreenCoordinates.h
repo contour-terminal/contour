@@ -2,16 +2,19 @@
 
 #include <terminal/Screen.h>
 #include <terminal/Color.h>
+
+#include <ostream>
 #include <utility>
 
 #include <QtCore/QPoint>
 
 namespace terminal::view {
 
-struct ScreenCoordinates { // TODO: move me to a better place
+struct ScreenCoordinates {
     WindowSize screenSize;
     unsigned cellWidth;
     unsigned cellHeight;
+    unsigned textBaseline;
     int leftMargin = 0;
     int bottomMargin = 0;
 
@@ -29,4 +32,13 @@ struct ScreenCoordinates { // TODO: move me to a better place
     }
 };
 
+inline std::ostream& operator<<(std::ostream& os, terminal::view::ScreenCoordinates const& _coords)
+{
+    os << "screen: " << _coords.screenSize.columns<< 'x' << _coords.screenSize.rows
+       << ", cell:" << _coords.cellWidth << 'x' << _coords.cellHeight
+       << ", base: " << _coords.textBaseline
+       << ", margin: " << _coords.leftMargin << 'x' << _coords.bottomMargin;
+    return os;
 }
+
+} // end namespace

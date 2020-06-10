@@ -207,20 +207,6 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
         // TODO: update textshaper's shader to blink (requires current clock knowledge)
     }
 
-    if (attributes_.styles & CharacterStyleMask::CrossedOut)
-    {
-        // TODO: render centered horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-
-    if (attributes_.styles & CharacterStyleMask::DoublyUnderlined)
-    {
-        // TODO: render lower-bound horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-    else if (attributes_.styles & CharacterStyleMask::Underline)
-    {
-        // TODO: render lower-bound double-horizontal bar through the cell rectangle (we could reuse the TextShaper and a Unicode character for that, respecting opacity!)
-    }
-
     if ((attributes_.styles & CharacterStyleMask::Hidden))
         return {};
 

@@ -30,12 +30,14 @@ GLRenderer::GLRenderer(Logger _logger,
                        terminal::Opacity _backgroundOpacity,
                        ShaderConfig const& _backgroundShaderConfig,
                        ShaderConfig const& _textShaderConfig,
+                       ShaderConfig const& _decoratorShaderConfig,
                        ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     screenCoordinates_{
         _screenSize,
         _fonts.regular.first.get().maxAdvance(), // cell width
-        _fonts.regular.first.get().lineHeight() // cell height
+        _fonts.regular.first.get().lineHeight(), // cell height
+        _fonts.regular.first.get().baseline()
     },
     pendingBackgroundDraw_{},
     logger_{ move(_logger) },
@@ -58,6 +60,14 @@ GLRenderer::GLRenderer(Logger _logger,
         _projectionMatrix,
         _backgroundShaderConfig
     },
+    decorationRenderer_{
+        screenCoordinates_,
+        _projectionMatrix,
+        _decoratorShaderConfig,
+        1,      // line thickness (TODO: configurable)
+        0.75f,  // curly amplitude
+        1.0f    // curly frequency
+    },
     cursor_{
         QSize(
             static_cast<int>(fonts_.regular.first.get().maxAdvance()),
@@ -79,6 +89,7 @@ GLRenderer::GLRenderer(Logger _logger,
 void GLRenderer::clearCache()
 {
     textRenderer_.clearCache();
+    decorationRenderer_.clearCache();
 }
 
 void GLRenderer::setFont(FontConfig const& _fonts)
@@ -105,6 +116,8 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 
     screenCoordinates_.cellWidth = cellWidth;
     screenCoordinates_.cellHeight = cellHeight;
+    screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
+
     cellBackground_.resize(cellSize);
     cursor_.resize(cellSize);
     clearCache();
@@ -118,6 +131,7 @@ void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 
     cellBackground_.setProjection(_projectionMatrix);
     textRenderer_.setProjection(_projectionMatrix);
+    decorationRenderer_.setProjection(_projectionMatrix);
     cursor_.setProjection(_projectionMatrix);
 }
 
@@ -140,11 +154,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
-    auto const changes = _terminal.render(
-        _now,
-        bind(&GLRenderer::fillBackgroundGroup, this, _1, _2, _3),
-        bind(&TextRenderer::schedule, &textRenderer_, _1, _2, _3)
-    );
+    auto const changes = _terminal.render(_now, bind(&GLRenderer::renderCell, this, _1, _2, _3));
 
     assert(!pendingBackgroundDraw_.empty());
     renderPendingBackgroundCells();
@@ -163,6 +173,7 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
     }
 
     textRenderer_.execute();
+    decorationRenderer_.execute();
 
     if (_terminal.isSelectionAvailable())
     {
@@ -182,6 +193,13 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
         }
     }
     return changes;
+}
+
+void GLRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
+{
+    fillBackgroundGroup(_row, _col, _cell);
+    textRenderer_.schedule(_row, _col, _cell);
+    decorationRenderer_.renderCell(_row, _col, _cell);
 }
 
 void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)

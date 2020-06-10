@@ -1457,6 +1457,11 @@ void Screen::operator()(SetBackgroundColor const& v)
     buffer_->graphicsRendition.backgroundColor = v.color;
 }
 
+void Screen::operator()(SetUnderlineColor const& v)
+{
+    buffer_->graphicsRendition.underlineColor = v.color;
+}
+
 void Screen::operator()(SetCursorStyle const& v)
 {
 	if (setCursorStyle_)
@@ -1465,6 +1470,10 @@ void Screen::operator()(SetCursorStyle const& v)
 
 void Screen::operator()(SetGraphicsRendition const& v)
 {
+    // TODO: optimize this as there are only 3 cases
+    // 1.) reset
+    // 2.) set some bits |=
+    // 3.) clear some bits &= ~
     switch (v.rendition)
     {
         case GraphicsRendition::Reset:
@@ -1496,6 +1505,15 @@ void Screen::operator()(SetGraphicsRendition const& v)
             break;
         case GraphicsRendition::DoublyUnderlined:
             buffer_->graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
+            break;
+        case GraphicsRendition::CurlyUnderlined:
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::CurlyUnderlined;
+            break;
+        case GraphicsRendition::DottedUnderline:
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::DottedUnderline;
+            break;
+        case GraphicsRendition::DashedUnderline:
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::DashedUnderline;
             break;
         case GraphicsRendition::Normal:
             buffer_->graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);

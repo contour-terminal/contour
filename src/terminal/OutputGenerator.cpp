@@ -242,6 +242,33 @@ void OutputGenerator::operator()(Command const& command)
                     sgr_add(100 + static_cast<unsigned>(get<BrightColor>(v.color)));
             }
         },
+        [&](SetUnderlineColor const& v) {
+            if (v.color != currentUnderlineColor_)
+            {
+                currentUnderlineColor_ = v.color;
+                if (holds_alternative<IndexedColor>(v.color))
+                {
+                    auto const colorValue = get<IndexedColor>(v.color);
+                    sgr_add(58);
+                    sgr_add(5);
+                    sgr_add(static_cast<unsigned>(colorValue));
+                }
+                else if (holds_alternative<terminal::RGBColor>(v.color))
+                {
+                    auto const color = get<RGBColor>(v.color);
+                    sgr_add(58);
+                    sgr_add(2);
+                    sgr_add(color.red);
+                    sgr_add(color.green);
+                    sgr_add(color.blue);
+                }
+                // TODO?
+                // else if (holds_alternative<DefaultColor>(v.color))
+                //     sgr_add(58);
+                // else if (holds_alternative<BrightColor>(v.color))
+                //     sgr_add(90 + static_cast<unsigned>(get<BrightColor>(v.color)));
+            }
+        },
 		[&](SetCursorStyle cursorStyle) {
 			switch (cursorStyle.display) {
 				case CursorDisplay::Blink:

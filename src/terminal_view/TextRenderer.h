@@ -21,6 +21,8 @@
 #include <crispy/text/TextShaper.h>
 #include <crispy/text/TextRenderer.h>
 #include <crispy/text/Font.h>
+#include <crispy/Atlas.h>
+#include <crispy/AtlasRenderer.h>
 
 #include <unicode/run_segmenter.h>
 

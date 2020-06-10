@@ -1,0 +1,114 @@
+/**
+ * This file is part of the "contour" project.
+ *   Copyright (c) 2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#pragma once
+
+#include <terminal_view/ShaderConfig.h>
+
+#include <crispy/Atlas.h>
+#include <crispy/AtlasRenderer.h>
+
+#include <terminal/Screen.h>
+
+#include <QtGui/QOpenGLShaderProgram>
+
+namespace terminal::view {
+
+struct ScreenCoordinates;
+
+/// Dectorator, to decorate a grid cell, eventually containing a character
+///
+/// It should be possible to render multiple decoration onto the same coordinates.
+enum class Decorator {
+    /// Draws an underline
+    Underline,
+    /// Draws a doubly underline
+    DoubleUnderline,
+    /// Draws a curly underline
+    CurlyUnderline,
+    /// Draws a dotted underline
+    DottedUnderline,
+    /// Draws a dashed underline
+    DashedUnderline,
+    /// Draws a strike-through line
+    CrossedOut,
+    /// Draws a box around the glyph, this is literally the bounding box of a grid cell.
+    /// This could be used for debugging.
+    /// TODO: That should span the box around the whole (potentially wide) character
+    Box,
+    /// Puts a circle-shape around into the cell (and ideally around the glyph)
+    /// TODO: How'd that look like with double-width characters?
+    Circle,
+};
+
+/// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
+class DecorationRenderer {
+  public:
+    /// Constructs the decoration renderer.
+    ///
+    /// @param _screenCoordinates
+    /// @param _projectionMatrix
+    /// @param _shaderConfig
+    /// @param _lineThickness
+    /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
+    /// @param _curlyFrequency the number of complete sine waves that one grid cell width will cover
+    DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
+                       QMatrix4x4 const& _projectionMatrix,
+                       ShaderConfig const& _shaderConfig,
+                       unsigned _lineThickness,
+                       float _curlyAmplitude,
+                       float _curlyFrequency);
+
+    void setProjection(QMatrix4x4 const& _projectionMatrix);
+    void setColorProfile(ColorProfile const& _colorProfile);
+
+    void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
+    void renderDecoration(Decorator _decoration,
+                          cursor_pos_t _row,
+                          cursor_pos_t _col,
+                          unsigned _columnCount,
+                          RGBColor const& _color);
+    void execute();
+
+    void clearCache();
+
+  private:
+    using Atlas = crispy::atlas::TextureAtlas<Decorator, int>; // contains various glyph decorators
+    using DataRef = Atlas::DataRef;
+    using AtlasRenderer = crispy::atlas::Renderer;
+
+    void rebuild();
+
+    std::optional<DataRef> getDataRef(Decorator _decorator);
+
+  private:
+    ScreenCoordinates const& screenCoordinates_;
+    QMatrix4x4 projectionMatrix_;
+
+    unsigned lineThickness_ = 1;
+    float curlyAmplitude_ = 1.0f;
+    float curlyFrequency_ = 1.0f;
+
+    ScreenBuffer::GraphicsAttributes attributes_{};
+    unsigned columnCount_ = 0;
+
+    ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
+
+    std::unique_ptr<QOpenGLShaderProgram> decoratorShader_;
+    int decoratorProjectionLocation_;
+    AtlasRenderer atlasRenderer_;
+    Atlas atlas_;
+
+};
+
+} // end namespace

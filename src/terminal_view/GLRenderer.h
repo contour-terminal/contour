@@ -16,6 +16,7 @@
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/CellBackground.h>
 #include <terminal_view/TextRenderer.h>
+#include <terminal_view/DecorationRenderer.h>
 #include <terminal_view/GLCursor.h>
 #include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/RenderMetrics.h>
@@ -60,6 +61,7 @@ class GLRenderer : public QOpenGLFunctions {
                Opacity _backgroundOpacity,
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
+               ShaderConfig const& _decoratorShaderConfig,
                ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
@@ -106,6 +108,7 @@ class GLRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
+    void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
     void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
     void renderPendingBackgroundCells();
 
@@ -145,6 +148,7 @@ class GLRenderer : public QOpenGLFunctions {
     QMatrix4x4 projectionMatrix_;
     TextRenderer textRenderer_;
     CellBackground cellBackground_;
+    DecorationRenderer decorationRenderer_;
     GLCursor cursor_;
 };
 

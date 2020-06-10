@@ -86,6 +86,7 @@ class OutputGenerator {
     Writer writer_;
     std::vector<unsigned> sgr_;
     Color currentForegroundColor_ = DefaultColor{};
+    Color currentUnderlineColor_ = DefaultColor{};
     Color currentBackgroundColor_ = DefaultColor{};
     KeyMode cursorKeysMode_ = KeyMode::Normal;
 };

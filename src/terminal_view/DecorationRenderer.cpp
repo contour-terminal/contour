@@ -1,0 +1,290 @@
+/**
+ * This file is part of the "contour" project.
+ *   Copyright (c) 2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include <terminal_view/DecorationRenderer.h>
+#include <terminal_view/ScreenCoordinates.h>
+
+#include <crispy/Atlas.h>
+#include <crispy/AtlasRenderer.h>
+
+#include <iostream>
+#include <optional>
+
+using namespace std;
+using namespace crispy;
+
+namespace terminal::view {
+
+constexpr unsigned MaxDecoratorInstanceCount = 1;
+constexpr unsigned MaxDecoratorTextureDepth = 2;
+constexpr unsigned MaxDecoratorTextureSize = 128;
+
+DecorationRenderer::DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
+                                       QMatrix4x4 const& _projectionMatrix,
+                                       ShaderConfig const& _decoratorShaderConfig,
+                                       unsigned _lineThickness,
+                                       float _curlyAmplitude,
+                                       float _curlyFrequency) :
+    screenCoordinates_{ _screenCoordinates },
+    projectionMatrix_{ _projectionMatrix },
+    lineThickness_{ _lineThickness },
+    curlyAmplitude_{ _curlyAmplitude },
+    curlyFrequency_{ _curlyFrequency },
+    attributes_{},
+    columnCount_{},
+    colorProfile_{},
+    decoratorShader_{ createShader(_decoratorShaderConfig) },
+    decoratorProjectionLocation_{ decoratorShader_->uniformLocation("vs_projection") },
+    atlasRenderer_{},
+    atlas_{
+        0,
+        MaxDecoratorInstanceCount,
+        min(MaxDecoratorTextureDepth, atlasRenderer_.maxTextureSize() / atlasRenderer_.maxTextureDepth()),
+        min(MaxDecoratorTextureSize, atlasRenderer_.maxTextureSize()),
+        min(MaxDecoratorTextureSize, atlasRenderer_.maxTextureSize()),
+        GL_R8,
+        atlasRenderer_.scheduler(),
+        "decoratorAtlas"
+    }
+{
+    decoratorShader_->bind();
+    decoratorShader_->setUniformValue("fs_decoratorTextures", 0);
+}
+
+void DecorationRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
+{
+    projectionMatrix_ = _projectionMatrix;
+}
+
+void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
+{
+    colorProfile_ = _colorProfile;
+}
+
+void DecorationRenderer::clearCache()
+{
+    atlas_.clear();
+}
+
+void DecorationRenderer::rebuild()
+{
+    auto const width = screenCoordinates_.cellWidth;
+    auto const baseline = screenCoordinates_.textBaseline;
+
+    { // {{{ underline
+        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto const height = baseline;
+        auto const base_y = max((height - thickness) / 2, 0u);
+        auto image = atlas::Buffer(width * height, 0u);
+
+        for (unsigned y = 1; y <= thickness; ++y)
+            for (unsigned x = 0; x < width; ++x)
+                image[(base_y + y) * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::Underline,
+            width, height,
+            width, height,
+            GL_RED,
+            image
+        );
+    } // }}}
+    { // {{{ double underline
+        auto const height = max(baseline - 1, 3u);
+        auto const thickness = height / (3 * lineThickness_);
+        auto image = atlas::Buffer(width * height, 0u);
+
+        for (unsigned y = 0; y < thickness; ++y)
+        {
+            for (unsigned x = 0; x < width; ++x)
+            {
+                image[y * width + x] = 0xFF;
+                image[(height - 1 - y) * width + x] = 0xFF;
+            }
+        }
+
+        atlas_.insert(
+            Decorator::DoubleUnderline,
+            width, height,
+            width, height,
+            GL_RED,
+            image
+        );
+    } // }}}
+    { // {{{ curly underline
+        auto const height = max(static_cast<unsigned>(curlyAmplitude_ * static_cast<float>(screenCoordinates_.textBaseline)), lineThickness_ * 3) - lineThickness_;
+        auto image = atlas::Buffer(width * height, 0u);
+
+        for (unsigned x = 0; x < width; ++x)
+        {
+            auto const normalizedX = static_cast<double>(x) / static_cast<double>(width);
+            auto const sin_x = curlyFrequency_ * normalizedX * 2.0 * M_PI;
+            auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
+            assert(0.0f <= normalizedY && normalizedY <= 1.0f);
+            auto const y = static_cast<unsigned>(normalizedY * static_cast<float>(height - lineThickness_));
+            assert(y < height);
+            for (unsigned yi = 0; yi < lineThickness_; ++yi)
+                image[(y + yi) * width + x] = 0xFF;
+        }
+
+        atlas_.insert(
+            Decorator::CurlyUnderline,
+            width, height,
+            width, height,
+            GL_RED,
+            image
+        );
+    } // }}}
+    { // {{{ dotted underline
+        auto const thickness = max(lineThickness_ * width / 4, 1u);
+        auto const height = thickness;
+        auto image = atlas::Buffer(width * height, 0u);
+
+        for (unsigned x = 0; x < width; ++x)
+            if ((x / thickness) % 2 == 0)
+                for (unsigned y = 0; y < height; ++y)
+                    image[y * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::DottedUnderline,
+            width, height,
+            width, height,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
+    { // {{{ dashed underline
+        // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
+        // whereas the middle one is being skipped.
+        auto const thickness = max(lineThickness_ * width / 4, 1u);
+        auto const height = thickness;
+        auto image = atlas::Buffer(width * height, 0u);
+
+        for (unsigned x = 0; x < width; ++x)
+            if (fabs(float(x) / float(width) - 0.5f) >= 0.25f)
+                for (unsigned y = 0; y < height; ++y)
+                    image[y * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::DashedUnderline,
+            width, height,
+            width, height,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
+    // TODO: Overline
+    // TODO: CrossedOut
+    // TODO: Box
+    // TODO: Circle
+}
+
+void DecorationRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
+{
+    if (_cell.attributes().styles & CharacterStyleMask::Underline)
+        renderDecoration(Decorator::Underline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    else if (_cell.attributes().styles & CharacterStyleMask::DoublyUnderlined)
+        renderDecoration(Decorator::DoubleUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    else if (_cell.attributes().styles & CharacterStyleMask::CurlyUnderlined)
+        renderDecoration(Decorator::CurlyUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    else if (_cell.attributes().styles & CharacterStyleMask::DottedUnderline)
+        renderDecoration(Decorator::DottedUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    else if (_cell.attributes().styles & CharacterStyleMask::DashedUnderline)
+        renderDecoration(Decorator::DashedUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+
+    if (_cell.attributes().styles & CharacterStyleMask::CrossedOut)
+        renderDecoration(Decorator::CrossedOut, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+
+    if (_cell.attributes().styles & CharacterStyleMask::Boxed)
+        renderDecoration(Decorator::Box, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+
+    if (_cell.attributes().styles & CharacterStyleMask::Circle)
+        renderDecoration(Decorator::Circle, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+}
+
+optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)
+{
+    if (optional<DataRef> const dataRef = atlas_.get(_decoration); dataRef.has_value())
+        return dataRef;
+
+    if (atlas_.empty())
+        rebuild();
+
+    if (optional<DataRef> const dataRef = atlas_.get(_decoration); dataRef.has_value())
+        return dataRef;
+
+    return nullopt;
+}
+
+void DecorationRenderer::renderDecoration(Decorator _decoration,
+                                          cursor_pos_t _row,
+                                          cursor_pos_t _col,
+                                          unsigned _columnCount,
+                                          RGBColor const& _color)
+{
+    if (optional<DataRef> const dataRef = getDataRef(_decoration); dataRef.has_value())
+    {
+#if 0 // !defined(NDEBUG)
+        cout << fmt::format(
+            "DecorationRenderer.renderDecoration: {} from {}:{} with {} cells, color {}\n",
+            _decoration, _row, _col, _columnCount, _color
+        );
+#endif
+
+        auto const pos = screenCoordinates_.map(_col, _row);
+        auto const x = static_cast<unsigned>(pos.x());
+        auto const y = static_cast<unsigned>(pos.y());
+        auto const z = 0u;
+        auto const color = QVector4D(
+            static_cast<float>(_color.red) / 255.0f,
+            static_cast<float>(_color.green) / 255.0f,
+            static_cast<float>(_color.blue) / 255.0f,
+            1.0f
+        );
+        atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
+        unsigned const advanceX = screenCoordinates_.cellWidth;
+        for (unsigned i = 0; i < _columnCount; ++i)
+        {
+#if 0 // !defined(NDEBUG)
+            cout << fmt::format(
+                " at: {}:{}\n",
+                x + advanceX + i,
+                y
+            );
+#endif
+            atlasRenderer_.scheduler().renderTexture({textureInfo, x + advanceX * i, y, z, color});
+        }
+    }
+    else
+    {
+#if 0 // !defined(NDEBUG)
+        cout << fmt::format(
+            "DecorationRenderer.renderDecoration: {} from {}:{} with {} cells (MISSING IMPLEMENTATION)\n",
+            _decoration, _row, _col, _columnCount, _color
+        );
+#endif
+    }
+}
+
+void DecorationRenderer::execute()
+{
+    if (!atlasRenderer_.empty())
+    {
+        //cout << fmt::format("DecorationRenderer.execute: {} decorations\n", atlasRenderer_.size());
+        decoratorShader_->bind();
+        decoratorShader_->setUniformValue(decoratorProjectionLocation_, projectionMatrix_);
+        atlasRenderer_.execute();
+    }
+}
+
+} // end namespace

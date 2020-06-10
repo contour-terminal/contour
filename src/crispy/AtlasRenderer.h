@@ -54,6 +54,7 @@ class Renderer : public QOpenGLExtraFunctions, public CommandListener {
     /// First, schedule commands in order to prepare and fill command queue, then execute.
     void execute();
 
+    size_t size() const noexcept;
     bool empty() const noexcept;
 
   private:

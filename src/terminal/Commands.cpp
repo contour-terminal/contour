@@ -92,6 +92,12 @@ string to_string(GraphicsRendition s)
             return "NoHidden";
         case GraphicsRendition::NoCrossedOut:
             return "NoCrossedOut";
+        case GraphicsRendition::CurlyUnderlined:
+            return "CurlyUnderlined";
+        case GraphicsRendition::DottedUnderline:
+            return "DottedUnderlined";
+        case GraphicsRendition::DashedUnderline:
+            return "DashedUnderlined";
     }
     return "?";
 }
@@ -301,6 +307,7 @@ class MnemonicBuilder {
     }
     void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Select foreground color to {}", to_string(v.color))); }
     void operator()(SetBackgroundColor const& v) { build("SGR", fmt::format("Select background color to {}", to_string(v.color))); }
+    void operator()(SetUnderlineColor const& v) {  build("SGR", fmt::format("Select underline color to {}", to_string(v.color))); }
     void operator()(SetGraphicsRendition const& v) { build("SGR", fmt::format("Select style rendition to {}", to_string(v.rendition))); }
     void operator()(SetMark const&) { build("SETMARK", "Sets vertical jump-mark in current line"); }
     void operator()(SetMode const& v) {

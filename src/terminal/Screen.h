@@ -53,6 +53,11 @@ class CharacterStyleMask {
 		Hidden = (1 << 6),
 		CrossedOut = (1 << 7),
 		DoublyUnderlined = (1 << 8),
+        CurlyUnderlined = (1 << 9),
+        DottedUnderline = (1 << 10),
+        DashedUnderline = (1 << 11),
+        Boxed = (1 << 12),
+        Circle = (1 << 13),
 	};
 
 	constexpr CharacterStyleMask() : mask_{} {}
@@ -128,7 +133,21 @@ struct ScreenBuffer {
     struct GraphicsAttributes {
         Color foregroundColor{DefaultColor{}};
         Color backgroundColor{DefaultColor{}};
+        Color underlineColor{DefaultColor{}};
         CharacterStyleMask styles{};
+
+        RGBColor getUnderlineColor(ColorProfile const& _colorProfile) const noexcept
+        {
+            float const opacity = [=]() {
+                if (styles & CharacterStyleMask::Faint)
+                    return 0.5f;
+                else
+                    return 1.0f;
+            }();
+
+            bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+            return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
+        }
 
         std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile) const noexcept
         {
@@ -660,6 +679,7 @@ class Screen {
     void operator()(ForwardIndex const& v);
     void operator()(SetForegroundColor const& v);
     void operator()(SetBackgroundColor const& v);
+    void operator()(SetUnderlineColor const& v);
     void operator()(SetCursorStyle const& v);
     void operator()(SetGraphicsRendition const& v);
     void operator()(SetMark const&);
@@ -855,7 +875,8 @@ constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffe
 {
     return a.backgroundColor == b.backgroundColor
         && a.foregroundColor == b.foregroundColor
-        && a.styles == b.styles;
+        && a.styles == b.styles
+        && a.underlineColor == b.underlineColor;
 }
 
 constexpr bool operator!=(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
@@ -944,7 +965,7 @@ namespace fmt {
         auto format(terminal::CharacterStyleMask _mask, FormatContext& ctx)
         {
             using Mask = terminal::CharacterStyleMask;
-            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 9>{
+            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 10>{
                 std::pair{Mask::Bold, "bold"},
                 std::pair{Mask::Faint, "faint"},
                 std::pair{Mask::Italic, "italic"},
@@ -953,7 +974,8 @@ namespace fmt {
                 std::pair{Mask::Inverse, "inverse"},
                 std::pair{Mask::Hidden, "hidden"},
                 std::pair{Mask::CrossedOut, "crossedOut"},
-                std::pair{Mask::DoublyUnderlined, "doublyUnderlined"}
+                std::pair{Mask::DoublyUnderlined, "doublyUnderlined"},
+                std::pair{Mask::CurlyUnderlined, "curlyUnderlined"}
             };
             int i = 0;
             std::ostringstream os;

@@ -207,6 +207,11 @@ void Renderer::setProjection(QMatrix4x4 const& _projection)
     projection_ = _projection;
 }
 
+size_t Renderer::size() const noexcept
+{
+    return scheduler_->size();
+}
+
 bool Renderer::empty() const noexcept
 {
     return scheduler_->size() == 0;
@@ -296,6 +301,8 @@ void Renderer::uploadTexture(UploadTexture const& _upload)
 {
     auto const& texture = _upload.texture.get();
     auto const key = AtlasKey{_upload.texture.get().atlasName, _upload.texture.get().atlas};
+    [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
+    assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");;
     auto const textureId = atlasMap_[key];
     auto const x0 = texture.x;
     auto const y0 = texture.y;

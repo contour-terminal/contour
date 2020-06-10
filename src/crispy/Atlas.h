@@ -243,6 +243,8 @@ class TextureAtlas {
         if (currentY_ + _height > height_ && !advanceZ())
             return std::nullopt;
 
+        assert(allocations_.find(_id) == allocations_.end());
+
         TextureInfo const& info = allocations_.emplace(std::pair{
             _id,
             TextureInfo{

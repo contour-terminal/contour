@@ -119,9 +119,11 @@ FontList FontLoader::load(string const& _fontPattern, unsigned _fontSize)
 
     if (logger_)
         *logger_ << fmt::format(
-            "FontLoader: loading font \"{}\" from \"{}\", size={}, fallbacks={}\n",
+            "FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}\n",
             _fontPattern,
             primaryFont->filePath(),
+            primaryFont->baseline(),
+            primaryFont->bitmapHeight(),
             _fontSize,
             fallbackList.size()
         );

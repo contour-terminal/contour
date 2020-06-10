@@ -502,6 +502,7 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onTerminalClosed, this),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
+        *config::Config::loadShaderConfig(config::ShaderClass::Decorator),
         *config::Config::loadShaderConfig(config::ShaderClass::Cursor),
         ref(logger_)
     );
@@ -829,7 +830,7 @@ void TerminalWindow::toggleFullScreen()
 
 bool TerminalWindow::setFontSize(unsigned _fontSize)
 {
-    cout << fmt::format("TerminalWindow.setFontSize: {} -> {}\n", profile().fontSize, _fontSize);
+    // cout << fmt::format("TerminalWindow.setFontSize: {} -> {}\n", profile().fontSize, _fontSize);
 
     if (_fontSize < 5) // Let's not be crazy.
         return false;
