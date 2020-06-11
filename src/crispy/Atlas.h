@@ -177,6 +177,9 @@ class TextureAtlas {
     /// @return number of textures stored in this texture atlas.
     constexpr size_t size() const noexcept { return allocations_.size(); }
 
+    /// @return boolean indicating whether or not this atlas is empty (has no textures present).
+    constexpr bool empty() const noexcept { return allocations_.size() == 0; }
+
     void clear()
     {
         currentInstanceId_ = instanceBaseId_;

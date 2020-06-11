@@ -57,10 +57,10 @@ class Renderer : public QOpenGLExtraFunctions, public CommandListener {
     bool empty() const noexcept;
 
   private:
-    void createAtlas(CreateAtlas const& _atlas);
-    void uploadTexture(UploadTexture const& _texture);
-    void renderTexture(RenderTexture const& _render);
-    void destroyAtlas(DestroyAtlas const& _atlas);
+    void createAtlas(CreateAtlas const& _atlas) override;
+    void uploadTexture(UploadTexture const& _texture) override;
+    void renderTexture(RenderTexture const& _render) override;
+    void destroyAtlas(DestroyAtlas const& _atlas) override;
 
     void selectTextureUnit(unsigned _id);
     void bindTexture2DArray(GLuint _textureId);
