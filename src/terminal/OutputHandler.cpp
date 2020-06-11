@@ -127,6 +127,8 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
         case Action::Param:
             if (_currentChar == ';')
                 parameters_.push_back({0});
+            else if (_currentChar == ':')
+                parameters_.back().push_back({0});
             else
                 parameters_.back().back() = parameters_.back().back() * 10 + (_currentChar - U'0');
             return;

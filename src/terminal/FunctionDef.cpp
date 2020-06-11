@@ -223,6 +223,40 @@ namespace {
 	template <typename T>
 	size_t parseColor(HandlerContext& _ctx, size_t i)
 	{
+        // We are at parameter index `i`.
+        //
+        // It may now follow:
+        // - ":2;r;g;b"         RGB color
+        // - ":3:F:C:M:Y"       CMY color  (F is scaling factor, what is max? 100 or 255?)
+        // - ":4:F:C:M:Y:K"     CMYK color (F is scaling factor, what is max? 100 or 255?)
+        // - ":5:P"
+        // Sub-parameters can also be delimited with ';' and thus are no sub-parameters per-se.
+        if (_ctx.subParameterCount(i) >= 1)
+        {
+            switch (_ctx.subparam(i, 0))
+            {
+                case 2: // ":2:R:G:B"
+                    if (_ctx.subParameterCount(i) == 4)
+                    {
+                        auto const r = _ctx.subparam(i, 1);
+                        auto const g = _ctx.subparam(i, 2);
+                        auto const b = _ctx.subparam(i, 3);
+                        if (r <= 255 && g <= 255 && b <= 255)
+                            _ctx.template emitCommand<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+                    }
+                    break;
+                case 3: // ":3:F:C:M:Y" (TODO)
+                case 4: // ":4:F:C:M:Y:K" (TODO)
+                    break;
+                case 5: // ":5:P"
+                    if (auto const P = _ctx.subparam(i, 1); P <= 255)
+                        _ctx.template emitCommand<T>(static_cast<IndexedColor>(P));
+                    break;
+                default:
+                    break; // XXX invalid sub parameter
+            }
+        }
+
 		if (i + 1 < _ctx.parameterCount())
 		{
 			++i;
@@ -285,27 +319,36 @@ namespace {
 					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Italic);
 					break;
 				case 4:
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
+                    if (_ctx.subParameterCount(i) == 1)
+                    {
+                        switch (_ctx.subparam(i, 0))
+                        {
+                            case 0: // 4:0
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
+                                break;
+                            case 1: // 4:1
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
+                                break;
+                            case 2: // 4:2
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
+                                break;
+                            case 3: // 4:3
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::CurlyUnderlined);
+                                break;
+                            case 4: // 4:4
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DottedUnderline);
+                                break;
+                            case 5: // 4:5
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DashedUnderline);
+                                break;
+                            default:
+                                _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
+                                break;
+                        }
+                    }
+                    else
+                        _ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
 					break;
-                // TODO: parse 4:0 to 4:5 properly
-                case 4000: // 4:0
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
-                    break;
-                case 4001: // 4:1
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
-                    break;
-                case 4002: // 4:2
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
-                    break;
-                case 4003: // 4:3
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::CurlyUnderlined);
-                    break;
-                case 4004: // 4:4
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DottedUnderline);
-                    break;
-                case 4005: // 4:5
-					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::DashedUnderline);
-                    break;
 				case 5:
 					_ctx.template emitCommand<SetGraphicsRendition>(GraphicsRendition::Blinking);
 					break;
@@ -402,7 +445,7 @@ namespace {
 				case 49:
 					_ctx.template emitCommand<SetBackgroundColor>(DefaultColor{});
 					break;
-                case 58: // Reserved. But used at least by Kitty for that purpose.
+                case 58: // Reserved, but used for setting underline/decoration colors by some other VTEs (such as mintty, kitty, libvte)
 					i = parseColor<SetUnderlineColor>(_ctx, i);
                     break;
 				case 90:

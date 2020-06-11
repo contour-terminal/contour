@@ -17,3 +17,6 @@
 using namespace std;
 using namespace terminal;
 
+TEST_CASE("Parser_subparams", "[parser]")
+{
+}

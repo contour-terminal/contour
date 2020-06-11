@@ -106,7 +106,7 @@ class HandlerContext {
 	FunctionParamList const& parameters() const noexcept { return parameters_; }
 
 	size_t parameterCount() const noexcept { return parameters_.size(); }
-    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size(); }
+    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
 
 	std::optional<FunctionParam> param_opt(size_t _index) const noexcept
 	{
@@ -131,8 +131,8 @@ class HandlerContext {
     unsigned int subparam(size_t _index, size_t _subIndex) const noexcept
     {
         assert(_index < parameters_.size());
-        assert(_subIndex < parameters_[_index].size());
-		return parameters_[_index][_subIndex];
+        assert(_subIndex + 1 < parameters_[_index].size());
+		return parameters_[_index][_subIndex + 1];
     }
 
     template <typename T, typename... Args>

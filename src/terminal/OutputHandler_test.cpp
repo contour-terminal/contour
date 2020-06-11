@@ -51,6 +51,27 @@ TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
     REQUIRE(0xF6 == static_cast<unsigned>(ch.ch));
 }
 
+TEST_CASE("OutputHandler.sub_parameters", "[OutputHandler]")
+{
+    auto output = OutputHandler{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto parser = Parser{ref(output)};
+
+    SECTION("curly underline") {
+        parser.parseFragment("\033[4:3m");
+        REQUIRE(1 == output.commands().size());
+        REQUIRE(holds_alternative<SetGraphicsRendition>(output.commands()[0]));
+        REQUIRE(get<SetGraphicsRendition>(output.commands()[0]).rendition == GraphicsRendition::CurlyUnderlined);
+    }
+
+    SECTION("decoration color") {
+        parser.parseFragment("\033[58:2:255:128:65m");
+        REQUIRE(1 == output.commands().size());
+        REQUIRE(holds_alternative<SetUnderlineColor>(output.commands()[0]));
+
+        REQUIRE(get<SetUnderlineColor>(output.commands()[0]).color == terminal::RGBColor(255, 128, 65));
+    }
+}
+
 TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
 {
     auto output = OutputHandler{
