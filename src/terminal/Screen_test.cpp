@@ -1183,6 +1183,14 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
     screen(MoveCursorToNextTab{});
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1 * TabWidth + 1});
 
+    screen.write(MoveCursorToColumn{TabWidth - 1});
+    screen.write(MoveCursorToNextTab{});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1 * TabWidth + 1});
+
+    screen.write(MoveCursorToColumn{TabWidth});
+    screen.write(MoveCursorToNextTab{});
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1 * TabWidth + 1});
+
     screen(MoveCursorToNextTab{});
     REQUIRE(screen.cursorPosition() == Coordinate{1, 2 * TabWidth + 1});
 

@@ -1330,7 +1330,10 @@ void Screen::operator()(MoveCursorToNextTab const&)
         // default tab settings
         if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
         {
-            auto const n = min(1 + buffer_->tabWidth - buffer_->cursor.column % buffer_->tabWidth, size_.columns - cursorPosition().column);
+            auto const n = min(
+                buffer_->tabWidth - (buffer_->cursor.column - 1) % buffer_->tabWidth,
+                size_.columns - cursorPosition().column
+            );
             appendSpaceChars(n);
         }
         else
