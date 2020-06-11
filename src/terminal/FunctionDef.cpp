@@ -48,8 +48,34 @@ string to_sequence(FunctionDef const& _func, HandlerContext const& _ctx)
         sstr << ' ' << *_func.leaderSymbol;
 
     sstr << ' ' << accumulate(
-        begin(_ctx.parameters()), end(_ctx.parameters()), string{},
-        [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); });
+        begin(_ctx.parameters()),
+        end(_ctx.parameters()),
+        string{},
+        [](string const& a, auto const& p) -> string {
+            return !a.empty()
+                ? fmt::format("{};{}",
+                        a,
+                        accumulate(
+                            begin(p), end(p),
+                            string{},
+                            [](string const& x, FunctionParam y) -> string {
+                                return !x.empty()
+                                    ? fmt::format("{}:{}", x, y)
+                                    : std::to_string(y);
+                            }
+                        )
+                    )
+                : accumulate(
+                        begin(p), end(p),
+                        string{},
+                        [](string const& x, FunctionParam y) -> string {
+                            return !x.empty()
+                                ? fmt::format("{}:{}", x, y)
+                                : std::to_string(y);
+                        }
+                    );
+        }
+    );
 
 	if (_func.followerSymbol)
         sstr << ' ' << *_func.followerSymbol;

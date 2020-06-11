@@ -28,8 +28,6 @@
 
 #include <fmt/format.h>
 
-#define LIBTERMINAL_KITTY_EXT
-
 namespace terminal {
 
 /**

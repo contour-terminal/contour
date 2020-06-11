@@ -48,11 +48,7 @@ constexpr bool isExecuteChar(char32_t value) noexcept
 
 constexpr bool isParamChar(char32_t value) noexcept
 {
-#if defined(LIBTERMINAL_KITTY_EXT)
     return includes(Range{0x30, 0x3B}, value);
-#else
-    return includes(Range{0x30, 0x39}, value) || value == 0x3B;
-#endif
 }
 
 constexpr bool isC1(char32_t value) noexcept
@@ -273,10 +269,6 @@ void Parser::handleViaSwitch()
                 invokeAction(ActionClass::Event, Action::Ignore);
             else if (includes(Range{0x3C, 0x3F}, currentChar()))
                 transitionTo(State::CSI_Ignore);
-#if !defined(LIBTERMINAL_KITTY_EXT)
-            else if (currentChar() == 0x3A)
-                transitionTo(State::CSI_Ignore);
-#endif
             else if (includes(Range{0x20, 0x2F}, currentChar()))
                 transitionTo(State::CSI_Intermediate, Action::Collect);
             else if (includes(Range{0x40, 0x7E}, currentChar()))

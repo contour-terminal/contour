@@ -68,7 +68,31 @@ string OutputHandler::sequenceString(char _finalChar, string const& _prefix) con
 
     sstr << ' ' << accumulate(
         begin(parameters_), end(parameters_), string{},
-        [](auto a, auto p) { return !a.empty() ? fmt::format("{} {}", a, p) : std::to_string(p); });
+        [](string const& a, auto const& p) -> string {
+            return !a.empty()
+                ? fmt::format("{};{}",
+                        a,
+                        accumulate(
+                            begin(p), end(p),
+                            string{},
+                            [](string const& x, FunctionParam y) -> string {
+                                return !x.empty()
+                                    ? fmt::format("{}:{}", x, y)
+                                    : std::to_string(y);
+                            }
+                        )
+                    )
+                : accumulate(
+                        begin(p), end(p),
+                        string{},
+                        [](string const& x, FunctionParam y) -> string {
+                            return !x.empty()
+                                ? fmt::format("{}:{}", x, y)
+                                : std::to_string(y);
+                        }
+                    );
+        }
+    );
 
     if (!intermediateCharacters_.empty())
         sstr << ' ' << intermediateCharacters_;
@@ -88,7 +112,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
 			leaderSymbol_ = 0;
             intermediateCharacters_.clear();
             parameters_.resize(1);
-            parameters_[0] = 0;
+            parameters_[0] = {0};
             private_ = false;
             return;
 		case Action::CollectLeader:
@@ -102,9 +126,9 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             return;
         case Action::Param:
             if (_currentChar == ';')
-                parameters_.push_back(0);
+                parameters_.push_back({0});
             else
-                parameters_.back() = parameters_.back() * 10 + (_currentChar - U'0');
+                parameters_.back().back() = parameters_.back().back() * 10 + (_currentChar - U'0');
             return;
         case Action::CSI_Dispatch:
 			dispatchCSI(static_cast<char>(_currentChar));

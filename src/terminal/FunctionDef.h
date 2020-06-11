@@ -73,8 +73,9 @@ constexpr bool operator<(FunctionDef const& a, FunctionDef const& b) noexcept
 	return a.id() < b.id();
 }
 
+
 using FunctionParam = unsigned int;
-using FunctionParamList = std::vector<FunctionParam>;
+using FunctionParamList = std::vector<std::vector<FunctionParam>>;
 using Intermediaries = std::string;
 using CommandList = std::vector<Command>;
 
@@ -92,20 +93,25 @@ class HandlerContext {
 
   public:
     size_t constexpr static MaxParameters = 16;
+    size_t constexpr static MaxSubParameters = 8;
 
 	HandlerContext()
 	{
-		parameters_.reserve(MaxParameters);
+		parameters_.resize(MaxParameters);
+        for (auto& param : parameters_)
+            param.reserve(MaxSubParameters);
+        parameters_.clear();
 	}
 
 	FunctionParamList const& parameters() const noexcept { return parameters_; }
 
 	size_t parameterCount() const noexcept { return parameters_.size(); }
+    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size(); }
 
 	std::optional<FunctionParam> param_opt(size_t _index) const noexcept
 	{
-		if (_index < parameters_.size() && parameters_[_index])
-			return {parameters_[_index]};
+		if (_index < parameters_.size() && parameters_[_index][0])
+			return {parameters_[_index][0]};
 		else
 			return std::nullopt;
 	}
@@ -117,7 +123,16 @@ class HandlerContext {
 
     unsigned int param(size_t _index) const noexcept
     {
-		return parameters_[_index];
+        assert(_index < parameters_.size());
+        assert(0 < parameters_[_index].size());
+		return parameters_[_index][0];
+    }
+
+    unsigned int subparam(size_t _index, size_t _subIndex) const noexcept
+    {
+        assert(_index < parameters_.size());
+        assert(_subIndex < parameters_[_index].size());
+		return parameters_[_index][_subIndex];
     }
 
     template <typename T, typename... Args>
