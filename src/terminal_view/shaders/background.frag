@@ -1,7 +1,7 @@
-uniform mediump vec4 u_color;
+in mediump vec4 fs_textColor;
 out mediump vec4 outColor;
 
 void main()
 {
-    outColor = u_color;
+    outColor = fs_textColor;
 }

@@ -38,7 +38,7 @@ add_library(terminal_view STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/decorator_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
-    CellBackground.cpp CellBackground.h
+    BackgroundRenderer.cpp BackgroundRenderer.h
     DecorationRenderer.cpp DecorationRenderer.h
     GLCursor.cpp GLCursor.h
     GLRenderer.cpp GLRenderer.h

@@ -39,26 +39,23 @@ GLRenderer::GLRenderer(Logger _logger,
         _fonts.regular.first.get().lineHeight(), // cell height
         _fonts.regular.first.get().baseline()
     },
-    pendingBackgroundDraw_{},
     logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     fonts_{ _fonts },
     projectionMatrix_{ _projectionMatrix },
+    backgroundRenderer_{
+        screenCoordinates_,
+        _colorProfile,
+        _projectionMatrix,
+        _backgroundShaderConfig
+    },
     textRenderer_{
         metrics_,
         screenCoordinates_,
         _colorProfile,
         _fonts,
         _textShaderConfig
-    },
-    cellBackground_{
-        QSize(
-            static_cast<int>(fonts_.regular.first.get().maxAdvance()),
-            static_cast<int>(fonts_.regular.first.get().lineHeight())
-        ),
-        _projectionMatrix,
-        _backgroundShaderConfig
     },
     decorationRenderer_{
         screenCoordinates_,
@@ -118,7 +115,6 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     screenCoordinates_.cellHeight = cellHeight;
     screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
 
-    cellBackground_.resize(cellSize);
     cursor_.resize(cellSize);
     clearCache();
 
@@ -129,9 +125,9 @@ void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
     projectionMatrix_ = _projectionMatrix;
 
-    cellBackground_.setProjection(_projectionMatrix);
-    textRenderer_.setProjection(_projectionMatrix);
+    backgroundRenderer_.setProjection(_projectionMatrix);
     decorationRenderer_.setProjection(_projectionMatrix);
+    textRenderer_.setProjection(_projectionMatrix);
     cursor_.setProjection(_projectionMatrix);
 }
 
@@ -150,17 +146,25 @@ void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
 uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
 {
     metrics_.clear();
-    pendingBackgroundDraw_ = {};
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
+    backgroundRenderer_.setOpacity(static_cast<float>(backgroundOpacity_) / 255.0f);
     auto const changes = _terminal.render(_now, bind(&GLRenderer::renderCell, this, _1, _2, _3));
-
-    assert(!pendingBackgroundDraw_.empty());
-    renderPendingBackgroundCells();
 
     textRenderer_.flushPendingSegments();
 
+    backgroundRenderer_.execute();
+    renderCursor(_terminal);
+    textRenderer_.execute();
+    decorationRenderer_.execute();
+    renderSelection(_terminal);
+
+    return changes;
+}
+
+void GLRenderer::renderCursor(Terminal const& _terminal)
+{
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
@@ -171,82 +175,36 @@ uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point 
             cursorCell.width()
         );
     }
+}
 
-    textRenderer_.execute();
-    decorationRenderer_.execute();
-
+void GLRenderer::renderSelection(Terminal const& _terminal)
+{
     if (_terminal.isSelectionAvailable())
     {
-        auto const color = canonicalColor(colorProfile_.selection, Opacity((int)(colorProfile_.selectionOpacity * 255.0f)));
+        backgroundRenderer_.setOpacity(colorProfile_.selectionOpacity);
         for (Selector::Range const& range : _terminal.selection())
         {
             if (_terminal.isAbsoluteLineVisible(range.line))
             {
                 cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(_terminal.historyLineCount() - _terminal.scrollOffset());
-
                 ++metrics_.cellBackgroundRenderCount;
-                cellBackground_.render(
-                    screenCoordinates_.map(range.fromColumn, row),
-                    color,
-                    1 + range.toColumn - range.fromColumn);
+                backgroundRenderer_.renderOnce(
+                    row,
+                    range.fromColumn,
+                    colorProfile_.selection,
+                    1 + range.toColumn - range.fromColumn
+                );
             }
         }
+        backgroundRenderer_.execute();
     }
-    return changes;
 }
 
 void GLRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
 {
-    fillBackgroundGroup(_row, _col, _cell);
-    textRenderer_.schedule(_row, _col, _cell);
+    backgroundRenderer_.renderCell(_row, _col, _cell);
     decorationRenderer_.renderCell(_row, _col, _cell);
-}
-
-void GLRenderer::fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
-{
-    auto const bgColor = _cell.attributes().makeColors(colorProfile_).second;
-
-    if (pendingBackgroundDraw_.lineNumber == _row && pendingBackgroundDraw_.color == bgColor)
-    {
-        assert(_cell.width() != 0);
-        pendingBackgroundDraw_.endColumn += _cell.width();
-    }
-    else
-    {
-        if (!pendingBackgroundDraw_.empty())
-            renderPendingBackgroundCells();
-
-        pendingBackgroundDraw_.reset(bgColor, _row, _col);
-    }
-}
-
-void GLRenderer::renderPendingBackgroundCells()
-{
-    if (pendingBackgroundDraw_.color == colorProfile_.defaultBackground)
-        return;
-
-    ++metrics_.cellBackgroundRenderCount;
-
-    // printf("GLRenderer.renderPendingBackgroundCells(#%u: %d, %d-%d) #%02x%02x%02x\n",
-    //     metrics_.cellBackgroundRenderCount,
-    //     pendingBackgroundDraw_.lineNumber,
-    //     pendingBackgroundDraw_.startColumn,
-    //     pendingBackgroundDraw_.endColumn,
-    //     int(pendingBackgroundDraw_.color[0] * 0xFF) & 0xFF,
-    //     int(pendingBackgroundDraw_.color[1] * 0xFF) & 0xFF,
-    //     int(pendingBackgroundDraw_.color[2] * 0xFF) & 0xFF
-    // );
-
-    cellBackground_.render(
-        screenCoordinates_.map(pendingBackgroundDraw_.startColumn, pendingBackgroundDraw_.lineNumber),
-        QVector4D(
-            static_cast<float>(pendingBackgroundDraw_.color.red) / 255.0f,
-            static_cast<float>(pendingBackgroundDraw_.color.green) / 255.0f,
-            static_cast<float>(pendingBackgroundDraw_.color.blue) / 255.0f,
-            1.0f
-        ),
-        1 + pendingBackgroundDraw_.endColumn - pendingBackgroundDraw_.startColumn
-    );
+    textRenderer_.schedule(_row, _col, _cell);
 }
 
 } // end namespace

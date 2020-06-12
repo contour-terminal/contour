@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal_view/ShaderConfig.h>
-#include <terminal_view/CellBackground.h>
+#include <terminal_view/BackgroundRenderer.h>
 #include <terminal_view/TextRenderer.h>
 #include <terminal_view/DecorationRenderer.h>
 #include <terminal_view/GLCursor.h>
@@ -109,35 +109,13 @@ class GLRenderer : public QOpenGLFunctions {
 
   private:
     void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
-    void fillBackgroundGroup(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
-    void renderPendingBackgroundCells();
+    void renderCursor(Terminal const& _terminal);
+    void renderSelection(Terminal const& _terminal);
 
   private:
     RenderMetrics metrics_;
 
-    struct PendingBackgroundDraw
-    {
-        RGBColor color;                 // The background color the draw is pending for.
-        cursor_pos_t lineNumber{};      // The line this color has to be drawn on.
-        cursor_pos_t startColumn{};     // The first column to start drawing.
-        cursor_pos_t endColumn{};       // The last column to draw.
-
-        void reset(RGBColor const& _color, cursor_pos_t _lineNo, cursor_pos_t _col)
-        {
-            color = _color;
-            lineNumber = _lineNo;
-            startColumn = _col;
-            endColumn = _col;
-        }
-
-        bool empty() const noexcept
-        {
-            return lineNumber == 0;
-        }
-    };
-
     ScreenCoordinates screenCoordinates_;
-    PendingBackgroundDraw pendingBackgroundDraw_;
     Logger logger_;
 
     ColorProfile colorProfile_;
@@ -146,10 +124,10 @@ class GLRenderer : public QOpenGLFunctions {
     FontConfig fonts_;
 
     QMatrix4x4 projectionMatrix_;
+    BackgroundRenderer backgroundRenderer_;
     TextRenderer textRenderer_;
-    CellBackground cellBackground_;
     DecorationRenderer decorationRenderer_;
     GLCursor cursor_;
 };
 
-}
+} // end namespace
