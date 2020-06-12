@@ -217,3 +217,19 @@ brew install freetype fontconfig harfbuzz boost qt5
 * [console\_codes](http://man.he.net/man4/console_codes) Linux console codes
 * [Summary of ANSI standards for ASCII terminals](http://www.inwap.com/pdp10/ansicode.txt)
 * [Text Terminal HOWTO (Chapter 7.2, PTY)](http://tldp.org/HOWTO/Text-Terminal-HOWTO-7.html#ss7.2)
+
+### License
+
+```
+Contour - A modern C++ Terminal Emulator
+-------------------------------------------
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
