@@ -19,6 +19,7 @@
 
 namespace contour::actions {
 
+struct FollowHyperlink{};
 struct ToggleFullScreen{};
 struct ScreenshotVT{};
 struct IncreaseFontSize{};
@@ -54,6 +55,7 @@ struct ResetConfig{};
 // FocusPreviousTab
 
 using Action = std::variant<
+    FollowHyperlink,
     ResetFontSize,
     ReloadConfig,
     ResetConfig,

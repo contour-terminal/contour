@@ -18,6 +18,7 @@
 #include <terminal/ControlCode.h>
 
 #include <crispy/escape.h>
+#include <crispy/stdfs.h>
 
 #include <chrono>
 
@@ -180,6 +181,8 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                                        currentMousePosition_.column};
     if (inputGenerator_.generate(withPosition))
     {
+        // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
+        // under the current position
         flushInput();
         return true;
     }

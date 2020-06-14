@@ -601,6 +601,21 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
     if (auto cursor = _node["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
         colors.cursor = cursor.as<string>();
 
+    if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
+    {
+        if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            colors.hyperlinkDecoration.normal = color.as<string>();
+            cout << fmt::format("normal color: {}\n", colors.hyperlinkDecoration.normal);
+        }
+
+        if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            colors.hyperlinkDecoration.hover = color.as<string>();
+            cout << fmt::format("hover color: {}\n", colors.hyperlinkDecoration.hover);
+        }
+    }
+
     auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
         if (_node)
         {
@@ -724,6 +739,23 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.backgroundOpacity =
                 (terminal::Opacity)(static_cast<unsigned>(255 * clamp(opacity.as<float>(), 0.0f, 1.0f)));
         softLoadValue(background, "blur", profile.backgroundBlur);
+    }
+
+    if (auto deco = _node["hyperlink_decoration"]; deco)
+    {
+        if (auto normal = deco["normal"]; normal && normal.IsScalar())
+            if (auto const pdeco = terminal::view::to_decorator(normal.as<string>()); pdeco.has_value())
+            {
+                profile.hyperlinkDecoration.normal = *pdeco;
+                cout << fmt::format("normal deco: {}\n", *pdeco);
+            }
+
+        if (auto hover = deco["hover"]; hover && hover.IsScalar())
+            if (auto const pdeco = terminal::view::to_decorator(hover.as<string>()); pdeco.has_value())
+            {
+                profile.hyperlinkDecoration.hover = *pdeco;
+                cout << fmt::format("hover deco: {}\n", *pdeco);
+            }
     }
 
     if (auto cursor = _node["cursor"]; cursor)

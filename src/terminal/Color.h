@@ -135,6 +135,11 @@ struct ColorProfile {
     RGBColor mouseForeground = 0x800000;
     RGBColor mouseBackground = 0x808000;
 
+    struct {
+        RGBColor normal = 0x0070F0;
+        RGBColor hover = 0xFF0000;
+    } hyperlinkDecoration;
+
     Palette palette = []() {
         Palette colors;
 

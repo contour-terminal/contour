@@ -59,6 +59,8 @@ class GLRenderer : public QOpenGLFunctions {
                FontConfig const& _fonts,
                ColorProfile _colorProfile,
                Opacity _backgroundOpacity,
+               Decorator _hyperlinkNormal,
+               Decorator _hyperlinkHover,
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
                ShaderConfig const& _decoratorShaderConfig,
@@ -73,6 +75,11 @@ class GLRenderer : public QOpenGLFunctions {
     void setFont(FontConfig const& _fonts);
     bool setFontSize(unsigned int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
+
+    void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
+    {
+        decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
+    }
 
     constexpr void setScreenSize(WindowSize const& _screenSize) noexcept
     {
@@ -90,7 +97,9 @@ class GLRenderer : public QOpenGLFunctions {
      *
      * @p _now The time hint to use when rendering the eventually blinking cursor.
      */
-    uint64_t render(Terminal const& _terminal, std::chrono::steady_clock::time_point _now);
+    uint64_t render(Terminal& _terminal,
+                    std::chrono::steady_clock::time_point _now,
+                    terminal::Coordinate const& _currentMousePosition);
 
     RenderMetrics const& metrics() const noexcept { return metrics_; }
 

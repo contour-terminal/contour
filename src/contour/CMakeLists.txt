@@ -1,6 +1,6 @@
 include(FilesystemResolver)
 
-find_package(Qt5 COMPONENTS Gui REQUIRED)  # apt install qtbase5-dev libqt5gui5
+find_package(Qt5 COMPONENTS Gui Network REQUIRED)  # apt install qtbase5-dev libqt5gui5
 find_package(OpenGL REQUIRED)
 find_package(Freetype REQUIRED)
 
@@ -69,7 +69,7 @@ elseif(APPLE)
     )
 endif()
 
-set(contour_LIBRARIES terminal_view yaml-cpp Qt5::Gui OpenGL::GL)
+set(contour_LIBRARIES terminal_view yaml-cpp Qt5::Gui Qt5::Network OpenGL::GL)
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     list(APPEND contour_LIBRARIES ${Boost_LIBRARIES})

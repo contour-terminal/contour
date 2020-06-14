@@ -52,6 +52,8 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            chrono::milliseconds _cursorBlinkInterval,
                            terminal::ColorProfile _colorProfile,
                            terminal::Opacity _backgroundOpacity,
+                           Decorator _hyperlinkNormal,
+                           Decorator _hyperlinkHover,
                            string const& _shell,
                            terminal::Process::Environment const& _env,
                            QMatrix4x4 const& _projectionMatrix,
@@ -76,6 +78,8 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _fonts,
         _colorProfile,
         _backgroundOpacity,
+        _hyperlinkNormal,
+        _hyperlinkHover,
         _backgroundShaderConfig,
         _textShaderConfig,
         _decoratorShaderConfig,
@@ -309,7 +313,7 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
 
 uint64_t TerminalView::render(chrono::steady_clock::time_point const& _now)
 {
-    return renderer_.render(process_.terminal(), _now);
+    return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition());
 }
 
 void TerminalView::wait()

@@ -28,6 +28,22 @@ using namespace crispy;
 
 namespace terminal {
 
+std::unordered_map<std::string, std::string> parseSubParamKeyValuePairs(std::string const& s)
+{
+    // params := pair (':' pair)*
+    // pair := TEXT '=' TEXT
+    std::unordered_map<std::string, std::string> params;
+    // foo=bar:foo2=bar2:....
+    // TODO: support more than one param!
+    if (auto const i = s.find('='); i != s.npos)
+    {
+        auto const key = s.substr(0, i);
+        auto const val = s.substr(i + 1);
+        params[key] = val;
+    }
+    return params;
+}
+
 optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
 {
     if (_intermediate.size() != 1)
@@ -241,6 +257,23 @@ void OutputHandler::dispatchOSC()
         case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
         case 6: // Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
             log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            break;
+        case 8: // hyperlink extension: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
+            // hyperlink_OSC ::= OSC '8' ';' params ';' URI
+            // params := pair (':' pair)*
+            // pair := TEXT '=' TEXT
+            if (auto const pos = value.find(';'); pos != value.npos)
+            {
+                auto const params = parseSubParamKeyValuePairs(value.substr(1, pos));
+                auto id = string{};
+                auto uri = string{};
+                if (auto const p = params.find("id"); p != params.end())
+                    id = p->second;
+                uri = value.substr(pos + 1);
+                emitCommand<Hyperlink>(id, uri);
+            }
+            else
+                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
         case 10: // Ps = 1 0  -> Change VT100 text foreground color to Pt.
             if (value == "?")

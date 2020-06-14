@@ -52,6 +52,8 @@ class TerminalView {
                  std::chrono::milliseconds _cursorBlinkInterval,
                  terminal::ColorProfile _colorProfile,
                  terminal::Opacity _backgroundOpacity,
+                 Decorator _hyperlinkNormal,
+                 Decorator _hyperlinkHover,
                  std::string const& _shell,
                  terminal::Process::Environment const& _env,
                  QMatrix4x4 const& _projectionMatrix,
@@ -86,6 +88,7 @@ class TerminalView {
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
+    void setHyperlinkDecoration(Decorator _normal, Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
     void setProjection(QMatrix4x4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
 
     /// Renders the screen buffer to the current OpenGL screen.

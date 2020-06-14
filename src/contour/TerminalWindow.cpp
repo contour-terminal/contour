@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <contour/TerminalWindow.h>
+#include <contour/Actions.h>
 
 #include <QClipboard>
 #include <QDebug>
@@ -24,7 +25,8 @@
 #include <QScreen>
 #include <QTimer>
 
-#include <QMetaEnum>
+#include <QtCore/QFileInfo>
+#include <QtNetwork/QHostInfo>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
@@ -493,6 +495,8 @@ void TerminalWindow::initializeGL()
         profile().cursorBlinkInterval,
         profile().colors,
         profile().backgroundOpacity,
+        profile().hyperlinkDecoration.normal,
+        profile().hyperlinkDecoration.hover,
         profile().shell,
         profile().env,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
@@ -701,14 +705,13 @@ void TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
 {
     now_ = chrono::steady_clock::now();
 
-    if (terminalView_->terminal().send(_mouseEvent, now_))
-        return;
+    // No input mapping found, forward event.
+    terminalView_->terminal().send(_mouseEvent, now_);
 
+    // Always test local configured mappings first
     if (auto mapping = config_.mouseMappings.find(_mouseEvent); mapping != config_.mouseMappings.end())
-    {
         for (auto const& action : mapping->second)
             executeAction(action);
-    }
 }
 
 void TerminalWindow::mousePressEvent(QMouseEvent* _event)
@@ -757,9 +760,26 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
         auto const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - MarginTop) / terminalView_->cellHeight());
         auto const col = static_cast<unsigned>(1 + (max(_event->x(), 0) - MarginLeft) / terminalView_->cellWidth());
 
-        terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
+        {
+            auto const _l = scoped_lock{terminalView_->terminal()};
+            auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
+            if (terminalView_->terminal().screen().contains(currentMousePosition))
+            {
+                if (terminalView_->terminal().screen()(currentMousePosition).hyperlink())
+                    setCursor(Qt::CursorShape::PointingHandCursor);
+                else
+                    setDefaultCursor();
+            }
+        }
 
-        if (terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
+        auto const handled = terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
+
+        // XXX always update as we don't know if a hyperlink is visible and its hover-state has changed.
+        // We could implement an actual check by keeping track of how many grid cells do contain a
+        // hyperlink whose number eventually updates upon every cell write.
+        bool constexpr hyperlinkVisible = true;
+
+        if (hyperlinkVisible || handled || terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
         {
             setScreenDirty();
             update();
@@ -771,6 +791,20 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
     }
 }
 
+void TerminalWindow::setDefaultCursor()
+{
+    using Type = terminal::ScreenBuffer::Type;
+    switch (terminalView_->terminal().screenBufferType())
+    {
+        case Type::Main:
+            setCursor(Qt::IBeamCursor);
+            break;
+        case Type::Alternate:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
+}
+
 void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "normal" colors
 {
     try
@@ -779,16 +813,7 @@ void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
 
         // as per Qt-documentation, some platform implementations reset the cursor when leaving the
         // window, so we have to re-apply our desired cursor in focusInEvent().
-        using Type = terminal::ScreenBuffer::Type;
-        switch (terminalView_->terminal().screenBufferType())
-        {
-            case Type::Main:
-                setCursor(Qt::IBeamCursor);
-                break;
-            case Type::Alternate:
-                setCursor(Qt::ArrowCursor);
-                break;
-        }
+        setDefaultCursor();
 
         terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
     }
@@ -989,6 +1014,19 @@ void TerminalWindow::executeAction(Action const& _action)
                 }
             );
             return reloadConfigValues(defaultConfig);
+        },
+        [this](actions::FollowHyperlink) -> bool {
+            auto const _l = scoped_lock{terminalView_->terminal()};
+            auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
+            if (terminalView_->terminal().screen().contains(currentMousePosition))
+            {
+                if (auto hyperlink = terminalView_->terminal().screen()(currentMousePosition).hyperlink(); hyperlink != nullptr)
+                {
+                    followHyperlink(*hyperlink);
+                    return true;
+                }
+            }
+            return false;
         }
     }, _action);
 
@@ -997,6 +1035,33 @@ void TerminalWindow::executeAction(Action const& _action)
         setScreenDirty();
         update();
     }
+}
+
+void TerminalWindow::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
+{
+    auto const fileInfo = QFileInfo(QString::fromStdString(std::string(_hyperlink.path())));
+    auto const isLocal = _hyperlink.isLocal() && _hyperlink.host() == QHostInfo::localHostName().toStdString();
+    auto const editorEnv = getenv("EDITOR");
+
+    if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
+    {
+        QStringList args;
+        args.append("-c");
+        args.append(QString::fromStdString(config_.backingFilePath.string()));
+        args.append(QString::fromUtf8(_hyperlink.path().data(), _hyperlink.path().size()));
+        QProcess::execute(QString::fromStdString(programPath_), args);
+    }
+    else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
+    {
+        QStringList args;
+        args.append("-c");
+        args.append(QString::fromStdString(config_.backingFilePath.string()));
+        args.append(QString::fromStdString(editorEnv));
+        args.append(QString::fromUtf8(_hyperlink.path().data(), _hyperlink.path().size()));
+        QProcess::execute(QString::fromStdString(programPath_), args);
+    }
+    else
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromUtf8(std::string(_hyperlink.path()).c_str())));
 }
 
 terminal::view::FontConfig TerminalWindow::loadFonts(config::TerminalProfile const& _profile)
@@ -1033,6 +1098,9 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     terminalView_->terminal().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
 
     terminalView_->setColorProfile(newProfile.colors);
+
+    terminalView_->setHyperlinkDecoration(newProfile.hyperlinkDecoration.normal,
+                                          newProfile.hyperlinkDecoration.hover);
 
     if (newProfile.cursorShape != profile().cursorShape)
         terminalView_->setCursorShape(newProfile.cursorShape);

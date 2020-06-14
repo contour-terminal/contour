@@ -164,6 +164,8 @@ class Terminal {
     /// Only access this when having locked.
     Screen& screen() noexcept { return screen_; }
 
+    Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
+
     // {{{ cursor management
     void setCursorDisplay(CursorDisplay _value);
     void setCursorShape(CursorShape _value);

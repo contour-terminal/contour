@@ -76,6 +76,7 @@ class TerminalWindow :
     terminal::view::FontConfig loadFonts(config::TerminalProfile const& _profile);
     void executeAction(actions::Action const& _action);
     void executeInput(terminal::MouseEvent const& event);
+    void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
 
     bool fullscreen() const;
     void toggleFullScreen();
@@ -103,6 +104,8 @@ class TerminalWindow :
     void onTerminalClosed();
 
     void blinkingCursorUpdate();
+
+    void setDefaultCursor();
 
   private:
     /// Declares the screen-dirtiness-vs-rendering state.

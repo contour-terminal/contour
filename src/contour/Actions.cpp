@@ -48,6 +48,7 @@ namespace {
 optional<Action> fromString(string const& _name)
 {
     auto static const mappings = array{
+        mapAction<actions::FollowHyperlink>("FollowHyperlink"),
         mapAction<actions::ChangeProfile>("ChangeProfile"),
         mapAction<actions::CopySelection>("CopySelection"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),

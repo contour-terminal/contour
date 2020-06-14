@@ -19,6 +19,7 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MAT
     add_compile_options(-Wextra)
 elseif(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
+    add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
 include(EnableCcache)

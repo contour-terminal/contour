@@ -21,6 +21,7 @@
 #include <terminal/Process.h>
 #include <terminal/WindowSize.h>
 #include <terminal_view/ShaderConfig.h>
+#include <terminal_view/DecorationRenderer.h> // Decorator
 
 #include <crispy/stdfs.h>
 
@@ -97,6 +98,11 @@ struct TerminalProfile {
 
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
+
+    struct {
+        terminal::view::Decorator normal = terminal::view::Decorator::DottedUnderline;
+        terminal::view::Decorator hover = terminal::view::Decorator::Underline;
+    } hyperlinkDecoration;
 };
 
 using terminal::view::ShaderConfig;

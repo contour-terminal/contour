@@ -272,6 +272,7 @@ class MnemonicBuilder {
     void operator()(HorizontalPositionRelative const& v) { build("HPR", "Horizontal Position Relative", v.n); }
     void operator()(HorizontalTabClear const& v) { build("TBC", "Horizontal Tab Clear", v.which); }
     void operator()(HorizontalTabSet) { build("HTS", "Horizontal Tab Set"); }
+    void operator()(Hyperlink const& v) { build("HYPERLINK", fmt::format("Set hyperlink id='{}' link='{}'", v.id, v.link)); }
     void operator()(MoveCursorUp const& v) { build("CUU", "Move cursor up", v.n); }
     void operator()(MoveCursorDown const& v) { build("CUD", "Move cursor down", v.n); }
     void operator()(MoveCursorForward const& v) { build("CUF", "Move cursor forward", v.n); }

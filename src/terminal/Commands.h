@@ -777,6 +777,12 @@ struct RestoreWindowTitle {};
 /// SETMARK - Sets a marker at the current cursor line position that can be jumped to later.
 struct SetMark {};
 
+/// OSC 8 - Sets or resets the hyperlink for text this OSC.
+struct Hyperlink {
+    std::string id;
+    std::string link;
+};
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -915,6 +921,7 @@ using Command = std::variant<
     HorizontalPositionRelative,
     HorizontalTabClear,
     HorizontalTabSet,
+    Hyperlink,
     Index,
     InsertCharacters,
     InsertColumns,

@@ -51,6 +51,8 @@ enum class Decorator {
     Encircle,
 };
 
+std::optional<Decorator> to_decorator(std::string const& _value);
+
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
 class DecorationRenderer {
   public:
@@ -60,17 +62,28 @@ class DecorationRenderer {
     /// @param _projectionMatrix
     /// @param _shaderConfig
     /// @param _lineThickness
+    /// @param _colorProfile
     /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
     /// @param _curlyFrequency the number of complete sine waves that one grid cell width will cover
     DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
                        QMatrix4x4 const& _projectionMatrix,
                        ShaderConfig const& _shaderConfig,
+                       ColorProfile const& _colorProfile,
+                       Decorator _hyperlinkNormal,
+                       Decorator _hyperlinkHover,
                        unsigned _lineThickness,
                        float _curlyAmplitude,
                        float _curlyFrequency);
 
     void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setColorProfile(ColorProfile const& _colorProfile);
+
+    void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
+    {
+        std::cout << fmt::format("setHyperlinkDecoration: {}; {}\n", _normal, _hover);
+        hyperlinkNormal_  = _normal;
+        hyperlinkHover_ = _hover;
+    }
 
     void renderCell(cursor_pos_t _row,
                     cursor_pos_t _col,
@@ -99,12 +112,11 @@ class DecorationRenderer {
     ScreenCoordinates const& screenCoordinates_;
     QMatrix4x4 projectionMatrix_;
 
+    Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
+    Decorator hyperlinkHover_ = Decorator::Underline;
     unsigned lineThickness_ = 1;
     float curlyAmplitude_ = 1.0f;
     float curlyFrequency_ = 1.0f;
-
-    ScreenBuffer::GraphicsAttributes attributes_{};
-    unsigned columnCount_ = 0;
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 
@@ -112,7 +124,6 @@ class DecorationRenderer {
     int decoratorProjectionLocation_;
     AtlasRenderer atlasRenderer_;
     Atlas atlas_;
-
 };
 
 } // end namespace

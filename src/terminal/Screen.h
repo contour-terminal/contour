@@ -19,6 +19,7 @@
 #include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/WindowSize.h>
+#include <terminal/Hyperlink.h>
 #include <terminal/InputGenerator.h> // MouseTransport
 
 #include <unicode/grapheme_segmenter.h>
@@ -194,13 +195,15 @@ struct ScreenBuffer {
             attributes_ = {};
             codepointCount_ = 0;
             width_ = 1;
+            hyperlink_ = nullptr;
         }
 
-        void reset(GraphicsAttributes _attribs) noexcept
+        void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
         {
             attributes_ = std::move(_attribs);
             codepointCount_ = 0;
             width_ = 1;
+            hyperlink_ = _hyperlink;
         }
 
         Cell(Cell const&) noexcept = default;
@@ -265,6 +268,9 @@ struct ScreenBuffer {
             return unicode::to_utf8(codepoints_.data(), codepointCount_);
         }
 
+        HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
+        void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
+
       private:
         /// Unicode codepoint to be displayed.
         std::array<char32_t, MaxCodepoints> codepoints_;
@@ -277,6 +283,8 @@ struct ScreenBuffer {
 
         /// Number of combined codepoints stored in this cell.
         uint8_t codepointCount_;
+
+        HyperlinkRef hyperlink_ = nullptr;
     };
 
 	using LineBuffer = std::vector<Cell>;
@@ -378,6 +386,10 @@ struct ScreenBuffer {
 
     ColumnIterator lastColumn{currentColumn};
     Cursor lastCursor{};
+
+    HyperlinkRef currentHyperlink = {};
+    // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
+    std::unordered_map<std::string, HyperlinkRef> hyperlinks;
 
 	void appendChar(char32_t _codepoint, bool _consecutive);
 	void appendCharToCurrent(char32_t _codepoint);
@@ -664,6 +676,7 @@ class Screen {
     void operator()(HorizontalPositionRelative const& v);
     void operator()(HorizontalTabClear const& v);
     void operator()(HorizontalTabSet const& v);
+    void operator()(Hyperlink const& v);
     void operator()(MoveCursorUp const& v);
     void operator()(MoveCursorDown const& v);
     void operator()(MoveCursorForward const& v);

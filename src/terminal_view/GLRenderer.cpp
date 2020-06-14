@@ -28,6 +28,8 @@ GLRenderer::GLRenderer(Logger _logger,
                        FontConfig const& _fonts,
                        terminal::ColorProfile _colorProfile,
                        terminal::Opacity _backgroundOpacity,
+                       Decorator _hyperlinkNormal,
+                       Decorator _hyperlinkHover,
                        ShaderConfig const& _backgroundShaderConfig,
                        ShaderConfig const& _textShaderConfig,
                        ShaderConfig const& _decoratorShaderConfig,
@@ -61,6 +63,9 @@ GLRenderer::GLRenderer(Logger _logger,
         screenCoordinates_,
         _projectionMatrix,
         _decoratorShaderConfig,
+        _colorProfile,
+        _hyperlinkNormal,
+        _hyperlinkHover,
         1,      // line thickness (TODO: configurable)
         0.75f,  // curly amplitude
         1.0f    // curly frequency
@@ -140,17 +145,44 @@ void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
 {
     colorProfile_ = _colors;
     textRenderer_.setColorProfile(_colors);
+    decorationRenderer_.setColorProfile(_colors);
     cursor_.setColor(canonicalColor(colorProfile_.cursor));
 }
 
-uint64_t GLRenderer::render(Terminal const& _terminal, steady_clock::time_point _now)
+uint64_t GLRenderer::render(Terminal& _terminal,
+                            steady_clock::time_point _now,
+                            terminal::Coordinate const& _currentMousePosition)
 {
     metrics_.clear();
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
     backgroundRenderer_.setOpacity(static_cast<float>(backgroundOpacity_) / 255.0f);
-    auto const changes = _terminal.render(_now, bind(&GLRenderer::renderCell, this, _1, _2, _3));
+    uint64_t changes = 0;
+    {
+        auto _l = scoped_lock{_terminal};
+        if (_terminal.screen().contains(_currentMousePosition))
+        {
+            auto& cellAtMouse = _terminal.screen()(_currentMousePosition);
+            if (cellAtMouse.hyperlink())
+            {
+                cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+            }
+
+            changes = _terminal.preRender(_now);
+            _terminal.screen().render(bind(&GLRenderer::renderCell, this, _1, _2, _3),
+                                      _terminal.screen().scrollOffset());
+
+            if (cellAtMouse.hyperlink())
+                cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
+        }
+        else
+        {
+            changes = _terminal.preRender(_now);
+            _terminal.screen().render(bind(&GLRenderer::renderCell, this, _1, _2, _3),
+                                      _terminal.screen().scrollOffset());
+        }
+    }
 
     textRenderer_.flushPendingSegments();
 

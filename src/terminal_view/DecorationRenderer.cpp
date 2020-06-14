@@ -17,8 +17,11 @@
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
 
+#include <array>
+#include <cmath>
 #include <iostream>
 #include <optional>
+#include <utility>
 
 using namespace std;
 using namespace crispy;
@@ -29,20 +32,42 @@ constexpr unsigned MaxDecoratorInstanceCount = 1;
 constexpr unsigned MaxDecoratorTextureDepth = 2;
 constexpr unsigned MaxDecoratorTextureSize = 128;
 
+optional<Decorator> to_decorator(std::string const& _value)
+{
+    auto constexpr mappings = array{
+        pair{"underline", Decorator::Underline},
+        pair{"double-underline", Decorator::DoubleUnderline},
+        pair{"curly-underline", Decorator::CurlyUnderline},
+        pair{"dashed-underline", Decorator::DashedUnderline},
+        pair{"crossed-out", Decorator::CrossedOut},
+        pair{"framed", Decorator::Frame},
+        pair{"encircle", Decorator::Encircle},
+    };
+
+    for (auto const& mapping : mappings)
+        if (mapping.first == _value)
+            return {mapping.second};
+
+    return nullopt;
+}
+
 DecorationRenderer::DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
                                        QMatrix4x4 const& _projectionMatrix,
                                        ShaderConfig const& _decoratorShaderConfig,
+                                       ColorProfile const& _colorProfile,
+                                       Decorator _hyperlinkNormal,
+                                       Decorator _hyperlinkHover,
                                        unsigned _lineThickness,
                                        float _curlyAmplitude,
                                        float _curlyFrequency) :
     screenCoordinates_{ _screenCoordinates },
     projectionMatrix_{ _projectionMatrix },
+    hyperlinkNormal_{ _hyperlinkNormal },
+    hyperlinkHover_{ _hyperlinkHover },
     lineThickness_{ _lineThickness },
     curlyAmplitude_{ _curlyAmplitude },
     curlyFrequency_{ _curlyFrequency },
-    attributes_{},
-    columnCount_{},
-    colorProfile_{},
+    colorProfile_{ _colorProfile },
     decoratorShader_{ createShader(_decoratorShaderConfig) },
     decoratorProjectionLocation_{ decoratorShader_->uniformLocation("vs_projection") },
     atlasRenderer_{},
@@ -146,12 +171,12 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const thickness = max(lineThickness_ * width / 4, 1u);
+        auto const thickness = max(lineThickness_ * width / 6, 1u);
         auto const height = thickness;
         auto image = atlas::Buffer(width * height, 0u);
 
         for (unsigned x = 0; x < width; ++x)
-            if ((x / thickness) % 2 == 0)
+            if ((x / thickness) % 3 == 1)
                 for (unsigned y = 0; y < height; ++y)
                     image[y * width + x] = 0xFF;
 
@@ -193,17 +218,30 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
                                     cursor_pos_t _col,
                                     ScreenBuffer::Cell const& _cell)
 {
-    auto constexpr underlineMappings = array{
-        pair{CharacterStyleMask::Underline, Decorator::Underline},
-        pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
-        pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
-        pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
-        pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
-    };
+    if (_cell.hyperlink())
+    {
+        auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
+                            ? colorProfile_.hyperlinkDecoration.hover
+                            : colorProfile_.hyperlinkDecoration.normal;
+        auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
+                            ? hyperlinkHover_
+                            : hyperlinkNormal_;
+        renderDecoration(decoration, _row, _col, 1, color);
+    }
+    else
+    {
+        auto constexpr underlineMappings = array{
+            pair{CharacterStyleMask::Underline, Decorator::Underline},
+            pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
+            pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
+            pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
+            pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
+        };
 
-    for (auto const& mapping : underlineMappings)
-        if (_cell.attributes().styles & mapping.first)
-            renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+        for (auto const& mapping : underlineMappings)
+            if (_cell.attributes().styles & mapping.first)
+                renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    }
 
     auto constexpr supplementalMappings = array{
         pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},

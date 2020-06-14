@@ -310,6 +310,7 @@ void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
     else
     {
         auto const extendedWidth = lastColumn->appendCharacter(ch);
+        lastColumn->setHyperlink(currentHyperlink);
         if (extendedWidth != 0)
             clearAndAdvance(extendedWidth);
     }
@@ -326,7 +327,7 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
         assert(n > 0);
         cursor.column += n;
         for (unsigned i = 0; i < n; ++i)
-            (currentColumn++)->reset(graphicsRendition);
+            (currentColumn++)->reset(graphicsRendition, currentHyperlink);
     }
     else if (autoWrap)
         wrapPending = true;
@@ -337,6 +338,7 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
     Cell& cell = *currentColumn;
     cell.setCharacter(ch);
     cell.attributes() = graphicsRendition;
+    cell.setHyperlink(currentHyperlink);
 
     lastColumn = currentColumn;
     lastCursor = cursor;
@@ -348,7 +350,7 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
         cursor.column += n;
         currentColumn++;
         for (unsigned i = 1; i < n; ++i)
-            (currentColumn++)->reset(graphicsRendition);
+            (currentColumn++)->reset(graphicsRendition, currentHyperlink);
     }
     else if (autoWrap)
         wrapPending = true;
@@ -1079,6 +1081,9 @@ void Screen::operator()(SendTerminalId const&)
 
 void Screen::operator()(ClearToEndOfScreen const&)
 {
+    if (isAlternateScreen() && buffer_->cursor.row == 1 && buffer_->cursor.column == 1)
+        buffer_->hyperlinks.clear();
+
     (*this)(ClearToEndOfLine{});
 
     for_each(
@@ -1260,6 +1265,25 @@ void Screen::operator()(HorizontalTabClear const& v)
 void Screen::operator()(HorizontalTabSet const&)
 {
     buffer_->setTabUnderCursor();
+}
+
+void Screen::operator()(Hyperlink const& v)
+{
+    if (v.link.empty())
+        buffer_->currentHyperlink = nullptr;
+    else if (v.id.empty())
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.link});
+    else if (auto i = buffer_->hyperlinks.find(v.id); i != buffer_->hyperlinks.end())
+        buffer_->currentHyperlink = i->second;
+    else
+    {
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.link});
+        buffer_->hyperlinks[v.id] = buffer_->currentHyperlink;
+    }
+    // TODO:
+    // Care about eviction.
+    // Move hyperlink store into ScreenBuffer, so it gets reset upon every switch into
+    // alternate screen (not for main screen!)
 }
 
 void Screen::operator()(MoveCursorUp const& v)

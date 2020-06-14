@@ -70,6 +70,11 @@ profiles:
         # Specifies a colorscheme to use (alternatively the colors can be inlined).
         colors: "default"
 
+        # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
+        hyperlink_decoration:
+            default: dotted
+            hover: underline
+
 # Color Profiles
 # --------------
 #
@@ -85,6 +90,10 @@ color_schemes:
         selection: '#30c0c0'
         # Opacity to draw the selection color over the existing screen cell(s).
         selection_opacity: 0.3
+        # color to pick for hyperlinks decoration, when hovering
+        hyperlink_decoration:
+            normal: '#f0f000'
+            hover: '#ff0000'
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).
@@ -148,6 +157,7 @@ color_schemes:
 # - CopySelection     Copies the current selection into the clipboard buffer.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
+# - FollowHyperlink   Follows the hyperlink that is exposed via OSC 8 under the current cursor position.
 # - IncreaseFontSize  Increases the font size by 1 pixel.
 # - IncreaseOpacity   Increases the default-background opacity by 5%.
 # - NewTerminal       Spawns a new terminal at the current terminals current working directory.
@@ -174,6 +184,7 @@ color_schemes:
 # - WriteScreen:      Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:
+    - { mods: [Control],        mouse: Left,        action: FollowHyperlink }
     - { mods: [],               mouse: Middle,      action: PasteSelection }
     - { mods: [],               mouse: WheelDown,   action: ScrollDown }
     - { mods: [],               mouse: WheelUp,     action: ScrollUp }

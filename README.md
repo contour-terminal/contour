@@ -9,9 +9,9 @@
 
 **IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
 
-## Purpose
-
-`contour` is a modern terminal emulator, for everyday use.
+`contour` is a modern terminal emulator, for everyday use. It is fully seperating emulation from
+graphical representation for clear seperation of concerns but also for special features to come
+before version 1.0 is released (headless terminal server with GUI & TUI frontends).
 
 ## Features
 
@@ -27,6 +27,7 @@
 - ✅ Key binding customization
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+- ✅ Clickable hyperlinks via OSC 8
 
 ## A word on vertical line markers
 
