@@ -56,8 +56,8 @@ class CharacterStyleMask {
         CurlyUnderlined = (1 << 9),
         DottedUnderline = (1 << 10),
         DashedUnderline = (1 << 11),
-        Boxed = (1 << 12),
-        Circle = (1 << 13),
+        Framed = (1 << 12),
+        Encircled = (1 << 13),
 	};
 
 	constexpr CharacterStyleMask() : mask_{} {}
@@ -175,7 +175,7 @@ struct ScreenBuffer {
 
         Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
             codepoints_{},
-            attributes_{_attrib},
+            attributes_{std::move(_attrib)},
             width_{1},
             codepointCount_{0}
         {
@@ -198,15 +198,15 @@ struct ScreenBuffer {
 
         void reset(GraphicsAttributes _attribs) noexcept
         {
-            attributes_ = _attribs;
+            attributes_ = std::move(_attribs);
             codepointCount_ = 0;
             width_ = 1;
         }
 
-        constexpr Cell(Cell const&) noexcept = default;
-        constexpr Cell(Cell&&) noexcept = default;
-        constexpr Cell& operator=(Cell const&) noexcept = default;
-        constexpr Cell& operator=(Cell&&) noexcept = default;
+        Cell(Cell const&) noexcept = default;
+        Cell(Cell&&) noexcept = default;
+        Cell& operator=(Cell const&) noexcept = default;
+        Cell& operator=(Cell&&) noexcept = default;
 
         constexpr std::u32string_view codepoints() const noexcept
         {
@@ -339,7 +339,7 @@ struct ScreenBuffer {
 	ScreenBuffer(Type _type, WindowSize const& _size, std::optional<size_t> _maxHistoryLineCount)
 		: type_{ _type },
           size_{ _size },
-          maxHistoryLineCount_{ move(_maxHistoryLineCount) },
+          maxHistoryLineCount_{ _maxHistoryLineCount },
 		  margin_{
 			  {1, _size.rows},
 			  {1, _size.columns}
@@ -460,6 +460,9 @@ struct ScreenBuffer {
 			return {1, 1};
 	}
 
+	Cell& at(Coordinate const& _coord);
+	Cell const& at(Coordinate const& _coord) const;
+
 	Cell& at(cursor_pos_t row, cursor_pos_t col);
 	Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
 
@@ -547,7 +550,7 @@ class Screen {
            SetMouseWheelMode _setMouseWheelMode,
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
-           Logger _logger,
+           Logger const& _logger,
            bool _logRaw,
            bool _logTrace,
            Hook _onCommands,
@@ -571,7 +574,7 @@ class Screen {
            SetMouseWheelMode _setMouseWheelMode,
 		   OnSetCursorStyle _setCursorStyle,
            Reply _reply,
-           Logger _logger
+           Logger const& _logger
     ) : Screen{
         _size,
         _maxHistoryLineCount,
@@ -585,14 +588,14 @@ class Screen {
         std::move(_setMouseWheelMode),
         std::move(_setCursorStyle),
         std::move(_reply),
-        std::move(_logger),
+        _logger,
         true, // logs raw output by default?
         true, // logs trace output by default?
         {}, {}, {}, {}, {}, {}, {}
     } {}
 
-    Screen(WindowSize const& _size, Logger _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, move(_logger), true, true, {}, {}, {}, {}, {}, {}, {}} {}
+    Screen(WindowSize const& _size, Logger const& _logger) :
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, _logger, true, true, {}, {}, {}, {}, {}, {}, {}} {}
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -736,9 +739,26 @@ class Screen {
     Coordinate cursorPosition() const noexcept { return buffer_->cursorPosition(); }
     Cursor const& realCursor() const noexcept { return buffer_->cursor; }
 
+    // Tests if given coordinate is within the visible screen area.
+    constexpr bool contains(Coordinate const& _coord) const noexcept
+    {
+        return 1 <= _coord.row && _coord.row <= size_.rows
+            && 1 <= _coord.column && _coord.column <= size_.columns;
+    }
+
     Cell const& currentCell() const noexcept
     {
         return *buffer_->currentColumn;
+    }
+
+    Cell& operator()(Coordinate const& _coord) noexcept
+    {
+        return buffer_->at(_coord);
+    }
+
+    Cell const& operator()(Coordinate const& _coord) const noexcept
+    {
+        return buffer_->at(_coord);
     }
 
     Cell const& operator()(cursor_pos_t _row, cursor_pos_t _col) const noexcept

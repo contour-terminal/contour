@@ -254,6 +254,20 @@ Screen::Cell const& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col) const
     return const_cast<ScreenBuffer*>(this)->at(_row, _col);
 }
 
+Screen::Cell& ScreenBuffer::at(Coordinate const& _coord)
+{
+    assert(_coord.row >= 1 && _coord.row <= size_.rows);
+    assert(_coord.column >= 1 && _coord.column <= size_.columns);
+    assert(size_.rows == lines.size());
+
+    return (*next(begin(lines), _coord.row - 1))[_coord.column - 1];
+}
+
+Screen::Cell const& ScreenBuffer::at(Coordinate const& _coord) const
+{
+    return const_cast<ScreenBuffer*>(this)->at(_coord);
+}
+
 void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
 {
     wrapPending = false;
@@ -683,7 +697,7 @@ Screen::Screen(WindowSize const& _size,
                SetMouseWheelMode _setMouseWheelMode,
 			   OnSetCursorStyle _setCursorStyle,
                Reply reply,
-               Logger _logger,
+               Logger const& _logger,
                bool _logRaw,
                bool _logTrace,
                Hook onCommands,
@@ -1837,7 +1851,7 @@ Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
 
 Screen::Cell const& Screen::at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
 {
-    return buffer_->at(_rowNr, _colNr);
+    return buffer_->at(Coordinate{_rowNr, _colNr});
 }
 
 void Screen::moveCursorTo(Coordinate to)

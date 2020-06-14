@@ -45,10 +45,10 @@ enum class Decorator {
     /// Draws a box around the glyph, this is literally the bounding box of a grid cell.
     /// This could be used for debugging.
     /// TODO: That should span the box around the whole (potentially wide) character
-    Box,
+    Frame,
     /// Puts a circle-shape around into the cell (and ideally around the glyph)
     /// TODO: How'd that look like with double-width characters?
-    Circle,
+    Encircle,
 };
 
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
@@ -72,12 +72,16 @@ class DecorationRenderer {
     void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setColorProfile(ColorProfile const& _colorProfile);
 
-    void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
+    void renderCell(cursor_pos_t _row,
+                    cursor_pos_t _col,
+                    ScreenBuffer::Cell const& _cell);
+
     void renderDecoration(Decorator _decoration,
                           cursor_pos_t _row,
                           cursor_pos_t _col,
                           unsigned _columnCount,
                           RGBColor const& _color);
+
     void execute();
 
     void clearCache();

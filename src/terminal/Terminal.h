@@ -142,12 +142,27 @@ class Terminal {
     uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
     {
         auto _l = std::lock_guard{screenLock_};
-        auto const changes = changes_.exchange(0);
-        updateCursorVisibilityState(_now);
+        auto const changes = preRender(_now);
         renderPass(pass, std::forward<RenderPasses>(passes)...);
         return changes;
     }
+
+    uint64_t preRender(std::chrono::steady_clock::time_point _now) const
+    {
+        auto const changes = changes_.exchange(0);
+        updateCursorVisibilityState(_now);
+        return changes;
+    }
     // }}}
+
+    void lock() const { screenLock_.lock(); }
+    void unlock() const { screenLock_.unlock(); }
+
+    /// Only access this when having locked.
+    Screen const& screen() const noexcept { return screen_; }
+
+    /// Only access this when having locked.
+    Screen& screen() noexcept { return screen_; }
 
     // {{{ cursor management
     void setCursorDisplay(CursorDisplay _value);

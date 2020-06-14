@@ -185,31 +185,35 @@ void DecorationRenderer::rebuild()
     } // }}}
     // TODO: Overline
     // TODO: CrossedOut
-    // TODO: Box
-    // TODO: Circle
+    // TODO: Framed
+    // TODO: Encircle
 }
 
-void DecorationRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
+void DecorationRenderer::renderCell(cursor_pos_t _row,
+                                    cursor_pos_t _col,
+                                    ScreenBuffer::Cell const& _cell)
 {
-    if (_cell.attributes().styles & CharacterStyleMask::Underline)
-        renderDecoration(Decorator::Underline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
-    else if (_cell.attributes().styles & CharacterStyleMask::DoublyUnderlined)
-        renderDecoration(Decorator::DoubleUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
-    else if (_cell.attributes().styles & CharacterStyleMask::CurlyUnderlined)
-        renderDecoration(Decorator::CurlyUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
-    else if (_cell.attributes().styles & CharacterStyleMask::DottedUnderline)
-        renderDecoration(Decorator::DottedUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
-    else if (_cell.attributes().styles & CharacterStyleMask::DashedUnderline)
-        renderDecoration(Decorator::DashedUnderline, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    auto constexpr underlineMappings = array{
+        pair{CharacterStyleMask::Underline, Decorator::Underline},
+        pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
+        pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
+        pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
+        pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
+    };
 
-    if (_cell.attributes().styles & CharacterStyleMask::CrossedOut)
-        renderDecoration(Decorator::CrossedOut, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    for (auto const& mapping : underlineMappings)
+        if (_cell.attributes().styles & mapping.first)
+            renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
 
-    if (_cell.attributes().styles & CharacterStyleMask::Boxed)
-        renderDecoration(Decorator::Box, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    auto constexpr supplementalMappings = array{
+        pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},
+        pair{CharacterStyleMask::Framed, Decorator::Frame},
+        pair{CharacterStyleMask::Encircled, Decorator::Encircle},
+    };
 
-    if (_cell.attributes().styles & CharacterStyleMask::Circle)
-        renderDecoration(Decorator::Circle, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+    for (auto const& mapping : supplementalMappings)
+        if (_cell.attributes().styles & mapping.first)
+        renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)

@@ -373,23 +373,6 @@ bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
         chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_) >= cursorBlinkInterval());
 }
 
-// void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1) const
-// {
-//     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-//     changes_.store(0);
-//     updateCursorVisibilityState(_now);
-//     screen_.render(pass1, screen_.scrollOffset());
-// }
-//
-// void Terminal::render(steady_clock::time_point _now, Screen::Renderer const& pass1, Screen::Renderer const& pass2) const
-// {
-//     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-//     changes_.store(0);
-//     updateCursorVisibilityState(_now);
-//     screen_.render(pass1, screen_.scrollOffset());
-//     screen_.render(pass2, screen_.scrollOffset());
-// }
-
 void Terminal::updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const
 {
     auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
