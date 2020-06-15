@@ -1,0 +1,71 @@
+#! /usr/bin/make -f
+# vim:noet:syntax=make
+
+export DH_VERBOSE=1
+
+BUILDDIR = build
+
+configure: configure-stamp
+configure-stamp:
+	mkdir -p build
+	cmake . \
+		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DCMAKE_INSTALL_PREFIX="/usr" \
+		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
+		-DCMAKE_CXX_COMPILER="g++-9" \
+		-DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+		-DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+		-DYAML_CPP_INSTALL=OFF \
+		-DCONTOUR_EXAMPLES=OFF \
+		-DLIBTERMINAL_TESTING=OFF \
+		-DLIBUNICODE_TESTING=OFF \
+		-B ${BUILDDIR}
+	touch $@
+
+build: build-stamp
+build-stamp: configure-stamp
+	dh_testdir
+	$(MAKE) -C ${BUILDDIR} -j3
+	touch $@
+
+install: install-stamp
+install-stamp:
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+	$(MAKE) -C ${BUILDDIR} install DESTDIR=$(CURDIR)/debian/tmp
+	touch $@
+
+binary-indep: build install
+binary-arch: build install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs
+	dh_install
+	dh_installman
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_makeshlibs
+	dh_shlibdeps
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+binary: binary-arch binary-indep
+
+clean:
+	rm -rf ${BUILDDIR}
+	dh_testdir
+	dh_testroot
+	dh_clean
+	#dh_auto_clean
+
+%:
+	dh $@
+
+.PHONY: configure build binary-indep binary-arch binary install clean

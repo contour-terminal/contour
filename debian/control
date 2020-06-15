@@ -1,0 +1,31 @@
+Source: contour
+Section: x11
+Priority: optional
+Maintainer: Christian Parpart <christian@parpart.family>
+Build-Depends:
+  cmake,
+  debhelper (>= 9),
+  make,
+  g++-9,
+  libkf5windowsystem-dev,
+  libqt5opengl5-dev,
+  pkg-config,
+  qtbase5-dev,
+Standards-Version: 3.9.3
+
+Package: contour
+Architecture: any
+Section: httpd
+Priority: optional
+Description: Contour terminal emulator.
+  A GPU accelerated modern terminal emulator.
+Homepage: https://github.com/christianparpart/contour/
+Recommends:
+  xdg-utils
+Depends: ${shlibs:Depends}, ${misc:Depends},
+  libfreetype6,
+  libharfbuzz0b,
+  libkf5windowsystem5,
+  libqt5core5a,
+  libqt5gui5,
+  libqt5network5,
