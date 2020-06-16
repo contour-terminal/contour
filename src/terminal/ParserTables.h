@@ -24,10 +24,11 @@ namespace terminal {
 struct ParserTable {
     using State = Parser::State;
     using Action = Parser::Action;
+    enum UnicodeCodepoint { Value = 256 };
 
     //! State transition map from (State, Byte) to (State).
-    std::array<std::array<State, 256>, std::numeric_limits<State>::size()> transitions{
-        std::array<State, 256>{State::Ground /*XXX or Undefined?*/}};
+    std::array<std::array<State, 257>, std::numeric_limits<State>::size()> transitions{
+        std::array<State, 257>{State::Ground /*XXX or Undefined?*/}};
 
     //! actions to be invoked upon state entry
     std::array<Action, std::numeric_limits<Action>::size()> entryEvents{Action::Undefined};
@@ -36,10 +37,10 @@ struct ParserTable {
     std::array<Action, std::numeric_limits<Action>::size()> exitEvents{Action::Undefined};
 
     //! actions to be invoked for a given (State, Byte) pair.
-    std::array<std::array<Action, 256>, std::numeric_limits<Action>::size()> events;
+    std::array<std::array<Action, 257>, std::numeric_limits<Action>::size()> events;
 
     //! Standard state machine tables parsing VT225 to VT525.
-    static ParserTable constexpr get();
+    static constexpr ParserTable get();
 
     // {{{ implementation detail
     struct Range {
@@ -61,6 +62,11 @@ struct ParserTable {
     constexpr void event(State _state, Action _action, uint8_t _input)
     {
         events[static_cast<size_t>(_state)][_input] = _action;
+    }
+
+    constexpr void event(State _state, Action _action, UnicodeCodepoint)
+    {
+        events[static_cast<size_t>(_state)][UnicodeCodepoint::Value] = _action;
     }
 
     constexpr void event(State _state, Action _action, Range _input)
@@ -121,13 +127,16 @@ struct ParserTable {
     // }}}
 };
 
-ParserTable constexpr ParserTable::get()
+constexpr ParserTable ParserTable::get()
 {
     auto t = ParserTable{};
 
     // Ground
     t.event(State::Ground, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
     t.event(State::Ground, Action::Print, Range{0x20, 0x7F});
+    t.event(State::Ground, Action::Print, Range{0xA0, 0xFF});
+    t.event(State::Ground, Action::Print, UnicodeCodepoint::Value);
+    //t.event(State::Ground, Action::Print, );
 
     // EscapeIntermediate
     t.event(State::EscapeIntermediate, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
@@ -199,6 +208,8 @@ ParserTable constexpr ParserTable::get()
     t.entry(State::OSC_String, Action::OSC_Start);
     t.event(State::OSC_String, Action::Ignore, Range{0x00, 0x06}, Range{0x08, 0x17}, 0x19, Range{0x1C, 0x1F});
     t.event(State::OSC_String, Action::OSC_Put, Range{0x20, 0x7F});
+    t.event(State::OSC_String, Action::OSC_Put, Range{0xA0, 0xFF});
+    t.event(State::OSC_String, Action::OSC_Put, UnicodeCodepoint::Value);
     t.exit(State::OSC_String, Action::OSC_End);
     t.transition(State::OSC_String, State::Ground, 0x9C);
     t.transition(State::OSC_String, State::Ground, 0x07);
@@ -217,12 +228,8 @@ ParserTable constexpr ParserTable::get()
     // CSI_Param
     t.event(State::CSI_Param, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
     t.event(State::CSI_Param, Action::Param, Range{0x30, 0x39});
-    t.event(State::CSI_Param, Action::Param, 0x3B);
-#if defined(LIBTERMINAL_KITTY_EXT)
     t.event(State::CSI_Param, Action::Param, 0x3A);
-#else
-    t.transition(State::CSI_Param, State::CSI_Ignore, 0x3A);
-#endif
+    t.event(State::CSI_Param, Action::Param, 0x3B);
     t.event(State::CSI_Param, Action::Ignore, 0x7F);
     t.transition(State::CSI_Param, State::CSI_Ignore, Range{0x3C, 0x3F});
     t.transition(State::CSI_Param, State::CSI_Intermediate, Action::Collect, Range{0x20, 0x2F});

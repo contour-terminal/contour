@@ -25,8 +25,9 @@
 
 #include <fmt/format.h>
 
-//#define VT_PARSER_TABLES 1
-#define VT_PARSER_SWITCH 1
+#define VT_PARSER_TABLES 1
+//#define VT_PARSER_SWITCH 1
+
 // TODO: VT_PARSER_TABLES can NOT handle values >= 0xFF, such as unicode emoji codepoints.
 // work around by use std::sort() with std::bineary_search() on ranged entries instead?
 
@@ -155,25 +156,19 @@ void Parser::handleViaTables()
 
     ParserTable static constexpr table = ParserTable::get();
 
-    assert((state_ == State::Ground || currentChar() < 0xFF) && "TODO: cannot handle unicode in table lookup");
+    auto const ch = currentChar() < 0xFF ? currentChar() : static_cast<char32_t>(ParserTable::UnicodeCodepoint::Value);
 
-    if (state_ == State::Ground && isPrintChar(currentChar()))
-        // FIXME a hack I am not yet feeling right with: Eliminate this if-condition.
-        invokeAction(ActionClass::Event, Action::Print);
-    else if (auto const t = table.transitions[s][currentChar()]; t != State::Undefined)
+    if (auto const t = table.transitions[s][ch]; t != State::Undefined)
     {
         invokeAction(ActionClass::Leave, table.exitEvents[s]);
-        invokeAction(ActionClass::Transition, table.events[s][currentChar()]);
+        invokeAction(ActionClass::Transition, table.events[s][ch]);
         state_ = t;
         invokeAction(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)]);
     }
-    else if (Action const a = table.events[s][currentChar()]; a != Action::Undefined)
+    else if (Action const a = table.events[s][ch]; a != Action::Undefined)
         invokeAction(ActionClass::Event, a);
     else
-        log<ParserErrorEvent>(
-            "Parser Error: Unknown action for state/input pair ({}, {})",
-            to_string(state_),
-            crispy::escape(currentChar()));
+        log<ParserErrorEvent>("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch));
 }
 #endif
 
