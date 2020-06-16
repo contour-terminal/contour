@@ -12,11 +12,12 @@ target_include_directories(crispy-core INTERFACE
 target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/escape.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/indexed.h
     ${CMAKE_CURRENT_SOURCE_DIR}/overloaded.h
     ${CMAKE_CURRENT_SOURCE_DIR}/reference.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/escape.h
     ${CMAKE_CURRENT_SOURCE_DIR}/span.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/times.h
 )
 
