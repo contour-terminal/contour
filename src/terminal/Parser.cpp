@@ -95,7 +95,7 @@ void Parser::parse()
 
 void Parser::logInvalidInput() const
 {
-    if (currentChar() <= 0x7F && isprint(currentChar()))
+    if (currentChar() >= 0x20 && currentChar() <= 0x7F)
         log<ParserErrorEvent>(
             "{}: invalid character: 0x{:02X} '{}'",
             to_string(state_),
@@ -106,23 +106,6 @@ void Parser::logInvalidInput() const
             "{}: invalid character: 0x{:02X}",
             to_string(state_),
             static_cast<unsigned>(currentChar()));
-}
-
-void Parser::logTrace(std::string const& /*_message*/) const
-{
-    //if (logger_)
-    //{
-    //    string const character =
-    //        currentChar() ? fmt::format("character: {:02X}", static_cast<unsigned>(currentChar())) : string("");
-
-    //    log<ParserTraceEvent>(
-    //        "{}: {}: {:02X} {} {}",
-    //        to_string(state_),
-    //        _message,
-    //        static_cast<unsigned>(currentByte()),
-    //        escape(static_cast<unsigned>(currentByte())),
-    //        character);
-    //}
 }
 
 void Parser::invokeAction(ActionClass actionClass, Action action)

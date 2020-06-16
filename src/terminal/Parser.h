@@ -365,7 +365,6 @@ class Parser {
     }
 
     void logInvalidInput() const;
-    void logTrace(std::string const& message) const;
 
     void parse();
     void handleViaSwitch();
