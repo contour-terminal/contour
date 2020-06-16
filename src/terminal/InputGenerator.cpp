@@ -343,6 +343,17 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 
+    // Well accepted hack to distinguish between Backspace nad Ctrl+Backspace,
+    // - Backspace is emitting 0x7f,
+    // - Ctrl+Backspace is emitting 0x08
+    if (_characterEvent == 0x08)
+    {
+        if (!_modifier.control())
+            return append("\x7f");
+        else
+            return append("\x08");
+    }
+
     if (_characterEvent < 32 || (!_modifier.control() && _characterEvent <= 0x7F))
         return append(chr); // raw C0 code
     else if (_modifier == Modifier::Control && _characterEvent == L' ')
