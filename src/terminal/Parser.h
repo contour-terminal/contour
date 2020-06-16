@@ -371,7 +371,6 @@ class Parser {
     void handleViaSwitch();
     void handleViaTables();
 
-    void transitionTo(State targetState, Action action = Action::Ignore);
     void invokeAction(ActionClass actionClass, Action action);
 
     bool dataAvailable() const noexcept { return begin_ != end_; }
