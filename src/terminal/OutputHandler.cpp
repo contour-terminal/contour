@@ -72,6 +72,7 @@ string OutputHandler::sequenceString(char _finalChar, string const& _prefix) con
     if (leaderSymbol_)
         sstr << ' ' << leaderSymbol_;
 
+    if (parameters_.size() > 1 || (parameters_.size() == 1 && parameters_[0][0] != 0))
     sstr << ' ' << accumulate(
         begin(parameters_), end(parameters_), string{},
         [](string const& a, auto const& p) -> string {
