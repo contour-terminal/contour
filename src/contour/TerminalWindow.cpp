@@ -13,6 +13,7 @@
  */
 #include <contour/TerminalWindow.h>
 #include <contour/Actions.h>
+#include <terminal/Metrics.h>
 
 #include <QClipboard>
 #include <QDebug>
@@ -349,7 +350,17 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
 TerminalWindow::~TerminalWindow()
 {
     makeCurrent(); // XXX must be called.
-    // ...
+    statsSummary();
+}
+
+void TerminalWindow::statsSummary()
+{
+#if defined(CONTOUR_VT_METRICS)
+    std::cout << "Some small summary in VT sequences usage metrics\n";
+    std::cout << "================================================\n\n";
+    for (auto const& [name, freq] : terminalMetrics_.ordered())
+        std::cout << fmt::format("{:>10}: {}\n", freq, name);
+#endif
 }
 
 QSurfaceFormat TerminalWindow::surfaceFormat()
@@ -500,7 +511,7 @@ void TerminalWindow::initializeGL()
         profile().shell,
         profile().env,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
-        bind(&TerminalWindow::onScreenUpdate, this),
+        bind(&TerminalWindow::onScreenUpdate, this, _1),
         bind(&TerminalWindow::onWindowTitleChanged, this),
         bind(&TerminalWindow::onDoResize, this, _1, _2, _3),
         bind(&TerminalWindow::onTerminalClosed, this),
@@ -1186,8 +1197,13 @@ float TerminalWindow::contentScale() const
     return screen()->devicePixelRatio();
 }
 
-void TerminalWindow::onScreenUpdate()
+void TerminalWindow::onScreenUpdate([[maybe_unused]] std::vector<terminal::Command> const& _commands)
 {
+#if defined(CONTOUR_VT_METRICS)
+    for (auto const& command : _commands)
+        terminalMetrics_(command);
+#endif
+
     if (profile().autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
         terminalView_->terminal().scrollToBottom();
 

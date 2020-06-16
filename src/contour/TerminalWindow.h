@@ -16,6 +16,7 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/FileChangeWatcher.h>
+#include <terminal/Metrics.h>
 #include <terminal_view/TerminalView.h>
 #include <terminal_view/FontConfig.h>
 
@@ -97,7 +98,7 @@ class TerminalWindow :
     bool reloadConfigValues(config::Config _newConfig);
     bool reloadConfigValues(config::Config _newConfig, std::string const& _profileName);
 
-    void onScreenUpdate();
+    void onScreenUpdate(std::vector<terminal::Command> const& _commands);
     void onWindowTitleChanged();
     void onDoResize(unsigned _width, unsigned _height, bool _inPixels);
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
@@ -161,6 +162,8 @@ class TerminalWindow :
         }
     }
 
+    void statsSummary();
+
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
 
@@ -184,6 +187,9 @@ class TerminalWindow :
         std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
     Stats stats_;
+#if defined(CONTOUR_VT_METRICS)
+    terminal::Metrics terminalMetrics_{};
+#endif
 };
 
 } // namespace contour

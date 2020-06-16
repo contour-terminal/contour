@@ -57,7 +57,7 @@ class TerminalView {
                  std::string const& _shell,
                  terminal::Process::Environment const& _env,
                  QMatrix4x4 const& _projectionMatrix,
-                 std::function<void()> _onScreenUpdate,
+                 std::function<void(std::vector<Command> const&)> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                  std::function<void()> _onTerminalClosed,

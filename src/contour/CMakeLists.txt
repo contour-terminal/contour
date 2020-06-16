@@ -17,6 +17,7 @@ endif()
 
 option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
+option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
@@ -42,6 +43,10 @@ set_target_properties(contour PROPERTIES AUTOMOC ON)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
+endif()
+
+if(CONTOUR_VT_METRICS)
+    target_compile_definitions(contour PRIVATE CONTOUR_VT_METRICS)
 endif()
 
 if(WIN32)
