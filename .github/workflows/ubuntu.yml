@@ -23,7 +23,7 @@ jobs:
           sudo apt -q update
           sudo apt install -y "g++-9" \
                   libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules \
+                  qtbase5-dev libqt5gui5 cmake extra-cmake-modules \
                   libfontconfig1-dev libharfbuzz-dev
       - name: "create build directory"
         run: mkdir build

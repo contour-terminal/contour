@@ -1,0 +1,362 @@
+# vim:et:ts=2:sw=2
+
+on:
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+    branches:
+      - 'gh-actions' # only for testing
+
+name: Create Release
+
+# TODO:
+# [ ] run tests on each build (as last check before creating release)
+
+jobs:
+  build_windows:
+    name: build on Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: "Initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v2
+      - name: "Install dependencies"
+        run: vcpkg install freetype fontconfig harfbuzz --triplet x64-windows
+      - name: "create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+      - name: "Build"
+        run: cmake --build build/ --config Release
+      - name: inspect
+        run: Get-ChildItem -Recurse
+      - name: "Uploading to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-x64.exe
+          path: .\build\src\contour\Release\contour.exe
+
+  build_ubuntu1804:
+    name: build on Ubuntu 18.04
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: "initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: set environment variables
+        id: set_env_var
+        run: |
+           VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
+           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
+           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
+           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
+           RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+           echo "::set-output name=version::${VERSION}"
+           echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
+           echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
+           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
+           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+           echo "::set-env name=body::${RELEASEBODY}"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt -q update
+          sudo apt install -y "g++-9" cmake \
+                  libfreetype6-dev \
+                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                  libfontconfig1-dev libharfbuzz-dev \
+                  debhelper dpkg-dev
+      - name: "create debian package"
+        run: |
+          set -ex
+          ./scripts/mkdebchangelog.sh "${{ steps.set_env_var.outputs.version }}" "${{ steps.set_env_var.outputs.RUN_ID }}"
+          VERSION="${{ steps.set_env_var.outputs.version }}"
+          INCR="${{ steps.set_env_var.outputs.RUN_ID }}"
+          sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
+          dpkg-buildpackage -uc -us
+          mkdir target
+          mv ../contour*.* target/
+      - name: "Uploading artifact .deb package"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
+      - name: "Uploading artifact .ddeb package (debugging symbols)"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
+
+  build_ubuntu_2004:
+    name: build on Ubuntu 20.04
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: "initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: set environment variables
+        id: set_env_var
+        run: |
+           VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
+           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
+           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
+           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
+           RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+           echo "::set-output name=version::${VERSION}"
+           echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
+           echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
+           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
+           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+           echo "::set-env name=body::${RELEASEBODY}"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt -q update
+          sudo apt install -y "g++-9" cmake \
+                  libfreetype6-dev \
+                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                  libfontconfig1-dev libharfbuzz-dev \
+                  debhelper dpkg-dev
+      - name: "create debian package"
+        run: |
+          set -ex
+          ./scripts/mkdebchangelog.sh "${{ steps.set_env_var.outputs.version }}" "${{ steps.set_env_var.outputs.RUN_ID }}"
+          VERSION="${{ steps.set_env_var.outputs.version }}"
+          INCR="${{ steps.set_env_var.outputs.RUN_ID }}"
+          sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
+          dpkg-buildpackage -uc -us
+          mkdir target
+          mv ../contour*.* target/
+      - name: "Uploading artifact .deb package"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+          path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
+      - name: "Uploading artifact .ddeb package (debugging symbols)"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+          path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
+
+  build_osx:
+    name: build on OS/X
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: "Initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: set environment variables
+        id: set_env_var
+        run: |
+           VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
+           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
+           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
+           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
+           RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+           echo "::set-output name=version::${VERSION}"
+           echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
+           echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
+           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
+           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+           echo "::set-env name=body::${RELEASEBODY}"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Install dependencies"
+        run: |
+          set -ex
+          #brew update
+          brew install freetype fontconfig qt5 harfbuzz boost pkg-config
+      - name: "Create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: |
+          cmake . \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+                -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+                -DYAML_CPP_INSTALL=OFF \
+                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
+                -B build/
+      - name: "Build"
+        run: cmake --build build/
+      - name: "test: libcrispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: inspect
+        run: |
+          find build/ -print
+          echo "TODO: upload to artifact store"
+      - name: package
+        run: |
+          set -ex
+          cd build/src/contour/
+          zip -r contour-osx.zip contour.app
+      - name: upload to artifact store
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+          path: build/src/contour/contour-osx.zip
+
+  do_release:
+    name: release
+    runs-on: ubuntu-latest
+    needs: [build_ubuntu1804, build_ubuntu_2004, build_windows, build_osx]
+    steps:
+      - uses: actions/checkout@v1
+      - name: set environment variables
+        id: set_env_var
+        run: |
+          VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
+          SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+          if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
+          if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+          if [ $REPOSITORY != "master" ]; then
+            TAG_SUFFIX="_prerelease_${GITHUB_RUN_NUMBER}"
+          else
+            TAG_SUFFIX=""
+          fi
+          RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+          RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
+          RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
+          RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+          echo "::set-output name=version::${VERSION}"
+          echo "::set-output name=tag_suffix::${TAG_SUFFIX}"
+          echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
+          echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
+          echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
+          echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+          echo "::set-env name=body::${RELEASEBODY}"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+
+      - name: create release page
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # token provided by Actions
+        with:
+          tag_name: v${{ steps.set_env_var.outputs.version }}${{ steps.set_env_var.outputs.tag_suffix}}
+          release_name: contour ${{ steps.set_env_var.outputs.version }} ${{ steps.set_env_var.outputs.RELEASENAME_SUFFIX}}
+          body: |
+            ${{ steps.set_env_var.outputs.RELEASEBODY }}
+          draft: true
+          prerelease: ${{ steps.set_env_var.outputs.IS_PRERELEASE }}
+
+      - name: fetch ubuntu 18.04 .deb
+        uses: actions/download-artifact@v1
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+      - name: fetch ubuntu 18.04 .ddeb
+        uses: actions/download-artifact@v1
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+
+      - name: fetch ubuntu 20.04 .deb
+        uses: actions/download-artifact@v1
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+      - name: fetch ubuntu 20.04 .ddeb
+        uses: actions/download-artifact@v1
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+
+      - name: fetch windows contour.exe
+        uses: actions/download-artifact@v1
+        with:
+          name: contour-x64.exe
+
+      - name: fetch OS/X package
+        uses: actions/download-artifact@v1
+        with:
+          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+
+      # -------------------------------------------------------------
+      - name: Upload Ubuntu 18.04 package (.deb)
+        id: upload-release-asset-deb
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload Ubuntu 18.04 debug package (.ddeb)
+        id: upload-release-asset-ddeb
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_content_type: application/vnd.debian.binary-package
+
+      # -------------------------------------------------------------
+      - name: Upload Ubuntu 20.04 package (.deb)
+        id: upload-release-asset-deb-2004
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
+
+      - name: Upload Ubuntu 20.04 debug package (.ddeb)
+        id: upload-release-asset-ddeb-2004
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_content_type: application/vnd.debian.binary-package
+
+      # -------------------------------------------------------------
+      - name: Upload Windows package
+        id: upload-release-asset-winx64
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-x64.exe
+          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-x64.exe
+          asset_content_type: application/x-msdos-program
+
+      # -------------------------------------------------------------
+      - name: Upload OS/X package
+        id: upload-release-asset-osx
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+          asset_content_type: application/zip
+
