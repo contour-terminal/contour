@@ -136,7 +136,6 @@ constexpr ParserTable ParserTable::get()
     t.event(State::Ground, Action::Print, Range{0x20, 0x7F});
     t.event(State::Ground, Action::Print, Range{0xA0, 0xFF});
     t.event(State::Ground, Action::Print, UnicodeCodepoint::Value);
-    //t.event(State::Ground, Action::Print, );
 
     // EscapeIntermediate
     t.event(State::EscapeIntermediate, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
@@ -179,6 +178,8 @@ constexpr ParserTable ParserTable::get()
 
     // DCS_Ignore
     t.event(State::DCS_Ignore, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F}, Range{0x20, 0x7F});
+    t.event(State::DCS_Ignore, Action::Print, Range{0xA0, 0xFF});
+    t.event(State::DCS_Ignore, Action::Print, UnicodeCodepoint::Value);
     t.transition(State::DCS_Ignore, State::Ground, 0x9C);
 
     // DCS_Intermediate
