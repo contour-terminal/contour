@@ -13,6 +13,7 @@
  */
 #include <contour/Config.h>
 #include <contour/TerminalWindow.h>
+#include <terminal/ParserTables.h>
 
 #include <QCommandLineParser>
 #include <QGuiApplication>
@@ -29,6 +30,7 @@ namespace contour {
             addVersionOption();
             addOption(configOption);
             addOption(profileOption);
+            addOption(parserTable);
         }
 
         QCommandLineOption const configOption{
@@ -43,6 +45,11 @@ namespace contour {
             QStringList() << "p" << "profile",
             QCoreApplication::translate("main", "Terminal Profile to load."),
             QCoreApplication::translate("main", "NAME")
+        };
+
+        QCommandLineOption const parserTable{
+            QStringList() << "t" << "parser-table",
+            QCoreApplication::translate("main", "Dumps parser table")
         };
 
         QString profileName() const { return value(profileOption); }
@@ -63,6 +70,12 @@ int main(int argc, char* argv[])
 
         auto cli = contour::CLI{};
         cli.process(app);
+
+        if (cli.isSet(cli.parserTable))
+        {
+            terminal::dot(std::cout, terminal::ParserTable::get());
+            return EXIT_SUCCESS;
+        }
 
         auto configFailures = int{0};
         auto const configLogger = [&](string const& _msg)

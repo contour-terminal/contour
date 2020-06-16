@@ -517,3 +517,34 @@ struct numeric_limits<terminal::Parser::Action> {
     constexpr static size_t size() noexcept { return 15; }
 };
 }  // namespace std
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::Parser::State> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+
+        template <typename FormatContext>
+        auto format(terminal::Parser::State state, FormatContext& ctx)
+        {
+            auto constexpr mappings = std::array<std::string_view, 15>{
+                "Undefined",
+                "Ground",
+                "Escape",
+                "EscapeIntermediate",
+                "CSI_Entry",
+                "CSI_Param",
+                "CSI_Intermediate",
+                "CSI_Ignore",
+                "DCS_Entry",
+                "DCS_Param",
+                "DCS_Intermediate",
+                "DCS_PassThrough",
+                "DCS_Ignore",
+                "OSC_String",
+                "SOS_PM_APC_String",
+            };
+            return format_to(ctx.out(), "{}", mappings.at(static_cast<unsigned>(state)));
+        }
+    };
+}

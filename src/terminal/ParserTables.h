@@ -264,4 +264,6 @@ ParserTable constexpr ParserTable::get()
     return t;
 }
 
+void dot(std::ostream& _os, ParserTable const& _table);
+
 }  // namespace terminal
