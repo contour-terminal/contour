@@ -16,6 +16,7 @@
 
 #include <terminal/Commands.h>
 #include <crispy/escape.h>
+#include <crispy/utils.h>
 
 #include <fmt/format.h>
 
@@ -28,20 +29,9 @@ using namespace crispy;
 
 namespace terminal {
 
-std::unordered_map<std::string, std::string> parseSubParamKeyValuePairs(std::string const& s)
+inline std::unordered_map<std::string, std::string> parseSubParamKeyValuePairs(std::string const& s)
 {
-    // params := pair (':' pair)*
-    // pair := TEXT '=' TEXT
-    std::unordered_map<std::string, std::string> params;
-    // foo=bar:foo2=bar2:....
-    // TODO: support more than one param!
-    if (auto const i = s.find('='); i != s.npos)
-    {
-        auto const key = s.substr(0, i);
-        auto const val = s.substr(i + 1);
-        params[key] = val;
-    }
-    return params;
+    return crispy::splitKeyValuePairs(s, ':');
 }
 
 optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
