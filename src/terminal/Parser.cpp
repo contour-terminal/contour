@@ -14,7 +14,9 @@
 #include <terminal/ControlCode.h>
 #include <terminal/Parser.h>
 #include <terminal/ParserTables.h>
+
 #include <crispy/escape.h>
+#include <crispy/overloaded.h>
 
 #include <unicode/utf8.h>
 
@@ -58,9 +60,6 @@ constexpr bool isPrintChar(char32_t value) noexcept
 
 void Parser::parseFragment(uint8_t const* begin, uint8_t const* end)
 {
-    // log("initial state: {}, processing {} bytes: {}", to_string(state_), distance(begin, end),
-    //     escape(begin, end));
-
     begin_ = begin;
     end_ = end;
 
@@ -77,7 +76,8 @@ void Parser::parse()
             overloaded{
                 [&](unicode::Incomplete) {},
                 [&](unicode::Invalid) {
-                    log<ParserErrorEvent>("Invalid UTF8!");
+                    if (parseError_)
+                        parseError_("Invalid UTF-8 byte sequence received.");
                     currentChar_ = ReplacementCharacter;
                     handleViaTables();
                 },
@@ -93,27 +93,8 @@ void Parser::parse()
     }
 }
 
-void Parser::logInvalidInput() const
-{
-    if (currentChar() >= 0x20 && currentChar() <= 0x7F)
-        log<ParserErrorEvent>(
-            "{}: invalid character: 0x{:02X} '{}'",
-            to_string(state_),
-            static_cast<unsigned>(currentChar()),
-            static_cast<char>(currentChar()));
-    else
-        log<ParserErrorEvent>(
-            "{}: invalid character: 0x{:02X}",
-            to_string(state_),
-            static_cast<unsigned>(currentChar()));
-}
-
 void Parser::invokeAction(ActionClass actionClass, Action action)
 {
-    // if (action != Action::Ignore && action != Action::Undefined)
-    //     log("0x{:02X} '{}' {} {}: {}", currentChar(), escape(currentChar()), to_string(actionClass),
-    //         to_string(state_), to_string(action));
-
     if (actionHandler_)
         actionHandler_(actionClass, action, currentChar());
 }
@@ -135,8 +116,8 @@ void Parser::handleViaTables()
     }
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
         invokeAction(ActionClass::Event, a);
-    else
-        log<ParserErrorEvent>("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch));
+    else if (parseError_)
+        parseError_(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
 }
 
 }  // namespace terminal

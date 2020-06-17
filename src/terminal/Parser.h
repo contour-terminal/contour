@@ -13,9 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
-#include <terminal/Logger.h>
-
 #include <unicode/utf8.h>
 
 #include <cstdint>
@@ -177,9 +174,11 @@ class Parser {
 
     using ActionHandler = std::function<void(ActionClass, Action, char32_t)>;
     using iterator = uint8_t const*;
+    using ParseError = std::function<void(std::string const&)>;
 
-    explicit Parser(ActionHandler _actionHandler, Logger _logger = {})
-        : actionHandler_{std::move(_actionHandler)}, logger_{std::move(_logger)}
+    Parser(ActionHandler _actionHandler, ParseError  _parseError = {}) :
+        actionHandler_{std::move(_actionHandler)},
+        parseError_{ std::move(_parseError) }
     {
     }
 
@@ -357,15 +356,6 @@ class Parser {
     };
 
   private:
-    template <typename Event, typename... Args>
-    void log(std::string_view const& msg, Args... args) const
-    {
-        if (logger_)
-            logger_(Event{ fmt::format(msg, args...) });
-    }
-
-    void logInvalidInput() const;
-
     void parse();
     void handleViaSwitch();
     void handleViaTables();
@@ -386,7 +376,7 @@ class Parser {
     iterator end_ = nullptr;
 
     ActionHandler const actionHandler_;
-    Logger const logger_;
+    ParseError const parseError_;
 };
 
 constexpr std::string_view to_string(Parser::State state)

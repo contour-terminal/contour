@@ -15,6 +15,7 @@
 #include <terminal/Commands.h>
 #include <terminal/OutputGenerator.h>
 #include <terminal/VTType.h>
+#include <terminal/Logger.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -725,7 +726,10 @@ Screen::Screen(WindowSize const& _size,
 	setCursorStyle_{ move(_setCursorStyle) },
     reply_{ move(reply) },
     handler_{ _logger },
-    parser_{ ref(handler_), _logger },
+    parser_{
+        ref(handler_),
+        [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
+    },
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, _maxHistoryLineCount },
     alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, nullopt },
     buffer_{ &primaryBuffer_ },
