@@ -678,6 +678,9 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
         //         << "key:" << static_cast<Qt::Key>(_keyEvent->key())
         //         << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
 
+        if (!_keyEvent->text().isEmpty() && cursor().shape() != Qt::CursorShape::BlankCursor)
+            setCursor(Qt::CursorShape::BlankCursor);
+
         if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
         {
             auto const& actions = i->second;
