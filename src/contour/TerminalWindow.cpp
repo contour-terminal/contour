@@ -733,8 +733,6 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
     {
         auto const mouseButton = makeMouseButton(_event->button());
         executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
-        setScreenDirty();
-        update();
     }
     catch (std::exception const& e)
     {
