@@ -249,7 +249,7 @@ constexpr ParserTable ParserTable::get()
     t.transition(State::CSI_Intermediate, State::CSI_Ignore, Range{0x30, 0x3F});
     t.transition(State::CSI_Intermediate, State::Ground, Action::CSI_Dispatch, Range{0x40, 0x7E});
 
-    // Ground -> *
+    // * -> Ground
     for (State anywhere = std::numeric_limits<State>::min(); anywhere <= std::numeric_limits<State>::max(); ++anywhere)
     {
         t.transition(anywhere, State::Ground, 0x18);
