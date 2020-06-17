@@ -509,7 +509,6 @@ void TerminalWindow::initializeGL()
         profile().hyperlinkDecoration.normal,
         profile().hyperlinkDecoration.hover,
         profile().shell,
-        profile().env,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
         bind(&TerminalWindow::onScreenUpdate, this, _1),
         bind(&TerminalWindow::onWindowTitleChanged, this),

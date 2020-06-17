@@ -16,16 +16,17 @@ profiles:
         # But you may as well log in to a remote host.
         # shell: "ssh ubuntu-vm"
         # shell: "/bin/bash"
-
-        # Determines the initial terminal sice in characters.
-        terminal_size:
-            columns: 130
-            lines: 30
+        # arguments: ["some", "optional", "arguments", "for", "the", "shell"]
 
         # Environment variables to be passed to the shell.
         environment:
             TERM: xterm-256color
             COLORTERM: truecolor
+
+        # Determines the initial terminal sice in characters.
+        terminal_size:
+            columns: 130
+            lines: 30
 
         history:
             # Number of lines to preserve (-1 for infinite).

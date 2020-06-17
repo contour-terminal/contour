@@ -220,10 +220,11 @@ Process::Process(string const& _path,
             if (login_tty(_pty.slave()) < 0)
                 _exit(EXIT_FAILURE);
 
-            char** argv = new char* [_args.size() + 1];
+            char** argv = new char* [_args.size() + 2];
+            argv[0] = const_cast<char*>(_path.c_str());
             for (size_t i = 0; i < _args.size(); ++i)
-                argv[i] = const_cast<char*>(_args[i].c_str());
-			argv[_args.size()] = nullptr;
+                argv[i + 1] = const_cast<char*>(_args[i].c_str());
+			argv[_args.size() + 1] = nullptr;
 
             for (auto&& [name, value] : _env)
                 setenv(name.c_str(), value.c_str(), true);
@@ -237,7 +238,7 @@ Process::Process(string const& _path,
     initializeStartupInfoAttachedToPTY(startupInfo_, _pty);
 
     string cmd = _path;
-    for (size_t i = 1; i < _args.size(); ++i)
+    for (size_t i = 0; i < _args.size(); ++i)
     {
         cmd += ' ';
         if (_args[i].find(' ') != std::string::npos)

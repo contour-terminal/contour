@@ -76,8 +76,7 @@ inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
 }
 
 struct TerminalProfile {
-    std::string shell;
-    terminal::Process::Environment env;
+    terminal::Process::ExecInfo shell;
 
     terminal::WindowSize terminalSize;
 

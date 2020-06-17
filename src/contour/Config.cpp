@@ -604,16 +604,10 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
     if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
     {
         if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
             colors.hyperlinkDecoration.normal = color.as<string>();
-            cout << fmt::format("normal color: {}\n", colors.hyperlinkDecoration.normal);
-        }
 
         if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
             colors.hyperlinkDecoration.hover = color.as<string>();
-            cout << fmt::format("hover color: {}\n", colors.hyperlinkDecoration.hover);
-        }
     }
 
     auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
@@ -679,9 +673,13 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     else
         _logger(fmt::format("No colors section found."));
 
-    softLoadValue(_node, "shell", profile.shell);
-    if (profile.shell.empty())
-        profile.shell = terminal::Process::loginShell();
+    softLoadValue(_node, "shell", profile.shell.program);
+    if (profile.shell.program.empty())
+        profile.shell.program = terminal::Process::loginShell();
+
+    if (auto args = _node["arguments"]; args && args.IsSequence())
+        for (auto const& argNode : args)
+            profile.shell.arguments.emplace_back(argNode.as<string>());
 
     if (auto env = _node["environment"]; env)
     {
@@ -689,15 +687,15 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         {
             auto const name = i->first.as<string>();
             auto const value = i->second.as<string>();
-            profile.env[name] = value;
+            profile.shell.env[name] = value;
         }
     }
 
     // force some default env
-    if (profile.env.find("TERM") == profile.env.end())
-        profile.env["TERM"] = "xterm-256color";
-    if (profile.env.find("COLORTERM") == profile.env.end())
-        profile.env["COLORTERM"] = "truecolor";
+    if (profile.shell.env.find("TERM") == profile.shell.env.end())
+        profile.shell.env["TERM"] = "xterm-256color";
+    if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
+        profile.shell.env["COLORTERM"] = "truecolor";
 
     if (auto terminalSize = _node["terminal_size"]; terminalSize)
     {
@@ -745,17 +743,11 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     {
         if (auto normal = deco["normal"]; normal && normal.IsScalar())
             if (auto const pdeco = terminal::view::to_decorator(normal.as<string>()); pdeco.has_value())
-            {
                 profile.hyperlinkDecoration.normal = *pdeco;
-                cout << fmt::format("normal deco: {}\n", *pdeco);
-            }
 
         if (auto hover = deco["hover"]; hover && hover.IsScalar())
             if (auto const pdeco = terminal::view::to_decorator(hover.as<string>()); pdeco.has_value())
-            {
                 profile.hyperlinkDecoration.hover = *pdeco;
-                cout << fmt::format("hover deco: {}\n", *pdeco);
-            }
     }
 
     if (auto cursor = _node["cursor"]; cursor)

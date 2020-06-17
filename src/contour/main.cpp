@@ -31,6 +31,7 @@ namespace contour {
             addOption(configOption);
             addOption(profileOption);
             addOption(parserTable);
+            addPositionalArgument("executable", "path to executable to execute.");
         }
 
         QCommandLineOption const configOption{
@@ -119,6 +120,16 @@ int main(int argc, char* argv[])
 
         if (configFailures)
             return EXIT_FAILURE;
+
+        // Possibly override shell to be executed
+        if (auto const positionalArgs = cli.positionalArguments(); !positionalArgs.empty())
+        {
+            auto& shell = config.profile(profileName)->shell;
+            shell.program = positionalArgs.at(0).toStdString();
+            auto args = vector<string>{};
+            for (int i = 1; i < positionalArgs.size(); ++i)
+                shell.arguments.push_back(positionalArgs.at(i).toStdString());
+        }
 
         //QSurfaceFormat::setDefaultFormat(contour::TerminalWindow::surfaceFormat());
 

@@ -16,9 +16,7 @@
 using namespace terminal;
 using namespace std;
 
-TerminalProcess::TerminalProcess(const string& _path,
-                                 vector<string> const& _args,
-                                 Environment const& _env,
+TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
                                  WindowSize _winSize,
                                  optional<size_t> _maxHistoryLineCount,
                                  chrono::milliseconds _cursorBlinkInterval,
@@ -55,7 +53,7 @@ TerminalProcess::TerminalProcess(const string& _path,
         move(_resetDynamicColor),
         move(_setDynamicColor)
     ),
-    Process{_path, _args, _env, terminal().device()}
+    Process{_shell, terminal().device()}
 {
     terminal().setCursorDisplay(_cursorDisplay);
     terminal().setCursorShape(_cursorShape);

@@ -48,8 +48,19 @@ class [[nodiscard]] Process {
     using ExitStatus = std::variant<NormalExit, SignalExit>;
 	using Environment = std::map<std::string, std::string>;
 
+    struct ExecInfo {
+        std::string program;
+        std::vector<std::string> arguments;
+        Environment env;
+    };
+
     //! Returns login shell of current user.
     static std::string loginShell();
+
+    Process(ExecInfo const& _exe, PseudoTerminal& _pty) :
+        Process(_exe.program, _exe.arguments, _exe.env, _pty)
+    {
+    }
 
     Process(
 		const std::string& path,

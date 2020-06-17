@@ -22,9 +22,7 @@ namespace terminal {
 class TerminalProcess : public Terminal, public Process {
   public:
     TerminalProcess(
-		const std::string& _path,
-		std::vector<std::string> const& _args,
-		Environment const& _env,
+        Process::ExecInfo const& _shell,
         WindowSize _winSize,
         std::optional<size_t> _maxHistoryLineCount,
         std::chrono::milliseconds _cursorBlinkInterval,
