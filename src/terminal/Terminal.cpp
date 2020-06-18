@@ -241,6 +241,8 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
         return true;
     }
 
+    speedClicks_ = 0;
+
     if (leftMouseButtonPressed_ && !selector_)
     {
         selector_ = make_unique<Selector>(
@@ -257,11 +259,10 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     {
         selector_->extend(absoluteCoordinate(newPosition));
         changes_++;
+        return true;
     }
 
-    speedClicks_ = 0;
-
-    return true;
+    return false;
 }
 
 bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
