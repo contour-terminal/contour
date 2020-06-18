@@ -272,7 +272,7 @@ namespace {
                     return fmt::format("{}", _severity);
             }
         }();
-        auto const tag = [](GLint _type) {
+        auto const tag = []([[maybe_unused]] GLint _type) {
 #if defined(GL_DEBUG_TYPE_ERROR)
             return  _type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "";
 #else
@@ -1369,7 +1369,7 @@ void TerminalWindow::post(std::function<void()> _fn)
 
 inline char const* signalName(int _signo)
 {
-#if defined(__unix__) || defined(APPLE)
+#if defined(__unix__) || defined(__APPLE__)
     return strsignal(_signo);
 #else
     return "unknown";
