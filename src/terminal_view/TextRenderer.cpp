@@ -153,8 +153,9 @@ void TextRenderer::flushPendingSegments()
 
 crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
+    auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
     auto const key = CacheKey{
-        u32string_view(codepoints_.data(), codepoints_.size()),
+        codepoints,
         attributes_.styles
     };
     if (auto const cached = cache_.find(key); cached != cache_.end())
@@ -164,11 +165,10 @@ crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     }
     else
     {
-        auto keyString = u32string(key.text);
-        cacheKeyStorage_[keyString] = keyString;
+        cacheKeyStorage_[codepoints] = u32string(codepoints);
 
         auto const cacheKeyFromStorage = CacheKey{
-            cacheKeyStorage_[keyString],
+            cacheKeyStorage_[codepoints],
             attributes_.styles
         };
 
