@@ -558,7 +558,10 @@ void TerminalWindow::paintGL()
         state_.store(State::CleanPainting);
         now_ = chrono::steady_clock::now();
 
-        glViewport(0, 0, width() * contentScale(), height() * contentScale());
+        auto const scaledWidth = static_cast<GLsizei>(static_cast<float>(width()) * contentScale());
+        auto const scaledHeight = static_cast<GLsizei>(static_cast<float>(height()) * contentScale());
+
+        glViewport(0, 0, scaledWidth, scaledHeight);
 
         {
             auto calls = decltype(queuedCalls_){};
