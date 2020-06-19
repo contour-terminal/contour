@@ -204,11 +204,18 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
     else
     {
         bitmap.resize(height * width * 4);
-        copy(
-            buffer,
-            buffer + height * width * 4,
-            bitmap.begin()
-        );
+        auto s = buffer;
+        auto t = bitmap.begin();
+
+        for (unsigned i = 0; i < width * height; ++i)
+        {
+            // BGRA -> RGBA
+            *t++ = s[2];
+            *t++ = s[1];
+            *t++ = s[0];
+            *t++ = s[3];
+            s += 4;
+        }
     }
 
     return {GlyphBitmap{

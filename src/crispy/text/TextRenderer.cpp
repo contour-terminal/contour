@@ -92,7 +92,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     if (!bitmap.has_value())
         return nullopt;
 
-    auto const format = _id.font.get().hasColor() ? GL_BGRA : GL_RED;
+    auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
 
     //auto const cw = _id.font.get()->glyph->advance.x >> 6;
