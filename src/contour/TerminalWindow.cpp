@@ -773,6 +773,7 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
 
         auto const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - MarginTop) / terminalView_->cellHeight());
         auto const col = static_cast<unsigned>(1 + (max(_event->x(), 0) - MarginLeft) / terminalView_->cellWidth());
+        auto const mod = makeModifier(_event->modifiers());
 
         {
             auto const _l = scoped_lock{terminalView_->terminal()};
@@ -786,7 +787,7 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
             }
         }
 
-        auto const handled = terminalView_->terminal().send(terminal::MouseMoveEvent{row, col}, now_);
+        auto const handled = terminalView_->terminal().send(terminal::MouseMoveEvent{row, col, mod}, now_);
 
         // XXX always update as we don't know if a hyperlink is visible and its hover-state has changed.
         // We could implement an actual check by keeping track of how many grid cells do contain a

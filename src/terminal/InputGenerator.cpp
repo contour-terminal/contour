@@ -663,9 +663,18 @@ bool InputGenerator::generate(MouseMoveEvent const& _mouse)
     if (currentMousePosition_ != _mouse.coordinates())
     {
         currentMousePosition_ = {_mouse.row, _mouse.column};
-        if (currentlyPressedMouseButtons_.size())
+
+        if (mouseProtocol_.has_value())
         {
-            return generateMouse(MouseButton::Left, Modifier::None, _mouse.row, _mouse.column, MouseEventType::Drag);
+            bool const modifiersPressed = _mouse.modifier.any();
+            bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && modifiersPressed)
+                              || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
+            if (report)
+                return generateMouse(MouseButton::Left,
+                                     _mouse.modifier,
+                                     _mouse.row,
+                                     _mouse.column,
+                                     MouseEventType::Drag);
         }
     }
 

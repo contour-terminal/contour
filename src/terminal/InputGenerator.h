@@ -55,6 +55,8 @@ class Modifier {
 
     constexpr operator unsigned () const noexcept { return mask_; }
 
+    constexpr bool any() const noexcept { return mask_ != 0; }
+
     constexpr Modifier& operator|=(Modifier const& _other) noexcept
     {
         mask_ |= _other.mask_;
@@ -208,6 +210,8 @@ struct MouseMoveEvent {
 
     /// Column number in screen coordinates [1..cols]
     cursor_pos_t column;
+
+    Modifier modifier{};
 
     constexpr auto as_pair() const noexcept { return std::pair{ row, column }; }
 
