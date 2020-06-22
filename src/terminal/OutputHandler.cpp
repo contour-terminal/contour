@@ -17,6 +17,7 @@
 #include <terminal/Commands.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
+#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 
@@ -29,7 +30,7 @@ using namespace crispy;
 
 namespace terminal {
 
-inline std::unordered_map<std::string, std::string> parseSubParamKeyValuePairs(std::string const& s)
+inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(std::string_view const& s)
 {
     return crispy::splitKeyValuePairs(s, ':');
 }
@@ -126,7 +127,12 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
 			leaderSymbol_ = static_cast<char>(_currentChar);
 			return;
         case Action::Collect:
-            intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, because non-ASCII wouldn't be valid collected chars
+            {
+                uint8_t u8[4];
+                size_t const count = unicode::to_utf8(_currentChar, u8);
+                for (size_t i = 0; i < count; ++i)
+                    intermediateCharacters_.push_back(u8[i]);
+            }
             return;
         case Action::Print:
             emitCommand<AppendChar>(_currentChar);
@@ -169,7 +175,12 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             // no need, we inline OSC_Put and OSC_End's actions
             break;
         case Action::OSC_Put:
-            intermediateCharacters_.push_back(static_cast<char>(_currentChar)); // cast OK, becuase only ASCII's allowed (I think) TODO: check that fact
+            {
+                uint8_t u8[4];
+                size_t const count = unicode::to_utf8(_currentChar, u8);
+                for (size_t i = 0; i < count; ++i)
+                    intermediateCharacters_.push_back(u8[i]);
+            }
             break;
         case Action::OSC_End:
             dispatchOSC();
@@ -188,16 +199,54 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
     }
 }
 
-std::optional<RGBColor> OutputHandler::parseColor(std::string const& _value)
+constexpr unsigned long strntoul(char const* _data, size_t _count, char const** _eptr, unsigned _base = 10)
+{
+    constexpr auto values = string_view{"0123456789ABCDEF"};
+    constexpr auto lowerLetters = string_view{"abcdef"};
+
+    unsigned long result = 0;
+    while (_count != 0)
+    {
+        if (auto const i = values.find(*_data); i != values.npos && i < _base)
+        {
+            result *= _base;
+            result += i;
+            ++_data;
+            --_count;
+        }
+        else if (auto const i = lowerLetters.find(*_data); i != lowerLetters.npos && _base == 16)
+        {
+            result *= _base;
+            result += i;
+            ++_data;
+            --_count;
+        }
+        else
+            return 0;
+    }
+
+    if (_eptr)
+        *_eptr = _data;
+
+    return result;
+}
+
+std::optional<RGBColor> OutputHandler::parseColor(std::string_view const& _value)
 {
     try
     {
         // "rgb:RRRR/GGGG/BBBB"
         if (_value.size() == 18 && _value.substr(0, 4) == "rgb:" && _value[8] == '/' && _value[13] == '/')
         {
+#if 1
+            auto const r = strntoul(_value.data() + 4, 4, nullptr, 16);
+            auto const g = strntoul(_value.data() + 9, 4, nullptr, 16);
+            auto const b = strntoul(_value.data() + 14, 4, nullptr, 16);
+#else
             auto const r = stoul(_value.substr(4, 4), nullptr, 16);
             auto const g = stoul(_value.substr(9, 4), nullptr, 16);
             auto const b = stoul(_value.substr(14, 4), nullptr, 16);
+#endif
 
             return RGBColor{
                 static_cast<uint8_t>(r & 0xFF),
@@ -230,15 +279,14 @@ void OutputHandler::dispatchOSC()
         if (i < _data.size() && _data[i] == ';')
             ++i;
 
-        string const value = _data.substr(i);
-        return pair{code, value};
+        return pair{code, string_view(_data.data() + i, _data.size() - i)};
     }(intermediateCharacters_);
 
     switch (code)
     {
         case 0: // set window title and icon name
         case 2: // set window title
-            emitCommand<ChangeWindowTitle>(value);
+            emitCommand<ChangeWindowTitle>(string(value));
             [[fallthrough]];
         case 1: // set icon name
             // ignore
@@ -256,12 +304,12 @@ void OutputHandler::dispatchOSC()
             if (auto const pos = value.find(';'); pos != value.npos)
             {
                 auto const params = parseSubParamKeyValuePairs(value.substr(1, pos));
-                auto id = string{};
-                auto uri = string{};
+                auto id = string_view{};
+                auto uri = string_view{};
                 if (auto const p = params.find("id"); p != params.end())
                     id = p->second;
                 uri = value.substr(pos + 1);
-                emitCommand<Hyperlink>(id, uri);
+                emitCommand<Hyperlink>(string(id), string(uri));
             }
             else
                 log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
@@ -378,7 +426,7 @@ void OutputHandler::executeControlFunction(char _c0)
 void OutputHandler::dispatchESC(char _finalChar)
 {
     char const leaderSym = intermediateCharacters_.size() == 1
-		? intermediateCharacters_[0]
+		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
 	auto const funcId = FunctionDef::makeId(
@@ -393,7 +441,7 @@ void OutputHandler::dispatchESC(char _finalChar)
 void OutputHandler::dispatchCSI(char _finalChar)
 {
     char const followerSym = intermediateCharacters_.size() == 1
-		? intermediateCharacters_[0]
+		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
 	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(_finalChar));
