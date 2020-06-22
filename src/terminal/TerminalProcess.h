@@ -40,7 +40,8 @@ class TerminalProcess : public Terminal, public Process {
         CursorShape _cursorShape,
         Hook _onScreenCommands,
         std::function<void()> _onTerminalClosed,
-        Logger _logger
+        Logger _logger,
+        Screen::NotifyCallback _notify
     );
 
     ~TerminalProcess();

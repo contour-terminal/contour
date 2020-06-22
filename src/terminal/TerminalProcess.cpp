@@ -34,7 +34,8 @@ TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
                                  CursorShape _cursorShape,
                                  Hook _onScreenCommands,
                                  function<void()> _onTerminalClosed,
-                                 Logger _logger) :
+                                 Logger _logger,
+                                 Screen::NotifyCallback _notify) :
     Terminal(
         _winSize,
         _maxHistoryLineCount,
@@ -51,7 +52,8 @@ TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
         move(_bell),
         move(_requestDynamicColor),
         move(_resetDynamicColor),
-        move(_setDynamicColor)
+        move(_setDynamicColor),
+        move(_notify)
     ),
     Process{_shell, terminal().device()}
 {

@@ -25,6 +25,7 @@
 #include <QOpenGLWindow>
 #include <QOpenGLExtraFunctions>
 #include <QTimer>
+#include <QtWidgets/QSystemTrayIcon>
 
 #include <atomic>
 #include <fstream>
@@ -100,6 +101,7 @@ class TerminalWindow :
 
     void onScreenUpdate(std::vector<terminal::Command> const& _commands);
     void onWindowTitleChanged();
+    void onNotify(std::string const& _title, std::string const& _content);
     void onDoResize(unsigned _width, unsigned _height, bool _inPixels);
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
     void onTerminalClosed();
@@ -107,6 +109,9 @@ class TerminalWindow :
     void blinkingCursorUpdate();
 
     void setDefaultCursor();
+
+  signals:
+    void showNotification(QString const& _title, QString const& _body);
 
   private:
     /// Declares the screen-dirtiness-vs-rendering state.

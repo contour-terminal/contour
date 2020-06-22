@@ -60,7 +60,8 @@ class Terminal {
         std::function<void()> _bell = {},
         std::function<RGBColor(DynamicColorName)> _requestDynamicColor = {},
         std::function<void(DynamicColorName)> _resetDynamicColor = {},
-        std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor = {}
+        std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor = {},
+        Screen::NotifyCallback _notify = {}
     );
     ~Terminal();
 

@@ -12,11 +12,13 @@
  * limitations under the License.
  */
 #include <contour/Config.h>
-#include <contour/TerminalWindow.h>
+#include <contour/Controller.h>
+
 #include <terminal/ParserTables.h>
 
-#include <QCommandLineParser>
-#include <QGuiApplication>
+#include <QtCore/QCommandLineParser>
+#include <QtCore/QThread>
+#include <QtWidgets/QApplication>
 
 #include <iostream>
 
@@ -61,13 +63,13 @@ int main(int argc, char* argv[])
 {
     try
     {
-        QGuiApplication::setApplicationName("contour");
-        QGuiApplication::setOrganizationName("contour");
-        QGuiApplication::setApplicationVersion(QString::fromStdString(fmt::format(
+        QCoreApplication::setApplicationName("contour");
+        QCoreApplication::setOrganizationName("contour");
+        QCoreApplication::setApplicationVersion(QString::fromStdString(fmt::format(
             "{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH
         )));
-        QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-        QGuiApplication app(argc, argv);
+        QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+        QApplication app(argc, argv);
 
         auto cli = contour::CLI{};
         cli.process(app);
@@ -131,16 +133,15 @@ int main(int argc, char* argv[])
                 shell.arguments.push_back(positionalArgs.at(i).toStdString());
         }
 
-        //QSurfaceFormat::setDefaultFormat(contour::TerminalWindow::surfaceFormat());
+        contour::Controller controller(argv[0], config, profileName);
+        controller.start();
 
-        auto mainWindow = contour::TerminalWindow{
-            config,
-            profileName,
-            argv[0]
-        };
-        mainWindow.show();
+        auto const rv = app.exec();
 
-        return app.exec();
+        controller.exit();
+        controller.wait();
+
+        return rv;
     }
     catch (exception const& e)
     {

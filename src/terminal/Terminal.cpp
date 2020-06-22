@@ -43,7 +43,8 @@ Terminal::Terminal(WindowSize _winSize,
                    std::function<void()> _bell,
                    std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                    std::function<void(DynamicColorName)> _resetDynamicColor,
-                   std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor
+                   std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
+                   Screen::NotifyCallback _notify
 ) :
     changes_{ 0 },
     logger_{ _logger },
@@ -80,7 +81,8 @@ Terminal::Terminal(WindowSize _winSize,
         move(_requestDynamicColor),
         move(_resetDynamicColor),
         move(_setDynamicColor),
-        bind(&InputGenerator::setGenerateFocusEvents, &inputGenerator_, _1)
+        bind(&InputGenerator::setGenerateFocusEvents, &inputGenerator_, _1),
+        move(_notify)
     },
     onScreenCommands_{ move(_onScreenCommands) },
     screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) },

@@ -379,6 +379,13 @@ void OutputHandler::dispatchOSC()
         case -'L': // Ps = L  ; c -> Set icon label.
             log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
+        case 777:
+            {
+                auto const splits = crispy::split(value, ';');
+                if (splits.size() == 3 && splits[0] == "notify")
+                    emitCommand<Notify>(string(splits[1]), string(splits[2]));
+            }
+            break;
         default:
             log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
             break;

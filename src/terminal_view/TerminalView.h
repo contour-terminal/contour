@@ -58,6 +58,7 @@ class TerminalView {
                  QMatrix4x4 const& _projectionMatrix,
                  std::function<void(std::vector<Command> const&)> _onScreenUpdate,
                  std::function<void()> _onWindowTitleChanged,
+                 Screen::NotifyCallback _notify,
                  std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                  std::function<void()> _onTerminalClosed,
                  ShaderConfig const& _backgroundShaderConfig,

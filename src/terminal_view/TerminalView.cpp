@@ -58,6 +58,7 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            QMatrix4x4 const& _projectionMatrix,
                            function<void(vector<Command> const&)> _onScreenUpdate,
                            function<void()> _onWindowTitleChanged,
+                           Screen::NotifyCallback _notify,
                            function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                            function<void()> _onTerminalClosed,
                            ShaderConfig const& _backgroundShaderConfig,
@@ -104,7 +105,8 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _cursorShape,
         [onScreenUpdate = move(_onScreenUpdate)](auto const& _commands) { if (onScreenUpdate) onScreenUpdate(_commands); },
         move(_onTerminalClosed),
-        [this](terminal::LogEvent const& _event) { logger_(_event); }
+        [this](terminal::LogEvent const& _event) { logger_(_event); },
+        move(_notify)
     },
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}

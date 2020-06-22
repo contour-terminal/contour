@@ -15,19 +15,18 @@
 #include <contour/Actions.h>
 #include <terminal/Metrics.h>
 
-#include <QClipboard>
-#include <QDebug>
-#include <QDesktopServices>
-#include <QGuiApplication>
-#include <QKeyEvent>
-#include <QOpenGLFunctions>
-#include <QOpenGLWindow>
-#include <QProcess>
-#include <QScreen>
-#include <QTimer>
-
+#include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
+#include <QtCore/QProcess>
+#include <QtCore/QTimer>
+#include <QtGui/QClipboard>
+#include <QtGui/QDesktopServices>
+#include <QtGui/QKeyEvent>
+#include <QtGui/QOpenGLFunctions>
+#include <QtGui/QOpenGLWindow>
+#include <QtGui/QScreen>
 #include <QtNetwork/QHostInfo>
+#include <QtWidgets/QApplication>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
@@ -512,6 +511,7 @@ void TerminalWindow::initializeGL()
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
         bind(&TerminalWindow::onScreenUpdate, this, _1),
         bind(&TerminalWindow::onWindowTitleChanged, this),
+        bind(&TerminalWindow::onNotify, this, _1, _2),
         bind(&TerminalWindow::onDoResize, this, _1, _2, _3),
         bind(&TerminalWindow::onTerminalClosed, this),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
@@ -1181,6 +1181,7 @@ void TerminalWindow::onBell()
 {
     if (logger_.sink())
         *logger_.sink() << "TODO: Beep!\n";
+    QApplication::beep();
     // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
     // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
 }
@@ -1224,6 +1225,12 @@ void TerminalWindow::onWindowTitleChanged()
             : fmt::format("{} - contour", terminalTitle);
         setTitle(QString::fromUtf8(title.c_str()));
     });
+}
+
+void TerminalWindow::onNotify(string const& _title, string const& _content)
+{
+    emit showNotification(QString::fromUtf8(_title.data(), _title.size()),
+                          QString::fromUtf8(_content.data(), _content.size()));
 }
 
 void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixels)

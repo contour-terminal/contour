@@ -783,6 +783,12 @@ struct Hyperlink {
     std::string link;
 };
 
+/// OSC 777 - notify
+struct Notify {
+    std::string title;
+    std::string content;
+};
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -936,6 +942,7 @@ using Command = std::variant<
     MoveCursorToLine,
     MoveCursorToNextTab,
     MoveCursorUp,
+    Notify,
     ReportCursorPosition,
     ReportExtendedCursorPosition,
     RequestDynamicColor,

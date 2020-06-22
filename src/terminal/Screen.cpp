@@ -709,7 +709,8 @@ Screen::Screen(WindowSize const& _size,
                std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
                std::function<void(DynamicColorName)> _resetDynamicColor,
                std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-               std::function<void(bool)> _setGenerateFocusEvents
+               std::function<void(bool)> _setGenerateFocusEvents,
+               NotifyCallback _notify
 ) :
     onCommands_{ move(onCommands) },
     logger_{ _logger },
@@ -740,7 +741,8 @@ Screen::Screen(WindowSize const& _size,
     requestDynamicColor_{ move(_requestDynamicColor) },
     resetDynamicColor_{ move(_resetDynamicColor) },
     setDynamicColor_{ move(_setDynamicColor) },
-    setGenerateFocusEvents_{ move(_setGenerateFocusEvents) }
+    setGenerateFocusEvents_{ move(_setGenerateFocusEvents) },
+    notify_{ move(_notify) }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
 }
@@ -1391,6 +1393,13 @@ void Screen::operator()(MoveCursorToNextTab const&)
             // then TAB moves to next line left margin
             (*this)(CursorNextLine{1});
     }
+}
+
+void Screen::operator()(Notify const& _notify)
+{
+    cout << "Screen.NOTIFY: title: '" << _notify.title << "', content: '" << _notify.content << "'\n";
+    if (notify_)
+        notify_(_notify.title, _notify.content);
 }
 
 void Screen::appendSpaceChars(size_t n)

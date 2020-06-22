@@ -539,6 +539,7 @@ class Screen {
 	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
     using OnBufferChanged = std::function<void(ScreenBuffer::Type)>;
     using Hook = std::function<void(std::vector<Command> const& commands)>;
+    using NotifyCallback = std::function<void(std::string const&, std::string const&)>;
 
   public:
     /**
@@ -571,7 +572,8 @@ class Screen {
            std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
            std::function<void(DynamicColorName)> _resetDynamicColor,
            std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-           std::function<void(bool)> _setGenerateFocusEvents
+           std::function<void(bool)> _setGenerateFocusEvents,
+           NotifyCallback _notify
     );
 
     Screen(WindowSize const& _size,
@@ -603,11 +605,11 @@ class Screen {
         _logger,
         true, // logs raw output by default?
         true, // logs trace output by default?
-        {}, {}, {}, {}, {}, {}, {}
+        {}, {}, {}, {}, {}, {}, {}, {}
     } {}
 
     Screen(WindowSize const& _size, Logger const& _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, _logger, true, true, {}, {}, {}, {}, {}, {}, {}} {}
+        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, _logger, true, true, {}, {}, {}, {}, {}, {}, {}, {}} {}
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -686,6 +688,7 @@ class Screen {
     void operator()(MoveCursorTo const& v);
     void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
+    void operator()(Notify const& v);
     void operator()(CursorBackwardTab const& v);
     void operator()(SaveCursor const& v);
     void operator()(RestoreCursor const& v);
@@ -902,6 +905,8 @@ class Screen {
     std::function<void(DynamicColorName)> resetDynamicColor_{};
     std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};
     std::function<void(bool)> setGenerateFocusEvents_{};
+
+    NotifyCallback notify_{};
 };
 
 constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept

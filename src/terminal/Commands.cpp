@@ -274,6 +274,7 @@ class MnemonicBuilder {
     void operator()(HorizontalTabSet) { build("HTS", "Horizontal Tab Set"); }
     void operator()(Hyperlink const& v) { build("HYPERLINK", fmt::format("Set hyperlink id='{}' link='{}'", v.id, v.link)); }
     void operator()(MoveCursorUp const& v) { build("CUU", "Move cursor up", v.n); }
+    void operator()(Notify const&) { build("NOTIFY", "Send user notification"); }
     void operator()(MoveCursorDown const& v) { build("CUD", "Move cursor down", v.n); }
     void operator()(MoveCursorForward const& v) { build("CUF", "Move cursor forward", v.n); }
     void operator()(MoveCursorBackward const& v)  { build("CUB", "Move cursor backward", v.n); }

@@ -197,6 +197,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](MoveCursorTo const& to) { write("\033[{}H", pairOrNone(1, to.row, to.column)); },
         [&](MoveCursorToLine const& to) { write("\033[{}d", to.row); },
         [&](MoveCursorToNextTab) { write("\t"); },
+        [&](Notify const& v) { write("\033]777;notify;{};{}\033\\", v.title, v.content); },
         [&](CursorBackwardTab const& v) { write("\033[{}Z", v.count); },
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
