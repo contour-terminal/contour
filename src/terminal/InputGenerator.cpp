@@ -666,8 +666,8 @@ bool InputGenerator::generate(MouseMoveEvent const& _mouse)
 
         if (mouseProtocol_.has_value())
         {
-            bool const modifiersPressed = _mouse.modifier.any();
-            bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && modifiersPressed)
+            bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
+            bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
                               || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
             if (report)
                 return generateMouse(MouseButton::Left,

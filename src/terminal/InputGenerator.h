@@ -315,22 +315,6 @@ enum class MouseTransport {
     URXVT,
 };
 
-inline std::string to_string(MouseTransport _value)
-{
-    switch (_value)
-    {
-        case MouseTransport::Default:
-            return "Default";
-        case MouseTransport::Extended:
-            return "Extended";
-        case MouseTransport::SGR:
-            return "SGR";
-        case MouseTransport::URXVT:
-            return "URXVT";
-    }
-    return "<Unknown MouseTransport>";
-}
-
 class InputGenerator {
   public:
     using Sequence = std::vector<char>;
@@ -478,6 +462,41 @@ namespace fmt { // {{{
                     return format_to(_ctx.out(), "Application");
                 case terminal::KeyMode::Normal:
                     return format_to(_ctx.out(), "Normal");
+            }
+            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::MouseTransport> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MouseTransport _value, FormatContext& _ctx)
+        {
+            switch (_value)
+            {
+                case terminal::MouseTransport::Default: return format_to(_ctx.out(), "Default");
+                case terminal::MouseTransport::Extended: return format_to(_ctx.out(), "Extended");
+                case terminal::MouseTransport::SGR: return format_to(_ctx.out(), "SGR");
+                case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
+            }
+            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::InputGenerator::MouseEventType> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::InputGenerator::MouseEventType _value, FormatContext& _ctx)
+        {
+            switch (_value)
+            {
+                case terminal::InputGenerator::MouseEventType::Press: return format_to(_ctx.out(), "Press");
+                case terminal::InputGenerator::MouseEventType::Drag: return format_to(_ctx.out(), "Drag");
+                case terminal::InputGenerator::MouseEventType::Release: return format_to(_ctx.out(), "Release");
             }
             return format_to(_ctx.out(), "<{}>", unsigned(_value));
         }
