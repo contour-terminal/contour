@@ -149,6 +149,9 @@ void BackgroundRenderer::renderCellRange()
 
 void BackgroundRenderer::execute()
 {
+    if (columnCount_)
+        renderCellRange();
+
     if (vertexCoords_.empty())
         return;
 
