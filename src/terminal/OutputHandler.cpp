@@ -238,15 +238,9 @@ std::optional<RGBColor> OutputHandler::parseColor(std::string_view const& _value
         // "rgb:RRRR/GGGG/BBBB"
         if (_value.size() == 18 && _value.substr(0, 4) == "rgb:" && _value[8] == '/' && _value[13] == '/')
         {
-#if 1
             auto const r = strntoul(_value.data() + 4, 4, nullptr, 16);
             auto const g = strntoul(_value.data() + 9, 4, nullptr, 16);
             auto const b = strntoul(_value.data() + 14, 4, nullptr, 16);
-#else
-            auto const r = stoul(_value.substr(4, 4), nullptr, 16);
-            auto const g = stoul(_value.substr(9, 4), nullptr, 16);
-            auto const b = stoul(_value.substr(14, 4), nullptr, 16);
-#endif
 
             return RGBColor{
                 static_cast<uint8_t>(r & 0xFF),
