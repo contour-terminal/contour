@@ -56,14 +56,16 @@ struct FunctionDef {
     constexpr static uint32_t makeId(FunctionType _type,
 									 char _leaderSymbol,
 									 char _followerSymbol,
-									 char _finalSymbol) noexcept {
+									 char _finalSymbol) noexcept
+    {
         return _finalSymbol
              | _followerSymbol << 8
              | _leaderSymbol << 16
 			 | static_cast<unsigned>(_type) << 18;
     }
 
-    constexpr uint32_t id() const noexcept {
+    constexpr uint32_t id() const noexcept
+    {
         return makeId(type, leaderSymbol.value_or(0), followerSymbol.value_or(0), finalSymbol);
     }
 

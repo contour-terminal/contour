@@ -307,9 +307,9 @@ class MnemonicBuilder {
     void operator()(RestoreWindowTitle const&) {
         build("WINMANIP", "Restores window title from stack.", 23, 0, 0);
     }
-    void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Select foreground color to {}", to_string(v.color))); }
-    void operator()(SetBackgroundColor const& v) { build("SGR", fmt::format("Select background color to {}", to_string(v.color))); }
-    void operator()(SetUnderlineColor const& v) {  build("SGR", fmt::format("Select underline color to {}", to_string(v.color))); }
+    void operator()(SetForegroundColor const& v) { build("SGR", fmt::format("Set foreground color to {}", to_string(v.color))); }
+    void operator()(SetBackgroundColor const& v) { build("SGR", fmt::format("Set background color to {}", to_string(v.color))); }
+    void operator()(SetUnderlineColor const& v) {  build("SGR", fmt::format("Set underline color to {}", to_string(v.color))); }
     void operator()(SetGraphicsRendition const& v) { build("SGR", fmt::format("Select style rendition to {}", to_string(v.rendition))); }
     void operator()(SetMark const&) { build("SETMARK", "Sets vertical jump-mark in current line"); }
     void operator()(SetMode const& v) {
