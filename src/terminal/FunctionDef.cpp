@@ -697,7 +697,7 @@ FunctionHandlerMap functions(VTType _vt)
 		{
 			CSI(std::nullopt, std::nullopt, 'c', VTType::VT100, "DA1", "Send primary device attributes"),
 			[](auto& _ctx) {
-				if (_ctx.parameterCount() <= 1 && _ctx.param_or(0, FunctionParam{0}))
+				if (_ctx.parameterCount() <= 1 && _ctx.param_or(0, FunctionParam{0}) == 0)
 					return _ctx.template emitCommand<SendDeviceAttributes>();
 				else
 					return HandlerResult::Invalid;
