@@ -57,7 +57,9 @@ struct FunctionDef {
 									 char _leaderSymbol,
 									 char _followerSymbol,
 									 char _finalSymbol) noexcept {
-        return _finalSymbol | _followerSymbol << 8 | _leaderSymbol << 16
+        return _finalSymbol
+             | _followerSymbol << 8
+             | _leaderSymbol << 16
 			 | static_cast<unsigned>(_type) << 18;
     }
 
