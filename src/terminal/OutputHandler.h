@@ -15,7 +15,7 @@
 
 #include <terminal/Logger.h>
 #include <terminal/Parser.h>
-#include <terminal/FunctionDef.h>
+#include <terminal/Functions.h>
 
 #include <string>
 #include <string_view>
@@ -68,8 +68,6 @@ class OutputHandler : private HandlerContext {
     bool private_ = false;
 
     Logger const logger_;
-
-	FunctionHandlerMap functionMapper_;
 };
 
 }  // namespace terminal

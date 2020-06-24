@@ -17,7 +17,7 @@ endif()
 set(terminal_HEADERS
     Color.h
     Commands.h
-    FunctionDef.h
+    Functions.h
     InputGenerator.h
     OutputGenerator.h
     OutputHandler.h
@@ -36,7 +36,7 @@ set(terminal_HEADERS
 set(terminal_SOURCES
     Color.cpp
     Commands.cpp
-    FunctionDef.cpp
+    Functions.cpp
     InputGenerator.cpp
     OutputGenerator.cpp
     OutputHandler.cpp

@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal/OutputHandler.h>
-#include <terminal/FunctionDef.h>
 
 #include <terminal/Commands.h>
 #include <crispy/escape.h>
@@ -60,8 +59,7 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
 }
 
 OutputHandler::OutputHandler(Logger _logger) :
-	logger_{std::move(_logger)},
-	functionMapper_{functions(VTType::VT525)}
+	logger_{std::move(_logger)}
 {
 	parameters_.reserve(MaxParameters);
 }
@@ -119,8 +117,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
         case Action::Clear:
 			leaderSymbol_ = 0;
             intermediateCharacters_.clear();
-            parameters_.resize(1);
-            parameters_[0] = {0};
+            parameters_.clear();
             private_ = false;
             return;
 		case Action::CollectLeader:
@@ -138,6 +135,8 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             emitCommand<AppendChar>(_currentChar);
             return;
         case Action::Param:
+            if (parameters_.empty())
+                parameters_.push_back({0});
             if (_currentChar == ';')
                 parameters_.push_back({0});
             else if (_currentChar == ':')
@@ -152,24 +151,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
             executeControlFunction(static_cast<char>(_currentChar));
             return;
         case Action::ESC_Dispatch:
-            if (intermediateCharacters_.empty())
-                dispatchESC(static_cast<char>(_currentChar));
-            else if (intermediateCharacters_ == "#" && _currentChar == '8')
-                emitCommand<ScreenAlignmentPattern>();
-            else if (intermediateCharacters_ == "(" && _currentChar == 'B')
-            {
-                // TODO: ESC ( B
-                //log<UnsupportedOutputEvent>("Designate G0 Character Set: US-ASCII.");
-            }
-            else if (_currentChar == '0')
-            {
-                if (auto g = getCharsetTableForCode(intermediateCharacters_); g.has_value())
-                    emitCommand<DesignateCharset>(*g, Charset::Special);
-                else
-                    logInvalidESC(static_cast<char>(_currentChar), fmt::format("Invalid charset table identifier: {}", escape(intermediateCharacters_[0])));
-            }
-            else
-                logInvalidESC(static_cast<char>(_currentChar));
+            dispatchESC(static_cast<char>(_currentChar));
             return;
         case Action::OSC_Start:
             // no need, we inline OSC_Put and OSC_End's actions
@@ -426,39 +408,34 @@ void OutputHandler::executeControlFunction(char _c0)
 
 void OutputHandler::dispatchESC(char _finalChar)
 {
-    char const leaderSym = intermediateCharacters_.size() == 1
+    char const intermediate = intermediateCharacters_.size() == 1
 		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
-	auto const funcId = FunctionDef::makeId(
-		FunctionType::ESC, leaderSym, 0, static_cast<char>(_finalChar));
-
-	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
-		funcMap->second.second(*this);
-	else
-		logInvalidESC(_finalChar, "Unknown final character");
+    if (FunctionSpec const* funcSpec = select(FunctionCategory::ESC, 0, 0, intermediate, _finalChar); funcSpec != nullptr)
+        apply(*funcSpec, *this);
+    else
+		logInvalidESC(_finalChar, "Unknown escape sequence.");
 }
 
 void OutputHandler::dispatchCSI(char _finalChar)
 {
-    char const followerSym = intermediateCharacters_.size() == 1
+    char const intermediate = intermediateCharacters_.size() == 1
 		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
-	auto const funcId = FunctionDef::makeId(FunctionType::CSI, leaderSymbol_, followerSym, static_cast<char>(_finalChar));
-
-	if (auto const funcMap = functionMapper_.find(funcId); funcMap != end(functionMapper_))
+    if (FunctionSpec const* funcSpec = select(FunctionCategory::CSI, leaderSymbol_, parameterCount(), intermediate, _finalChar); funcSpec != nullptr)
 	{
-		HandlerResult const result = funcMap->second.second(*this);
+        HandlerContext::Result const result = apply(*funcSpec, *this);
 		switch (result)
 		{
-			case HandlerResult::Unsupported:
+            case HandlerContext::Result::Unsupported:
 				logUnsupportedCSI(_finalChar);
 				break;
-			case HandlerResult::Invalid:
+            case HandlerContext::Result::Invalid:
 				logInvalidCSI(_finalChar);
 				break;
-			case HandlerResult::Ok:
+            case HandlerContext::Result::Ok:
 				break;
 		}
 	}

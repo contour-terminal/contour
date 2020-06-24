@@ -352,11 +352,11 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
         currentColumn++;
         for (unsigned i = 1; i < n; ++i)
             (currentColumn++)->reset(graphicsRendition, currentHyperlink);
+        verifyState();
     }
     else if (autoWrap)
         wrapPending = true;
 
-    verifyState();
 }
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n)
@@ -798,7 +798,7 @@ void Screen::write(char const * _data, size_t _size)
     {
         auto const traces = to_mnemonic(handler_.commands(), true, true);
         for (auto const& trace : traces)
-        logger_(TraceOutputEvent{trace});
+            logger_(TraceOutputEvent{trace});
     }
     #endif
 
