@@ -344,7 +344,9 @@ class MnemonicBuilder {
         else
             build("DECKPNM", "Keypad Numeric Mode");
     }
-    void operator()(DesignateCharset) { build("TODO"); }
+    void operator()(DesignateCharset const& v) {
+        build("CHARSET", fmt::format("Designate charset {} into {}.", to_string(v.charset), to_string(v.table)));
+    }
     void operator()(SingleShiftSelect const& v) {
         switch (v.table) {
             case CharsetTable::G0:
