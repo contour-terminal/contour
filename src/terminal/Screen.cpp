@@ -672,7 +672,7 @@ void ScreenBuffer::verifyState() const
     assert(size_.rows == lines.size());
 
     // verify cursor positions
-    [[maybe_unused]] auto const clampedCursor = clampCoordinate(cursor);
+    [[maybe_unused]] auto const clampedCursor = clampToScreen(cursor);
     assert(cursor == clampedCursor);
 
     // verify iterators

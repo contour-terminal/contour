@@ -491,18 +491,28 @@ struct ScreenBuffer {
 	}
 
 	/// Clamps given coordinates, respecting DECOM (Origin Mode).
-	Coordinate clampCoordinate(Coordinate const& to) const noexcept
+	Coordinate clampCoordinate(Coordinate const& coord) const noexcept
 	{
 		if (!cursorRestrictedToMargin)
-			return {
-				std::clamp(to.row, cursor_pos_t{ 1 }, size_.rows),
-				std::clamp(to.column, cursor_pos_t{ 1 }, size_.columns)
-			};
+            return clampToMargin(coord);
 		else
-			return {
-				std::clamp(to.row, cursor_pos_t{ 1 }, margin_.vertical.to),
-				std::clamp(to.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
-			};
+            return clampToScreen(coord);
+	}
+
+	Coordinate clampToMargin(Coordinate const& coord) const noexcept
+	{
+        return {
+            std::clamp(coord.row, cursor_pos_t{ 1 }, size_.rows),
+            std::clamp(coord.column, cursor_pos_t{ 1 }, size_.columns)
+        };
+	}
+
+	Coordinate clampToScreen(Coordinate const& coord) const noexcept
+	{
+        return {
+            std::clamp(coord.row, cursor_pos_t{ 1 }, margin_.vertical.to),
+            std::clamp(coord.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
+        };
 	}
 
 	void moveCursorTo(Coordinate to);
