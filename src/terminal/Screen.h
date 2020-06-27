@@ -453,6 +453,14 @@ struct ScreenBuffer {
     void clearTabUnderCursor();
     void setTabUnderCursor();
 
+    /// Renders a single text line.
+    std::string renderTextLine(cursor_pos_t _row) const;
+
+    /// Renders the full screen as text into the given string. Each line will be terminated by LF.
+    std::string renderText() const;
+
+    std::string screenshot() const;
+
 	constexpr Coordinate realCursorPosition() const noexcept { return {cursor.row, cursor.column}; }
 
 	constexpr Coordinate cursorPosition() const noexcept {
@@ -643,10 +651,10 @@ class Screen {
     void render(Renderer const& _renderer, size_t _scrollOffset = 0) const;
 
     /// Renders a single text line.
-    std::string renderTextLine(cursor_pos_t _row) const;
+    std::string renderTextLine(cursor_pos_t _row) const { return buffer_->renderTextLine(_row); }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
-    std::string renderText() const;
+    std::string renderText() const { return buffer_->renderText(); }
 
     /// Takes a screenshot by outputting VT sequences needed to render the current state of the screen.
     ///
@@ -654,7 +662,7 @@ class Screen {
     ///
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
-    std::string screenshot() const;
+    std::string screenshot() const { return buffer_->screenshot(); }
 
     // {{{ Command processor
     void operator()(Bell const& v);

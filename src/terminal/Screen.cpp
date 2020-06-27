@@ -878,7 +878,7 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
     return line;
 }
 
-string Screen::renderTextLine(cursor_pos_t row) const
+string ScreenBuffer::renderTextLine(cursor_pos_t row) const
 {
     string line;
     line.reserve(size_.columns);
@@ -891,7 +891,7 @@ string Screen::renderTextLine(cursor_pos_t row) const
     return line;
 }
 
-string Screen::renderText() const
+string ScreenBuffer::renderText() const
 {
     string text;
     text.reserve(size_.rows * (size_.columns + 1));
@@ -905,23 +905,26 @@ string Screen::renderText() const
     return text;
 }
 
-std::string Screen::screenshot() const
+std::string ScreenBuffer::screenshot() const
 {
     auto result = std::stringstream{};
     auto generator = OutputGenerator{ result };
 
-    generator(ClearScreen{});
-    generator(MoveCursorTo{ 1, 1 });
-
-    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
+    for (cursor_pos_t const row : times(1, size_.rows))
     {
-        for (cursor_pos_t col = 1; col <= size_.columns; ++col)
+        for (cursor_pos_t const col : times(1, size_.columns))
         {
             Cell const& cell = at(row, col);
 
-            //TODO: generator(SetGraphicsRendition{ cell.attributes().styles });
+            //TODO: some kind of: generator(SetGraphicsRendition{ cell.attributes().styles });
+            if (cell.attributes().styles & CharacterStyleMask::Bold)
+                generator(SetGraphicsRendition{GraphicsRendition::Bold});
+            else
+                generator(SetGraphicsRendition{GraphicsRendition::Normal});
+
             generator(SetForegroundColor{ cell.attributes().foregroundColor });
             generator(SetBackgroundColor{ cell.attributes().backgroundColor });
+
             if (!cell.codepointCount())
                 generator(AppendChar{ U' ' });
             else
@@ -931,10 +934,6 @@ std::string Screen::screenshot() const
         generator(MoveCursorToBeginOfLine{});
         generator(Linefeed{});
     }
-
-    generator(MoveCursorTo{ buffer_->cursor.row, buffer_->cursor.column });
-    if (realCursor().visible)
-        generator(SetMode{ Mode::VisibleCursor, false });
 
     return result.str();
 }
