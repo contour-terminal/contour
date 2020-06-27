@@ -668,21 +668,55 @@ void ScreenBuffer::setTabUnderCursor()
 
 void ScreenBuffer::verifyState() const
 {
-#if !defined(NDEBUG)
+#if 0 // !defined(NDEBUG)
+    bool ok = true;
     assert(size_.rows == lines.size());
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursor = clampToScreen(cursor);
-    assert(cursor == clampedCursor);
+    if (cursor != clampedCursor)
+    {
+        cerr << fmt::format("Cursor {} does not match clamp to screen {}.\n", cursor, clampedCursor);
+        ok = false;
+    }
 
     // verify iterators
     [[maybe_unused]] auto const line = next(begin(lines), cursor.row - 1);
-
     [[maybe_unused]] auto const col = columnIteratorAt(cursor.column);
 
-    assert(line == currentLine);
-    assert(col == currentColumn);
-    assert(wrapPending == false || cursor.column == size_.columns);
+    if (line != currentLine)
+    {
+        cerr << fmt::format("Calculated current line does not match.\n");
+        ok = false;
+    }
+    else if (col != currentColumn)
+    {
+        cerr << fmt::format("Calculated current column does not match.\n");
+        ok = false;
+    }
+
+    if (cursor.column != size_.columns && wrapPending)
+    {
+        cerr << fmt::format("wrapPending flag set when cursor is not in last column.");
+        ok = false;
+    }
+
+    if (!ok)
+    {
+        cerr << fmt::format("Rendered screen at the time of failure: {}, cursor at {}", size_, cursor);
+        if (cursorRestrictedToMargin)
+            cerr << fmt::format(" (real: {})", toRealCoordinate(cursor));
+        cerr << '\n';
+        for_each(times(size_.columns), [](auto) { cerr << '='; });
+        cerr << '\n' << screenshot();
+        for_each(times(size_.columns), [](auto) { cerr << '='; });
+        cerr << endl;
+    }
+
+    // assert(line == currentLine);
+    // assert(col == currentColumn);
+    // assert(wrapPending == false || cursor.column == size_.columns);
+    assert(ok);
 #endif
 }
 
