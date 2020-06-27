@@ -453,7 +453,7 @@ struct ScreenBuffer {
     void clearTabUnderCursor();
     void setTabUnderCursor();
 
-	constexpr Coordinate realCursorPosition() const noexcept { return cursor; }
+	constexpr Coordinate realCursorPosition() const noexcept { return {cursor.row, cursor.column}; }
 
 	constexpr Coordinate cursorPosition() const noexcept {
 		if (!cursorRestrictedToMargin)
@@ -752,13 +752,11 @@ class Screen {
     bool scrollMarkDown();
     //}}}
 
-    bool isCursorInsideMargins() const noexcept {
-        if (!buffer_->margin_.vertical.contains(buffer_->cursor.row))
-            return false;
-        else if (isModeEnabled(Mode::LeftRightMargin) && !buffer_->margin_.horizontal.contains(buffer_->cursor.column))
-            return false;
-        else
-            return true;
+    bool isCursorInsideMargins() const noexcept
+    {
+        bool const insideVerticalMargin = buffer_->margin_.vertical.contains(buffer_->cursor.row);
+        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin) || buffer_->margin_.horizontal.contains(buffer_->cursor.column);
+        return insideVerticalMargin && insideHorizontalMargin;
     }
 
     Coordinate realCursorPosition() const noexcept { return buffer_->realCursorPosition(); }
