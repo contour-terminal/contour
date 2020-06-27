@@ -619,9 +619,10 @@ void ScreenBuffer::updateCursorIterators()
 
 void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 {
-    auto const n = min(_n, size_.columns);
-    cursor.column = n;
-    currentColumn = columnIteratorAt(n);
+    auto const col = cursorRestrictedToMargin ? margin_.horizontal.from + _n - 1 : _n;
+    auto const clampedCol = min(col, size_.columns);
+    cursor.column = clampedCol;
+    currentColumn = columnIteratorAt(clampedCol);
 
     verifyState();
 }
@@ -1330,7 +1331,7 @@ void Screen::operator()(MoveCursorUp const& v)
     auto const n = min(v.n, cursorPosition().row - buffer_->margin_.vertical.from);
     buffer_->cursor.row -= n;
     buffer_->currentLine = prev(buffer_->currentLine, n);
-    buffer_->setCurrentColumn(realCursorPosition().column);
+    buffer_->setCurrentColumn(cursorPosition().column);
     buffer_->verifyState();
 }
 
@@ -1339,7 +1340,7 @@ void Screen::operator()(MoveCursorDown const& v)
     auto const n = min(v.n, size_.rows - cursorPosition().row);
     buffer_->cursor.row += n;
     buffer_->currentLine = next(buffer_->currentLine, n);
-    buffer_->setCurrentColumn(realCursorPosition().column);
+    buffer_->setCurrentColumn(cursorPosition().column);
 }
 
 void Screen::operator()(MoveCursorForward const& v)
@@ -1368,7 +1369,7 @@ void Screen::operator()(MoveCursorToBeginOfLine const&)
 {
     buffer_->wrapPending = false;
 
-    buffer_->setCurrentColumn(buffer_->margin_.horizontal.from);
+    buffer_->setCurrentColumn(1);
 }
 
 void Screen::operator()(MoveCursorTo const& v)

@@ -409,7 +409,7 @@ struct ScreenBuffer {
 	void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
 	void insertColumns(cursor_pos_t _n);
 
-    /// Sets the current column to given real column number.
+    /// Sets the current column to given logical column number.
     void setCurrentColumn(cursor_pos_t _n);
 
     /// Increments current column number by @p _n.
