@@ -61,11 +61,21 @@ class OutputHandler : private HandlerContext {
 
     std::string sequenceString(char _finalChar, std::string const& _prefix) const;
 
+    template <typename T, typename... Args>
+    HandlerResult emitCommand(Args&&... args)
+    {
+        commands_.emplace_back(T{std::forward<Args>(args)...});
+        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
+        return HandlerResult::Ok;
+    }
+
   private:
     char32_t currentChar_{};
 
 	char leaderSymbol_ = 0;
     bool private_ = false;
+
+    CommandList commands_{};
 
     Logger const logger_;
 };

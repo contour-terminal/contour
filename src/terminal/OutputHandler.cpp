@@ -413,7 +413,7 @@ void OutputHandler::dispatchESC(char _finalChar)
 		: char{};
 
     if (FunctionSpec const* funcSpec = select(FunctionCategory::ESC, 0, 0, intermediate, _finalChar); funcSpec != nullptr)
-        apply(*funcSpec, *this);
+        apply(*funcSpec, *this, commands_);
     else
 		logInvalidESC(_finalChar, "Unknown escape sequence.");
 }
@@ -426,16 +426,16 @@ void OutputHandler::dispatchCSI(char _finalChar)
 
     if (FunctionSpec const* funcSpec = select(FunctionCategory::CSI, leaderSymbol_, parameterCount(), intermediate, _finalChar); funcSpec != nullptr)
 	{
-        HandlerContext::Result const result = apply(*funcSpec, *this);
+        HandlerResult const result = apply(*funcSpec, *this, commands_);
 		switch (result)
 		{
-            case HandlerContext::Result::Unsupported:
+            case HandlerResult::Unsupported:
 				logUnsupportedCSI(_finalChar);
 				break;
-            case HandlerContext::Result::Invalid:
+            case HandlerResult::Invalid:
 				logInvalidCSI(_finalChar);
 				break;
-            case HandlerContext::Result::Ok:
+            case HandlerResult::Ok:
 				break;
 		}
 	}

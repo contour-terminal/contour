@@ -34,19 +34,29 @@ using std::for_each;
 
 namespace terminal {
 
-using HandlerResult = HandlerContext::Result;
 using FunctionParam = HandlerContext::FunctionParam;
+
+namespace {
+    template <typename T, typename... Args>
+    HandlerResult emitCommand(CommandList& _output, Args&&... args)
+    {
+        _output.emplace_back(T{std::forward<Args>(args)...});
+        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
+        return HandlerResult::Ok;
+    }
+}
 
 namespace impl // {{{ some command generator helpers
 {
-    HandlerResult setMode(HandlerContext& _ctx, size_t _modeIndex, bool _enable)
+    HandlerResult setMode(HandlerContext const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
 	{
 		switch (_ctx.param(_modeIndex))
 		{
 			case 2:  // (AM) Keyboard Action Mode
 				return HandlerResult::Unsupported;
 			case 4:  // (IRM) Insert Mode
-				return _ctx.emitCommand<SetMode>(Mode::Insert, _enable);
+                emitCommand<SetMode>(_output, Mode::Insert, _enable);
+                return HandlerResult::Ok;
 			case 12:  // (SRM) Send/Receive Mode
 			case 20:  // (LNM) Automatic Newline
 			default:
@@ -54,80 +64,55 @@ namespace impl // {{{ some command generator helpers
 		}
 	}
 
-	HandlerResult setModeDEC(HandlerContext& _ctx, size_t _modeIndex, bool _enable)
+	HandlerResult setModeDEC(HandlerContext const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
 	{
 		switch (_ctx.param(_modeIndex))
 		{
-			case 1:
-				return _ctx.emitCommand<SetMode>(Mode::UseApplicationCursorKeys, _enable);
-			case 2:
-				return _ctx.emitCommand<SetMode>(Mode::DesignateCharsetUSASCII, _enable);
-			case 3:
-				return _ctx.emitCommand<SetMode>(Mode::Columns132, _enable);
-			case 4:
-				return _ctx.emitCommand<SetMode>(Mode::SmoothScroll, _enable);
-			case 5:
-				return _ctx.emitCommand<SetMode>(Mode::ReverseVideo, _enable);
-			case 6:
-				return _ctx.emitCommand<SetMode>(Mode::Origin, _enable);
-			case 7:
-				return _ctx.emitCommand<SetMode>(Mode::AutoWrap, _enable);
-			case 9:
-				return _ctx.emitCommand<SendMouseEvents>(MouseProtocol::X10, _enable);
-			case 10:
-				return _ctx.emitCommand<SetMode>(Mode::ShowToolbar, _enable);
-			case 12:
-				return _ctx.emitCommand<SetMode>(Mode::BlinkingCursor, _enable);
-			case 19:
-				return _ctx.emitCommand<SetMode>(Mode::PrinterExtend, _enable);
-			case 25:
-				return _ctx.emitCommand<SetMode>(Mode::VisibleCursor, _enable);
-			case 30:
-				return _ctx.emitCommand<SetMode>(Mode::ShowScrollbar, _enable);
-			case 47:
-				return _ctx.emitCommand<SetMode>(Mode::UseAlternateScreen, _enable);
-			case 69:
-				return _ctx.emitCommand<SetMode>(Mode::LeftRightMargin, _enable);
-			case 1000:
-				return _ctx.emitCommand<SendMouseEvents>(MouseProtocol::NormalTracking, _enable);
-			// case 1001: // TODO
-			//     return _ctx.emitCommand<SendMouseEvents>(MouseProtocol::HighlightTracking, _enable);
-			case 1002:
-				return _ctx.emitCommand<SendMouseEvents>(MouseProtocol::ButtonTracking, _enable);
-			case 1003:
-				return _ctx.emitCommand<SendMouseEvents>(MouseProtocol::AnyEventTracking, _enable);
-			case 1004:
-				return _ctx.emitCommand<SetMode>(Mode::FocusTracking, _enable);
-			case 1005:
-				return _ctx.emitCommand<SetMode>(Mode::MouseExtended, _enable);
-			case 1006:
-				return _ctx.emitCommand<SetMode>(Mode::MouseSGR, _enable);
-			case 1007:
-				return _ctx.emitCommand<SetMode>(Mode::MouseAlternateScroll, _enable);
-			case 1015:
-				return _ctx.emitCommand<SetMode>(Mode::MouseURXVT, _enable);
-			case 1047:
-				return _ctx.emitCommand<SetMode>(Mode::UseAlternateScreen, _enable);
+			case 1: return emitCommand<SetMode>(_output, Mode::UseApplicationCursorKeys, _enable);
+			case 2: return emitCommand<SetMode>(_output, Mode::DesignateCharsetUSASCII, _enable);
+			case 3: return emitCommand<SetMode>(_output, Mode::Columns132, _enable);
+			case 4: return emitCommand<SetMode>(_output, Mode::SmoothScroll, _enable);
+			case 5: return emitCommand<SetMode>(_output, Mode::ReverseVideo, _enable);
+			case 6: return emitCommand<SetMode>(_output, Mode::Origin, _enable);
+			case 7: return emitCommand<SetMode>(_output, Mode::AutoWrap, _enable);
+			case 9: return emitCommand<SendMouseEvents>(_output, MouseProtocol::X10, _enable);
+			case 10: return emitCommand<SetMode>(_output, Mode::ShowToolbar, _enable);
+			case 12: return emitCommand<SetMode>(_output, Mode::BlinkingCursor, _enable);
+			case 19: return emitCommand<SetMode>(_output, Mode::PrinterExtend, _enable);
+			case 25: return emitCommand<SetMode>(_output, Mode::VisibleCursor, _enable);
+			case 30: return emitCommand<SetMode>(_output, Mode::ShowScrollbar, _enable);
+			case 47: return emitCommand<SetMode>(_output, Mode::UseAlternateScreen, _enable);
+			case 69: return emitCommand<SetMode>(_output, Mode::LeftRightMargin, _enable);
+			case 1000: return emitCommand<SendMouseEvents>(_output, MouseProtocol::NormalTracking, _enable);
+			// case 1001: // TODO return emitCommand<SendMouseEvents>(_output, MouseProtocol::HighlightTracking, _enable);
+			case 1002: return emitCommand<SendMouseEvents>(_output, MouseProtocol::ButtonTracking, _enable);
+			case 1003: return emitCommand<SendMouseEvents>(_output, MouseProtocol::AnyEventTracking, _enable);
+			case 1004: return emitCommand<SetMode>(_output, Mode::FocusTracking, _enable);
+			case 1005: return emitCommand<SetMode>(_output, Mode::MouseExtended, _enable);
+			case 1006: return emitCommand<SetMode>(_output, Mode::MouseSGR, _enable);
+			case 1007: return emitCommand<SetMode>(_output, Mode::MouseAlternateScroll, _enable);
+			case 1015: return emitCommand<SetMode>(_output, Mode::MouseURXVT, _enable);
+			case 1047: return emitCommand<SetMode>(_output, Mode::UseAlternateScreen, _enable);
 			case 1048:
 				if (_enable)
-					return _ctx.emitCommand<SaveCursor>();
+					return emitCommand<SaveCursor>(_output);
 				else
-					return _ctx.emitCommand<RestoreCursor>();
+					return emitCommand<RestoreCursor>(_output);
 			case 1049:
 				if (_enable)
 				{
-					_ctx.emitCommand<SaveCursor>();
-					_ctx.emitCommand<SetMode>(Mode::UseAlternateScreen, true);
-					_ctx.emitCommand<ClearScreen>();
+					emitCommand<SaveCursor>(_output);
+					emitCommand<SetMode>(_output, Mode::UseAlternateScreen, true);
+					emitCommand<ClearScreen>(_output);
 				}
 				else
 				{
-					_ctx.emitCommand<SetMode>(Mode::UseAlternateScreen, false);
-					_ctx.emitCommand<RestoreCursor>();
+					emitCommand<SetMode>(_output, Mode::UseAlternateScreen, false);
+					emitCommand<RestoreCursor>(_output);
 				}
 				return HandlerResult::Ok;
 			case 2004:
-				return _ctx.emitCommand<SetMode>(Mode::BracketedPaste, _enable);
+				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
 			default:
 				return HandlerResult::Unsupported;
 		}
@@ -135,7 +120,7 @@ namespace impl // {{{ some command generator helpers
 
 	/// Parses color at given parameter offset @p i and returns new offset to continue processing parameters.
 	template <typename T>
-	size_t parseColor(HandlerContext& _ctx, size_t i)
+	size_t parseColor(HandlerContext const& _ctx, size_t i, CommandList& _output)
 	{
         // We are at parameter index `i`.
         //
@@ -156,7 +141,7 @@ namespace impl // {{{ some command generator helpers
                         auto const g = _ctx.subparam(i, 2);
                         auto const b = _ctx.subparam(i, 3);
                         if (r <= 255 && g <= 255 && b <= 255)
-                            _ctx.emitCommand<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+                            emitCommand<T>(_output, RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
                     }
                     break;
                 case 3: // ":3:F:C:M:Y" (TODO)
@@ -164,7 +149,7 @@ namespace impl // {{{ some command generator helpers
                     break;
                 case 5: // ":5:P"
                     if (auto const P = _ctx.subparam(i, 1); P <= 255)
-                        _ctx.emitCommand<T>(static_cast<IndexedColor>(P));
+                        emitCommand<T>(_output, static_cast<IndexedColor>(P));
                     break;
                 default:
                     break; // XXX invalid sub parameter
@@ -182,7 +167,7 @@ namespace impl // {{{ some command generator helpers
 					++i;
 					auto const value = _ctx.param(i);
 					if (i <= 255)
-						_ctx.emitCommand<T>(static_cast<IndexedColor>(value));
+						emitCommand<T>(_output, static_cast<IndexedColor>(value));
 					else
                         {} // TODO: _ctx.logInvalidCSI("Invalid color indexing.");
 				}
@@ -198,7 +183,7 @@ namespace impl // {{{ some command generator helpers
 					auto const b = _ctx.param(i + 3);
 					i += 3;
 					if (r <= 255 && g <= 255 && b <= 255)
-						_ctx.emitCommand<T>(RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+						emitCommand<T>(_output, RGBColor{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
 					else
                         {} // TODO: _ctx.logInvalidCSI("RGB color out of range.");
 				}
@@ -214,214 +199,93 @@ namespace impl // {{{ some command generator helpers
 		return i;
 	}
 
-	HandlerResult dispatchSGR(HandlerContext& _ctx)
+	HandlerResult dispatchSGR(HandlerContext const& _ctx, CommandList& _output)
 	{
         if (_ctx.parameterCount() == 0)
-           return _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Reset);
+           return emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Reset);
 
 		for (size_t i = 0; i < _ctx.parameterCount(); ++i)
 		{
 			switch (_ctx.param(i))
 			{
-				case 0:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Reset);
-                    break;
-				case 1:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Bold);
-					break;
-				case 2:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Faint);
-					break;
-				case 3:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Italic);
-					break;
+				case 0: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Reset); break;
+				case 1: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Bold); break;
+				case 2: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Faint); break;
+				case 3: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Italic); break;
 				case 4:
                     if (_ctx.subParameterCount(i) == 1)
                     {
                         switch (_ctx.subparam(i, 0))
                         {
-                            case 0: // 4:0
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
-                                break;
-                            case 1: // 4:1
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
-                                break;
-                            case 2: // 4:2
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
-                                break;
-                            case 3: // 4:3
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::CurlyUnderlined);
-                                break;
-                            case 4: // 4:4
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::DottedUnderline);
-                                break;
-                            case 5: // 4:5
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::DashedUnderline);
-                                break;
-                            default:
-                                _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
-                                break;
+                            case 0: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoUnderline); break; // 4:0
+                            case 1: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Underline); break; // 4:1
+                            case 2: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::DoublyUnderlined); break; // 4:2
+                            case 3: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::CurlyUnderlined); break; // 4:3
+                            case 4: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::DottedUnderline); break; // 4:4
+                            case 5: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::DashedUnderline); break; // 4:5
+                            default: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Underline); break;
                         }
                     }
                     else
-                        _ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Underline);
+                        emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Underline);
 					break;
-				case 5:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Blinking);
-					break;
-				case 7:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Inverse);
-					break;
-				case 8:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Hidden);
-					break;
-				case 9:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::CrossedOut);
-					break;
-				case 21:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::DoublyUnderlined);
-					break;
-				case 22:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::Normal);
-					break;
-				case 23:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoItalic);
-					break;
-				case 24:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoUnderline);
-					break;
-				case 25:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoBlinking);
-					break;
-				case 27:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoInverse);
-					break;
-				case 28:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoHidden);
-					break;
-				case 29:
-					_ctx.emitCommand<SetGraphicsRendition>(GraphicsRendition::NoCrossedOut);
-					break;
-				case 30:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Black);
-					break;
-				case 31:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Red);
-					break;
-				case 32:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Green);
-					break;
-				case 33:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Yellow);
-					break;
-				case 34:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Blue);
-					break;
-				case 35:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Magenta);
-					break;
-				case 36:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::Cyan);
-					break;
-				case 37:
-					_ctx.emitCommand<SetForegroundColor>(IndexedColor::White);
-					break;
-				case 38:
-					i = parseColor<SetForegroundColor>(_ctx, i);
-					break;
-				case 39:
-					_ctx.emitCommand<SetForegroundColor>(DefaultColor{});
-					break;
-				case 40:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Black);
-					break;
-				case 41:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Red);
-					break;
-				case 42:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Green);
-					break;
-				case 43:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Yellow);
-					break;
-				case 44:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Blue);
-					break;
-				case 45:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Magenta);
-					break;
-				case 46:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::Cyan);
-					break;
-				case 47:
-					_ctx.emitCommand<SetBackgroundColor>(IndexedColor::White);
-					break;
-				case 48:
-					i = parseColor<SetBackgroundColor>(_ctx, i);
-					break;
-				case 49:
-					_ctx.emitCommand<SetBackgroundColor>(DefaultColor{});
-					break;
-                case 58: // Reserved, but used for setting underline/decoration colors by some other VTEs (such as mintty, kitty, libvte)
-					i = parseColor<SetUnderlineColor>(_ctx, i);
-                    break;
-				case 90:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Black);
-					break;
-				case 91:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Red);
-					break;
-				case 92:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Green);
-					break;
-				case 93:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Yellow);
-					break;
-				case 94:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Blue);
-					break;
-				case 95:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Magenta);
-					break;
-				case 96:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::Cyan);
-					break;
-				case 97:
-					_ctx.emitCommand<SetForegroundColor>(BrightColor::White);
-					break;
-				case 100:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Black);
-					break;
-				case 101:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Red);
-					break;
-				case 102:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Green);
-					break;
-				case 103:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Yellow);
-					break;
-				case 104:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Blue);
-					break;
-				case 105:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Magenta);
-					break;
-				case 106:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::Cyan);
-					break;
-				case 107:
-					_ctx.emitCommand<SetBackgroundColor>(BrightColor::White);
-					break;
-				default:
-					// TODO: _ctx.logInvalidCSI("Invalid SGR number: {}", _ctx.param(i));;
-					break;
+				case 5: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Blinking); break;
+				case 7: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Inverse); break;
+				case 8: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Hidden); break;
+				case 9: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::CrossedOut); break;
+				case 21: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::DoublyUnderlined); break;
+				case 22: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Normal); break;
+				case 23: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoItalic); break;
+				case 24: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoUnderline); break;
+				case 25: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoBlinking); break;
+				case 27: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoInverse); break;
+				case 28: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoHidden); break;
+				case 29: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoCrossedOut); break;
+				case 30: emitCommand<SetForegroundColor>(_output, IndexedColor::Black); break;
+				case 31: emitCommand<SetForegroundColor>(_output, IndexedColor::Red); break;
+				case 32: emitCommand<SetForegroundColor>(_output, IndexedColor::Green); break;
+				case 33: emitCommand<SetForegroundColor>(_output, IndexedColor::Yellow); break;
+				case 34: emitCommand<SetForegroundColor>(_output, IndexedColor::Blue); break;
+				case 35: emitCommand<SetForegroundColor>(_output, IndexedColor::Magenta); break;
+				case 36: emitCommand<SetForegroundColor>(_output, IndexedColor::Cyan); break;
+				case 37: emitCommand<SetForegroundColor>(_output, IndexedColor::White); break;
+				case 38: i = parseColor<SetForegroundColor>(_ctx, i, _output); break;
+				case 39: emitCommand<SetForegroundColor>(_output, DefaultColor{}); break;
+				case 40: emitCommand<SetBackgroundColor>(_output, IndexedColor::Black); break;
+				case 41: emitCommand<SetBackgroundColor>(_output, IndexedColor::Red); break;
+				case 42: emitCommand<SetBackgroundColor>(_output, IndexedColor::Green); break;
+				case 43: emitCommand<SetBackgroundColor>(_output, IndexedColor::Yellow); break;
+				case 44: emitCommand<SetBackgroundColor>(_output, IndexedColor::Blue); break;
+				case 45: emitCommand<SetBackgroundColor>(_output, IndexedColor::Magenta); break;
+				case 46: emitCommand<SetBackgroundColor>(_output, IndexedColor::Cyan); break;
+				case 47: emitCommand<SetBackgroundColor>(_output, IndexedColor::White); break;
+				case 48: i = parseColor<SetBackgroundColor>(_ctx, i, _output); break;
+				case 49: emitCommand<SetBackgroundColor>(_output, DefaultColor{}); break;
+                // 58 is reserved, but used for setting underline/decoration colors by some other VTEs (such as mintty, kitty, libvte)
+                case 58: i = parseColor<SetUnderlineColor>(_ctx, i, _output); break;
+				case 90: emitCommand<SetForegroundColor>(_output, BrightColor::Black); break;
+				case 91: emitCommand<SetForegroundColor>(_output, BrightColor::Red); break;
+				case 92: emitCommand<SetForegroundColor>(_output, BrightColor::Green); break;
+				case 93: emitCommand<SetForegroundColor>(_output, BrightColor::Yellow); break;
+				case 94: emitCommand<SetForegroundColor>(_output, BrightColor::Blue); break;
+				case 95: emitCommand<SetForegroundColor>(_output, BrightColor::Magenta); break;
+				case 96: emitCommand<SetForegroundColor>(_output, BrightColor::Cyan); break;
+				case 97: emitCommand<SetForegroundColor>(_output, BrightColor::White); break;
+				case 100: emitCommand<SetBackgroundColor>(_output, BrightColor::Black); break;
+				case 101: emitCommand<SetBackgroundColor>(_output, BrightColor::Red); break;
+				case 102: emitCommand<SetBackgroundColor>(_output, BrightColor::Green); break;
+				case 103: emitCommand<SetBackgroundColor>(_output, BrightColor::Yellow); break;
+				case 104: emitCommand<SetBackgroundColor>(_output, BrightColor::Blue); break;
+				case 105: emitCommand<SetBackgroundColor>(_output, BrightColor::Magenta); break;
+				case 106: emitCommand<SetBackgroundColor>(_output, BrightColor::Cyan); break;
+				case 107: emitCommand<SetBackgroundColor>(_output, BrightColor::White); break;
+				default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", _ctx.param(i));
 			}
 		}
 		return HandlerResult::Ok;
 	}
 
-	HandlerResult requestMode(HandlerContext& /*_ctx*/, unsigned int _mode)
+	HandlerResult requestMode(HandlerContext const& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
@@ -448,7 +312,7 @@ namespace impl // {{{ some command generator helpers
 		}
 	}
 
-	HandlerResult requestModeDEC(HandlerContext& /*_ctx*/, unsigned int _mode)
+	HandlerResult requestModeDEC(HandlerContext const& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
@@ -494,148 +358,114 @@ namespace impl // {{{ some command generator helpers
 		}
 	}
 
-    HandlerResult CPR(HandlerContext& _ctx)
+    HandlerResult CPR(HandlerContext const& _ctx, CommandList& _output)
     {
         switch (_ctx.param(0))
         {
-            case 5:
-                return _ctx.emitCommand<DeviceStatusReport>();
-            case 6:
-                return _ctx.emitCommand<ReportCursorPosition>();
-            default:
-                return HandlerResult::Unsupported;
+            case 5: return emitCommand<DeviceStatusReport>(_output);
+            case 6: return emitCommand<ReportCursorPosition>(_output);
+            default: return HandlerResult::Unsupported;
         }
     }
 
-    HandlerResult DECRQPSR(HandlerContext& _ctx)
+    HandlerResult DECRQPSR(HandlerContext const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() != 1)
             return HandlerResult::Invalid; // -> error
         else if (_ctx.param(0) == 1)
             // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
-            // TODO return _ctx.emitCommand<RequestCursorState>(); // or call it with ...Detailed?
+            // TODO return emitCommand<RequestCursorState>(); // or call it with ...Detailed?
             return HandlerResult::Invalid;
         else if (_ctx.param(0) == 2)
-            return _ctx.emitCommand<RequestTabStops>();
+            return emitCommand<RequestTabStops>(_output);
         else
             return HandlerResult::Invalid;
     }
 
-    HandlerResult DECSCUSR(HandlerContext& _ctx)
+    HandlerResult DECSCUSR(HandlerContext const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() <= 1)
         {
             switch (_ctx.param_or(0, HandlerContext::FunctionParam{1}))
             {
                 case 0:
-                case 1:
-                    return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Block);
-                case 2: return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Block);
-                case 3:
-                    return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Underscore);
-                case 4:
-                    return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Underscore);
-                case 5:
-                    return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Blink, CursorShape::Bar);
-                case 6:
-                    return _ctx.emitCommand<SetCursorStyle>(CursorDisplay::Steady, CursorShape::Bar);
-                default:
-                    return HandlerResult::Invalid;
+                case 1: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Blink, CursorShape::Block);
+                case 2: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Steady, CursorShape::Block);
+                case 3: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Blink, CursorShape::Underscore);
+                case 4: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Steady, CursorShape::Underscore);
+                case 5: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Blink, CursorShape::Bar);
+                case 6: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Steady, CursorShape::Bar);
+                default: return HandlerResult::Invalid;
             }
         }
         else
             return HandlerResult::Invalid;
     }
 
-    HandlerResult ED(HandlerContext& _ctx)
+    HandlerResult ED(HandlerContext const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 0)
-            return _ctx.emitCommand<ClearToEndOfScreen>();
+            return emitCommand<ClearToEndOfScreen>(_output);
         else
         {
             for (size_t i = 0; i < _ctx.parameterCount(); ++i)
             {
                 switch (_ctx.param(i))
                 {
-                    case 0:
-                        _ctx.emitCommand<ClearToEndOfScreen>();
-                        break;
-                    case 1:
-                        _ctx.emitCommand<ClearToBeginOfScreen>();
-                        break;
-                    case 2:
-                        _ctx.emitCommand<ClearScreen>();
-                        break;
-                    case 3:
-                        _ctx.emitCommand<ClearScrollbackBuffer>();
-                        break;
+                    case 0: emitCommand<ClearToEndOfScreen>(_output); break;
+                    case 1: emitCommand<ClearToBeginOfScreen>(_output); break;
+                    case 2: emitCommand<ClearScreen>(_output); break;
+                    case 3: emitCommand<ClearScrollbackBuffer>(_output); break;
                 }
             }
             return HandlerResult::Ok;
         }
     }
 
-    HandlerResult EL(HandlerContext& _ctx)
+    HandlerResult EL(HandlerContext const& _ctx, CommandList& _output)
     {
         switch (_ctx.param_or(0, FunctionParam{0}))
         {
-            case 0:
-                return _ctx.emitCommand<ClearToEndOfLine>();
-            case 1:
-                return _ctx.emitCommand<ClearToBeginOfLine>();
-            case 2:
-                return _ctx.emitCommand<ClearLine>();
-            default:
-                return HandlerResult::Invalid;
+            case 0: return emitCommand<ClearToEndOfLine>(_output);
+            case 1: return emitCommand<ClearToBeginOfLine>(_output);
+            case 2: return emitCommand<ClearLine>(_output);
+            default: return HandlerResult::Invalid;
         }
     }
 
-    HandlerResult TBC(HandlerContext& _ctx)
+    HandlerResult TBC(HandlerContext const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() != 1)
-            return _ctx.emitCommand<HorizontalTabClear>(HorizontalTabClear::AllTabs);
+            return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::AllTabs);
 
         switch (_ctx.param(0))
         {
-            case 0:
-                return _ctx.emitCommand<HorizontalTabClear>(HorizontalTabClear::UnderCursor);
-            case 3:
-                return _ctx.emitCommand<HorizontalTabClear>(HorizontalTabClear::AllTabs);
-            default:
-                return HandlerResult::Invalid;
+            case 0: return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::UnderCursor);
+            case 3: return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::AllTabs);
+            default: return HandlerResult::Invalid;
         }
     }
 
-    HandlerResult WINDOWMANIP(HandlerContext& _ctx)
+    HandlerResult WINDOWMANIP(HandlerContext const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 3)
         {
             switch (_ctx.param(0))
             {
-                case 4:
-                    return _ctx.emitCommand<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Pixels);
-                case 8:
-                    return _ctx.emitCommand<ResizeWindow>(_ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Characters);
-                case 22:
-                    return _ctx.emitCommand<SaveWindowTitle>();
-                case 23:
-                    return _ctx.emitCommand<RestoreWindowTitle>();
-                default:
-                    return HandlerResult::Unsupported;
+                case 4: return emitCommand<ResizeWindow>(_output, _ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Pixels);
+                case 8: return emitCommand<ResizeWindow>(_output, _ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Characters);
+                case 22: return emitCommand<SaveWindowTitle>(_output);
+                case 23: return emitCommand<RestoreWindowTitle>(_output);
+                default: return HandlerResult::Unsupported;
             }
         }
         else if (_ctx.parameterCount() == 1)
         {
             switch (_ctx.param(0))
             {
-                case 4:
-                    // this means, resize to full display size
-                    return _ctx.emitCommand<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Pixels);
-                case 8:
-                    // i.e. full display size
-                    return _ctx.emitCommand<ResizeWindow>(0u, 0u, ResizeWindow::Unit::Characters);
-                default:
-                    return HandlerResult::Unsupported;
+                case 4: return emitCommand<ResizeWindow>(_output, 0u, 0u, ResizeWindow::Unit::Pixels); // this means, resize to full display size
+                case 8: return emitCommand<ResizeWindow>(_output, 0u, 0u, ResizeWindow::Unit::Characters); // i.e. full display size
+                default: return HandlerResult::Unsupported;
             }
         }
         else
@@ -739,77 +569,77 @@ FunctionSpec const* select(FunctionCategory _category,
 }
 
 /// Applies a FunctionSpec to a given context, emitting the respective command.
-HandlerResult apply(FunctionSpec const& _function, HandlerContext& _ctx)
+HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, CommandList& _output)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionSpec
     switch (_function)
     {
         // ESC
-        case CS_G0_SPECIAL: return _ctx.emitCommand<DesignateCharset>(CharsetTable::G0, Charset::Special);
-        case CS_G0_USASCII: return _ctx.emitCommand<DesignateCharset>(CharsetTable::G0, Charset::USASCII);
-        case CS_G1_SPECIAL: return _ctx.emitCommand<DesignateCharset>(CharsetTable::G1, Charset::Special);
-        case CS_G1_USASCII: return _ctx.emitCommand<DesignateCharset>(CharsetTable::G1, Charset::USASCII);
-        case DECALN: return _ctx.emitCommand<ScreenAlignmentPattern>();
-        case DECBI: return _ctx.emitCommand<BackIndex>();
-        case DECFI: return _ctx.emitCommand<ForwardIndex>();
-        case DECKPAM: return _ctx.emitCommand<ApplicationKeypadMode>(true);
-        case DECKPNM: return _ctx.emitCommand<ApplicationKeypadMode>(false);
-        case DECRS: return _ctx.emitCommand<RestoreCursor>();
-        case DECSC: return _ctx.emitCommand<SaveCursor>();
-        case HTS: return _ctx.emitCommand<HorizontalTabSet>();
-        case IND: return _ctx.emitCommand<Index>();
-        case RI: return _ctx.emitCommand<ReverseIndex>();
-        case RIS: return _ctx.emitCommand<FullReset>();
-        case SS2: return _ctx.emitCommand<SingleShiftSelect>(CharsetTable::G2);
-        case SS3: return _ctx.emitCommand<SingleShiftSelect>(CharsetTable::G3);
+        case CS_G0_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::Special);
+        case CS_G0_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::USASCII);
+        case CS_G1_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::Special);
+        case CS_G1_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::USASCII);
+        case DECALN: return emitCommand<ScreenAlignmentPattern>(_output);
+        case DECBI: return emitCommand<BackIndex>(_output);
+        case DECFI: return emitCommand<ForwardIndex>(_output);
+        case DECKPAM: return emitCommand<ApplicationKeypadMode>(_output, true);
+        case DECKPNM: return emitCommand<ApplicationKeypadMode>(_output, false);
+        case DECRS: return emitCommand<RestoreCursor>(_output);
+        case DECSC: return emitCommand<SaveCursor>(_output);
+        case HTS: return emitCommand<HorizontalTabSet>(_output);
+        case IND: return emitCommand<Index>(_output);
+        case RI: return emitCommand<ReverseIndex>(_output);
+        case RIS: return emitCommand<FullReset>(_output);
+        case SS2: return emitCommand<SingleShiftSelect>(_output, CharsetTable::G2);
+        case SS3: return emitCommand<SingleShiftSelect>(_output, CharsetTable::G3);
 
         // CSI
-        case ANSISYSSC: return _ctx.emitCommand<RestoreCursor>();
-        case CBT: return _ctx.emitCommand<CursorBackwardTab>(_ctx.param_or(0, FunctionParam{1}));
-        case CHA: return _ctx.emitCommand<MoveCursorToColumn>(_ctx.param_or(0, FunctionParam{1}));
-        case CNL: return _ctx.emitCommand<CursorNextLine>(_ctx.param_or(0, FunctionParam{1}));
-        case CPL: return _ctx.emitCommand<CursorPreviousLine>(_ctx.param_or(0, FunctionParam{1}));
-        case CPR: return impl::CPR(_ctx);
-        case CUB: return _ctx.emitCommand<MoveCursorBackward>(_ctx.param_or(0, FunctionParam{0}));
-        case CUD: return _ctx.emitCommand<MoveCursorDown>(_ctx.param_or(0, FunctionParam{1}));
-        case CUF: return _ctx.emitCommand<MoveCursorForward>(_ctx.param_or(0, FunctionParam{1}));
-        case CUP: return _ctx.emitCommand<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
-        case CUU: return _ctx.emitCommand<MoveCursorUp>(_ctx.param_or(0, FunctionParam{1}));
-        case DA1: return _ctx.emitCommand<SendDeviceAttributes>();
-        case DA2: return _ctx.emitCommand<SendTerminalId>();
-        case DCH: return _ctx.emitCommand<DeleteCharacters>(_ctx.param_or(0, FunctionParam{1}));
-        case DECDC: return _ctx.emitCommand<DeleteColumns>(_ctx.param_or(0, FunctionParam{1}));
-        case DECIC: return _ctx.emitCommand<InsertColumns>(_ctx.param_or(0, FunctionParam{1}));
-        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false); }); break;
+        case ANSISYSSC: return emitCommand<RestoreCursor>(_output);
+        case CBT: return emitCommand<CursorBackwardTab>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CHA: return emitCommand<MoveCursorToColumn>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CNL: return emitCommand<CursorNextLine>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CPL: return emitCommand<CursorPreviousLine>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CPR: return impl::CPR(_ctx, _output);
+        case CUB: return emitCommand<MoveCursorBackward>(_output, _ctx.param_or(0, FunctionParam{0}));
+        case CUD: return emitCommand<MoveCursorDown>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CUF: return emitCommand<MoveCursorForward>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CUP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
+        case CUU: return emitCommand<MoveCursorUp>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case DA1: return emitCommand<SendDeviceAttributes>(_output);
+        case DA2: return emitCommand<SendTerminalId>(_output);
+        case DCH: return emitCommand<DeleteCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case DECDC: return emitCommand<DeleteColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case DECIC: return emitCommand<InsertColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false, _output); }); break;
         case DECRQM: return impl::requestModeDEC(_ctx, _ctx.param(0));
         case DECRQM_ANSI: return impl::requestMode(_ctx, _ctx.param(0));
-        case DECRQPSR: return impl::DECRQPSR(_ctx);
-        case DECSCUSR: return impl::DECSCUSR(_ctx);
-        case DECSLRM: return _ctx.emitCommand<SetLeftRightMargin>(_ctx.param_opt(0), _ctx.param_opt(1));
-        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true); }); break;
-        case DECSTBM: return _ctx.emitCommand<SetTopBottomMargin>(_ctx.param_opt(0), _ctx.param_opt(1));
-        case DECSTR: return _ctx.emitCommand<SoftTerminalReset>();
-        case DECXCPR: return _ctx.emitCommand<ReportExtendedCursorPosition>();
-        case DL: return _ctx.emitCommand<DeleteLines>(_ctx.param_or(0, FunctionParam{1}));
-        case ECH: return _ctx.emitCommand<EraseCharacters>(_ctx.param_or(0, FunctionParam{1}));
-        case ED: return impl::ED(_ctx);
-        case EL: return impl::EL(_ctx);
-        case HPA: return _ctx.emitCommand<HorizontalPositionAbsolute>(_ctx.param(0));
-        case HPR: return _ctx.emitCommand<HorizontalPositionRelative>(_ctx.param(0));
-        case HVP: return _ctx.emitCommand<MoveCursorTo>(_ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1})); // YES, it's like a CUP!
-        case ICH: return _ctx.emitCommand<InsertCharacters>(_ctx.param_or(0, FunctionParam{1}));
-        case IL:  return _ctx.emitCommand<InsertLines>(_ctx.param_or(0, FunctionParam{1}));
-        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false); }); break;
-        case SCOSC: return _ctx.emitCommand<SaveCursor>();
-        case SD: return _ctx.emitCommand<ScrollDown>(_ctx.param_or(0, FunctionParam{1}));
-        case SETMARK: return _ctx.emitCommand<SetMark>();
-        case SGR: return impl::dispatchSGR(_ctx);
-        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true); }); break;
-        case SU: return _ctx.emitCommand<ScrollUp>(_ctx.param_or(0, FunctionParam{1}));
-        case TBC: return impl::TBC(_ctx);
-        case VPA: return _ctx.emitCommand<MoveCursorToLine>(_ctx.param_or(0, FunctionParam{1}));
-        case WINMANIP: return impl::WINDOWMANIP(_ctx);
+        case DECRQPSR: return impl::DECRQPSR(_ctx, _output);
+        case DECSCUSR: return impl::DECSCUSR(_ctx, _output);
+        case DECSLRM: return emitCommand<SetLeftRightMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
+        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true, _output); }); break;
+        case DECSTBM: return emitCommand<SetTopBottomMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
+        case DECSTR: return emitCommand<SoftTerminalReset>(_output);
+        case DECXCPR: return emitCommand<ReportExtendedCursorPosition>(_output);
+        case DL: return emitCommand<DeleteLines>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case ECH: return emitCommand<EraseCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case ED: return impl::ED(_ctx, _output);
+        case EL: return impl::EL(_ctx, _output);
+        case HPA: return emitCommand<HorizontalPositionAbsolute>(_output, _ctx.param(0));
+        case HPR: return emitCommand<HorizontalPositionRelative>(_output, _ctx.param(0));
+        case HVP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1})); // YES, it's like a CUP!
+        case ICH: return emitCommand<InsertCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case IL:  return emitCommand<InsertLines>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false, _output); }); break;
+        case SCOSC: return emitCommand<SaveCursor>(_output);
+        case SD: return emitCommand<ScrollDown>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case SETMARK: return emitCommand<SetMark>(_output);
+        case SGR: return impl::dispatchSGR(_ctx, _output);
+        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true, _output); }); break;
+        case SU: return emitCommand<ScrollUp>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case TBC: return impl::TBC(_ctx, _output);
+        case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
 
         // TODO: OSC
 

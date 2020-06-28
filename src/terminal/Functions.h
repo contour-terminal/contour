@@ -29,7 +29,7 @@ enum class FunctionCategory {
 /// Defines a function with all its syntax requirements plus some additional meta information.
 struct FunctionSpec {
     FunctionCategory category;  // (2 bits) ESC, CSI, OSC
-    char leader;                // (2 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
+    char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (6 bits) 0x40..0x7E (final character)
     unsigned minimumParameters; // (4 bits) 0..7
@@ -42,10 +42,10 @@ struct FunctionSpec {
     constexpr unsigned id() const noexcept {
         return static_cast<unsigned>(category)
              | leader << 2
-             | intermediate << (2 + 2)
-             | finalSymbol << (2 + 2 + 4)
-             | minimumParameters << (2 + 2 + 4 + 6)
-             | maximumParameters << (2 + 2 + 4 + 6 + 4);
+             | intermediate << (2 + 3)
+             | finalSymbol << (2 + 3 + 4)
+             | minimumParameters << (2 + 3 + 4 + 6)
+             | maximumParameters << (2 + 3 + 4 + 6 + 4);
     }
 
     constexpr operator unsigned () const noexcept { return id(); }
@@ -225,18 +225,18 @@ inline FunctionSpec const* selectOSCommand(unsigned _id)
     return select(FunctionCategory::OSC, 0, _id, 0, 0);
 }
 
+using CommandList = std::vector<Command>;
+
 /// Helps constructing VT functions as they're being parsed by the VT parser.
 class HandlerContext {
   public:
     using FunctionParam = unsigned int;
     using FunctionParamList = std::vector<std::vector<FunctionParam>>;
     using Intermediaries = std::string;
-    using CommandList = std::vector<Command>;
 
   protected:
     FunctionParamList parameters_;
     Intermediaries intermediateCharacters_;
-    CommandList commands_;
 
   public:
     size_t constexpr static MaxParameters = 16;
@@ -281,33 +281,19 @@ class HandlerContext {
         return parameters_[_index][_subIndex + 1];
     }
 
-    // mutators
-    //
-
-    enum class Result {
-        Ok,
-        Invalid,
-        Unsupported,
-    };
-
-    template <typename T, typename... Args>
-    Result emitCommand(Args&&... args)
-    {
-        commands_.emplace_back(T{std::forward<Args>(args)...});
-        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
-        return Result::Ok;
-    }
-
-    std::vector<Command>& commands() noexcept { return commands_; }
-    std::vector<Command> const& commands() const noexcept { return commands_; }
 };
 
+enum class HandlerResult {
+    Ok,
+    Invalid,
+    Unsupported,
+};
 /// Applies a FunctionSpec to a given context, emitting the respective command.
 ///
 /// A FunctionSelector must have been transformed into a FunctionSpec already.
 /// So the idea is:
 ///     VT sequence -> FunctionSelector -> FunctionSpec -> Command.
-HandlerContext::Result apply(FunctionSpec const& _function, HandlerContext& _context);
+HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _context, CommandList& _output);
 
 /// Converts a FunctionSpec with a given context back into a human readable VT sequence.
 std::string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx);
