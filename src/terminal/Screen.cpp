@@ -1122,26 +1122,37 @@ void Screen::operator()(ReportExtendedCursorPosition const&)
 void Screen::operator()(SendDeviceAttributes const&)
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
-    reply("\033[?64;{}c",
-          to_params(DeviceAttributes::Columns132 | DeviceAttributes::SelectiveErase
-                  | DeviceAttributes::UserDefinedKeys | DeviceAttributes::NationalReplacementCharacterSets
-                  | DeviceAttributes::TechnicalCharacters | DeviceAttributes::AnsiColor
-                  | DeviceAttributes::AnsiTextLocator));
+    auto constexpr VT420 = "64";
+    auto const attrs = to_params(
+        DeviceAttributes::AnsiColor |
+        DeviceAttributes::AnsiTextLocator |
+        DeviceAttributes::Columns132 |
+        //TODO: DeviceAttributes::NationalReplacementCharacterSets |
+        //TODO: DeviceAttributes::RectangularEditing |
+        //TODO: DeviceAttributes::SelectiveErase |
+        //TODO: DeviceAttributes::SixelGraphics |
+        //TODO: DeviceAttributes::TechnicalCharacters |
+        DeviceAttributes::UserDefinedKeys
+    );
+    reply("\033[?{};{}c", VT420, attrs);
 }
 
 void Screen::operator()(SendTerminalId const&)
 {
+    // Note, this is "Secondary DA".
+    // It requests for the terminalID
+
     // terminal protocol type
     auto constexpr Pp = static_cast<unsigned>(VTType::VT420);
 
     // version number
     // TODO: (PACKAGE_VERSION_MAJOR * 100 + PACKAGE_VERSION_MINOR) * 100 + PACKAGE_VERSION_MICRO
-    auto constexpr Pv = 0;
+    auto constexpr Pv = (LIBTERMINAL_VERSION_MAJOR * 100 + LIBTERMINAL_VERSION_MINOR) * 100 + LIBTERMINAL_VERSION_PATCH;
 
     // ROM cardridge registration number (always 0)
     auto constexpr Pc = 0;
 
-    reply("\033[{};{};{}c", Pp, Pv, Pc);
+    reply("\033[>{};{};{}c", Pp, Pv, Pc);
 }
 
 void Screen::operator()(ClearToEndOfScreen const&)

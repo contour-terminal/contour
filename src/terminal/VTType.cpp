@@ -13,6 +13,9 @@
  */
 #include <terminal/VTType.h>
 
+#include <array>
+#include <utility>
+
 using namespace std;
 
 namespace terminal {
@@ -27,22 +30,22 @@ string to_string(DeviceAttributes v)
         s += v;
     };
 
-    if (v & DeviceAttributes::Columns132)
-        s += "Columns132";
-    if (v & DeviceAttributes::Printer)
-        append("Printer");
-    if (v & DeviceAttributes::SelectiveErase)
-        append("SelectiveErase");
-    if (v & DeviceAttributes::UserDefinedKeys)
-        append("UserDefinedKeys");
-    if (v & DeviceAttributes::NationalReplacementCharacterSets)
-        append("NationalReplacementCharacterSets");
-    if (v & DeviceAttributes::TechnicalCharacters)
-        append("TechnicalCharacters");
-    if (v & DeviceAttributes::AnsiColor)
-        append("AnsiColor");
-    if (v & DeviceAttributes::AnsiTextLocator)
-        append("AnsiTextLocator");
+    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 10>{
+        pair{DeviceAttributes::AnsiColor, "AnsiColor"},
+        pair{DeviceAttributes::AnsiTextLocator, "AnsiTextLocator"},
+        pair{DeviceAttributes::Columns132, "Columns132"},
+        pair{DeviceAttributes::NationalReplacementCharacterSets, "NationalReplacementCharacterSets"},
+        pair{DeviceAttributes::Printer, "Printer"},
+        pair{DeviceAttributes::RectangularEditing, "RectangularEditing"},
+        pair{DeviceAttributes::SelectiveErase, "SelectiveErase"},
+        pair{DeviceAttributes::SixelGraphics, "SixelGraphics"},
+        pair{DeviceAttributes::TechnicalCharacters, "TechnicalCharacters"},
+        pair{DeviceAttributes::UserDefinedKeys, "UserDefinedKeys"},
+    };
+
+    for (auto const& mapping: mappings)
+        if (v & mapping.first)
+            append(mapping.second);
 
     return s;
 }
@@ -57,22 +60,22 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    if (v & DeviceAttributes::Columns132)
-        s += "1";
-    if (v & DeviceAttributes::Printer)
-        append("2");
-    if (v & DeviceAttributes::SelectiveErase)
-        append("6");
-    if (v & DeviceAttributes::UserDefinedKeys)
-        append("8");
-    if (v & DeviceAttributes::NationalReplacementCharacterSets)
-        append("9");
-    if (v & DeviceAttributes::TechnicalCharacters)
-        append("15");
-    if (v & DeviceAttributes::AnsiColor)
-        append("22");
-    if (v & DeviceAttributes::AnsiTextLocator)
-        append("29");
+    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 10>{
+        pair{DeviceAttributes::AnsiColor, "22"},
+        pair{DeviceAttributes::AnsiTextLocator, "29"},
+        pair{DeviceAttributes::Columns132, "1"},
+        pair{DeviceAttributes::NationalReplacementCharacterSets, "9"},
+        pair{DeviceAttributes::Printer, "2"},
+        pair{DeviceAttributes::RectangularEditing, "28"},
+        pair{DeviceAttributes::SelectiveErase, "6"},
+        pair{DeviceAttributes::SixelGraphics, "4"},
+        pair{DeviceAttributes::TechnicalCharacters, "15"},
+        pair{DeviceAttributes::UserDefinedKeys, "8"},
+    };
+
+    for (auto const& mapping: mappings)
+        if (v & mapping.first)
+            append(mapping.second);
 
     return s;
 }

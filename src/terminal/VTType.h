@@ -21,6 +21,8 @@ namespace terminal {
  * Virtual Terminal Types.
  *
  * The integer representation must match the terminalID response encoding.
+ *
+ * The integer representational values match the one for DA2's first response parameter.
  */
 enum class VTType {
     VT100 = 0,
@@ -30,7 +32,8 @@ enum class VTType {
     VT340 = 19,
     VT320 = 24,
     VT420 = 41,
-    VT510 = 64,
+    VT510 = 61,
+    VT520 = 64,
     VT525 = 65,
 };
 
@@ -39,7 +42,7 @@ enum class VTType {
  *
  * Used in response to SendDeviceAttributes.
  */
-enum class DeviceAttributes : uint8_t {
+enum class DeviceAttributes : uint16_t {
     Columns132 = (1 << 0),
     Printer = (1 << 1),
     SelectiveErase = (1 << 2),
@@ -48,6 +51,8 @@ enum class DeviceAttributes : uint8_t {
     TechnicalCharacters = (1 << 5),
     AnsiColor = (1 << 6),
     AnsiTextLocator = (1 << 7),
+    SixelGraphics = (1 << 8),
+    RectangularEditing = (1 << 9),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)

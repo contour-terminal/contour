@@ -325,7 +325,15 @@ struct ReportCursorPosition {};
 /// The host asks the terminal for the current cursor position, including the current page number.
 struct ReportExtendedCursorPosition {};
 
+/// DA1 - Primary Device Attributes
+///
+/// In this DA exchange, the host asks for the terminal's architectural class and basic attributes.
 struct SendDeviceAttributes {};
+
+/// DA2 - Secondary Device Attributes.
+///
+/// In this DA exchange, the host requests the terminal's identification code, firmware version level,
+/// and hardware options.
 struct SendTerminalId {};
 
 struct ClearToEndOfScreen {};
