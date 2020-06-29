@@ -301,10 +301,7 @@ void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
     verifyState();
 
     if (wrapPending && autoWrap)
-    {
-        assert(cursor.column == size_.columns);
         linefeed(margin_.horizontal.from);
-    }
 
     bool const insertToPrev =
         _consecutive
@@ -674,56 +671,71 @@ void ScreenBuffer::setTabUnderCursor()
 
 void ScreenBuffer::verifyState() const
 {
-#if 0 // !defined(NDEBUG)
-    bool ok = true;
-    assert(size_.rows == lines.size());
+#if !defined(NDEBUG)
+    auto const lrmm = isModeEnabled(Mode::LeftRightMargin);
+    if (wrapPending &&
+            ((lrmm && cursor.column != margin_.horizontal.to)
+            || (!lrmm && cursor.column != size_.columns)))
+    {
+        fail(fmt::format(
+            "Wrap is pending but cursor's column ({}) is not at right side of margin ({}) or screen ({}).",
+            cursor.column, margin_.horizontal.to, size_.columns
+        ));
+    }
+
+    if (size_.rows != lines.size())
+        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines.size(), size_.rows));
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursor = clampToScreen(cursor);
     if (cursor != clampedCursor)
-    {
-        cerr << fmt::format("Cursor {} does not match clamp to screen {}.\n", cursor, clampedCursor);
-        ok = false;
-    }
+        fail(fmt::format("Cursor {} does not match clamp to screen {}.", cursor, clampedCursor));
+    // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
 
     // verify iterators
     [[maybe_unused]] auto const line = next(begin(lines), cursor.row - 1);
     [[maybe_unused]] auto const col = columnIteratorAt(cursor.column);
 
     if (line != currentLine)
-    {
-        cerr << fmt::format("Calculated current line does not match.\n");
-        ok = false;
-    }
+        fail(fmt::format("Calculated current line does not match."));
     else if (col != currentColumn)
-    {
-        cerr << fmt::format("Calculated current column does not match.\n");
-        ok = false;
-    }
+        fail(fmt::format("Calculated current column does not match."));
 
-    if (cursor.column != size_.columns && wrapPending)
-    {
-        cerr << fmt::format("wrapPending flag set when cursor is not in last column.");
-        ok = false;
-    }
+    if (wrapPending && cursor.column != size_.columns && cursor.column != margin_.horizontal.to)
+        fail(fmt::format("wrapPending flag set when cursor is not in last column."));
+#endif
+}
 
-    if (!ok)
-    {
-        cerr << fmt::format("Rendered screen at the time of failure: {}, cursor at {}", size_, cursor);
-        if (cursorRestrictedToMargin)
-            cerr << fmt::format(" (real: {})", toRealCoordinate(cursor));
-        cerr << '\n';
-        for_each(times(size_.columns), [](auto) { cerr << '='; });
-        cerr << '\n' << screenshot();
+void ScreenBuffer::fail(std::string const& _message) const
+{
+    auto const hline = [&]() {
         for_each(times(size_.columns), [](auto) { cerr << '='; });
         cerr << endl;
-    }
+    };
 
-    // assert(line == currentLine);
-    // assert(col == currentColumn);
-    // assert(wrapPending == false || cursor.column == size_.columns);
-    assert(ok);
-#endif
+    hline();
+    cerr << "\033[1;37;41m" << _message << "\033[m" << endl;
+    hline();
+
+    cerr << fmt::format("Rendered screen at the time of failure: {}, cursor at {}", size_, cursor);
+    if (cursorRestrictedToMargin)
+        cerr << fmt::format(" (real: {})", toRealCoordinate(cursor));
+    cerr << '\n';
+
+    hline();
+    cerr << screenshot();
+    hline();
+
+    // TODO: print more useful debug information
+    // - screen size
+    // - left/right margin
+    // - top/down margin
+    // - cursor position
+    // - autoWrap
+    // - wrapPending
+    // - ... other output related modes
+
+    assert(false);
 }
 
 // ==================================================================================

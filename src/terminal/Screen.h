@@ -445,6 +445,7 @@ struct ScreenBuffer {
 
     void clampSavedLines();
 	void verifyState() const;
+    void fail(std::string const& _message) const;
 	void saveState();
 	void restoreState();
 	void updateCursorIterators();
