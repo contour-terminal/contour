@@ -459,8 +459,10 @@ TEST_CASE("ClearLine", "[screen]")
 
 TEST_CASE("InsertColumns", "[screen]")
 {
+    // "DECIC has no effect outside the scrolling margins."
     Screen screen{{5, 5}, [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
     screen(SetMode{ Mode::LeftRightMargin, true });
     screen(SetLeftRightMargin{2, 4});
     screen(SetTopBottomMargin{2, 4});
@@ -503,6 +505,14 @@ TEST_CASE("InsertColumns", "[screen]")
             screen(InsertColumns{3});
             REQUIRE("12345\n67  0\nAB  E\nFG  J\nKLMNO\n" == screen.renderText());
         }
+    }
+
+    SECTION("inside margins - repeative") {
+        screen(MoveCursorTo{2, 2});
+        screen(InsertColumns{ 1 });
+        REQUIRE("12345\n6 780\nA BCE\nF GHJ\nKLMNO\n" == screen.renderText());
+        screen(InsertColumns{ 1 });
+        REQUIRE("12345\n6  70\nA  BE\nF  GJ\nKLMNO\n" == screen.renderText());
     }
 }
 
@@ -1483,6 +1493,7 @@ TEST_CASE("CursorNextLine", "[screen]")
         screen(SetTopBottomMargin{2, 4});
         screen(SetMode{Mode::Origin, true});
         screen(MoveCursorTo{1, 2});
+        REQUIRE(screen.currentCell().toUtf8() == "8");
 
         SECTION("normal-1") {
             screen(CursorNextLine{1});
@@ -1494,9 +1505,14 @@ TEST_CASE("CursorNextLine", "[screen]")
             REQUIRE(screen.cursorPosition() == Coordinate{3, 1});
         }
 
-        SECTION("clamped") {
+        SECTION("normal-3") {
             screen(CursorNextLine{3});
-            REQUIRE(screen.cursorPosition() == Coordinate{3, 1});
+            REQUIRE(screen.cursorPosition() == Coordinate{4, 1});
+        }
+
+        SECTION("clamped-1") {
+            screen(CursorNextLine{4});
+            REQUIRE(screen.cursorPosition() == Coordinate{4, 1});
         }
     }
 }

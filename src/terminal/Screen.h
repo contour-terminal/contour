@@ -448,7 +448,17 @@ struct ScreenBuffer {
     void fail(std::string const& _message) const;
 	void saveState();
 	void restoreState();
-	void updateCursorIterators();
+
+    void updateCursorIterators()
+    {
+        currentLine = next(begin(lines), cursor.row - 1);
+        updateColumnIterator();
+    }
+
+    void updateColumnIterator()
+    {
+        currentColumn = columnIteratorAt(cursor.column);
+    }
 
     void clearAllTabs();
     void clearTabUnderCursor();
@@ -503,12 +513,21 @@ struct ScreenBuffer {
 	Coordinate clampCoordinate(Coordinate const& coord) const noexcept
 	{
 		if (!cursorRestrictedToMargin)
-            return clampToMargin(coord);
+            return clampToOrigin(coord);
 		else
             return clampToScreen(coord);
 	}
 
-	Coordinate clampToMargin(Coordinate const& coord) const noexcept
+    /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
+	Coordinate clampToOrigin(Coordinate const& coord) const noexcept
+	{
+        return {
+            std::clamp(coord.row, cursor_pos_t{0}, margin_.vertical.length()),
+            std::clamp(coord.column, cursor_pos_t{0}, margin_.horizontal.length())
+        };
+	}
+
+	Coordinate clampToScreen(Coordinate const& coord) const noexcept
 	{
         return {
             std::clamp(coord.row, cursor_pos_t{ 1 }, size_.rows),
@@ -516,15 +535,14 @@ struct ScreenBuffer {
         };
 	}
 
-	Coordinate clampToScreen(Coordinate const& coord) const noexcept
-	{
-        return {
-            std::clamp(coord.row, cursor_pos_t{ 1 }, margin_.vertical.to),
-            std::clamp(coord.column, cursor_pos_t{ 1 }, margin_.horizontal.to)
-        };
-	}
-
 	void moveCursorTo(Coordinate to);
+
+    bool isCursorInsideMargins() const noexcept
+    {
+        bool const insideVerticalMargin = margin_.vertical.contains(cursor.row);
+        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin) || margin_.horizontal.contains(cursor.column);
+        return insideVerticalMargin && insideHorizontalMargin;
+    }
 };
 
 inline auto begin(ScreenBuffer::Line& _line) { return _line.begin(); }
@@ -761,12 +779,7 @@ class Screen {
     bool scrollMarkDown();
     //}}}
 
-    bool isCursorInsideMargins() const noexcept
-    {
-        bool const insideVerticalMargin = buffer_->margin_.vertical.contains(buffer_->cursor.row);
-        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin) || buffer_->margin_.horizontal.contains(buffer_->cursor.column);
-        return insideVerticalMargin && insideHorizontalMargin;
-    }
+    bool isCursorInsideMargins() const noexcept { return buffer_->isCursorInsideMargins(); }
 
     Coordinate realCursorPosition() const noexcept { return buffer_->realCursorPosition(); }
     Coordinate cursorPosition() const noexcept { return buffer_->cursorPosition(); }

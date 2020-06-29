@@ -232,7 +232,7 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
 void ScreenBuffer::moveCursorTo(Coordinate to)
 {
     wrapPending = false;
-    cursor = clampCoordinate(toRealCoordinate(to));
+    cursor = clampToScreen(toRealCoordinate(to));
     updateCursorIterators();
 }
 
@@ -291,7 +291,7 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
         cursor.row++;
         cursor.column = _newColumn;
         currentLine++;
-        currentColumn = next(begin(*currentLine), _newColumn - 1);
+        updateColumnIterator();
     }
     verifyState();
 }
@@ -346,7 +346,12 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
     lastColumn = currentColumn;
     lastCursor = cursor;
 
-    auto const n = min(cell.width(), margin_.horizontal.length() - cursor.column);
+    bool const cursorInsideMargin = isModeEnabled(Mode::LeftRightMargin) && isCursorInsideMargins();
+    auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor.column
+                                                   : size_.columns - cursor.column;
+
+    auto const n = min(cell.width(), cellsAvailable);
+
     if (n == cell.width())
     {
         assert(n > 0);
@@ -357,7 +362,12 @@ void ScreenBuffer::appendCharToCurrent(char32_t ch)
         verifyState();
     }
     else if (autoWrap)
+    {
         wrapPending = true;
+        verifyState();
+    }
+    else
+        verifyState();
 
 }
 
@@ -589,19 +599,23 @@ void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 void ScreenBuffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 {
     auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
+
     auto line = next(begin(lines), _lineNo - 1);
-    auto column = next(begin(*line), realCursorPosition().column - 1);
-    auto reverseMarginRight = next(line->rbegin(), size_.columns - margin_.horizontal.to);
-    auto reverseColumn = next(line->rbegin(), size_.columns - realCursorPosition().column + 1);
+    auto column0 = next(begin(*line), realCursorPosition().column - 1);
+    auto column1 = next(begin(*line), margin_.horizontal.to - n);
+    auto column2 = next(begin(*line), margin_.horizontal.to);
 
     rotate(
-        reverseMarginRight,
-        next(reverseMarginRight, n),
-        reverseColumn
+        column0,
+        column1,
+        column2
     );
-    updateCursorIterators();
+
+    if (line == currentLine)
+        updateColumnIterator();
+
     fill_n(
-        column,
+        columnIteratorAt(begin(*line), cursor.column),
         n,
         Cell{L' ', graphicsRendition}
     );
@@ -613,18 +627,12 @@ void ScreenBuffer::insertColumns(cursor_pos_t _n)
         insertChars(lineNo, _n);
 }
 
-void ScreenBuffer::updateCursorIterators()
-{
-    currentLine = next(begin(lines), cursor.row - 1);
-    currentColumn = columnIteratorAt(cursor.column);
-}
-
 void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 {
     auto const col = cursorRestrictedToMargin ? margin_.horizontal.from + _n - 1 : _n;
     auto const clampedCol = min(col, size_.columns);
     cursor.column = clampedCol;
-    currentColumn = columnIteratorAt(clampedCol);
+    updateColumnIterator();
 
     verifyState();
 }
@@ -632,8 +640,8 @@ void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 bool ScreenBuffer::incrementCursorColumn(cursor_pos_t _n)
 {
     auto const n = min(_n,  margin_.horizontal.length() - cursor.column);
-    currentColumn = columnIteratorAt(currentColumn, n + 1);
     cursor.column += n;
+    updateColumnIterator();
     verifyState();
     return n == _n;
 }
