@@ -75,6 +75,43 @@ constexpr bool operator>=(FunctionSpec const& a, FunctionSpec const& b) noexcept
 constexpr bool operator<(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) < 0; }
 constexpr bool operator>(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) > 0; }
 
+struct FunctionSelector
+{
+    /// represents the corresponding function category.
+    FunctionCategory category;
+    /// an optional value between 0x3C .. 0x3F
+    char leader;
+    /// number of arguments supplied
+    size_t argc;
+    /// an optional intermediate character between (0x20 .. 0x2F)
+    char intermediate;
+    /// between 0x40 .. 0x7F
+    char finalSymbol;
+};
+
+constexpr int compare(FunctionSelector const& a, FunctionSpec const& b) noexcept
+{
+    if (a.category != b.category)
+        return static_cast<int>(a.category) - static_cast<int>(b.category);
+
+    if (a.leader != b.leader)
+        return a.leader - b.leader;
+
+    if (a.intermediate != b.intermediate)
+        return a.intermediate - b.intermediate;
+
+    if (a.finalSymbol != b.finalSymbol)
+        return a.finalSymbol - b.finalSymbol;
+
+    if (a.argc < b.minimumParameters)
+        return -1;
+
+    if (a.argc > b.maximumParameters)
+        return +1;
+
+    return 0;
+}
+
 namespace detail // {{{
 {
     constexpr auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
@@ -135,7 +172,7 @@ constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes");
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters");
 constexpr inline auto DECDC       = detail::CSI('\'', 0, 1, std::nullopt, '~', VTType::VT420, "DECDC", "Delete column");
-constexpr inline auto DECIC       = detail::CSI('\'', 0, 1, std::nullopt, '}', VTType::VT420, "DECIC", "Insert column");
+constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, "DECIC", "Insert column");
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, "TBC", "Horizontal Tab Clear");
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode");
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, "DECRQM", "Request DEC-mode");
@@ -146,7 +183,7 @@ constexpr inline auto ANSISYSSC   = detail::CSI(std::nullopt, 0, 0, std::nullopt
 constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT420, "SCOSC", "Save Cursor");
 constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 2, 2, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin");
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode");
-constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 2, 2, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin");
+constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin");
 constexpr inline auto DECSTR      = detail::CSI('!', 0, 0, std::nullopt, 'p', VTType::VT100, "DECSTR", "Soft terminal reset");
 constexpr inline auto DECXCPR     = detail::CSI(std::nullopt, 0, 0, std::nullopt, '6', VTType::VT100, "DECXCPR", "Request extended cursor position");
 constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, "DL",  "Delete lines");
@@ -170,20 +207,8 @@ constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VT
 
 /// Selects a FunctionSpec based on a FunctionSelector.
 ///
-/// @p _category represents the corresponding function category.
-/// @p _leader an optional value between 0x3C .. 0x3F
-/// @p _argc number of arguments supplied
-/// @p _intermediate an optional intermediate character between (0x20 .. 0x2F)
-/// @p _final between 0x40 .. 0x7F
-///
-/// @notice multi-character intermediates are intentionally not supported.
-///
 /// @return the matching FunctionSpec or nullptr if none matched.
-FunctionSpec const* select(FunctionCategory _category,
-                           char _leader,
-                           unsigned _argc,
-                           char _intermediate,
-                           char _final);
+FunctionSpec const* select(FunctionSelector const& _selector);
 
 /// Selects a FunctionSpec based on given input Escape sequence fields.
 ///
@@ -195,7 +220,7 @@ FunctionSpec const* select(FunctionCategory _category,
 /// @return the matching FunctionSpec or nullptr if none matched.
 inline FunctionSpec const* selectEscape(char _intermediate, char _final)
 {
-    return select(FunctionCategory::CSI, 0, 0, _intermediate, _final);
+    return select({FunctionCategory::ESC, 0, 0, _intermediate, _final});
 }
 
 /// Selects a FunctionSpec based on given input control sequence fields.
@@ -210,7 +235,7 @@ inline FunctionSpec const* selectEscape(char _intermediate, char _final)
 /// @return the matching FunctionSpec or nullptr if none matched.
 inline FunctionSpec const* selectControl(char _leader, unsigned _argc, char _intermediate, char _final)
 {
-    return select(FunctionCategory::CSI, _leader, _argc, _intermediate, _final);
+    return select({FunctionCategory::CSI, _leader, _argc, _intermediate, _final});
 }
 
 /// Selects a FunctionSpec based on given input control sequence fields.
@@ -222,7 +247,7 @@ inline FunctionSpec const* selectControl(char _leader, unsigned _argc, char _int
 /// @return the matching FunctionSpec or nullptr if none matched.
 inline FunctionSpec const* selectOSCommand(unsigned _id)
 {
-    return select(FunctionCategory::OSC, 0, _id, 0, 0);
+    return select({FunctionCategory::OSC, 0, _id, 0, 0});
 }
 
 using CommandList = std::vector<Command>;
@@ -326,6 +351,45 @@ namespace fmt {
                 case FunctionCategory::OSC: return format_to(ctx.out(), "OSC");
             }
             return format_to(ctx.out(), "({})", static_cast<int>(value));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::FunctionSpec> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::FunctionSpec f, FormatContext& ctx)
+        {
+            return format_to(
+                ctx.out(),
+                "{} {} ({}-{}) {} {}",
+                f.category,
+                f.leader ? f.leader : ' ',
+                f.minimumParameters,
+                f.maximumParameters,
+                f.intermediate ? f.intermediate : ' ',
+                f.finalSymbol
+            );
+        }
+    };
+
+    template <>
+    struct formatter<terminal::FunctionSelector> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::FunctionSelector f, FormatContext& ctx)
+        {
+            return format_to(
+                ctx.out(),
+                "{} {} ({}-{}) {} {}",
+                f.category,
+                f.leader ? f.leader : ' ',
+                f.argc,
+                f.intermediate ? f.intermediate : ' ',
+                f.finalSymbol
+            );
         }
     };
 }

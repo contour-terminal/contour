@@ -15,6 +15,8 @@
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <algorithm>
 #include <numeric>
@@ -544,28 +546,30 @@ namespace impl // {{{ some command generator helpers
     };
 
     // TODO: constexpr sort(Range, Pred)
-    sort(f.begin(), f.end(), [](auto const& a, auto const& b) { return a < b; });
+    sort(f.begin(), f.end(), [](FunctionSpec const& a, FunctionSpec const& b) { return a < b; });
+
     return f;
 }
 
-FunctionSpec const* select(FunctionCategory _category,
-                           char _leader,
-                           unsigned _argc,
-                           char _intermediate,
-                           char _final)
+FunctionSpec const* select(FunctionSelector const& _selector)
 {
     auto static const funcs = functions();
 
-    // TODO: This is heavily inefficient. Use binary_search() instead.
-    for (auto const& f: funcs)
-        if (f.category == _category
-                && f.leader == _leader
-                && f.intermediate == _intermediate
-                && f.finalSymbol == _final
-                && f.minimumParameters <= _argc && _argc <= f.maximumParameters)
-        return &f;
-
-    return nullptr; // TODO
+	int a = 0;
+	int b = static_cast<int>(funcs.size()) - 1;
+    while (a <= b)
+    {
+        auto const i = (a + b) / 2;
+        auto const& I = funcs[i];
+        auto const rel = compare(_selector, I);
+        if (rel > 0)
+            a = i + 1;
+        else if (rel < 0)
+            b = i - 1;
+        else
+            return &I;
+    }
+    return nullptr;
 }
 
 /// Applies a FunctionSpec to a given context, emitting the respective command.
@@ -611,13 +615,13 @@ HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, C
         case DCH: return emitCommand<DeleteCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
         case DECDC: return emitCommand<DeleteColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
         case DECIC: return emitCommand<InsertColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false, _output); }); break;
+        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false, _output); }); return HandlerResult::Ok;
         case DECRQM: return impl::requestModeDEC(_ctx, _ctx.param(0));
         case DECRQM_ANSI: return impl::requestMode(_ctx, _ctx.param(0));
         case DECRQPSR: return impl::DECRQPSR(_ctx, _output);
         case DECSCUSR: return impl::DECSCUSR(_ctx, _output);
         case DECSLRM: return emitCommand<SetLeftRightMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
-        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true, _output); }); break;
+        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true, _output); }); return HandlerResult::Ok;
         case DECSTBM: return emitCommand<SetTopBottomMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
         case DECSTR: return emitCommand<SoftTerminalReset>(_output);
         case DECXCPR: return emitCommand<ReportExtendedCursorPosition>(_output);
@@ -630,12 +634,12 @@ HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, C
         case HVP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1})); // YES, it's like a CUP!
         case ICH: return emitCommand<InsertCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
         case IL:  return emitCommand<InsertLines>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false, _output); }); break;
+        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false, _output); }); return HandlerResult::Ok;
         case SCOSC: return emitCommand<SaveCursor>(_output);
         case SD: return emitCommand<ScrollDown>(_output, _ctx.param_or(0, FunctionParam{1}));
         case SETMARK: return emitCommand<SetMark>(_output);
         case SGR: return impl::dispatchSGR(_ctx, _output);
-        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true, _output); }); break;
+        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true, _output); }); return HandlerResult::Ok;
         case SU: return emitCommand<ScrollUp>(_output, _ctx.param_or(0, FunctionParam{1}));
         case TBC: return impl::TBC(_ctx, _output);
         case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, FunctionParam{1}));
@@ -643,9 +647,10 @@ HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, C
 
         // TODO: OSC
 
-        default: return HandlerResult::Unsupported;
+        default:
+           std::cerr << "NOT FOUND: " << to_sequence(_function, _ctx) << std::endl;
+           return HandlerResult::Unsupported;
     }
-    return HandlerResult::Ok;
 }
 
 string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx)

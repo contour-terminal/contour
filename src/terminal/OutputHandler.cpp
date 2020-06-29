@@ -412,7 +412,9 @@ void OutputHandler::dispatchESC(char _finalChar)
 		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
-    if (FunctionSpec const* funcSpec = select(FunctionCategory::ESC, 0, 0, intermediate, _finalChar); funcSpec != nullptr)
+    auto const selector = FunctionSelector{FunctionCategory::ESC, 0, 0, intermediate, _finalChar};
+
+    if (FunctionSpec const* funcSpec = select(selector); funcSpec != nullptr)
         apply(*funcSpec, *this, commands_);
     else
 		logInvalidESC(_finalChar, "Unknown escape sequence.");
@@ -420,11 +422,14 @@ void OutputHandler::dispatchESC(char _finalChar)
 
 void OutputHandler::dispatchCSI(char _finalChar)
 {
+    // Only support CSI sequences with 0 or 1 intermediate characters.
     char const intermediate = intermediateCharacters_.size() == 1
 		? static_cast<char>(intermediateCharacters_[0])
 		: char{};
 
-    if (FunctionSpec const* funcSpec = select(FunctionCategory::CSI, leaderSymbol_, parameterCount(), intermediate, _finalChar); funcSpec != nullptr)
+    auto const selector = FunctionSelector{FunctionCategory::CSI, leaderSymbol_, parameterCount(), intermediate, _finalChar};
+
+    if (FunctionSpec const* funcSpec = select(selector); funcSpec != nullptr)
 	{
         HandlerResult const result = apply(*funcSpec, *this, commands_);
 		switch (result)
@@ -439,6 +444,8 @@ void OutputHandler::dispatchCSI(char _finalChar)
 				break;
 		}
 	}
+    else
+        logInvalidCSI(_finalChar);
 }
 
 void OutputHandler::logUnsupportedCSI(char _finalChar) const
