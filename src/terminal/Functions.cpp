@@ -511,6 +511,7 @@ namespace impl // {{{ some command generator helpers
         CUU,
         DA1,
         DA2,
+        DA3,
         DCH,
         DECDC,
         DECIC,
@@ -612,6 +613,7 @@ HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, C
         case CUU: return emitCommand<MoveCursorUp>(_output, _ctx.param_or(0, FunctionParam{1}));
         case DA1: return emitCommand<SendDeviceAttributes>(_output);
         case DA2: return emitCommand<SendTerminalId>(_output);
+        case DA3: return HandlerResult::Unsupported;
         case DCH: return emitCommand<DeleteCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
         case DECDC: return emitCommand<DeleteColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
         case DECIC: return emitCommand<InsertColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
