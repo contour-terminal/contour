@@ -213,6 +213,11 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
         case Mode::AutoWrap:
             autoWrap = _enable;
             break;
+        case Mode::LeftRightMargin:
+            // Resetting DECLRMM also resets the horizontal margins back to screen size.
+            if (!_enable)
+                margin_.horizontal = {1, size_.columns};
+            break;
         case Mode::Origin:
             cursorRestrictedToMargin = _enable;
             break;
