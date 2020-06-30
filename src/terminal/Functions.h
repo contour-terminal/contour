@@ -18,6 +18,9 @@
 
 #include <fmt/format.h>
 
+#include <string>
+#include <vector>
+
 namespace terminal {
 
 enum class FunctionCategory {
