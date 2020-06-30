@@ -41,7 +41,7 @@ using namespace std;
 
 void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
 {
-    auto in = ifstream{_inputFile};
+    auto in = ifstream{_inputFile, ios::binary};
     if (!in.good())
     {
         cerr << "Could not open input file.\n";
