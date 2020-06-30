@@ -46,18 +46,35 @@ void dot(std::ostream& _os, ParserTable const& _table)
             }
         }
     }
+    // TODO: isReachableFromAnywhere(targetState) to check if x can be reached from anywhere.
 
     _os << "digraph {\n";
     _os << "  node [shape=box];\n";
     _os << "  ranksep = 0.75;\n";
     _os << "  rankdir = LR;\n";
     _os << "  concentrate = true;\n";
+
+    unsigned groundCount = 0;
+
     for (auto const& t : transitions)
     {
-        if (t.first.first == State::Undefined)
+        auto const sourceState = t.first.first;
+        auto const targetState = t.first.second;
+
+        if (sourceState == State::Undefined)
             continue;
 
-        _os << fmt::format("  {} -> {} ", t.first.first, t.first.second);
+        auto const targetStateName = targetState == State::Ground && targetState != sourceState
+            ? fmt::format("{}_{}", targetState, ++groundCount)
+            : fmt::format("{}", targetState);
+
+        // if (isReachableFromAnywhere(targetState))
+        //     _os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n", sourceStateName);
+
+        if (targetState == State::Ground && sourceState != State::Ground)
+            _os << fmt::format("  {} [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n", targetStateName);
+
+        _os << fmt::format("  {} -> {} ", sourceState, targetStateName);
         _os << "[";
         _os << "label=\"";
         for (auto const && [rangeCount, u] : crispy::indexed(t.second))
