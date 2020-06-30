@@ -315,7 +315,17 @@ void OutputHandler::dispatchOSC()
                 log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
             return;
         case 13: // Ps = 1 3  -> Change mouse foreground color to Pt.
+            if (auto color = parseColor(value); color.has_value())
+                emitCommand<SetDynamicColor>(DynamicColorName::MouseForegroundColor, color.value());
+            else
+                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+            break;
         case 14: // Ps = 1 4  -> Change mouse background color to Pt.
+            if (auto color = parseColor(value); color.has_value())
+                emitCommand<SetDynamicColor>(DynamicColorName::MouseBackgroundColor, color.value());
+            else
+                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+            break;
         case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
         case 16: // Ps = 1 6  -> Change Tektronix background color to Pt.
         case 17: // Ps = 1 7  -> Change highlight background color to Pt.
