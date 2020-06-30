@@ -1433,9 +1433,9 @@ void Screen::operator()(MoveCursorToNextTab const&)
         auto const currentCursorColumn = cursorPosition().column;
 
         if (i < buffer_->tabs.size())
-            appendSpaceChars(buffer_->tabs[i] - currentCursorColumn);
+            (*this)(MoveCursorForward{buffer_->tabs[i] - currentCursorColumn});
         else if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
-            appendSpaceChars(buffer_->margin_.horizontal.to - currentCursorColumn);
+            (*this)(MoveCursorForward{buffer_->margin_.horizontal.to - currentCursorColumn});
         else
             (*this)(CursorNextLine{1});
     }
@@ -1448,7 +1448,7 @@ void Screen::operator()(MoveCursorToNextTab const&)
                 buffer_->tabWidth - (buffer_->cursor.column - 1) % buffer_->tabWidth,
                 size_.columns - cursorPosition().column
             );
-            appendSpaceChars(n);
+            (*this)(MoveCursorForward{n});
         }
         else
             (*this)(CursorNextLine{1});
@@ -1470,14 +1470,6 @@ void Screen::operator()(Notify const& _notify)
     cout << "Screen.NOTIFY: title: '" << _notify.title << "', content: '" << _notify.content << "'\n";
     if (notify_)
         notify_(_notify.title, _notify.content);
-}
-
-void Screen::appendSpaceChars(size_t n)
-{
-    // Don't do (*this)(MoveCursorForward{n}) because we actually want spaces.
-
-    for (size_t i = 0; i < n; ++i)
-        write(AppendChar{U' '});
 }
 
 void Screen::operator()(CursorBackwardTab const& v)
