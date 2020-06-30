@@ -24,21 +24,21 @@ string to_string(IndexedColor color)
     switch (color)
     {
         case IndexedColor::Black:
-            return "Black";
+            return "black";
         case IndexedColor::Red:
-            return "Red";
+            return "red";
         case IndexedColor::Green:
-            return "Green";
+            return "green";
         case IndexedColor::Yellow:
-            return "Yellow";
+            return "yellow";
         case IndexedColor::Blue:
-            return "Blue";
+            return "blue";
         case IndexedColor::Magenta:
-            return "Magenta";
+            return "magenta";
         case IndexedColor::Cyan:
-            return "Cyan";
+            return "cyan";
         case IndexedColor::White:
-            return "White";
+            return "white";
         case IndexedColor::Default:
             return "DEFAULT";
     }
@@ -50,21 +50,21 @@ string to_string(BrightColor color)
     switch (color)
     {
         case BrightColor::Black:
-            return "BrightBlack";
+            return "bright-black";
         case BrightColor::Red:
-            return "BrightRed";
+            return "bright-red";
         case BrightColor::Green:
-            return "BrightGreen";
+            return "bright-Green";
         case BrightColor::Yellow:
-            return "BrightYellow";
+            return "bright-Yellow";
         case BrightColor::Blue:
-            return "BrightBlue";
+            return "bright-blue";
         case BrightColor::Magenta:
-            return "BrightMagenta";
+            return "bright-magenta";
         case BrightColor::Cyan:
-            return "BrightCyan";
+            return "bright-cyan";
         case BrightColor::White:
-            return "BrightWhite";
+            return "bright-white";
     }
     return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
 }
