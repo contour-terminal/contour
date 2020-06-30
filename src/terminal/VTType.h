@@ -53,6 +53,7 @@ enum class DeviceAttributes : uint16_t {
     AnsiTextLocator = (1 << 7),
     SixelGraphics = (1 << 8),
     RectangularEditing = (1 << 9),
+    Windowing = (1 << 10),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)

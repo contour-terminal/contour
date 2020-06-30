@@ -30,7 +30,7 @@ string to_string(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 10>{
+    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 11>{
         pair{DeviceAttributes::AnsiColor, "AnsiColor"},
         pair{DeviceAttributes::AnsiTextLocator, "AnsiTextLocator"},
         pair{DeviceAttributes::Columns132, "Columns132"},
@@ -41,6 +41,7 @@ string to_string(DeviceAttributes v)
         pair{DeviceAttributes::SixelGraphics, "SixelGraphics"},
         pair{DeviceAttributes::TechnicalCharacters, "TechnicalCharacters"},
         pair{DeviceAttributes::UserDefinedKeys, "UserDefinedKeys"},
+        pair{DeviceAttributes::Windowing, "Windowing"},
     };
 
     for (auto const& mapping: mappings)
@@ -60,7 +61,7 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 10>{
+    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 11>{
         pair{DeviceAttributes::AnsiColor, "22"},
         pair{DeviceAttributes::AnsiTextLocator, "29"},
         pair{DeviceAttributes::Columns132, "1"},
@@ -71,6 +72,7 @@ string to_params(DeviceAttributes v)
         pair{DeviceAttributes::SixelGraphics, "4"},
         pair{DeviceAttributes::TechnicalCharacters, "15"},
         pair{DeviceAttributes::UserDefinedKeys, "8"},
+        pair{DeviceAttributes::Windowing, "18"},
     };
 
     for (auto const& mapping: mappings)
