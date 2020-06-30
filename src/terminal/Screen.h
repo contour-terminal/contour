@@ -21,6 +21,7 @@
 #include <terminal/WindowSize.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/InputGenerator.h> // MouseTransport
+#include <terminal/VTType.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/width.h>
@@ -653,6 +654,11 @@ class Screen {
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
 
+    void setTerminalId(VTType _id) noexcept
+    {
+        terminalId_ = _id;
+    }
+
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
     size_t historyLineCount() const noexcept;
 
@@ -914,6 +920,8 @@ class Screen {
     OutputHandler handler_;
     Parser parser_;
     unsigned long instructionCounter_ = 0;
+
+    VTType terminalId_ = VTType::VT525;
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;

@@ -1122,7 +1122,29 @@ void Screen::operator()(ReportExtendedCursorPosition const&)
 void Screen::operator()(SendDeviceAttributes const&)
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
-    auto constexpr VT420 = "64";
+
+    auto const id = [&]() -> string_view {
+        switch (terminalId_)
+        {
+            case VTType::VT100:
+                return "1";
+            case VTType::VT220:
+            case VTType::VT240:
+                return "62";
+            case VTType::VT320:
+            case VTType::VT330:
+            case VTType::VT340:
+                return "63";
+            case VTType::VT420:
+                return "64";
+            case VTType::VT510:
+            case VTType::VT520:
+            case VTType::VT525:
+                return "65";
+        }
+        return "1"; // Should never be reached.
+    }();
+
     auto const attrs = to_params(
         DeviceAttributes::AnsiColor |
         DeviceAttributes::AnsiTextLocator |
@@ -1134,7 +1156,8 @@ void Screen::operator()(SendDeviceAttributes const&)
         //TODO: DeviceAttributes::TechnicalCharacters |
         DeviceAttributes::UserDefinedKeys
     );
-    reply("\033[?{};{}c", VT420, attrs);
+
+    reply("\033[?{};{}c", id, attrs);
 }
 
 void Screen::operator()(SendTerminalId const&)
@@ -1143,7 +1166,7 @@ void Screen::operator()(SendTerminalId const&)
     // It requests for the terminalID
 
     // terminal protocol type
-    auto constexpr Pp = static_cast<unsigned>(VTType::VT420);
+    auto const Pp = static_cast<unsigned>(terminalId_);
 
     // version number
     // TODO: (PACKAGE_VERSION_MAJOR * 100 + PACKAGE_VERSION_MINOR) * 100 + PACKAGE_VERSION_MICRO
@@ -1209,6 +1232,7 @@ void Screen::operator()(EraseCharacters const& v)
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
     size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
+
     fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->graphicsRendition});
 }
 
