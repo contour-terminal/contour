@@ -104,7 +104,7 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
     switch (state_)
     {
         case State::Empty:
-            if (_cell.codepoint(0) != SP)
+            if (!_cell.empty() && _cell.codepoint(0) != SP)
             {
                 state_ = State::Filling;
                 reset(_row, _col, _cell.attributes());
@@ -112,7 +112,7 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell c
             }
             break;
         case State::Filling:
-            if (row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
+            if (!_cell.empty() && row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
                 extend(_cell, _col);
             else
             {
