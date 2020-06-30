@@ -287,8 +287,8 @@ error_code createDefaultConfig(FileSystem::path const& _path)
     if (ec)
         return ec;
 
-    ofstream{_path.string()}.write(
-        (char const*) &contour::default_config_yaml[0],
+    ofstream{_path.string(), ios::binary | ios::trunc}.write(
+        (char const*) contour::default_config_yaml.data(),
         contour::default_config_yaml.size()
     );
 
