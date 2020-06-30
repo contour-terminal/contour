@@ -328,15 +328,15 @@ void OutputHandler::dispatchOSC()
             break;
         case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
         case 16: // Ps = 1 6  -> Change Tektronix background color to Pt.
-        case 17: // Ps = 1 7  -> Change highlight background color to Pt.
+        case 17: // Ps = 1 7  -> TODO: Change highlight background color to Pt.
         case 18: // Ps = 1 8  -> Change Tektronix cursor color to Pt.
-        case 19: // Ps = 1 9  -> Change highlight foreground color to Pt.
+        case 19: // Ps = 1 9  -> TODO: Change highlight foreground color to Pt.
         case 46: // Ps = 4 6  -> Change Log File to Pt.  This is normally disabled by a compile-time option.
-        case 50: // Ps = 5 0  -> Set Font to Pt.
+        case 50: // Ps = 5 0  -> TODO: Set Font to Pt.
         case 51: // Ps = 5 1  -> reserved for Emacs shell.
-        case 52: // Ps = 5 2  -> Manipulate Selection Data.
-        case 104: // Ps = 1 0 4 ; c -> Reset Color Number c.
-        case 105: // Ps = 1 0 5 ; c -> Reset Special Color Number c.
+        case 52: // Ps = 5 2  -> TODO: Manipulate Selection Data.
+        case 104: // Ps = 1 0 4 ; c -> TODO: Reset Color Number c.
+        case 105: // Ps = 1 0 5 ; c -> TODO: Reset Special Color Number c.
         case 106: // Ps = 1 0 6 ; c ; f -> Enable/disable Special Color Number c.
             log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
@@ -357,20 +357,19 @@ void OutputHandler::dispatchOSC()
             break;
         case 115: // Ps = 1 1 5  -> Reset Tektronix foreground color.
         case 116: // Ps = 1 1 6  -> Reset Tektronix background color.
-        case 117: // Ps = 1 1 7  -> Reset highlight color.
+        case 117: // Ps = 1 1 7  -> TODO: Reset highlight color.
         case 118: // Ps = 1 1 8  -> Reset Tektronix cursor color.
-        case 119: // Ps = 1 1 9  -> Reset highlight foreground color.
+        case 119: // Ps = 1 1 9  -> TODO: Reset highlight foreground color.
         case -'I': // Ps = I  ; c -> Set icon to file.
         case -'l': // Ps = l  ; c -> Set window title.
         case -'L': // Ps = L  ; c -> Set icon label.
             log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
         case 777:
-            {
-                auto const splits = crispy::split(value, ';');
-                if (splits.size() == 3 && splits[0] == "notify")
-                    emitCommand<Notify>(string(splits[1]), string(splits[2]));
-            }
+            if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
+                emitCommand<Notify>(string(splits[1]), string(splits[2]));
+            else
+                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
             break;
         default:
             log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
