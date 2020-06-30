@@ -33,7 +33,7 @@ enum class HyperlinkState {
 
 using URI = std::string;
 
-struct HyperlinkInfo {
+struct HyperlinkInfo { // TODO: rename to Hyperlink
     std::string id;
     URI uri;
     HyperlinkState state = HyperlinkState::Inactive;

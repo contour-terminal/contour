@@ -61,88 +61,38 @@ optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
 OutputHandler::OutputHandler(Logger _logger) :
 	logger_{std::move(_logger)}
 {
-	parameters_.reserve(MaxParameters);
-}
-
-string OutputHandler::sequenceString(char _finalChar, string const& _prefix) const
-{
-    stringstream sstr;
-    sstr << _prefix;
-    if (leaderSymbol_)
-        sstr << ' ' << leaderSymbol_;
-
-    if (parameterCount() > 1 || (parameterCount() == 1 && parameters_[0][0] != 0))
-    sstr << ' ' << accumulate(
-        begin(parameters_), end(parameters_), string{},
-        [](string const& a, auto const& p) -> string {
-            return !a.empty()
-                ? fmt::format("{};{}",
-                        a,
-                        accumulate(
-                            begin(p), end(p),
-                            string{},
-                            [](string const& x, FunctionParam y) -> string {
-                                return !x.empty()
-                                    ? fmt::format("{}:{}", x, y)
-                                    : std::to_string(y);
-                            }
-                        )
-                    )
-                : accumulate(
-                        begin(p), end(p),
-                        string{},
-                        [](string const& x, FunctionParam y) -> string {
-                            return !x.empty()
-                                ? fmt::format("{}:{}", x, y)
-                                : std::to_string(y);
-                        }
-                    );
-        }
-    );
-
-    if (!intermediateCharacters_.empty())
-        sstr << ' ' << intermediateCharacters_;
-
-    sstr << ' ' << _finalChar;
-
-    return sstr.str();
 }
 
 void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, char32_t _currentChar)
 {
-    currentChar_ = _currentChar;
-
     switch (_action)
     {
         case Action::Clear:
-			leaderSymbol_ = 0;
-            intermediateCharacters_.clear();
-            parameters_.clear();
-            private_ = false;
+            sequence_.clear();
             return;
 		case Action::CollectLeader:
-			leaderSymbol_ = static_cast<char>(_currentChar);
+			sequence_.setLeader(static_cast<char>(_currentChar));
 			return;
         case Action::Collect:
             {
                 uint8_t u8[4];
                 size_t const count = unicode::to_utf8(_currentChar, u8);
                 for (size_t i = 0; i < count; ++i)
-                    intermediateCharacters_.push_back(u8[i]);
+                    sequence_.intermediateCharacters().push_back(u8[i]);
             }
             return;
         case Action::Print:
             emitCommand<AppendChar>(_currentChar);
             return;
         case Action::Param:
-            if (parameters_.empty())
-                parameters_.push_back({0});
+            if (sequence_.parameters().empty())
+                sequence_.parameters().push_back({0});
             if (_currentChar == ';')
-                parameters_.push_back({0});
+                sequence_.parameters().push_back({0});
             else if (_currentChar == ':')
-                parameters_.back().push_back({0});
+                sequence_.parameters().back().push_back({0});
             else
-                parameters_.back().back() = parameters_.back().back() * 10 + (_currentChar - U'0');
+                sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_currentChar - U'0');
             return;
         case Action::CSI_Dispatch:
 			dispatchCSI(static_cast<char>(_currentChar));
@@ -161,19 +111,19 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
                 uint8_t u8[4];
                 size_t const count = unicode::to_utf8(_currentChar, u8);
                 for (size_t i = 0; i < count; ++i)
-                    intermediateCharacters_.push_back(u8[i]);
+                    sequence_.intermediateCharacters().push_back(u8[i]);
             }
             break;
         case Action::OSC_End:
             dispatchOSC();
-            intermediateCharacters_.clear();
+            sequence_.clear();
             break;
         case Action::Hook:
         case Action::Put:
         case Action::Unhook:
             log<UnsupportedOutputEvent>(fmt::format(
                 "Action: {} {} \"{}\"", to_string(_action), escape(_currentChar),
-                escape(intermediateCharacters_)));
+                escape(sequence_.intermediateCharacters())));
             return;
         case Action::Ignore:
         case Action::Undefined:
@@ -256,7 +206,9 @@ void OutputHandler::dispatchOSC()
             ++i;
 
         return pair{code, string_view(_data.data() + i, _data.size() - i)};
-    }(intermediateCharacters_);
+    }(sequence_.intermediateCharacters());
+
+    sequence_.setCategory(FunctionCategory::OSC);
 
     switch (code)
     {
@@ -271,7 +223,7 @@ void OutputHandler::dispatchOSC()
         case 4: // Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
         case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
         case 6: // Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
-            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            log<UnsupportedOutputEvent>(sequence_.str());
             break;
         case 8: // hyperlink extension: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
             // hyperlink_OSC ::= OSC '8' ';' params ';' URI
@@ -288,7 +240,7 @@ void OutputHandler::dispatchOSC()
                 emitCommand<Hyperlink>(string(id), string(uri));
             }
             else
-                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+                log<UnsupportedOutputEvent>(sequence_.str());
             break;
         case 10: // Ps = 1 0  -> Change VT100 text foreground color to Pt.
             if (value == "?")
@@ -296,7 +248,7 @@ void OutputHandler::dispatchOSC()
             else if (auto color = parseColor(value); color.has_value())
                 emitCommand<SetDynamicColor>(DynamicColorName::DefaultForegroundColor, color.value());
             else
-                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
             break;
         case 11: // Ps = 1 1  -> Change VT100 text background color to Pt.
             if (value == "?")
@@ -304,7 +256,7 @@ void OutputHandler::dispatchOSC()
             else if (auto color = parseColor(value); color.has_value())
                 emitCommand<SetDynamicColor>(DynamicColorName::DefaultBackgroundColor, color.value());
             else
-                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
             break;
         case 12: // Ps = 1 2  -> Change text cursor color to Pt.
             if (value == "?")
@@ -312,19 +264,19 @@ void OutputHandler::dispatchOSC()
             else if (auto color = parseColor(value); color.has_value())
                 emitCommand<SetDynamicColor>(DynamicColorName::TextCursorColor, color.value());
             else
-                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
             return;
         case 13: // Ps = 1 3  -> Change mouse foreground color to Pt.
             if (auto color = parseColor(value); color.has_value())
                 emitCommand<SetDynamicColor>(DynamicColorName::MouseForegroundColor, color.value());
             else
-                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
             break;
         case 14: // Ps = 1 4  -> Change mouse background color to Pt.
             if (auto color = parseColor(value); color.has_value())
                 emitCommand<SetDynamicColor>(DynamicColorName::MouseBackgroundColor, color.value());
             else
-                log<InvalidOutputEvent>("OSC {}", intermediateCharacters_);
+                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
             break;
         case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
         case 16: // Ps = 1 6  -> Change Tektronix background color to Pt.
@@ -338,7 +290,7 @@ void OutputHandler::dispatchOSC()
         case 104: // Ps = 1 0 4 ; c -> TODO: Reset Color Number c.
         case 105: // Ps = 1 0 5 ; c -> TODO: Reset Special Color Number c.
         case 106: // Ps = 1 0 6 ; c ; f -> Enable/disable Special Color Number c.
-            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            log<UnsupportedOutputEvent>(sequence_.str());
             break;
         case 110: // Ps = 1 1 0  -> Reset VT100 text foreground color.
             emitCommand<ResetDynamicColor>(DynamicColorName::DefaultForegroundColor);
@@ -363,16 +315,16 @@ void OutputHandler::dispatchOSC()
         case -'I': // Ps = I  ; c -> Set icon to file.
         case -'l': // Ps = l  ; c -> Set window title.
         case -'L': // Ps = L  ; c -> Set icon label.
-            log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+            log<UnsupportedOutputEvent>(sequence_.str());
             break;
         case 777:
             if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
                 emitCommand<Notify>(string(splits[1]), string(splits[2]));
             else
-                log<UnsupportedOutputEvent>("OSC " + intermediateCharacters_);
+                log<UnsupportedOutputEvent>(sequence_.str());
             break;
         default:
-            log<InvalidOutputEvent>("OSC " + intermediateCharacters_, "Unknown");
+            log<InvalidOutputEvent>(sequence_.str(), "Unknown OSC code.");
             break;
     }
 }
@@ -417,59 +369,52 @@ void OutputHandler::executeControlFunction(char _c0)
 
 void OutputHandler::dispatchESC(char _finalChar)
 {
-    char const intermediate = intermediateCharacters_.size() == 1
-		? static_cast<char>(intermediateCharacters_[0])
-		: char{};
+    sequence_.setCategory(FunctionCategory::ESC);
+    sequence_.setFinalChar(_finalChar);
 
-    auto const selector = FunctionSelector{FunctionCategory::ESC, 0, 0, intermediate, _finalChar};
-
-    if (FunctionSpec const* funcSpec = select(selector); funcSpec != nullptr)
-        apply(*funcSpec, *this, commands_);
+    if (FunctionSpec const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
+        apply(*funcSpec, sequence_, commands_);
     else
-		logInvalidESC(_finalChar, "Unknown escape sequence.");
+		logInvalidESC("Unknown escape sequence.");
 }
 
 void OutputHandler::dispatchCSI(char _finalChar)
 {
-    // Only support CSI sequences with 0 or 1 intermediate characters.
-    char const intermediate = intermediateCharacters_.size() == 1
-		? static_cast<char>(intermediateCharacters_[0])
-		: char{};
+    sequence_.setCategory(FunctionCategory::CSI);
+    sequence_.setFinalChar(_finalChar);
 
-    auto const selector = FunctionSelector{FunctionCategory::CSI, leaderSymbol_, parameterCount(), intermediate, _finalChar};
-
-    if (FunctionSpec const* funcSpec = select(selector); funcSpec != nullptr)
+    if (FunctionSpec const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
 	{
-        HandlerResult const result = apply(*funcSpec, *this, commands_);
+        ApplyResult const result = apply(*funcSpec, sequence_, commands_);
 		switch (result)
 		{
-            case HandlerResult::Unsupported:
-				logUnsupportedCSI(_finalChar);
+            case ApplyResult::Unsupported:
+				logUnsupportedCSI();
 				break;
-            case HandlerResult::Invalid:
-				logInvalidCSI(_finalChar);
+            case ApplyResult::Invalid:
+				logInvalidCSI();
 				break;
-            case HandlerResult::Ok:
+            case ApplyResult::Ok:
 				break;
 		}
 	}
     else
-        logInvalidCSI(_finalChar);
+        logInvalidCSI();
 }
 
-void OutputHandler::logUnsupportedCSI(char _finalChar) const
+void OutputHandler::logUnsupportedCSI() const
 {
-    log<UnsupportedOutputEvent>(sequenceString(_finalChar, "CSI"));
+    log<UnsupportedOutputEvent>(sequence_.str());
 }
 
-void OutputHandler::logInvalidESC(char _finalChar, std::string const& message) const
+void OutputHandler::logInvalidESC(std::string const& message) const
 {
-    log<InvalidOutputEvent>(sequenceString(_finalChar, "ESC"), message);
+    log<InvalidOutputEvent>(sequence_.str(), message);
 }
 
-void OutputHandler::logInvalidCSI(char _finalChar, std::string const& message) const
+void OutputHandler::logInvalidCSI(std::string const& message) const
 {
-    log<InvalidOutputEvent>(sequenceString(_finalChar, "CSI"), message);
+    log<InvalidOutputEvent>(sequence_.str(), message);
 }
 
 }  // namespace terminal

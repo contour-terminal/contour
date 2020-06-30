@@ -41,9 +41,9 @@ struct FunctionSpec {
 
     constexpr unsigned id() const noexcept {
         return static_cast<unsigned>(category)
-             | leader << 2
-             | intermediate << (2 + 3)
-             | finalSymbol << (2 + 3 + 4)
+             | leader            <<  2
+             | intermediate      << (2 + 3)
+             | finalSymbol       << (2 + 3 + 4)
              | minimumParameters << (2 + 3 + 4 + 6)
              | maximumParameters << (2 + 3 + 4 + 6 + 4);
     }
@@ -111,6 +111,118 @@ constexpr int compare(FunctionSelector const& a, FunctionSpec const& b) noexcept
 
     return 0;
 }
+
+/// Helps constructing VT functions as they're being parsed by the VT parser.
+class Sequence {
+  public:
+    using Parameter = unsigned int;
+    using ParameterList = std::vector<std::vector<Parameter>>;
+    using Intermediaries = std::string;
+
+  private:
+    FunctionCategory category_;
+    char leaderSymbol_ = 0;
+    ParameterList parameters_;
+    Intermediaries intermediateCharacters_;
+    char finalChar_ = 0;
+
+  public:
+    size_t constexpr static MaxParameters = 16;
+    size_t constexpr static MaxSubParameters = 8;
+
+    Sequence()
+    {
+        parameters_.resize(MaxParameters);
+        for (auto& param : parameters_)
+            param.reserve(MaxSubParameters);
+        parameters_.clear();
+    }
+
+    // mutators
+    //
+    void clear()
+    {
+        leaderSymbol_ = 0;
+        intermediateCharacters_.clear();
+        parameters_.clear();
+        finalChar_ = 0;
+    }
+
+    void setCategory(FunctionCategory _cat) noexcept { category_ = _cat; }
+    void setLeader(char _ch) noexcept { leaderSymbol_ = _ch; }
+    ParameterList& parameters() noexcept { return parameters_; }
+    Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
+    void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
+
+    // conversion
+    //
+    std::string str() const;
+
+    FunctionSelector selector() const noexcept
+    {
+        // Only support CSI sequences with 0 or 1 intermediate characters.
+        char const intermediate = intermediateCharacters_.size() == 1
+            ? static_cast<char>(intermediateCharacters_[0])
+            : char{};
+
+        return FunctionSelector{category_, leaderSymbol_, parameters_.size(), intermediate, finalChar_};
+    }
+
+    // accessors
+    //
+    FunctionCategory category() const noexcept { return category_; }
+    Intermediaries const& intermediateCharacters() const noexcept { return intermediateCharacters_; }
+    char finalChar() const noexcept { return finalChar_; }
+
+    ParameterList const& parameters() const noexcept { return parameters_; }
+    size_t parameterCount() const noexcept { return parameters_.size(); }
+    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
+
+    std::optional<Parameter> param_opt(size_t _index) const noexcept
+    {
+        if (_index < parameters_.size() && parameters_[_index][0])
+            return {parameters_[_index][0]};
+        else
+            return std::nullopt;
+    }
+
+    Parameter param_or(size_t _index, Parameter _defaultValue) const noexcept
+    {
+        return param_opt(_index).value_or(_defaultValue);
+    }
+
+    unsigned int param(size_t _index) const noexcept
+    {
+        assert(_index < parameters_.size());
+        assert(0 < parameters_[_index].size());
+        return parameters_[_index][0];
+    }
+
+    unsigned int subparam(size_t _index, size_t _subIndex) const noexcept
+    {
+        assert(_index < parameters_.size());
+        assert(_subIndex + 1 < parameters_[_index].size());
+        return parameters_[_index][_subIndex + 1];
+    }
+};
+
+/// Converts a FunctionSpec with a given context back into a human readable VT sequence.
+std::string to_sequence(FunctionSpec const& _func, Sequence const& _ctx);
+
+enum class ApplyResult {
+    Ok,
+    Invalid,
+    Unsupported,
+};
+
+using CommandList = std::vector<Command>;
+
+/// Applies a FunctionSpec to a given context, emitting the respective command.
+///
+/// A FunctionSelector must have been transformed into a FunctionSpec already.
+/// So the idea is:
+///     VT sequence -> FunctionSelector -> FunctionSpec -> Command.
+ApplyResult apply(FunctionSpec const& _function, Sequence const& _context, CommandList& _output);
 
 namespace detail // {{{
 {
@@ -250,79 +362,6 @@ inline FunctionSpec const* selectOSCommand(unsigned _id)
 {
     return select({FunctionCategory::OSC, 0, _id, 0, 0});
 }
-
-using CommandList = std::vector<Command>;
-
-/// Helps constructing VT functions as they're being parsed by the VT parser.
-class HandlerContext {
-  public:
-    using FunctionParam = unsigned int;
-    using FunctionParamList = std::vector<std::vector<FunctionParam>>;
-    using Intermediaries = std::string;
-
-  protected:
-    FunctionParamList parameters_;
-    Intermediaries intermediateCharacters_;
-
-  public:
-    size_t constexpr static MaxParameters = 16;
-    size_t constexpr static MaxSubParameters = 8;
-
-    HandlerContext()
-    {
-        parameters_.resize(MaxParameters);
-        for (auto& param : parameters_)
-            param.reserve(MaxSubParameters);
-        parameters_.clear();
-    }
-
-    FunctionParamList const& parameters() const noexcept { return parameters_; }
-    size_t parameterCount() const noexcept { return parameters_.size(); }
-    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
-
-    std::optional<FunctionParam> param_opt(size_t _index) const noexcept
-    {
-        if (_index < parameters_.size() && parameters_[_index][0])
-            return {parameters_[_index][0]};
-        else
-            return std::nullopt;
-    }
-
-    FunctionParam param_or(size_t _index, FunctionParam _defaultValue) const noexcept
-    {
-        return param_opt(_index).value_or(_defaultValue);
-    }
-
-    unsigned int param(size_t _index) const noexcept
-    {
-        assert(_index < parameters_.size());
-        assert(0 < parameters_[_index].size());
-        return parameters_[_index][0];
-    }
-
-    unsigned int subparam(size_t _index, size_t _subIndex) const noexcept
-    {
-        assert(_index < parameters_.size());
-        assert(_subIndex + 1 < parameters_[_index].size());
-        return parameters_[_index][_subIndex + 1];
-    }
-
-};
-
-enum class HandlerResult {
-    Ok,
-    Invalid,
-    Unsupported,
-};
-/// Applies a FunctionSpec to a given context, emitting the respective command.
-///
-/// A FunctionSelector must have been transformed into a FunctionSpec already.
-/// So the idea is:
-///     VT sequence -> FunctionSelector -> FunctionSpec -> Command.
-HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _context, CommandList& _output);
-
-/// Converts a FunctionSpec with a given context back into a human readable VT sequence.
-std::string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx);
 
 } // end namespace
 

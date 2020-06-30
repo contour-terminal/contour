@@ -38,37 +38,37 @@ using std::for_each;
 
 namespace terminal {
 
-using FunctionParam = HandlerContext::FunctionParam;
+using Parameter = Sequence::Parameter;
 
 namespace {
     template <typename T, typename... Args>
-    HandlerResult emitCommand(CommandList& _output, Args&&... args)
+    ApplyResult emitCommand(CommandList& _output, Args&&... args)
     {
         _output.emplace_back(T{std::forward<Args>(args)...});
-        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
-        return HandlerResult::Ok;
+        // TODO: telemetry_.increment(...);
+        return ApplyResult::Ok;
     }
 }
 
 namespace impl // {{{ some command generator helpers
 {
-    HandlerResult setMode(HandlerContext const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
+    ApplyResult setMode(Sequence const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
 	{
 		switch (_ctx.param(_modeIndex))
 		{
 			case 2:  // (AM) Keyboard Action Mode
-				return HandlerResult::Unsupported;
+				return ApplyResult::Unsupported;
 			case 4:  // (IRM) Insert Mode
                 emitCommand<SetMode>(_output, Mode::Insert, _enable);
-                return HandlerResult::Ok;
+                return ApplyResult::Ok;
 			case 12:  // (SRM) Send/Receive Mode
 			case 20:  // (LNM) Automatic Newline
 			default:
-				return HandlerResult::Unsupported;
+				return ApplyResult::Unsupported;
 		}
 	}
 
-	HandlerResult setModeDEC(HandlerContext const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
+	ApplyResult setModeDEC(Sequence const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
 	{
 		switch (_ctx.param(_modeIndex))
 		{
@@ -114,17 +114,17 @@ namespace impl // {{{ some command generator helpers
 					emitCommand<SetMode>(_output, Mode::UseAlternateScreen, false);
 					emitCommand<RestoreCursor>(_output);
 				}
-				return HandlerResult::Ok;
+				return ApplyResult::Ok;
 			case 2004:
 				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
 			default:
-				return HandlerResult::Unsupported;
+				return ApplyResult::Unsupported;
 		}
 	}
 
 	/// Parses color at given parameter offset @p i and returns new offset to continue processing parameters.
 	template <typename T>
-	size_t parseColor(HandlerContext const& _ctx, size_t i, CommandList& _output)
+	size_t parseColor(Sequence const& _ctx, size_t i, CommandList& _output)
 	{
         // We are at parameter index `i`.
         //
@@ -203,7 +203,7 @@ namespace impl // {{{ some command generator helpers
 		return i;
 	}
 
-	HandlerResult dispatchSGR(HandlerContext const& _ctx, CommandList& _output)
+	ApplyResult dispatchSGR(Sequence const& _ctx, CommandList& _output)
 	{
         if (_ctx.parameterCount() == 0)
            return emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Reset);
@@ -286,10 +286,10 @@ namespace impl // {{{ some command generator helpers
 				default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", _ctx.param(i));
 			}
 		}
-		return HandlerResult::Ok;
+		return ApplyResult::Ok;
 	}
 
-	HandlerResult requestMode(HandlerContext const& /*_ctx*/, unsigned int _mode)
+	ApplyResult requestMode(Sequence const& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
@@ -310,13 +310,13 @@ namespace impl // {{{ some command generator helpers
 			case 18: // TSM, Tabulation stop
 			case 19: // EBM, Editing boundary
 			case 20: // LNM, Line feed/new line
-				return HandlerResult::Unsupported; // TODO
+				return ApplyResult::Unsupported; // TODO
 			default:
-				return HandlerResult::Invalid;
+				return ApplyResult::Invalid;
 		}
 	}
 
-	HandlerResult requestModeDEC(HandlerContext const& /*_ctx*/, unsigned int _mode)
+	ApplyResult requestModeDEC(Sequence const& /*_ctx*/, unsigned int _mode)
 	{
 		switch (_mode)
 		{
@@ -356,41 +356,41 @@ namespace impl // {{{ some command generator helpers
 			case 103: // DECHDPXM, Half-duplex
 			case 104: // DECESKM, Secondary keyboard language
 			case 106: // DECOSCNM, Overscan
-				return HandlerResult::Unsupported;
+				return ApplyResult::Unsupported;
 			default:
-				return HandlerResult::Invalid;
+				return ApplyResult::Invalid;
 		}
 	}
 
-    HandlerResult CPR(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult CPR(Sequence const& _ctx, CommandList& _output)
     {
         switch (_ctx.param(0))
         {
             case 5: return emitCommand<DeviceStatusReport>(_output);
             case 6: return emitCommand<ReportCursorPosition>(_output);
-            default: return HandlerResult::Unsupported;
+            default: return ApplyResult::Unsupported;
         }
     }
 
-    HandlerResult DECRQPSR(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult DECRQPSR(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() != 1)
-            return HandlerResult::Invalid; // -> error
+            return ApplyResult::Invalid; // -> error
         else if (_ctx.param(0) == 1)
             // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
             // TODO return emitCommand<RequestCursorState>(); // or call it with ...Detailed?
-            return HandlerResult::Invalid;
+            return ApplyResult::Invalid;
         else if (_ctx.param(0) == 2)
             return emitCommand<RequestTabStops>(_output);
         else
-            return HandlerResult::Invalid;
+            return ApplyResult::Invalid;
     }
 
-    HandlerResult DECSCUSR(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult DECSCUSR(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() <= 1)
         {
-            switch (_ctx.param_or(0, HandlerContext::FunctionParam{1}))
+            switch (_ctx.param_or(0, Sequence::Parameter{1}))
             {
                 case 0:
                 case 1: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Blink, CursorShape::Block);
@@ -399,14 +399,14 @@ namespace impl // {{{ some command generator helpers
                 case 4: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Steady, CursorShape::Underscore);
                 case 5: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Blink, CursorShape::Bar);
                 case 6: return emitCommand<SetCursorStyle>(_output, CursorDisplay::Steady, CursorShape::Bar);
-                default: return HandlerResult::Invalid;
+                default: return ApplyResult::Invalid;
             }
         }
         else
-            return HandlerResult::Invalid;
+            return ApplyResult::Invalid;
     }
 
-    HandlerResult ED(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult ED(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 0)
             return emitCommand<ClearToEndOfScreen>(_output);
@@ -422,22 +422,22 @@ namespace impl // {{{ some command generator helpers
                     case 3: emitCommand<ClearScrollbackBuffer>(_output); break;
                 }
             }
-            return HandlerResult::Ok;
+            return ApplyResult::Ok;
         }
     }
 
-    HandlerResult EL(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult EL(Sequence const& _ctx, CommandList& _output)
     {
-        switch (_ctx.param_or(0, FunctionParam{0}))
+        switch (_ctx.param_or(0, Parameter{0}))
         {
             case 0: return emitCommand<ClearToEndOfLine>(_output);
             case 1: return emitCommand<ClearToBeginOfLine>(_output);
             case 2: return emitCommand<ClearLine>(_output);
-            default: return HandlerResult::Invalid;
+            default: return ApplyResult::Invalid;
         }
     }
 
-    HandlerResult TBC(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult TBC(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() != 1)
             return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::AllTabs);
@@ -446,11 +446,11 @@ namespace impl // {{{ some command generator helpers
         {
             case 0: return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::UnderCursor);
             case 3: return emitCommand<HorizontalTabClear>(_output, HorizontalTabClear::AllTabs);
-            default: return HandlerResult::Invalid;
+            default: return ApplyResult::Invalid;
         }
     }
 
-    HandlerResult WINDOWMANIP(HandlerContext const& _ctx, CommandList& _output)
+    ApplyResult WINDOWMANIP(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 3)
         {
@@ -460,7 +460,7 @@ namespace impl // {{{ some command generator helpers
                 case 8: return emitCommand<ResizeWindow>(_output, _ctx.param(2), _ctx.param(1), ResizeWindow::Unit::Characters);
                 case 22: return emitCommand<SaveWindowTitle>(_output);
                 case 23: return emitCommand<RestoreWindowTitle>(_output);
-                default: return HandlerResult::Unsupported;
+                default: return ApplyResult::Unsupported;
             }
         }
         else if (_ctx.parameterCount() == 1)
@@ -469,11 +469,11 @@ namespace impl // {{{ some command generator helpers
             {
                 case 4: return emitCommand<ResizeWindow>(_output, 0u, 0u, ResizeWindow::Unit::Pixels); // this means, resize to full display size
                 case 8: return emitCommand<ResizeWindow>(_output, 0u, 0u, ResizeWindow::Unit::Characters); // i.e. full display size
-                default: return HandlerResult::Unsupported;
+                default: return ApplyResult::Unsupported;
             }
         }
         else
-            return HandlerResult::Unsupported;
+            return ApplyResult::Unsupported;
     }
 } // }}}
 
@@ -575,7 +575,7 @@ FunctionSpec const* select(FunctionSelector const& _selector)
 }
 
 /// Applies a FunctionSpec to a given context, emitting the respective command.
-HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, CommandList& _output)
+ApplyResult apply(FunctionSpec const& _function, Sequence const& _ctx, CommandList& _output)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionSpec
@@ -602,61 +602,61 @@ HandlerResult apply(FunctionSpec const& _function, HandlerContext const& _ctx, C
 
         // CSI
         case ANSISYSSC: return emitCommand<RestoreCursor>(_output);
-        case CBT: return emitCommand<CursorBackwardTab>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case CHA: return emitCommand<MoveCursorToColumn>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case CNL: return emitCommand<CursorNextLine>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case CPL: return emitCommand<CursorPreviousLine>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CBT: return emitCommand<CursorBackwardTab>(_output, _ctx.param_or(0, Parameter{1}));
+        case CHA: return emitCommand<MoveCursorToColumn>(_output, _ctx.param_or(0, Parameter{1}));
+        case CNL: return emitCommand<CursorNextLine>(_output, _ctx.param_or(0, Parameter{1}));
+        case CPL: return emitCommand<CursorPreviousLine>(_output, _ctx.param_or(0, Parameter{1}));
         case CPR: return impl::CPR(_ctx, _output);
-        case CUB: return emitCommand<MoveCursorBackward>(_output, _ctx.param_or(0, FunctionParam{0}));
-        case CUD: return emitCommand<MoveCursorDown>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case CUF: return emitCommand<MoveCursorForward>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case CUP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1}));
-        case CUU: return emitCommand<MoveCursorUp>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case CUB: return emitCommand<MoveCursorBackward>(_output, _ctx.param_or(0, Parameter{0}));
+        case CUD: return emitCommand<MoveCursorDown>(_output, _ctx.param_or(0, Parameter{1}));
+        case CUF: return emitCommand<MoveCursorForward>(_output, _ctx.param_or(0, Parameter{1}));
+        case CUP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, Parameter{1}), _ctx.param_or(1, Parameter{1}));
+        case CUU: return emitCommand<MoveCursorUp>(_output, _ctx.param_or(0, Parameter{1}));
         case DA1: return emitCommand<SendDeviceAttributes>(_output);
         case DA2: return emitCommand<SendTerminalId>(_output);
-        case DA3: return HandlerResult::Unsupported;
-        case DCH: return emitCommand<DeleteCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case DECDC: return emitCommand<DeleteColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case DECIC: return emitCommand<InsertColumns>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false, _output); }); return HandlerResult::Ok;
+        case DA3: return ApplyResult::Unsupported;
+        case DCH: return emitCommand<DeleteCharacters>(_output, _ctx.param_or(0, Parameter{1}));
+        case DECDC: return emitCommand<DeleteColumns>(_output, _ctx.param_or(0, Parameter{1}));
+        case DECIC: return emitCommand<InsertColumns>(_output, _ctx.param_or(0, Parameter{1}));
+        case DECRM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, false, _output); }); return ApplyResult::Ok;
         case DECRQM: return impl::requestModeDEC(_ctx, _ctx.param(0));
         case DECRQM_ANSI: return impl::requestMode(_ctx, _ctx.param(0));
         case DECRQPSR: return impl::DECRQPSR(_ctx, _output);
         case DECSCUSR: return impl::DECSCUSR(_ctx, _output);
         case DECSLRM: return emitCommand<SetLeftRightMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
-        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true, _output); }); return HandlerResult::Ok;
+        case DECSM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setModeDEC(_ctx, i, true, _output); }); return ApplyResult::Ok;
         case DECSTBM: return emitCommand<SetTopBottomMargin>(_output, _ctx.param_opt(0), _ctx.param_opt(1));
         case DECSTR: return emitCommand<SoftTerminalReset>(_output);
         case DECXCPR: return emitCommand<ReportExtendedCursorPosition>(_output);
-        case DL: return emitCommand<DeleteLines>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case ECH: return emitCommand<EraseCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case DL: return emitCommand<DeleteLines>(_output, _ctx.param_or(0, Parameter{1}));
+        case ECH: return emitCommand<EraseCharacters>(_output, _ctx.param_or(0, Parameter{1}));
         case ED: return impl::ED(_ctx, _output);
         case EL: return impl::EL(_ctx, _output);
         case HPA: return emitCommand<HorizontalPositionAbsolute>(_output, _ctx.param(0));
         case HPR: return emitCommand<HorizontalPositionRelative>(_output, _ctx.param(0));
-        case HVP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, FunctionParam{1}), _ctx.param_or(1, FunctionParam{1})); // YES, it's like a CUP!
-        case ICH: return emitCommand<InsertCharacters>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case IL:  return emitCommand<InsertLines>(_output, _ctx.param_or(0, FunctionParam{1}));
-        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false, _output); }); return HandlerResult::Ok;
+        case HVP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, Parameter{1}), _ctx.param_or(1, Parameter{1})); // YES, it's like a CUP!
+        case ICH: return emitCommand<InsertCharacters>(_output, _ctx.param_or(0, Parameter{1}));
+        case IL:  return emitCommand<InsertLines>(_output, _ctx.param_or(0, Parameter{1}));
+        case RM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, false, _output); }); return ApplyResult::Ok;
         case SCOSC: return emitCommand<SaveCursor>(_output);
-        case SD: return emitCommand<ScrollDown>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case SD: return emitCommand<ScrollDown>(_output, _ctx.param_or(0, Parameter{1}));
         case SETMARK: return emitCommand<SetMark>(_output);
         case SGR: return impl::dispatchSGR(_ctx, _output);
-        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true, _output); }); return HandlerResult::Ok;
-        case SU: return emitCommand<ScrollUp>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case SM: for_each(times(_ctx.parameterCount()), [&](size_t i) { impl::setMode(_ctx, i, true, _output); }); return ApplyResult::Ok;
+        case SU: return emitCommand<ScrollUp>(_output, _ctx.param_or(0, Parameter{1}));
         case TBC: return impl::TBC(_ctx, _output);
-        case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, FunctionParam{1}));
+        case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, Parameter{1}));
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
 
         // TODO: OSC
 
         default:
            std::cerr << "NOT FOUND: " << to_sequence(_function, _ctx) << std::endl;
-           return HandlerResult::Unsupported;
+           return ApplyResult::Unsupported;
     }
 }
 
-string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx)
+string to_sequence(FunctionSpec const& _func, Sequence const& _ctx)
 {
     stringstream sstr;
 
@@ -676,7 +676,7 @@ string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx)
                         accumulate(
                             begin(p), end(p),
                             string{},
-                            [](string const& x, HandlerContext::FunctionParam y) -> string {
+                            [](string const& x, Sequence::Parameter y) -> string {
                                 return !x.empty()
                                     ? fmt::format("{}:{}", x, y)
                                     : std::to_string(y);
@@ -686,7 +686,7 @@ string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx)
                 : accumulate(
                         begin(p), end(p),
                         string{},
-                        [](string const& x, HandlerContext::FunctionParam y) -> string {
+                        [](string const& x, Sequence::Parameter y) -> string {
                             return !x.empty()
                                 ? fmt::format("{}:{}", x, y)
                                 : std::to_string(y);
@@ -699,6 +699,55 @@ string to_sequence(FunctionSpec const& _func, HandlerContext const& _ctx)
         sstr << ' ' << _func.intermediate;
 
     sstr << ' ' << _func.finalSymbol;
+
+    return sstr.str();
+}
+
+string Sequence::str() const
+{
+    stringstream sstr;
+
+    sstr << fmt::format("{} ", category_);
+
+    if (leaderSymbol_)
+        sstr << ' ' << leaderSymbol_;
+
+    if (parameterCount() > 1 || (parameterCount() == 1 && parameters_[0][0] != 0))
+    {
+        sstr << ' ' << accumulate(
+            begin(parameters_), end(parameters_), string{},
+            [](string const& a, auto const& p) -> string {
+                return !a.empty()
+                    ? fmt::format("{};{}",
+                            a,
+                            accumulate(
+                                begin(p), end(p),
+                                string{},
+                                [](string const& x, Sequence::Parameter y) -> string {
+                                    return !x.empty()
+                                        ? fmt::format("{}:{}", x, y)
+                                        : std::to_string(y);
+                                }
+                            )
+                        )
+                    : accumulate(
+                            begin(p), end(p),
+                            string{},
+                            [](string const& x, Sequence::Parameter y) -> string {
+                                return !x.empty()
+                                    ? fmt::format("{}:{}", x, y)
+                                    : std::to_string(y);
+                            }
+                        );
+            }
+        );
+    }
+
+    if (!intermediateCharacters().empty())
+        sstr << ' ' << intermediateCharacters();
+
+    if (finalChar_)
+        sstr << ' ' << finalChar_;
 
     return sstr.str();
 }

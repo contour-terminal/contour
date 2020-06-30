@@ -23,7 +23,7 @@
 
 namespace terminal {
 
-class OutputHandler : private HandlerContext {
+class OutputHandler {
   public:
     using ActionClass = Parser::ActionClass;
     using Action = Parser::Action;
@@ -55,26 +55,20 @@ class OutputHandler : private HandlerContext {
             logger_(Event{ std::forward<Args>(args)... });
     }
 
-    void logInvalidESC(char _finalChar, std::string const& message = "") const;
-    void logInvalidCSI(char _finalChar, std::string const& message = "") const;
-    void logUnsupportedCSI(char _finalChar) const;
-
-    std::string sequenceString(char _finalChar, std::string const& _prefix) const;
+    void logInvalidESC(std::string const& message = "") const;
+    void logInvalidCSI(std::string const& message = "") const;
+    void logUnsupportedCSI() const;
 
     template <typename T, typename... Args>
-    HandlerResult emitCommand(Args&&... args)
+    ApplyResult emitCommand(Args&&... args)
     {
         commands_.emplace_back(T{std::forward<Args>(args)...});
-        // TODO: telemetry_.increment(fmt::format("{}.{}", "Command", typeid(T).name()));
-        return HandlerResult::Ok;
+        // TODO: telemetry_.increment(sequence_);
+        return ApplyResult::Ok;
     }
 
   private:
-    char32_t currentChar_{};
-
-	char leaderSymbol_ = 0;
-    bool private_ = false;
-
+    Sequence sequence_{};
     CommandList commands_{};
 
     Logger const logger_;
