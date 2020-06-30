@@ -12,8 +12,10 @@
  * limitations under the License.
  */
 #include <terminal/Functions.h>
-#include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <crispy/sort.h>
+#include <crispy/times.h>
+#include <crispy/indexed.h>
 
 #include <fmt/format.h>
 
@@ -475,9 +477,9 @@ namespace impl // {{{ some command generator helpers
     }
 } // }}}
 
-/*constexpr*/ auto functions()
+constexpr auto functions()
 {
-    auto f = array{
+    auto f = array{ // {{{
         // ESC
         CS_G0_SPECIAL,
         CS_G0_USASCII,
@@ -544,10 +546,9 @@ namespace impl // {{{ some command generator helpers
         TBC,
         VPA,
         WINMANIP,
-    };
+    }; // }}}
 
-    // TODO: constexpr sort(Range, Pred)
-    sort(f.begin(), f.end(), [](FunctionSpec const& a, FunctionSpec const& b) { return a < b; });
+    crispy::sort(f, [](FunctionSpec const& a, FunctionSpec const& b) constexpr { return compare(a, b); });
 
     return f;
 }
