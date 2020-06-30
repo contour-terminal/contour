@@ -204,6 +204,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](RequestDynamicColor const& v) { write("\033];?\x07", setDynamicColorCommand(v.name)); },
         [&](RequestTabStops const&) { write("\033[2$w"); },
         [&](SetDynamicColor const& v) { write("\033]{};{}\x07", setDynamicColorCommand(v.name), setDynamicColorValue(v.color)); },
+        [&](DumpState const&) { write("\033]{}\x07", "888"); },
         [&](ResetDynamicColor const& v) { write("\033]{}\x07", resetDynamicColorCommand(v.name)); },
         [&](SetForegroundColor const& v) {
             if (v.color != currentForegroundColor_)

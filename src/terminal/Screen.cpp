@@ -714,7 +714,7 @@ void ScreenBuffer::verifyState() const
 #endif
 }
 
-void ScreenBuffer::fail(std::string const& _message) const
+void ScreenBuffer::dumpState(std::string const& _message) const
 {
     auto const hline = [&]() {
         for_each(times(size_.columns), [](auto) { cerr << '='; });
@@ -743,6 +743,11 @@ void ScreenBuffer::fail(std::string const& _message) const
     // - wrapPending
     // - ... other output related modes
 
+}
+
+void ScreenBuffer::fail(std::string const& _message) const
+{
+    dumpState(_message);
     assert(false);
 }
 
@@ -991,6 +996,7 @@ std::string ScreenBuffer::screenshot() const
                 for (char32_t const ch : cell.codepoints())
                     generator(AppendChar{ ch });
         }
+        generator(SetGraphicsRendition{GraphicsRendition::Reset});
         generator(MoveCursorToBeginOfLine{});
         generator(Linefeed{});
     }
@@ -1232,7 +1238,6 @@ void Screen::operator()(EraseCharacters const& v)
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
     size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
-
     fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->graphicsRendition});
 }
 
@@ -1929,6 +1934,12 @@ void Screen::operator()(SetDynamicColor const& v)
     if (setDynamicColor_)
         setDynamicColor_(v.name, v.color);
 }
+
+void Screen::operator()(DumpState const&)
+{
+    buffer_->dumpState("Dumping screen state");
+}
+
 // }}}
 
 // {{{ others

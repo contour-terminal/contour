@@ -446,6 +446,7 @@ struct ScreenBuffer {
 
     void clampSavedLines();
 	void verifyState() const;
+    void dumpState(std::string const& _message) const;
     void fail(std::string const& _message) const;
 	void saveState();
 	void restoreState();
@@ -765,6 +766,8 @@ class Screen {
     void operator()(RequestTabStops const& v);
     void operator()(ResetDynamicColor const& v);
     void operator()(SetDynamicColor const& v);
+
+    void operator()(DumpState const&);
     // }}}
 
     // reset screen

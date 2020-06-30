@@ -797,6 +797,9 @@ struct Notify {
     std::string content;
 };
 
+/// OSC 888
+struct DumpState {};
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -928,6 +931,7 @@ using Command = std::variant<
     DeleteLines,
     DesignateCharset,
     DeviceStatusReport,
+    DumpState,
     EraseCharacters,
     ForwardIndex,
     FullReset,

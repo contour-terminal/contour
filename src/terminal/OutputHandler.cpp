@@ -323,6 +323,9 @@ void OutputHandler::dispatchOSC()
             else
                 log<UnsupportedOutputEvent>(sequence_.str());
             break;
+        case 888:
+            emitCommand<DumpState>();
+            break;
         default:
             log<InvalidOutputEvent>(sequence_.str(), "Unknown OSC code.");
             break;

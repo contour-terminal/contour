@@ -268,6 +268,7 @@ class MnemonicBuilder {
     void operator()(DeleteLines const& v) { build("DL", "Delete Lines", v.n); }
     void operator()(DeleteCharacters const& v) { build("DCH", "Delete characters", v.n); }
     void operator()(DeleteColumns const& v) { build("DECDC", "Delete columns", v.n); }
+    void operator()(DumpState const&) { build("DSTATE", "Dumps internal state to debug stream."); }
     void operator()(HorizontalPositionAbsolute const& v) { build("HPA", "Horizontal Position Absolute", v.n); }
     void operator()(HorizontalPositionRelative const& v) { build("HPR", "Horizontal Position Relative", v.n); }
     void operator()(HorizontalTabClear const& v) { build("TBC", "Horizontal Tab Clear", v.which); }
