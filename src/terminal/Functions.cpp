@@ -12,10 +12,13 @@
  * limitations under the License.
  */
 #include <terminal/Functions.h>
+#include <terminal/Color.h>
+
 #include <crispy/algorithm.h>
+#include <crispy/indexed.h>
 #include <crispy/sort.h>
 #include <crispy/times.h>
-#include <crispy/indexed.h>
+#include <crispy/utils.h>
 
 #include <fmt/format.h>
 
@@ -450,6 +453,78 @@ namespace impl // {{{ some command generator helpers
         }
     }
 
+    inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(std::string_view const& s)
+    {
+        return crispy::splitKeyValuePairs(s, ':');
+    }
+
+    std::optional<RGBColor> parseColor(std::string_view const& _value)
+    {
+        try
+        {
+            // "rgb:RRRR/GGGG/BBBB"
+            if (_value.size() == 18 && _value.substr(0, 4) == "rgb:" && _value[8] == '/' && _value[13] == '/')
+            {
+                auto const r = crispy::strntoul(_value.data() + 4, 4, nullptr, 16);
+                auto const g = crispy::strntoul(_value.data() + 9, 4, nullptr, 16);
+                auto const b = crispy::strntoul(_value.data() + 14, 4, nullptr, 16);
+
+                return RGBColor{
+                    static_cast<uint8_t>(r & 0xFF),
+                    static_cast<uint8_t>(g & 0xFF),
+                    static_cast<uint8_t>(b & 0xFF)
+                };
+            }
+            return std::nullopt;
+        }
+        catch (...)
+        {
+            // that will be a formatting error in stoul() then.
+            return std::nullopt;
+        }
+    }
+
+    ApplyResult setOrRequestDynamicColor(Sequence const& _ctx, CommandList& _output, DynamicColorName _name)
+    {
+        auto const& value = _ctx.intermediateCharacters();
+        if (value == "?")
+            return emitCommand<RequestDynamicColor>(_output, _name);
+        else if (auto color = parseColor(value); color.has_value())
+            return emitCommand<SetDynamicColor>(_output, _name, color.value());
+        else
+            return ApplyResult::Invalid;
+    }
+
+    ApplyResult NOTIFY(Sequence const& _ctx, CommandList& _output)
+    {
+        auto const& value = _ctx.intermediateCharacters();
+        if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
+            return emitCommand<Notify>(_output, string(splits[1]), string(splits[2]));
+        else
+            return ApplyResult::Unsupported;
+    }
+
+    ApplyResult HYPERLINK(Sequence const& _ctx, CommandList& _output)
+    {
+        auto const& value = _ctx.intermediateCharacters();
+        // hyperlink_OSC ::= OSC '8' ';' params ';' URI
+        // params := pair (':' pair)*
+        // pair := TEXT '=' TEXT
+        if (auto const pos = value.find(';'); pos != value.npos)
+        {
+            auto const params = parseSubParamKeyValuePairs(value.substr(1, pos));
+            auto id = string_view{};
+            auto uri = string_view{};
+            if (auto const p = params.find("id"); p != params.end())
+                id = p->second;
+            uri = value.substr(pos + 1);
+            emitCommand<Hyperlink>(_output, string(id), string(uri));
+            return ApplyResult::Ok;
+        }
+        else
+            return ApplyResult::Invalid;
+    }
+
     ApplyResult WINDOWMANIP(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 3)
@@ -477,93 +552,20 @@ namespace impl // {{{ some command generator helpers
     }
 } // }}}
 
-constexpr auto functions()
-{
-    auto f = array{ // {{{
-        // ESC
-        CS_G0_SPECIAL,
-        CS_G0_USASCII,
-        CS_G1_SPECIAL,
-        CS_G1_USASCII,
-        DECALN,
-        DECBI,
-        DECFI,
-        DECKPAM,
-        DECKPNM,
-        DECRS,
-        DECSC,
-        HTS,
-        IND,
-        RI,
-        RIS,
-        SS2,
-        SS3,
-
-        // CSI
-        ANSISYSSC,
-        CBT,
-        CHA,
-        CNL,
-        CPL,
-        CPR,
-        CUB,
-        CUD,
-        CUF,
-        CUP,
-        CUU,
-        DA1,
-        DA2,
-        DA3,
-        DCH,
-        DECDC,
-        DECIC,
-        DECRM,
-        DECRQM,
-        DECRQM_ANSI,
-        DECRQPSR,
-        DECSCUSR,
-        DECSLRM,
-        DECSM,
-        DECSTBM,
-        DECSTR,
-        DECXCPR,
-        DL,
-        ECH,
-        ED,
-        EL,
-        HPA,
-        HPR,
-        HVP,
-        ICH,
-        IL,
-        RM,
-        SCOSC,
-        SD,
-        SETMARK,
-        SGR,
-        SM,
-        SU,
-        TBC,
-        VPA,
-        WINMANIP,
-    }; // }}}
-
-    crispy::sort(f, [](FunctionSpec const& a, FunctionSpec const& b) constexpr { return compare(a, b); });
-
-    return f;
-}
-
 FunctionSpec const* select(FunctionSelector const& _selector)
 {
     auto static const funcs = functions();
 
-	int a = 0;
-	int b = static_cast<int>(funcs.size()) - 1;
+    //std::cout << fmt::format("select: {}\n", _selector);
+
+    int a = 0;
+    int b = static_cast<int>(funcs.size()) - 1;
     while (a <= b)
     {
         auto const i = (a + b) / 2;
         auto const& I = funcs[i];
         auto const rel = compare(_selector, I);
+        //std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0 ? '>' : '=', I);
         if (rel > 0)
             a = i + 1;
         else if (rel < 0)
@@ -582,10 +584,10 @@ ApplyResult apply(FunctionSpec const& _function, Sequence const& _ctx, CommandLi
     switch (_function)
     {
         // ESC
-        case CS_G0_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::Special);
-        case CS_G0_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::USASCII);
-        case CS_G1_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::Special);
-        case CS_G1_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::USASCII);
+        case SCS_G0_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::Special);
+        case SCS_G0_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::USASCII);
+        case SCS_G1_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::Special);
+        case SCS_G1_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::USASCII);
         case DECALN: return emitCommand<ScreenAlignmentPattern>(_output);
         case DECBI: return emitCommand<BackIndex>(_output);
         case DECFI: return emitCommand<ForwardIndex>(_output);
@@ -648,7 +650,23 @@ ApplyResult apply(FunctionSpec const& _function, Sequence const& _ctx, CommandLi
         case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, Parameter{1}));
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
 
-        // TODO: OSC
+        // OSC
+        case SETICON: return ApplyResult::Unsupported;
+        case SETWINTITLE: return emitCommand<ChangeWindowTitle>(_output, string(_ctx.intermediateCharacters()));
+        case SETXPROP: return ApplyResult::Unsupported;
+        case HYPERLINK: return impl::HYPERLINK(_ctx, _output);
+        case COLORFG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::DefaultForegroundColor);
+        case COLORBG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::DefaultBackgroundColor);
+        case COLORCURSOR: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::TextCursorColor);
+        case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseForegroundColor);
+        case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseBackgroundColor);
+        //case COLORSPECIAL: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::HighlightForegroundColor);
+        case RCOLORFG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultForegroundColor);
+        case RCOLORBG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultBackgroundColor);
+        case RCOLORCURSOR: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::TextCursorColor);
+        case RCOLORMOUSEFG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::MouseForegroundColor);
+        case RCOLORMOUSEBG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::MouseBackgroundColor);
+        case NOTIFY: return impl::NOTIFY(_ctx, _output);
 
         default:
            std::cerr << "NOT FOUND: " << to_sequence(_function, _ctx) << std::endl;

@@ -16,27 +16,31 @@
 #include <terminal/VTType.h>
 #include <terminal/Commands.h>
 
+#include <crispy/sort.h>
+
 #include <fmt/format.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
 namespace terminal {
 
 enum class FunctionCategory {
-    ESC = 0,
-    CSI = 1,
-    OSC = 2,
+    C0  = 0,
+    ESC = 1,
+    CSI = 2,
+    OSC = 3,
 };
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
-struct FunctionSpec {
-    FunctionCategory category;  // (2 bits) ESC, CSI, OSC
+struct FunctionSpec { // TODO: rename Function
+    FunctionCategory category;  // (2 bits) C0, ESC, CSI, OSC
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
-    char finalSymbol;           // (6 bits) 0x40..0x7E (final character)
+    char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
     unsigned minimumParameters; // (4 bits) 0..7
-    unsigned maximumParameters; // (7 bits) 0..127
+    unsigned maximumParameters; // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
 
     VTType conformanceLevel;
     std::string_view mnemonic;
@@ -44,14 +48,47 @@ struct FunctionSpec {
 
     constexpr unsigned id() const noexcept {
         return static_cast<unsigned>(category)
-             | leader            <<  2
-             | intermediate      << (2 + 3)
-             | finalSymbol       << (2 + 3 + 4)
-             | minimumParameters << (2 + 3 + 4 + 6)
-             | maximumParameters << (2 + 3 + 4 + 6 + 4);
+             | (!leader ? 0 :       (leader - 0x3C)       << 2)
+             | (!intermediate ? 0 : (intermediate - 0) << (2 + 3))
+             | (!finalSymbol ? 0 :  (finalSymbol - 0x30)  << (2 + 3 + 4))
+             | minimumParameters                          << (2 + 3 + 4 + 7)
+             | maximumParameters                          << (2 + 3 + 4 + 7 + 4);
     }
 
     constexpr operator unsigned () const noexcept { return id(); }
+
+    // Semantic constructors
+    //
+    constexpr static auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
+    }
+
+    constexpr static auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
+    }
+
+    constexpr static auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
+    }
+
+    constexpr static auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{
+            FunctionCategory::CSI,
+            _leader.value_or(0),
+            _intermediate.value_or(0),
+            _final,
+            _argc0,
+            _argc1,
+            _vt,
+            _mnemonic,
+            _description
+        };
+    }
+    // }
 };
 
 constexpr int compare(FunctionSpec const& a, FunctionSpec const& b)
@@ -59,16 +96,19 @@ constexpr int compare(FunctionSpec const& a, FunctionSpec const& b)
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
 
+    if (a.finalSymbol != b.finalSymbol) // XXX
+        return static_cast<int>(a.finalSymbol) - static_cast<int>(b.finalSymbol);
+
     if (a.leader != b.leader)
         return a.leader - b.leader;
 
     if (a.intermediate != b.intermediate)
         return static_cast<int>(a.intermediate) - static_cast<int>(b.intermediate);
 
-    if (a.finalSymbol != b.finalSymbol)
-        return a.finalSymbol - b.finalSymbol;
+    if (a.minimumParameters != b.minimumParameters)
+        return static_cast<int>(a.minimumParameters) - static_cast<int>(b.minimumParameters);
 
-    return static_cast<int>(a.minimumParameters) - static_cast<int>(b.minimumParameters);
+    return static_cast<int>(a.maximumParameters) - static_cast<int>(b.maximumParameters);
 }
 
 constexpr bool operator==(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) == 0; }
@@ -85,7 +125,7 @@ struct FunctionSelector
     /// an optional value between 0x3C .. 0x3F
     char leader;
     /// number of arguments supplied
-    size_t argc;
+    unsigned argc;
     /// an optional intermediate character between (0x20 .. 0x2F)
     char intermediate;
     /// between 0x40 .. 0x7F
@@ -97,14 +137,17 @@ constexpr int compare(FunctionSelector const& a, FunctionSpec const& b) noexcept
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
 
+    if (a.finalSymbol != b.finalSymbol)
+        return a.finalSymbol - b.finalSymbol;
+
     if (a.leader != b.leader)
         return a.leader - b.leader;
 
     if (a.intermediate != b.intermediate)
         return a.intermediate - b.intermediate;
 
-    if (a.finalSymbol != b.finalSymbol)
-        return a.finalSymbol - b.finalSymbol;
+    if (a.category == FunctionCategory::OSC)
+        return static_cast<int>(a.argc) - static_cast<int>(b.maximumParameters);
 
     if (a.argc < b.minimumParameters)
         return -1;
@@ -163,12 +206,15 @@ class Sequence {
 
     FunctionSelector selector() const noexcept
     {
+        if (category_ == FunctionCategory::OSC)
+            return FunctionSelector{category_, 0, static_cast<unsigned>(parameters_[0][0]), 0, 0};
+
         // Only support CSI sequences with 0 or 1 intermediate characters.
         char const intermediate = intermediateCharacters_.size() == 1
             ? static_cast<char>(intermediateCharacters_[0])
             : char{};
 
-        return FunctionSelector{category_, leaderSymbol_, parameters_.size(), intermediate, finalChar_};
+        return FunctionSelector{category_, leaderSymbol_, static_cast<unsigned>(parameters_.size()), intermediate, finalChar_};
     }
 
     // accessors
@@ -229,6 +275,16 @@ ApplyResult apply(FunctionSpec const& _function, Sequence const& _context, Comma
 
 namespace detail // {{{
 {
+    constexpr auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
+    }
+
+    constexpr auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        return FunctionSpec{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
+    }
+
     constexpr auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         return FunctionSpec{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
@@ -236,6 +292,7 @@ namespace detail // {{{
 
     constexpr auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
+        // TODO: static_assert on _leader/_intermediate range-or-null
         return FunctionSpec{
             FunctionCategory::CSI,
             _leader.value_or(0),
@@ -248,17 +305,25 @@ namespace detail // {{{
             _description
         };
     }
-    // }
 } // }}}
 
-// CSI
-constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
+// C0
+constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
+constexpr inline auto BEL = detail::C0('\x07', "BEL", "Bell");
+constexpr inline auto BS  = detail::C0('\x08', "BS", "Backspace");
+constexpr inline auto TAB = detail::C0('\x09', "TAB", "Tab");
+constexpr inline auto LF  = detail::C0('\x0A', "LF", "Line Feed");
+constexpr inline auto VT  = detail::C0('\x0B', "VT", "Vertical Tab"); // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
+constexpr inline auto FF  = detail::C0('\x0C', "FF", "Form Feed");
+constexpr inline auto CR  = detail::C0('\x0D', "CR", "Carriage Return");
+constexpr inline auto SO  = detail::C0('\x0E', "SO", "Shift Out; Switch to an alternative character set. ");
+constexpr inline auto SI  = detail::C0('\x0F', "SI", "Shift In; Return to regular character set after Shift Out.");
 
 // ESC functions
-constexpr inline auto CS_G0_SPECIAL = detail::ESC('(', '0', VTType::VT100, "CS_G0_SPECIAL", "Set G0 to DEC Special Character and Line Drawing Set");
-constexpr inline auto CS_G0_USASCII = detail::ESC('(', 'B', VTType::VT100, "CS_G0_USASCII", "Set G0 to USASCII");
-constexpr inline auto CS_G1_SPECIAL = detail::ESC(')', '0', VTType::VT100, "CS_G0_SPECIAL", "Set G1 to DEC Special Character and Line Drawing Set");
-constexpr inline auto CS_G1_USASCII = detail::ESC(')', 'B', VTType::VT100, "CS_G0_USASCII", "Set G1 to USASCII");
+constexpr inline auto SCS_G0_SPECIAL = detail::ESC('(', '0', VTType::VT100, "SCS_G0_SPECIAL", "Set G0 to DEC Special Character and Line Drawing Set");
+constexpr inline auto SCS_G0_USASCII = detail::ESC('(', 'B', VTType::VT100, "SCS_G0_USASCII", "Set G0 to USASCII");
+constexpr inline auto SCS_G1_SPECIAL = detail::ESC(')', '0', VTType::VT100, "SCS_G0_SPECIAL", "Set G1 to DEC Special Character and Line Drawing Set");
+constexpr inline auto SCS_G1_USASCII = detail::ESC(')', 'B', VTType::VT100, "SCS_G0_USASCII", "Set G1 to USASCII");
 constexpr inline auto DECALN  = detail::ESC('#', '8', VTType::VT100, "DECALN", "Screen Alignment Pattern");
 constexpr inline auto DECBI   = detail::ESC(std::nullopt, '6', VTType::VT100, "DECBI", "Back Index");
 constexpr inline auto DECFI   = detail::ESC(std::nullopt, '9', VTType::VT100, "DECFI", "Forward Index");
@@ -272,6 +337,9 @@ constexpr inline auto RI      = detail::ESC(std::nullopt, 'M', VTType::VT100, "R
 constexpr inline auto RIS     = detail::ESC(std::nullopt, 'c', VTType::VT100, "RIS", "Reset to Initial State (Hard Reset)");
 constexpr inline auto SS2     = detail::ESC(std::nullopt, 'N', VTType::VT220, "SS2", "Single Shift Select (G2 Character Set)");
 constexpr inline auto SS3     = detail::ESC(std::nullopt, 'O', VTType::VT220, "SS3", "Single Shift Select (G3 Character Set)");
+
+// CSI
+constexpr inline auto ArgsMax = 127; // this is the maximum number that fits into 7 bits.
 
 // CSI functions
 constexpr inline auto CHA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'G', VTType::VT100, "CHA", "Move cursor to column");
@@ -287,7 +355,7 @@ constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes");
 constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VTType::VT100, "DA3", "Send tertiary device attributes");
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters");
-constexpr inline auto DECDC       = detail::CSI('\'', 0, 1, std::nullopt, '~', VTType::VT420, "DECDC", "Delete column");
+constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, "DECDC", "Delete column");
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, "DECIC", "Insert column");
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, "TBC", "Horizontal Tab Clear");
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode");
@@ -300,7 +368,7 @@ constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt
 constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 2, 2, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin");
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode");
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin");
-constexpr inline auto DECSTR      = detail::CSI('!', 0, 0, std::nullopt, 'p', VTType::VT100, "DECSTR", "Soft terminal reset");
+constexpr inline auto DECSTR      = detail::CSI(std::nullopt, 0, 0, '!', 'p', VTType::VT100, "DECSTR", "Soft terminal reset");
 constexpr inline auto DECXCPR     = detail::CSI(std::nullopt, 0, 0, std::nullopt, '6', VTType::VT100, "DECXCPR", "Request extended cursor position");
 constexpr inline auto DL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'M', VTType::VT100, "DL",  "Delete lines");
 constexpr inline auto ECH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'X', VTType::VT420, "ECH", "Erase characters");
@@ -320,6 +388,143 @@ constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTType::VT525, "WINMANIP", "Window Manipulation");
 constexpr inline auto CBT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'Z', VTType::VT100, "CBT", "Cursor Backward Tabulation");
 constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VTType::VT100, "SETMARK", "Set Vertical Mark");
+
+// OSC
+constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Window Icon");
+constexpr inline auto SETWINTITLE   = detail::OSC(2, "SETWINTITLE", "Change Window Title");
+constexpr inline auto SETXPROP      = detail::OSC(3, "SETXPROP", "Set X11 property");
+// TODO: Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
+// TODO: Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
+// TODO: Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
+// TODO: Ps = 7 (set current working directory)
+constexpr inline auto HYPERLINK     = detail::OSC(8, "HYPERLINK", "Hyperlinked Text");
+constexpr inline auto COLORFG       = detail::OSC(10, "COLORFG", "Change or request text foreground color.");
+constexpr inline auto COLORBG       = detail::OSC(11, "COLORBG", "Change or request text background color.");
+constexpr inline auto COLORCURSOR   = detail::OSC(12, "COLORCURSOR", "Change text cursor color to Pt.");
+constexpr inline auto COLORMOUSEFG  = detail::OSC(13, "COLORMOUSEFG", "Change mouse foreground color.");
+constexpr inline auto COLORMOUSEBG  = detail::OSC(14, "COLORMOUSEBG", "Change mouse background color.");
+constexpr inline auto COLORSPECIAL  = detail::OSC(106, "COLORSPECIAL", "Enable/disable Special Color Number c.");
+constexpr inline auto RCOLORFG      = detail::OSC(110, "RCOLORFG", "Reset VT100 text foreground color.");
+constexpr inline auto RCOLORBG      = detail::OSC(111, "RCOLORBG", "Reset VT100 text background color.");
+constexpr inline auto RCOLORCURSOR  = detail::OSC(112, "RCOLORCURSOR", "Reset text cursor color.");
+constexpr inline auto RCOLORMOUSEFG = detail::OSC(113, "RCOLORMOUSEFG", "Reset mouse foreground color.");
+constexpr inline auto RCOLORMOUSEBG = detail::OSC(114, "RCOLORMOUSEBG", "Reset mouse background color.");
+constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
+constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
+
+inline auto const& functions()
+{
+    static auto const funcs = []() constexpr { // {{{
+        auto f = std::array{
+            // C0
+            EOT,
+            BEL,
+            BS,
+            TAB,
+            LF,
+            VT,
+            FF,
+            CR,
+            SO,
+            SI,
+
+            // ESC
+            DECALN,
+            DECBI,
+            DECFI,
+            DECKPAM,
+            DECKPNM,
+            DECRS,
+            DECSC,
+            HTS,
+            IND,
+            RI,
+            RIS,
+            SCS_G0_SPECIAL,
+            SCS_G0_USASCII,
+            SCS_G1_SPECIAL,
+            SCS_G1_USASCII,
+            SS2,
+            SS3,
+
+            // CSI
+            ANSISYSSC,
+            CBT,
+            CHA,
+            CNL,
+            CPL,
+            CPR,
+            CUB,
+            CUD,
+            CUF,
+            CUP,
+            CUU,
+            DA1,
+            DA2,
+            DA3,
+            DCH,
+            DECDC,
+            DECIC,
+            DECRM,
+            DECRQM,
+            DECRQM_ANSI,
+            DECRQPSR,
+            DECSCUSR,
+            DECSLRM,
+            DECSM,
+            DECSTBM,
+            DECSTR,
+            DECXCPR,
+            DL,
+            ECH,
+            ED,
+            EL,
+            HPA,
+            HPR,
+            HVP,
+            ICH,
+            IL,
+            RM,
+            SCOSC,
+            SD,
+            SETMARK,
+            SGR,
+            SM,
+            SU,
+            TBC,
+            VPA,
+            WINMANIP,
+
+            // OSC
+            SETICON,
+            SETWINTITLE,
+            SETXPROP,
+            HYPERLINK,
+            COLORFG,
+            COLORBG,
+            COLORCURSOR,
+            COLORMOUSEFG,
+            COLORMOUSEBG,
+            COLORSPECIAL,
+            RCOLORFG,
+            RCOLORBG,
+            RCOLORCURSOR,
+            RCOLORMOUSEFG,
+            RCOLORMOUSEBG,
+            NOTIFY,
+            DUMPSTATE,
+        };
+        crispy::sort(f, [](FunctionSpec const& a, FunctionSpec const& b) constexpr { return compare(a, b); });
+        return f;
+    }();  // }}}
+
+#if 0
+    for (auto [a, b] : crispy::indexed(funcs))
+        std::cout << fmt::format("{:>2}: {}\n", a, b);
+#endif
+
+    return funcs;
+}
 
 /// Selects a FunctionSpec based on a FunctionSelector.
 ///
@@ -389,11 +594,12 @@ namespace fmt {
             using terminal::FunctionCategory;
             switch (value)
             {
+                case FunctionCategory::C0:  return format_to(ctx.out(), "C0");
                 case FunctionCategory::ESC: return format_to(ctx.out(), "ESC");
                 case FunctionCategory::CSI: return format_to(ctx.out(), "CSI");
                 case FunctionCategory::OSC: return format_to(ctx.out(), "OSC");
             }
-            return format_to(ctx.out(), "({})", static_cast<int>(value));
+            return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
         }
     };
 
@@ -404,16 +610,63 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::FunctionSpec f, FormatContext& ctx)
         {
-            return format_to(
-                ctx.out(),
-                "{} {} ({}-{}) {} {}",
-                f.category,
-                f.leader ? f.leader : ' ',
-                f.minimumParameters,
-                f.maximumParameters,
-                f.intermediate ? f.intermediate : ' ',
-                f.finalSymbol
-            );
+            switch (f.category)
+            {
+                case terminal::FunctionCategory::C0:
+                    return format_to(
+                        ctx.out(),
+                        "{}",
+                        f.mnemonic
+                    );
+                case terminal::FunctionCategory::ESC:
+                    return format_to(
+                        ctx.out(),
+                        "{} {} {}",
+                        f.category,
+                        f.intermediate ? f.intermediate : ' ',
+                        f.finalSymbol ? f.finalSymbol : ' '
+                    );
+                case terminal::FunctionCategory::OSC:
+                    return format_to(
+                        ctx.out(),
+                        "{} {}",
+                        f.category,
+                        f.maximumParameters
+                    );
+                case terminal::FunctionCategory::CSI:
+                    if (f.minimumParameters == f.maximumParameters)
+                        return format_to(
+                            ctx.out(),
+                            "{} {} {}    {} {}",
+                            f.category,
+                            f.leader ? f.leader : ' ',
+                            f.minimumParameters,
+                            f.intermediate ? f.intermediate : ' ',
+                            f.finalSymbol
+                        );
+                    else if (f.maximumParameters == terminal::ArgsMax)
+                        return format_to(
+                            ctx.out(),
+                            "{} {} {}..  {} {}",
+                            f.category,
+                            f.leader ? f.leader : ' ',
+                            f.minimumParameters,
+                            f.intermediate ? f.intermediate : ' ',
+                            f.finalSymbol
+                        );
+                    else
+                        return format_to(
+                            ctx.out(),
+                            "{} {} {}..{} {} {}",
+                            f.category,
+                            f.leader ? f.leader : ' ',
+                            f.minimumParameters,
+                            f.maximumParameters,
+                            f.intermediate ? f.intermediate : ' ',
+                            f.finalSymbol
+                        );
+            }
+            return format_to(ctx.out(), "?");
         }
     };
 
@@ -424,15 +677,26 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::FunctionSelector f, FormatContext& ctx)
         {
-            return format_to(
-                ctx.out(),
-                "{} {} ({}-{}) {} {}",
-                f.category,
-                f.leader ? f.leader : ' ',
-                f.argc,
-                f.intermediate ? f.intermediate : ' ',
-                f.finalSymbol
-            );
+            switch (f.category)
+            {
+                case terminal::FunctionCategory::OSC:
+                    return format_to(
+                        ctx.out(),
+                        "{} {}",
+                        f.category,
+                        f.argc
+                    );
+                default:
+                    return format_to(
+                        ctx.out(),
+                        "{} {} {} {} {}",
+                        f.category,
+                        f.leader ? f.leader : ' ',
+                        f.argc,
+                        f.intermediate ? f.intermediate : ' ',
+                        f.finalSymbol ? f.finalSymbol : ' '
+                    );
+            }
         }
     };
 }

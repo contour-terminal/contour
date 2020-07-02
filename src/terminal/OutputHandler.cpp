@@ -131,38 +131,6 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
     }
 }
 
-constexpr unsigned long strntoul(char const* _data, size_t _count, char const** _eptr, unsigned _base = 10)
-{
-    constexpr auto values = string_view{"0123456789ABCDEF"};
-    constexpr auto lowerLetters = string_view{"abcdef"};
-
-    unsigned long result = 0;
-    while (_count != 0)
-    {
-        if (auto const i = values.find(*_data); i != values.npos && i < _base)
-        {
-            result *= _base;
-            result += i;
-            ++_data;
-            --_count;
-        }
-        else if (auto const i = lowerLetters.find(*_data); i != lowerLetters.npos && _base == 16)
-        {
-            result *= _base;
-            result += i;
-            ++_data;
-            --_count;
-        }
-        else
-            return 0;
-    }
-
-    if (_eptr)
-        *_eptr = _data;
-
-    return result;
-}
-
 std::optional<RGBColor> OutputHandler::parseColor(std::string_view const& _value)
 {
     try
@@ -209,127 +177,13 @@ void OutputHandler::dispatchOSC()
     }(sequence_.intermediateCharacters());
 
     sequence_.setCategory(FunctionCategory::OSC);
+    sequence_.parameters().push_back({static_cast<Sequence::Parameter>(code)});
+    sequence_.intermediateCharacters() = string{value};
 
-    switch (code)
-    {
-        case 0: // set window title and icon name
-        case 2: // set window title
-            emitCommand<ChangeWindowTitle>(string(value));
-            [[fallthrough]];
-        case 1: // set icon name
-            // ignore
-            break;
-        case 3: // set X server property
-        case 4: // Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
-        case 5: // Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
-        case 6: // Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
-            log<UnsupportedOutputEvent>(sequence_.str());
-            break;
-        case 8: // hyperlink extension: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
-            // hyperlink_OSC ::= OSC '8' ';' params ';' URI
-            // params := pair (':' pair)*
-            // pair := TEXT '=' TEXT
-            if (auto const pos = value.find(';'); pos != value.npos)
-            {
-                auto const params = parseSubParamKeyValuePairs(value.substr(1, pos));
-                auto id = string_view{};
-                auto uri = string_view{};
-                if (auto const p = params.find("id"); p != params.end())
-                    id = p->second;
-                uri = value.substr(pos + 1);
-                emitCommand<Hyperlink>(string(id), string(uri));
-            }
-            else
-                log<UnsupportedOutputEvent>(sequence_.str());
-            break;
-        case 10: // Ps = 1 0  -> Change VT100 text foreground color to Pt.
-            if (value == "?")
-                emitCommand<RequestDynamicColor>(DynamicColorName::DefaultForegroundColor);
-            else if (auto color = parseColor(value); color.has_value())
-                emitCommand<SetDynamicColor>(DynamicColorName::DefaultForegroundColor, color.value());
-            else
-                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
-            break;
-        case 11: // Ps = 1 1  -> Change VT100 text background color to Pt.
-            if (value == "?")
-                emitCommand<RequestDynamicColor>(DynamicColorName::DefaultBackgroundColor);
-            else if (auto color = parseColor(value); color.has_value())
-                emitCommand<SetDynamicColor>(DynamicColorName::DefaultBackgroundColor, color.value());
-            else
-                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
-            break;
-        case 12: // Ps = 1 2  -> Change text cursor color to Pt.
-            if (value == "?")
-                emitCommand<RequestDynamicColor>(DynamicColorName::TextCursorColor);
-            else if (auto color = parseColor(value); color.has_value())
-                emitCommand<SetDynamicColor>(DynamicColorName::TextCursorColor, color.value());
-            else
-                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
-            return;
-        case 13: // Ps = 1 3  -> Change mouse foreground color to Pt.
-            if (auto color = parseColor(value); color.has_value())
-                emitCommand<SetDynamicColor>(DynamicColorName::MouseForegroundColor, color.value());
-            else
-                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
-            break;
-        case 14: // Ps = 1 4  -> Change mouse background color to Pt.
-            if (auto color = parseColor(value); color.has_value())
-                emitCommand<SetDynamicColor>(DynamicColorName::MouseBackgroundColor, color.value());
-            else
-                log<InvalidOutputEvent>(sequence_.str(), "Parsing color failed.");
-            break;
-        case 15: // Ps = 1 5  -> Change Tektronix foreground color to Pt.
-        case 16: // Ps = 1 6  -> Change Tektronix background color to Pt.
-        case 17: // Ps = 1 7  -> TODO: Change highlight background color to Pt.
-        case 18: // Ps = 1 8  -> Change Tektronix cursor color to Pt.
-        case 19: // Ps = 1 9  -> TODO: Change highlight foreground color to Pt.
-        case 46: // Ps = 4 6  -> Change Log File to Pt.  This is normally disabled by a compile-time option.
-        case 50: // Ps = 5 0  -> TODO: Set Font to Pt.
-        case 51: // Ps = 5 1  -> reserved for Emacs shell.
-        case 52: // Ps = 5 2  -> TODO: Manipulate Selection Data.
-        case 104: // Ps = 1 0 4 ; c -> TODO: Reset Color Number c.
-        case 105: // Ps = 1 0 5 ; c -> TODO: Reset Special Color Number c.
-        case 106: // Ps = 1 0 6 ; c ; f -> Enable/disable Special Color Number c.
-            log<UnsupportedOutputEvent>(sequence_.str());
-            break;
-        case 110: // Ps = 1 1 0  -> Reset VT100 text foreground color.
-            emitCommand<ResetDynamicColor>(DynamicColorName::DefaultForegroundColor);
-            break;
-        case 111: // Ps = 1 1 1  -> Reset VT100 text background color.
-            emitCommand<ResetDynamicColor>(DynamicColorName::DefaultBackgroundColor);
-            break;
-        case 112: // Ps = 1 1 2  -> Reset text cursor color.
-            emitCommand<ResetDynamicColor>(DynamicColorName::TextCursorColor);
-            break;
-        case 113: // Ps = 1 1 3  -> Reset mouse foreground color.
-            emitCommand<ResetDynamicColor>(DynamicColorName::MouseForegroundColor);
-            break;
-        case 114: // Ps = 1 1 4  -> Reset mouse background color.
-            emitCommand<ResetDynamicColor>(DynamicColorName::MouseBackgroundColor);
-            break;
-        case 115: // Ps = 1 1 5  -> Reset Tektronix foreground color.
-        case 116: // Ps = 1 1 6  -> Reset Tektronix background color.
-        case 117: // Ps = 1 1 7  -> TODO: Reset highlight color.
-        case 118: // Ps = 1 1 8  -> Reset Tektronix cursor color.
-        case 119: // Ps = 1 1 9  -> TODO: Reset highlight foreground color.
-        case -'I': // Ps = I  ; c -> Set icon to file.
-        case -'l': // Ps = l  ; c -> Set window title.
-        case -'L': // Ps = L  ; c -> Set icon label.
-            log<UnsupportedOutputEvent>(sequence_.str());
-            break;
-        case 777:
-            if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
-                emitCommand<Notify>(string(splits[1]), string(splits[2]));
-            else
-                log<UnsupportedOutputEvent>(sequence_.str());
-            break;
-        case 888:
-            emitCommand<DumpState>();
-            break;
-        default:
-            log<InvalidOutputEvent>(sequence_.str(), "Unknown OSC code.");
-            break;
-    }
+    if (FunctionSpec const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
+        apply(*funcSpec, sequence_, commands_);
+    else
+        log<InvalidOutputEvent>(sequence_.str(), "Sequencer: Unsupported OSC function.");
 }
 
 void OutputHandler::executeControlFunction(char _c0)

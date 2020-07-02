@@ -80,6 +80,7 @@ if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(terminal_test
         test_main.cpp
+        Functions_test.cpp
         Parser_test.cpp
         Screen_test.cpp
         OutputHandler_test.cpp
