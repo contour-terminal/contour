@@ -47,7 +47,8 @@ constexpr void sort(Container& _container, Comp _compare, size_t _low, size_t _h
     if (_low < _high)
     {
         auto const pi = detail::partition(_container, _compare, _low, _high);
-        sort(_container, _compare, _low, pi - 1);
+        if (pi > 0)
+            sort(_container, _compare, _low, pi - 1);
         sort(_container, _compare, pi + 1, _high);
     }
 }
@@ -55,13 +56,15 @@ constexpr void sort(Container& _container, Comp _compare, size_t _low, size_t _h
 template <typename Container, typename Comp>
 constexpr void sort(Container& _container, Comp _compare)
 {
-    sort(_container, _compare, 0, _container.size() - 1);
+    if (auto const count = std::size(_container); count > 1)
+        sort(_container, _compare, 0, count - 1);
 }
 
 template <typename Container>
 constexpr void sort(Container& _container)
 {
-    sort(_container, [](auto const& a, auto const& b) { return a < b ? -1 : a > b ? +1 : 0; }, 0, _container.size() - 1);
+    if (auto const count = std::size(_container); count > 1)
+        sort(_container, [](auto const& a, auto const& b) { return a < b ? -1 : a > b ? +1 : 0; }, 0, count - 1);
 }
 
 } // end namespaces

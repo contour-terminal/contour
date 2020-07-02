@@ -83,6 +83,7 @@ if(CRISPY_TESTING)
     add_executable(crispy_test
         compose_test.cpp
         utils_test.cpp
+        sort_test.cpp
         test_main.cpp
     )
     target_link_libraries(crispy_test fmt::fmt-header-only Catch2::Catch2 crispy::core)
