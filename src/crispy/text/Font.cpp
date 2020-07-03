@@ -54,7 +54,7 @@ namespace { // {{{ helper functions
 
         unsigned long long maxAdvance = 0;
         unsigned count = 0;
-        for (unsigned glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
+        for (FT_Long glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
         {
             if (FT_Load_Glyph(_face, glyphIndex, FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)// FT_LOAD_BITMAP_METRICS_ONLY);
             {
@@ -63,7 +63,7 @@ namespace { // {{{ helper functions
             }
         }
         if (count != 0)
-            return maxAdvance / count;
+            return static_cast<unsigned>(maxAdvance / count);
 
         return 8; // What else would it be.
     }

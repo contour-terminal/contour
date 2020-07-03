@@ -1063,7 +1063,7 @@ void TerminalWindow::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         QStringList args;
         args.append("-c");
         args.append(QString::fromStdString(config_.backingFilePath.string()));
-        args.append(QString::fromUtf8(_hyperlink.path().data(), _hyperlink.path().size()));
+        args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(programPath_), args);
     }
     else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
@@ -1072,7 +1072,7 @@ void TerminalWindow::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         args.append("-c");
         args.append(QString::fromStdString(config_.backingFilePath.string()));
         args.append(QString::fromStdString(editorEnv));
-        args.append(QString::fromUtf8(_hyperlink.path().data(), _hyperlink.path().size()));
+        args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(programPath_), args);
     }
     else
@@ -1229,8 +1229,8 @@ void TerminalWindow::onWindowTitleChanged()
 
 void TerminalWindow::onNotify(string const& _title, string const& _content)
 {
-    emit showNotification(QString::fromUtf8(_title.data(), _title.size()),
-                          QString::fromUtf8(_content.data(), _content.size()));
+    emit showNotification(QString::fromUtf8(_title.data(), static_cast<int>(_title.size())),
+                          QString::fromUtf8(_content.data(), static_cast<int>(_content.size())));
 }
 
 void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixels)

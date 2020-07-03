@@ -122,7 +122,7 @@ void OutputHandler::invokeAction(ActionClass /*_actionClass*/, Action _action, c
         case Action::Put:
         case Action::Unhook:
             log<UnsupportedOutputEvent>(fmt::format(
-                "Action: {} {} \"{}\"", to_string(_action), escape(_currentChar),
+                "Action: {} {} \"{}\"", to_string(_action), escape(unicode::to_utf8(_currentChar)),
                 escape(sequence_.intermediateCharacters())));
             return;
         case Action::Ignore:

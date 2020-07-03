@@ -1915,7 +1915,7 @@ void Screen::operator()(RequestTabStops const&)
     else if (buffer_->tabWidth != 0)
     {
         dcs << buffer_->tabWidth + 1;
-        for (size_t column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
+        for (unsigned column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
             dcs << '/' << column;
     }
     dcs << '\x5c'; // ST

@@ -26,7 +26,7 @@ namespace detail
         int i = static_cast<int>(_low) - 1;
         auto& pivot = _container[_high];
 
-        for (int const j : crispy::times(_low, _high - _low))
+        for (int const j : crispy::times(static_cast<int>(_low), static_cast<int>(_high - _low)))
         {
             if (_compare(_container[j], pivot) <= 0)
             {

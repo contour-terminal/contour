@@ -197,7 +197,7 @@ void GLCursor::updateShape()
     drawCount_ = static_cast<GLsizei>(vertices.size() / 2); // vertex count = array element size divided by dimension (2)
 
     vbo_.bind();
-    vbo_.write(0, &vertices[0], vertices.size() * sizeof(GLfloat));
+    vbo_.write(0, &vertices[0], static_cast<int>(vertices.size() * sizeof(GLfloat)));
     vbo_.release();
 }
 

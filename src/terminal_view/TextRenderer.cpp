@@ -249,7 +249,7 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
         _run.end - _run.start,
         codepoints_.data() + _run.start,
         clusters_.data() + _run.start,
-        -clusters_[0]
+        -static_cast<int>(clusters_[0])
     );
     return gpos;
 }

@@ -177,7 +177,7 @@ void BackgroundRenderer::execute()
                  GL_STATIC_DRAW);
 
     // render
-    glDrawArrays(GL_TRIANGLES, 0, vertexCoords_.size());
+    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexCoords_.size()));
 
     // cleanup
     shader_->release();

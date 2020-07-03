@@ -262,7 +262,7 @@ void Renderer::execute()
                      scheduler_->colors.data(),
                      GL_STATIC_DRAW);
 
-        glDrawArrays(GL_TRIANGLES, 0, scheduler_->vertexCoords.size());
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(scheduler_->vertexCoords.size()));
 
         // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
         //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a

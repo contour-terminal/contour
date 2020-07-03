@@ -17,14 +17,14 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
         if (auto const i = values.find(*_data); i != values.npos && i < _base)
         {
             result *= _base;
-            result += i;
+            result += static_cast<unsigned long>(i);
             ++_data;
             --_count;
         }
         else if (auto const i = lowerLetters.find(*_data); i != lowerLetters.npos && _base == 16)
         {
             result *= _base;
-            result += i;
+            result += static_cast<unsigned long>(i);
             ++_data;
             --_count;
         }
