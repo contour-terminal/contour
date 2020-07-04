@@ -174,9 +174,9 @@ void OutputGenerator::operator()(Command const& command)
         [&](HorizontalTabSet) { write("\033H"); },
         [&](Hyperlink const& v) {
             if (v.id.empty())
-                write("\033]8;;{}\033\\", v.link);
+                write("\033]8;;{}\033\\", v.uri);
             else
-                write("\033]8;id={};{}\033\\", v.id, v.link);
+                write("\033]8;id={};{}\033\\", v.id, v.uri);
         },
         [&](MoveCursorUp const& up) {
             if (normalCursorKeys())

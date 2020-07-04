@@ -14,84 +14,91 @@
 #pragma once
 
 #include <terminal/VTType.h>
-#include <terminal/Commands.h>
 
 #include <crispy/sort.h>
 
 #include <fmt/format.h>
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace terminal {
 
 enum class FunctionCategory {
-    C0  = 0,
-    ESC = 1,
-    CSI = 2,
-    OSC = 3,
+    C0   = 0,
+    ESC  = 1,
+    CSI  = 2,
+    OSC  = 3,
 };
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
-struct FunctionSpec { // TODO: rename Function
-    FunctionCategory category;  // (2 bits) C0, ESC, CSI, OSC
+struct FunctionDefinition { // TODO: rename Function
+    FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
-    unsigned minimumParameters; // (4 bits) 0..7
-    unsigned maximumParameters; // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
+    uint32_t minimumParameters; // (4 bits) 0..7
+    uint32_t maximumParameters; // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
 
     VTType conformanceLevel;
     std::string_view mnemonic;
     std::string_view comment;
 
-    constexpr unsigned id() const noexcept {
-        return static_cast<unsigned>(category)
-             | (!leader ? 0 :       (leader - 0x3C)       << 2)
-             | (!intermediate ? 0 : (intermediate - 0) << (2 + 3))
-             | (!finalSymbol ? 0 :  (finalSymbol - 0x30)  << (2 + 3 + 4))
-             | minimumParameters                          << (2 + 3 + 4 + 7)
-             | maximumParameters                          << (2 + 3 + 4 + 7 + 4);
+    constexpr unsigned id() const noexcept
+    {
+        switch (category)
+        {
+            case FunctionCategory::C0:
+                return static_cast<unsigned>(category) | finalSymbol << 3;
+            default:
+                return static_cast<unsigned>(category)
+                     | (!leader ? 0 :       (leader - 0x3C)       <<  3)
+                     | (!intermediate ? 0 : (intermediate - 0)    << (3 + 3))
+                     | (!finalSymbol ? 0 :  (finalSymbol - 0x30)  << (3 + 3 + 4))
+                     | minimumParameters                          << (3 + 3 + 4 + 7)
+                     | maximumParameters                          << (3 + 3 + 4 + 7 + 4);
+        }
     }
 
     constexpr operator unsigned () const noexcept { return id(); }
 
     // Semantic constructors
     //
-    constexpr static auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
-    {
-        return FunctionSpec{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
-    }
-
-    constexpr static auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
-    {
-        return FunctionSpec{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
-    }
-
-    constexpr static auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    {
-        return FunctionSpec{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
-    }
-
-    constexpr static auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    {
-        return FunctionSpec{
-            FunctionCategory::CSI,
-            _leader.value_or(0),
-            _intermediate.value_or(0),
-            _final,
-            _argc0,
-            _argc1,
-            _vt,
-            _mnemonic,
-            _description
-        };
-    }
+    // constexpr static auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
+    // {
+    //     return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
+    // }
+    //
+    // constexpr static auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    // {
+    //     return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
+    // }
+    //
+    // constexpr static auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    // {
+    //     return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
+    // }
+    //
+    // constexpr static auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    // {
+    //     return FunctionDefinition{
+    //         FunctionCategory::CSI,
+    //         _leader.value_or(0),
+    //         _intermediate.value_or(0),
+    //         _final,
+    //         _argc0,
+    //         _argc1,
+    //         _vt,
+    //         _mnemonic,
+    //         _description
+    //     };
+    // }
     // }
 };
 
-constexpr int compare(FunctionSpec const& a, FunctionSpec const& b)
+constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
 {
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
@@ -111,12 +118,12 @@ constexpr int compare(FunctionSpec const& a, FunctionSpec const& b)
     return static_cast<int>(a.maximumParameters) - static_cast<int>(b.maximumParameters);
 }
 
-constexpr bool operator==(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) == 0; }
-constexpr bool operator!=(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) != 0; }
-constexpr bool operator<=(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) <= 0; }
-constexpr bool operator>=(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) >= 0; }
-constexpr bool operator<(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) < 0; }
-constexpr bool operator>(FunctionSpec const& a, FunctionSpec const& b) noexcept { return compare(a, b) > 0; }
+constexpr bool operator==(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) == 0; }
+constexpr bool operator!=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) != 0; }
+constexpr bool operator<=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) <= 0; }
+constexpr bool operator>=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) >= 0; }
+constexpr bool operator<(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) < 0; }
+constexpr bool operator>(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) > 0; }
 
 struct FunctionSelector
 {
@@ -132,7 +139,7 @@ struct FunctionSelector
     char finalSymbol;
 };
 
-constexpr int compare(FunctionSelector const& a, FunctionSpec const& b) noexcept
+constexpr int compare(FunctionSelector const& a, FunctionDefinition const& b) noexcept
 {
     if (a.category != b.category)
         return static_cast<int>(a.category) - static_cast<int>(b.category);
@@ -200,21 +207,26 @@ class Sequence {
     Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
     void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
 
-    // conversion
-    //
+    /// Converts a FunctionDefinition with a given context back into a human readable VT sequence.
     std::string str() const;
 
+    /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding FunctionDefinition.
     FunctionSelector selector() const noexcept
     {
-        if (category_ == FunctionCategory::OSC)
-            return FunctionSelector{category_, 0, static_cast<unsigned>(parameters_[0][0]), 0, 0};
+        switch (category_)
+        {
+            case FunctionCategory::OSC:
+                return FunctionSelector{category_, 0, static_cast<unsigned>(parameters_[0][0]), 0, 0};
+            default:
+            {
+                // Only support CSI sequences with 0 or 1 intermediate characters.
+                char const intermediate = intermediateCharacters_.size() == 1
+                    ? static_cast<char>(intermediateCharacters_[0])
+                    : char{};
 
-        // Only support CSI sequences with 0 or 1 intermediate characters.
-        char const intermediate = intermediateCharacters_.size() == 1
-            ? static_cast<char>(intermediateCharacters_[0])
-            : char{};
-
-        return FunctionSelector{category_, leaderSymbol_, static_cast<unsigned>(parameters_.size()), intermediate, finalChar_};
+                return FunctionSelector{category_, leaderSymbol_, static_cast<unsigned>(parameters_.size()), intermediate, finalChar_};
+            }
+        }
     }
 
     // accessors
@@ -255,45 +267,27 @@ class Sequence {
     }
 };
 
-/// Converts a FunctionSpec with a given context back into a human readable VT sequence.
-std::string to_sequence(FunctionSpec const& _func, Sequence const& _ctx);
-
-enum class ApplyResult {
-    Ok,
-    Invalid,
-    Unsupported,
-};
-
-using CommandList = std::vector<Command>;
-
-/// Applies a FunctionSpec to a given context, emitting the respective command.
-///
-/// A FunctionSelector must have been transformed into a FunctionSpec already.
-/// So the idea is:
-///     VT sequence -> FunctionSelector -> FunctionSpec -> Command.
-ApplyResult apply(FunctionSpec const& _function, Sequence const& _context, CommandList& _output);
-
 namespace detail // {{{
 {
     constexpr auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionSpec{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
+        return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
     }
 
     constexpr auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionSpec{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
+        return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
     }
 
     constexpr auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionSpec{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
+        return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
     }
 
     constexpr auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         // TODO: static_assert on _leader/_intermediate range-or-null
-        return FunctionSpec{
+        return FunctionDefinition{
             FunctionCategory::CSI,
             _leader.value_or(0),
             _intermediate.value_or(0),
@@ -514,7 +508,7 @@ inline auto const& functions()
             NOTIFY,
             DUMPSTATE,
         };
-        crispy::sort(f, [](FunctionSpec const& a, FunctionSpec const& b) constexpr { return compare(a, b); });
+        crispy::sort(f, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
         return f;
     }();  // }}}
 
@@ -526,25 +520,25 @@ inline auto const& functions()
     return funcs;
 }
 
-/// Selects a FunctionSpec based on a FunctionSelector.
+/// Selects a FunctionDefinition based on a FunctionSelector.
 ///
-/// @return the matching FunctionSpec or nullptr if none matched.
-FunctionSpec const* select(FunctionSelector const& _selector);
+/// @return the matching FunctionDefinition or nullptr if none matched.
+FunctionDefinition const* select(FunctionSelector const& _selector);
 
-/// Selects a FunctionSpec based on given input Escape sequence fields.
+/// Selects a FunctionDefinition based on given input Escape sequence fields.
 ///
 /// @p _intermediate an optional intermediate character between (0x20 .. 0x2F)
 /// @p _final between 0x40 .. 0x7F
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
-/// @return the matching FunctionSpec or nullptr if none matched.
-inline FunctionSpec const* selectEscape(char _intermediate, char _final)
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
 {
     return select({FunctionCategory::ESC, 0, 0, _intermediate, _final});
 }
 
-/// Selects a FunctionSpec based on given input control sequence fields.
+/// Selects a FunctionDefinition based on given input control sequence fields.
 ///
 /// @p _leader an optional value between 0x3C .. 0x3F
 /// @p _argc number of arguments supplied
@@ -553,20 +547,20 @@ inline FunctionSpec const* selectEscape(char _intermediate, char _final)
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
-/// @return the matching FunctionSpec or nullptr if none matched.
-inline FunctionSpec const* selectControl(char _leader, unsigned _argc, char _intermediate, char _final)
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline FunctionDefinition const* selectControl(char _leader, unsigned _argc, char _intermediate, char _final)
 {
     return select({FunctionCategory::CSI, _leader, _argc, _intermediate, _final});
 }
 
-/// Selects a FunctionSpec based on given input control sequence fields.
+/// Selects a FunctionDefinition based on given input control sequence fields.
 ///
 /// @p _id leading numeric identifier (such as 8 for hyperlink)
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
-/// @return the matching FunctionSpec or nullptr if none matched.
-inline FunctionSpec const* selectOSCommand(unsigned _id)
+/// @return the matching FunctionDefinition or nullptr if none matched.
+inline FunctionDefinition const* selectOSCommand(unsigned _id)
 {
     return select({FunctionCategory::OSC, 0, _id, 0, 0});
 }
@@ -575,9 +569,9 @@ inline FunctionSpec const* selectOSCommand(unsigned _id)
 
 namespace std {
     template<>
-    struct hash<terminal::FunctionSpec> {
+    struct hash<terminal::FunctionDefinition> {
         /// This is actually perfect hashing.
-        constexpr uint32_t operator()(terminal::FunctionSpec const& _fun) const noexcept {
+        constexpr uint32_t operator()(terminal::FunctionDefinition const& _fun) const noexcept {
             return _fun.id();
         }
     };
@@ -594,21 +588,21 @@ namespace fmt {
             using terminal::FunctionCategory;
             switch (value)
             {
-                case FunctionCategory::C0:  return format_to(ctx.out(), "C0");
-                case FunctionCategory::ESC: return format_to(ctx.out(), "ESC");
-                case FunctionCategory::CSI: return format_to(ctx.out(), "CSI");
-                case FunctionCategory::OSC: return format_to(ctx.out(), "OSC");
+                case FunctionCategory::C0:   return format_to(ctx.out(), "C0");
+                case FunctionCategory::ESC:  return format_to(ctx.out(), "ESC");
+                case FunctionCategory::CSI:  return format_to(ctx.out(), "CSI");
+                case FunctionCategory::OSC:  return format_to(ctx.out(), "OSC");
             }
             return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
         }
     };
 
     template <>
-    struct formatter<terminal::FunctionSpec> {
+    struct formatter<terminal::FunctionDefinition> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(const terminal::FunctionSpec f, FormatContext& ctx)
+        auto format(const terminal::FunctionDefinition f, FormatContext& ctx)
         {
             switch (f.category)
             {

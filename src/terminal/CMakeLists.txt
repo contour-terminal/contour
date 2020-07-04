@@ -16,17 +16,17 @@ endif()
 
 set(terminal_HEADERS
     Color.h
+    CommandBuilder.h
     Commands.h
     Functions.h
     InputGenerator.h
     OutputGenerator.h
-    OutputHandler.h
     Parser.h
     ParserTables.h
     Process.h
     PseudoTerminal.h
     Screen.h
-	Selector.h
+    Selector.h
     Terminal.h
     TerminalProcess.h
     VTType.h
@@ -35,17 +35,17 @@ set(terminal_HEADERS
 
 set(terminal_SOURCES
     Color.cpp
+    CommandBuilder.cpp
     Commands.cpp
     Functions.cpp
     InputGenerator.cpp
     OutputGenerator.cpp
-    OutputHandler.cpp
     Parser.cpp
     ParserTables.cpp
     Process.cpp
     PseudoTerminal.cpp
     Screen.cpp
-	Selector.cpp
+    Selector.cpp
     Terminal.cpp
     TerminalProcess.cpp
     VTType.cpp
@@ -80,11 +80,11 @@ if(LIBTERMINAL_TESTING)
     enable_testing()
     add_executable(terminal_test
         test_main.cpp
+		Selector_test.cpp
+        CommandBuilder_test.cpp
         Functions_test.cpp
         Parser_test.cpp
         Screen_test.cpp
-        OutputHandler_test.cpp
-		Selector_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)

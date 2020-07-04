@@ -791,9 +791,9 @@ Screen::Screen(WindowSize const& _size,
     setMouseWheelMode_{ move(_setMouseWheelMode) },
 	setCursorStyle_{ move(_setCursorStyle) },
     reply_{ move(reply) },
-    handler_{ _logger },
+    commandBuilder_{ _logger },
     parser_{
-        ref(handler_),
+        ref(commandBuilder_),
         [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
     },
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, _maxHistoryLineCount },
@@ -853,7 +853,7 @@ void Screen::write(char const * _data, size_t _size)
         logger_(RawOutputEvent{ escape(_data, _data + _size) });
 #endif
 
-    handler_.commands().clear();
+    commandBuilder_.commands().clear();
     parser_.parseFragment(_data, _size);
 
     buffer_->verifyState();
@@ -861,14 +861,14 @@ void Screen::write(char const * _data, size_t _size)
     #if defined(LIBTERMINAL_LOG_TRACE)
     if (logTrace_ && logger_)
     {
-        auto const traces = to_mnemonic(handler_.commands(), true, true);
+        auto const traces = to_mnemonic(commandBuilder_.commands(), true, true);
         for (auto const& trace : traces)
             logger_(TraceOutputEvent{trace});
     }
     #endif
 
     for_each(
-        handler_.commands(),
+        commandBuilder_.commands(),
         [&](Command const& _command) {
             visit(*this, _command);
             instructionCounter_++;
@@ -877,7 +877,7 @@ void Screen::write(char const * _data, size_t _size)
     );
 
     if (onCommands_)
-        onCommands_(handler_.commands());
+        onCommands_(commandBuilder_.commands());
 }
 
 void Screen::write(std::u32string_view const& _text)
@@ -1374,15 +1374,15 @@ void Screen::operator()(HorizontalTabSet const&)
 
 void Screen::operator()(Hyperlink const& v)
 {
-    if (v.link.empty())
+    if (v.uri.empty())
         buffer_->currentHyperlink = nullptr;
     else if (v.id.empty())
-        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.link});
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.uri});
     else if (auto i = buffer_->hyperlinks.find(v.id); i != buffer_->hyperlinks.end())
         buffer_->currentHyperlink = i->second;
     else
     {
-        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.link});
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.uri});
         buffer_->hyperlinks[v.id] = buffer_->currentHyperlink;
     }
     // TODO:

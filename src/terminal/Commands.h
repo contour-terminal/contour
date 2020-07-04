@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace terminal {
 
@@ -788,7 +789,7 @@ struct SetMark {};
 /// OSC 8 - Sets or resets the hyperlink for text this OSC.
 struct Hyperlink {
     std::string id;
-    std::string link;
+    std::string uri;
 };
 
 /// OSC 777 - notify
@@ -986,6 +987,8 @@ using Command = std::variant<
     SingleShiftSelect,
     SoftTerminalReset
 >;
+
+using CommandList = std::vector<Command>;
 
 std::string to_string(Command const& cmd);
 std::string to_mnemonic(Command const& _command, bool _withParameters, bool _withComment);

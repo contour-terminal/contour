@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/OutputHandler.h>
+#include <terminal/CommandBuilder.h>
 #include <terminal/Parser.h>
 #include <catch2/catch.hpp>
 #include <fmt/format.h>
@@ -19,25 +19,25 @@
 using namespace std;
 using namespace terminal;
 
-TEST_CASE("parseColor", "[OutputHandler]")
+TEST_CASE("CommandBuilder.parseColor", "[CommandBuilder]")
 {
-    Color const c1 = OutputHandler::parseColor("rgb:FFFF/FFFF/FFFF").value();
+    Color const c1 = CommandBuilder::parseColor("rgb:FFFF/FFFF/FFFF").value();
     CHECK(c1 == RGBColor{0xFF, 0xFF, 0xFF});
 
-    Color const c2 = OutputHandler::parseColor("rgb:0000/0000/0000").value();
+    Color const c2 = CommandBuilder::parseColor("rgb:0000/0000/0000").value();
     CHECK(c2 == RGBColor{0x00, 0x00, 0x00});
 
     RGBColor const c3 = RGBColor{0x10, 0x30, 0xC0};
     std::string const s3 = setDynamicColorValue(c3);
-    RGBColor const c4 = *OutputHandler::parseColor(s3);
+    RGBColor const c4 = *CommandBuilder::parseColor(s3);
     CHECK(c3 == c4);
 
     // TODO: other colors
 }
 
-TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
+TEST_CASE("CommandBuilder.utf8_single", "[CommandBuilder]")  // TODO: move to Parser_test
 {
-    auto output = OutputHandler{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{ref(output)};
 
     parser.parseFragment("\xC3\xB6");  // ö
@@ -51,9 +51,51 @@ TEST_CASE("utf8_single", "[OutputHandler]")  // TODO: move to Parser_test
     REQUIRE(0xF6 == static_cast<unsigned>(ch.ch));
 }
 
-TEST_CASE("OutputHandler.sub_parameters", "[OutputHandler]")
+TEST_CASE("CommandBuilder.OSC_2", "[CommandBuilder]")
 {
-    auto output = OutputHandler{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
+    auto parser = Parser{ref(output)};
+    parser.parseFragment("\033]2;abcd\033\\");
+    REQUIRE(1 == output.commands().size());
+    REQUIRE(holds_alternative<terminal::ChangeWindowTitle>(output.commands()[0]));
+    REQUIRE(get<ChangeWindowTitle>(output.commands()[0]).title == "abcd");
+}
+
+TEST_CASE("CommandBuilder.OSC_8", "[CommandBuilder]")
+{
+    auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
+    auto parser = Parser{ref(output)};
+    SECTION("no attribs") {
+        parser.parseFragment("\033]8;;file://local/path/to\033\\");
+        REQUIRE(1 == output.commands().size());
+        REQUIRE(holds_alternative<terminal::Hyperlink>(output.commands()[0]));
+        auto const& hyperlink = get<Hyperlink>(output.commands()[0]);
+        CHECK(hyperlink.id == "");
+        CHECK(hyperlink.uri == "file://local/path/to");
+    }
+
+    SECTION("with-id-attrib") {
+        parser.parseFragment("\033]8;id=1234;file://local/path\033\\");
+        REQUIRE(1 == output.commands().size());
+        REQUIRE(holds_alternative<terminal::Hyperlink>(output.commands()[0]));
+        auto const& hyperlink = get<Hyperlink>(output.commands()[0]);
+        CHECK(hyperlink.id == "1234");
+        CHECK(hyperlink.uri == "file://local/path");
+    }
+
+    SECTION("extended") {
+        parser.parseFragment("\033]8;id=foo:bar=blah;file://local/path/to\033\\");
+        REQUIRE(1 == output.commands().size());
+        REQUIRE(holds_alternative<terminal::Hyperlink>(output.commands()[0]));
+        auto const& hyperlink = get<Hyperlink>(output.commands()[0]);
+        CHECK(hyperlink.id == "foo");
+        CHECK(hyperlink.uri == "file://local/path/to");
+    }
+}
+
+TEST_CASE("CommandBuilder.sub_parameters", "[CommandBuilder]")
+{
+    auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{ref(output)};
 
     SECTION("curly underline") {
@@ -72,10 +114,10 @@ TEST_CASE("OutputHandler.sub_parameters", "[OutputHandler]")
     }
 }
 
-TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
+TEST_CASE("CommandBuilder.utf8_middle", "[CommandBuilder]")  // TODO: move to Parser_test
 {
-    auto output = OutputHandler{
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("parser: {}", msg)); }};
@@ -94,10 +136,10 @@ TEST_CASE("utf8_middle", "[OutputHandler]")  // TODO: move to Parser_test
     REQUIRE('Z' == static_cast<unsigned>(get<AppendChar>(output.commands()[2]).ch));
 }
 
-TEST_CASE("set_g1_special", "[OutputHandler]")
+TEST_CASE("CommandBuilder.set_g1_special", "[CommandBuilder]")
 {
-    auto output = OutputHandler{
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
@@ -110,10 +152,10 @@ TEST_CASE("set_g1_special", "[OutputHandler]")
     REQUIRE(Charset::Special == ct.charset);
 }
 
-TEST_CASE("color_fg_indexed", "[OutputHandler]")
+TEST_CASE("CommandBuilder.color_fg_indexed", "[CommandBuilder]")
 {
-    auto output = OutputHandler{
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
@@ -128,10 +170,10 @@ TEST_CASE("color_fg_indexed", "[OutputHandler]")
     REQUIRE(235 == static_cast<unsigned>(indexedColor));
 }
 
-TEST_CASE("color_bg_indexed", "[OutputHandler]")
+TEST_CASE("CommandBuilder.color_bg_indexed", "[CommandBuilder]")
 {
-    auto output = OutputHandler{
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
@@ -146,10 +188,10 @@ TEST_CASE("color_bg_indexed", "[OutputHandler]")
     REQUIRE(235 == static_cast<unsigned>(indexedColor));
 }
 
-TEST_CASE("SETMARK", "[OutputHandler]")
+TEST_CASE("CommandBuilder.SETMARK", "[CommandBuilder]")
 {
-    auto output = OutputHandler{
-            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[OutputHandler]: {}", msg)); }};
+    auto output = CommandBuilder{
+            [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
     auto parser = Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};

@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/OutputHandler.h>
+#include <terminal/Functions.h>
 #include <terminal/Parser.h>
 #include <catch2/catch.hpp>
 #include <fmt/format.h>
@@ -19,7 +19,7 @@
 namespace terminal
 {
     // purely for proper diagnostic printing in Catch2
-    inline std::ostream& operator<<(std::ostream& os, FunctionSpec const& f)
+    inline std::ostream& operator<<(std::ostream& os, FunctionDefinition const& f)
     {
         return os << fmt::format("{}", f);
     }
@@ -30,7 +30,7 @@ using namespace terminal;
 
 TEST_CASE("Functions.SCOSC", "[Functions]")
 {
-    FunctionSpec const* f = terminal::selectControl(0, 0, 0, 's');
+    FunctionDefinition const* f = terminal::selectControl(0, 0, 0, 's');
     REQUIRE(f);
     CHECK(*f == SCOSC);
 }
@@ -38,35 +38,35 @@ TEST_CASE("Functions.SCOSC", "[Functions]")
 TEST_CASE("Functions.DECSLRM", "[Functions]")
 {
     // Maybe it is okay to not care about 0 and 1 arguments? Who's doing that?
-    FunctionSpec const* f = terminal::selectControl(0, 2, 0, 's');
+    FunctionDefinition const* f = terminal::selectControl(0, 2, 0, 's');
     REQUIRE(f);
     CHECK(*f == DECSLRM);
 }
 
 TEST_CASE("Functions.OSC1", "[Functions]")
 {
-    FunctionSpec const* osc = terminal::selectOSCommand(1);
+    FunctionDefinition const* osc = terminal::selectOSCommand(1);
     REQUIRE(osc);
     CHECK(*osc == SETICON);
 }
 
 TEST_CASE("Functions.OSC2", "[Functions]")
 {
-    FunctionSpec const* osc = terminal::selectOSCommand(2);
+    FunctionDefinition const* osc = terminal::selectOSCommand(2);
     REQUIRE(osc);
     CHECK(*osc == SETWINTITLE);
 }
 
 TEST_CASE("Functions.OSC8", "[Functions]")
 {
-    FunctionSpec const* osc = terminal::selectOSCommand(8);
+    FunctionDefinition const* osc = terminal::selectOSCommand(8);
     REQUIRE(osc);
     CHECK(*osc == HYPERLINK);
 }
 
 TEST_CASE("Functions.OSC777", "[Functions]")
 {
-    FunctionSpec const* osc = terminal::selectOSCommand(777);
+    FunctionDefinition const* osc = terminal::selectOSCommand(777);
     REQUIRE(osc);
     CHECK(*osc == NOTIFY);
 }

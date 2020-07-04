@@ -29,96 +29,6 @@ void logScreenText(Screen const& screen, string const& headline = "")
         UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
 }
 
-TEST_CASE("resize", "[screen]")
-{
-    auto screen = Screen{{2, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
-    screen.write("AB\r\nCD");
-    REQUIRE("AB\nCD\n" == screen.renderText());
-    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
-
-    SECTION("no-op") {
-        screen.resize({2, 2});
-        REQUIRE("AB\nCD\n" == screen.renderText());
-    }
-
-    SECTION("grow lines") {
-        screen.resize({2, 3});
-        REQUIRE("AB\nCD\n  \n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
-
-        screen.write("EF");
-        REQUIRE("AB\nCD\nEF\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
-    }
-
-    SECTION("shrink lines") {
-        screen.resize({2, 1});
-        REQUIRE("CD\n" == screen.renderText());
-        REQUIRE("AB" == screen.renderHistoryTextLine(1));
-        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
-    }
-
-    SECTION("grow columns") {
-        screen.resize({3, 2});
-        REQUIRE("AB \nCD \n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
-    }
-
-    SECTION("shrink columns") {
-        screen.resize({1, 2});
-        REQUIRE("A\nC\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
-    }
-
-    SECTION("regrow columns") {
-        // 1.) grow
-        screen.resize({3, 2});
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
-
-        // 2.) fill
-        screen(AppendChar{'Y'});
-        REQUIRE("AB \nCDY\n" == screen.renderText());
-        screen(MoveCursorTo{1, 3});
-        screen(AppendChar{'X'});
-        REQUIRE("ABX\nCDY\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
-
-        // 3.) shrink
-        screen.resize({2, 2});
-        REQUIRE("AB\nCD\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
-
-        // 4.) regrow (and see if pre-filled data were retained)
-        screen.resize({3, 2});
-        REQUIRE("ABX\nCDY\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
-    }
-
-    SECTION("grow rows, grow columns") {
-        screen.resize({3, 3});
-        REQUIRE("AB \nCD \n   \n" == screen.renderText());
-        screen.write("1\r\n234");
-        REQUIRE("AB \nCD1\n234\n" == screen.renderText());
-    }
-
-    SECTION("grow rows, shrink columns") {
-        screen.resize({1, 3});
-        REQUIRE("A\nC\n \n" == screen.renderText());
-    }
-
-    SECTION("shrink rows, grow columns") {
-        screen.resize({3, 1});
-        REQUIRE("CD \n" == screen.renderText());
-    }
-
-    SECTION("shrink rows, shrink columns") {
-        screen.resize({1, 1});
-        REQUIRE("C\n" == screen.renderText());
-    }
-
-    // TODO: what do we want to do when re resize to {0, y}, {x, 0}, {0, 0}?
-}
-
 TEST_CASE("AppendChar", "[screen]")
 {
     auto screen = Screen{{3, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
@@ -141,6 +51,26 @@ TEST_CASE("AppendChar", "[screen]")
     screen(SetMode{ Mode::AutoWrap, true });
     screen.write("EF");
     REQUIRE("F  " == screen.renderTextLine(1));
+}
+
+TEST_CASE("AppendChar_CR_LF", "[screen]")
+{
+    auto screen = Screen{{3, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    REQUIRE("   " == screen.renderTextLine(1));
+
+    screen(SetMode{ Mode::AutoWrap, false });
+
+    screen.write("ABC");
+    REQUIRE("ABC" == screen.renderTextLine(1));
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+
+    screen.write("\r");
+    REQUIRE("ABC\n   \n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
+
+    screen.write("\n");
+    REQUIRE("ABC\n   \n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
 }
 
 TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
@@ -2129,6 +2059,96 @@ TEST_CASE("DECTABSR", "[screen]")
         screen.write(RequestTabStops{});
         CHECK(reply == "\033P2$u2/4/8/16\x5c");
     }
+}
+
+TEST_CASE("resize", "[screen]")
+{
+    auto screen = Screen{{2, 2}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    screen.write("AB\r\nCD");
+    REQUIRE("AB\nCD\n" == screen.renderText());
+    REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+
+    SECTION("no-op") {
+        screen.resize({2, 2});
+        REQUIRE("AB\nCD\n" == screen.renderText());
+    }
+
+    SECTION("grow lines") {
+        screen.resize({2, 3});
+        REQUIRE("AB\nCD\n  \n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+
+        screen.write("EF");
+        REQUIRE("AB\nCD\nEF\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
+    }
+
+    SECTION("shrink lines") {
+        screen.resize({2, 1});
+        REQUIRE("CD\n" == screen.renderText());
+        REQUIRE("AB" == screen.renderHistoryTextLine(1));
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+    }
+
+    SECTION("grow columns") {
+        screen.resize({3, 2});
+        REQUIRE("AB \nCD \n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+    }
+
+    SECTION("shrink columns") {
+        screen.resize({1, 2});
+        REQUIRE("A\nC\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
+    }
+
+    SECTION("regrow columns") {
+        // 1.) grow
+        screen.resize({3, 2});
+        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+
+        // 2.) fill
+        screen(AppendChar{'Y'});
+        REQUIRE("AB \nCDY\n" == screen.renderText());
+        screen(MoveCursorTo{1, 3});
+        screen(AppendChar{'X'});
+        REQUIRE("ABX\nCDY\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+
+        // 3.) shrink
+        screen.resize({2, 2});
+        REQUIRE("AB\nCD\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+
+        // 4.) regrow (and see if pre-filled data were retained)
+        screen.resize({3, 2});
+        REQUIRE("ABX\nCDY\n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
+    }
+
+    SECTION("grow rows, grow columns") {
+        screen.resize({3, 3});
+        REQUIRE("AB \nCD \n   \n" == screen.renderText());
+        screen.write("1\r\n234");
+        REQUIRE("AB \nCD1\n234\n" == screen.renderText());
+    }
+
+    SECTION("grow rows, shrink columns") {
+        screen.resize({1, 3});
+        REQUIRE("A\nC\n \n" == screen.renderText());
+    }
+
+    SECTION("shrink rows, grow columns") {
+        screen.resize({3, 1});
+        REQUIRE("CD \n" == screen.renderText());
+    }
+
+    SECTION("shrink rows, shrink columns") {
+        screen.resize({1, 1});
+        REQUIRE("C\n" == screen.renderText());
+    }
+
+    // TODO: what do we want to do when re resize to {0, y}, {x, 0}, {0, 0}?
 }
 
 // TODO: SetForegroundColor

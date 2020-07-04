@@ -15,8 +15,8 @@
 
 #include <terminal/Color.h>
 #include <terminal/Commands.h>
+#include <terminal/CommandBuilder.h>
 #include <terminal/Logger.h>
-#include <terminal/OutputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Hyperlink.h>
@@ -920,7 +920,7 @@ class Screen {
 	OnSetCursorStyle setCursorStyle_;
     Reply const reply_;
 
-    OutputHandler handler_;
+    CommandBuilder commandBuilder_;
     Parser parser_;
     unsigned long instructionCounter_ = 0;
 
