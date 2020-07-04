@@ -16,7 +16,8 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 ## Features
 
 - ✅ Available on all 3 major platforms, Linux, OS/X, Windows.
-- ✅ Emoji support (-: 🌈 💝 😛 👪 :-)
+- ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emojis :-)
+- ✅ Unicode: Grapheme cluster support
 - ✅ Font ligatures support (such as in Fira Code).
 - ✅ Bold and italic fonts
 - ✅ GPU-accelerated rendering.
