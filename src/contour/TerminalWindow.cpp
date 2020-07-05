@@ -558,10 +558,16 @@ void TerminalWindow::paintGL()
         state_.store(State::CleanPainting);
         now_ = chrono::steady_clock::now();
 
-        auto const scaledWidth = static_cast<GLsizei>(static_cast<float>(width()) * contentScale());
-        auto const scaledHeight = static_cast<GLsizei>(static_cast<float>(height()) * contentScale());
+        QPoint const viewport{
+            static_cast<int>(static_cast<float>(width()) * contentScale()),
+            static_cast<int>(static_cast<float>(height()) * contentScale())
+        };
 
-        glViewport(0, 0, scaledWidth, scaledHeight);
+        if (viewport != renderStateCache_.viewport)
+        {
+            glViewport(0, 0, static_cast<GLsizei>(viewport.x()), static_cast<GLsizei>(viewport.y()));
+            renderStateCache_.viewport = viewport;
+        }
 
         {
             auto calls = decltype(queuedCalls_){};
@@ -573,7 +579,12 @@ void TerminalWindow::paintGL()
         }
 
         QVector4D const bg = GLRenderer::canonicalColor(profile().colors.defaultBackground, profile().backgroundOpacity);
-        glClearColor(bg[0], bg[1], bg[2], bg[3]);
+        if (bg != renderStateCache_.backgroundColor)
+        {
+            glClearColor(bg[0], bg[1], bg[2], bg[3]);
+            renderStateCache_.backgroundColor = bg;
+        }
+
         glClear(GL_COLOR_BUFFER_BIT);
 
         //terminal::view::render(terminalView_, now_);

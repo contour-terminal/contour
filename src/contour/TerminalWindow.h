@@ -22,9 +22,11 @@
 
 #include <crispy/text/FontLoader.h>
 
-#include <QOpenGLWindow>
-#include <QOpenGLExtraFunctions>
-#include <QTimer>
+#include <QtCore/QPoint>
+#include <QtCore/QTimer>
+#include <QtGui/QOpenGLWindow>
+#include <QtGui/QOpenGLExtraFunctions>
+#include <QtGui/QVector4D>
 #include <QtWidgets/QSystemTrayIcon>
 
 #include <atomic>
@@ -195,6 +197,12 @@ class TerminalWindow :
 #if defined(CONTOUR_VT_METRICS)
     terminal::Metrics terminalMetrics_{};
 #endif
+
+    // render state cache
+    struct {
+        QVector4D backgroundColor{};
+        QPoint viewport{};
+    } renderStateCache_;
 };
 
 } // namespace contour

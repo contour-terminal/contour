@@ -146,21 +146,21 @@ Renderer::Renderer() :
     // 0 (vec3): vertex buffer
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(0);
 
     // 1 (vec3): texture coordinates buffer
     glGenBuffers(1, &texCoordsBuffer_);
     glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(1);
 
     // 2 (vec4): color buffer
     glGenBuffers(1, &colorsBuffer_);
     glBindBuffer(GL_ARRAY_BUFFER, colorsBuffer_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(2);
 }
@@ -246,21 +246,21 @@ void Renderer::execute()
         glBufferData(GL_ARRAY_BUFFER,
                      scheduler_->vertexCoords.size() * sizeof(GLfloat),
                      scheduler_->vertexCoords.data(),
-                     GL_STATIC_DRAW);
+                     GL_DYNAMIC_DRAW);
 
         // upload texture coordinates
         glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
         glBufferData(GL_ARRAY_BUFFER,
                      scheduler_->texCoords.size() * sizeof(GLfloat),
                      scheduler_->texCoords.data(),
-                     GL_STATIC_DRAW);
+                     GL_DYNAMIC_DRAW);
 
         // upload text colors
         glBindBuffer(GL_ARRAY_BUFFER, colorsBuffer_);
         glBufferData(GL_ARRAY_BUFFER,
                      scheduler_->colors.size() * sizeof(GLfloat),
                      scheduler_->colors.data(),
-                     GL_STATIC_DRAW);
+                     GL_DYNAMIC_DRAW);
 
         glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(scheduler_->vertexCoords.size()));
 
