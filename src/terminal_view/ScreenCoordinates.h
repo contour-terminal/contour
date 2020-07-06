@@ -27,7 +27,11 @@ struct ScreenCoordinates {
     constexpr QPoint map(cursor_pos_t col, cursor_pos_t row) const noexcept {
         return QPoint{
             static_cast<int>(leftMargin + (col - 1) * cellWidth),
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
             static_cast<int>(bottomMargin + (screenSize.rows - row) * cellHeight)
+#else
+            static_cast<int>((row - 1) * cellHeight)
+#endif
         };
     }
 };

@@ -152,6 +152,8 @@ Font::~Font()
         FT_Done_Face(face_);
 }
 
+#define LIBTERMINAL_VIEW_NATURAL_COORDS 1
+
 optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
 {
     FT_Int32 flags = FT_LOAD_DEFAULT;
@@ -199,14 +201,18 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
         bitmap.resize(height * width);
         for (unsigned i = 0; i < height; ++i)
             for (unsigned j = 0; j < face_->glyph->bitmap.width; ++j)
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
                 bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
+#else
+                bitmap[(height - i - 1) * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
+#endif
     }
     else
     {
         bitmap.resize(height * width * 4);
-        auto s = buffer;
         auto t = bitmap.begin();
-
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
+        auto s = buffer;
         for (unsigned i = 0; i < width * height; ++i)
         {
             // BGRA -> RGBA
@@ -216,6 +222,21 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
             *t++ = s[3];
             s += 4;
         }
+#else
+        for (unsigned y = 0; y < height; ++y)
+        {
+            auto s = buffer + (height - y - 1) * width * 4;
+            for (unsigned x = 0; x < width * 4; x += 4)
+            {
+                // BGRA -> RGBA
+                *t++ = s[2];
+                *t++ = s[1];
+                *t++ = s[0];
+                *t++ = s[3];
+                s += 4;
+            }
+        }
+#endif
     }
 
     return {GlyphBitmap{

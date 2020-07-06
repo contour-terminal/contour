@@ -537,8 +537,12 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
             terminalView_->resize(width(), height());
             terminalView_->setProjection(
                 ortho(
-                    0.0f, static_cast<float>(width()),
-                    0.0f, static_cast<float>(height())
+                    0.0f, static_cast<float>(width()),      // left, right
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS)
+                    0.0f, static_cast<float>(height())      // bottom, top
+#else
+                    static_cast<float>(height()), 0.0f      // bottom, top
+#endif
                 )
             );
             if (setScreenDirty())

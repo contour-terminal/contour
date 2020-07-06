@@ -47,6 +47,11 @@ add_library(terminal_view STATIC
     TextRenderer.cpp TextRenderer.h
 )
 
+option(LIBTERMINAL_VIEW_NATURAL_COORDS "Natural coordinates" OFF)
+if(LIBTERMINAL_VIEW_NATURAL_COORDS)
+    target_compile_definitions(terminal_view PUBLIC LIBTERMINAL_VIEW_NATURAL_COORDS)
+endif()
+
 target_include_directories(terminal_view PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(terminal_view PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 

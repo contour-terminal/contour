@@ -130,17 +130,37 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
                          metadata);
 }
 
+#define LIBTERMINAL_VIEW_NATURAL_COORDS 1
 void TextRenderer::renderTexture(QPoint const& _pos,
                                  QVector4D const& _color,
                                  atlas::TextureInfo const& _textureInfo,
                                  Glyph const& _glyph,
                                  GlyphPosition const& _gpos)
 {
-    unsigned const px = _pos.x() + _gpos.x;
-    unsigned const py = _pos.y() + _gpos.y;
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
+    auto const x = _pos.x() + _gpos.x + _glyph.bearing.x();
+    auto const y = _pos.y() + _gpos.y + _gpos.font.get().baseline() - _glyph.descender;
+#else
+    auto const x = _pos.x()
+                 + _gpos.x
+                 + _glyph.bearing.x();
 
-    auto const x = px + _glyph.bearing.x();
-    auto const y = py + _gpos.font.get().baseline() - _glyph.descender;
+    auto const y = _pos.y()
+                 + _gpos.font.get().bitmapHeight()
+                 + _gpos.y
+                 ;
+#endif
+
+    // cout << fmt::format(
+    //     "Text.render: xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}\n",
+    //     x, y,
+    //     _pos.x(), _pos.y(),
+    //     _gpos.x, _gpos.y,
+    //     _gpos.font.get().baseline(),
+    //     _gpos.font.get().lineHeight(),
+    //     _gpos.font.get().bitmapHeight(),
+    //     _glyph.descender
+    // );
 
     renderTexture(QPoint(x, y), _color, _textureInfo);
 

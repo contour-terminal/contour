@@ -282,10 +282,13 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
             _decoration, _row, _col, _columnCount, _color
         );
 #endif
-
         auto const pos = screenCoordinates_.map(_col, _row);
         auto const x = static_cast<unsigned>(pos.x());
+#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
         auto const y = static_cast<unsigned>(pos.y());
+#else
+        auto const y = static_cast<unsigned>(pos.y()) + screenCoordinates_.cellHeight;
+#endif
         auto const z = 0u;
         auto const color = QVector4D(
             static_cast<float>(_color.red) / 255.0f,
