@@ -139,6 +139,8 @@ class TextRenderer : public QOpenGLFunctions {
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;
+    int marginLocation_;
+    int cellSizeLocation_;
     crispy::text::TextRenderer renderer_;
 };
 

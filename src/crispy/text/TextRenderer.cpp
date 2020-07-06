@@ -74,6 +74,19 @@ void TextRenderer::render(QPoint _pos,
                           get<0>(*ti).get(), // TextureInfo
                           get<1>(*ti).get(), // Metadata
                           gpos);
+    #else
+    unsigned offset = 0;
+    for (GlyphPosition const& gpos : _glyphPositions)
+    {
+        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
+            renderTexture(QPoint(_pos.x() + offset, _pos.y()),
+                          _color,
+                          get<0>(*ti).get(), // TextureInfo
+                          get<1>(*ti).get(), // Metadata
+                          gpos);
+        ++offset;
+    }
+    #endif
 }
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)

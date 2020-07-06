@@ -42,7 +42,9 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
     fonts_{ _fonts },
     textShaper_{},
     textShader_{ createShader(_textShaderConfig) },
-    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") }
+    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
+    marginLocation_{ textShader_->uniformLocation("vs_margin") },
+    cellSizeLocation_{ textShader_->uniformLocation("vs_cellSize") }
 {
     initializeOpenGLFunctions();
 
@@ -142,7 +144,11 @@ void TextRenderer::flushPendingSegments()
 
     auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_);
     renderer_.render(
+        #if 1
         screenCoordinates_.map(startColumn_, row_),
+        #else
+        QPoint(startColumn_ - 1, row_ - 1), // `- 1` because it'll be zero-indexed
+        #endif
         cachedGlyphPositions(),
         QVector4D(
             static_cast<float>(fgColor.red) / 255.0f,
@@ -259,7 +265,17 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
 void TextRenderer::execute()
 {
     textShader_->bind();
+
+    // TODO: only upload when it actually DOES change
     textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
+    textShader_->setUniformValue(marginLocation_, QVector2D(
+        static_cast<float>(screenCoordinates_.leftMargin),
+        static_cast<float>(screenCoordinates_.bottomMargin)
+    ));
+    textShader_->setUniformValue(cellSizeLocation_, QVector2D(
+        static_cast<float>(cellSize_.width),
+        static_cast<float>(cellSize_.height)
+    ));
 
     renderer_.execute();
     state_ = State::Empty;

@@ -150,6 +150,13 @@ Renderer::Renderer() :
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
     glEnableVertexAttribArray(0);
 
+    // setup EBO
+    glGenBuffers(1, &ebo_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
+    static const GLuint indices[6] = { 0, 1, 3, 1, 2, 3 };
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+    //glVertexAttribDivisor(0, 1);
+
     // 1 (vec3): texture coordinates buffer
     glGenBuffers(1, &texCoordsBuffer_);
     glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
@@ -174,6 +181,7 @@ Renderer::~Renderer()
     glDeleteBuffers(1, &vbo_);
     glDeleteBuffers(1, &texCoordsBuffer_);
     glDeleteBuffers(1, &colorsBuffer_);
+    glDeleteBuffers(1, &ebo_);
 }
 
 CommandListener& Renderer::scheduler() noexcept

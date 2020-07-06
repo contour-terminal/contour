@@ -69,6 +69,7 @@ class Renderer : public QOpenGLExtraFunctions, public CommandListener {
   private:
     GLuint vao_;                // Vertex Array Object, covering all buffer objects
     GLuint vbo_;                // Buffer containing the vertex coordinates
+    GLuint ebo_;
     GLuint texCoordsBuffer_;    // Buffer containing the texture coordinates
     GLuint colorsBuffer_;       // Buffer containing the text colors
 
