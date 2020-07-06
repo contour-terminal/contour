@@ -67,8 +67,9 @@ class GLRenderer : public QOpenGLFunctions {
                ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
-    size_t cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
-    size_t cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
+    unsigned cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
+    unsigned cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
+    crispy::text::CellSize cellSize() const noexcept { return crispy::text::CellSize{cellWidth(), cellHeight()}; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);

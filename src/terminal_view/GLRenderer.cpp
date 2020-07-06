@@ -86,6 +86,8 @@ GLRenderer::GLRenderer(Logger _logger,
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
+
+    textRenderer_.setCellSize(cellSize());
 }
 
 void GLRenderer::clearCache()
@@ -111,16 +113,13 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
             fallback.get().setFontSize(_fontSize);
     }
 
-    auto const cellWidth = fonts_.regular.first.get().maxAdvance();
-    auto const cellHeight = fonts_.regular.first.get().lineHeight();
-    auto const cellSize = QSize{static_cast<int>(cellWidth),
-                                static_cast<int>(cellHeight)};
-
-    screenCoordinates_.cellWidth = cellWidth;
-    screenCoordinates_.cellHeight = cellHeight;
+    screenCoordinates_.cellWidth = cellWidth();
+    screenCoordinates_.cellHeight = cellHeight();
     screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
 
-    cursor_.resize(cellSize);
+    textRenderer_.setCellSize(cellSize());
+
+    cursor_.resize(QSize{static_cast<int>(cellWidth()), static_cast<int>(cellHeight())}); // TODO: use CellSize instead
     clearCache();
 
     return true;

@@ -57,13 +57,18 @@ void TextRenderer::setProjection(QMatrix4x4 const& _projection)
     renderer_.setProjection(_projection);
 }
 
+void TextRenderer::setCellSize(CellSize const& _cellSize)
+{
+    cellSize_ = _cellSize;
+}
+
 void TextRenderer::render(QPoint _pos,
                           vector<GlyphPosition> const& _glyphPositions,
-                          QVector4D const& _color,
-                          QSize const& _cellSize)
+                          QVector4D const& _color)
 {
+    #if 1
     for (GlyphPosition const& gpos : _glyphPositions)
-        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}, _cellSize); ti.has_value())
+        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
             renderTexture(_pos,
                           _color,
                           get<0>(*ti).get(), // TextureInfo
@@ -71,18 +76,16 @@ void TextRenderer::render(QPoint _pos,
                           gpos);
 }
 
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id, QSize const& _cellSize)
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 {
     TextureAtlas& atlas = _id.font.get().hasColor()
         ? colorAtlas_
         : monochromeAtlas_;
 
-    return getTextureInfo(_id, _cellSize, atlas);
+    return getTextureInfo(_id, atlas);
 }
 
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
-                                                             QSize const& _cellSize,
-                                                             TextureAtlas& _atlas)
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas)
 {
     if (optional<DataRef> const dataRef = _atlas.get(_id); dataRef.has_value())
         return dataRef;
@@ -98,8 +101,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     //auto const cw = _id.font.get()->glyph->advance.x >> 6;
     // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-    auto const ratioX = colored ? static_cast<float>(_cellSize.width()) * 2.0f / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
-    auto const ratioY = colored ? static_cast<float>(_cellSize.height()) / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
+    auto const ratioX = colored ? static_cast<float>(cellSize_.width) * 2.0f / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
+    auto const ratioY = colored ? static_cast<float>(cellSize_.height) / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
 
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;

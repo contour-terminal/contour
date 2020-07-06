@@ -87,6 +87,7 @@ class TextRenderer : public QOpenGLFunctions {
     void setFont(FontConfig const& _fonts);
 
     void setProjection(QMatrix4x4 const& _projectionMatrix);
+    void setCellSize(crispy::text::CellSize const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
     void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
@@ -134,6 +135,7 @@ class TextRenderer : public QOpenGLFunctions {
     // target surface rendering
     //
     QMatrix4x4 projectionMatrix_;
+    crispy::text::CellSize cellSize_;
     crispy::text::TextShaper textShaper_;
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;

@@ -65,6 +65,12 @@ void TextRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
     renderer_.setProjection(_projectionMatrix);
 }
 
+void TextRenderer::setCellSize(crispy::text::CellSize const& _cellSize)
+{
+    cellSize_ = _cellSize;
+    renderer_.setCellSize(_cellSize);
+}
+
 void TextRenderer::setColorProfile(ColorProfile const& _colorProfile)
 {
     colorProfile_ = _colorProfile;
@@ -143,11 +149,7 @@ void TextRenderer::flushPendingSegments()
             static_cast<float>(fgColor.green) / 255.0f,
             static_cast<float>(fgColor.blue) / 255.0f,
             1.0f
-        ),
-        QSize{
-            static_cast<int>(cellWidth()),
-            static_cast<int>(cellHeight())
-        }
+        )
     );
 }
 
@@ -258,6 +260,7 @@ void TextRenderer::execute()
 {
     textShader_->bind();
     textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
+
     renderer_.execute();
     state_ = State::Empty;
 }

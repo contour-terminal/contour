@@ -55,6 +55,14 @@ namespace std {
 
 namespace crispy::text {
 
+struct CellSize {
+    unsigned width;
+    unsigned height;
+};
+constexpr bool operator==(CellSize const& a, CellSize const& b) noexcept { return a.width == b.width && a.height == b.height; }
+constexpr bool operator!=(CellSize const& a, CellSize const& b) noexcept { return !(a == b); }
+// TODO: fmt::formatter<CellSize>
+
 /**
  * High-level OpenGL text shaping API
  */
@@ -64,11 +72,11 @@ class TextRenderer {
     ~TextRenderer();
 
     void setProjection(QMatrix4x4 const& _projection);
+    void setCellSize(CellSize const& _cellSize);
 
     void render(QPoint _pos,
                 std::vector<GlyphPosition> const& glyphPositions,
-                QVector4D const& _color,
-                QSize const& _cellSize);
+                QVector4D const& _color);
 
     void execute();
 
@@ -94,8 +102,8 @@ class TextRenderer {
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
     using DataRef = TextRenderer::TextureAtlas::DataRef;
 
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize);
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id, QSize const& _cellSize, TextureAtlas& _atlas);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
 
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
@@ -106,6 +114,7 @@ class TextRenderer {
     atlas::Renderer renderer_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
+    CellSize cellSize_;
 };
 
 } // end namespace
