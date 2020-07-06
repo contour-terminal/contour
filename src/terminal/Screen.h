@@ -392,7 +392,7 @@ struct ScreenBuffer {
     std::unordered_map<std::string, HyperlinkRef> hyperlinks;
 
 	void appendChar(char32_t _codepoint, bool _consecutive);
-	void appendCharToCurrent(char32_t _codepoint);
+	void writeCharToCurrentAndAdvance(char32_t _codepoint);
     void clearAndAdvance(unsigned _offset);
 
 	// Applies LF but also moves cursor to given column @p _column.

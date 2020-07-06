@@ -46,8 +46,6 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
     marginLocation_{ textShader_->uniformLocation("vs_margin") },
     cellSizeLocation_{ textShader_->uniformLocation("vs_cellSize") }
 {
-    initializeOpenGLFunctions();
-
     textShader_->bind();
     textShader_->setUniformValue("fs_monochromeTextures", 0);
     textShader_->setUniformValue("fs_colorTextures", 1);

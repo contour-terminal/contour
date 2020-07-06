@@ -72,8 +72,8 @@ struct Renderer::ExecutionScheduler : public CommandListener
                 x + r, y + s, z
             };
 
-            copy(vertices, back_inserter(this->vertexCoords));
-            assert(this->vertexCoords.size() == 6 * 3 * renderTextures.size());
+            copy(vertices, back_inserter(vertexCoords));
+            assert(vertexCoords.size() == 6 * 3 * renderTextures.size());
         }
 
         { // texture coordinates

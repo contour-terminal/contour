@@ -311,7 +311,7 @@ void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
         && unicode::grapheme_segmenter::nonbreakable(lastColumn->codepoint(lastColumn->codepointCount() - 1), ch);
 
     if (!insertToPrev)
-        appendCharToCurrent(ch);
+        writeCharToCurrentAndAdvance(ch);
     else
     {
         auto const extendedWidth = lastColumn->appendCharacter(ch);

@@ -76,7 +76,7 @@ namespace terminal::view {
 struct RenderMetrics;
 
 /// Text Rendering Pipeline
-class TextRenderer : public QOpenGLFunctions {
+class TextRenderer {
   public:
     TextRenderer(RenderMetrics& _renderMetrics,
                  ScreenCoordinates const& _screenCoordinates,
@@ -97,10 +97,6 @@ class TextRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
-    size_t cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
-    size_t cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
-    ColorProfile const& colorProfile() const noexcept { return colorProfile_; }
-
     void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
     void extend(ScreenBuffer::Cell const& _cell, cursor_pos_t _column);
     crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
