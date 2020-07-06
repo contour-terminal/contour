@@ -233,8 +233,7 @@ struct ScreenBuffer {
             if (_codepoint)
             {
                 codepointCount_ = 1;
-                width_ = unicode::width(_codepoint);
-                assert(width_ != 0);
+                width_ = std::max(unicode::width(_codepoint), 1);
             }
             else
             {

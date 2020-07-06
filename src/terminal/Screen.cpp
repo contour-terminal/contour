@@ -296,12 +296,14 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
     verifyState();
 }
 
-void ScreenBuffer::appendChar(char32_t ch, bool _consecutive)
+void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
 {
     verifyState();
 
     if (wrapPending && autoWrap)
         linefeed(margin_.horizontal.from);
+
+    auto const ch = _ch == 0x7F ? ' ' : _ch;
 
     bool const insertToPrev =
         _consecutive
@@ -336,7 +338,7 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
         wrapPending = true;
 }
 
-void ScreenBuffer::appendCharToCurrent(char32_t ch)
+void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t ch)
 {
     Cell& cell = *currentColumn;
     cell.setCharacter(ch);
