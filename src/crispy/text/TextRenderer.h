@@ -98,6 +98,7 @@ class TextRenderer {
         int descender;
         int advance;            // offset to advance to next glyph in line.
     };
+    friend struct fmt::formatter<crispy::text::TextRenderer::Glyph>;
 
     using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
     using DataRef = TextRenderer::TextureAtlas::DataRef;
@@ -118,3 +119,24 @@ class TextRenderer {
 };
 
 } // end namespace
+
+namespace fmt {
+    template <>
+    struct formatter<crispy::text::TextRenderer::Glyph> {
+        using Glyph = crispy::text::TextRenderer::Glyph;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(Glyph const& _glyph, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "size:{}x{}, bearing:{}x{}, height:{}, descender:{}, advance:{}",
+                _glyph.size.x(),
+                _glyph.size.y(),
+                _glyph.bearing.x(),
+                _glyph.bearing.y(),
+                _glyph.height,
+                _glyph.descender,
+                _glyph.advance);
+        }
+    };
+}
