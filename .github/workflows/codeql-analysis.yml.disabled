@@ -1,0 +1,61 @@
+name: "Code scanning"
+
+on:
+  push:
+    branches:
+      - master
+      - wip
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  CodeQL-Build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          # We must fetch at least the immediate parents so that if this is
+          # a pull request then we can checkout the head.
+          fetch-depth: 2
+
+      # If this run was triggered by a pull request event, then checkout
+      # the head of the pull request instead of the merge commit.
+      - run: git checkout HEAD^2
+        if: ${{ github.event_name == 'pull_request' }}
+
+      - name: "initialize sub modules"
+        run: git submodule update --init --recursive
+
+      # Initializes the CodeQL tools for scanning.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v1
+        with:
+          languages: cpp
+
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt -q update
+          sudo apt install -y "g++-9" \
+                  libfreetype6-dev \
+                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                  libfontconfig1-dev libharfbuzz-dev
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          cd build && cmake .. \
+            -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
+            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+            -DYAML_CPP_INSTALL=OFF
+      - name: "build"
+        run: cmake --build build/ -- -j3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v1
