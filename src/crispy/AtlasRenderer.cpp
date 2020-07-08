@@ -33,9 +33,8 @@ struct Renderer::ExecutionScheduler : public CommandListener
     std::vector<CreateAtlas> createAtlases;
     std::vector<UploadTexture> uploadTextures;
     std::vector<RenderTexture> renderTextures;
-    std::vector<GLfloat> vertexCoords;
-    std::vector<GLfloat> texCoords;
-    std::vector<GLfloat> colors;
+    std::vector<GLfloat> buffer;
+    GLsizei vertexCount = 0;
     std::vector<DestroyAtlas> destroyAtlases;
 
     void createAtlas(CreateAtlas const& _atlas) override
@@ -52,60 +51,43 @@ struct Renderer::ExecutionScheduler : public CommandListener
     {
         renderTextures.emplace_back(_render);
 
-        { // vertex coordinates
-            GLfloat const x = _render.x;
-            GLfloat const y = _render.y;
-            GLfloat const z = _render.z;
-          //GLfloat const w = _render.w;
-            GLfloat const r = _render.texture.get().targetWidth;
-            GLfloat const s = _render.texture.get().targetHeight;
+        // Vertices
+        GLfloat const x = _render.x;
+        GLfloat const y = _render.y;
+        GLfloat const z = _render.z;
+      //GLfloat const w = _render.w;
+        GLfloat const r = _render.texture.get().targetWidth;
+        GLfloat const s = _render.texture.get().targetHeight;
 
-            GLfloat const vertices[6 * 3] = {
-                // first triangle
-                x,     y + s, z,
-                x,     y,     z,
-                x + r, y,     z,
+        // TexCoords
+        GLfloat const rx = _render.texture.get().relativeX;
+        GLfloat const ry = _render.texture.get().relativeY;
+        GLfloat const w = _render.texture.get().relativeWidth;
+        GLfloat const h = _render.texture.get().relativeHeight;
+        GLfloat const i = _render.texture.get().z;
+        GLfloat const u = _render.texture.get().user;
 
-                // second triangle
-                x,     y + s, z,
-                x + r, y,     z,
-                x + r, y + s, z
-            };
+        // color
+        GLfloat const cr = _render.color[0];
+        GLfloat const cg = _render.color[1];
+        GLfloat const cb = _render.color[2];
+        GLfloat const ca = _render.color[3];
 
-            copy(vertices, back_inserter(vertexCoords));
-            assert(vertexCoords.size() == 6 * 3 * renderTextures.size());
-        }
+        GLfloat const vertices[6 * 11] = {
+            // first triangle
+        // <X      Y      Z> <X       Y       I  U>  <R   G   B   A>
+            x,     y + s, z,  rx,     ry,     i, u,  cr, cg, cb, ca,
+            x,     y,     z,  rx,     ry + h, i, u,  cr, cg, cb, ca,
+            x + r, y,     z,  rx + w, ry + h, i, u,  cr, cg, cb, ca,
 
-        { // texture coordinates
-            GLfloat const rx = _render.texture.get().relativeX;
-            GLfloat const ry = _render.texture.get().relativeY;
-            GLfloat const w = _render.texture.get().relativeWidth;
-            GLfloat const h = _render.texture.get().relativeHeight;
-            GLfloat const i = _render.texture.get().z;
-            GLfloat const u = _render.texture.get().user;
-            GLfloat const texCoords[6 * 4] = {
-                // first triangle
-                rx,      ry,     i, u,
-                rx,      ry + h, i, u,
-                rx + w,  ry + h, i, u,
+            // second triangle
+            x,     y + s, z,  rx,     ry,     i, u,  cr, cg, cb, ca,
+            x + r, y,     z,  rx + w, ry + h, i, u,  cr, cg, cb, ca,
+            x + r, y + s, z,  rx + w, ry,     i, u,  cr, cg, cb, ca,
+        };
 
-                // second triangle
-                rx,      ry,     i, u,
-                rx + w,  ry + h, i, u,
-                rx + w,  ry,     i, u,
-            };
-            copy(texCoords, back_inserter(this->texCoords));
-        }
-
-        // texture color that MAY be blended onto the texture
-        for (size_t i = 0; i < 6; ++i)
-        {
-            colors.push_back(_render.color[0]);
-            colors.push_back(_render.color[1]);
-            colors.push_back(_render.color[2]);
-            colors.push_back(_render.color[3]);
-        }
-        assert(colors.size() == 6 * 4 * renderTextures.size());
+        copy(vertices, back_inserter(buffer));
+        vertexCount += 6;
     }
 
     void destroyAtlas(DestroyAtlas const& _atlas) override
@@ -126,10 +108,9 @@ struct Renderer::ExecutionScheduler : public CommandListener
         createAtlases.clear();
         uploadTextures.clear();
         renderTextures.clear();
-        vertexCoords.clear();
-        texCoords.clear();
-        colors.clear();
         destroyAtlases.clear();
+        buffer.clear();
+        vertexCount = 0;
     }
 };
 
@@ -143,33 +124,35 @@ Renderer::Renderer() :
     glGenVertexArrays(1, &vao_);
     glBindVertexArray(vao_);
 
-    // 0 (vec3): vertex buffer
+    auto constexpr BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
+    auto constexpr VertexOffset = (void const*) 0;
+    auto const TexCoordOffset = (void const*) (3 * sizeof(GLfloat));
+    auto const ColorOffset = (void const*) (7 * sizeof(GLfloat));
+
     glGenBuffers(1, &vbo_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glBufferData(GL_ARRAY_BUFFER, 0/* sizeof(GLfloat) * 6 * 11 * 200 * 100*/, nullptr, GL_STREAM_DRAW);
+
+    // 0 (vec3): vertex buffer
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset);
     glEnableVertexAttribArray(0);
 
-    // setup EBO
-    glGenBuffers(1, &ebo_);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
-    static const GLuint indices[6] = { 0, 1, 3, 1, 2, 3 };
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-    //glVertexAttribDivisor(0, 1);
-
     // 1 (vec3): texture coordinates buffer
-    glGenBuffers(1, &texCoordsBuffer_);
-    glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, TexCoordOffset);
     glEnableVertexAttribArray(1);
 
     // 2 (vec4): color buffer
-    glGenBuffers(1, &colorsBuffer_);
-    glBindBuffer(GL_ARRAY_BUFFER, colorsBuffer_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset);
     glEnableVertexAttribArray(2);
+
+    // setup EBO
+    // glGenBuffers(1, &ebo_);
+    // glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
+    // static const GLuint indices[6] = { 0, 1, 3, 1, 2, 3 };
+    // glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    // TODO: later for instanced rendering
+    //glVertexAttribDivisor(0, 1);
 }
 
 Renderer::~Renderer()
@@ -179,9 +162,7 @@ Renderer::~Renderer()
 
     glDeleteVertexArrays(1, &vao_);
     glDeleteBuffers(1, &vbo_);
-    glDeleteBuffers(1, &texCoordsBuffer_);
-    glDeleteBuffers(1, &colorsBuffer_);
-    glDeleteBuffers(1, &ebo_);
+    //glDeleteBuffers(1, &ebo_);
 }
 
 CommandListener& Renderer::scheduler() noexcept
@@ -249,28 +230,14 @@ void Renderer::execute()
     {
         glBindVertexArray(vao_);
 
-        // upload vertices
+        // upload buffer
         glBindBuffer(GL_ARRAY_BUFFER, vbo_);
         glBufferData(GL_ARRAY_BUFFER,
-                     scheduler_->vertexCoords.size() * sizeof(GLfloat),
-                     scheduler_->vertexCoords.data(),
-                     GL_DYNAMIC_DRAW);
+                     scheduler_->buffer.size() * sizeof(GLfloat),
+                     scheduler_->buffer.data(),
+                     GL_STREAM_DRAW);
 
-        // upload texture coordinates
-        glBindBuffer(GL_ARRAY_BUFFER, texCoordsBuffer_);
-        glBufferData(GL_ARRAY_BUFFER,
-                     scheduler_->texCoords.size() * sizeof(GLfloat),
-                     scheduler_->texCoords.data(),
-                     GL_DYNAMIC_DRAW);
-
-        // upload text colors
-        glBindBuffer(GL_ARRAY_BUFFER, colorsBuffer_);
-        glBufferData(GL_ARRAY_BUFFER,
-                     scheduler_->colors.size() * sizeof(GLfloat),
-                     scheduler_->colors.data(),
-                     GL_DYNAMIC_DRAW);
-
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(scheduler_->vertexCoords.size()));
+        glDrawArrays(GL_TRIANGLES, 0, scheduler_->vertexCount);
 
         // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
         //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
