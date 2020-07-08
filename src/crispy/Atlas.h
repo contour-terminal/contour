@@ -21,6 +21,7 @@
 #include <cassert>
 #include <functional>
 #include <iomanip> // setprecision
+#include <list>
 #include <map>
 #include <optional>
 #include <ostream>
@@ -75,14 +76,14 @@ struct RenderTexture {
     unsigned x;           // window x coordinate to render the texture to
     unsigned y;           // window y coordinate to render the texture to
     unsigned z;           // window z coordinate to render the texture to
-    QVector4D color;
+    QVector4D color;      // optional; a color being associated with this texture
 };
 
 /// Generic listener API to events from an Atlas.
 ///
 /// One prominent user is the scheduler in the Renderer.
 class CommandListener {
-public:
+  public:
     virtual ~CommandListener() = default;
 
     /// Creates a new (3D) texture atlas.
@@ -107,7 +108,6 @@ public:
  * @param Key a comparable key (such as @c char or @c uint32_t) to use to store and access textures.
  * @param Metadata some optionally accessible metadata that is attached with each texture.
  */
-template <typename Key, typename Metadata = int>
 class TextureAtlas {
   public:
     /**
@@ -174,12 +174,6 @@ class TextureAtlas {
 
     constexpr unsigned maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
 
-    /// @return number of textures stored in this texture atlas.
-    constexpr size_t size() const noexcept { return allocations_.size(); }
-
-    /// @return boolean indicating whether or not this atlas is empty (has no textures present).
-    constexpr bool empty() const noexcept { return allocations_.size() == 0; }
-
     void clear()
     {
         currentInstanceId_ = instanceBaseId_;
@@ -187,30 +181,10 @@ class TextureAtlas {
         currentX_ = 0;
         currentY_ = 0;
         maxTextureHeightInCurrentRow_ = 0;
-
-        allocations_.clear();
-        metadata_.clear();
     }
 
-    /// Tests whether given sub-texture is being present in this texture atlas.
-    constexpr bool contains(Key const& _id) const
-    {
-        return allocations_.find(_id) != allocations_.end();
-    }
-
-    using DataRef = std::tuple<
-        std::reference_wrapper<TextureInfo const>,
-        std::reference_wrapper<Metadata const>
-    >;
-
-    /// Retrieves TextureInfo and Metadata tuple if available, std::nullopt otherwise.
-    [[nodiscard]] std::optional<DataRef> get(Key const& _id) const
-    {
-        if (auto const i = allocations_.find(_id); i != allocations_.end())
-            return DataRef{std::ref(i->second), std::ref(metadata_.at(_id))};
-        else
-            return std::nullopt;
-    }
+    TextureInfo& get(size_t _index) { return *std::next(std::begin(textureInfos_), _index); }
+    TextureInfo const& get(size_t _index) const { return *std::next(std::begin(textureInfos_), _index); }
 
     /// Inserts a new texture into the atlas.
     ///
@@ -220,58 +194,51 @@ class TextureAtlas {
     /// @param _format   data format
     /// @param _data     raw texture data to be inserted
     /// @param _user     user defined data that is supplied along with TexCoord's 4th component
-    /// @param _metadata user defined metadata for the host
-    std::optional<DataRef> insert(Key const& _id,
-                                  unsigned _width,
-                                  unsigned _height,
-                                  unsigned _targetWidth,
-                                  unsigned _targetHeight,
-                                  unsigned _format,
-                                  Buffer _data,
-                                  unsigned _user = 0,
-                                  Metadata _metadata = {})
+    ///
+    /// @return index to the created TextureInfo or std::nullopt if failed.
+    TextureInfo const* insert(unsigned _width,
+                              unsigned _height,
+                              unsigned _targetWidth,
+                              unsigned _targetHeight,
+                              unsigned _format,
+                              Buffer&& _data,
+                              unsigned _user = 0)
     {
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
         if (_height > height_ || _width > width_)
-            return std::nullopt;
+            return nullptr;
 
         // ensure we have enough width space in current row
         if (currentX_ + _width >= width_ && !advanceY())
-            return std::nullopt;
+            return nullptr;
 
         // ensure we have enoguh height space in current row
         if (currentY_ + _height > height_ && !advanceZ())
-            return std::nullopt;
+            return nullptr;
 
-        assert(allocations_.find(_id) == allocations_.end());
-
-        TextureInfo const& info = allocations_.emplace(std::pair{
-            _id,
-            TextureInfo{
-                currentInstanceId_,
-                name_,
-                currentX_,
-                currentY_,
-                currentZ_,
-                _width,
-                _height,
-                _targetWidth,
-                _targetHeight,
-                static_cast<float>(currentX_) / static_cast<float>(width_),
-                static_cast<float>(currentY_) / static_cast<float>(height_),
-                static_cast<float>(_width) / static_cast<float>(width_),
-                static_cast<float>(_height) / static_cast<float>(height_),
-                _user
-            }
-        }).first->second;
-
-        if constexpr (!std::is_same_v<Metadata, void>)
-            metadata_.emplace(std::pair{_id, std::move(_metadata)});
+        textureInfos_.emplace_back(TextureInfo{
+            currentInstanceId_,
+            name_,
+            currentX_,
+            currentY_,
+            currentZ_,
+            _width,
+            _height,
+            _targetWidth,
+            _targetHeight,
+            static_cast<float>(currentX_) / static_cast<float>(width_),
+            static_cast<float>(currentY_) / static_cast<float>(height_),
+            static_cast<float>(_width) / static_cast<float>(width_),
+            static_cast<float>(_height) / static_cast<float>(height_),
+            _user
+        });
 
         currentX_ += _width;
 
         if (_height > maxTextureHeightInCurrentRow_)
             maxTextureHeightInCurrentRow_ = _height;
+
+        TextureInfo const& info = textureInfos_.back();
 
         commandListener_.uploadTexture(UploadTexture{
             std::ref(info),
@@ -279,7 +246,7 @@ class TextureAtlas {
             _format
         });
 
-        return get(_id);
+        return &info;
     }
 
   private:
@@ -356,6 +323,115 @@ class TextureAtlas {
     unsigned currentY_ = 0;             // current Y-offset to start drawing to
     unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
+    std::list<TextureInfo> textureInfos_;
+};
+
+template <typename Key, typename Metadata = int>
+class MetadataTextureAtlas {
+  public:
+    MetadataTextureAtlas(unsigned _instanceBaseId,
+                         unsigned _maxInstances,
+                         unsigned _depth,
+                         unsigned _width,
+                         unsigned _height,
+                         unsigned _format, // such as GL_R8 or GL_RGBA8
+                         CommandListener& _listener,
+                         std::string _name = {}) :
+        atlas_{
+            _instanceBaseId,
+            _maxInstances,
+            _depth,
+            _width,
+            _height,
+            _format,
+            _listener,
+            std::move(_name)
+        }
+    {
+    }
+
+    MetadataTextureAtlas(MetadataTextureAtlas const&) = delete;
+    MetadataTextureAtlas& operator=(MetadataTextureAtlas const&) = delete;
+    MetadataTextureAtlas(MetadataTextureAtlas&&) = delete; // TODO
+    MetadataTextureAtlas& operator=(MetadataTextureAtlas&&) = delete; // TODO
+
+    //std::string const& name() const noexcept { return name_; }
+    constexpr unsigned maxInstances() const noexcept { return atlas_.maxInstances(); }
+    constexpr unsigned depth() const noexcept { return atlas_.depth(); }
+    constexpr unsigned width() const noexcept { return atlas_.width(); }
+    constexpr unsigned height() const noexcept { return atlas_.height(); }
+
+    /// @return number of textures stored in this texture atlas.
+    constexpr size_t size() const noexcept { return allocations_.size(); }
+
+    /// @return boolean indicating whether or not this atlas is empty (has no textures present).
+    constexpr bool empty() const noexcept { return allocations_.size() == 0; }
+
+    void clear()
+    {
+        atlas_.clear();
+        allocations_.clear();
+        metadata_.clear();
+    }
+
+    /// Tests whether given sub-texture is being present in this texture atlas.
+    constexpr bool contains(Key const& _id) const
+    {
+        return allocations_.find(_id) != allocations_.end();
+    }
+
+    using DataRef = std::tuple<
+        std::reference_wrapper<TextureInfo const>,
+        std::reference_wrapper<Metadata const>
+    >;
+
+    /// Inserts a new texture into the atlas.
+    ///
+    /// @param _id       a unique identifier used for accessing this texture
+    /// @param _width    texture width in pixels
+    /// @param _height   texture height in pixels
+    /// @param _format   data format
+    /// @param _data     raw texture data to be inserted
+    /// @param _user     user defined data that is supplied along with TexCoord's 4th component
+    /// @param _metadata user defined metadata for the host
+    ///
+    /// @return index to the corresponding DataRef or std::nullopt if failed.
+    std::optional<DataRef> insert(Key const& _id,
+                                  unsigned _width,
+                                  unsigned _height,
+                                  unsigned _targetWidth,
+                                  unsigned _targetHeight,
+                                  unsigned _format,
+                                  Buffer&& _data,
+                                  unsigned _user = 0,
+                                  Metadata _metadata = {})
+    {
+        assert(allocations_.find(_id) == allocations_.end());
+
+        TextureInfo const* textureInfo = atlas_.insert(_width, _height, _targetWidth, _targetHeight, _format, std::move(_data), _user);
+        if (!textureInfo)
+            return std::nullopt;
+
+        allocations_.emplace(std::pair{_id, std::ref(*textureInfo)});
+
+        if constexpr (!std::is_same_v<Metadata, void>)
+            metadata_.emplace(std::pair{_id, std::move(_metadata)});
+
+        return get(_id);
+    }
+
+    /// Retrieves TextureInfo and Metadata tuple if available, std::nullopt otherwise.
+    [[nodiscard]] std::optional<DataRef> get(Key const& _id) const
+    {
+        if (auto const i = allocations_.find(_id); i != allocations_.end())
+            return DataRef{std::ref(i->second), std::ref(metadata_.at(_id))};
+        else
+            return std::nullopt;
+    }
+
+  private:
+    TextureAtlas atlas_;
+
     std::map<Key, TextureInfo> allocations_ = {};
 
     // conditionally transform void to int as I can't conditionally enable/disable this member var.
@@ -367,63 +443,102 @@ class TextureAtlas {
 
 } // end namespace
 
-namespace std {
-    inline ostream& operator<<(ostream& _os, crispy::atlas::CreateAtlas const& _cmd)
-    {
-        _os << '{'
-            << _cmd.atlasName.get() << '/' << _cmd.atlas
-            << ", " << _cmd.width << '/' << _cmd.height << '/' << _cmd.depth
-            << ", " << _cmd.format
-            << '}';
-        return _os;
-    }
+namespace fmt { // {{{
+    template <>
+    struct formatter<crispy::atlas::CreateAtlas> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::CreateAtlas const& _cmd, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<atlas:{}, dim:{}x{}, depth:{}, format:{}>",
+                _cmd.atlasName.get(),
+                _cmd.width,
+                _cmd.height,
+                _cmd.depth,
+                _cmd.format
+            );
+        }
+    };
 
-    inline ostream& operator<<(ostream& _os, crispy::atlas::TextureInfo const& _info)
-    {
-        _os << '{'
-            << _info.atlasName.get() << '/' << _info.atlas << '/' << _info.x << '/' << _info.y << '/' << _info.z
-            << ", " << _info.width << 'x' << _info.height
-            << '}';
-        return _os;
-    }
+    template <>
+    struct formatter<crispy::atlas::TextureInfo> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::TextureInfo const& info, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<{}; {}x{}/{}x{}; {}/{}/{}>",
+                info.atlasName.get(),
+                info.width,
+                info.height,
+                info.targetWidth,
+                info.targetHeight,
+                info.x,
+                info.y,
+                info.z
+            );
+        }
+    };
 
-    inline ostream& operator<<(ostream& _os, crispy::atlas::UploadTexture const& _cmd)
-    {
-        _os << '{'
-            << _cmd.texture.get()
-            << ", len:" << _cmd.data.size()
-            << ", format:" << _cmd.format
-            << '}';
-        return _os;
-    }
+    template <>
+    struct formatter<crispy::atlas::UploadTexture> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::UploadTexture const& _cmd, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<texture:{}, len:{}, format:{}>",
+                _cmd.texture.get(),
+                _cmd.data.size(),
+                _cmd.format
+            );
+        }
+    };
 
-    inline ostream& operator<<(ostream& _os, crispy::atlas::RenderTexture const& _cmd)
-    {
-        _os << '{'
-            << "AtlasCoord: " << _cmd.texture.get()
-            << ", Target: " << _cmd.x << '/' << _cmd.y << '/' << _cmd.z
-            << '}';
-        return _os;
-    }
+    template <>
+    struct formatter<crispy::atlas::RenderTexture> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::RenderTexture const& _cmd, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<AtlasCoord:{}, target: {}:{}:{}>",
+                _cmd.texture.get(),
+                _cmd.x,
+                _cmd.y,
+                _cmd.z
+            );
+        }
+    };
 
-    inline ostream& operator<<(ostream& _os, crispy::atlas::DestroyAtlas const& _cmd)
-    {
-        _os << '{'
-            << _cmd.atlasName.get() << '/' << _cmd.atlas
-            << '}';
-        return _os;
-    }
+    template <>
+    struct formatter<crispy::atlas::DestroyAtlas> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::DestroyAtlas const& _cmd, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<atlas: {}, id:{}>",
+                _cmd.atlasName.get(),
+                _cmd.atlas
+            );
+        }
+    };
 
-    template <typename Key, typename Metadata>
-    inline ostream& operator<<(ostream& _os, crispy::atlas::TextureAtlas<Key, Metadata> const& _atlas)
-    {
-        _os << '{'
-            << _atlas.name() << ": "
-            << fmt::format("instance: {}/{}", _atlas.currentInstance(), _atlas.maxInstances())
-            << fmt::format(", dim: {}x{}x{}", _atlas.width(), _atlas.height(), _atlas.depth())
-            << fmt::format(", at: {}x{}x{}", _atlas.currentX(), _atlas.currentY(), _atlas.currentZ())
-            << fmt::format(", rowHeight: {}", _atlas.maxTextureHeightInCurrentRow())
-            << '}';
-        return _os;
-    }
-}
+    template <>
+    struct formatter<crispy::atlas::TextureAtlas> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::atlas::TextureAtlas const& _atlas, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "<instance: {}/{}, dim: {}x{}x{}, at: {}x{}x{}, rowHeight:{}>",
+                _atlas.currentInstance(), _atlas.maxInstances(),
+                _atlas.width(), _atlas.height(), _atlas.depth(),
+                _atlas.currentX(), _atlas.currentY(), _atlas.currentZ(),
+                _atlas.maxTextureHeightInCurrentRow()
+            );
+        }
+    };
+} // }}}

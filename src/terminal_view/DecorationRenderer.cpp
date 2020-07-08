@@ -121,7 +121,7 @@ void DecorationRenderer::rebuild()
             width, height,
             width, height,
             GL_RED,
-            image
+            move(image)
         );
     } // }}}
     { // {{{ double underline
@@ -143,7 +143,7 @@ void DecorationRenderer::rebuild()
             width, height,
             width, height,
             GL_RED,
-            image
+            move(image)
         );
     } // }}}
     { // {{{ curly underline
@@ -167,7 +167,7 @@ void DecorationRenderer::rebuild()
             width, height,
             width, height,
             GL_RED,
-            image
+            move(image)
         );
     } // }}}
     { // {{{ dotted underline

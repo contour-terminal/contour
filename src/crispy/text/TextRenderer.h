@@ -100,8 +100,8 @@ class TextRenderer {
     };
     friend struct fmt::formatter<crispy::text::TextRenderer::Glyph>;
 
-    using TextureAtlas = atlas::TextureAtlas<GlyphId, Glyph>;
-    using DataRef = TextRenderer::TextureAtlas::DataRef;
+    using TextureAtlas = atlas::MetadataTextureAtlas<GlyphId, Glyph>;
+    using DataRef = TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
     std::optional<DataRef> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
@@ -121,6 +121,18 @@ class TextRenderer {
 } // end namespace
 
 namespace fmt {
+    template <>
+    struct formatter<crispy::text::GlyphId> {
+        using GlyphId = crispy::text::GlyphId;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(GlyphId const& _glyphId, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "GlyphId<index:{}>", _glyphId.glyphIndex);
+        }
+    };
+
     template <>
     struct formatter<crispy::text::TextRenderer::Glyph> {
         using Glyph = crispy::text::TextRenderer::Glyph;

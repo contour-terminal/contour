@@ -100,7 +100,7 @@ class DecorationRenderer {
     void clearCache();
 
   private:
-    using Atlas = crispy::atlas::TextureAtlas<Decorator, int>; // contains various glyph decorators
+    using Atlas = crispy::atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
     using DataRef = Atlas::DataRef;
     using AtlasRenderer = crispy::atlas::Renderer;
 
