@@ -14,10 +14,11 @@
 #pragma once
 
 #include <terminal/Commands.h>
-#include <terminal_view/ShaderConfig.h>
+#include <terminal_view/ScreenCoordinates.h>
+
+#include <crispy/Atlas.h>
 
 #include <QtCore/QPoint>
-#include <QtCore/QSize>
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QVector4D>
@@ -25,45 +26,39 @@
 #include <QtGui/QOpenGLBuffer>
 #include <QtGui/QOpenGLVertexArrayObject>
 
-#include <memory>
-#include <string>
-
 namespace terminal::view {
 
-class GLCursor : public QOpenGLFunctions {
+/// Takes care of rendering the text cursor.
+class CursorRenderer {
   public:
-    GLCursor(QSize _size,
-             QMatrix4x4 _transform,
-             CursorShape _shape,
-             QVector4D const& _color,
-             ShaderConfig const& _shaderConfig);
-    ~GLCursor();
-
-    bool setShaderConfig(ShaderConfig const& _shaderConfig);
-    void setProjection(QMatrix4x4 const& _mat);
+    CursorRenderer(crispy::atlas::CommandListener& _commandListener,
+                   crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+                   ScreenCoordinates const& _screenCoordinates,
+                   CursorShape _shape,
+                   QVector4D const& _color);
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
     void setColor(QVector4D const& _color);
 
-    void resize(QSize _size);
     void render(QPoint _pos, unsigned _columnWidth);
+    void clearCache();
 
   private:
-    void updateShape();
+    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<CursorShape, int>;
+    using DataRef = TextureAtlas::DataRef;
+
+    void rebuild();
+    std::optional<DataRef> getDataRef(CursorShape _shape);
 
   private:
+    crispy::atlas::CommandListener& commandListener_;
+    TextureAtlas textureAtlas_;
+    ScreenCoordinates const& screenCoordinates_;
+
     CursorShape shape_;
-    QSize size_;
+    QVector4D color_;
     unsigned columnWidth_;
-    QMatrix4x4 projectionMatrix_;
-    std::unique_ptr<QOpenGLShaderProgram> shader_;
-    GLint transformLocation_;
-    GLint colorLocation_;
-    QOpenGLBuffer vbo_;
-    QOpenGLVertexArrayObject vao_;
-    GLenum drawMode_;
-    GLsizei drawCount_;
 };
 
 } // namespace terminal::view

@@ -13,13 +13,14 @@
  */
 #pragma once
 
-#include <terminal_view/ShaderConfig.h>
 #include <terminal_view/BackgroundRenderer.h>
-#include <terminal_view/TextRenderer.h>
+#include <terminal_view/CursorRenderer.h>
 #include <terminal_view/DecorationRenderer.h>
-#include <terminal_view/GLCursor.h>
-#include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/TextRenderer.h>
+
 #include <terminal_view/RenderMetrics.h>
+#include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/ShaderConfig.h>
 
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
@@ -63,7 +64,6 @@ class GLRenderer : public QOpenGLFunctions {
                Decorator _hyperlinkHover,
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
-               ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
 
     unsigned maxTextureDepth();
@@ -151,7 +151,7 @@ class GLRenderer : public QOpenGLFunctions {
     BackgroundRenderer backgroundRenderer_;
     TextRenderer textRenderer_;
     DecorationRenderer decorationRenderer_;
-    GLCursor cursor_;
+    CursorRenderer cursorRenderer_;
 };
 
 } // end namespace

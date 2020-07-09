@@ -63,7 +63,6 @@ GLRenderer::GLRenderer(Logger _logger,
                        Decorator _hyperlinkHover,
                        ShaderConfig const& _backgroundShaderConfig,
                        ShaderConfig const& _textShaderConfig,
-                       ShaderConfig const& _cursorShaderConfig,
                        QMatrix4x4 const& _projectionMatrix) :
     screenCoordinates_{
         _screenSize,
@@ -128,15 +127,12 @@ GLRenderer::GLRenderer(Logger _logger,
         0.75f,  // curly amplitude
         1.0f    // curly frequency
     },
-    cursor_{
-        QSize(
-            static_cast<int>(fonts_.regular.first.get().maxAdvance()),
-            static_cast<int>(fonts_.regular.first.get().lineHeight())
-        ),
-        _projectionMatrix,
+    cursorRenderer_{
+        textureRenderer_.scheduler(),
+        monochromeAtlasAllocator_,
+        screenCoordinates_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        canonicalColor(_colorProfile.cursor),
-        _cursorShaderConfig
+        canonicalColor(_colorProfile.cursor)
     }
 {
     initialize();
@@ -157,8 +153,10 @@ void GLRenderer::clearCache()
 {
     monochromeAtlasAllocator_.clear();
     coloredAtlasAllocator_.clear();
-    textRenderer_.clearCache();
+
     decorationRenderer_.clearCache();
+    cursorRenderer_.clearCache();
+    textRenderer_.clearCache();
 }
 
 void GLRenderer::setFont(FontConfig const& _fonts)
@@ -184,7 +182,6 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 
     textRenderer_.setCellSize(cellSize());
 
-    cursor_.resize(QSize{static_cast<int>(cellWidth()), static_cast<int>(cellHeight())}); // TODO: use CellSize instead
     clearCache();
 
     return true;
@@ -196,7 +193,6 @@ void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 
     backgroundRenderer_.setProjection(_projectionMatrix);
     decorationRenderer_.setProjection(_projectionMatrix);
-    cursor_.setProjection(_projectionMatrix);
 }
 
 void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
@@ -209,7 +205,7 @@ void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
     colorProfile_ = _colors;
     textRenderer_.setColorProfile(_colors);
     decorationRenderer_.setColorProfile(_colors);
-    cursor_.setColor(canonicalColor(colorProfile_.cursor));
+    cursorRenderer_.setColor(canonicalColor(colorProfile_.cursor));
 }
 
 uint64_t GLRenderer::render(Terminal& _terminal,
@@ -277,8 +273,8 @@ void GLRenderer::renderCursor(Terminal const& _terminal)
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
         Screen::Cell const& cursorCell = _terminal.absoluteAt(_terminal.cursor());
-        cursor_.setShape(_terminal.cursorShape());
-        cursor_.render(
+        cursorRenderer_.setShape(_terminal.cursorShape());
+        cursorRenderer_.render(
             screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset())),
             cursorCell.width()
         );

@@ -17,8 +17,6 @@
 
 #include "background_vert.h"
 #include "background_frag.h"
-#include "cursor_vert.h"
-#include "cursor_frag.h"
 #include "text_vert.h"
 #include "text_frag.h"
 
@@ -42,8 +40,6 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
             return {s(background_vert), s(background_frag)};
         case ShaderClass::Text:
             return {s(text_vert), s(text_frag)};
-        case ShaderClass::Cursor:
-            return {s(cursor_vert), s(cursor_frag)};
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));

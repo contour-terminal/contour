@@ -25,8 +25,7 @@ namespace terminal::view {
 
 enum class ShaderClass {
     Background,
-    Text,
-    Cursor
+    Text
 };
 
 struct ShaderConfig {
@@ -42,8 +41,6 @@ inline std::string to_string(ShaderClass _shaderClass)
             return "background";
         case ShaderClass::Text:
             return "text";
-        case ShaderClass::Cursor:
-            return "cursor";
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));

@@ -14,8 +14,6 @@
 #include "Config.h"
 #include "contour_yaml.h"
 
-#include <terminal_view/GLCursor.h>
-
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
 #include <terminal/ControlCode.h>

@@ -516,7 +516,6 @@ void TerminalWindow::initializeGL()
         bind(&TerminalWindow::onTerminalClosed, this),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
-        *config::Config::loadShaderConfig(config::ShaderClass::Cursor),
         ref(logger_)
     );
 

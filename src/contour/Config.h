@@ -138,7 +138,6 @@ struct Config {
 
     ShaderConfig backgroundShader = terminal::view::defaultShaderConfig(ShaderClass::Background);
     ShaderConfig textShader = terminal::view::defaultShaderConfig(ShaderClass::Text);
-    ShaderConfig cursorShader = terminal::view::defaultShaderConfig(ShaderClass::Cursor);
 };
 
 std::optional<std::string> readConfigFile(std::string const& _filename);

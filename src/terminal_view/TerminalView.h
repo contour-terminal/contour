@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal_view/GLCursor.h>
 #include <terminal_view/GLRenderer.h>
 #include <terminal_view/FontConfig.h>
 
@@ -63,7 +62,6 @@ class TerminalView {
                  std::function<void()> _onTerminalClosed,
                  ShaderConfig const& _backgroundShaderConfig,
                  ShaderConfig const& _textShaderConfig,
-                 ShaderConfig const& _cursorShaderConfig,
                  Logger _logger);
 
     TerminalView(TerminalView const&) = delete;

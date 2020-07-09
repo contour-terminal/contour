@@ -63,7 +63,6 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onTerminalClosed,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig,
-                           ShaderConfig const& _cursorShaderConfig,
                            Logger _logger) :
     logger_{ move(_logger) },
     fonts_{ _fonts },
@@ -81,7 +80,6 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _hyperlinkHover,
         _backgroundShaderConfig,
         _textShaderConfig,
-        _cursorShaderConfig,
         _projectionMatrix
     },
     process_{
