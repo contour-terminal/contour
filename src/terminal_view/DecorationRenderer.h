@@ -58,16 +58,18 @@ class DecorationRenderer {
   public:
     /// Constructs the decoration renderer.
     ///
+    /// @param _commandListener
+    /// @param _monochromeTextureAtlas
     /// @param _screenCoordinates
     /// @param _projectionMatrix
-    /// @param _shaderConfig
     /// @param _lineThickness
     /// @param _colorProfile
     /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
     /// @param _curlyFrequency the number of complete sine waves that one grid cell width will cover
-    DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
+    DecorationRenderer(crispy::atlas::CommandListener& _commandListener,
+                       crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+                       ScreenCoordinates const& _screenCoordinates,
                        QMatrix4x4 const& _projectionMatrix,
-                       ShaderConfig const& _shaderConfig,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover,
@@ -95,8 +97,6 @@ class DecorationRenderer {
                           unsigned _columnCount,
                           RGBColor const& _color);
 
-    void execute();
-
     void clearCache();
 
   private:
@@ -120,9 +120,7 @@ class DecorationRenderer {
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 
-    std::unique_ptr<QOpenGLShaderProgram> decoratorShader_;
-    int decoratorProjectionLocation_;
-    AtlasRenderer atlasRenderer_;
+    crispy::atlas::CommandListener& commandListener_;
     Atlas atlas_;
 };
 

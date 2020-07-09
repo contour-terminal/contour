@@ -92,8 +92,6 @@ class Renderer : public QOpenGLExtraFunctions, public CommandListener {
 
     GLuint currentActiveTexture_ = std::numeric_limits<GLuint>::max();
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
-
-    QMatrix4x4 projection_;
 };
 
 } // end namespace

@@ -79,20 +79,21 @@ struct RenderMetrics;
 class TextRenderer {
   public:
     TextRenderer(RenderMetrics& _renderMetrics,
+                 crispy::atlas::CommandListener& _commandListener,
+                 crispy::atlas::TextureAtlasAllocator& _textureAtlasAllocator,
+                 crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                  ScreenCoordinates const& _screenCoordinates,
                  ColorProfile const& _colorProfile,
-                 FontConfig const& _fonts,
-                 ShaderConfig const& _shaderConfig);
+                 FontConfig const& _fonts);
 
     void setFont(FontConfig const& _fonts);
 
-    void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setCellSize(crispy::text::CellSize const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
     void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
     void flushPendingSegments();
-    void execute();
+    void finish();
 
     void clearCache();
 
@@ -130,13 +131,8 @@ class TextRenderer {
 
     // target surface rendering
     //
-    QMatrix4x4 projectionMatrix_;
     crispy::text::CellSize cellSize_;
     crispy::text::TextShaper textShaper_;
-    std::unique_ptr<QOpenGLShaderProgram> textShader_;
-    int textProjectionLocation_;
-    int marginLocation_;
-    int cellSizeLocation_;
     crispy::text::TextRenderer renderer_;
 };
 

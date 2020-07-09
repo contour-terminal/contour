@@ -191,11 +191,6 @@ unsigned Renderer::maxTextureUnits()
     return static_cast<unsigned>(value);
 }
 
-void Renderer::setProjection(QMatrix4x4 const& _projection)
-{
-    projection_ = _projection;
-}
-
 size_t Renderer::size() const noexcept
 {
     return scheduler_->size();

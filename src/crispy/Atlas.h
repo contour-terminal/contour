@@ -108,7 +108,7 @@ class CommandListener {
  * @param Key a comparable key (such as @c char or @c uint32_t) to use to store and access textures.
  * @param Metadata some optionally accessible metadata that is attached with each texture.
  */
-class TextureAtlas {
+class TextureAtlasAllocator {
   public:
     /**
      * Constructs a texture atlas with given limits.
@@ -122,14 +122,14 @@ class TextureAtlas {
      * @param _format   an arbitrary user defined number that defines the storage format for this texture,
      *                  such as GL_R8 or GL_RBGA8 when using OpenGL
      */
-    TextureAtlas(unsigned _instanceBaseId,
-                 unsigned _maxInstances,
-                 unsigned _depth,
-                 unsigned _width,
-                 unsigned _height,
-                 unsigned _format, // such as GL_R8 or GL_RGBA8
-                 CommandListener& _listener,
-                 std::string _name = {})
+    TextureAtlasAllocator(unsigned _instanceBaseId,
+                          unsigned _maxInstances,
+                          unsigned _depth,
+                          unsigned _width,
+                          unsigned _height,
+                          unsigned _format, // such as GL_R8 or GL_RGBA8
+                          CommandListener& _listener,
+                          std::string _name = {})
       : instanceBaseId_{ _instanceBaseId },
         maxInstances_{ _maxInstances },
         depth_{ _depth },
@@ -143,12 +143,12 @@ class TextureAtlas {
         notifyCreateAtlas();
     }
 
-    TextureAtlas(TextureAtlas const&) = delete;
-    TextureAtlas& operator=(TextureAtlas const&) = delete;
-    TextureAtlas(TextureAtlas&&) = delete; // TODO
-    TextureAtlas& operator=(TextureAtlas&&) = delete; // TODO
+    TextureAtlasAllocator(TextureAtlasAllocator const&) = delete;
+    TextureAtlasAllocator& operator=(TextureAtlasAllocator const&) = delete;
+    TextureAtlasAllocator(TextureAtlasAllocator&&) = delete; // TODO
+    TextureAtlasAllocator& operator=(TextureAtlasAllocator&&) = delete; // TODO
 
-    ~TextureAtlas()
+    ~TextureAtlasAllocator()
     {
         for (unsigned id = instanceBaseId_; id <= currentInstanceId_; ++id)
             commandListener_.destroyAtlas(DestroyAtlas{id, name_});
@@ -329,24 +329,8 @@ class TextureAtlas {
 template <typename Key, typename Metadata = int>
 class MetadataTextureAtlas {
   public:
-    MetadataTextureAtlas(unsigned _instanceBaseId,
-                         unsigned _maxInstances,
-                         unsigned _depth,
-                         unsigned _width,
-                         unsigned _height,
-                         unsigned _format, // such as GL_R8 or GL_RGBA8
-                         CommandListener& _listener,
-                         std::string _name = {}) :
-        atlas_{
-            _instanceBaseId,
-            _maxInstances,
-            _depth,
-            _width,
-            _height,
-            _format,
-            _listener,
-            std::move(_name)
-        }
+    explicit MetadataTextureAtlas(TextureAtlasAllocator& _allocator) :
+        atlas_{ _allocator }
     {
     }
 
@@ -367,9 +351,13 @@ class MetadataTextureAtlas {
     /// @return boolean indicating whether or not this atlas is empty (has no textures present).
     constexpr bool empty() const noexcept { return allocations_.size() == 0; }
 
+    TextureAtlasAllocator& allocator() noexcept { return atlas_; }
+    TextureAtlasAllocator const& allocator() const noexcept { return atlas_; }
+
+    /// Clears userdata, if the TextureAtlasAllocator has to be cleared too, that has to be done
+    /// explicitly.
     void clear()
     {
-        atlas_.clear();
         allocations_.clear();
         metadata_.clear();
     }
@@ -430,7 +418,7 @@ class MetadataTextureAtlas {
     }
 
   private:
-    TextureAtlas atlas_;
+    TextureAtlasAllocator& atlas_;
 
     std::map<Key, TextureInfo> allocations_ = {};
 
@@ -527,13 +515,13 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::TextureAtlas> {
+    struct formatter<crispy::atlas::TextureAtlasAllocator> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::TextureAtlas const& _atlas, FormatContext& ctx)
+        auto format(crispy::atlas::TextureAtlasAllocator const& _atlas, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "<instance: {}/{}, dim: {}x{}x{}, at: {}x{}x{}, rowHeight:{}>",
+            return format_to(ctx.out(), "TextureAtlasAllocator<instance: {}/{}, dim: {}x{}x{}, at: {}x{}x{}, rowHeight:{}>",
                 _atlas.currentInstance(), _atlas.maxInstances(),
                 _atlas.width(), _atlas.height(), _atlas.depth(),
                 _atlas.currentX(), _atlas.currentY(), _atlas.currentZ(),

@@ -64,31 +64,28 @@ constexpr bool operator!=(CellSize const& a, CellSize const& b) noexcept { retur
 // TODO: fmt::formatter<CellSize>
 
 /**
- * High-level OpenGL text shaping API
+ * High-level graphics target caching text shaping API.
  */
 class TextRenderer {
   public:
-    TextRenderer();
+    TextRenderer(atlas::CommandListener& _commandListener,
+                 atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
+                 atlas::TextureAtlasAllocator& _coloredAtlasAllocator);
     ~TextRenderer();
 
-    void setProjection(QMatrix4x4 const& _projection);
     void setCellSize(CellSize const& _cellSize);
 
     void render(QPoint _pos,
                 std::vector<GlyphPosition> const& glyphPositions,
                 QVector4D const& _color);
 
-    void execute();
-
-    /// Clears the render cache.
-    void clearCache();
-
     /// Renders an arbitrary texture.
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
                        atlas::TextureInfo const& _textureInfo);
 
-    bool empty() const noexcept { return renderer_.empty(); }
+
+    void clearCache();
 
   private:
     struct Glyph {
@@ -112,7 +109,7 @@ class TextRenderer {
                        Glyph const& _glyph,
                        GlyphPosition const& _gpos);
 
-    atlas::Renderer renderer_;
+    atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
     CellSize cellSize_;

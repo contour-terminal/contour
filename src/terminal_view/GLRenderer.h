@@ -63,9 +63,11 @@ class GLRenderer : public QOpenGLFunctions {
                Decorator _hyperlinkHover,
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
-               ShaderConfig const& _decoratorShaderConfig,
                ShaderConfig const& _cursorShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
+
+    unsigned maxTextureDepth();
+    unsigned maxTextureSize();
 
     unsigned cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
     unsigned cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
@@ -118,12 +120,14 @@ class GLRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
+    void initialize();
     void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
     void renderCursor(Terminal const& _terminal);
     void renderSelection(Terminal const& _terminal);
 
   private:
     RenderMetrics metrics_;
+    bool initialized_ = false;
 
     ScreenCoordinates screenCoordinates_;
     Logger logger_;
@@ -133,7 +137,17 @@ class GLRenderer : public QOpenGLFunctions {
 
     FontConfig fonts_;
 
+    crispy::atlas::Renderer textureRenderer_;
+    crispy::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
+    crispy::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
+
     QMatrix4x4 projectionMatrix_;
+
+    std::unique_ptr<QOpenGLShaderProgram> textShader_;
+    int textProjectionLocation_;
+    int marginLocation_;
+    int cellSizeLocation_;
+
     BackgroundRenderer backgroundRenderer_;
     TextRenderer textRenderer_;
     DecorationRenderer decorationRenderer_;

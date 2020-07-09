@@ -32,23 +32,19 @@ using unicode::out;
 #endif
 
 TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
+                           crispy::atlas::CommandListener& _commandListener,
+                           crispy::atlas::TextureAtlasAllocator& _textureAtlasAllocator,
+                           crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                            ScreenCoordinates const& _screenCoordinates,
                            ColorProfile const& _colorProfile,
-                           FontConfig const& _fonts,
-                           ShaderConfig const& _textShaderConfig) :
+                           FontConfig const& _fonts) :
     renderMetrics_{ _renderMetrics },
     screenCoordinates_{ _screenCoordinates },
     colorProfile_{ _colorProfile },
     fonts_{ _fonts },
     textShaper_{},
-    textShader_{ createShader(_textShaderConfig) },
-    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
-    marginLocation_{ textShader_->uniformLocation("vs_margin") },
-    cellSizeLocation_{ textShader_->uniformLocation("vs_cellSize") }
+    renderer_{ _commandListener, _textureAtlasAllocator, _colorAtlasAllocator }
 {
-    textShader_->bind();
-    textShader_->setUniformValue("fs_monochromeTextures", 0);
-    textShader_->setUniformValue("fs_colorTextures", 1);
 }
 
 void TextRenderer::clearCache()
@@ -57,12 +53,6 @@ void TextRenderer::clearCache()
     textShaper_.clearCache();
     cacheKeyStorage_.clear();
     cache_.clear();
-}
-
-void TextRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
-{
-    projectionMatrix_ = _projectionMatrix;
-    renderer_.setProjection(_projectionMatrix);
 }
 
 void TextRenderer::setCellSize(crispy::text::CellSize const& _cellSize)
@@ -260,22 +250,8 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
     return gpos;
 }
 
-void TextRenderer::execute()
+void TextRenderer::finish()
 {
-    textShader_->bind();
-
-    // TODO: only upload when it actually DOES change
-    textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
-    textShader_->setUniformValue(marginLocation_, QVector2D(
-        static_cast<float>(screenCoordinates_.leftMargin),
-        static_cast<float>(screenCoordinates_.bottomMargin)
-    ));
-    textShader_->setUniformValue(cellSizeLocation_, QVector2D(
-        static_cast<float>(cellSize_.width),
-        static_cast<float>(cellSize_.height)
-    ));
-
-    renderer_.execute();
     state_ = State::Empty;
 }
 

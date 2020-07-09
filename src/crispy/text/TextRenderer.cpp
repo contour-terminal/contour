@@ -19,32 +19,12 @@ using namespace std;
 
 namespace crispy::text {
 
-constexpr unsigned MaxInstanceCount = 1;
-constexpr unsigned MaxMonochromeTextureSize = 1024;
-constexpr unsigned MaxColorTextureSize = 2048;
-
-TextRenderer::TextRenderer() :
-    renderer_{},
-    monochromeAtlas_{
-        0,
-        MaxInstanceCount,
-        renderer_.maxTextureSize() / renderer_.maxTextureDepth(),
-        min(MaxMonochromeTextureSize, renderer_.maxTextureSize()),
-        min(MaxMonochromeTextureSize, renderer_.maxTextureSize()),
-        GL_R8,
-        renderer_.scheduler(),
-        "monochromeAtlas"
-    },
-    colorAtlas_{
-        1,
-        MaxInstanceCount,
-        renderer_.maxTextureSize() / renderer_.maxTextureDepth(),
-        min(MaxColorTextureSize, renderer_.maxTextureSize()),
-        min(MaxColorTextureSize, renderer_.maxTextureSize()),
-        GL_RGBA8,
-        renderer_.scheduler(),
-        "colorAtlas"
-    }
+TextRenderer::TextRenderer(atlas::CommandListener& _commandListener,
+                           atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
+                           atlas::TextureAtlasAllocator& _coloredAtlasAllocator) :
+    commandListener_{ _commandListener },
+    monochromeAtlas_{ _monochromeAtlasAllocator },
+    colorAtlas_{ _coloredAtlasAllocator }
 {
 }
 
@@ -52,9 +32,10 @@ TextRenderer::~TextRenderer()
 {
 }
 
-void TextRenderer::setProjection(QMatrix4x4 const& _projection)
+void TextRenderer::clearCache()
 {
-    renderer_.setProjection(_projection);
+    monochromeAtlas_.clear();
+    colorAtlas_.clear();
 }
 
 void TextRenderer::setCellSize(CellSize const& _cellSize)
@@ -192,18 +173,7 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     auto const x = static_cast<unsigned>(_pos.x());
     auto const y = static_cast<unsigned>(_pos.y());
     auto const z = 0u;
-    renderer_.scheduler().renderTexture({_textureInfo, x, y, z, _color});
-}
-
-void TextRenderer::execute()
-{
-    renderer_.execute();
-}
-
-void TextRenderer::clearCache()
-{
-    monochromeAtlas_.clear();
-    colorAtlas_.clear();
+    commandListener_.renderTexture({_textureInfo, x, y, z, _color});
 }
 
 } // end namespace

@@ -51,9 +51,10 @@ optional<Decorator> to_decorator(std::string const& _value)
     return nullopt;
 }
 
-DecorationRenderer::DecorationRenderer(ScreenCoordinates const& _screenCoordinates,
+DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
+                                       atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+                                       ScreenCoordinates const& _screenCoordinates,
                                        QMatrix4x4 const& _projectionMatrix,
-                                       ShaderConfig const& _decoratorShaderConfig,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover,
@@ -68,22 +69,14 @@ DecorationRenderer::DecorationRenderer(ScreenCoordinates const& _screenCoordinat
     curlyAmplitude_{ _curlyAmplitude },
     curlyFrequency_{ _curlyFrequency },
     colorProfile_{ _colorProfile },
-    decoratorShader_{ createShader(_decoratorShaderConfig) },
-    decoratorProjectionLocation_{ decoratorShader_->uniformLocation("vs_projection") },
-    atlasRenderer_{},
-    atlas_{
-        0,
-        MaxDecoratorInstanceCount,
-        min(MaxDecoratorTextureDepth, atlasRenderer_.maxTextureSize() / atlasRenderer_.maxTextureDepth()),
-        min(MaxDecoratorTextureSize, atlasRenderer_.maxTextureSize()),
-        min(MaxDecoratorTextureSize, atlasRenderer_.maxTextureSize()),
-        GL_R8,
-        atlasRenderer_.scheduler(),
-        "decoratorAtlas"
-    }
+    commandListener_{ _commandListener },
+    atlas_{ _monochromeTextureAtlas }
 {
-    decoratorShader_->bind();
-    decoratorShader_->setUniformValue("fs_decoratorTextures", 0);
+}
+
+void DecorationRenderer::clearCache()
+{
+    atlas_.clear();
 }
 
 void DecorationRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
@@ -94,11 +87,6 @@ void DecorationRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
 {
     colorProfile_ = _colorProfile;
-}
-
-void DecorationRenderer::clearCache()
-{
-    atlas_.clear();
 }
 
 void DecorationRenderer::rebuild()
@@ -307,7 +295,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
                 y
             );
 #endif
-            atlasRenderer_.scheduler().renderTexture({textureInfo, x + advanceX * i, y, z, color});
+            commandListener_.renderTexture({textureInfo, x + advanceX * i, y, z, color});
         }
     }
     else
@@ -318,17 +306,6 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
             _decoration, _row, _col, _columnCount, _color
         );
 #endif
-    }
-}
-
-void DecorationRenderer::execute()
-{
-    if (!atlasRenderer_.empty())
-    {
-        //cout << fmt::format("DecorationRenderer.execute: {} decorations\n", atlasRenderer_.size());
-        decoratorShader_->bind();
-        decoratorShader_->setUniformValue(decoratorProjectionLocation_, projectionMatrix_);
-        atlasRenderer_.execute();
     }
 }
 

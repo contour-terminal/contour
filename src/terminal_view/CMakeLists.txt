@@ -24,8 +24,6 @@ CIncludeMe(shaders/background.frag "${CMAKE_CURRENT_BINARY_DIR}/background_frag.
 CIncludeMe(shaders/background.vert "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h" "background_vert" "default_shaders")
 CIncludeMe(shaders/cursor.frag "${CMAKE_CURRENT_BINARY_DIR}/cursor_frag.h" "cursor_frag" "default_shaders")
 CIncludeMe(shaders/cursor.vert "${CMAKE_CURRENT_BINARY_DIR}/cursor_vert.h" "cursor_vert" "default_shaders")
-CIncludeMe(shaders/decorator.frag "${CMAKE_CURRENT_BINARY_DIR}/decorator_frag.h" "decorator_frag" "default_shaders")
-CIncludeMe(shaders/decorator.vert "${CMAKE_CURRENT_BINARY_DIR}/decorator_vert.h" "decorator_vert" "default_shaders")
 CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "default_shaders")
 CIncludeMe(shaders/text.vert "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h" "text_vert" "default_shaders")
 
@@ -34,8 +32,6 @@ add_library(terminal_view STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/cursor_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/cursor_vert.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/decorator_frag.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/decorator_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
     BackgroundRenderer.cpp BackgroundRenderer.h

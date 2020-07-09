@@ -63,7 +63,6 @@ class TerminalView {
                  std::function<void()> _onTerminalClosed,
                  ShaderConfig const& _backgroundShaderConfig,
                  ShaderConfig const& _textShaderConfig,
-                 ShaderConfig const& _decoratorShaderConfig,
                  ShaderConfig const& _cursorShaderConfig,
                  Logger _logger);
 

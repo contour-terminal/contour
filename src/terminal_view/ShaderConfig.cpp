@@ -21,8 +21,6 @@
 #include "cursor_frag.h"
 #include "text_vert.h"
 #include "text_frag.h"
-#include "decorator_vert.h"
-#include "decorator_frag.h"
 
 namespace terminal::view {
 
@@ -44,8 +42,6 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
             return {s(background_vert), s(background_frag)};
         case ShaderClass::Text:
             return {s(text_vert), s(text_frag)};
-        case ShaderClass::Decorator:
-            return {s(decorator_vert), s(decorator_frag)};
         case ShaderClass::Cursor:
             return {s(cursor_vert), s(cursor_frag)};
     }

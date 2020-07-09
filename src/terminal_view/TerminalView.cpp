@@ -63,7 +63,6 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            function<void()> _onTerminalClosed,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig,
-                           ShaderConfig const& _decoratorShaderConfig,
                            ShaderConfig const& _cursorShaderConfig,
                            Logger _logger) :
     logger_{ move(_logger) },
@@ -82,7 +81,6 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
         _hyperlinkHover,
         _backgroundShaderConfig,
         _textShaderConfig,
-        _decoratorShaderConfig,
         _cursorShaderConfig,
         _projectionMatrix
     },
@@ -270,7 +268,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
 
     renderer_.setScreenSize(newScreenSize);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
-    renderer_.clearCache();
+    //renderer_.clearCache();
 
     if (newScreenSize != process_.screenSize())
     {

@@ -26,7 +26,6 @@ namespace terminal::view {
 enum class ShaderClass {
     Background,
     Text,
-    Decorator,
     Cursor
 };
 
@@ -43,8 +42,6 @@ inline std::string to_string(ShaderClass _shaderClass)
             return "background";
         case ShaderClass::Text:
             return "text";
-        case ShaderClass::Decorator:
-            return "decorator";
         case ShaderClass::Cursor:
             return "cursor";
     }
