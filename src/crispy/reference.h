@@ -22,9 +22,9 @@ public:
     constexpr reference(std::reference_wrapper<T> _ref) noexcept : ref_{&_ref.get()} {}
 
     reference(reference const&) = default;
-    reference(reference&&) = default;
+    reference(reference&&) noexcept = default;
     reference& operator=(reference const&) = default;
-    reference& operator=(reference&&) = default;
+    reference& operator=(reference&&) noexcept = default;
 
     constexpr reference& operator=(T& _ref)
     {
