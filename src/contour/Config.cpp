@@ -93,6 +93,16 @@ namespace {
                         state = State::Octal1;
                     else if (_value[i] == 'x')
                         state = State::Hex1;
+                    else if (_value[i] == 'e')
+                    {
+                        state = State::Text;
+                        out.push_back('\033');
+                    }
+                    else if (_value[i] == '\\')
+                    {
+                        out.push_back('\\');
+                        state = State::Text;
+                    }
                     else
                     {
                         // Unknown escape sequence, so just continue as text.
@@ -466,7 +476,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (holds_alternative<actions::WriteScreen>(action))
         {
             if (auto chars = _parent["chars"]; chars.IsScalar())
-                return actions::WriteScreen{chars.as<string>()};
+                return actions::WriteScreen{parseEscaped(chars.as<string>())};
             else
                 return nullopt;
         }

@@ -903,7 +903,7 @@ void TerminalWindow::executeAction(Action const& _action)
     bool const dirty = visit(overloaded{
         [this](actions::WriteScreen const& _write) -> bool {
             terminalView_->terminal().writeToScreen(_write.chars);
-            return false;
+            return true;
         },
         [&](actions::ToggleFullScreen) -> bool {
             toggleFullScreen();
