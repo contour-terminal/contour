@@ -51,7 +51,6 @@ add_library(crispy-gui STATIC
     AtlasRenderer.h AtlasRenderer.cpp
     text/Font.h text/Font.cpp
     text/FontLoader.h text/FontLoader.cpp
-    text/TextRenderer.h text/TextRenderer.cpp
     text/TextShaper.h text/TextShaper.cpp
 )
 add_library(crispy::gui ALIAS crispy-gui)
