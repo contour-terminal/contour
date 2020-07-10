@@ -868,6 +868,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case RCOLORMOUSEFG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::MouseForegroundColor);
         case RCOLORMOUSEBG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::MouseBackgroundColor);
         case NOTIFY: return impl::NOTIFY(_ctx, _output);
+        case DUMPSTATE: return emitCommand<DumpState>(_output);
 
         default:
            std::cerr << "NOT FOUND: " << _ctx.str() << std::endl;
