@@ -22,6 +22,8 @@
 #include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/ShaderConfig.h>
 
+#include <terminal_view/OpenGLRenderer.h>
+
 #include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
@@ -46,7 +48,7 @@ struct ShaderConfig;
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class GLRenderer : public QOpenGLFunctions {
+class GLRenderer {
   public:
     /** Constructs a GLRenderer instances.
      *
@@ -65,9 +67,6 @@ class GLRenderer : public QOpenGLFunctions {
                ShaderConfig const& _backgroundShaderConfig,
                ShaderConfig const& _textShaderConfig,
                QMatrix4x4 const& _projectionMatrix);
-
-    unsigned maxTextureDepth();
-    unsigned maxTextureSize();
 
     unsigned cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
     unsigned cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
@@ -91,6 +90,7 @@ class GLRenderer : public QOpenGLFunctions {
 
     constexpr void setMargin(int _leftMargin, int _bottomMargin) noexcept
     {
+        renderTarget_.setMargin(_leftMargin, _bottomMargin);
         screenCoordinates_.leftMargin = _leftMargin;
         screenCoordinates_.bottomMargin = _bottomMargin;
     }
@@ -120,14 +120,12 @@ class GLRenderer : public QOpenGLFunctions {
     void clearCache();
 
   private:
-    void initialize();
     void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
     void renderCursor(Terminal const& _terminal);
     void renderSelection(Terminal const& _terminal);
 
   private:
     RenderMetrics metrics_;
-    bool initialized_ = false;
 
     ScreenCoordinates screenCoordinates_;
     Logger logger_;
@@ -137,16 +135,7 @@ class GLRenderer : public QOpenGLFunctions {
 
     FontConfig fonts_;
 
-    crispy::atlas::Renderer textureRenderer_;
-    crispy::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
-    crispy::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
-
-    QMatrix4x4 projectionMatrix_;
-
-    std::unique_ptr<QOpenGLShaderProgram> textShader_;
-    int textProjectionLocation_;
-    int marginLocation_;
-    int cellSizeLocation_;
+    OpenGLRenderer renderTarget_;
 
     BackgroundRenderer backgroundRenderer_;
     TextRenderer textRenderer_;

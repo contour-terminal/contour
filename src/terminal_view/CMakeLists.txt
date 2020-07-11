@@ -31,9 +31,10 @@ add_library(terminal_view STATIC
     "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
     BackgroundRenderer.cpp BackgroundRenderer.h
-    DecorationRenderer.cpp DecorationRenderer.h
     CursorRenderer.cpp CursorRenderer.h
-    GLRenderer.cpp GLRenderer.h
+    DecorationRenderer.cpp DecorationRenderer.h
+    OpenGLRenderer.cpp OpenGLRenderer.h
+    Renderer.cpp Renderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalView.cpp TerminalView.h
     TextRenderer.cpp TextRenderer.h

@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal_view/GLRenderer.h>
+#include <terminal_view/Renderer.h>
 #include <terminal_view/FontConfig.h>
 
 #include <terminal/Color.h>

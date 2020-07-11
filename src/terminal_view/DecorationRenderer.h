@@ -61,7 +61,6 @@ class DecorationRenderer {
     /// @param _commandListener
     /// @param _monochromeTextureAtlas
     /// @param _screenCoordinates
-    /// @param _projectionMatrix
     /// @param _lineThickness
     /// @param _colorProfile
     /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
@@ -69,7 +68,6 @@ class DecorationRenderer {
     DecorationRenderer(crispy::atlas::CommandListener& _commandListener,
                        crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                        ScreenCoordinates const& _screenCoordinates,
-                       QMatrix4x4 const& _projectionMatrix,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover,
@@ -77,7 +75,6 @@ class DecorationRenderer {
                        float _curlyAmplitude,
                        float _curlyFrequency);
 
-    void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setColorProfile(ColorProfile const& _colorProfile);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
@@ -110,7 +107,6 @@ class DecorationRenderer {
 
   private:
     ScreenCoordinates const& screenCoordinates_;
-    QMatrix4x4 projectionMatrix_;
 
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;

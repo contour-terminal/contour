@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/GLRenderer.h>
+#include <terminal_view/Renderer.h>
 #include <terminal_view/TextRenderer.h>
 
 #include <functional>
@@ -22,37 +22,6 @@ using namespace std::placeholders;
 using namespace crispy;
 
 namespace terminal::view {
-
-constexpr unsigned MaxInstanceCount = 1;
-constexpr unsigned MaxMonochromeTextureSize = 1024;
-constexpr unsigned MaxColorTextureSize = 2048;
-
-unsigned GLRenderer::maxTextureDepth()
-{
-    initialize();
-
-    GLint value;
-    glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value);
-    return static_cast<unsigned>(value);
-}
-
-unsigned GLRenderer::maxTextureSize()
-{
-    initialize();
-
-    GLint value = {};
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
-    return static_cast<unsigned>(value);
-}
-
-void GLRenderer::initialize()
-{
-    if (!initialized_)
-    {
-        initialized_ = true;
-        initializeOpenGLFunctions();
-    }
-}
 
 GLRenderer::GLRenderer(Logger _logger,
                        WindowSize const& _screenSize,
@@ -74,32 +43,13 @@ GLRenderer::GLRenderer(Logger _logger,
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     fonts_{ _fonts },
-    textureRenderer_{},
-    monochromeAtlasAllocator_{
-        0,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
-        min(MaxMonochromeTextureSize, maxTextureSize()),
-        min(MaxMonochromeTextureSize, maxTextureSize()),
-        GL_R8,
-        textureRenderer_.scheduler(),
-        "monochromeAtlas"
+    renderTarget_{
+        _textShaderConfig,
+        _projectionMatrix,
+        0, // TODO left margin
+        0, // TODO bottom margin
+        {}, // TODO _cellSize?
     },
-    coloredAtlasAllocator_{
-        1,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
-        min(MaxColorTextureSize, maxTextureSize()),
-        min(MaxColorTextureSize, maxTextureSize()),
-        GL_RGBA8,
-        textureRenderer_.scheduler(),
-        "colorAtlas"
-    },
-    projectionMatrix_{ _projectionMatrix },
-    textShader_{ createShader(_textShaderConfig) },
-    textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
-    marginLocation_{ textShader_->uniformLocation("vs_margin") },
-    cellSizeLocation_{ textShader_->uniformLocation("vs_cellSize") },
     backgroundRenderer_{
         screenCoordinates_,
         _colorProfile,
@@ -108,18 +58,17 @@ GLRenderer::GLRenderer(Logger _logger,
     },
     textRenderer_{
         metrics_,
-        textureRenderer_.scheduler(),
-        monochromeAtlasAllocator_,
-        coloredAtlasAllocator_,
+        renderTarget_.scheduler(),
+        renderTarget_.monochromeAtlasAllocator(),
+        renderTarget_.coloredAtlasAllocator(),
         screenCoordinates_,
         _colorProfile,
         _fonts
     },
     decorationRenderer_{
-        textureRenderer_.scheduler(),
-        monochromeAtlasAllocator_,
+        renderTarget_.scheduler(),
+        renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
-        _projectionMatrix,
         _colorProfile,
         _hyperlinkNormal,
         _hyperlinkHover,
@@ -128,32 +77,19 @@ GLRenderer::GLRenderer(Logger _logger,
         1.0f    // curly frequency
     },
     cursorRenderer_{
-        textureRenderer_.scheduler(),
-        monochromeAtlasAllocator_,
+        renderTarget_.scheduler(),
+        renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
         canonicalColor(_colorProfile.cursor)
     }
 {
-    initialize();
-
-    glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
-    //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
-
     textRenderer_.setCellSize(cellSize());
-
-    textShader_->bind();
-    textShader_->setUniformValue("fs_monochromeTextures", 0);
-    textShader_->setUniformValue("fs_colorTextures", 1);
-    textShader_->release();
 }
 
 void GLRenderer::clearCache()
 {
-    monochromeAtlasAllocator_.clear();
-    coloredAtlasAllocator_.clear();
-
+    renderTarget_.clearCache();
     decorationRenderer_.clearCache();
     cursorRenderer_.clearCache();
     textRenderer_.clearCache();
@@ -189,10 +125,9 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 
 void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
-    projectionMatrix_ = _projectionMatrix;
+    renderTarget_.setProjection(_projectionMatrix);
 
     backgroundRenderer_.setProjection(_projectionMatrix);
-    decorationRenderer_.setProjection(_projectionMatrix);
 }
 
 void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
@@ -244,26 +179,15 @@ uint64_t GLRenderer::render(Terminal& _terminal,
     }
 
     textRenderer_.flushPendingSegments();
+    textRenderer_.finish();
 
     backgroundRenderer_.execute();
     renderCursor(_terminal);
 
-    textShader_->bind();
-    // TODO: only upload when it actually DOES change
-    textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
-    textShader_->setUniformValue(marginLocation_, QVector2D(
-        static_cast<float>(screenCoordinates_.leftMargin),
-        static_cast<float>(screenCoordinates_.bottomMargin)
-    ));
-    textShader_->setUniformValue(cellSizeLocation_, QVector2D(
-        static_cast<float>(screenCoordinates_.cellWidth),
-        static_cast<float>(screenCoordinates_.cellHeight)
-    ));
-    textureRenderer_.execute();
+    renderTarget_.execute();
 
-    renderSelection(_terminal);
+    renderSelection(_terminal); // TODO: integrate into renderTarget_
 
-    textRenderer_.finish();
     return changes;
 }
 

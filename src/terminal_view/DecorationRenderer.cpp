@@ -54,7 +54,6 @@ optional<Decorator> to_decorator(std::string const& _value)
 DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
                                        atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                                        ScreenCoordinates const& _screenCoordinates,
-                                       QMatrix4x4 const& _projectionMatrix,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover,
@@ -62,7 +61,6 @@ DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
                                        float _curlyAmplitude,
                                        float _curlyFrequency) :
     screenCoordinates_{ _screenCoordinates },
-    projectionMatrix_{ _projectionMatrix },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
     lineThickness_{ _lineThickness },
@@ -77,11 +75,6 @@ DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
 void DecorationRenderer::clearCache()
 {
     atlas_.clear();
-}
-
-void DecorationRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
-{
-    projectionMatrix_ = _projectionMatrix;
 }
 
 void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
