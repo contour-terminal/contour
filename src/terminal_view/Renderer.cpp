@@ -45,6 +45,7 @@ GLRenderer::GLRenderer(Logger _logger,
     fonts_{ _fonts },
     renderTarget_{
         _textShaderConfig,
+        _backgroundShaderConfig,
         _projectionMatrix,
         0, // TODO left margin
         0, // TODO bottom margin
@@ -53,12 +54,11 @@ GLRenderer::GLRenderer(Logger _logger,
     backgroundRenderer_{
         screenCoordinates_,
         _colorProfile,
-        _projectionMatrix,
-        _backgroundShaderConfig
+        renderTarget_
     },
     textRenderer_{
         metrics_,
-        renderTarget_.scheduler(),
+        renderTarget_,
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
         screenCoordinates_,
@@ -66,7 +66,7 @@ GLRenderer::GLRenderer(Logger _logger,
         _fonts
     },
     decorationRenderer_{
-        renderTarget_.scheduler(),
+        renderTarget_,
         renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
         _colorProfile,
@@ -77,7 +77,7 @@ GLRenderer::GLRenderer(Logger _logger,
         1.0f    // curly frequency
     },
     cursorRenderer_{
-        renderTarget_.scheduler(),
+        renderTarget_,
         renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
@@ -126,8 +126,6 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
 void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
     renderTarget_.setProjection(_projectionMatrix);
-
-    backgroundRenderer_.setProjection(_projectionMatrix);
 }
 
 void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
@@ -178,15 +176,17 @@ uint64_t GLRenderer::render(Terminal& _terminal,
         }
     }
 
+    backgroundRenderer_.renderPendingCells();
+    backgroundRenderer_.finish();
+
+    renderSelection(_terminal);
+
+    renderCursor(_terminal);
+
     textRenderer_.flushPendingSegments();
     textRenderer_.finish();
 
-    backgroundRenderer_.execute();
-    renderCursor(_terminal);
-
     renderTarget_.execute();
-
-    renderSelection(_terminal); // TODO: integrate into renderTarget_
 
     return changes;
 }
@@ -209,6 +209,7 @@ void GLRenderer::renderSelection(Terminal const& _terminal)
 {
     if (_terminal.isSelectionAvailable())
     {
+        // TODO: don't abouse BackgroundRenderer here, maybe invent RectRenderer?
         backgroundRenderer_.setOpacity(colorProfile_.selectionOpacity);
         for (Selector::Range const& range : _terminal.selection())
         {
@@ -224,7 +225,7 @@ void GLRenderer::renderSelection(Terminal const& _terminal)
                 );
             }
         }
-        backgroundRenderer_.execute();
+        backgroundRenderer_.renderPendingCells();
     }
 }
 

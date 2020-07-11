@@ -27,8 +27,9 @@
 namespace terminal::view {
 
 struct ScreenCoordinates;
+class OpenGLRenderer;
 
-class BackgroundRenderer : public QOpenGLExtraFunctions {
+class BackgroundRenderer {
   public:
     /// Constructs the decoration renderer.
     ///
@@ -37,12 +38,8 @@ class BackgroundRenderer : public QOpenGLExtraFunctions {
     /// @param _shaderConfig
     BackgroundRenderer(ScreenCoordinates const& _screenCoordinates,
                        ColorProfile const& _colorProfile,
-                       QMatrix4x4 const& _projectionMatrix,
-                       ShaderConfig const& _shaderConfig);
+                       OpenGLRenderer& _renderTarget);
 
-    ~BackgroundRenderer();
-
-    void setProjection(QMatrix4x4 const& _projectionMatrix);
     void setColorProfile(ColorProfile const& _colorProfile);
 
     // TODO: pass background color directly (instead of whole grid cell),
@@ -54,8 +51,8 @@ class BackgroundRenderer : public QOpenGLExtraFunctions {
 
     void renderOnce(cursor_pos_t _row, cursor_pos_t _col, RGBColor const& _color, unsigned _count);
 
-    /// Executes all queued render actions
-    void execute();
+    void renderPendingCells();
+    void finish();
 
     constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
 
@@ -73,17 +70,8 @@ class BackgroundRenderer : public QOpenGLExtraFunctions {
     cursor_pos_t startColumn_ = 0;
     unsigned columnCount_ = 0;
 
-    // scheduled renders
-    std::vector<GLfloat> vertexCoords_{};
-    std::vector<GLfloat> colors_{};
-
     // rendering
-    QMatrix4x4 projectionMatrix_;
-    std::unique_ptr<QOpenGLShaderProgram> shader_;
-    GLint projectionLocation_;
-    GLuint colorsBuffer_;       // Buffer containing the text colors
-    GLuint vbo_;
-    GLuint vao_;
+    OpenGLRenderer& renderTarget_;
 };
 
 } // end namespace

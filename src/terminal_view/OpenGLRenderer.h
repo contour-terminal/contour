@@ -18,7 +18,7 @@
 #include <terminal_view/TextRenderer.h> // FIXME CellSize lol
 
 #include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLFunctions>
+#include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QOpenGLShaderProgram>
 
 #include <memory>
@@ -27,13 +27,19 @@ namespace terminal::view {
 
 struct ShaderConfig;
 
-class OpenGLRenderer : public QOpenGLFunctions {
+class OpenGLRenderer :
+    public crispy::atlas::CommandListener,
+    public QOpenGLExtraFunctions
+{
   public:
     OpenGLRenderer(ShaderConfig const& _textShaderConfig,
+                   ShaderConfig const& _rectShaderConfig,
                    QMatrix4x4 const& _projectionMatrix,
                    int _leftMargin,
                    int _bottomMargin,
                    CellSize const& _cellSize);
+
+    ~OpenGLRenderer();
 
     void clearCache();
 
@@ -41,7 +47,12 @@ class OpenGLRenderer : public QOpenGLFunctions {
     constexpr void setCellSize(CellSize const& _cellSize) noexcept { cellSize_ = _cellSize; }
     constexpr void setProjection(QMatrix4x4 const& _projectionMatrix) noexcept { projectionMatrix_ = _projectionMatrix; }
 
-    crispy::atlas::CommandListener& scheduler() noexcept { return textureRenderer_.scheduler(); }
+    void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
+    void createAtlas(crispy::atlas::CreateAtlas const& _param) override;
+    void uploadTexture(crispy::atlas::UploadTexture const& _param) override;
+    void renderTexture(crispy::atlas::RenderTexture const& _param) override;
+    void destroyAtlas(crispy::atlas::DestroyAtlas const& _param) override;
+
     crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return monochromeAtlasAllocator_; }
     crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return coloredAtlasAllocator_; }
 
@@ -68,6 +79,14 @@ class OpenGLRenderer : public QOpenGLFunctions {
     crispy::atlas::Renderer textureRenderer_;
     crispy::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
     crispy::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
+
+    // filled rectangles
+    //
+    std::vector<GLfloat> rectBuffer_;
+    std::unique_ptr<QOpenGLShaderProgram> rectShader_;
+    GLint rectProjectionLocation_;
+    GLuint rectVAO_;
+    GLuint rectVBO_;
 };
 
 } // end namespace
