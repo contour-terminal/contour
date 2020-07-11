@@ -29,11 +29,6 @@
 
 #include <crispy/text/Font.h>
 
-#include <QPoint>
-#include <QMatrix2x4>
-#include <QOpenGLFunctions>
-#include <QOpenGLShaderProgram>
-
 #include <fmt/format.h>
 
 #include <chrono>

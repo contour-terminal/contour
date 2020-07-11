@@ -20,8 +20,6 @@
 
 #include <terminal/Screen.h>
 
-#include <QtGui/QOpenGLShaderProgram>
-
 namespace terminal::view {
 
 struct ScreenCoordinates;

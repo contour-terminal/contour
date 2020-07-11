@@ -22,7 +22,6 @@
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeyEvent>
-#include <QtGui/QOpenGLFunctions>
 #include <QtGui/QOpenGLWindow>
 #include <QtGui/QScreen>
 #include <QtNetwork/QHostInfo>

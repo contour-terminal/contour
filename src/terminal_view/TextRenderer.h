@@ -26,8 +26,8 @@
 #include <unicode/run_segmenter.h>
 
 #include <QtCore/QPoint>
-#include <QtGui/QOpenGLFunctions>
-#include <QtGui/QOpenGLShaderProgram>
+
+#include <QtGui/QVector4D>
 
 #include <functional>
 #include <unordered_map>

@@ -19,11 +19,6 @@
 
 #include <memory>
 
-#include <QtGui/QOpenGLBuffer>
-#include <QtGui/QOpenGLShaderProgram>
-#include <QtGui/QOpenGLVertexArrayObject>
-#include <QtGui/QOpenGLExtraFunctions>
-
 namespace terminal::view {
 
 struct ScreenCoordinates;

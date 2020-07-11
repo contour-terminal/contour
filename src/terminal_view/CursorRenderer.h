@@ -19,12 +19,7 @@
 #include <crispy/Atlas.h>
 
 #include <QtCore/QPoint>
-#include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLShaderProgram>
 #include <QtGui/QVector4D>
-#include <QtGui/QOpenGLFunctions>
-#include <QtGui/QOpenGLBuffer>
-#include <QtGui/QOpenGLVertexArrayObject>
 
 namespace terminal::view {
 

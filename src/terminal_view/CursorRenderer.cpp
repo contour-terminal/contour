@@ -13,6 +13,10 @@
  */
 #include <terminal_view/CursorRenderer.h>
 
+#include <QtCore/QSize>
+
+#include <QtGui/QOpenGLFunctions> // for GL_RED
+
 #include <stdexcept>
 #include <vector>
 
@@ -60,49 +64,6 @@ string to_string(CursorShape _value)
             return "bar";
     }
     return "block";
-}
-
-pair<GLenum, vector<float>> getTriangles(QSize _size, CursorShape _shape, unsigned _columnWidth)
-{
-    GLfloat const width = static_cast<GLfloat>(_size.width() * _columnWidth);
-    GLfloat const height = static_cast<GLfloat>(_size.height());
-
-    switch (_shape)
-    {
-        case CursorShape::Block:
-            return {GL_TRIANGLES, vector{
-                0.0f, 0.0f,                 // bottom left
-                width, 0.0f,                // bottom right
-                width, height,              // top right
-
-                width, height,              // top right
-                0.0f, height,               // top left
-                0.0f, 0.0f                  // bottom left
-            }};
-        case CursorShape::Rectangle:
-            return {GL_LINE_STRIP, {
-                0.0f, 0.0f,                 // bottom left
-                width, 0.0f,                // bottom right
-
-                width, height,              // top right
-                0.0f, height,               // top left
-
-                0.0f, 0.0f                  // bottom left
-            }};
-        case CursorShape::Underscore:
-            return {GL_LINES, vector{
-                0.0f, 0.0f,                 // bottom left
-                width, 0.0f,                // bottom right
-            }};
-        case CursorShape::Bar:
-            return {GL_LINES, vector{
-                0.0f, 0.0f,                 // bottom left
-                0.0f, height,               // top left
-            }};
-            break;
-    }
-    assert(!"Should not have reached here.");
-    return {GL_TRIANGLES, {}};
 }
 
 CursorRenderer::CursorRenderer(crispy::atlas::CommandListener& _commandListener,
