@@ -48,25 +48,25 @@ struct ShaderConfig;
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class GLRenderer {
+class Renderer {
   public:
-    /** Constructs a GLRenderer instances.
+    /** Constructs a Renderer instances.
      *
      * @p _logger the logging instance to use when logging is needed during rendering.
      * @p _fonts reference to the set of loaded fonts to be used for rendering text.
      * @p _colorProfile user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
-    GLRenderer(Logger _logger,
-               WindowSize const& _screenSize,
-               FontConfig const& _fonts,
-               ColorProfile _colorProfile,
-               Opacity _backgroundOpacity,
-               Decorator _hyperlinkNormal,
-               Decorator _hyperlinkHover,
-               ShaderConfig const& _backgroundShaderConfig,
-               ShaderConfig const& _textShaderConfig,
-               QMatrix4x4 const& _projectionMatrix);
+    Renderer(Logger _logger,
+             WindowSize const& _screenSize,
+             FontConfig const& _fonts,
+             ColorProfile _colorProfile,
+             Opacity _backgroundOpacity,
+             Decorator _hyperlinkNormal,
+             Decorator _hyperlinkHover,
+             ShaderConfig const& _backgroundShaderConfig,
+             ShaderConfig const& _textShaderConfig,
+             QMatrix4x4 const& _projectionMatrix);
 
     unsigned cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
     unsigned cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }

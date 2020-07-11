@@ -104,7 +104,7 @@ class TerminalView {
     Terminal const& terminal() const noexcept { return process_.terminal(); }
     Terminal& terminal() noexcept { return process_.terminal(); }
 
-    GLRenderer const& renderer() const { return renderer_; }
+    Renderer const& renderer() const { return renderer_; }
 
     void setColorProfile(terminal::ColorProfile const& _colors);
 
@@ -127,7 +127,7 @@ class TerminalView {
     QSize size_;
     WindowMargin windowMargin_;
 
-    GLRenderer renderer_;
+    Renderer renderer_;
     TerminalProcess process_;
     ColorProfile colorProfile_;
     ColorProfile defaultColorProfile_;

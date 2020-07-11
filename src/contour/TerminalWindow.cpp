@@ -57,7 +57,7 @@ using namespace std::placeholders;
 
 namespace contour {
 
-using terminal::view::GLRenderer;
+using terminal::view::Renderer;
 using actions::Action;
 
 namespace {
@@ -580,7 +580,7 @@ void TerminalWindow::paintGL()
             for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
         }
 
-        QVector4D const bg = GLRenderer::canonicalColor(profile().colors.defaultBackground, profile().backgroundOpacity);
+        QVector4D const bg = Renderer::canonicalColor(profile().colors.defaultBackground, profile().backgroundOpacity);
         if (bg != renderStateCache_.backgroundColor)
         {
             glClearColor(bg[0], bg[1], bg[2], bg[3]);

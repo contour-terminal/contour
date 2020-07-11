@@ -23,16 +23,16 @@ using namespace crispy;
 
 namespace terminal::view {
 
-GLRenderer::GLRenderer(Logger _logger,
-                       WindowSize const& _screenSize,
-                       FontConfig const& _fonts,
-                       terminal::ColorProfile _colorProfile,
-                       terminal::Opacity _backgroundOpacity,
-                       Decorator _hyperlinkNormal,
-                       Decorator _hyperlinkHover,
-                       ShaderConfig const& _backgroundShaderConfig,
-                       ShaderConfig const& _textShaderConfig,
-                       QMatrix4x4 const& _projectionMatrix) :
+Renderer::Renderer(Logger _logger,
+                   WindowSize const& _screenSize,
+                   FontConfig const& _fonts,
+                   terminal::ColorProfile _colorProfile,
+                   terminal::Opacity _backgroundOpacity,
+                   Decorator _hyperlinkNormal,
+                   Decorator _hyperlinkHover,
+                   ShaderConfig const& _backgroundShaderConfig,
+                   ShaderConfig const& _textShaderConfig,
+                   QMatrix4x4 const& _projectionMatrix) :
     screenCoordinates_{
         _screenSize,
         _fonts.regular.first.get().maxAdvance(), // cell width
@@ -87,7 +87,7 @@ GLRenderer::GLRenderer(Logger _logger,
     textRenderer_.setCellSize(cellSize());
 }
 
-void GLRenderer::clearCache()
+void Renderer::clearCache()
 {
     renderTarget_.clearCache();
     decorationRenderer_.clearCache();
@@ -95,12 +95,12 @@ void GLRenderer::clearCache()
     textRenderer_.clearCache();
 }
 
-void GLRenderer::setFont(FontConfig const& _fonts)
+void Renderer::setFont(FontConfig const& _fonts)
 {
     textRenderer_.setFont(_fonts);
 }
 
-bool GLRenderer::setFontSize(unsigned int _fontSize)
+bool Renderer::setFontSize(unsigned int _fontSize)
 {
     if (_fontSize == fonts_.regular.first.get().fontSize())
         return false;
@@ -123,17 +123,17 @@ bool GLRenderer::setFontSize(unsigned int _fontSize)
     return true;
 }
 
-void GLRenderer::setProjection(QMatrix4x4 const& _projectionMatrix)
+void Renderer::setProjection(QMatrix4x4 const& _projectionMatrix)
 {
     renderTarget_.setProjection(_projectionMatrix);
 }
 
-void GLRenderer::setBackgroundOpacity(terminal::Opacity _opacity)
+void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
 {
     backgroundOpacity_ = _opacity;
 }
 
-void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
+void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
 {
     colorProfile_ = _colors;
     textRenderer_.setColorProfile(_colors);
@@ -141,7 +141,7 @@ void GLRenderer::setColorProfile(terminal::ColorProfile const& _colors)
     cursorRenderer_.setColor(canonicalColor(colorProfile_.cursor));
 }
 
-uint64_t GLRenderer::render(Terminal& _terminal,
+uint64_t Renderer::render(Terminal& _terminal,
                             steady_clock::time_point _now,
                             terminal::Coordinate const& _currentMousePosition)
 {
@@ -162,7 +162,7 @@ uint64_t GLRenderer::render(Terminal& _terminal,
             }
 
             changes = _terminal.preRender(_now);
-            _terminal.screen().render(bind(&GLRenderer::renderCell, this, _1, _2, _3),
+            _terminal.screen().render(bind(&Renderer::renderCell, this, _1, _2, _3),
                                       _terminal.screen().scrollOffset());
 
             if (cellAtMouse.hyperlink())
@@ -171,7 +171,7 @@ uint64_t GLRenderer::render(Terminal& _terminal,
         else
         {
             changes = _terminal.preRender(_now);
-            _terminal.screen().render(bind(&GLRenderer::renderCell, this, _1, _2, _3),
+            _terminal.screen().render(bind(&Renderer::renderCell, this, _1, _2, _3),
                                       _terminal.screen().scrollOffset());
         }
     }
@@ -191,7 +191,7 @@ uint64_t GLRenderer::render(Terminal& _terminal,
     return changes;
 }
 
-void GLRenderer::renderCursor(Terminal const& _terminal)
+void Renderer::renderCursor(Terminal const& _terminal)
 {
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
@@ -205,7 +205,7 @@ void GLRenderer::renderCursor(Terminal const& _terminal)
     }
 }
 
-void GLRenderer::renderSelection(Terminal const& _terminal)
+void Renderer::renderSelection(Terminal const& _terminal)
 {
     if (_terminal.isSelectionAvailable())
     {
@@ -229,7 +229,7 @@ void GLRenderer::renderSelection(Terminal const& _terminal)
     }
 }
 
-void GLRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
+void Renderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
 {
     backgroundRenderer_.renderCell(_row, _col, _cell);
     decorationRenderer_.renderCell(_row, _col, _cell);
