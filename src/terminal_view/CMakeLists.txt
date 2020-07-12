@@ -40,7 +40,7 @@ add_library(terminal_view STATIC
     TextRenderer.cpp TextRenderer.h
 )
 
-option(LIBTERMINAL_VIEW_NATURAL_COORDS "Natural coordinates" OFF)
+option(LIBTERMINAL_VIEW_NATURAL_COORDS "Natural coordinates" ON)
 if(LIBTERMINAL_VIEW_NATURAL_COORDS)
     target_compile_definitions(terminal_view PUBLIC LIBTERMINAL_VIEW_NATURAL_COORDS)
 endif()
