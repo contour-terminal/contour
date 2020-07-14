@@ -18,10 +18,11 @@
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/FontConfig.h>
 
-#include <crispy/text/TextShaper.h>
-#include <crispy/text/Font.h>
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
+#include <crispy/FNV.h>
+#include <crispy/text/Font.h>
+#include <crispy/text/TextShaper.h>
 
 #include <unicode/run_segmenter.h>
 
@@ -95,8 +96,8 @@ namespace std
     struct hash<terminal::view::CacheKey> {
         size_t operator()(terminal::view::CacheKey const& _key) const noexcept
         {
-            return hash<std::u32string_view>{}(_key.text)
-                + static_cast<size_t>(_key.styles); // TODO maybe use FNV for both?
+            auto fnv = crispy::FNV<char32_t>{};
+            return static_cast<size_t>(fnv(fnv(&_key.text[0], _key.text.size()), static_cast<char32_t>(_key.styles)));
         }
     };
 }
