@@ -1219,14 +1219,10 @@ void Screen::operator()(ClearToBeginOfScreen const&)
 
 void Screen::operator()(ClearScreen const&)
 {
-    for_each(
-        LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(buffer_->lines),
-        end(buffer_->lines),
-        [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
-        }
-    );
+    // Instead of *just* clearing the screen, and thus, losing potential important content,
+    // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
+    // up in case the content is still needed.
+    buffer_->scrollUp(size().rows);
 }
 
 void Screen::operator()(ClearScrollbackBuffer const&)
