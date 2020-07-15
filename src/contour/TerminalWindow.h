@@ -78,8 +78,8 @@ class TerminalWindow :
 
   private:
     terminal::view::FontConfig loadFonts(config::TerminalProfile const& _profile);
-    void executeAction(actions::Action const& _action);
-    void executeInput(terminal::MouseEvent const& event);
+    bool executeAction(actions::Action const& _action);
+    bool executeInput(terminal::MouseEvent const& event);
     void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
 
     bool fullscreen() const;

@@ -736,17 +736,22 @@ void TerminalWindow::wheelEvent(QWheelEvent* _event)
     }
 }
 
-void TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
+bool TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
 {
     now_ = chrono::steady_clock::now();
 
-    // No input mapping found, forward event.
-    terminalView_->terminal().send(_mouseEvent, now_);
-
-    // Always test local configured mappings first
+    bool handled = false;
     if (auto mapping = config_.mouseMappings.find(_mouseEvent); mapping != config_.mouseMappings.end())
+    {
         for (auto const& action : mapping->second)
-            executeAction(action);
+            handled = executeAction(action) || handled;
+    }
+
+    if (handled)
+        return true;
+
+    // No input mapping found, forward event.
+    return terminalView_->terminal().send(_mouseEvent, now_);
 }
 
 void TerminalWindow::mousePressEvent(QMouseEvent* _event)
@@ -904,134 +909,137 @@ bool TerminalWindow::setFontSize(unsigned _fontSize)
     return true;
 }
 
-void TerminalWindow::executeAction(Action const& _action)
+bool TerminalWindow::executeAction(Action const& _action)
 {
-    bool const dirty = visit(overloaded{
-        [this](actions::WriteScreen const& _write) -> bool {
+    enum class Result { Nothing, Silently, Dirty };
+
+    Result const result = visit(overloaded{
+        [&](actions::WriteScreen const& _write) -> Result {
             terminalView_->terminal().writeToScreen(_write.chars);
-            return true;
+            return Result::Silently;
         },
-        [&](actions::ToggleFullScreen) -> bool {
+        [&](actions::ToggleFullScreen) -> Result {
             toggleFullScreen();
-            return false;
+            return Result::Silently;
         },
-        [&](actions::IncreaseFontSize) -> bool {
+        [&](actions::IncreaseFontSize) -> Result {
             setFontSize(profile().fontSize + 1);
-            return false;
+            return Result::Silently;
         },
-        [&](actions::DecreaseFontSize) -> bool {
+        [&](actions::DecreaseFontSize) -> Result {
             setFontSize(profile().fontSize - 1);
-            return false;
+            return Result::Silently;
         },
-        [&](actions::IncreaseOpacity) -> bool {
+        [&](actions::IncreaseOpacity) -> Result {
             ++profile().backgroundOpacity;
             terminalView_->setBackgroundOpacity(profile().backgroundOpacity);
-            return true;
+            return Result::Dirty;
         },
-        [&](actions::DecreaseOpacity) -> bool {
+        [&](actions::DecreaseOpacity) -> Result {
             --profile().backgroundOpacity;
             terminalView_->setBackgroundOpacity(profile().backgroundOpacity);
-            return true;
+            return Result::Dirty;
         },
-        [&](actions::ScreenshotVT) -> bool {
+        [&](actions::ScreenshotVT) -> Result {
             auto const screenshot = terminalView_->terminal().screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
-            return false;
+            return Result::Silently;
         },
-        [this](actions::SendChars const& chars) -> bool {
+        [this](actions::SendChars const& chars) -> Result {
             for (auto const ch : chars.chars)
                 terminalView_->terminal().send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None}, now_);
-            return false;
+            return Result::Silently;
         },
-        [this](actions::ScrollOneUp) -> bool {
-            return terminalView_->terminal().scrollUp(1);
+        [this](actions::ScrollOneUp) -> Result {
+            return terminalView_->terminal().scrollUp(1) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollOneDown) -> bool {
-            return terminalView_->terminal().scrollDown(1);
+        [this](actions::ScrollOneDown) -> Result {
+            return terminalView_->terminal().scrollDown(1) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollUp) -> bool {
-            return terminalView_->terminal().scrollUp(profile().historyScrollMultiplier);
+        [this](actions::ScrollUp) -> Result {
+            return terminalView_->terminal().scrollUp(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollDown) -> bool {
-            return terminalView_->terminal().scrollDown(profile().historyScrollMultiplier);
+        [this](actions::ScrollDown) -> Result {
+            return terminalView_->terminal().scrollDown(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollPageUp) -> bool {
-            return terminalView_->terminal().scrollUp(profile().terminalSize.rows / 2);
+        [this](actions::ScrollPageUp) -> Result {
+            return terminalView_->terminal().scrollUp(profile().terminalSize.rows / 2) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollPageDown) -> bool {
-            return terminalView_->terminal().scrollDown(profile().terminalSize.rows / 2);
+        [this](actions::ScrollPageDown) -> Result {
+            return terminalView_->terminal().scrollDown(profile().terminalSize.rows / 2) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollMarkUp) -> bool {
-            return terminalView_->terminal().scrollMarkUp();
+        [this](actions::ScrollMarkUp) -> Result {
+            return terminalView_->terminal().scrollMarkUp() ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollMarkDown) -> bool {
-            return terminalView_->terminal().scrollMarkDown();
+        [this](actions::ScrollMarkDown) -> Result {
+            return terminalView_->terminal().scrollMarkDown() ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollToTop) -> bool {
-            return terminalView_->terminal().scrollToTop();
+        [this](actions::ScrollToTop) -> Result {
+            return terminalView_->terminal().scrollToTop() ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ScrollToBottom) -> bool {
-            return terminalView_->terminal().scrollToBottom();
+        [this](actions::ScrollToBottom) -> Result {
+            return terminalView_->terminal().scrollToBottom() ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::CopySelection) -> bool {
+        [this](actions::CopySelection) -> Result {
             string const text = extractSelectionText();
             if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
                 clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())));
-            return false;
+            return Result::Silently;
         },
-        [this](actions::PasteSelection) -> bool {
+        [this](actions::PasteSelection) -> Result {
             if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
             {
                 string const text = clipboard->text(QClipboard::Selection).toUtf8().toStdString();
                 terminalView_->terminal().sendPaste(string_view{text});
             }
-            return false;
+            return Result::Silently;
         },
-        [this](actions::PasteClipboard) -> bool {
+        [this](actions::PasteClipboard) -> Result {
             if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
             {
                 string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
                 terminalView_->terminal().sendPaste(string_view{text});
             }
-            return false;
+            return Result::Silently;
         },
-        [this](actions::ChangeProfile const& v) -> bool {
+        [this](actions::ChangeProfile const& v) -> Result {
             cerr << fmt::format("Changing profile to '{}'.", v.name) << endl;
             if (auto newProfile = config_.profile(v.name); newProfile)
                 setProfile(*newProfile);
             else
                 cerr << fmt::format("No such profile: '{}'.", v.name) << endl;
-            return true;
+            return Result::Dirty;
         },
-        [this](actions::NewTerminal const& v) -> bool {
+        [this](actions::NewTerminal const& v) -> Result {
             spawnNewTerminal(v.profileName.value_or(profileName_));
-            return false;
+            return Result::Silently;
         },
-        [this](actions::OpenConfiguration) -> bool {
+        [this](actions::OpenConfiguration) -> Result {
             if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(config_.backingFilePath.string().c_str()))))
                 cerr << "Could not open configuration file \"" << config_.backingFilePath << "\"" << endl;
-            return false;
+            return Result::Silently;
         },
-        [](actions::OpenFileManager) -> bool {
+        [](actions::OpenFileManager) -> Result {
             // TODO open file manager at current window's current working directory (via /proc/self/cwd)
-            return false;
+            return Result::Silently;
         },
-        [this](actions::Quit) -> bool {
+        [this](actions::Quit) -> Result {
             // XXX: later warn here when more then one terminal view is open
             terminalView_->terminal().device().close();
-            return false;
+            return Result::Silently;
         },
-        [this](actions::ResetFontSize) -> bool {
-            return setFontSize(config_.profile(profileName_)->fontSize);
+        [this](actions::ResetFontSize) -> Result {
+            setFontSize(config_.profile(profileName_)->fontSize);
+            return Result::Silently;
         },
-        [this](actions::ReloadConfig const& action) -> bool {
+        [this](actions::ReloadConfig const& action) -> Result {
             if (action.profileName.has_value())
-                return reloadConfigValues(action.profileName.value());
+                return reloadConfigValues(action.profileName.value()) ? Result::Dirty : Result::Nothing;
             else
-                return reloadConfigValues();
+                return reloadConfigValues() ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::ResetConfig) -> bool {
+        [this](actions::ResetConfig) -> Result {
             auto const ec = config::createDefaultConfig(config_.backingFilePath);
             if (ec)
             {
@@ -1039,7 +1047,7 @@ void TerminalWindow::executeAction(Action const& _action)
                                     config_.backingFilePath.string(),
                                     ec.category().name(),
                                     ec.message());
-                return false;
+                return Result::Silently;
             }
             auto const defaultConfig = config::loadConfigFromFile(
                 config_.backingFilePath,
@@ -1047,9 +1055,9 @@ void TerminalWindow::executeAction(Action const& _action)
                     cerr << "Failed to load default config: " << msg << endl;
                 }
             );
-            return reloadConfigValues(defaultConfig);
+            return reloadConfigValues(defaultConfig) ? Result::Dirty : Result::Nothing;
         },
-        [this](actions::FollowHyperlink) -> bool {
+        [this](actions::FollowHyperlink) -> Result {
             auto const _l = scoped_lock{terminalView_->terminal()};
             auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
             if (terminalView_->terminal().screen().contains(currentMousePosition))
@@ -1057,17 +1065,23 @@ void TerminalWindow::executeAction(Action const& _action)
                 if (auto hyperlink = terminalView_->terminal().screen().at(currentMousePosition).hyperlink(); hyperlink != nullptr)
                 {
                     followHyperlink(*hyperlink);
-                    return true;
+                    return Result::Silently;
                 }
             }
-            return false;
+            return Result::Silently;
         }
     }, _action);
 
-    if (dirty)
+    switch (result)
     {
-        setScreenDirty();
-        update();
+        case Result::Nothing:
+            return false;
+        case Result::Silently:
+            return true;
+        case Result::Dirty:
+            setScreenDirty();
+            update();
+            return true;
     }
 }
 

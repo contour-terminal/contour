@@ -149,7 +149,6 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
-    backgroundRenderer_.setOpacity(static_cast<float>(backgroundOpacity_) / 255.0f);
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
