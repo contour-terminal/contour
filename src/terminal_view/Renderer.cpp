@@ -230,6 +230,7 @@ void Renderer::renderSelection(Terminal const& _terminal)
             }
         }
         backgroundRenderer_.renderPendingCells();
+        backgroundRenderer_.setOpacity(1.0f);
     }
 }
 
