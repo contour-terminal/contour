@@ -76,7 +76,11 @@ Terminal::Terminal(WindowSize _winSize,
         true, // logs raw output by default?
         true, // logs trace output by default?
         bind(&Terminal::onScreenCommands, this, _1),
-        move(_onScreenBufferChanged),
+        [this, _onScreenBufferChanged](ScreenBuffer::Type _type) {
+            if (selector_)
+                selector_.reset();
+            _onScreenBufferChanged(_type);
+        },
         move(_bell),
         move(_requestDynamicColor),
         move(_resetDynamicColor),
