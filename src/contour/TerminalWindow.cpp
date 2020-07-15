@@ -1085,7 +1085,7 @@ bool TerminalWindow::executeAction(Action const& _action)
     switch (result)
     {
         case Result::Nothing:
-            return false;
+            break;
         case Result::Silently:
             return true;
         case Result::Dirty:
@@ -1093,6 +1093,7 @@ bool TerminalWindow::executeAction(Action const& _action)
             update();
             return true;
     }
+    return false;
 }
 
 void TerminalWindow::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
