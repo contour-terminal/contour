@@ -28,10 +28,6 @@ using namespace crispy;
 
 namespace terminal::view {
 
-constexpr unsigned MaxDecoratorInstanceCount = 1;
-constexpr unsigned MaxDecoratorTextureDepth = 2;
-constexpr unsigned MaxDecoratorTextureSize = 128;
-
 optional<Decorator> to_decorator(std::string const& _value)
 {
     auto constexpr mappings = array{
