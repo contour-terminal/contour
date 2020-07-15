@@ -947,7 +947,7 @@ class Screen {
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
-    size_t scrollOffset_;
+    size_t scrollOffset_ = 0;
 
     OnBufferChanged onBufferChanged_{};
     std::function<void()> bell_{};
