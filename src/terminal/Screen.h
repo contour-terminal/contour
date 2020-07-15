@@ -805,16 +805,6 @@ class Screen {
         return *buffer_->currentColumn;
     }
 
-    Cell& operator()(Coordinate const& _coord) noexcept
-    {
-        return buffer_->at(_coord);
-    }
-
-    Cell const& operator()(Coordinate const& _coord) const noexcept
-    {
-        return buffer_->at(_coord);
-    }
-
     Cell const& operator()(cursor_pos_t _row, cursor_pos_t _col) const noexcept
     {
         return buffer_->at(_row, _col);
@@ -833,15 +823,34 @@ class Screen {
 
     void moveCursorTo(Coordinate to);
 
-    Cell const& absoluteAt(Coordinate const& _coord) const;
+    Cell& absoluteAt(Coordinate const& _coord);
 
-    Cell const& at(cursor_pos_t _row, cursor_pos_t _col) const noexcept;
+    Cell const& absoluteAt(Coordinate const& _coord) const
+    {
+        return const_cast<Screen&>(*this).absoluteAt(_coord);
+    }
+
+    // Gets a reference to the cell relative to screen origin (top left, 1:1).
+    Cell& at(Coordinate const& _coord) noexcept
+    {
+        auto const y = static_cast<cursor_pos_t>(currentBuffer().savedLines.size() + _coord.row - scrollOffset_);
+        return absoluteAt(Coordinate{y, _coord.column});
+    }
+
+    // Gets a reference to the cell relative to screen origin (top left, 1:1).
+    Cell const& at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
+    {
+        return const_cast<Screen&>(*this).at(Coordinate{_rowNr, _colNr});
+    }
 
     /// Retrieves the cell at given cursor, respecting origin mode.
     Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return buffer_->withOriginAt(row, col); }
 
     bool isPrimaryScreen() const noexcept { return buffer_ == &primaryBuffer_; }
     bool isAlternateScreen() const noexcept { return buffer_ == &alternateBuffer_; }
+
+    ScreenBuffer const& currentBuffer() const noexcept { return *buffer_; }
+    ScreenBuffer& currentBuffer() noexcept { return *buffer_; }
 
     bool isModeEnabled(Mode m) const noexcept
     {

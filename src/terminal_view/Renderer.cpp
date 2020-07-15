@@ -155,7 +155,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         auto _l = scoped_lock{_terminal};
         if (_terminal.screen().contains(_currentMousePosition))
         {
-            auto& cellAtMouse = _terminal.screen()(_currentMousePosition);
+            auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
             if (cellAtMouse.hyperlink())
             {
                 cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?

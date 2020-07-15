@@ -792,7 +792,7 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
             auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
             if (terminalView_->terminal().screen().contains(currentMousePosition))
             {
-                if (terminalView_->terminal().screen()(currentMousePosition).hyperlink())
+                if (terminalView_->terminal().screen().at(currentMousePosition).hyperlink())
                     setCursor(Qt::CursorShape::PointingHandCursor);
                 else
                     setDefaultCursor();
@@ -1047,7 +1047,7 @@ void TerminalWindow::executeAction(Action const& _action)
             auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
             if (terminalView_->terminal().screen().contains(currentMousePosition))
             {
-                if (auto hyperlink = terminalView_->terminal().screen()(currentMousePosition).hyperlink(); hyperlink != nullptr)
+                if (auto hyperlink = terminalView_->terminal().screen().at(currentMousePosition).hyperlink(); hyperlink != nullptr)
                 {
                     followHyperlink(*hyperlink);
                     return true;

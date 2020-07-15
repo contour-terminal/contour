@@ -1975,19 +1975,14 @@ void Screen::resetHard()
     setBuffer(ScreenBuffer::Type::Main);
 }
 
-Screen::Cell const& Screen::absoluteAt(Coordinate const& _coord) const
+Screen::Cell& Screen::absoluteAt(Coordinate const& _coord)
 {
     if (_coord.row <= buffer_->savedLines.size())
         return *next(begin(*next(begin(buffer_->savedLines), _coord.row - 1)), _coord.column - 1);
     else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(buffer_->savedLines.size()); rowNr <= size_.rows)
-        return at(rowNr, _coord.column);
+        return buffer_->at(rowNr, _coord.column);
     else
         throw invalid_argument{"Row number exceeds boundaries."};
-}
-
-Screen::Cell const& Screen::at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
-{
-    return buffer_->at(Coordinate{_rowNr, _colNr});
 }
 
 void Screen::moveCursorTo(Coordinate to)

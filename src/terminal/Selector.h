@@ -85,7 +85,9 @@ class Selector {
 			 Coordinate const& _from) :
 		Selector{
 			_mode,
-			std::bind(&Screen::absoluteAt, _screen, std::placeholders::_1),
+            [screen = std::ref(_screen)](Coordinate const& _coord) -> Screen::Cell const& {
+                return screen.get().absoluteAt(_coord);
+            },
 			_wordDelimiters,
 			_screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
 			_screen.size().columns,
