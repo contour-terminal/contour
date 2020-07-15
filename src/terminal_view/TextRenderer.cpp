@@ -386,9 +386,9 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                                  atlas::TextureInfo const& _textureInfo)
 {
     // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-    auto const x = static_cast<unsigned>(_pos.x());
-    auto const y = static_cast<unsigned>(_pos.y());
-    auto const z = 0u;
+    auto const x = _pos.x();
+    auto const y = _pos.y();
+    auto const z = 0;
     commandListener_.renderTexture({_textureInfo, x, y, z, _color});
 }
 

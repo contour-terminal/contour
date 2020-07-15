@@ -260,11 +260,11 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         );
 #endif
         auto const pos = screenCoordinates_.map(_col, _row);
-        auto const x = static_cast<unsigned>(pos.x());
+        auto const x = pos.x();
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
-        auto const y = static_cast<unsigned>(pos.y());
+        auto const y = pos.y();
 #else
-        auto const y = static_cast<unsigned>(pos.y()) + screenCoordinates_.cellHeight;
+        auto const y = pos.y() + screenCoordinates_.cellHeight;
 #endif
         auto const z = 0u;
         auto const color = QVector4D(
@@ -274,8 +274,8 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
             1.0f
         );
         atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
-        unsigned const advanceX = screenCoordinates_.cellWidth;
-        for (unsigned i = 0; i < _columnCount; ++i)
+        auto const advanceX = static_cast<int>(screenCoordinates_.cellWidth);
+        for (int i = 0; i < static_cast<int>(_columnCount); ++i)
         {
 #if 0 // !defined(NDEBUG)
             cout << fmt::format(

@@ -73,9 +73,9 @@ struct UploadTexture {
 
 struct RenderTexture {
     std::reference_wrapper<TextureInfo const> texture;
-    unsigned x;           // window x coordinate to render the texture to
-    unsigned y;           // window y coordinate to render the texture to
-    unsigned z;           // window z coordinate to render the texture to
+    int x;           // window x coordinate to render the texture to
+    int y;           // window y coordinate to render the texture to
+    int z;           // window z coordinate to render the texture to
     QVector4D color;      // optional; a color being associated with this texture
 };
 

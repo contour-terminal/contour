@@ -203,16 +203,10 @@ void CursorRenderer::render(QPoint _pos, unsigned _columnWidth)
     if (optional<DataRef> const dataRef = getDataRef(shape_); dataRef.has_value())
     {
         auto const& textureInfo = get<0>(dataRef.value()).get();
-        auto const x = static_cast<unsigned>(_pos.x());
-        auto const y = static_cast<unsigned>(_pos.y());
-        auto constexpr z = 0u;
-        commandListener_.renderTexture({
-            textureInfo,
-            x,
-            y,
-            z,
-            color_
-        });
+        auto const x = _pos.x();
+        auto const y = _pos.y();
+        auto constexpr z = 0;
+        commandListener_.renderTexture({textureInfo, x, y, z, color_});
     }
 }
 
