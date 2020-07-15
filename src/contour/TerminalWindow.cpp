@@ -854,7 +854,12 @@ void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
         // window, so we have to re-apply our desired cursor in focusInEvent().
         setDefaultCursor();
 
+        terminalView_->terminal().screen().setFocus(true);
         terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
+
+        // force redraw because of setFocus()-change otherwise sometimes not being shown in realtime
+        setScreenDirty();
+        update();
     }
     catch (std::exception const& e)
     {
@@ -866,7 +871,12 @@ void TerminalWindow::focusOutEvent(QFocusEvent* _event) // TODO maybe paint with
 {
     QOpenGLWindow::focusOutEvent(_event);
 
+    terminalView_->terminal().screen().setFocus(false);
     terminalView_->terminal().send(terminal::FocusOutEvent{}, now_);
+
+    // force redraw because of setFocus()-change otherwise sometimes not being shown in realtime
+    setScreenDirty();
+    update();
 }
 
 bool TerminalWindow::event(QEvent* _event)

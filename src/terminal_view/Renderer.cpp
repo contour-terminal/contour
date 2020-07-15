@@ -196,7 +196,12 @@ void Renderer::renderCursor(Terminal const& _terminal)
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
         Screen::Cell const& cursorCell = _terminal.absoluteAt(_terminal.cursor());
-        cursorRenderer_.setShape(_terminal.cursorShape());
+
+        auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
+                                                              : CursorShape::Rectangle;
+
+        cursorRenderer_.setShape(cursorShape);
+
         cursorRenderer_.render(
             screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset())),
             cursorCell.width()

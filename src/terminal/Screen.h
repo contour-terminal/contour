@@ -689,6 +689,9 @@ class Screen {
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot() const { return buffer_->screenshot(); }
 
+    void setFocus(bool _focused) { focused_ = _focused; }
+    bool focused() const noexcept { return focused_; }
+
     // {{{ Command processor
     void operator()(Bell const& v);
     void operator()(FullReset const& v);
@@ -917,6 +920,7 @@ class Screen {
     Logger const logger_;
     bool logRaw_ = false;
     bool logTrace_ = false;
+    bool focused_ = true;
     ModeSwitchCallback useApplicationCursorKeys_;
     std::function<void()> onWindowTitleChanged_;
     ResizeWindowCallback resizeWindow_;
