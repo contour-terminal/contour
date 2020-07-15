@@ -723,10 +723,17 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
 
 void TerminalWindow::wheelEvent(QWheelEvent* _event)
 {
-    auto const button = _event->delta() > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
-    auto const mouseEvent = terminal::MousePressEvent{button, makeModifier(_event->modifiers())};
+    try
+    {
+        auto const button = _event->delta() > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+        auto const mouseEvent = terminal::MousePressEvent{button, makeModifier(_event->modifiers())};
 
-    executeInput(mouseEvent);
+        executeInput(mouseEvent);
+    }
+    catch (std::exception const& e)
+    {
+        reportUnhandledException(__PRETTY_FUNCTION__, e);
+    }
 }
 
 void TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
