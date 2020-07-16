@@ -468,6 +468,25 @@ namespace fmt { // {{{
     };
 
     template <>
+    struct formatter<terminal::MouseButton> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MouseButton _value, FormatContext& _ctx)
+        {
+            switch (_value)
+            {
+                case terminal::MouseButton::Left: return format_to(_ctx.out(), "Left");
+                case terminal::MouseButton::Right: return format_to(_ctx.out(), "Right");
+                case terminal::MouseButton::Middle: return format_to(_ctx.out(), "Middle");
+                case terminal::MouseButton::WheelUp: return format_to(_ctx.out(), "WheelUp");
+                case terminal::MouseButton::WheelDown: return format_to(_ctx.out(), "WheelDown");
+            }
+            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        }
+    };
+
+    template <>
     struct formatter<terminal::MouseTransport> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
