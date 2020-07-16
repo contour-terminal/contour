@@ -774,7 +774,7 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
         auto const mouseButton = makeMouseButton(_mouseRelease->button());
         executeInput(terminal::MouseReleaseEvent{mouseButton});
 
-        if (terminalView_->terminal().isSelectionAvailable())
+        if (terminalView_->terminal().screen().isSelectionAvailable())
         {
             setScreenDirty();
             update();
@@ -818,7 +818,7 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
         // hyperlink whose number eventually updates upon every cell write.
         bool constexpr hyperlinkVisible = true;
 
-        if (hyperlinkVisible || handled || terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
+        if (hyperlinkVisible || handled || terminalView_->terminal().screen().isSelectionAvailable()) // && only if selection has changed!
         {
             setScreenDirty();
             update();
@@ -1192,7 +1192,7 @@ string TerminalWindow::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_->terminal().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Screen::Cell const& _cell) {
+    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Screen::Cell const& _cell) {
         if (_col <= lastColumn)
         {
             text += currentLine;
@@ -1307,7 +1307,7 @@ void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixel
     else
     {
         if (_width == 0 && _height == 0)
-            resize(_width, _height);
+            resize(static_cast<int>(_width), static_cast<int>(_height));
         else
         {
             if (!_width)

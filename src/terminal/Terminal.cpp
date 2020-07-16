@@ -47,7 +47,7 @@ Terminal::Terminal(WindowSize _winSize,
                    Screen::NotifyCallback _notify
 ) :
     changes_{ 0 },
-    logger_{ _logger },
+    logger_{ move(_logger) },
     pty_{ _winSize },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
     cursorShape_{ CursorShape::Block }, // TODO: pass via param
@@ -56,7 +56,6 @@ Terminal::Terminal(WindowSize _winSize,
     lastCursorBlink_{ _now },
     startTime_{ _now },
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
-    selector_{},
     onSelectionComplete_{ move(_onSelectionComplete) },
     inputGenerator_{},
     screen_{
@@ -76,11 +75,7 @@ Terminal::Terminal(WindowSize _winSize,
         true, // logs raw output by default?
         true, // logs trace output by default?
         bind(&Terminal::onScreenCommands, this, _1),
-        [this, _onScreenBufferChanged](ScreenBuffer::Type _type) {
-            if (selector_)
-                selector_.reset();
-            _onScreenBufferChanged(_type);
-        },
+        _onScreenBufferChanged,
         move(_bell),
         move(_requestDynamicColor),
         move(_resetDynamicColor),
@@ -202,7 +197,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
 
         if (_mousePress.modifier == Modifier::None || _mousePress.modifier == Modifier::Control)
         {
-            Selector::Mode const selectionMode = [](int _speedClicks, Modifier _modifier) {
+            Selector::Mode const selectionMode = [](unsigned _speedClicks, Modifier _modifier) {
                 if (_speedClicks == 3)
                     return Selector::Mode::FullLine;
                 else if (_modifier == Modifier::Control)
@@ -215,24 +210,29 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
 
             if (speedClicks_ >= 2)
             {
-                selector_ = make_unique<Selector>(
+                screen_.setSelector(make_unique<Selector>(
                     selectionMode,
                     bind(&Terminal::absoluteAt, this, _1),
-                    wordDelimiters(),
+                    wordDelimiters_,
                     screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
                     screenSize().columns,
                     absoluteCoordinate(currentMousePosition_)
-                );
+                ));
+                changes_++;
             }
-            else if (selector_)
+            else
                 clearSelection();
-
-            changes_++;
 
             return true;
         }
     }
     return false;
+}
+
+void Terminal::clearSelection()
+{
+    screen_.clearSelection();
+    changes_++;
 }
 
 bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
@@ -249,21 +249,21 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
 
     speedClicks_ = 0;
 
-    if (leftMouseButtonPressed_ && !selector_)
+    if (leftMouseButtonPressed_ && !screen_.selectionAvailable())
     {
-        selector_ = make_unique<Selector>(
+        screen_.setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
             bind(&Terminal::absoluteAt, this, _1),
-            wordDelimiters(),
+            wordDelimiters_,
             screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
             screenSize().columns,
             absoluteCoordinate(currentMousePosition_)
-        );
+        ));
     }
 
-    if (selector_ && selector_->state() != Selector::State::Complete)
+    if (screen_.selectionAvailable() && screen_.selector()->state() != Selector::State::Complete)
     {
-        selector_->extend(absoluteCoordinate(newPosition));
+        screen_.selector()->extend(absoluteCoordinate(newPosition));
         changes_++;
         return true;
     }
@@ -286,9 +286,9 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     if (_mouseRelease.button == MouseButton::Left)
     {
         leftMouseButtonPressed_ = false;
-        if (selector_ && selector_->state() == Selector::State::InProgress)
+        if (screen_.selectionAvailable() && screen_.selector()->state() == Selector::State::InProgress)
         {
-            selector_->stop();
+            screen_.selector()->stop();
 
             if (onSelectionComplete_)
                 onSelectionComplete_();
@@ -442,26 +442,6 @@ void Terminal::setCursorShape(CursorShape _shape)
 void Terminal::setWordDelimiters(string const& _wordDelimiters)
 {
     wordDelimiters_ = unicode::from_utf8(_wordDelimiters);
-}
-
-vector<Selector::Range> Terminal::selection() const
-{
-    if (selector_)
-        return selector_->selection();
-    else
-        return {};
-}
-
-void Terminal::renderSelection(terminal::Screen::Renderer const& _render) const
-{
-    if (selector_)
-        selector_->render(_render);
-}
-
-void Terminal::clearSelection()
-{
-    selector_.reset();
-    changes_++;
 }
 
 }  // namespace terminal

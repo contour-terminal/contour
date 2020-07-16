@@ -14,7 +14,8 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/Screen.h> // Coordinate
+#include <terminal/ScreenBuffer.h>
+#include <terminal/Commands.h>          // Coordinate
 
 #include <fmt/format.h>
 
@@ -67,9 +68,9 @@ class Selector {
     };
 
 
-    using Renderer = Screen::Renderer;
+    using Renderer = ScreenBuffer::Renderer;
     enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
-	using GetCellAt = std::function<Screen::Cell const&(Coordinate const&)>;
+	using GetCellAt = std::function<ScreenBuffer::Cell const&(Coordinate const&)>;
 
     Selector(Mode _mode,
 			 GetCellAt _at,
@@ -81,16 +82,16 @@ class Selector {
 	/// Convenience constructor when access to Screen is available.
     Selector(Mode _mode,
 			 std::u32string const& _wordDelimiters,
-			 Screen const& _screen,
+			 ScreenBuffer const& _screenBuffer,
 			 Coordinate const& _from) :
 		Selector{
 			_mode,
-            [screen = std::ref(_screen)](Coordinate const& _coord) -> Screen::Cell const& {
-                return screen.get().absoluteAt(_coord);
+            [screenBuffer = std::ref(_screenBuffer)](Coordinate const& _coord) -> ScreenBuffer::Cell const& {
+                return screenBuffer.get().absoluteAt(_coord);
             },
 			_wordDelimiters,
-			_screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
-			_screen.size().columns,
+			_screenBuffer.size().rows + static_cast<cursor_pos_t>(_screenBuffer.historyLineCount()),
+			_screenBuffer.size().columns,
 			_from
 		}
 	{
@@ -156,7 +157,7 @@ class Selector {
 		}
 	}
 
-	Screen::Cell const& at(Coordinate const& _coord) const { return getCellAt_(_coord); }
+	ScreenBuffer::Cell const& at(Coordinate const& _coord) const { return getCellAt_(_coord); }
 
 	void extendSelectionBackward();
 	void extendSelectionForward();

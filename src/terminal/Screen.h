@@ -20,6 +20,7 @@
 #include <terminal/Parser.h>
 #include <terminal/WindowSize.h>
 #include <terminal/Hyperlink.h>
+#include <terminal/Selector.h>
 #include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/VTType.h>
 #include <terminal/ScreenBuffer.h>
@@ -57,7 +58,7 @@ class Screen {
 	using Cell = ScreenBuffer::Cell;
 	using Cursor = ScreenBuffer::Cursor;
     using Reply = std::function<void(std::string const&)>;
-    using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
+    using Renderer = ScreenBuffer::Renderer;
     using ModeSwitchCallback = std::function<void(bool)>;
     using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
     using SetApplicationKeypadMode = std::function<void(bool)>;
@@ -151,7 +152,7 @@ class Screen {
     }
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
-    size_t historyLineCount() const noexcept;
+    size_t historyLineCount() const noexcept { return buffer_->historyLineCount(); }
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -317,7 +318,10 @@ class Screen {
 
     void moveCursorTo(Coordinate to);
 
-    Cell& absoluteAt(Coordinate const& _coord);
+    Cell& absoluteAt(Coordinate const& _coord)
+    {
+        return buffer_->absoluteAt(_coord);
+    }
 
     Cell const& absoluteAt(Coordinate const& _coord) const
     {
@@ -390,6 +394,27 @@ class Screen {
 
     ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }
 
+    /// Tests whether some area has been selected.
+    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
+
+    /// Returns list of ranges that have been selected.
+    std::vector<Selector::Range> selection() const;
+
+    /// Sets or resets to a new selection.
+    void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
+
+    /// Tests whether or not some grid cells are selected.
+    bool selectionAvailable() const noexcept { return !!selector_; }
+
+    Selector const* selector() const noexcept { return selector_.get(); }
+    Selector* selector() noexcept { return selector_.get(); }
+
+    /// Clears current selection, if any currently present.
+    void clearSelection() { selector_.reset(); }
+
+    /// Renders only the selected area.
+    void renderSelection(Renderer const& _render) const;
+
   private:
     void setBuffer(ScreenBuffer::Type _type);
 
@@ -439,6 +464,8 @@ class Screen {
     std::stack<std::string> savedWindowTitles_{};
 
     size_t scrollOffset_ = 0;
+
+    std::unique_ptr<Selector> selector_;
 
     OnBufferChanged onBufferChanged_{};
     std::function<void()> bell_{};

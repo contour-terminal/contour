@@ -21,6 +21,7 @@
 #include <crispy/algorithm.h>
 
 #include <algorithm>
+#include <stdexcept>
 #include <iostream>
 #include <optional>
 
@@ -245,6 +246,21 @@ ScreenBuffer::Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t co
         col += margin_.horizontal.from - 1;
     }
     return at(row, col);
+}
+
+ScreenBuffer::Cell const& ScreenBuffer::absoluteAt(Coordinate const& _coord) const
+{
+    return const_cast<ScreenBuffer&>(*this).absoluteAt(_coord);
+}
+
+ScreenBuffer::Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
+{
+    if (_coord.row <= savedLines.size())
+        return *next(begin(*next(begin(savedLines), _coord.row - 1)), _coord.column - 1);
+    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(savedLines.size()); rowNr <= size_.rows)
+        return at(rowNr, _coord.column);
+    else
+        throw std::invalid_argument{"Row number exceeds boundaries."};
 }
 
 ScreenBuffer::Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)

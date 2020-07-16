@@ -211,11 +211,11 @@ void Renderer::renderCursor(Terminal const& _terminal)
 
 void Renderer::renderSelection(Terminal const& _terminal)
 {
-    if (_terminal.isSelectionAvailable())
+    if (_terminal.screen().isSelectionAvailable())
     {
         // TODO: don't abouse BackgroundRenderer here, maybe invent RectRenderer?
         backgroundRenderer_.setOpacity(colorProfile_.selectionOpacity);
-        for (Selector::Range const& range : _terminal.selection())
+        for (Selector::Range const& range : _terminal.screen().selection())
         {
             if (_terminal.isAbsoluteLineVisible(range.line))
             {

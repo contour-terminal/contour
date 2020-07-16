@@ -29,7 +29,7 @@ TEST_CASE("Selector.Linear")
 	);
 
 	SECTION("forward single-line") {
-		auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 2}};
+		auto selector = Selector{Selector::Mode::Linear, U",", screen.currentBuffer(), Coordinate{2, 2}};
 		selector.extend(Coordinate{2, 4});
 		// selected area "b,cdefg,hi\n1234"
 		// TODO

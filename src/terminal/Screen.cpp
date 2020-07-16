@@ -110,11 +110,6 @@ void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
     // Alternate buffer does not have a history usually (and for now we keep it that way).
 }
 
-size_t Screen::historyLineCount() const noexcept
-{
-    return buffer_->savedLines.size();
-}
-
 void Screen::resize(WindowSize const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
@@ -229,6 +224,21 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
             line += " "; // fill character
 
     return line;
+}
+
+void Screen::renderSelection(terminal::Screen::Renderer const& _render) const
+{
+    if (selector_)
+        selector_->render(_render);
+}
+
+
+vector<Selector::Range> Screen::selection() const
+{
+    if (selector_)
+        return selector_->selection();
+    else
+        return {};
 }
 
 // {{{ viewport management
@@ -452,6 +462,9 @@ void Screen::operator()(ClearScreen const&)
 
 void Screen::operator()(ClearScrollbackBuffer const&)
 {
+    if (selector_)
+        selector_.reset();
+
     buffer_->savedLines.clear();
 }
 
@@ -1196,16 +1209,6 @@ void Screen::resetHard()
     setBuffer(ScreenBuffer::Type::Main);
 }
 
-Screen::Cell& Screen::absoluteAt(Coordinate const& _coord)
-{
-    if (_coord.row <= buffer_->savedLines.size())
-        return *next(begin(*next(begin(buffer_->savedLines), _coord.row - 1)), _coord.column - 1);
-    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(buffer_->savedLines.size()); rowNr <= size_.rows)
-        return buffer_->at(rowNr, _coord.column);
-    else
-        throw invalid_argument{"Row number exceeds boundaries."};
-}
-
 void Screen::moveCursorTo(Coordinate to)
 {
     buffer_->wrapPending = false;
@@ -1231,6 +1234,10 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
                 buffer_ = &alternateBuffer_;
                 break;
         }
+
+        if (selector_)
+            selector_.reset();
+
         if (onBufferChanged_)
             onBufferChanged_(_type);
     }

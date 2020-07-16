@@ -313,6 +313,8 @@ struct ScreenBuffer {
 	using Lines = std::deque<Line>;
     using LineIterator = Lines::iterator;
 
+    using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
+
     struct Cursor : public Coordinate {
         bool visible = true;
 
@@ -350,6 +352,11 @@ struct ScreenBuffer {
     void reset()
     {
         *this = ScreenBuffer(type_, size_, maxHistoryLineCount_);
+    }
+
+    size_t historyLineCount() const noexcept
+    {
+        return savedLines.size();
     }
 
     std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const;
@@ -481,6 +488,9 @@ struct ScreenBuffer {
 		else
 			return {1, 1};
 	}
+
+    Cell& absoluteAt(Coordinate const& _coord);
+    Cell const& absoluteAt(Coordinate const& _coord) const;
 
 	Cell& at(Coordinate const& _coord);
 	Cell const& at(Coordinate const& _coord) const;

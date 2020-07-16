@@ -18,7 +18,6 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/PseudoTerminal.h>
 #include <terminal/Screen.h>
-#include <terminal/Selector.h>
 
 #include <fmt/format.h>
 
@@ -189,20 +188,11 @@ class Terminal {
     // }}}
 
     // {{{ selection management
+    // TODO: move you, too?
     void setWordDelimiters(std::string const& _wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
 
-    /// Tests whether some area has been selected.
-    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
-
-    /// Returns list of ranges that have been selected.
-    std::vector<Selector::Range> selection() const;
-
-    /// Clears current selection, if any currently present.
     void clearSelection();
-
-    /// Renders only the selected area.
-    void renderSelection(terminal::Screen::Renderer const& _render) const;
     // }}}
 
   private:
@@ -239,7 +229,6 @@ class Terminal {
     std::chrono::steady_clock::time_point startTime_;
 
     std::u32string wordDelimiters_;
-    std::unique_ptr<Selector> selector_;
     std::function<void()> onSelectionComplete_;
 
     // helpers for detecting double/tripple clicks
