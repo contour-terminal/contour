@@ -195,7 +195,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
-        Screen::Cell const& cursorCell = _terminal.absoluteAt(_terminal.cursor());
+        Screen::Cell const& cursorCell = *_terminal.absoluteAt(_terminal.cursor());
 
         auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
                                                               : CursorShape::Rectangle;

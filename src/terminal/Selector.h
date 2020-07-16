@@ -70,7 +70,7 @@ class Selector {
 
     using Renderer = ScreenBuffer::Renderer;
     enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
-	using GetCellAt = std::function<ScreenBuffer::Cell const&(Coordinate const&)>;
+	using GetCellAt = std::function<ScreenBuffer::Cell const*(Coordinate const&)>;
 
     Selector(Mode _mode,
 			 GetCellAt _at,
@@ -86,8 +86,11 @@ class Selector {
 			 Coordinate const& _from) :
 		Selector{
 			_mode,
-            [screenBuffer = std::ref(_screenBuffer)](Coordinate const& _coord) -> ScreenBuffer::Cell const& {
-                return screenBuffer.get().absoluteAt(_coord);
+            [screenBuffer = std::ref(_screenBuffer)](Coordinate const& _coord) -> ScreenBuffer::Cell const* {
+                if (_coord.row <= screenBuffer.get().size().rows)
+                    return &screenBuffer.get().absoluteAt(_coord);
+                else
+                    return nullptr;
             },
 			_wordDelimiters,
 			_screenBuffer.size().rows + static_cast<cursor_pos_t>(_screenBuffer.historyLineCount()),
@@ -157,7 +160,7 @@ class Selector {
 		}
 	}
 
-	ScreenBuffer::Cell const& at(Coordinate const& _coord) const { return getCellAt_(_coord); }
+	ScreenBuffer::Cell const* at(Coordinate const& _coord) const { return getCellAt_(_coord); }
 
 	void extendSelectionBackward();
 	void extendSelectionForward();
