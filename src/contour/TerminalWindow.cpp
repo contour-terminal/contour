@@ -760,6 +760,13 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
     {
         auto const mouseButton = makeMouseButton(_event->button());
         executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
+
+        // Force redraw of the scene in case a selection was just created.
+        if (terminalView_->terminal().screen().isSelectionAvailable())
+        {
+            setScreenDirty();
+            update();
+        }
     }
     catch (std::exception const& e)
     {
@@ -773,12 +780,6 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
     {
         auto const mouseButton = makeMouseButton(_mouseRelease->button());
         executeInput(terminal::MouseReleaseEvent{mouseButton});
-
-        if (terminalView_->terminal().screen().isSelectionAvailable())
-        {
-            setScreenDirty();
-            update();
-        }
     }
     catch (std::exception const& e)
     {
@@ -1078,7 +1079,7 @@ bool TerminalWindow::executeAction(Action const& _action)
                     return Result::Silently;
                 }
             }
-            return Result::Silently;
+            return Result::Nothing;
         }
     }, _action);
 

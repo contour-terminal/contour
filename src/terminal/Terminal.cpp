@@ -208,7 +208,10 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     return Selector::Mode::Linear;
             }(speedClicks_, _mousePress.modifier);
 
-            if (speedClicks_ >= 2)
+            changes_++;
+            if (!screen_.selectionAvailable()
+                || screen_.selector()->state() == Selector::State::Waiting
+                || speedClicks_ >= 2)
             {
                 screen_.setSelector(make_unique<Selector>(
                     selectionMode,
@@ -218,9 +221,13 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                     screenSize().columns,
                     absoluteCoordinate(currentMousePosition_)
                 ));
-                changes_++;
+
+                if (selectionMode != Selector::Mode::Linear)
+                {
+                    screen_.selector()->extend(absoluteCoordinate(currentMousePosition_));
+                }
             }
-            else
+            else if (screen_.selector()->state() == Selector::State::Complete)
                 clearSelection();
 
             return true;
