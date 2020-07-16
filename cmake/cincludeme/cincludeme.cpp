@@ -39,7 +39,7 @@
 
 using namespace std;
 
-void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
+static void dump(ostream& _out, string const& _inputFile, string const& _symbolName)
 {
     auto in = ifstream{_inputFile, ios::binary};
     if (!in.good())
