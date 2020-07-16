@@ -26,6 +26,7 @@ set(terminal_HEADERS
     Process.h
     PseudoTerminal.h
     Screen.h
+    ScreenBuffer.h
     Selector.h
     Terminal.h
     TerminalProcess.h
@@ -45,6 +46,7 @@ set(terminal_SOURCES
     Process.cpp
     PseudoTerminal.cpp
     Screen.cpp
+    ScreenBuffer.cpp
     Selector.cpp
     Terminal.cpp
     TerminalProcess.cpp
