@@ -364,6 +364,9 @@ class MnemonicBuilder {
                 break;
         }
     }
+    void operator()(ChangeIconTitle const& v) {
+        build("ICONTITLE", fmt::format("Sets icon title to {}", v.title));
+    }
     void operator()(ChangeWindowTitle const& v) {
         build("WINTITLE", fmt::format("Sets window title to {}", v.title));
     }

@@ -250,6 +250,7 @@ class Screen {
     void operator()(DesignateCharset const& v);
     void operator()(SingleShiftSelect const& v);
     void operator()(SoftTerminalReset const& v);
+    void operator()(ChangeIconTitle const& v);
     void operator()(ChangeWindowTitle const& v);
     void operator()(ResizeWindow const& v);
     void operator()(SaveWindowTitle const& v);

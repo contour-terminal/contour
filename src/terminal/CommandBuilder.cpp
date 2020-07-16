@@ -852,8 +852,8 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
 
         // OSC
-        case SETICON: return ApplyResult::Unsupported;
-        case SETWINTITLE: return emitCommand<ChangeWindowTitle>(_output, string(_ctx.intermediateCharacters()));
+        case SETICON: return emitCommand<ChangeIconTitle>(_output, _ctx.intermediateCharacters());
+        case SETWINTITLE: return emitCommand<ChangeWindowTitle>(_output, _ctx.intermediateCharacters());
         case SETXPROP: return ApplyResult::Unsupported;
         case HYPERLINK: return impl::HYPERLINK(_ctx, _output);
         case COLORFG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::DefaultForegroundColor);

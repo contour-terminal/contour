@@ -1086,6 +1086,11 @@ void Screen::operator()(SoftTerminalReset const&)
     resetSoft();
 }
 
+void Screen::operator()(ChangeIconTitle const&)
+{
+    // Not supported (for now), ignored.
+}
+
 void Screen::operator()(ChangeWindowTitle const& v)
 {
     windowTitle_ = v.title;

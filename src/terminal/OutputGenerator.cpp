@@ -372,7 +372,8 @@ void OutputGenerator::operator()(Command const& command)
             }
         },
         [&](AppendChar const& v) { write(v.ch); },
-        [&](ChangeWindowTitle const& v) { write("\033]2;{}\x9c", v.title); },
+        [&](ChangeIconTitle const& v) { write("\033]1;{}\033\\", v.title); },
+        [&](ChangeWindowTitle const& v) { write("\033]2;{}\033\\", v.title); },
         [&](SoftTerminalReset) { write("\033[!p"); },
         [&](ResizeWindow const& v) {
             write("\033[{};{};{}t",

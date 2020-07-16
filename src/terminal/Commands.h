@@ -721,6 +721,12 @@ struct HorizontalTabSet {};
 /// DECALN sets the margins to the extremes of the page, and moves the cursor to the home position.
 struct ScreenAlignmentPattern {};
 
+/// Changes the Window's icon title, that is, when the window is iconized, that given text is being
+/// displayed underneath the icon.
+///
+/// To be fair, nobody uses twm or fvwm anymore, or do you?
+struct ChangeIconTitle { std::string title; };
+
 /// Changes the Window's title to given title.
 struct ChangeWindowTitle { std::string title; };
 
@@ -916,6 +922,7 @@ using Command = std::variant<
     BackIndex,
     Backspace,
     Bell,
+    ChangeIconTitle,
     ChangeWindowTitle,
     ClearLine,
     ClearScreen,
