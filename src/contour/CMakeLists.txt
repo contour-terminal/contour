@@ -4,6 +4,10 @@ find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5
 find_package(OpenGL REQUIRED)
 find_package(Freetype REQUIRED)
 
+option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
+option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
+option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
+
 # /// {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
 if(CONTOUR_BLUR_PLATFORM_KWIN)
@@ -14,10 +18,6 @@ if(CONTOUR_BLUR_PLATFORM_KWIN)
     find_package(KF5 ${KF5_MIN_VERSION} REQUIRED WindowSystem)
 endif()
 # }}}
-
-option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
-option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
-option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
