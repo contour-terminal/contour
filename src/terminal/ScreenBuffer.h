@@ -115,6 +115,174 @@ struct Margin {
 	Range horizontal{}; // left-right
 };
 
+/// Character graphics rendition information.
+struct GraphicsAttributes {
+    Color foregroundColor{DefaultColor{}};
+    Color backgroundColor{DefaultColor{}};
+    Color underlineColor{DefaultColor{}};
+    CharacterStyleMask styles{};
+
+    RGBColor getUnderlineColor(ColorProfile const& _colorProfile) const noexcept
+    {
+        float const opacity = [=]() {
+            if (styles & CharacterStyleMask::Faint)
+                return 0.5f;
+            else
+                return 1.0f;
+        }();
+
+        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+        return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
+    }
+
+    std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile) const noexcept
+    {
+        float const opacity = [=]() {
+            if (styles & CharacterStyleMask::Faint)
+                return 0.5f;
+            else
+                return 1.0f;
+        }();
+
+        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+
+        return (styles & CharacterStyleMask::Inverse)
+            ? std::pair{ apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) * opacity,
+                         apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) }
+            : std::pair{ apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) * opacity,
+                         apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) };
+    }
+};
+
+/// Grid cell with character and graphics rendition information.
+class Cell {
+  public:
+    static size_t constexpr MaxCodepoints = 9;
+
+    Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
+        codepoints_{},
+        attributes_{std::move(_attrib)},
+        width_{1},
+        codepointCount_{0}
+    {
+        setCharacter(_ch);
+    }
+
+    constexpr Cell() noexcept :
+        codepoints_{},
+        attributes_{},
+        width_{1},
+        codepointCount_{0}
+    {}
+
+    void reset() noexcept
+    {
+        attributes_ = {};
+        codepointCount_ = 0;
+        width_ = 1;
+        hyperlink_ = nullptr;
+    }
+
+    void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
+    {
+        attributes_ = std::move(_attribs);
+        codepointCount_ = 0;
+        width_ = 1;
+        hyperlink_ = _hyperlink;
+    }
+
+    Cell(Cell const&) noexcept = default;
+    Cell(Cell&&) noexcept = default;
+    Cell& operator=(Cell const&) noexcept = default;
+    Cell& operator=(Cell&&) noexcept = default;
+
+    constexpr std::u32string_view codepoints() const noexcept
+    {
+        return std::u32string_view{codepoints_.data(), codepointCount_};
+    }
+
+    constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
+    constexpr unsigned codepointCount() const noexcept { return codepointCount_; }
+
+    constexpr bool empty() const noexcept { return codepointCount_ == 0; }
+
+    constexpr unsigned width() const noexcept { return width_; }
+
+    constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
+    constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
+
+    void setCharacter(char32_t _codepoint) noexcept
+    {
+        codepoints_[0] = _codepoint;
+        if (_codepoint)
+        {
+            codepointCount_ = 1;
+            width_ = std::max(unicode::width(_codepoint), 1);
+        }
+        else
+        {
+            codepointCount_ = 0;
+            width_ = 1;
+        }
+    }
+
+    void setWidth(unsigned _width) noexcept
+    {
+        width_ = _width;
+    }
+
+    int appendCharacter(char32_t _codepoint) noexcept
+    {
+        if (codepointCount_ < MaxCodepoints)
+        {
+            codepoints_[codepointCount_] = _codepoint;
+            codepointCount_++;
+
+            constexpr bool AllowWidthChange = false; // TODO: make configurable
+
+            auto const width = [&]() {
+                switch (_codepoint)
+                {
+                    case 0xFE0E:
+                        return 1;
+                    case 0xFE0F:
+                        return 2;
+                    default:
+                        return unicode::width(_codepoint);
+                }
+            }();
+
+            if (width != width_ && AllowWidthChange)
+            {
+                int const diff = width - width_;
+                width_ = width;
+                return diff;
+            }
+        }
+        return 0;
+    }
+
+    std::string toUtf8() const;
+
+    HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
+    void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
+
+  private:
+    /// Unicode codepoint to be displayed.
+    std::array<char32_t, MaxCodepoints> codepoints_;
+
+    /// Graphics renditions, such as foreground/background color or other grpahics attributes.
+    GraphicsAttributes attributes_;
+
+    /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
+    uint8_t width_;
+
+    /// Number of combined codepoints stored in this cell.
+    uint8_t codepointCount_;
+
+    HyperlinkRef hyperlink_ = nullptr;
+};
+
 /**
  * Screen Buffer, managing a single screen buffer.
  */
@@ -123,174 +291,6 @@ struct ScreenBuffer {
     enum class Type {
         Main,
         Alternate
-    };
-
-    /// Character graphics rendition information.
-    struct GraphicsAttributes {
-        Color foregroundColor{DefaultColor{}};
-        Color backgroundColor{DefaultColor{}};
-        Color underlineColor{DefaultColor{}};
-        CharacterStyleMask styles{};
-
-        RGBColor getUnderlineColor(ColorProfile const& _colorProfile) const noexcept
-        {
-            float const opacity = [=]() {
-                if (styles & CharacterStyleMask::Faint)
-                    return 0.5f;
-                else
-                    return 1.0f;
-            }();
-
-            bool const bright = (styles & CharacterStyleMask::Bold) != 0;
-            return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
-        }
-
-        std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile) const noexcept
-        {
-            float const opacity = [=]() {
-                if (styles & CharacterStyleMask::Faint)
-                    return 0.5f;
-                else
-                    return 1.0f;
-            }();
-
-            bool const bright = (styles & CharacterStyleMask::Bold) != 0;
-
-            return (styles & CharacterStyleMask::Inverse)
-                ? std::pair{ apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) * opacity,
-                             apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) }
-                : std::pair{ apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) * opacity,
-                             apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) };
-        }
-    };
-
-    /// Grid cell with character and graphics rendition information.
-    class Cell {
-      public:
-        static size_t constexpr MaxCodepoints = 9;
-
-        Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
-            codepoints_{},
-            attributes_{std::move(_attrib)},
-            width_{1},
-            codepointCount_{0}
-        {
-            setCharacter(_ch);
-        }
-
-        constexpr Cell() noexcept :
-            codepoints_{},
-            attributes_{},
-            width_{1},
-            codepointCount_{0}
-        {}
-
-        void reset() noexcept
-        {
-            attributes_ = {};
-            codepointCount_ = 0;
-            width_ = 1;
-            hyperlink_ = nullptr;
-        }
-
-        void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
-        {
-            attributes_ = std::move(_attribs);
-            codepointCount_ = 0;
-            width_ = 1;
-            hyperlink_ = _hyperlink;
-        }
-
-        Cell(Cell const&) noexcept = default;
-        Cell(Cell&&) noexcept = default;
-        Cell& operator=(Cell const&) noexcept = default;
-        Cell& operator=(Cell&&) noexcept = default;
-
-        constexpr std::u32string_view codepoints() const noexcept
-        {
-            return std::u32string_view{codepoints_.data(), codepointCount_};
-        }
-
-        constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
-        constexpr unsigned codepointCount() const noexcept { return codepointCount_; }
-
-        constexpr bool empty() const noexcept { return codepointCount_ == 0; }
-
-        constexpr unsigned width() const noexcept { return width_; }
-
-        constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
-        constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
-
-        void setCharacter(char32_t _codepoint) noexcept
-        {
-            codepoints_[0] = _codepoint;
-            if (_codepoint)
-            {
-                codepointCount_ = 1;
-                width_ = std::max(unicode::width(_codepoint), 1);
-            }
-            else
-            {
-                codepointCount_ = 0;
-                width_ = 1;
-            }
-        }
-
-        void setWidth(unsigned _width) noexcept
-        {
-            width_ = _width;
-        }
-
-        int appendCharacter(char32_t _codepoint) noexcept
-        {
-            if (codepointCount_ < MaxCodepoints)
-            {
-                codepoints_[codepointCount_] = _codepoint;
-                codepointCount_++;
-
-                constexpr bool AllowWidthChange = false; // TODO: make configurable
-
-                auto const width = [&]() {
-                    switch (_codepoint)
-                    {
-                        case 0xFE0E:
-                            return 1;
-                        case 0xFE0F:
-                            return 2;
-                        default:
-                            return unicode::width(_codepoint);
-                    }
-                }();
-
-                if (width != width_ && AllowWidthChange)
-                {
-                    int const diff = width - width_;
-                    width_ = width;
-                    return diff;
-                }
-            }
-            return 0;
-        }
-
-        std::string toUtf8() const;
-
-        HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
-        void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
-
-      private:
-        /// Unicode codepoint to be displayed.
-        std::array<char32_t, MaxCodepoints> codepoints_;
-
-        /// Graphics renditions, such as foreground/background color or other grpahics attributes.
-        GraphicsAttributes attributes_;
-
-        /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
-        uint8_t width_;
-
-        /// Number of combined codepoints stored in this cell.
-        uint8_t codepointCount_;
-
-        HyperlinkRef hyperlink_ = nullptr;
     };
 
 	using LineBuffer = std::vector<Cell>;
@@ -569,7 +569,7 @@ inline auto end(ScreenBuffer::Line const& _line) { return _line.cend(); }
 inline ScreenBuffer::Line::const_iterator cbegin(ScreenBuffer::Line const& _line) { return _line.cbegin(); }
 inline ScreenBuffer::Line::const_iterator cend(ScreenBuffer::Line const& _line) { return _line.cend(); }
 
-constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
+constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
 {
     return a.backgroundColor == b.backgroundColor
         && a.foregroundColor == b.foregroundColor
@@ -577,12 +577,12 @@ constexpr bool operator==(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffe
         && a.underlineColor == b.underlineColor;
 }
 
-constexpr bool operator!=(ScreenBuffer::GraphicsAttributes const& a, ScreenBuffer::GraphicsAttributes const& b) noexcept
+constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
 {
     return !(a == b);
 }
 
-constexpr bool operator==(ScreenBuffer::Cell const& a, ScreenBuffer::Cell const& b) noexcept
+constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 {
     if (a.codepointCount() != b.codepointCount())
         return false;
@@ -612,11 +612,11 @@ namespace fmt {
     };
 
     template <>
-    struct formatter<terminal::ScreenBuffer::Cell> {
+    struct formatter<terminal::Cell> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::ScreenBuffer::Cell const& cell, FormatContext& ctx)
+        auto format(terminal::Cell const& cell, FormatContext& ctx)
         {
             std::string codepoints;
             for (size_t i = 0; i < cell.codepointCount(); ++i)

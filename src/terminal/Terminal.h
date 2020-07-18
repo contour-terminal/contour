@@ -106,7 +106,7 @@ class Terminal {
     Cursor cursor() const;
 
     /// @returns a reference to the cell at the given absolute coordinate.
-    Screen::Cell const* absoluteAt(Coordinate const& _coord) const;
+    Cell const* absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;

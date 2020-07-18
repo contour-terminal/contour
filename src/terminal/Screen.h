@@ -55,7 +55,6 @@ namespace terminal {
  */
 class Screen {
   public:
-	using Cell = ScreenBuffer::Cell;
 	using Cursor = ScreenBuffer::Cursor;
     using Reply = std::function<void(std::string const&)>;
     using Renderer = ScreenBuffer::Renderer;

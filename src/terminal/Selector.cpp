@@ -51,7 +51,7 @@ Selector::Selector(Mode _mode,
 Coordinate Selector::stretchedColumn(Coordinate _coord) const noexcept
 {
     Coordinate stretched = _coord;
-    if (Screen::Cell const* cell = at(_coord); cell && cell->width() > 1)
+    if (Cell const* cell = at(_coord); cell && cell->width() > 1)
     {
         // wide character
         stretched.column += cell->width() - 1;
@@ -60,7 +60,7 @@ Coordinate Selector::stretchedColumn(Coordinate _coord) const noexcept
 
     while (stretched.column < columnCount_)
     {
-        if (Screen::Cell const* cell = at(stretched); cell)
+        if (Cell const* cell = at(stretched); cell)
         {
             if (cell->empty())
                 stretched.column++;
@@ -112,7 +112,7 @@ bool Selector::extend(Coordinate const& _coord)
 void Selector::extendSelectionBackward()
 {
     auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
-        ScreenBuffer::Cell const* cell = at(_coord);
+        Cell const* cell = at(_coord);
         return !cell || cell->empty() || wordDelimiters_.find(cell->codepoint(0)) != wordDelimiters_.npos;
     };
 
@@ -146,7 +146,7 @@ void Selector::extendSelectionBackward()
 void Selector::extendSelectionForward()
 {
     auto const isWordDelimiterAt = [this](Coordinate const& _coord) -> bool {
-        ScreenBuffer::Cell const* cell = at(_coord);
+        Cell const* cell = at(_coord);
         return !cell || cell->empty() || wordDelimiters_.find(cell->codepoint(0)) != wordDelimiters_.npos;
     };
 
@@ -215,7 +215,7 @@ void Selector::render(Selector::Renderer const& _render)
 {
     for (auto const& range : selection())
         for (auto col = range.fromColumn; col <= range.toColumn; ++col)
-            if (ScreenBuffer::Cell const* cell = at({range.line, col}); cell != nullptr)
+            if (Cell const* cell = at({range.line, col}); cell != nullptr)
                 _render(range.line, col, *cell);
 }
 

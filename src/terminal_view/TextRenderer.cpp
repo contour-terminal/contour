@@ -76,7 +76,7 @@ void TextRenderer::setFont(FontConfig const& _fonts)
     clearCache();
 }
 
-void TextRenderer::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr)
+void TextRenderer::reset(cursor_pos_t _row, cursor_pos_t _col, GraphicsAttributes const& _attr)
 {
     //std::cout << fmt::format("TextRenderer.reset(): attr:{}\n", _attr.styles);
     row_ = _row;
@@ -87,7 +87,7 @@ void TextRenderer::reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Gra
     clusterOffset_ = 0;
 }
 
-void TextRenderer::extend(ScreenBuffer::Cell const& _cell, [[maybe_unused]] cursor_pos_t _column)
+void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] cursor_pos_t _column)
 {
     for (size_t const i: times(_cell.codepointCount()))
     {
@@ -97,7 +97,7 @@ void TextRenderer::extend(ScreenBuffer::Cell const& _cell, [[maybe_unused]] curs
     ++clusterOffset_;
 }
 
-void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell)
+void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell)
 {
     constexpr char32_t SP = 0x20;
 

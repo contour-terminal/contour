@@ -115,7 +115,7 @@ class Renderer {
     void clearCache();
 
   private:
-    void renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell);
+    void renderCell(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
     void renderCursor(Terminal const& _terminal);
     void renderSelection(Terminal const& _terminal);
 

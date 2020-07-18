@@ -1193,7 +1193,7 @@ string TerminalWindow::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Screen::Cell const& _cell) {
+    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Cell const& _cell) {
         if (_col <= lastColumn)
         {
             text += currentLine;

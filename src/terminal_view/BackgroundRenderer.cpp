@@ -31,7 +31,7 @@ BackgroundRenderer::BackgroundRenderer(ScreenCoordinates const& _screenCoordinat
 {
 }
 
-void BackgroundRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell)
+void BackgroundRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell)
 {
     RGBColor const color = _cell.attributes().makeColors(colorProfile_).second;
     renderCell(_row, _col, color);

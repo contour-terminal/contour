@@ -1059,7 +1059,7 @@ void Screen::operator()(ScreenAlignmentPattern const&)
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 begin(line),
                 end(line),
-                ScreenBuffer::Cell{'X', buffer_->graphicsRendition}
+                Cell{'X', buffer_->graphicsRendition}
             );
         }
     );

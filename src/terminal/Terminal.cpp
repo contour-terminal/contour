@@ -215,7 +215,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
             {
                 screen_.setSelector(make_unique<Selector>(
                     selectionMode,
-                    [this](Coordinate const& _coord) -> ScreenBuffer::Cell const* { return absoluteAt(_coord); },
+                    [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
                     wordDelimiters_,
                     screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
                     screenSize().columns,
@@ -260,7 +260,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     {
         screen_.setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
-            [this](Coordinate const& _coord) -> ScreenBuffer::Cell const* { return absoluteAt(_coord); },
+            [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
             wordDelimiters_,
             screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
             screenSize().columns,
@@ -409,7 +409,7 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
         return chrono::milliseconds::min();
 }
 
-Screen::Cell const* Terminal::absoluteAt(Coordinate const& _coord) const
+Cell const* Terminal::absoluteAt(Coordinate const& _coord) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     if (_coord.row <= screen_.size().rows)
