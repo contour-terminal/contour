@@ -1691,7 +1691,7 @@ TEST_CASE("render into history", "[screen]")
 
     string renderedText;
     renderedText.resize(2 * 6);
-    auto const renderer = [&](auto rowNumber, auto columnNumber, Screen::Cell const& cell) {
+    auto const renderer = [&](auto rowNumber, auto columnNumber, Cell const& cell) {
         renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.codepoint(0));
         if (columnNumber == 5)
             renderedText[(rowNumber - 1) * 6 + (columnNumber)] = '\n';

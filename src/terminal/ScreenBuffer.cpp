@@ -44,7 +44,7 @@ using crispy::for_each;
 
 namespace terminal {
 
-std::string ScreenBuffer::Cell::toUtf8() const
+std::string Cell::toUtf8() const
 {
     return unicode::to_utf8(codepoints_.data(), codepointCount_);
 }
@@ -238,7 +238,7 @@ void ScreenBuffer::moveCursorTo(Coordinate to)
     updateCursorIterators();
 }
 
-ScreenBuffer::Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
+Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
 {
     if (cursorRestrictedToMargin)
     {
@@ -248,12 +248,12 @@ ScreenBuffer::Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t co
     return at(row, col);
 }
 
-ScreenBuffer::Cell const& ScreenBuffer::absoluteAt(Coordinate const& _coord) const
+Cell const& ScreenBuffer::absoluteAt(Coordinate const& _coord) const
 {
     return const_cast<ScreenBuffer&>(*this).absoluteAt(_coord);
 }
 
-ScreenBuffer::Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
+Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
 {
     if (_coord.row <= savedLines.size())
         return *next(begin(*next(begin(savedLines), _coord.row - 1)), _coord.column - 1);
@@ -263,7 +263,7 @@ ScreenBuffer::Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
         throw std::invalid_argument{"Row number exceeds boundaries."};
 }
 
-ScreenBuffer::Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
+Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
 {
     assert(_row >= 1 && _row <= size_.rows);
     assert(_col >= 1 && _col <= size_.columns);
@@ -272,12 +272,12 @@ ScreenBuffer::Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
     return (*next(begin(lines), _row - 1))[_col - 1];
 }
 
-ScreenBuffer::Cell const& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col) const
+Cell const& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col) const
 {
     return const_cast<ScreenBuffer*>(this)->at(_row, _col);
 }
 
-ScreenBuffer::Cell& ScreenBuffer::at(Coordinate const& _coord)
+Cell& ScreenBuffer::at(Coordinate const& _coord)
 {
     assert(_coord.row >= 1 && _coord.row <= size_.rows);
     assert(_coord.column >= 1 && _coord.column <= size_.columns);
@@ -286,7 +286,7 @@ ScreenBuffer::Cell& ScreenBuffer::at(Coordinate const& _coord)
     return (*next(begin(lines), _coord.row - 1))[_coord.column - 1];
 }
 
-ScreenBuffer::Cell const& ScreenBuffer::at(Coordinate const& _coord) const
+Cell const& ScreenBuffer::at(Coordinate const& _coord) const
 {
     return const_cast<ScreenBuffer*>(this)->at(_coord);
 }

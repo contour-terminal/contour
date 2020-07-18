@@ -130,15 +130,15 @@ class TextRenderer {
     void setCellSize(CellSize const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
-    void schedule(cursor_pos_t _row, cursor_pos_t _col, Screen::Cell const& _cell);
+    void schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
     void flushPendingSegments();
     void finish();
 
     void clearCache();
 
   private:
-    void reset(cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::GraphicsAttributes const& _attr);
-    void extend(ScreenBuffer::Cell const& _cell, cursor_pos_t _column);
+    void reset(cursor_pos_t _row, cursor_pos_t _col, GraphicsAttributes const& _attr);
+    void extend(Cell const& _cell, cursor_pos_t _column);
     crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
 
     crispy::text::GlyphPositionList const& cachedGlyphPositions();
@@ -190,7 +190,7 @@ class TextRenderer {
     State state_ = State::Empty;
     cursor_pos_t row_ = 1;
     cursor_pos_t startColumn_ = 1;
-    ScreenBuffer::GraphicsAttributes attributes_ = {};
+    GraphicsAttributes attributes_ = {};
     std::vector<char32_t> codepoints_{};
     std::vector<unsigned> clusters_{};
     unsigned clusterOffset_ = 0;

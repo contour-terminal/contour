@@ -210,7 +210,7 @@ void DecorationRenderer::rebuild()
 
 void DecorationRenderer::renderCell(cursor_pos_t _row,
                                     cursor_pos_t _col,
-                                    ScreenBuffer::Cell const& _cell)
+                                    Cell const& _cell)
 {
     if (_cell.hyperlink())
     {
