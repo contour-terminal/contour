@@ -11,6 +11,7 @@ target_include_directories(crispy-core INTERFACE
 )
 target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/base64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
     ${CMAKE_CURRENT_SOURCE_DIR}/escape.h
     ${CMAKE_CURRENT_SOURCE_DIR}/indexed.h
@@ -80,6 +81,7 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
+        base64_test.cpp
         compose_test.cpp
         utils_test.cpp
         sort_test.cpp
