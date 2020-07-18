@@ -53,6 +53,7 @@ class CharacterStyleMask {
         DashedUnderline = (1 << 11),
         Framed = (1 << 12),
         Encircled = (1 << 13),
+        Overline = (1 << 14),
 	};
 
 	constexpr CharacterStyleMask() : mask_{} {}
@@ -662,7 +663,7 @@ namespace fmt {
         auto format(terminal::CharacterStyleMask const& _mask, FormatContext& ctx)
         {
             using Mask = terminal::CharacterStyleMask;
-            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 10>{
+            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 11>{
                 std::pair{Mask::Bold, "bold"},
                 std::pair{Mask::Faint, "faint"},
                 std::pair{Mask::Italic, "italic"},
@@ -672,7 +673,8 @@ namespace fmt {
                 std::pair{Mask::Hidden, "hidden"},
                 std::pair{Mask::CrossedOut, "crossedOut"},
                 std::pair{Mask::DoublyUnderlined, "doublyUnderlined"},
-                std::pair{Mask::CurlyUnderlined, "curlyUnderlined"}
+                std::pair{Mask::CurlyUnderlined, "curlyUnderlined"},
+                std::pair{Mask::Overline, "overline"}
             };
             int i = 0;
             std::ostringstream os;

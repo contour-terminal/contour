@@ -98,6 +98,10 @@ string to_string(GraphicsRendition s)
             return "DottedUnderlined";
         case GraphicsRendition::DashedUnderline:
             return "DashedUnderlined";
+        case GraphicsRendition::Overline:
+            return "Overline";
+        case GraphicsRendition::NoOverline:
+            return "NoOverline";
     }
     return "?";
 }

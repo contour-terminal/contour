@@ -100,6 +100,8 @@ enum class GraphicsRendition {
     CurlyUnderlined = 30,   //!< Curly line below the baseline.
     DottedUnderline = 31,   //!< Dotted line below the baseline.
     DashedUnderline = 32,   //!< Dashed line below the baseline.
+    Overline = 53,          //!< Overlined glyph
+    NoOverline = 55,        //!< Reverses Overline.
 };
 
 std::string to_string(GraphicsRendition s);
