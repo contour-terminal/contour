@@ -90,7 +90,32 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
     CHECK(screen.at(1, 3).attributes().backgroundColor == IndexedColor::Blue);
 }
 
-TEST_CASE("AppendChar.emoji_VS16", "[screen]")
+TEST_CASE("AppendChar.emoji_VS16_fixed_width", "[screen]")
+{
+    auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+
+    // print letter-like symbol `i` with forced emoji presentation style.
+    screen.write(AppendChar{U'\u2139'});
+    screen.write(AppendChar{U'\uFE0F'});
+    screen.write(AppendChar{U'X'});
+
+    // double-width emoji with VS16
+    auto const& c1 = screen(1, 1);
+    CHECK(c1.codepoints() == U"\u2139\uFE0F");
+    CHECK(c1.width() == 1); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
+
+    // character after the emoji
+    auto const& c2 = screen(1, 2);
+    CHECK(c2.codepoints() == U"X");
+    CHECK(c2.width() == 1);
+
+    // character after the emoji
+    auto const& c3 = screen(1, 3);
+    CHECK(c3.codepointCount() == 0);
+}
+
+#if 0
+TEST_CASE("AppendChar.emoji_VS16_with_changing_width", "[screen]") // TODO
 {
     auto screen = Screen{{5, 1}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
 
@@ -114,6 +139,7 @@ TEST_CASE("AppendChar.emoji_VS16", "[screen]")
     CHECK(c3.codepoints() == U"X");
     CHECK(c3.width() == 1);
 }
+#endif
 
 TEST_CASE("AppendChar.emoji_family", "[screen]")
 {

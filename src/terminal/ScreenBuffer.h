@@ -235,25 +235,40 @@ struct ScreenBuffer {
             }
         }
 
-        unsigned appendCharacter(char32_t _codepoint) noexcept
+        void setWidth(unsigned _width) noexcept
+        {
+            width_ = _width;
+        }
+
+        int appendCharacter(char32_t _codepoint) noexcept
         {
             if (codepointCount_ < MaxCodepoints)
             {
                 codepoints_[codepointCount_] = _codepoint;
                 codepointCount_++;
 
-                auto const width = _codepoint == 0xFE0F ? 2 : unicode::width(_codepoint);
-                if (width > width_)
+                constexpr bool AllowWidthChange = false; // TODO: make configurable
+
+                auto const width = [&]() {
+                    switch (_codepoint)
+                    {
+                        case 0xFE0E:
+                            return 1;
+                        case 0xFE0F:
+                            return 2;
+                        default:
+                            return unicode::width(_codepoint);
+                    }
+                }();
+
+                if (width != width_ && AllowWidthChange)
                 {
-                    unsigned const diff = width - width_;
+                    int const diff = width - width_;
                     width_ = width;
                     return diff;
                 }
-                else
-                    return 0;
             }
-            else
-                return 1;
+            return 0;
         }
 
         std::string toUtf8() const;

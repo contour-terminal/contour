@@ -332,8 +332,8 @@ void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
     else
     {
         auto const extendedWidth = lastColumn->appendCharacter(ch);
-        lastColumn->setHyperlink(currentHyperlink);
-        if (extendedWidth != 0)
+
+        if (extendedWidth > 0)
             clearAndAdvance(extendedWidth);
     }
 }
@@ -343,7 +343,9 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
     if (_offset == 0)
         return;
 
-    auto const n = min(_offset, margin_.horizontal.length() - cursor.column);
+    auto const availableColumnCount = margin_.horizontal.length() - cursor.column;
+    auto const n = min(_offset, availableColumnCount);
+
     if (n == _offset)
     {
         assert(n > 0);
@@ -352,13 +354,15 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
             (currentColumn++)->reset(graphicsRendition, currentHyperlink);
     }
     else if (autoWrap)
+    {
         wrapPending = true;
+    }
 }
 
-void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t ch)
+void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t _character)
 {
     Cell& cell = *currentColumn;
-    cell.setCharacter(ch);
+    cell.setCharacter(_character);
     cell.attributes() = graphicsRendition;
     cell.setHyperlink(currentHyperlink);
 
@@ -387,7 +391,6 @@ void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t ch)
     }
     else
         verifyState();
-
 }
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n)
