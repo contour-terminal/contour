@@ -38,6 +38,8 @@ enum class Decorator {
     DottedUnderline,
     /// Draws a dashed underline
     DashedUnderline,
+    /// Draws an overline
+    Overline,
     /// Draws a strike-through line
     CrossedOut,
     /// Draws a box around the glyph, this is literally the bounding box of a grid cell.

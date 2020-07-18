@@ -35,6 +35,7 @@ optional<Decorator> to_decorator(std::string const& _value)
         pair{"double-underline", Decorator::DoubleUnderline},
         pair{"curly-underline", Decorator::CurlyUnderline},
         pair{"dashed-underline", Decorator::DashedUnderline},
+        pair{"overline", Decorator::Overline},
         pair{"crossed-out", Decorator::CrossedOut},
         pair{"framed", Decorator::Frame},
         pair{"encircle", Decorator::Encircle},
@@ -82,6 +83,7 @@ void DecorationRenderer::rebuild()
 {
     auto const width = screenCoordinates_.cellWidth;
     auto const baseline = screenCoordinates_.textBaseline;
+    auto const cellHeight = screenCoordinates_.cellHeight;
 
     { // {{{ underline
         auto const thickness = max(lineThickness_ * baseline / 3, 1u);
@@ -185,7 +187,22 @@ void DecorationRenderer::rebuild()
             move(image)
         );
     } // }}}
-    // TODO: Overline
+    { // {{{ overline
+        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto image = atlas::Buffer(width * cellHeight, 0u);
+
+        for (unsigned y = 0; y < thickness; ++y)
+            for (unsigned x = 0; x < width; ++x)
+                image[y * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::Overline,
+            width, cellHeight,
+            width, cellHeight,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
     // TODO: CrossedOut
     // TODO: Framed
     // TODO: Encircle
@@ -221,6 +238,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
     }
 
     auto constexpr supplementalMappings = array{
+        pair{CharacterStyleMask::Overline, Decorator::Overline},
         pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},
         pair{CharacterStyleMask::Framed, Decorator::Frame},
         pair{CharacterStyleMask::Encircled, Decorator::Encircle},
@@ -228,7 +246,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
 
     for (auto const& mapping : supplementalMappings)
         if (_cell.attributes().styles & mapping.first)
-        renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+            renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)

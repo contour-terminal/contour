@@ -893,6 +893,9 @@ void Screen::operator()(SetGraphicsRendition const& v)
         case GraphicsRendition::DashedUnderline:
             buffer_->graphicsRendition.styles |= CharacterStyleMask::DashedUnderline;
             break;
+        case GraphicsRendition::Overline:
+            buffer_->graphicsRendition.styles |= CharacterStyleMask::Overline;
+            break;
         case GraphicsRendition::Normal:
             buffer_->graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
             break;
@@ -913,6 +916,9 @@ void Screen::operator()(SetGraphicsRendition const& v)
             break;
         case GraphicsRendition::NoCrossedOut:
             buffer_->graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
+            break;
+        case GraphicsRendition::NoOverline:
+            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Overline;
             break;
     }
 }
