@@ -129,6 +129,7 @@ class Screen {
     void operator()(ReportExtendedCursorPosition const& v);
     void operator()(SendDeviceAttributes const& v);
     void operator()(SendTerminalId const& v);
+    void operator()(CopyToClipboard const& v);
     void operator()(ClearToEndOfScreen const& v);
     void operator()(ClearToBeginOfScreen const& v);
     void operator()(ClearScreen const& v);

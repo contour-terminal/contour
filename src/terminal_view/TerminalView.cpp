@@ -265,6 +265,11 @@ void TerminalView::commands(CommandList const& _commands)
     events_.commands(_commands);
 }
 
+void TerminalView::copyToClipboard(std::string_view const& _data)
+{
+    events_.copyToClipboard(_data);
+}
+
 void TerminalView::notify(std::string_view const& _title, std::string_view const& _body)
 {
     events_.notify(_title, _body);

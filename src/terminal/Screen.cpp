@@ -135,6 +135,12 @@ void Screen::write(std::u32string_view const& _text)
         auto const len = unicode::to_utf8(codepoint, bytes);
         write((char const*) bytes, len);
     }
+
+    for (char32_t ch : _text)
+    {
+        uint8_t bytes[4];
+        auto const len = unicode::to_utf8(ch, bytes);
+    }
 }
 
 void Screen::render(Renderer const& _render, size_t _scrollOffset) const
@@ -446,6 +452,11 @@ void Screen::operator()(SendTerminalId const&)
     auto constexpr Pc = 0;
 
     reply("\033[>{};{};{}c", Pp, Pv, Pc);
+}
+
+void Screen::operator()(CopyToClipboard const& v)
+{
+    eventListener_.copyToClipboard(v.data);
 }
 
 void Screen::operator()(ClearToEndOfScreen const&)

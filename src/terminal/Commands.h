@@ -809,6 +809,9 @@ struct Notify {
 /// OSC 888
 struct DumpState {};
 
+// OSC 52 ; c ; Base64EncodedData ST
+struct CopyToClipboard { std::string data; };
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -933,6 +936,7 @@ using Command = std::variant<
     ClearToBeginOfScreen,
     ClearToEndOfLine,
     ClearToEndOfScreen,
+    CopyToClipboard,
     CursorBackwardTab,
     CursorNextLine,
     CursorPreviousLine,

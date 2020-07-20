@@ -115,6 +115,7 @@ class TerminalWindow :
     void commands(terminal::CommandList const& /*_commands*/) override;
     void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
     void onClosed() override;
+    void copyToClipboard(std::string_view const& _data) override;
 
   signals:
     void showNotification(QString const& _title, QString const& _body);
