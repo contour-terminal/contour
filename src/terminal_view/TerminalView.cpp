@@ -41,11 +41,9 @@ inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _op
 
 TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            WindowSize const& _winSize,
+                           Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            std::string const& _wordDelimiters,
-                           function<void()> _onSelectionComplete,
-                           Screen::OnBufferChanged _onScreenBufferChanged,
-                           function<void()> _bell,
                            FontConfig const& _fonts,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
@@ -56,14 +54,10 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
                            Decorator _hyperlinkHover,
                            Process::ExecInfo const& _shell,
                            QMatrix4x4 const& _projectionMatrix,
-                           function<void(vector<Command> const&)> _onScreenUpdate,
-                           function<void()> _onWindowTitleChanged,
-                           Screen::NotifyCallback _notify,
-                           function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                           function<void()> _onTerminalClosed,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig,
                            Logger _logger) :
+    events_{ _events },
     logger_{ move(_logger) },
     fonts_{ _fonts },
     size_{
@@ -85,31 +79,21 @@ TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
     process_{
         _shell,
         _winSize,
+        *this,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
-        move(_onWindowTitleChanged),
-        move(_resizeWindow),
-        bind(&TerminalView::requestDynamicColor, this, _1),
-        bind(&TerminalView::resetDynamicColor, this, _1),
-        bind(&TerminalView::setDynamicColor, this, _1, _2),
         _now,
         _wordDelimiters,
-        move(_onSelectionComplete),
-        move(_onScreenBufferChanged),
-        move(_bell),
         _cursorDisplay,
         _cursorShape,
-        [onScreenUpdate = move(_onScreenUpdate)](auto const& _commands) { if (onScreenUpdate) onScreenUpdate(_commands); },
-        move(_onTerminalClosed),
-        [this](terminal::LogEvent const& _event) { logger_(_event); },
-        move(_notify)
+        [this](terminal::LogEvent const& _event) { logger_(_event); }
     },
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}
 {
 }
 
-RGBColor TerminalView::requestDynamicColor(DynamicColorName _name)
+optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
 {
     switch (_name)
     {
@@ -128,7 +112,7 @@ RGBColor TerminalView::requestDynamicColor(DynamicColorName _name)
         case DynamicColorName::HighlightBackgroundColor:
             return colorProfile_.selection;
     }
-    return RGBColor{}; // should never happen.
+    return nullopt; // should never happen
 }
 
 void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
@@ -136,61 +120,6 @@ void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
     colorProfile_ = _colors;
     defaultColorProfile_ = _colors;
     renderer_.setColorProfile(colorProfile_);
-}
-
-void TerminalView::resetDynamicColor(DynamicColorName _name)
-{
-    switch (_name)
-    {
-        case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = defaultColorProfile_.defaultForeground;
-            break;
-        case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = defaultColorProfile_.defaultBackground;
-            break;
-        case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = defaultColorProfile_.cursor;
-            break;
-        case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = defaultColorProfile_.mouseForeground;
-            break;
-        case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
-            break;
-        case DynamicColorName::HighlightForegroundColor:
-            // not needed (for now)
-            break;
-        case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selection = defaultColorProfile_.selection;
-            break;
-    }
-}
-
-void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
-{
-    switch (_name)
-    {
-        case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = _value;
-            break;
-        case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = _value;
-            break;
-        case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = _value;
-            break;
-        case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = _value;
-            break;
-        case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = _value;
-            break;
-        case DynamicColorName::HighlightForegroundColor:
-            break; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
-        case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selection = _value;
-            break;
-    }
 }
 
 bool TerminalView::alive() const
@@ -318,6 +247,102 @@ void TerminalView::wait()
 
     process_.terminal().device().close();
     (void) process_.wait();
+}
+
+
+void TerminalView::bell()
+{
+    events_.bell();
+}
+
+void TerminalView::bufferChanged(ScreenBuffer::Type _type)
+{
+    events_.bufferChanged(_type);
+}
+
+void TerminalView::commands(CommandList const& _commands)
+{
+    events_.commands(_commands);
+}
+
+void TerminalView::notify(std::string_view const& _title, std::string_view const& _body)
+{
+    events_.notify(_title, _body);
+}
+
+void TerminalView::onClosed()
+{
+    events_.onClosed();
+}
+
+void TerminalView::onSelectionComplete()
+{
+    events_.onSelectionComplete();
+}
+
+void TerminalView::resetDynamicColor(DynamicColorName _name)
+{
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorProfile_.defaultForeground = defaultColorProfile_.defaultForeground;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorProfile_.defaultBackground = defaultColorProfile_.defaultBackground;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorProfile_.cursor = defaultColorProfile_.cursor;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorProfile_.mouseForeground = defaultColorProfile_.mouseForeground;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            // not needed (for now)
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorProfile_.selection = defaultColorProfile_.selection;
+            break;
+    }
+}
+
+void TerminalView::resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels)
+{
+    events_.resizeWindow(_width, _height, _unitInPixels);
+}
+
+void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
+{
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorProfile_.defaultForeground = _value;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorProfile_.defaultBackground = _value;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorProfile_.cursor = _value;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorProfile_.mouseForeground = _value;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorProfile_.mouseBackground = _value;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            break; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
+        case DynamicColorName::HighlightBackgroundColor:
+            colorProfile_.selection = _value;
+            break;
+    }
+}
+
+void TerminalView::setWindowTitle(std::string_view const& _title)
+{
+    events_.setWindowTitle(_title);
 }
 
 } // namespace terminal::view

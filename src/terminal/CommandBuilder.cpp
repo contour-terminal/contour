@@ -18,6 +18,7 @@
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
+#include <crispy/base64.h>
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>

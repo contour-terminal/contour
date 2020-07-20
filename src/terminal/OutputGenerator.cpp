@@ -207,7 +207,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](DumpState const&) { write("\033]{}\x07", "888"); },
         [&](ResetDynamicColor const& v) { write("\033]{}\x07", resetDynamicColorCommand(v.name)); },
         [&](SetForegroundColor const& v) {
-            if (v.color != currentForegroundColor_)
+            if (true) // v.color != currentForegroundColor_)
             {
                 currentForegroundColor_ = v.color;
                 if (holds_alternative<IndexedColor>(v.color))
@@ -226,10 +226,19 @@ void OutputGenerator::operator()(Command const& command)
                     sgr_add(39);
                 else if (holds_alternative<BrightColor>(v.color))
                     sgr_add(90 + static_cast<unsigned>(get<BrightColor>(v.color)));
+                else if (holds_alternative<RGBColor>(v.color))
+                {
+                    auto const& rgb = get<RGBColor>(v.color);
+                    sgr_add(38);
+                    sgr_add(2);
+                    sgr_add(static_cast<unsigned>(rgb.red));
+                    sgr_add(static_cast<unsigned>(rgb.green));
+                    sgr_add(static_cast<unsigned>(rgb.blue));
+                }
             }
         },
         [&](SetBackgroundColor const& v) {
-            if (v.color != currentBackgroundColor_)
+            if (true)//v.color != currentBackgroundColor_)
             {
                 currentBackgroundColor_ = v.color;
                 if (holds_alternative<IndexedColor>(v.color))
@@ -248,6 +257,15 @@ void OutputGenerator::operator()(Command const& command)
                     sgr_add(49);
                 else if (holds_alternative<BrightColor>(v.color))
                     sgr_add(100 + static_cast<unsigned>(get<BrightColor>(v.color)));
+                else if (holds_alternative<RGBColor>(v.color))
+                {
+                    auto const& rgb = get<RGBColor>(v.color);
+                    sgr_add(48);
+                    sgr_add(2);
+                    sgr_add(static_cast<unsigned>(rgb.red));
+                    sgr_add(static_cast<unsigned>(rgb.green));
+                    sgr_add(static_cast<unsigned>(rgb.blue));
+                }
             }
         },
         [&](SetUnderlineColor const& v) {

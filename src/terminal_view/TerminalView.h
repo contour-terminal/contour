@@ -36,15 +36,27 @@ namespace terminal::view {
 struct ShaderConfig;
 
 /// OpenGL-Terminal Object.
-class TerminalView {
+class TerminalView : private Terminal::Events {
   public:
+    class Events {
+      public:
+        virtual ~Events() = default;
+
+        virtual void bell() {}
+        virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
+        virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+        virtual void onSelectionComplete() {}
+        virtual void bufferChanged(ScreenBuffer::Type) {}
+        virtual void commands(CommandList const& /*_commands*/) {}
+        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void onClosed() {}
+    };
+
     TerminalView(std::chrono::steady_clock::time_point _now,
                  terminal::WindowSize const& _winSize,
+                 Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
-                 std::function<void()> _onSelectionComplete,
-                 Screen::OnBufferChanged _onScreenBufferChanged,
-                 std::function<void()> _bell,
                  FontConfig const& _fonts,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
@@ -55,11 +67,6 @@ class TerminalView {
                  Decorator _hyperlinkHover,
                  Process::ExecInfo const& _shell,
                  QMatrix4x4 const& _projectionMatrix,
-                 std::function<void(std::vector<Command> const&)> _onScreenUpdate,
-                 std::function<void()> _onWindowTitleChanged,
-                 Screen::NotifyCallback _notify,
-                 std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                 std::function<void()> _onTerminalClosed,
                  ShaderConfig const& _backgroundShaderConfig,
                  ShaderConfig const& _textShaderConfig,
                  Logger _logger);
@@ -108,10 +115,6 @@ class TerminalView {
 
     void setColorProfile(terminal::ColorProfile const& _colors);
 
-    RGBColor requestDynamicColor(DynamicColorName _name);
-    void resetDynamicColor(DynamicColorName _name);
-    void setDynamicColor(DynamicColorName _name, RGBColor const& value);
-
     struct WindowMargin {
         int left;
         int bottom;
@@ -122,6 +125,20 @@ class TerminalView {
     constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
 
   private:
+    std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
+    void bell() override;
+    void bufferChanged(ScreenBuffer::Type) override;
+    void commands(CommandList const& /*_commands*/) override;
+    void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
+    void onClosed() override;
+    void onSelectionComplete() override;
+    void resetDynamicColor(DynamicColorName /*_name*/) override;
+    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
+    void setDynamicColor(DynamicColorName, RGBColor const&) override;
+    void setWindowTitle(std::string_view const& /*_title*/) override;
+
+  private:
+    Events& events_;
     Logger logger_;
     FontConfig fonts_;
     QSize size_;

@@ -41,6 +41,7 @@ namespace contour {
 // multiple terminals in tabbed views as well tiled.
 class TerminalWindow :
     public QOpenGLWindow,
+    public terminal::view::TerminalView::Events,
     protected QOpenGLExtraFunctions
 {
     Q_OBJECT
@@ -86,12 +87,10 @@ class TerminalWindow :
     void toggleFullScreen();
 
     bool setFontSize(unsigned _fontSize);
-    void onSelectionComplete();
     std::string extractSelectionText();
     void spawnNewTerminal(std::string const& _profileName);
 
     void onScreenBufferChanged(terminal::ScreenBuffer::Type _type);
-    void onBell();
 
     float contentScale() const;
 
@@ -101,16 +100,21 @@ class TerminalWindow :
     bool reloadConfigValues(config::Config _newConfig);
     bool reloadConfigValues(config::Config _newConfig, std::string const& _profileName);
 
-    void onScreenUpdate(std::vector<terminal::Command> const& _commands);
-    void onWindowTitleChanged();
-    void onNotify(std::string const& _title, std::string const& _content);
-    void onDoResize(unsigned _width, unsigned _height, bool _inPixels);
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
-    void onTerminalClosed();
 
     void blinkingCursorUpdate();
 
     void setDefaultCursor();
+
+  private:
+    void bell() override;
+    void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
+    void setWindowTitle(std::string_view const& /*_title*/) override;
+    void onSelectionComplete() override;
+    void bufferChanged(terminal::ScreenBuffer::Type) override;
+    void commands(terminal::CommandList const& /*_commands*/) override;
+    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
+    void onClosed() override;
 
   signals:
     void showNotification(QString const& _title, QString const& _body);

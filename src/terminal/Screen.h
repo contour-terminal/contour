@@ -24,6 +24,7 @@
 #include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/VTType.h>
 #include <terminal/ScreenBuffer.h>
+#include <terminal/ScreenEvents.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/width.h>
@@ -55,90 +56,25 @@ namespace terminal {
  */
 class Screen {
   public:
-	using Cursor = ScreenBuffer::Cursor;
-    using Reply = std::function<void(std::string const&)>;
+    using Cursor = ScreenBuffer::Cursor;
     using Renderer = ScreenBuffer::Renderer;
-    using ModeSwitchCallback = std::function<void(bool)>;
-    using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
-    using SetApplicationKeypadMode = std::function<void(bool)>;
-    using SetBracketedPaste = std::function<void(bool)>;
-    using SetMouseProtocol = std::function<void(MouseProtocol, bool)>;
-    using SetMouseTransport = std::function<void(MouseTransport)>;
-    using SetMouseWheelMode = std::function<void(InputGenerator::MouseWheelMode)>;
-	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
-    using OnBufferChanged = std::function<void(ScreenBuffer::Type)>;
-    using Hook = std::function<void(std::vector<Command> const& commands)>;
-    using NotifyCallback = std::function<void(std::string const&, std::string const&)>;
 
-  public:
     /**
      * Initializes the screen with the given screen size and callbaks.
      *
      * @param _size screen dimensions in number of characters per line and number of lines.
-     * @param _reply reply-callback with the data to send back to terminal input.
+     * @param _eventListener Interface to some VT sequence related callbacks.
      * @param _logger an optional logger for logging various events.
-     * @param _error an optional logger for errors.
-     * @param _onCommands hook to the commands being executed by the screen.
+     * @param _logRaw whether or not to log raw VT sequences.
+     * @param _logTrace whether or not to log VT sequences in trace mode.
+     * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
     Screen(WindowSize const& _size,
-           std::optional<size_t> _maxHistoryLineCount,
-           ModeSwitchCallback _useApplicationCursorKeys,
-           std::function<void()> _onWindowTitleChanged,
-           ResizeWindowCallback _resizeWindow,
-           SetApplicationKeypadMode _setApplicationkeypadMode,
-           SetBracketedPaste _setBracketedPaste,
-           SetMouseProtocol _setMouseProtocol,
-           SetMouseTransport _setMouseTransport,
-           SetMouseWheelMode _setMouseWheelMode,
-		   OnSetCursorStyle _setCursorStyle,
-           Reply _reply,
-           Logger const& _logger,
-           bool _logRaw,
-           bool _logTrace,
-           Hook _onCommands,
-           OnBufferChanged _onBufferChanged,
-           std::function<void()> _bell,
-           std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
-           std::function<void(DynamicColorName)> _resetDynamicColor,
-           std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-           std::function<void(bool)> _setGenerateFocusEvents,
-           NotifyCallback _notify
-    );
-
-    Screen(WindowSize const& _size,
-           std::optional<size_t> _maxHistoryLineCount,
-           ModeSwitchCallback _useApplicationCursorKeys,
-           std::function<void()> _onWindowTitleChanged,
-           ResizeWindowCallback _resizeWindow,
-           SetApplicationKeypadMode _setApplicationkeypadMode,
-           SetBracketedPaste _setBracketedPaste,
-           SetMouseProtocol _setMouseProtocol,
-           SetMouseTransport _setMouseTransport,
-           SetMouseWheelMode _setMouseWheelMode,
-		   OnSetCursorStyle _setCursorStyle,
-           Reply _reply,
-           Logger const& _logger
-    ) : Screen{
-        _size,
-        _maxHistoryLineCount,
-        std::move(_useApplicationCursorKeys),
-        std::move(_onWindowTitleChanged),
-        std::move(_resizeWindow),
-        std::move(_setApplicationkeypadMode),
-        std::move(_setBracketedPaste),
-        std::move(_setMouseProtocol),
-        std::move(_setMouseTransport),
-        std::move(_setMouseWheelMode),
-        std::move(_setCursorStyle),
-        std::move(_reply),
-        _logger,
-        true, // logs raw output by default?
-        true, // logs trace output by default?
-        {}, {}, {}, {}, {}, {}, {}, {}
-    } {}
-
-    Screen(WindowSize const& _size, Logger const& _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, _logger, true, true, {}, {}, {}, {}, {}, {}, {}, {}} {}
+           ScreenEvents& _eventListener,
+           Logger const& _logger = Logger{},
+           bool _logRaw = false,
+           bool _logTrace = false,
+           std::optional<size_t> _maxHistoryLineCount = std::nullopt);
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -421,8 +357,7 @@ class Screen {
     // interactive replies
     void reply(std::string const& message)
     {
-        if (reply_)
-            reply_(message);
+        eventListener_.reply(message);
     }
 
     template <typename... Args>
@@ -432,21 +367,12 @@ class Screen {
     }
 
   private:
-    Hook const onCommands_;
+    ScreenEvents& eventListener_;
+
     Logger const logger_;
     bool logRaw_ = false;
     bool logTrace_ = false;
     bool focused_ = true;
-    ModeSwitchCallback useApplicationCursorKeys_;
-    std::function<void()> onWindowTitleChanged_;
-    ResizeWindowCallback resizeWindow_;
-    SetApplicationKeypadMode setApplicationkeypadMode_;
-    SetBracketedPaste setBracketedPaste_;
-    SetMouseProtocol setMouseProtocol_;
-    SetMouseTransport setMouseTransport_;
-    SetMouseWheelMode setMouseWheelMode_;
-	OnSetCursorStyle setCursorStyle_;
-    Reply const reply_;
 
     CommandBuilder commandBuilder_;
     Parser parser_;
@@ -466,15 +392,6 @@ class Screen {
     size_t scrollOffset_ = 0;
 
     std::unique_ptr<Selector> selector_;
-
-    OnBufferChanged onBufferChanged_{};
-    std::function<void()> bell_{};
-    std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
-    std::function<void(DynamicColorName)> resetDynamicColor_{};
-    std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};
-    std::function<void(bool)> setGenerateFocusEvents_{};
-
-    NotifyCallback notify_{};
 };
 
 }  // namespace terminal
