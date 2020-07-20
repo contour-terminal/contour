@@ -18,42 +18,22 @@ using namespace std;
 
 TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
                                  WindowSize _winSize,
+                                 Terminal::Events& _eventListener,
                                  optional<size_t> _maxHistoryLineCount,
                                  chrono::milliseconds _cursorBlinkInterval,
-                                 function<void()> _changeWindowTitleCallback,
-                                 function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-                                 function<RGBColor(DynamicColorName)> _requestDynamicColor,
-                                 function<void(DynamicColorName)> _resetDynamicColor,
-                                 function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
                                  chrono::steady_clock::time_point _now,
                                  string const& _wordDelimiters,
-                                 function<void()> _onSelectionComplete,
-                                 Screen::OnBufferChanged _onScreenBufferChanged,
-                                 function<void()> _bell,
                                  CursorDisplay _cursorDisplay,
                                  CursorShape _cursorShape,
-                                 Hook _onScreenCommands,
-                                 function<void()> _onTerminalClosed,
-                                 Logger _logger,
-                                 Screen::NotifyCallback _notify) :
+                                 Logger _logger) :
     Terminal(
         _winSize,
+        _eventListener,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
-        move(_changeWindowTitleCallback),
-        move(_resizeWindow),
         _now,
         move(_logger),
-        move(_onScreenCommands),
-        move(_onTerminalClosed),
-        _wordDelimiters,
-        move(_onSelectionComplete),
-        move(_onScreenBufferChanged),
-        move(_bell),
-        move(_requestDynamicColor),
-        move(_resetDynamicColor),
-        move(_setDynamicColor),
-        move(_notify)
+        _wordDelimiters
     ),
     Process{_shell, terminal().device()}
 {

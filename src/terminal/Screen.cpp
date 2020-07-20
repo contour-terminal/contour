@@ -42,43 +42,16 @@ using namespace crispy;
 namespace terminal {
 
 Screen::Screen(WindowSize const& _size,
-               optional<size_t> _maxHistoryLineCount,
-               ModeSwitchCallback _useApplicationCursorKeys,
-               function<void()> _onWindowTitleChanged,
-               ResizeWindowCallback _resizeWindow,
-               SetApplicationKeypadMode _setApplicationkeypadMode,
-               SetBracketedPaste _setBracketedPaste,
-               SetMouseProtocol _setMouseProtocol,
-               SetMouseTransport _setMouseTransport,
-               SetMouseWheelMode _setMouseWheelMode,
-			   OnSetCursorStyle _setCursorStyle,
-               Reply reply,
+               ScreenEvents& _eventListener,
                Logger const& _logger,
                bool _logRaw,
                bool _logTrace,
-               Hook onCommands,
-               OnBufferChanged _onBufferChanged,
-               std::function<void()> _bell,
-               std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
-               std::function<void(DynamicColorName)> _resetDynamicColor,
-               std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-               std::function<void(bool)> _setGenerateFocusEvents,
-               NotifyCallback _notify
+               optional<size_t> _maxHistoryLineCount
 ) :
-    onCommands_{ move(onCommands) },
+    eventListener_{ _eventListener },
     logger_{ _logger },
     logRaw_{ _logRaw },
     logTrace_{ _logTrace },
-    useApplicationCursorKeys_{ move(_useApplicationCursorKeys) },
-    onWindowTitleChanged_{ move(_onWindowTitleChanged) },
-    resizeWindow_{ move(_resizeWindow) },
-    setApplicationkeypadMode_{ move(_setApplicationkeypadMode) },
-    setBracketedPaste_{ move(_setBracketedPaste) },
-    setMouseProtocol_{ move(_setMouseProtocol) },
-    setMouseTransport_{ move(_setMouseTransport) },
-    setMouseWheelMode_{ move(_setMouseWheelMode) },
-	setCursorStyle_{ move(_setCursorStyle) },
-    reply_{ move(reply) },
     commandBuilder_{ _logger },
     parser_{
         ref(commandBuilder_),
@@ -88,14 +61,7 @@ Screen::Screen(WindowSize const& _size,
     alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, nullopt },
     buffer_{ &primaryBuffer_ },
     size_{ _size },
-    maxHistoryLineCount_{ _maxHistoryLineCount },
-    onBufferChanged_{ move(_onBufferChanged) },
-    bell_{ move(_bell) },
-    requestDynamicColor_{ move(_requestDynamicColor) },
-    resetDynamicColor_{ move(_resetDynamicColor) },
-    setDynamicColor_{ move(_setDynamicColor) },
-    setGenerateFocusEvents_{ move(_setGenerateFocusEvents) },
-    notify_{ move(_notify) }
+    maxHistoryLineCount_{ _maxHistoryLineCount }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
 }
@@ -125,8 +91,7 @@ void Screen::write(Command const& _command)
     buffer_->verifyState();
     instructionCounter_++;
 
-    if (onCommands_)
-        onCommands_({_command});
+    eventListener_.commands({_command});
 }
 
 void Screen::write(char const * _data, size_t _size)
@@ -159,8 +124,7 @@ void Screen::write(char const * _data, size_t _size)
         }
     );
 
-    if (onCommands_)
-        onCommands_(commandBuilder_.commands());
+    eventListener_.commands(commandBuilder_.commands());
 }
 
 void Screen::write(std::u32string_view const& _text)
@@ -324,8 +288,7 @@ bool Screen::scrollToBottom()
 // {{{ ops
 void Screen::operator()(Bell const&)
 {
-    if (bell_)
-        bell_();
+    eventListener_.bell();
 }
 
 void Screen::operator()(FullReset const&)
@@ -733,8 +696,7 @@ void Screen::operator()(MoveCursorToNextTab const&)
 void Screen::operator()(Notify const& _notify)
 {
     cout << "Screen.NOTIFY: title: '" << _notify.title << "', content: '" << _notify.content << "'\n";
-    if (notify_)
-        notify_(_notify.title, _notify.content);
+    eventListener_.notify(_notify.title, _notify.content);
 }
 
 void Screen::operator()(CursorBackwardTab const& v)
@@ -842,8 +804,7 @@ void Screen::operator()(SetUnderlineColor const& v)
 
 void Screen::operator()(SetCursorStyle const& v)
 {
-	if (setCursorStyle_)
-		setCursorStyle_(v.display, v.shape);
+    eventListener_.setCursorStyle(v.display, v.shape);
 }
 
 void Screen::operator()(SetGraphicsRendition const& v)
@@ -941,44 +902,35 @@ void Screen::operator()(SetMode const& v)
                 setBuffer(ScreenBuffer::Type::Main);
             break;
         case Mode::UseApplicationCursorKeys:
-            if (useApplicationCursorKeys_)
-                useApplicationCursorKeys_(v.enable);
-            if (isAlternateScreen() && setMouseWheelMode_)
+            eventListener_.useApplicationCursorKeys(v.enable);
+            if (isAlternateScreen())
             {
                 if (v.enable)
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             }
             break;
         case Mode::BracketedPaste:
-            if (setBracketedPaste_)
-                setBracketedPaste_(v.enable);
+            eventListener_.setBracketedPaste(v.enable);
             break;
         case Mode::MouseSGR:
-            if (setMouseTransport_)
-                setMouseTransport_(MouseTransport::SGR);
+            eventListener_.setMouseTransport(MouseTransport::SGR);
             break;
         case Mode::MouseExtended:
-            if (setMouseTransport_)
-                setMouseTransport_(MouseTransport::Extended);
+            eventListener_.setMouseTransport(MouseTransport::Extended);
             break;
         case Mode::MouseURXVT:
-            if (setMouseTransport_)
-                setMouseTransport_(MouseTransport::URXVT);
+            eventListener_.setMouseTransport(MouseTransport::URXVT);
             break;
         case Mode::MouseAlternateScroll:
-            if (setMouseWheelMode_)
-            {
-                if (v.enable)
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-                else
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            }
+            if (v.enable)
+                eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+            else
+                eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             break;
         case Mode::FocusTracking:
-            if (setGenerateFocusEvents_)
-                setGenerateFocusEvents_(v.enable);
+            eventListener_.setGenerateFocusEvents(v.enable);
             break;
         default:
             break;
@@ -1067,14 +1019,12 @@ void Screen::operator()(ScreenAlignmentPattern const&)
 
 void Screen::operator()(SendMouseEvents const& v)
 {
-    if (setMouseProtocol_)
-        setMouseProtocol_(v.protocol, v.enable);
+    eventListener_.setMouseProtocol(v.protocol, v.enable);
 }
 
 void Screen::operator()(ApplicationKeypadMode const& v)
 {
-    if (setApplicationkeypadMode_)
-        setApplicationkeypadMode_(v.enable);
+    eventListener_.setApplicationkeypadMode(v.enable);
 }
 
 void Screen::operator()(DesignateCharset const&)
@@ -1101,8 +1051,7 @@ void Screen::operator()(ChangeWindowTitle const& v)
 {
     windowTitle_ = v.title;
 
-    if (onWindowTitleChanged_)
-        onWindowTitleChanged_();
+    eventListener_.setWindowTitle(v.title);
 }
 
 void Screen::operator()(SaveWindowTitle const&)
@@ -1117,15 +1066,13 @@ void Screen::operator()(RestoreWindowTitle const&)
         windowTitle_ = savedWindowTitles_.top();
         savedWindowTitles_.pop();
 
-        if (onWindowTitleChanged_)
-            onWindowTitleChanged_();
+        eventListener_.setWindowTitle(windowTitle_);
     }
 }
 
 void Screen::operator()(ResizeWindow const& v)
 {
-    if (resizeWindow_)
-        resizeWindow_(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels);
+    eventListener_.resizeWindow(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels);
 }
 
 void Screen::operator()(AppendChar const& v)
@@ -1136,11 +1083,12 @@ void Screen::operator()(AppendChar const& v)
 
 void Screen::operator()(RequestDynamicColor const& v)
 {
-    if (requestDynamicColor_)
+    if (auto const color = eventListener_.requestDynamicColor(v.name); color.has_value())
     {
-        reply("\033]{};{}\x07",
+        reply(
+            "\033]{};{}\x07",
             setDynamicColorCommand(v.name),
-            setDynamicColorValue(requestDynamicColor_(v.name))
+            setDynamicColorValue(color.value())
         );
     }
 }
@@ -1172,14 +1120,12 @@ void Screen::operator()(RequestTabStops const&)
 
 void Screen::operator()(ResetDynamicColor const& v)
 {
-    if (resetDynamicColor_)
-        resetDynamicColor_(v.name);
+    eventListener_.resetDynamicColor(v.name);
 }
 
 void Screen::operator()(SetDynamicColor const& v)
 {
-    if (setDynamicColor_)
-        setDynamicColor_(v.name, v.color);
+    eventListener_.setDynamicColor(v.name, v.color);
 }
 
 void Screen::operator()(DumpState const&)
@@ -1233,15 +1179,14 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
         switch (_type)
         {
             case ScreenBuffer::Type::Main:
-                if (setMouseWheelMode_)
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::Default);
+                eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
                 buffer_ = &primaryBuffer_;
                 break;
             case ScreenBuffer::Type::Alternate:
                 if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
-                    setMouseWheelMode_(InputGenerator::MouseWheelMode::NormalCursorKeys);
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
                 buffer_ = &alternateBuffer_;
                 break;
         }
@@ -1249,8 +1194,7 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
         if (selector_)
             selector_.reset();
 
-        if (onBufferChanged_)
-            onBufferChanged_(_type);
+        eventListener_.bufferChanged(_type);
     }
 }
 // }}}

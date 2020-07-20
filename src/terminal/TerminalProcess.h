@@ -24,24 +24,14 @@ class TerminalProcess : public Terminal, public Process {
     TerminalProcess(
         Process::ExecInfo const& _shell,
         WindowSize _winSize,
+        Terminal::Events& _eventListener,
         std::optional<size_t> _maxHistoryLineCount,
         std::chrono::milliseconds _cursorBlinkInterval,
-        std::function<void()> _changeWindowTitleCallback,
-        std::function<void(unsigned int, unsigned int, bool)> _resizeWindow,
-        std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
-        std::function<void(DynamicColorName)> _resetDynamicColor,
-        std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
         std::chrono::steady_clock::time_point _now,
         std::string const& _wordDelimiters,
-        std::function<void()> _onSelectionComplete,
-        Screen::OnBufferChanged _onScreenBufferChanged,
-        std::function<void()> _bell,
         CursorDisplay _cursorDisplay,
         CursorShape _cursorShape,
-        Hook _onScreenCommands,
-        std::function<void()> _onTerminalClosed,
-        Logger _logger,
-        Screen::NotifyCallback _notify
+        Logger _logger
     );
 
     ~TerminalProcess();

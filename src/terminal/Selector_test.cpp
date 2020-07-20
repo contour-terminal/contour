@@ -21,7 +21,8 @@ using namespace terminal;
 
 TEST_CASE("Selector.Linear")
 {
-    auto screen = Screen{{3, 11}, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    auto screenEvents = ScreenEvents{};
+    auto screen = Screen{{3, 11}, screenEvents, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
     screen.write(
 		"12345,67890"s +
 		"ab,cdefg,hi"s +
