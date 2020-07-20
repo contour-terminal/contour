@@ -1448,6 +1448,12 @@ void TerminalWindow::onClosed()
         close();
 }
 
+void TerminalWindow::copyToClipboard(std::string_view const& _text)
+{
+    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+        clipboard->setText(QString::fromUtf8(_text.data(), static_cast<int>(_text.size())));
+}
+
 // }}}
 
 } // namespace contour

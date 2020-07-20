@@ -49,6 +49,7 @@ class Terminal : public ScreenEvents {
         virtual void bell() {}
         virtual void bufferChanged(ScreenBuffer::Type) {}
         virtual void commands(CommandList const& /*_commands*/) {}
+        virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
@@ -221,6 +222,7 @@ class Terminal : public ScreenEvents {
     void bell() override;
     void bufferChanged(ScreenBuffer::Type) override;
     void commands(std::vector<Command> const& _commands) override;
+    void copyToClipboard(std::string_view const& _data) override;
     void notify(std::string_view const& _title, std::string_view const& _body) override;
     void reply(std::string_view const& _response) override;
     void resetDynamicColor(DynamicColorName _name) override;

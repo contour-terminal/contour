@@ -496,6 +496,16 @@ namespace impl // {{{ some command generator helpers
             return ApplyResult::Invalid;
     }
 
+    ApplyResult clipboard(Sequence const& _ctx, CommandList& _output)
+    {
+        // Only setting clipboard contents is supported, not reading.
+        auto const& params = _ctx.intermediateCharacters();
+        if (auto const splits = crispy::split(params, ';'); splits.size() == 2 && splits[0] == "c")
+            return emitCommand<CopyToClipboard>(_output, crispy::base64::decode(splits[1]));
+        else
+            return ApplyResult::Invalid;
+    }
+
     ApplyResult NOTIFY(Sequence const& _ctx, CommandList& _output)
     {
         auto const& value = _ctx.intermediateCharacters();
@@ -864,6 +874,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case COLORCURSOR: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::TextCursorColor);
         case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseBackgroundColor);
+        case CLIPBOARD: return impl::clipboard(_ctx, _output);
         //case COLORSPECIAL: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultForegroundColor);
         case RCOLORBG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultBackgroundColor);

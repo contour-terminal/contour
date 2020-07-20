@@ -43,13 +43,14 @@ class TerminalView : private Terminal::Events {
         virtual ~Events() = default;
 
         virtual void bell() {}
-        virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
-        virtual void setWindowTitle(std::string_view const& /*_title*/) {}
-        virtual void onSelectionComplete() {}
         virtual void bufferChanged(ScreenBuffer::Type) {}
         virtual void commands(CommandList const& /*_commands*/) {}
-        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+        virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
         virtual void onClosed() {}
+        virtual void onSelectionComplete() {}
+        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     };
 
     TerminalView(std::chrono::steady_clock::time_point _now,
@@ -129,6 +130,7 @@ class TerminalView : private Terminal::Events {
     void bell() override;
     void bufferChanged(ScreenBuffer::Type) override;
     void commands(CommandList const& /*_commands*/) override;
+    void copyToClipboard(std::string_view const& _data) override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
     void onClosed() override;
     void onSelectionComplete() override;

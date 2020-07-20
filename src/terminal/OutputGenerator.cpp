@@ -13,6 +13,8 @@
  */
 #include <terminal/Color.h>
 #include <terminal/OutputGenerator.h>
+
+#include <crispy/base64.h>
 #include <crispy/overloaded.h>
 #include <crispy/times.h>
 
@@ -147,6 +149,7 @@ void OutputGenerator::operator()(Command const& command)
         [&](EraseCharacters const& v) { write("\033[{}X", v.n); },
         [&](ScrollUp const& up) { write("\033[{}S", up.n); },
         [&](ScrollDown const& down) { write("\033[{}T", down.n); },
+        [&](CopyToClipboard const& v) { write("\033]42;{}\033\\", crispy::base64::encode(v.data)); },
         [&](ClearToEndOfLine) { write("\033[K"); },
         [&](ClearToBeginOfLine) { write("\033[1K"); },
         [&](ClearLine) { write("\033[2K"); },

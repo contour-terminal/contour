@@ -422,6 +422,11 @@ void Terminal::commands(vector<Command> const& _commands)
     eventListener_.commands(_commands);
 }
 
+void Terminal::copyToClipboard(std::string_view const& _data)
+{
+    eventListener_.copyToClipboard(_data);
+}
+
 void Terminal::notify(std::string_view const& _title, std::string_view const& _body)
 {
     eventListener_.notify(_title, _body);
