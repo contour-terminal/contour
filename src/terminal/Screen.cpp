@@ -285,6 +285,70 @@ bool Screen::scrollToBottom()
 }
 // }}}
 
+// {{{ others
+void Screen::resetSoft()
+{
+    (*this)(SetGraphicsRendition{GraphicsRendition::Reset}); // SGR
+    (*this)(MoveCursorTo{1, 1}); // DECSC (Save cursor state)
+    (*this)(SetMode{Mode::VisibleCursor, true}); // DECTCEM (Text cursor enable)
+    (*this)(SetMode{Mode::Origin, false}); // DECOM
+    (*this)(SetMode{Mode::KeyboardAction, false}); // KAM
+    (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
+    (*this)(SetMode{Mode::Insert, false}); // IRM
+    (*this)(SetMode{Mode::UseApplicationCursorKeys, false}); // DECCKM (Cursor keys)
+    (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
+    (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
+
+    // TODO: DECNKM (Numeric keypad)
+    // TODO: DECSCA (Select character attribute)
+    // TODO: DECNRCM (National replacement character set)
+    // TODO: GL, GR (G0, G1, G2, G3)
+    // TODO: DECAUPSS (Assign user preference supplemental set)
+    // TODO: DECSASD (Select active status display)
+    // TODO: DECKPM (Keyboard position mode)
+    // TODO: DECPCTERM (PCTerm mode)
+}
+
+void Screen::resetHard()
+{
+    primaryBuffer_.reset();
+    alternateBuffer_.reset();
+    setBuffer(ScreenBuffer::Type::Main);
+}
+
+void Screen::moveCursorTo(Coordinate to)
+{
+    buffer_->wrapPending = false;
+    buffer_->moveCursorTo(to);
+}
+
+void Screen::setBuffer(ScreenBuffer::Type _type)
+{
+    if (bufferType() != _type)
+    {
+        switch (_type)
+        {
+            case ScreenBuffer::Type::Main:
+                eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
+                buffer_ = &primaryBuffer_;
+                break;
+            case ScreenBuffer::Type::Alternate:
+                if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                else
+                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+                buffer_ = &alternateBuffer_;
+                break;
+        }
+
+        if (selector_)
+            selector_.reset();
+
+        eventListener_.bufferChanged(_type);
+    }
+}
+// }}}
+
 // {{{ ops
 void Screen::operator()(Bell const&)
 {
@@ -1133,70 +1197,6 @@ void Screen::operator()(DumpState const&)
     buffer_->dumpState("Dumping screen state");
 }
 
-// }}}
-
-// {{{ others
-void Screen::resetSoft()
-{
-    (*this)(SetGraphicsRendition{GraphicsRendition::Reset}); // SGR
-    (*this)(MoveCursorTo{1, 1}); // DECSC (Save cursor state)
-    (*this)(SetMode{Mode::VisibleCursor, true}); // DECTCEM (Text cursor enable)
-    (*this)(SetMode{Mode::Origin, false}); // DECOM
-    (*this)(SetMode{Mode::KeyboardAction, false}); // KAM
-    (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
-    (*this)(SetMode{Mode::Insert, false}); // IRM
-    (*this)(SetMode{Mode::UseApplicationCursorKeys, false}); // DECCKM (Cursor keys)
-    (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
-    (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
-
-    // TODO: DECNKM (Numeric keypad)
-    // TODO: DECSCA (Select character attribute)
-    // TODO: DECNRCM (National replacement character set)
-    // TODO: GL, GR (G0, G1, G2, G3)
-    // TODO: DECAUPSS (Assign user preference supplemental set)
-    // TODO: DECSASD (Select active status display)
-    // TODO: DECKPM (Keyboard position mode)
-    // TODO: DECPCTERM (PCTerm mode)
-}
-
-void Screen::resetHard()
-{
-    primaryBuffer_.reset();
-    alternateBuffer_.reset();
-    setBuffer(ScreenBuffer::Type::Main);
-}
-
-void Screen::moveCursorTo(Coordinate to)
-{
-    buffer_->wrapPending = false;
-    buffer_->moveCursorTo(to);
-}
-
-void Screen::setBuffer(ScreenBuffer::Type _type)
-{
-    if (bufferType() != _type)
-    {
-        switch (_type)
-        {
-            case ScreenBuffer::Type::Main:
-                eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-                buffer_ = &primaryBuffer_;
-                break;
-            case ScreenBuffer::Type::Alternate:
-                if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
-                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-                else
-                    eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-                buffer_ = &alternateBuffer_;
-                break;
-        }
-
-        if (selector_)
-            selector_.reset();
-
-        eventListener_.bufferChanged(_type);
-    }
-}
 // }}}
 
 } // namespace terminal
