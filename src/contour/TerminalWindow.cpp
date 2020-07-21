@@ -992,6 +992,47 @@ bool TerminalWindow::executeAction(Action const& _action)
         [this](actions::ScrollToTop) -> Result {
             return terminalView_->terminal().scrollToTop() ? Result::Dirty : Result::Nothing;
         },
+        [this](actions::CopyPreviousMarkRange) -> Result {
+            using terminal::Coordinate;
+            using terminal::cursor_pos_t;
+            using terminal::Cell;
+
+            auto const _l = std::lock_guard{terminalView_->terminal()};
+            std::cout << "1" << std::endl;
+            auto const& _screen = terminalView_->terminal().screen();
+            std::cout << "2" << std::endl;
+            auto const& _currentBuffer = _screen.currentBuffer();
+            std::cout << "3" << std::endl;
+            auto const colCount = _screen.size().columns;
+            std::cout << "4" << std::endl;
+            auto const bottomLine = _screen.currentBuffer().historyLineCount() +
+                                    _screen.size().rows;
+
+            std::cout << "5" << std::endl;
+            auto const marker1 = _currentBuffer.findPrevMarker(bottomLine);
+            std::cout << "6" << std::endl;
+            auto const marker0 = _currentBuffer.findPrevMarker(marker1.value());
+            std::cout << "7" << std::endl;
+            string text;
+
+            for (auto lineNum = *marker0; lineNum <= marker1; ++lineNum)
+            {
+                for (auto colNum = 1; colNum < colCount; ++colNum)
+                {
+                    auto const coord = Coordinate{
+                        static_cast<cursor_pos_t>(lineNum),
+                        static_cast<cursor_pos_t>(colNum)
+                    };
+
+                    Cell const& cell = _screen.absoluteAt(coord);
+                    text += cell.toUtf8();
+                }
+            }
+
+            copyToClipboard(text);
+
+            return Result::Silently;
+        },
         [this](actions::ScrollToBottom) -> Result {
             return terminalView_->terminal().scrollToBottom() ? Result::Dirty : Result::Nothing;
         },
