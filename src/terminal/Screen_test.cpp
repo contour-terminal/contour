@@ -99,13 +99,13 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 
     screen.write(AppendChar{U'\u2757'}); // ❗
     // screen.write(AppendChar{U'\uFE0F'});
-    CHECK(screen.at(1, 1).attributes().backgroundColor == IndexedColor::Blue);
-    CHECK(screen.at(1, 1).width() == 2);
-    CHECK(screen.at(1, 2).attributes().backgroundColor == IndexedColor::Blue);
-    CHECK(screen.at(1, 2).width() == 1);
+    CHECK(screen.at({1, 1}).attributes().backgroundColor == IndexedColor::Blue);
+    CHECK(screen.at({1, 1}).width() == 2);
+    CHECK(screen.at({1, 2}).attributes().backgroundColor == IndexedColor::Blue);
+    CHECK(screen.at({1, 2}).width() == 1);
 
     screen.write(AppendChar{U'M'});
-    CHECK(screen.at(1, 3).attributes().backgroundColor == IndexedColor::Blue);
+    CHECK(screen.at({1, 3}).attributes().backgroundColor == IndexedColor::Blue);
 }
 
 TEST_CASE("AppendChar.emoji_VS16_fixed_width", "[screen]")
@@ -118,17 +118,17 @@ TEST_CASE("AppendChar.emoji_VS16_fixed_width", "[screen]")
     screen.write(AppendChar{U'X'});
 
     // double-width emoji with VS16
-    auto const& c1 = screen(1, 1);
+    auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == U"\u2139\uFE0F");
     CHECK(c1.width() == 1); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
 
     // character after the emoji
-    auto const& c2 = screen(1, 2);
+    auto const& c2 = screen.at({1, 2});
     CHECK(c2.codepoints() == U"X");
     CHECK(c2.width() == 1);
 
     // character after the emoji
-    auto const& c3 = screen(1, 3);
+    auto const& c3 = screen.at({1, 3});
     CHECK(c3.codepointCount() == 0);
 }
 
@@ -178,17 +178,17 @@ TEST_CASE("AppendChar.emoji_family", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{1, 4});
 
     // double-width emoji with VS16
-    auto const& c1 = screen(1, 1);
+    auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == U"\U0001F468\u200D\U0001F468\u200D\U0001F467");
     CHECK(c1.width() == 2);
 
     // unused cell
-    auto const& c2 = screen(1, 2);
+    auto const& c2 = screen.at({1, 2});
     CHECK(c2.codepointCount() == 0);
     CHECK(c2.width() == 1);
 
     // character after the emoji
-    auto const& c3 = screen(1, 3);
+    auto const& c3 = screen.at({1, 3});
     CHECK(c3.codepoints() == U"X");
     CHECK(c3.width() == 1);
 }
@@ -204,15 +204,15 @@ TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
     screen.write(emoji);
     // TODO: provide native UTF-32 write function (not emulated through UTF-8 -> UTF-32...)
 
-    auto const& c1 = screen(1, 1);
+    auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == emoji);
     CHECK(c1.width() == 2);
 
     // other columns remain untouched
-    CHECK(screen(1, 2).codepointCount() == 0);
-    CHECK(screen(1, 3).codepointCount() == 0);
-    CHECK(screen(1, 4).codepointCount() == 0);
-    CHECK(screen(1, 5).codepointCount() == 0);
+    CHECK(screen.at({1, 2}).codepointCount() == 0);
+    CHECK(screen.at({1, 3}).codepointCount() == 0);
+    CHECK(screen.at({1, 4}).codepointCount() == 0);
+    CHECK(screen.at({1, 5}).codepointCount() == 0);
 
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == unicode::from_utf8(screen.renderTextLine(1)));
 }
@@ -223,21 +223,21 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
 
     screen.write(U"\U0001F600");
 
-    auto const& c1 = screen(1, 1);
+    auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == U"\U0001F600");
     CHECK(c1.width() == 2);
     REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
 
-    CHECK(screen(1, 2).codepointCount() == 0);
-    CHECK(screen(1, 3).codepointCount() == 0);
+    CHECK(screen.at({1, 2}).codepointCount() == 0);
+    CHECK(screen.at({1, 3}).codepointCount() == 0);
 
     screen.write("B");
-    auto const& c2 = screen(1, 2);
+    auto const& c2 = screen.at({1, 2});
     CHECK(c2.codepointCount() == 0);
     CHECK(c2.codepoint(0) == 0);
     CHECK(c2.width() == 1);
 
-    auto const& c3 = screen(1, 3);
+    auto const& c3 = screen.at({1, 3});
     CHECK(c3.codepointCount() == 1);
     CHECK(c3.codepoint(0) == 'B');
     CHECK(c3.codepoint(1) == 0);

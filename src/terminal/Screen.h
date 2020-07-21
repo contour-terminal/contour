@@ -403,11 +403,6 @@ class Screen {
         return *buffer_->currentColumn;
     }
 
-    Cell const& operator()(cursor_pos_t _row, cursor_pos_t _col) const noexcept
-    {
-        return buffer_->at(_row, _col);
-    }
-
     Cell& currentCell() noexcept
     {
         return *buffer_->currentColumn;
@@ -431,24 +426,18 @@ class Screen {
         return const_cast<Screen&>(*this).absoluteAt(_coord);
     }
 
-    // Gets a reference to the cell relative to screen origin (top left, 1:1).
+    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept
     {
-        auto const y = currentBuffer().historyLineCount() + _coord.row - scrollOffset_;
+        auto const y = currentBuffer().historyLineCount() + _coord.row;
         return absoluteAt(Coordinate{y, _coord.column});
     }
 
-    // Gets a reference to the cell relative to screen origin (top left, 1:1).
+    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(Coordinate const& _coord) const noexcept
     {
-        auto const y = currentBuffer().historyLineCount() + _coord.row - scrollOffset_;
+        auto const y = currentBuffer().historyLineCount() + _coord.row;
         return absoluteAt(Coordinate{y, _coord.column});
-    }
-
-    // Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell const& at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
-    {
-        return const_cast<Screen&>(*this).at(Coordinate{_rowNr, _colNr});
     }
 
     /// Retrieves the cell at given cursor, respecting origin mode.

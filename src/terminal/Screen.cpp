@@ -149,7 +149,7 @@ void Screen::render(Renderer const& _render, int _scrollOffset) const
             times(1, size_.rows) * times(1, size_.columns),
             [&](auto pos) {
                 auto const [row, col] = pos;
-                _render(row, col, at(row, col));
+                _render(row, col, at({row, col}));
             }
         );
     }
