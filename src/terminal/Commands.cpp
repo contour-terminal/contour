@@ -158,6 +158,8 @@ string to_string(Mode m)
             return "MouseURXVT";
         case Mode::MouseAlternateScroll:
             return "MouseAlternateScroll";
+        case Mode::BatchedRendering:
+            return "BatchedRendering";
     }
     return "?";
 }
@@ -288,6 +290,7 @@ class MnemonicBuilder {
     void operator()(MoveCursorTo const& v) { build("CUP", "Move cursor to position", v.row, v.column); }
     void operator()(MoveCursorToLine const& v) { build("VPA", "Move cursor to line", v.row); }
     void operator()(MoveCursorToNextTab const&) { build("\\t"); }
+    void operator()(CopyToClipboard const&) { build("CLIPBOARD", "Copy to clipboard"); }
     void operator()(CursorBackwardTab const& v) { build("CBT", "Cursor Backward Tab", v.count); }
     void operator()(SaveCursor const&) { build("DECSC", "Save cursor"); }
     void operator()(RestoreCursor const&) { build("DECRC", "Restore cursor"); }

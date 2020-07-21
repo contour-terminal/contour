@@ -63,39 +63,6 @@ struct FunctionDefinition { // TODO: rename Function
     }
 
     constexpr operator unsigned () const noexcept { return id(); }
-
-    // Semantic constructors
-    //
-    // constexpr static auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{
-    //         FunctionCategory::CSI,
-    //         _leader.value_or(0),
-    //         _intermediate.value_or(0),
-    //         _final,
-    //         _argc0,
-    //         _argc1,
-    //         _vt,
-    //         _mnemonic,
-    //         _description
-    //     };
-    // }
-    // }
 };
 
 constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
@@ -397,6 +364,8 @@ constexpr inline auto COLORBG       = detail::OSC(11, "COLORBG", "Change or requ
 constexpr inline auto COLORCURSOR   = detail::OSC(12, "COLORCURSOR", "Change text cursor color to Pt.");
 constexpr inline auto COLORMOUSEFG  = detail::OSC(13, "COLORMOUSEFG", "Change mouse foreground color.");
 constexpr inline auto COLORMOUSEBG  = detail::OSC(14, "COLORMOUSEBG", "Change mouse background color.");
+// printf "\033]52;c;$(printf "%s" "blabla" | base64)\a"
+constexpr inline auto CLIPBOARD     = detail::OSC(52, "CLIPBOARD", "Clipboard management.");
 constexpr inline auto COLORSPECIAL  = detail::OSC(106, "COLORSPECIAL", "Enable/disable Special Color Number c.");
 constexpr inline auto RCOLORFG      = detail::OSC(110, "RCOLORFG", "Reset VT100 text foreground color.");
 constexpr inline auto RCOLORBG      = detail::OSC(111, "RCOLORBG", "Reset VT100 text background color.");
@@ -499,6 +468,7 @@ inline auto const& functions()
             COLORCURSOR,
             COLORMOUSEFG,
             COLORMOUSEBG,
+            CLIPBOARD,
             COLORSPECIAL,
             RCOLORFG,
             RCOLORBG,

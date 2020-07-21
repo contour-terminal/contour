@@ -18,6 +18,7 @@
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
+#include <crispy/base64.h>
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>
@@ -136,6 +137,8 @@ namespace impl // {{{ some command generator helpers
 				return ApplyResult::Ok;
 			case 2004:
 				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
+            case 2001:
+                return emitCommand<SetMode>(_output, Mode::BatchedRendering, _enable);
 			default:
 				return ApplyResult::Unsupported;
 		}
@@ -491,6 +494,16 @@ namespace impl // {{{ some command generator helpers
             return emitCommand<RequestDynamicColor>(_output, _name);
         else if (auto color = CommandBuilder::parseColor(value); color.has_value())
             return emitCommand<SetDynamicColor>(_output, _name, color.value());
+        else
+            return ApplyResult::Invalid;
+    }
+
+    ApplyResult clipboard(Sequence const& _ctx, CommandList& _output)
+    {
+        // Only setting clipboard contents is supported, not reading.
+        auto const& params = _ctx.intermediateCharacters();
+        if (auto const splits = crispy::split(params, ';'); splits.size() == 2 && splits[0] == "c")
+            return emitCommand<CopyToClipboard>(_output, crispy::base64::decode(splits[1]));
         else
             return ApplyResult::Invalid;
     }
@@ -863,6 +876,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case COLORCURSOR: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::TextCursorColor);
         case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::MouseBackgroundColor);
+        case CLIPBOARD: return impl::clipboard(_ctx, _output);
         //case COLORSPECIAL: return impl::setOrRequestDynamicColor(_ctx, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultForegroundColor);
         case RCOLORBG: return emitCommand<ResetDynamicColor>(_output, DynamicColorName::DefaultBackgroundColor);

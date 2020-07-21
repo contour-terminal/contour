@@ -29,24 +29,15 @@ using namespace std::placeholders;
 namespace terminal {
 
 Terminal::Terminal(WindowSize _winSize,
+                   Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
-                   function<void()> _onWindowTitleChanged,
-                   function<void(unsigned int, unsigned int, bool)> _resizeWindow,
                    chrono::steady_clock::time_point _now,
                    Logger _logger,
-                   Hook _onScreenCommands,
-                   function<void()> _onClosed,
-                   string const& _wordDelimiters,
-                   function<void()> _onSelectionComplete,
-                   Screen::OnBufferChanged _onScreenBufferChanged,
-                   std::function<void()> _bell,
-                   std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
-                   std::function<void(DynamicColorName)> _resetDynamicColor,
-                   std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-                   Screen::NotifyCallback _notify
+                   string const& _wordDelimiters
 ) :
     changes_{ 0 },
+    eventListener_{ _eventListener },
     logger_{ move(_logger) },
     pty_{ _winSize },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
@@ -56,62 +47,22 @@ Terminal::Terminal(WindowSize _winSize,
     lastCursorBlink_{ _now },
     startTime_{ _now },
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
-    onSelectionComplete_{ move(_onSelectionComplete) },
     inputGenerator_{},
     screen_{
         _winSize,
-        _maxHistoryLineCount,
-        bind(&Terminal::useApplicationCursorKeys, this, _1),
-        move(_onWindowTitleChanged),
-        move(_resizeWindow),
-        bind(&InputGenerator::setApplicationKeypadMode, &inputGenerator_, _1),
-        bind(&InputGenerator::setBracketedPaste, &inputGenerator_, _1),
-        bind(&InputGenerator::setMouseProtocol, &inputGenerator_, _1, _2),
-        bind(&InputGenerator::setMouseTransport, &inputGenerator_, _1),
-        bind(&InputGenerator::setMouseWheelMode, &inputGenerator_, _1),
-        bind(&Terminal::onSetCursorStyle, this, _1, _2),
-        bind(&Terminal::onScreenReply, this, _1),
+        *this,
         logger_,
         true, // logs raw output by default?
         true, // logs trace output by default?
-        bind(&Terminal::onScreenCommands, this, _1),
-        _onScreenBufferChanged,
-        move(_bell),
-        move(_requestDynamicColor),
-        move(_resetDynamicColor),
-        move(_setDynamicColor),
-        bind(&InputGenerator::setGenerateFocusEvents, &inputGenerator_, _1),
-        move(_notify)
+        _maxHistoryLineCount
     },
-    onScreenCommands_{ move(_onScreenCommands) },
-    screenUpdateThread_{ [this]() { screenUpdateThread(); } },
-    onClosed_{ move(_onClosed) }
+    screenUpdateThread_{ [this]() { screenUpdateThread(); } }
 {
 }
 
 Terminal::~Terminal()
 {
     screenUpdateThread_.join();
-}
-
-void Terminal::useApplicationCursorKeys(bool _enable)
-{
-    auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
-    inputGenerator_.setCursorKeysMode(keyMode);
-}
-
-void Terminal::onScreenReply(string_view const& reply)
-{
-    pty_.write(reply.data(), reply.size());
-}
-
-void Terminal::onScreenCommands(vector<Command> const& _commands)
-{
-    changes_++;
-
-    // Screen output commands be here - anything this terminal is interested in?
-    if (onScreenCommands_)
-        onScreenCommands_(_commands);
 }
 
 void Terminal::screenUpdateThread()
@@ -130,8 +81,7 @@ void Terminal::screenUpdateThread()
         }
         else
         {
-            if (onClosed_)
-                onClosed_();
+            eventListener_.onClosed();
             break;
         }
     }
@@ -215,7 +165,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
             {
                 screen_.setSelector(make_unique<Selector>(
                     selectionMode,
-                    [this](Coordinate const& _coord) -> ScreenBuffer::Cell const* { return absoluteAt(_coord); },
+                    [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
                     wordDelimiters_,
                     screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
                     screenSize().columns,
@@ -260,7 +210,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     {
         screen_.setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
-            [this](Coordinate const& _coord) -> ScreenBuffer::Cell const* { return absoluteAt(_coord); },
+            [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
             wordDelimiters_,
             screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
             screenSize().columns,
@@ -409,7 +359,7 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
         return chrono::milliseconds::min();
 }
 
-Screen::Cell const* Terminal::absoluteAt(Coordinate const& _coord) const
+Cell const* Terminal::absoluteAt(Coordinate const& _coord) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     if (_coord.row <= screen_.size().rows)
@@ -433,12 +383,6 @@ Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, size_t _
     return {static_cast<cursor_pos_t>(row), col};
 }
 
-void Terminal::onSetCursorStyle(CursorDisplay _display, CursorShape _shape)
-{
-    setCursorDisplay(_display);
-    cursorShape_ = _shape;
-}
-
 void Terminal::setCursorDisplay(CursorDisplay _display)
 {
     cursorDisplay_ = _display;
@@ -453,5 +397,107 @@ void Terminal::setWordDelimiters(string const& _wordDelimiters)
 {
     wordDelimiters_ = unicode::from_utf8(_wordDelimiters);
 }
+
+// {{{ ScreenEvents overrides
+optional<RGBColor> Terminal::requestDynamicColor(DynamicColorName _name)
+{
+    return eventListener_.requestDynamicColor(_name);
+}
+
+void Terminal::bell()
+{
+    eventListener_.bell();
+}
+
+void Terminal::bufferChanged(ScreenBuffer::Type _type)
+{
+    eventListener_.bufferChanged(_type);
+}
+
+void Terminal::commands(vector<Command> const& _commands)
+{
+    changes_++;
+
+    // Screen output commands be here - anything this terminal is interested in?
+    eventListener_.commands(_commands);
+}
+
+void Terminal::copyToClipboard(std::string_view const& _data)
+{
+    eventListener_.copyToClipboard(_data);
+}
+
+void Terminal::notify(std::string_view const& _title, std::string_view const& _body)
+{
+    eventListener_.notify(_title, _body);
+}
+
+void Terminal::reply(string_view const& reply)
+{
+    pty_.write(reply.data(), reply.size());
+}
+
+void Terminal::resetDynamicColor(DynamicColorName _name)
+{
+    eventListener_.resetDynamicColor(_name);
+}
+
+void Terminal::resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels)
+{
+    eventListener_.resizeWindow(_width, _height, _unitInPixels);
+}
+
+void Terminal::setApplicationkeypadMode(bool _enabled)
+{
+    inputGenerator_.setApplicationKeypadMode(_enabled);
+}
+
+void Terminal::setBracketedPaste(bool _enabled)
+{
+    inputGenerator_.setBracketedPaste(_enabled);
+}
+
+void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
+{
+    setCursorDisplay(_display);
+    cursorShape_ = _shape;
+}
+
+void Terminal::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
+{
+    eventListener_.setDynamicColor(_name, _color);
+}
+
+void Terminal::setGenerateFocusEvents(bool _enabled)
+{
+    inputGenerator_.setGenerateFocusEvents(_enabled);
+}
+
+void Terminal::setMouseProtocol(MouseProtocol _protocol, bool _enabled)
+{
+    inputGenerator_.setMouseProtocol(_protocol, _enabled);
+}
+
+void Terminal::setMouseTransport(MouseTransport _transport)
+{
+    inputGenerator_.setMouseTransport(_transport);
+}
+
+void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode _mode)
+{
+    inputGenerator_.setMouseWheelMode(_mode);
+}
+
+void Terminal::setWindowTitle(std::string_view const& _title)
+{
+    eventListener_.setWindowTitle(_title);
+}
+
+void Terminal::useApplicationCursorKeys(bool _enable)
+{
+    auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
+    inputGenerator_.setCursorKeysMode(keyMode);
+}
+// }}}
 
 }  // namespace terminal

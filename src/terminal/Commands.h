@@ -175,6 +175,12 @@ enum class Mode {
     /// Toggles scrolling in alternate screen buffer, encodes CUP/CUD instead of mouse wheel events.
     MouseAlternateScroll = 1007,
     // }}}
+    // {{{ Extensions
+    // This merely resembles the "Synchronized Output" feature from iTerm2, except that it is using
+    // a different VT sequence to be enabled. Instead of a DCS,
+    // this feature is using CSI ? 2001 h (DECSM and DECRM).
+    BatchedRendering = 2001,
+    // }}}
 };
 
 constexpr bool isAnsiMode(Mode m) noexcept
@@ -206,6 +212,7 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::MouseSGR:
         case Mode::MouseURXVT:
         case Mode::MouseAlternateScroll:
+        case Mode::BatchedRendering:
             return false;
     }
     return false; // Should never be reached.
@@ -241,6 +248,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::MouseSGR: return "?1006";
         case Mode::MouseURXVT: return "?1015";
         case Mode::MouseAlternateScroll: return "?1007";
+        case Mode::BatchedRendering: return "2001";
     }
     return "0";
 }
@@ -809,6 +817,9 @@ struct Notify {
 /// OSC 888
 struct DumpState {};
 
+// OSC 52 ; c ; Base64EncodedData ST
+struct CopyToClipboard { std::string data; };
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -933,6 +944,7 @@ using Command = std::variant<
     ClearToBeginOfScreen,
     ClearToEndOfLine,
     ClearToEndOfScreen,
+    CopyToClipboard,
     CursorBackwardTab,
     CursorNextLine,
     CursorPreviousLine,
@@ -1003,8 +1015,171 @@ std::string to_string(Command const& cmd);
 std::string to_mnemonic(Command const& _command, bool _withParameters, bool _withComment);
 std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool _withParameters, bool _withComment);
 
-}  // namespace terminal
+/// Screen Command Execution API.
+class CommandVisitor {
+  public:
+    virtual ~CommandVisitor() = default;
 
+    virtual void visit(AppendChar const& v) = 0;
+    virtual void visit(ApplicationKeypadMode const& v) = 0;
+    virtual void visit(BackIndex const& v) = 0;
+    virtual void visit(Backspace const& v) = 0;
+    virtual void visit(Bell const& v) = 0;
+    virtual void visit(ChangeIconTitle const& v) = 0;
+    virtual void visit(ChangeWindowTitle const& v) = 0;
+    virtual void visit(ClearLine const& v) = 0;
+    virtual void visit(ClearScreen const& v) = 0;
+    virtual void visit(ClearScrollbackBuffer const& v) = 0;
+    virtual void visit(ClearToBeginOfLine const& v) = 0;
+    virtual void visit(ClearToBeginOfScreen const& v) = 0;
+    virtual void visit(ClearToEndOfLine const& v) = 0;
+    virtual void visit(ClearToEndOfScreen const& v) = 0;
+    virtual void visit(CopyToClipboard const& v) = 0;
+    virtual void visit(CursorBackwardTab const& v) = 0;
+    virtual void visit(CursorNextLine const& v) = 0;
+    virtual void visit(CursorPreviousLine const& v) = 0;
+    virtual void visit(DeleteCharacters const& v) = 0;
+    virtual void visit(DeleteColumns const& v) = 0;
+    virtual void visit(DeleteLines const& v) = 0;
+    virtual void visit(DesignateCharset const& v) = 0;
+    virtual void visit(DeviceStatusReport const& v) = 0;
+    virtual void visit(DumpState const& v) = 0;
+    virtual void visit(EraseCharacters const& v) = 0;
+    virtual void visit(ForwardIndex const& v) = 0;
+    virtual void visit(FullReset const& v) = 0;
+    virtual void visit(HorizontalPositionAbsolute const& v) = 0;
+    virtual void visit(HorizontalPositionRelative const& v) = 0;
+    virtual void visit(HorizontalTabClear const& v) = 0;
+    virtual void visit(HorizontalTabSet const& v) = 0;
+    virtual void visit(Hyperlink const& v) = 0;
+    virtual void visit(Index const& v) = 0;
+    virtual void visit(InsertCharacters const& v) = 0;
+    virtual void visit(InsertColumns const& v) = 0;
+    virtual void visit(InsertLines const& v) = 0;
+    virtual void visit(Linefeed const& v) = 0;
+    virtual void visit(MoveCursorBackward const& v) = 0;
+    virtual void visit(MoveCursorDown const& v) = 0;
+    virtual void visit(MoveCursorForward const& v) = 0;
+    virtual void visit(MoveCursorTo const& v) = 0;
+    virtual void visit(MoveCursorToBeginOfLine const& v) = 0;
+    virtual void visit(MoveCursorToColumn const& v) = 0;
+    virtual void visit(MoveCursorToLine const& v) = 0;
+    virtual void visit(MoveCursorToNextTab const& v) = 0;
+    virtual void visit(MoveCursorUp const& v) = 0;
+    virtual void visit(Notify const& v) = 0;
+    virtual void visit(ReportCursorPosition const& v) = 0;
+    virtual void visit(ReportExtendedCursorPosition const& v) = 0;
+    virtual void visit(RequestDynamicColor const& v) = 0;
+    virtual void visit(RequestMode const& v) = 0;
+    virtual void visit(RequestTabStops const& v) = 0;
+    virtual void visit(ResetDynamicColor const& v) = 0;
+    virtual void visit(ResizeWindow const& v) = 0;
+    virtual void visit(RestoreCursor const& v) = 0;
+    virtual void visit(RestoreWindowTitle const& v) = 0;
+    virtual void visit(ReverseIndex const& v) = 0;
+    virtual void visit(SaveCursor const& v) = 0;
+    virtual void visit(SaveWindowTitle const& v) = 0;
+    virtual void visit(ScreenAlignmentPattern const& v) = 0;
+    virtual void visit(ScrollDown const& v) = 0;
+    virtual void visit(ScrollUp const& v) = 0;
+    virtual void visit(SendDeviceAttributes const& v) = 0;
+    virtual void visit(SendMouseEvents const& v) = 0;
+    virtual void visit(SendTerminalId const& v) = 0;
+    virtual void visit(SetBackgroundColor const& v) = 0;
+    virtual void visit(SetCursorStyle const& v) = 0;
+    virtual void visit(SetDynamicColor const& v) = 0;
+    virtual void visit(SetForegroundColor const& v) = 0;
+    virtual void visit(SetGraphicsRendition const& v) = 0;
+    virtual void visit(SetLeftRightMargin const& v) = 0;
+    virtual void visit(SetMark const& v) = 0;
+    virtual void visit(SetMode const& v) = 0;
+    virtual void visit(SetTopBottomMargin const& v) = 0;
+    virtual void visit(SetUnderlineColor const& v) = 0;
+    virtual void visit(SingleShiftSelect const& v) = 0;
+    virtual void visit(SoftTerminalReset const& v) = 0;
+
+    // {{{ Secret std::visit() workaround
+    void operator()(AppendChar const& v) { visit(v); }
+    void operator()(ApplicationKeypadMode const& v) { visit(v); }
+    void operator()(BackIndex const& v) { visit(v); }
+    void operator()(Backspace const& v) { visit(v); }
+    void operator()(Bell const& v) { visit(v); }
+    void operator()(ChangeIconTitle const& v) { visit(v); }
+    void operator()(ChangeWindowTitle const& v) { visit(v); }
+    void operator()(ClearLine const& v) { visit(v); }
+    void operator()(ClearScreen const& v) { visit(v); }
+    void operator()(ClearScrollbackBuffer const& v) { visit(v); }
+    void operator()(ClearToBeginOfLine const& v) { visit(v); }
+    void operator()(ClearToBeginOfScreen const& v) { visit(v); }
+    void operator()(ClearToEndOfLine const& v) { visit(v); }
+    void operator()(ClearToEndOfScreen const& v) { visit(v); }
+    void operator()(CopyToClipboard const& v) { visit(v); }
+    void operator()(CursorBackwardTab const& v) { visit(v); }
+    void operator()(CursorNextLine const& v) { visit(v); }
+    void operator()(CursorPreviousLine const& v) { visit(v); }
+    void operator()(DeleteCharacters const& v) { visit(v); }
+    void operator()(DeleteColumns const& v) { visit(v); }
+    void operator()(DeleteLines const& v) { visit(v); }
+    void operator()(DesignateCharset const& v) { visit(v); }
+    void operator()(DeviceStatusReport const& v) { visit(v); }
+    void operator()(DumpState const& v) { visit(v); }
+    void operator()(EraseCharacters const& v) { visit(v); }
+    void operator()(ForwardIndex const& v) { visit(v); }
+    void operator()(FullReset const& v) { visit(v); }
+    void operator()(HorizontalPositionAbsolute const& v) { visit(v); }
+    void operator()(HorizontalPositionRelative const& v) { visit(v); }
+    void operator()(HorizontalTabClear const& v) { visit(v); }
+    void operator()(HorizontalTabSet const& v) { visit(v); }
+    void operator()(Hyperlink const& v) { visit(v); }
+    void operator()(Index const& v) { visit(v); }
+    void operator()(InsertCharacters const& v) { visit(v); }
+    void operator()(InsertColumns const& v) { visit(v); }
+    void operator()(InsertLines const& v) { visit(v); }
+    void operator()(Linefeed const& v) { visit(v); }
+    void operator()(MoveCursorBackward const& v) { visit(v); }
+    void operator()(MoveCursorDown const& v) { visit(v); }
+    void operator()(MoveCursorForward const& v) { visit(v); }
+    void operator()(MoveCursorTo const& v) { visit(v); }
+    void operator()(MoveCursorToBeginOfLine const& v) { visit(v); }
+    void operator()(MoveCursorToColumn const& v) { visit(v); }
+    void operator()(MoveCursorToLine const& v) { visit(v); }
+    void operator()(MoveCursorToNextTab const& v) { visit(v); }
+    void operator()(MoveCursorUp const& v) { visit(v); }
+    void operator()(Notify const& v) { visit(v); }
+    void operator()(ReportCursorPosition const& v) { visit(v); }
+    void operator()(ReportExtendedCursorPosition const& v) { visit(v); }
+    void operator()(RequestDynamicColor const& v) { visit(v); }
+    void operator()(RequestMode const& v) { visit(v); }
+    void operator()(RequestTabStops const& v) { visit(v); }
+    void operator()(ResetDynamicColor const& v) { visit(v); }
+    void operator()(ResizeWindow const& v) { visit(v); }
+    void operator()(RestoreCursor const& v) { visit(v); }
+    void operator()(RestoreWindowTitle const& v) { visit(v); }
+    void operator()(ReverseIndex const& v) { visit(v); }
+    void operator()(SaveCursor const& v) { visit(v); }
+    void operator()(SaveWindowTitle const& v) { visit(v); }
+    void operator()(ScreenAlignmentPattern const& v) { visit(v); }
+    void operator()(ScrollDown const& v) { visit(v); }
+    void operator()(ScrollUp const& v) { visit(v); }
+    void operator()(SendDeviceAttributes const& v) { visit(v); }
+    void operator()(SendMouseEvents const& v) { visit(v); }
+    void operator()(SendTerminalId const& v) { visit(v); }
+    void operator()(SetBackgroundColor const& v) { visit(v); }
+    void operator()(SetCursorStyle const& v) { visit(v); }
+    void operator()(SetDynamicColor const& v) { visit(v); }
+    void operator()(SetForegroundColor const& v) { visit(v); }
+    void operator()(SetGraphicsRendition const& v) { visit(v); }
+    void operator()(SetLeftRightMargin const& v) { visit(v); }
+    void operator()(SetMark const& v) { visit(v); }
+    void operator()(SetMode const& v) { visit(v); }
+    void operator()(SetTopBottomMargin const& v) { visit(v); }
+    void operator()(SetUnderlineColor const& v) { visit(v); }
+    void operator()(SingleShiftSelect const& v) { visit(v); }
+    void operator()(SoftTerminalReset const& v) { visit(v); }
+    // }}}
+};
+
+}  // namespace terminal
 
 namespace fmt {
     template <>
@@ -1099,7 +1274,7 @@ namespace fmt {
                 case DynamicColorName::DefaultForegroundColor:
                     return format_to(ctx.out(), "DefaultForegroundColor");
                 case DynamicColorName::DefaultBackgroundColor:
-                    return format_to(ctx.out(), "DefaultForegroundColor");
+                    return format_to(ctx.out(), "DefaultBackgroundColor");
                 case DynamicColorName::TextCursorColor:
                     return format_to(ctx.out(), "TextCursorColor");
                 case DynamicColorName::MouseForegroundColor:

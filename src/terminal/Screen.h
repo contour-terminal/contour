@@ -24,6 +24,7 @@
 #include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/VTType.h>
 #include <terminal/ScreenBuffer.h>
+#include <terminal/ScreenEvents.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/width.h>
@@ -45,6 +46,174 @@
 
 namespace terminal {
 
+class Screen;
+
+class CommandExecutor : public CommandVisitor {
+  protected:
+    Screen& screen_;
+
+  public:
+    explicit CommandExecutor(Screen& _screen) :
+        screen_{ _screen }
+    {}
+
+    void visit(AppendChar const& v) override;
+    void visit(ApplicationKeypadMode const& v) override;
+    void visit(BackIndex const& v) override;
+    void visit(Backspace const& v) override;
+    void visit(Bell const& v) override;
+    void visit(ChangeIconTitle const& v) override;
+    void visit(ChangeWindowTitle const& v) override;
+    void visit(ClearLine const& v) override;
+    void visit(ClearScreen const& v) override;
+    void visit(ClearScrollbackBuffer const& v) override;
+    void visit(ClearToBeginOfLine const& v) override;
+    void visit(ClearToBeginOfScreen const& v) override;
+    void visit(ClearToEndOfLine const& v) override;
+    void visit(ClearToEndOfScreen const& v) override;
+    void visit(CopyToClipboard const& v) override;
+    void visit(CursorBackwardTab const& v) override;
+    void visit(CursorNextLine const& v) override;
+    void visit(CursorPreviousLine const& v) override;
+    void visit(DeleteCharacters const& v) override;
+    void visit(DeleteColumns const& v) override;
+    void visit(DeleteLines const& v) override;
+    void visit(DesignateCharset const& v) override;
+    void visit(DeviceStatusReport const& v) override;
+    void visit(DumpState const& v) override;
+    void visit(EraseCharacters const& v) override;
+    void visit(ForwardIndex const& v) override;
+    void visit(FullReset const& v) override;
+    void visit(HorizontalPositionAbsolute const& v) override;
+    void visit(HorizontalPositionRelative const& v) override;
+    void visit(HorizontalTabClear const& v) override;
+    void visit(HorizontalTabSet const& v) override;
+    void visit(Hyperlink const& v) override;
+    void visit(Index const& v) override;
+    void visit(InsertCharacters const& v) override;
+    void visit(InsertColumns const& v) override;
+    void visit(InsertLines const& v) override;
+    void visit(Linefeed const& v) override;
+    void visit(MoveCursorBackward const& v) override;
+    void visit(MoveCursorDown const& v) override;
+    void visit(MoveCursorForward const& v) override;
+    void visit(MoveCursorTo const& v) override;
+    void visit(MoveCursorToBeginOfLine const& v) override;
+    void visit(MoveCursorToColumn const& v) override;
+    void visit(MoveCursorToLine const& v) override;
+    void visit(MoveCursorToNextTab const& v) override;
+    void visit(MoveCursorUp const& v) override;
+    void visit(Notify const& v) override;
+    void visit(ReportCursorPosition const& v) override;
+    void visit(ReportExtendedCursorPosition const& v) override;
+    void visit(RequestDynamicColor const& v) override;
+    void visit(RequestMode const& v) override;
+    void visit(RequestTabStops const& v) override;
+    void visit(ResetDynamicColor const& v) override;
+    void visit(ResizeWindow const& v) override;
+    void visit(RestoreCursor const& v) override;
+    void visit(RestoreWindowTitle const& v) override;
+    void visit(ReverseIndex const& v) override;
+    void visit(SaveCursor const& v) override;
+    void visit(SaveWindowTitle const& v) override;
+    void visit(ScreenAlignmentPattern const& v) override;
+    void visit(ScrollDown const& v) override;
+    void visit(ScrollUp const& v) override;
+    void visit(SendDeviceAttributes const& v) override;
+    void visit(SendMouseEvents const& v) override;
+    void visit(SendTerminalId const& v) override;
+    void visit(SetBackgroundColor const& v) override;
+    void visit(SetCursorStyle const& v) override;
+    void visit(SetDynamicColor const& v) override;
+    void visit(SetForegroundColor const& v) override;
+    void visit(SetGraphicsRendition const& v) override;
+    void visit(SetLeftRightMargin const& v) override;
+    void visit(SetMark const& v) override;
+    void visit(SetMode const& v) override;
+    void visit(SetTopBottomMargin const& v) override;
+    void visit(SetUnderlineColor const& v) override;
+    void visit(SingleShiftSelect const& v) override;
+    void visit(SoftTerminalReset const& v) override;
+};
+
+/// Batches any drawing related command until synchronization point, or
+/// executes the command directly otherwise.
+class SynchronizedCommandExecutor : public CommandExecutor {
+  private:
+    CommandList queuedCommands_;
+
+  public:
+    explicit SynchronizedCommandExecutor(Screen& _screen)
+        : CommandExecutor{_screen}
+    {}
+
+    // applies all queued commands.
+    void flush();
+
+    void enqueue(Command&& _cmd)
+    {
+        queuedCommands_.emplace_back(std::move(_cmd));
+    }
+
+    void visit(AppendChar const& v) override { enqueue(v); }
+    void visit(BackIndex const& v) override { enqueue(v); }
+    void visit(Backspace const& v) override { enqueue(v); }
+    void visit(ClearLine const& v) override { enqueue(v); }
+    void visit(ClearScreen const& v) override { enqueue(v); }
+    void visit(ClearScrollbackBuffer const& v) override { enqueue(v); }
+    void visit(ClearToBeginOfLine const& v) override { enqueue(v); }
+    void visit(ClearToBeginOfScreen const& v) override { enqueue(v); }
+    void visit(ClearToEndOfLine const& v) override { enqueue(v); }
+    void visit(ClearToEndOfScreen const& v) override { enqueue(v); }
+    void visit(CursorBackwardTab const& v) override { enqueue(v); }
+    void visit(CursorNextLine const& v) override { enqueue(v); }
+    void visit(CursorPreviousLine const& v) override { enqueue(v); }
+    void visit(DeleteCharacters const& v) override { enqueue(v); }
+    void visit(DeleteColumns const& v) override { enqueue(v); }
+    void visit(DeleteLines const& v) override { enqueue(v); }
+    void visit(DesignateCharset const& v) override { enqueue(v); }
+    void visit(EraseCharacters const& v) override { enqueue(v); }
+    void visit(ForwardIndex const& v) override { enqueue(v); }
+    void visit(FullReset const& v) override { enqueue(v); }
+    void visit(HorizontalPositionAbsolute const& v) override { enqueue(v); }
+    void visit(HorizontalPositionRelative const& v) override { enqueue(v); }
+    void visit(HorizontalTabClear const& v) override { enqueue(v); }
+    void visit(HorizontalTabSet const& v) override { enqueue(v); }
+    void visit(Hyperlink const& v) override { enqueue(v); }
+    void visit(Index const& v) override { enqueue(v); }
+    void visit(InsertCharacters const& v) override { enqueue(v); }
+    void visit(InsertColumns const& v) override { enqueue(v); }
+    void visit(InsertLines const& v) override { enqueue(v); }
+    void visit(Linefeed const& v) override { enqueue(v); }
+    void visit(MoveCursorBackward const& v) override { enqueue(v); }
+    void visit(MoveCursorDown const& v) override { enqueue(v); }
+    void visit(MoveCursorForward const& v) override { enqueue(v); }
+    void visit(MoveCursorTo const& v) override { enqueue(v); }
+    void visit(MoveCursorToBeginOfLine const& v) override { enqueue(v); }
+    void visit(MoveCursorToColumn const& v) override { enqueue(v); }
+    void visit(MoveCursorToLine const& v) override { enqueue(v); }
+    void visit(MoveCursorToNextTab const& v) override { enqueue(v); }
+    void visit(MoveCursorUp const& v) override { enqueue(v); }
+    void visit(ResetDynamicColor const& v) override { enqueue(v); }
+    void visit(ResizeWindow const& v) override { enqueue(v); }
+    void visit(RestoreCursor const& v) override { enqueue(v); }
+    void visit(ReverseIndex const& v) override { enqueue(v); }
+    void visit(SaveCursor const& v) override { enqueue(v); }
+    void visit(ScreenAlignmentPattern const& v) override { enqueue(v); }
+    void visit(ScrollDown const& v) override { enqueue(v); }
+    void visit(ScrollUp const& v) override { enqueue(v); }
+    void visit(SetBackgroundColor const& v) override { enqueue(v); }
+    void visit(SetCursorStyle const& v) override { enqueue(v); }
+    void visit(SetDynamicColor const& v) override { enqueue(v); }
+    void visit(SetForegroundColor const& v) override { enqueue(v); }
+    void visit(SetGraphicsRendition const& v) override { enqueue(v); }
+    void visit(SetLeftRightMargin const& v) override { enqueue(v); }
+    void visit(SetMark const& v) override { enqueue(v); }
+    void visit(SetTopBottomMargin const& v) override { enqueue(v); }
+    void visit(SetUnderlineColor const& v) override { enqueue(v); }
+    void visit(SingleShiftSelect const& v) override { enqueue(v); }
+};
+
 /**
  * Terminal Screen.
  *
@@ -55,91 +224,25 @@ namespace terminal {
  */
 class Screen {
   public:
-	using Cell = ScreenBuffer::Cell;
-	using Cursor = ScreenBuffer::Cursor;
-    using Reply = std::function<void(std::string const&)>;
+    using Cursor = ScreenBuffer::Cursor;
     using Renderer = ScreenBuffer::Renderer;
-    using ModeSwitchCallback = std::function<void(bool)>;
-    using ResizeWindowCallback = std::function<void(unsigned int, unsigned int, bool)>;
-    using SetApplicationKeypadMode = std::function<void(bool)>;
-    using SetBracketedPaste = std::function<void(bool)>;
-    using SetMouseProtocol = std::function<void(MouseProtocol, bool)>;
-    using SetMouseTransport = std::function<void(MouseTransport)>;
-    using SetMouseWheelMode = std::function<void(InputGenerator::MouseWheelMode)>;
-	using OnSetCursorStyle = std::function<void(CursorDisplay, CursorShape)>;
-    using OnBufferChanged = std::function<void(ScreenBuffer::Type)>;
-    using Hook = std::function<void(std::vector<Command> const& commands)>;
-    using NotifyCallback = std::function<void(std::string const&, std::string const&)>;
 
-  public:
     /**
      * Initializes the screen with the given screen size and callbaks.
      *
      * @param _size screen dimensions in number of characters per line and number of lines.
-     * @param _reply reply-callback with the data to send back to terminal input.
+     * @param _eventListener Interface to some VT sequence related callbacks.
      * @param _logger an optional logger for logging various events.
-     * @param _error an optional logger for errors.
-     * @param _onCommands hook to the commands being executed by the screen.
+     * @param _logRaw whether or not to log raw VT sequences.
+     * @param _logTrace whether or not to log VT sequences in trace mode.
+     * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
     Screen(WindowSize const& _size,
-           std::optional<size_t> _maxHistoryLineCount,
-           ModeSwitchCallback _useApplicationCursorKeys,
-           std::function<void()> _onWindowTitleChanged,
-           ResizeWindowCallback _resizeWindow,
-           SetApplicationKeypadMode _setApplicationkeypadMode,
-           SetBracketedPaste _setBracketedPaste,
-           SetMouseProtocol _setMouseProtocol,
-           SetMouseTransport _setMouseTransport,
-           SetMouseWheelMode _setMouseWheelMode,
-		   OnSetCursorStyle _setCursorStyle,
-           Reply _reply,
-           Logger const& _logger,
-           bool _logRaw,
-           bool _logTrace,
-           Hook _onCommands,
-           OnBufferChanged _onBufferChanged,
-           std::function<void()> _bell,
-           std::function<RGBColor(DynamicColorName)> _requestDynamicColor,
-           std::function<void(DynamicColorName)> _resetDynamicColor,
-           std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor,
-           std::function<void(bool)> _setGenerateFocusEvents,
-           NotifyCallback _notify
-    );
-
-    Screen(WindowSize const& _size,
-           std::optional<size_t> _maxHistoryLineCount,
-           ModeSwitchCallback _useApplicationCursorKeys,
-           std::function<void()> _onWindowTitleChanged,
-           ResizeWindowCallback _resizeWindow,
-           SetApplicationKeypadMode _setApplicationkeypadMode,
-           SetBracketedPaste _setBracketedPaste,
-           SetMouseProtocol _setMouseProtocol,
-           SetMouseTransport _setMouseTransport,
-           SetMouseWheelMode _setMouseWheelMode,
-		   OnSetCursorStyle _setCursorStyle,
-           Reply _reply,
-           Logger const& _logger
-    ) : Screen{
-        _size,
-        _maxHistoryLineCount,
-        std::move(_useApplicationCursorKeys),
-        std::move(_onWindowTitleChanged),
-        std::move(_resizeWindow),
-        std::move(_setApplicationkeypadMode),
-        std::move(_setBracketedPaste),
-        std::move(_setMouseProtocol),
-        std::move(_setMouseTransport),
-        std::move(_setMouseWheelMode),
-        std::move(_setCursorStyle),
-        std::move(_reply),
-        _logger,
-        true, // logs raw output by default?
-        true, // logs trace output by default?
-        {}, {}, {}, {}, {}, {}, {}, {}
-    } {}
-
-    Screen(WindowSize const& _size, Logger const& _logger) :
-        Screen{_size, std::nullopt, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, _logger, true, true, {}, {}, {}, {}, {}, {}, {}, {}} {}
+           ScreenEvents& _eventListener,
+           Logger const& _logger = Logger{},
+           bool _logRaw = false,
+           bool _logTrace = false,
+           std::optional<size_t> _maxHistoryLineCount = std::nullopt);
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -185,84 +288,83 @@ class Screen {
     bool focused() const noexcept { return focused_; }
 
     // {{{ Command processor
-    void operator()(Bell const& v);
-    void operator()(FullReset const& v);
-    void operator()(Linefeed const& v);
+    void operator()(AppendChar const& v);
+    void operator()(ApplicationKeypadMode const& v);
+    void operator()(BackIndex const& v);
     void operator()(Backspace const& v);
-    void operator()(DeviceStatusReport const& v);
-    void operator()(ReportCursorPosition const& v);
-    void operator()(ReportExtendedCursorPosition const& v);
-    void operator()(SendDeviceAttributes const& v);
-    void operator()(SendTerminalId const& v);
-    void operator()(ClearToEndOfScreen const& v);
-    void operator()(ClearToBeginOfScreen const& v);
+    void operator()(Bell const& v);
+    void operator()(ChangeIconTitle const& v);
+    void operator()(ChangeWindowTitle const& v);
+    void operator()(ClearLine const& v);
     void operator()(ClearScreen const& v);
     void operator()(ClearScrollbackBuffer const& v);
-    void operator()(EraseCharacters const& v);
-    void operator()(ScrollUp const& v);
-    void operator()(ScrollDown const& v);
-    void operator()(ClearToEndOfLine const& v);
     void operator()(ClearToBeginOfLine const& v);
-    void operator()(ClearLine const& v);
+    void operator()(ClearToBeginOfScreen const& v);
+    void operator()(ClearToEndOfLine const& v);
+    void operator()(ClearToEndOfScreen const& v);
+    void operator()(CopyToClipboard const& v);
+    void operator()(CursorBackwardTab const& v);
     void operator()(CursorNextLine const& v);
     void operator()(CursorPreviousLine const& v);
-    void operator()(InsertCharacters const& v);
-    void operator()(InsertLines const& v);
-    void operator()(InsertColumns const& v);
-    void operator()(DeleteLines const& v);
     void operator()(DeleteCharacters const& v);
     void operator()(DeleteColumns const& v);
+    void operator()(DeleteLines const& v);
+    void operator()(DesignateCharset const& v);
+    void operator()(DeviceStatusReport const& v);
+    void operator()(DumpState const&);
+    void operator()(EraseCharacters const& v);
+    void operator()(ForwardIndex const& v);
+    void operator()(FullReset const& v);
     void operator()(HorizontalPositionAbsolute const& v);
     void operator()(HorizontalPositionRelative const& v);
     void operator()(HorizontalTabClear const& v);
     void operator()(HorizontalTabSet const& v);
     void operator()(Hyperlink const& v);
-    void operator()(MoveCursorUp const& v);
+    void operator()(Index const& v);
+    void operator()(InsertCharacters const& v);
+    void operator()(InsertColumns const& v);
+    void operator()(InsertLines const& v);
+    void operator()(Linefeed const& v);
+    void operator()(MoveCursorBackward const& v);
     void operator()(MoveCursorDown const& v);
     void operator()(MoveCursorForward const& v);
-    void operator()(MoveCursorBackward const& v);
-    void operator()(MoveCursorToColumn const& v);
-    void operator()(MoveCursorToBeginOfLine const& v);
     void operator()(MoveCursorTo const& v);
+    void operator()(MoveCursorToBeginOfLine const& v);
+    void operator()(MoveCursorToColumn const& v);
     void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
+    void operator()(MoveCursorUp const& v);
     void operator()(Notify const& v);
-    void operator()(CursorBackwardTab const& v);
-    void operator()(SaveCursor const& v);
-    void operator()(RestoreCursor const& v);
-    void operator()(Index const& v);
-    void operator()(ReverseIndex const& v);
-    void operator()(BackIndex const& v);
-    void operator()(ForwardIndex const& v);
-    void operator()(SetForegroundColor const& v);
-    void operator()(SetBackgroundColor const& v);
-    void operator()(SetUnderlineColor const& v);
-    void operator()(SetCursorStyle const& v);
-    void operator()(SetGraphicsRendition const& v);
-    void operator()(SetMark const&);
-    void operator()(SetMode const& v);
-    void operator()(RequestMode const& v);
-    void operator()(SetTopBottomMargin const& v);
-    void operator()(SetLeftRightMargin const& v);
-    void operator()(ScreenAlignmentPattern const& v);
-    void operator()(SendMouseEvents const& v);
-    void operator()(ApplicationKeypadMode const& v);
-    void operator()(DesignateCharset const& v);
-    void operator()(SingleShiftSelect const& v);
-    void operator()(SoftTerminalReset const& v);
-    void operator()(ChangeIconTitle const& v);
-    void operator()(ChangeWindowTitle const& v);
-    void operator()(ResizeWindow const& v);
-    void operator()(SaveWindowTitle const& v);
-    void operator()(RestoreWindowTitle const& v);
-    void operator()(AppendChar const& v);
-
+    void operator()(ReportCursorPosition const& v);
+    void operator()(ReportExtendedCursorPosition const& v);
     void operator()(RequestDynamicColor const& v);
+    void operator()(RequestMode const& v);
     void operator()(RequestTabStops const& v);
     void operator()(ResetDynamicColor const& v);
+    void operator()(ResizeWindow const& v);
+    void operator()(RestoreCursor const& v);
+    void operator()(RestoreWindowTitle const& v);
+    void operator()(ReverseIndex const& v);
+    void operator()(SaveCursor const& v);
+    void operator()(SaveWindowTitle const& v);
+    void operator()(ScreenAlignmentPattern const& v);
+    void operator()(ScrollDown const& v);
+    void operator()(ScrollUp const& v);
+    void operator()(SendDeviceAttributes const& v);
+    void operator()(SendMouseEvents const& v);
+    void operator()(SendTerminalId const& v);
+    void operator()(SetBackgroundColor const& v);
+    void operator()(SetCursorStyle const& v);
     void operator()(SetDynamicColor const& v);
-
-    void operator()(DumpState const&);
+    void operator()(SetForegroundColor const& v);
+    void operator()(SetGraphicsRendition const& v);
+    void operator()(SetLeftRightMargin const& v);
+    void operator()(SetMark const&);
+    void operator()(SetMode const& v);
+    void operator()(SetTopBottomMargin const& v);
+    void operator()(SetUnderlineColor const& v);
+    void operator()(SingleShiftSelect const& v);
+    void operator()(SoftTerminalReset const& v);
     // }}}
 
     // reset screen
@@ -416,14 +518,15 @@ class Screen {
     /// Renders only the selected area.
     void renderSelection(Renderer const& _render) const;
 
+    bool synchronizeOutput() const noexcept { return false; } // TODO
+
   private:
     void setBuffer(ScreenBuffer::Type _type);
 
     // interactive replies
     void reply(std::string const& message)
     {
-        if (reply_)
-            reply_(message);
+        eventListener_.reply(message);
     }
 
     template <typename... Args>
@@ -433,21 +536,12 @@ class Screen {
     }
 
   private:
-    Hook const onCommands_;
+    ScreenEvents& eventListener_;
+
     Logger const logger_;
     bool logRaw_ = false;
     bool logTrace_ = false;
     bool focused_ = true;
-    ModeSwitchCallback useApplicationCursorKeys_;
-    std::function<void()> onWindowTitleChanged_;
-    ResizeWindowCallback resizeWindow_;
-    SetApplicationKeypadMode setApplicationkeypadMode_;
-    SetBracketedPaste setBracketedPaste_;
-    SetMouseProtocol setMouseProtocol_;
-    SetMouseTransport setMouseTransport_;
-    SetMouseWheelMode setMouseWheelMode_;
-	OnSetCursorStyle setCursorStyle_;
-    Reply const reply_;
 
     CommandBuilder commandBuilder_;
     Parser parser_;
@@ -464,18 +558,13 @@ class Screen {
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
+    CommandExecutor directExecutor_;
+    SynchronizedCommandExecutor synchronizedExecutor_;
+    CommandVisitor* commandExecutor_ = nullptr;
+
     size_t scrollOffset_ = 0;
 
     std::unique_ptr<Selector> selector_;
-
-    OnBufferChanged onBufferChanged_{};
-    std::function<void()> bell_{};
-    std::function<RGBColor(DynamicColorName)> requestDynamicColor_{};
-    std::function<void(DynamicColorName)> resetDynamicColor_{};
-    std::function<void(DynamicColorName, RGBColor const&)> setDynamicColor_{};
-    std::function<void(bool)> setGenerateFocusEvents_{};
-
-    NotifyCallback notify_{};
 };
 
 }  // namespace terminal

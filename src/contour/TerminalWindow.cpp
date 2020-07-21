@@ -59,7 +59,17 @@ namespace contour {
 using terminal::view::Renderer;
 using actions::Action;
 
-namespace {
+namespace
+{
+    inline char const* signalName(int _signo)
+    {
+#if defined(__unix__) || defined(__APPLE__)
+        return strsignal(_signo);
+#else
+        return "unknown";
+#endif
+    }
+
     constexpr inline terminal::Modifier makeModifier(int _mods)
     {
         using terminal::Modifier;
@@ -493,11 +503,9 @@ void TerminalWindow::initializeGL()
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
         profile().terminalSize,
+        *this,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
-        bind(&TerminalWindow::onSelectionComplete, this),
-        bind(&TerminalWindow::onScreenBufferChanged, this, _1),
-        bind(&TerminalWindow::onBell, this),
         fonts_,
         profile().cursorShape,
         profile().cursorDisplay,
@@ -508,11 +516,6 @@ void TerminalWindow::initializeGL()
         profile().hyperlinkDecoration.hover,
         profile().shell,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
-        bind(&TerminalWindow::onScreenUpdate, this, _1),
-        bind(&TerminalWindow::onWindowTitleChanged, this),
-        bind(&TerminalWindow::onNotify, this, _1, _2),
-        bind(&TerminalWindow::onDoResize, this, _1, _2, _3),
-        bind(&TerminalWindow::onTerminalClosed, this),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
         ref(logger_)
@@ -1177,15 +1180,6 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     profile_ = move(newProfile);
 }
 
-void TerminalWindow::onSelectionComplete()
-{
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-    {
-        string const text = extractSelectionText();
-        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
-    }
-}
-
 string TerminalWindow::extractSelectionText()
 {
     using namespace terminal;
@@ -1193,7 +1187,7 @@ string TerminalWindow::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Screen::Cell const& _cell) {
+    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Cell const& _cell) {
         if (_col <= lastColumn)
         {
             text += currentLine;
@@ -1206,29 +1200,6 @@ string TerminalWindow::extractSelectionText()
     text += currentLine;
 
     return text;
-}
-
-void TerminalWindow::onScreenBufferChanged(terminal::ScreenBuffer::Type _type)
-{
-    using Type = terminal::ScreenBuffer::Type;
-    switch (_type)
-    {
-        case Type::Main:
-            setCursor(Qt::IBeamCursor);
-            break;
-        case Type::Alternate:
-            setCursor(Qt::ArrowCursor);
-            break;
-    }
-}
-
-void TerminalWindow::onBell()
-{
-    if (logger_.sink())
-        *logger_.sink() << "TODO: Beep!\n";
-    QApplication::beep();
-    // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
-    // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
 }
 
 void TerminalWindow::spawnNewTerminal(std::string const& _profileName)
@@ -1245,95 +1216,6 @@ void TerminalWindow::spawnNewTerminal(std::string const& _profileName)
 float TerminalWindow::contentScale() const
 {
     return screen()->devicePixelRatio();
-}
-
-void TerminalWindow::onScreenUpdate([[maybe_unused]] std::vector<terminal::Command> const& _commands)
-{
-#if defined(CONTOUR_VT_METRICS)
-    for (auto const& command : _commands)
-        terminalMetrics_(command);
-#endif
-
-    if (profile().autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
-        terminalView_->terminal().scrollToBottom();
-
-    if (setScreenDirty())
-        QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
-}
-
-void TerminalWindow::onWindowTitleChanged()
-{
-    post([this]() {
-        auto const terminalTitle = terminalView_->terminal().windowTitle();
-        auto const title = terminalTitle.empty()
-            ? "contour"s
-            : fmt::format("{} - contour", terminalTitle);
-        setTitle(QString::fromUtf8(title.c_str()));
-    });
-}
-
-void TerminalWindow::onNotify(string const& _title, string const& _content)
-{
-    emit showNotification(QString::fromUtf8(_title.data(), static_cast<int>(_title.size())),
-                          QString::fromUtf8(_content.data(), static_cast<int>(_content.size())));
-}
-
-void TerminalWindow::onDoResize(unsigned _width, unsigned _height, bool _inPixels)
-{
-    bool resizePending = false;
-    if (fullscreen())
-    {
-        cerr << "Application request to resize window in full screen mode denied." << endl;
-    }
-    else if (_inPixels)
-    {
-        auto const screenSize = size();
-        if (_width == 0 && _height == 0)
-        {
-            _width = screenSize.width();
-            _height = screenSize.height();
-        }
-        else
-        {
-            if (!_width)
-                _width = screenSize.width();
-
-            if (!_height)
-                _height = screenSize.height();
-        }
-        profile().terminalSize.columns = _width / fonts_.regular.first.get().maxAdvance();
-        profile().terminalSize.rows = _height / fonts_.regular.first.get().lineHeight();
-        resizePending = true;
-    }
-    else
-    {
-        if (_width == 0 && _height == 0)
-            resize(static_cast<int>(_width), static_cast<int>(_height));
-        else
-        {
-            if (!_width)
-                _width = profile().terminalSize.columns;
-
-            if (!_height)
-                _height = profile().terminalSize.rows;
-
-            profile().terminalSize.columns = _width;
-            profile().terminalSize.rows = _height;
-            resizePending = true;
-        }
-    }
-
-    if (resizePending)
-    {
-        post([this]() {
-            terminalView_->setTerminalSize(profile().terminalSize);
-            auto const width = profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance();
-            auto const height = profile().terminalSize.rows * fonts_.regular.first.get().lineHeight();
-            resize(width, height);
-            setScreenDirty();
-            update();
-        });
-    }
 }
 
 void TerminalWindow::onConfigReload(FileChangeWatcher::Event /*_event*/)
@@ -1423,18 +1305,136 @@ void TerminalWindow::post(std::function<void()> _fn)
     QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 }
 
-inline char const* signalName(int _signo)
+// {{{ TerminalView::Events overrides
+
+void TerminalWindow::bell()
 {
-#if defined(__unix__) || defined(__APPLE__)
-    return strsignal(_signo);
-#else
-    return "unknown";
-#endif
+    if (logger_.sink())
+        *logger_.sink() << "TODO: Beep!\n";
+    QApplication::beep();
+    // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
+    // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
 }
 
-void TerminalWindow::onTerminalClosed()
+void TerminalWindow::notify(std::string_view const& _title, std::string_view const& _content)
+{
+    emit showNotification(QString::fromUtf8(_title.data(), static_cast<int>(_title.size())),
+                          QString::fromUtf8(_content.data(), static_cast<int>(_content.size())));
+}
+
+void TerminalWindow::setWindowTitle(std::string_view const& _title)
+{
+    post([this, terminalTitle = string(_title)]() {
+        auto const title = terminalTitle.empty()
+            ? "contour"s
+            : fmt::format("{} - contour", terminalTitle);
+        setTitle(QString::fromUtf8(title.c_str()));
+    });
+}
+
+void TerminalWindow::onSelectionComplete()
+{
+    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+    {
+        string const text = extractSelectionText();
+        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
+    }
+}
+
+void TerminalWindow::bufferChanged(terminal::ScreenBuffer::Type _type)
+{
+    using Type = terminal::ScreenBuffer::Type;
+    switch (_type)
+    {
+        case Type::Main:
+            setCursor(Qt::IBeamCursor);
+            break;
+        case Type::Alternate:
+            setCursor(Qt::ArrowCursor);
+            break;
+    }
+}
+
+void TerminalWindow::commands(terminal::CommandList const& _commands)
+{
+#if defined(CONTOUR_VT_METRICS)
+    for (auto const& command : _commands)
+        terminalMetrics_(command);
+#else
+    (void) _commands;
+#endif
+
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
+        terminalView_->terminal().scrollToBottom();
+
+    if (setScreenDirty())
+        QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+}
+
+void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPixels)
+{
+    bool resizePending = false;
+    if (fullscreen())
+    {
+        cerr << "Application request to resize window in full screen mode denied." << endl;
+    }
+    else if (_inPixels)
+    {
+        auto const screenSize = size();
+        if (_width == 0 && _height == 0)
+        {
+            _width = screenSize.width();
+            _height = screenSize.height();
+        }
+        else
+        {
+            if (!_width)
+                _width = screenSize.width();
+
+            if (!_height)
+                _height = screenSize.height();
+        }
+        profile().terminalSize.columns = _width / fonts_.regular.first.get().maxAdvance();
+        profile().terminalSize.rows = _height / fonts_.regular.first.get().lineHeight();
+        resizePending = true;
+    }
+    else
+    {
+        if (_width == 0 && _height == 0)
+            resize(static_cast<int>(_width), static_cast<int>(_height));
+        else
+        {
+            if (!_width)
+                _width = profile().terminalSize.columns;
+
+            if (!_height)
+                _height = profile().terminalSize.rows;
+
+            profile().terminalSize.columns = _width;
+            profile().terminalSize.rows = _height;
+            resizePending = true;
+        }
+    }
+
+    if (resizePending)
+    {
+        post([this]() {
+            terminalView_->setTerminalSize(profile().terminalSize);
+            auto const width = profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance();
+            auto const height = profile().terminalSize.rows * fonts_.regular.first.get().lineHeight();
+            resize(width, height);
+            setScreenDirty();
+            update();
+        });
+    }
+}
+
+void TerminalWindow::onClosed()
 {
     using terminal::Process;
+
+    // TODO: silently quit instantly when window/terminal has been spawned already since N seconds.
+    // This message should only be printed for "fast" terminal terminations.
 
     terminal::Process::ExitStatus const ec = terminalView_->process().wait();
     if (holds_alternative<Process::SignalExit>(ec))
@@ -1447,5 +1447,13 @@ void TerminalWindow::onTerminalClosed()
     else
         close();
 }
+
+void TerminalWindow::copyToClipboard(std::string_view const& _text)
+{
+    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+        clipboard->setText(QString::fromUtf8(_text.data(), static_cast<int>(_text.size())));
+}
+
+// }}}
 
 } // namespace contour

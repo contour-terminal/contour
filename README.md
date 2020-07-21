@@ -29,6 +29,7 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 - ✅ Clickable hyperlinks via OSC 8
+- ✅ Synchronized Rendering (via `DECSM`/`DECRM` 2001)
 
 ## A word on vertical line markers
 

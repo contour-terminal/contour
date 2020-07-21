@@ -17,6 +17,7 @@
 #include <terminal/Logger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/PseudoTerminal.h>
+#include <terminal/ScreenEvents.h>
 #include <terminal/Screen.h>
 
 #include <fmt/format.h>
@@ -38,30 +39,35 @@ namespace terminal {
 /// gets updated according to the process' outputted text,
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
-class Terminal {
+class Terminal : public ScreenEvents {
   public:
-    using Hook = std::function<void(std::vector<Command> const& commands)>;
+    class Events {
+      public:
+        virtual ~Events() = default;
+
+        virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
+        virtual void bell() {}
+        virtual void bufferChanged(ScreenBuffer::Type) {}
+        virtual void commands(CommandList const& /*_commands*/) {}
+        virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+        virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
+        virtual void onClosed() {}
+        virtual void onSelectionComplete() {}
+        virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
+        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
+        virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+    };
+
     using Cursor = Screen::Cursor; //TODO: CursorShape shape;
 
-    explicit Terminal(
-        WindowSize _winSize,
-        std::optional<size_t> _maxHistoryLineCount = std::nullopt,
-        std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
-        std::function<void()> _changeWindowTitleCallback = {},
-        std::function<void(unsigned int, unsigned int, bool)> _resizeWindow = {},
-        std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
-        Logger _logger = {},
-        Hook _onScreenCommands = {},
-        std::function<void()> _onClosed = {},
-        std::string const& _wordDelimiters = "",
-        std::function<void()> _onSelectionComplete = {},
-        Screen::OnBufferChanged _onScreenBufferChanged = {},
-        std::function<void()> _bell = {},
-        std::function<RGBColor(DynamicColorName)> _requestDynamicColor = {},
-        std::function<void(DynamicColorName)> _resetDynamicColor = {},
-        std::function<void(DynamicColorName, RGBColor const&)> _setDynamicColor = {},
-        Screen::NotifyCallback _notify = {}
-    );
+    Terminal(WindowSize _winSize,
+             Events& _eventListener,
+             std::optional<size_t> _maxHistoryLineCount = std::nullopt,
+             std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
+             std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
+             Logger _logger = {},
+             std::string const& _wordDelimiters = "");
     ~Terminal();
 
     /// Retrieves the time point this terminal instance has been spawned.
@@ -106,7 +112,7 @@ class Terminal {
     Cursor cursor() const;
 
     /// @returns a reference to the cell at the given absolute coordinate.
-    Screen::Cell const* absoluteAt(Coordinate const& _coord) const;
+    Cell const* absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
@@ -141,7 +147,7 @@ class Terminal {
     template <typename... RenderPasses>
     uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
     {
-        auto _l = std::lock_guard{screenLock_};
+        auto _l = std::lock_guard{*this};
         auto const changes = preRender(_now);
         renderPass(pass, std::forward<RenderPasses>(passes)...);
         return changes;
@@ -198,10 +204,8 @@ class Terminal {
   private:
     void flushInput();
     void screenUpdateThread();
-    void useApplicationCursorKeys(bool _enable);
     void onScreenReply(std::string_view const& reply);
     void onScreenCommands(std::vector<Command> const& commands);
-    void onSetCursorStyle(CursorDisplay _display, CursorShape _shape);
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
 
     template <typename... RemainingPasses>
@@ -214,8 +218,31 @@ class Terminal {
     }
 
   private:
+    std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
+    void bell() override;
+    void bufferChanged(ScreenBuffer::Type) override;
+    void commands(std::vector<Command> const& _commands) override;
+    void copyToClipboard(std::string_view const& _data) override;
+    void notify(std::string_view const& _title, std::string_view const& _body) override;
+    void reply(std::string_view const& _response) override;
+    void resetDynamicColor(DynamicColorName _name) override;
+    void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) override;
+    void setApplicationkeypadMode(bool _enabled) override;
+    void setBracketedPaste(bool _enabled) override;
+    void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;
+    void setDynamicColor(DynamicColorName _name, RGBColor const& _value) override;
+    void setGenerateFocusEvents(bool _enabled) override;
+    void setMouseProtocol(MouseProtocol _protocol, bool _enabled) override;
+    void setMouseTransport(MouseTransport _transport) override;
+    void setMouseWheelMode(InputGenerator::MouseWheelMode _mode) override;
+    void setWindowTitle(std::string_view const& _title) override;
+    void useApplicationCursorKeys(bool _enabled) override;
+
+  private:
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
+
+    Events& eventListener_;
 
     Logger logger_;
     PseudoTerminal pty_;
@@ -241,11 +268,8 @@ class Terminal {
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
     Screen screen_;
-    Screen::Hook onScreenCommands_;
     std::recursive_mutex mutable screenLock_;
     std::thread screenUpdateThread_;
-
-    std::function<void()> onClosed_;
 };
 
 }  // namespace terminal
