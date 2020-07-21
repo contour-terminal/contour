@@ -161,7 +161,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             }
 
             changes = _terminal.preRender(_now);
-            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, terminal::ScreenBuffer::Cell const& _cell) { renderCell(_row, _col, _cell); },
+            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell) { renderCell(_row, _col, _cell); },
                                       _terminal.screen().scrollOffset());
 
             if (cellAtMouse.hyperlink())
@@ -170,7 +170,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         else
         {
             changes = _terminal.preRender(_now);
-            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, ScreenBuffer::Cell const& _cell) { renderCell(_row, _col, _cell); },
+            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell) { renderCell(_row, _col, _cell); },
                                       _terminal.screen().scrollOffset());
         }
     }
