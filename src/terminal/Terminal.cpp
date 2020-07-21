@@ -56,7 +56,7 @@ Terminal::Terminal(WindowSize _winSize,
         true, // logs trace output by default?
         _maxHistoryLineCount
     },
-    screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) }
+    screenUpdateThread_{ [this]() { screenUpdateThread(); } }
 {
 }
 

@@ -323,7 +323,7 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     terminalView_{},
     configFileChangeWatcher_{
         config_.backingFilePath,
-        bind(&TerminalWindow::onConfigReload, this, _1)
+        [this](FileChangeWatcher::Event event) { onConfigReload(event); }
     },
     updateTimer_(this)
 {
