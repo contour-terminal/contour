@@ -49,6 +49,37 @@ std::string Cell::toUtf8() const
     return unicode::to_utf8(codepoints_.data(), codepointCount_);
 }
 
+std::optional<int> ScreenBuffer::findMarkerBackwards(int _currentCursorLine) const
+{
+    // TODO: unit- tests for all cases.
+
+    if (_currentCursorLine >= 1) // main screen area
+    {
+        auto currentLine = next(begin(lines), _currentCursorLine - 1);
+        for (int row = _currentCursorLine; row > 0; --row, --currentLine)
+            if (currentLine->marked)
+                return {row};
+    }
+
+    // saved-lines area
+    auto const scrollOffset = _currentCursorLine < 0
+        ? min(static_cast<size_t>(-_currentCursorLine), savedLines.size())
+        : 0;
+
+    if (scrollOffset + 1 < savedLines.size())
+    {
+        auto const i = find_if(
+            next(rbegin(savedLines), scrollOffset + 1),
+            rend(savedLines),
+            [](Line const& line) -> bool { return line.marked; }
+        );
+        if (i != rend(savedLines))
+            return distance(rbegin(savedLines), i); // TODO
+    }
+
+    return nullopt;
+}
+
 std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
 {
     _scrollOffset = min(_scrollOffset, savedLines.size());

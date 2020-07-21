@@ -502,6 +502,11 @@ class Screen {
         return buffer_->findNextMarker(_currentScrollOffset);
     }
 
+    std::optional<int> findMarkerBackwards(int _currentCursorLine) const
+    {
+        return buffer_->findMarkerBackwards(_currentCursorLine);
+    }
+
     ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }
 
     /// Tests whether some area has been selected.
