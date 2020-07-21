@@ -49,6 +49,7 @@ struct Quit{};
 struct ResetFontSize{};
 struct ReloadConfig{ std::optional<std::string> profileName; };
 struct ResetConfig{};
+struct CopyPreviousMarkRange{};
 // CloseTab
 // OpenTab
 // FocusNextTab
@@ -84,7 +85,8 @@ using Action = std::variant<
     NewTerminal,
     OpenConfiguration,
     OpenFileManager,
-    Quit
+    Quit,
+    CopyPreviousMarkRange
 >;
 
 std::optional<Action> fromString(std::string const& _name);
