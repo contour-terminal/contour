@@ -135,12 +135,6 @@ void Screen::write(std::u32string_view const& _text)
         auto const len = unicode::to_utf8(codepoint, bytes);
         write((char const*) bytes, len);
     }
-
-    for (char32_t ch : _text)
-    {
-        uint8_t bytes[4];
-        auto const len = unicode::to_utf8(ch, bytes);
-    }
 }
 
 void Screen::render(Renderer const& _render, size_t _scrollOffset) const

@@ -120,85 +120,83 @@ class Screen {
     bool focused() const noexcept { return focused_; }
 
     // {{{ Command processor
-    void operator()(Bell const& v);
-    void operator()(FullReset const& v);
-    void operator()(Linefeed const& v);
+    void operator()(AppendChar const& v);
+    void operator()(ApplicationKeypadMode const& v);
+    void operator()(BackIndex const& v);
     void operator()(Backspace const& v);
-    void operator()(DeviceStatusReport const& v);
-    void operator()(ReportCursorPosition const& v);
-    void operator()(ReportExtendedCursorPosition const& v);
-    void operator()(SendDeviceAttributes const& v);
-    void operator()(SendTerminalId const& v);
-    void operator()(CopyToClipboard const& v);
-    void operator()(ClearToEndOfScreen const& v);
-    void operator()(ClearToBeginOfScreen const& v);
+    void operator()(Bell const& v);
+    void operator()(ChangeIconTitle const& v);
+    void operator()(ChangeWindowTitle const& v);
+    void operator()(ClearLine const& v);
     void operator()(ClearScreen const& v);
     void operator()(ClearScrollbackBuffer const& v);
-    void operator()(EraseCharacters const& v);
-    void operator()(ScrollUp const& v);
-    void operator()(ScrollDown const& v);
-    void operator()(ClearToEndOfLine const& v);
     void operator()(ClearToBeginOfLine const& v);
-    void operator()(ClearLine const& v);
+    void operator()(ClearToBeginOfScreen const& v);
+    void operator()(ClearToEndOfLine const& v);
+    void operator()(ClearToEndOfScreen const& v);
+    void operator()(CopyToClipboard const& v);
+    void operator()(CursorBackwardTab const& v);
     void operator()(CursorNextLine const& v);
     void operator()(CursorPreviousLine const& v);
-    void operator()(InsertCharacters const& v);
-    void operator()(InsertLines const& v);
-    void operator()(InsertColumns const& v);
-    void operator()(DeleteLines const& v);
     void operator()(DeleteCharacters const& v);
     void operator()(DeleteColumns const& v);
+    void operator()(DeleteLines const& v);
+    void operator()(DesignateCharset const& v);
+    void operator()(DeviceStatusReport const& v);
+    void operator()(DumpState const&);
+    void operator()(EraseCharacters const& v);
+    void operator()(ForwardIndex const& v);
+    void operator()(FullReset const& v);
     void operator()(HorizontalPositionAbsolute const& v);
     void operator()(HorizontalPositionRelative const& v);
     void operator()(HorizontalTabClear const& v);
     void operator()(HorizontalTabSet const& v);
     void operator()(Hyperlink const& v);
-    void operator()(MoveCursorUp const& v);
+    void operator()(Index const& v);
+    void operator()(InsertCharacters const& v);
+    void operator()(InsertColumns const& v);
+    void operator()(InsertLines const& v);
+    void operator()(Linefeed const& v);
+    void operator()(MoveCursorBackward const& v);
     void operator()(MoveCursorDown const& v);
     void operator()(MoveCursorForward const& v);
-    void operator()(MoveCursorBackward const& v);
-    void operator()(MoveCursorToColumn const& v);
-    void operator()(MoveCursorToBeginOfLine const& v);
     void operator()(MoveCursorTo const& v);
+    void operator()(MoveCursorToBeginOfLine const& v);
+    void operator()(MoveCursorToColumn const& v);
     void operator()(MoveCursorToLine const& v);
     void operator()(MoveCursorToNextTab const& v);
+    void operator()(MoveCursorUp const& v);
     void operator()(Notify const& v);
-    void operator()(CursorBackwardTab const& v);
-    void operator()(SaveCursor const& v);
-    void operator()(RestoreCursor const& v);
-    void operator()(Index const& v);
-    void operator()(ReverseIndex const& v);
-    void operator()(BackIndex const& v);
-    void operator()(ForwardIndex const& v);
-    void operator()(SetForegroundColor const& v);
-    void operator()(SetBackgroundColor const& v);
-    void operator()(SetUnderlineColor const& v);
-    void operator()(SetCursorStyle const& v);
-    void operator()(SetGraphicsRendition const& v);
-    void operator()(SetMark const&);
-    void operator()(SetMode const& v);
-    void operator()(RequestMode const& v);
-    void operator()(SetTopBottomMargin const& v);
-    void operator()(SetLeftRightMargin const& v);
-    void operator()(ScreenAlignmentPattern const& v);
-    void operator()(SendMouseEvents const& v);
-    void operator()(ApplicationKeypadMode const& v);
-    void operator()(DesignateCharset const& v);
-    void operator()(SingleShiftSelect const& v);
-    void operator()(SoftTerminalReset const& v);
-    void operator()(ChangeIconTitle const& v);
-    void operator()(ChangeWindowTitle const& v);
-    void operator()(ResizeWindow const& v);
-    void operator()(SaveWindowTitle const& v);
-    void operator()(RestoreWindowTitle const& v);
-    void operator()(AppendChar const& v);
-
+    void operator()(ReportCursorPosition const& v);
+    void operator()(ReportExtendedCursorPosition const& v);
     void operator()(RequestDynamicColor const& v);
+    void operator()(RequestMode const& v);
     void operator()(RequestTabStops const& v);
     void operator()(ResetDynamicColor const& v);
+    void operator()(ResizeWindow const& v);
+    void operator()(RestoreCursor const& v);
+    void operator()(RestoreWindowTitle const& v);
+    void operator()(ReverseIndex const& v);
+    void operator()(SaveCursor const& v);
+    void operator()(SaveWindowTitle const& v);
+    void operator()(ScreenAlignmentPattern const& v);
+    void operator()(ScrollDown const& v);
+    void operator()(ScrollUp const& v);
+    void operator()(SendDeviceAttributes const& v);
+    void operator()(SendMouseEvents const& v);
+    void operator()(SendTerminalId const& v);
+    void operator()(SetBackgroundColor const& v);
+    void operator()(SetCursorStyle const& v);
     void operator()(SetDynamicColor const& v);
-
-    void operator()(DumpState const&);
+    void operator()(SetForegroundColor const& v);
+    void operator()(SetGraphicsRendition const& v);
+    void operator()(SetLeftRightMargin const& v);
+    void operator()(SetMark const&);
+    void operator()(SetMode const& v);
+    void operator()(SetTopBottomMargin const& v);
+    void operator()(SetUnderlineColor const& v);
+    void operator()(SingleShiftSelect const& v);
+    void operator()(SoftTerminalReset const& v);
     // }}}
 
     // reset screen
@@ -352,6 +350,8 @@ class Screen {
     /// Renders only the selected area.
     void renderSelection(Renderer const& _render) const;
 
+    bool synchronizeOutput() const noexcept { return false; } // TODO
+
   private:
     void setBuffer(ScreenBuffer::Type _type);
 
@@ -390,9 +390,177 @@ class Screen {
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
+    // CommandExecutor executor_;
+    // SynchronizedCommandExecutor synchronizedExecutor_;
+
     size_t scrollOffset_ = 0;
 
     std::unique_ptr<Selector> selector_;
+};
+
+class CommandExecutor : public CommandVisitor {
+  protected:
+    Screen& screen_;
+
+  public:
+    explicit CommandExecutor(Screen& _screen);
+
+    void visit(AppendChar const& v) override { screen_(v); }
+    void visit(ApplicationKeypadMode const& v) override { screen_(v); }
+    void visit(BackIndex const& v) override { screen_(v); }
+    void visit(Backspace const& v) override { screen_(v); }
+    void visit(Bell const& v) override { screen_(v); }
+    void visit(ChangeIconTitle const& v) override { screen_(v); }
+    void visit(ChangeWindowTitle const& v) override { screen_(v); }
+    void visit(ClearLine const& v) override { screen_(v); }
+    void visit(ClearScreen const& v) override { screen_(v); }
+    void visit(ClearScrollbackBuffer const& v) override { screen_(v); }
+    void visit(ClearToBeginOfLine const& v) override { screen_(v); }
+    void visit(ClearToBeginOfScreen const& v) override { screen_(v); }
+    void visit(ClearToEndOfLine const& v) override { screen_(v); }
+    void visit(ClearToEndOfScreen const& v) override { screen_(v); }
+    void visit(CopyToClipboard const& v) override { screen_(v); }
+    void visit(CursorBackwardTab const& v) override { screen_(v); }
+    void visit(CursorNextLine const& v) override { screen_(v); }
+    void visit(CursorPreviousLine const& v) override { screen_(v); }
+    void visit(DeleteCharacters const& v) override { screen_(v); }
+    void visit(DeleteColumns const& v) override { screen_(v); }
+    void visit(DeleteLines const& v) override { screen_(v); }
+    void visit(DesignateCharset const& v) override { screen_(v); }
+    void visit(DeviceStatusReport const& v) override { screen_(v); }
+    void visit(DumpState const& v) override { screen_(v); }
+    void visit(EraseCharacters const& v) override { screen_(v); }
+    void visit(ForwardIndex const& v) override { screen_(v); }
+    void visit(FullReset const& v) override { screen_(v); }
+    void visit(HorizontalPositionAbsolute const& v) override { screen_(v); }
+    void visit(HorizontalPositionRelative const& v) override { screen_(v); }
+    void visit(HorizontalTabClear const& v) override { screen_(v); }
+    void visit(HorizontalTabSet const& v) override { screen_(v); }
+    void visit(Hyperlink const& v) override { screen_(v); }
+    void visit(Index const& v) override { screen_(v); }
+    void visit(InsertCharacters const& v) override { screen_(v); }
+    void visit(InsertColumns const& v) override { screen_(v); }
+    void visit(InsertLines const& v) override { screen_(v); }
+    void visit(Linefeed const& v) override { screen_(v); }
+    void visit(MoveCursorBackward const& v) override { screen_(v); }
+    void visit(MoveCursorDown const& v) override { screen_(v); }
+    void visit(MoveCursorForward const& v) override { screen_(v); }
+    void visit(MoveCursorTo const& v) override { screen_(v); }
+    void visit(MoveCursorToBeginOfLine const& v) override { screen_(v); }
+    void visit(MoveCursorToColumn const& v) override { screen_(v); }
+    void visit(MoveCursorToLine const& v) override { screen_(v); }
+    void visit(MoveCursorToNextTab const& v) override { screen_(v); }
+    void visit(MoveCursorUp const& v) override { screen_(v); }
+    void visit(Notify const& v) override { screen_(v); }
+    void visit(ReportCursorPosition const& v) override { screen_(v); }
+    void visit(ReportExtendedCursorPosition const& v) override { screen_(v); }
+    void visit(RequestDynamicColor const& v) override { screen_(v); }
+    void visit(RequestMode const& v) override { screen_(v); }
+    void visit(RequestTabStops const& v) override { screen_(v); }
+    void visit(ResetDynamicColor const& v) override { screen_(v); }
+    void visit(ResizeWindow const& v) override { screen_(v); }
+    void visit(RestoreCursor const& v) override { screen_(v); }
+    void visit(RestoreWindowTitle const& v) override { screen_(v); }
+    void visit(ReverseIndex const& v) override { screen_(v); }
+    void visit(SaveCursor const& v) override { screen_(v); }
+    void visit(SaveWindowTitle const& v) override { screen_(v); }
+    void visit(ScreenAlignmentPattern const& v) override { screen_(v); }
+    void visit(ScrollDown const& v) override { screen_(v); }
+    void visit(ScrollUp const& v) override { screen_(v); }
+    void visit(SendDeviceAttributes const& v) override { screen_(v); }
+    void visit(SendMouseEvents const& v) override { screen_(v); }
+    void visit(SendTerminalId const& v) override { screen_(v); }
+    void visit(SetBackgroundColor const& v) override { screen_(v); }
+    void visit(SetCursorStyle const& v) override { screen_(v); }
+    void visit(SetDynamicColor const& v) override { screen_(v); }
+    void visit(SetForegroundColor const& v) override { screen_(v); }
+    void visit(SetGraphicsRendition const& v) override { screen_(v); }
+    void visit(SetLeftRightMargin const& v) override { screen_(v); }
+    void visit(SetMark const& v) override { screen_(v); }
+    void visit(SetMode const& v) override { screen_(v); }
+    void visit(SetTopBottomMargin const& v) override { screen_(v); }
+    void visit(SetUnderlineColor const& v) override { screen_(v); }
+    void visit(SingleShiftSelect const& v) override { screen_(v); }
+    void visit(SoftTerminalReset const& v) override { screen_(v); }
+};
+
+/// Batches any drawing related command until synchronization point, or
+/// executes the command directly otherwise.
+class SynchronizedCommandExecutor : public CommandExecutor {
+  private:
+    CommandList queuedCommands_;
+
+  public:
+    explicit SynchronizedCommandExecutor(Screen& _screen)
+        : CommandExecutor{_screen}
+    {}
+
+    // applies all queued commands.
+    void flush()
+    {
+        for (Command const& cmd : queuedCommands_)
+            std::visit(screen_, cmd);
+        queuedCommands_.clear();
+    }
+
+    void visit(AppendChar const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(BackIndex const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(Backspace const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearScreen const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearScrollbackBuffer const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearToBeginOfLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearToBeginOfScreen const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearToEndOfLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ClearToEndOfScreen const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(CursorBackwardTab const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(CursorNextLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(CursorPreviousLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(DeleteCharacters const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(DeleteColumns const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(DeleteLines const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(DesignateCharset const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(EraseCharacters const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ForwardIndex const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(FullReset const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(HorizontalPositionAbsolute const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(HorizontalPositionRelative const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(HorizontalTabClear const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(HorizontalTabSet const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(Hyperlink const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(Index const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(InsertCharacters const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(InsertColumns const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(InsertLines const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(Linefeed const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorBackward const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorDown const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorForward const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorTo const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorToBeginOfLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorToColumn const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorToLine const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorToNextTab const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(MoveCursorUp const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ResetDynamicColor const& v) override { queuedCommands_.emplace_back(v); }
+    //??? void visit(ResizeWindow const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(RestoreCursor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ReverseIndex const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SaveCursor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ScreenAlignmentPattern const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ScrollDown const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(ScrollUp const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetBackgroundColor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetCursorStyle const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetDynamicColor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetForegroundColor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetGraphicsRendition const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetLeftRightMargin const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetMark const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetTopBottomMargin const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SetUnderlineColor const& v) override { queuedCommands_.emplace_back(v); }
+    void visit(SingleShiftSelect const& v) override { queuedCommands_.emplace_back(v); }
+    //??? void visit(SoftTerminalReset const& v) override { queuedCommands_.emplace_back(v); }
 };
 
 }  // namespace terminal

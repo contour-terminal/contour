@@ -1007,8 +1007,91 @@ std::string to_string(Command const& cmd);
 std::string to_mnemonic(Command const& _command, bool _withParameters, bool _withComment);
 std::vector<std::string> to_mnemonic(std::vector<Command> const& _commands, bool _withParameters, bool _withComment);
 
-}  // namespace terminal
+/// Screen Command Execution API.
+class CommandVisitor {
+  public:
+    virtual ~CommandVisitor() = default;
 
+    virtual void visit(AppendChar const& v) = 0;
+    virtual void visit(ApplicationKeypadMode const& v) = 0;
+    virtual void visit(BackIndex const& v) = 0;
+    virtual void visit(Backspace const& v) = 0;
+    virtual void visit(Bell const& v) = 0;
+    virtual void visit(ChangeIconTitle const& v) = 0;
+    virtual void visit(ChangeWindowTitle const& v) = 0;
+    virtual void visit(ClearLine const& v) = 0;
+    virtual void visit(ClearScreen const& v) = 0;
+    virtual void visit(ClearScrollbackBuffer const& v) = 0;
+    virtual void visit(ClearToBeginOfLine const& v) = 0;
+    virtual void visit(ClearToBeginOfScreen const& v) = 0;
+    virtual void visit(ClearToEndOfLine const& v) = 0;
+    virtual void visit(ClearToEndOfScreen const& v) = 0;
+    virtual void visit(CopyToClipboard const& v) = 0;
+    virtual void visit(CursorBackwardTab const& v) = 0;
+    virtual void visit(CursorNextLine const& v) = 0;
+    virtual void visit(CursorPreviousLine const& v) = 0;
+    virtual void visit(DeleteCharacters const& v) = 0;
+    virtual void visit(DeleteColumns const& v) = 0;
+    virtual void visit(DeleteLines const& v) = 0;
+    virtual void visit(DesignateCharset const& v) = 0;
+    virtual void visit(DeviceStatusReport const& v) = 0;
+    virtual void visit(DumpState const&) = 0;
+    virtual void visit(EraseCharacters const& v) = 0;
+    virtual void visit(ForwardIndex const& v) = 0;
+    virtual void visit(FullReset const& v) = 0;
+    virtual void visit(HorizontalPositionAbsolute const& v) = 0;
+    virtual void visit(HorizontalPositionRelative const& v) = 0;
+    virtual void visit(HorizontalTabClear const& v) = 0;
+    virtual void visit(HorizontalTabSet const& v) = 0;
+    virtual void visit(Hyperlink const& v) = 0;
+    virtual void visit(Index const& v) = 0;
+    virtual void visit(InsertCharacters const& v) = 0;
+    virtual void visit(InsertColumns const& v) = 0;
+    virtual void visit(InsertLines const& v) = 0;
+    virtual void visit(Linefeed const& v) = 0;
+    virtual void visit(MoveCursorBackward const& v) = 0;
+    virtual void visit(MoveCursorDown const& v) = 0;
+    virtual void visit(MoveCursorForward const& v) = 0;
+    virtual void visit(MoveCursorTo const& v) = 0;
+    virtual void visit(MoveCursorToBeginOfLine const& v) = 0;
+    virtual void visit(MoveCursorToColumn const& v) = 0;
+    virtual void visit(MoveCursorToLine const& v) = 0;
+    virtual void visit(MoveCursorToNextTab const& v) = 0;
+    virtual void visit(MoveCursorUp const& v) = 0;
+    virtual void visit(Notify const& v) = 0;
+    virtual void visit(ReportCursorPosition const& v) = 0;
+    virtual void visit(ReportExtendedCursorPosition const& v) = 0;
+    virtual void visit(RequestDynamicColor const& v) = 0;
+    virtual void visit(RequestMode const& v) = 0;
+    virtual void visit(RequestTabStops const& v) = 0;
+    virtual void visit(ResetDynamicColor const& v) = 0;
+    virtual void visit(ResizeWindow const& v) = 0;
+    virtual void visit(RestoreCursor const& v) = 0;
+    virtual void visit(RestoreWindowTitle const& v) = 0;
+    virtual void visit(ReverseIndex const& v) = 0;
+    virtual void visit(SaveCursor const& v) = 0;
+    virtual void visit(SaveWindowTitle const& v) = 0;
+    virtual void visit(ScreenAlignmentPattern const& v) = 0;
+    virtual void visit(ScrollDown const& v) = 0;
+    virtual void visit(ScrollUp const& v) = 0;
+    virtual void visit(SendDeviceAttributes const& v) = 0;
+    virtual void visit(SendMouseEvents const& v) = 0;
+    virtual void visit(SendTerminalId const& v) = 0;
+    virtual void visit(SetBackgroundColor const& v) = 0;
+    virtual void visit(SetCursorStyle const& v) = 0;
+    virtual void visit(SetDynamicColor const& v) = 0;
+    virtual void visit(SetForegroundColor const& v) = 0;
+    virtual void visit(SetGraphicsRendition const& v) = 0;
+    virtual void visit(SetLeftRightMargin const& v) = 0;
+    virtual void visit(SetMark const&) = 0;
+    virtual void visit(SetMode const& v) = 0;
+    virtual void visit(SetTopBottomMargin const& v) = 0;
+    virtual void visit(SetUnderlineColor const& v) = 0;
+    virtual void visit(SingleShiftSelect const& v) = 0;
+    virtual void visit(SoftTerminalReset const& v) = 0;
+};
+
+}  // namespace terminal
 
 namespace fmt {
     template <>
