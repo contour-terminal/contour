@@ -84,7 +84,7 @@ Terminal::Terminal(WindowSize _winSize,
         move(_notify)
     },
     onScreenCommands_{ move(_onScreenCommands) },
-    screenUpdateThread_{ bind(&Terminal::screenUpdateThread, this) },
+    screenUpdateThread_{ [this]() { screenUpdateThread(); } },
     onClosed_{ move(_onClosed) }
 {
 }

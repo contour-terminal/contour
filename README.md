@@ -172,7 +172,7 @@ This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compile
 
 ```sh
 sudo apt install \
-    "g++-9" libfreetype6-dev qtbase5-dev libqt5gui5 extra-cmake-modules \
+    "g++-9" cmake libfreetype6-dev qtbase5-dev libqt5gui5 extra-cmake-modules \
     libfontconfig1-dev libharfbuzz-dev
 ```
 

@@ -21,7 +21,7 @@ FileChangeWatcher::FileChangeWatcher(FileSystem::path _filePath, Notifier _notif
     filePath_{ move(_filePath) },
     notifier_{ move(_notifier) },
     exit_{ false },
-    watcher_{ bind(&FileChangeWatcher::watch, this) }
+    watcher_{ [this]() { watch(); } }
 {
 }
 
