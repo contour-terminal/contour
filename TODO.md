@@ -1,6 +1,6 @@
 ### Known Bugs
 
-- PRIO-1: symbol sequences are not being rendered as ligatures if there are SGRs is set underneath
+- PRIO-0: use signed int for `cursor_pos_t` and use negative numbers (maybe?) for accessing savedLines
 - PRIO-1: wide cells don't show wide cursor (see README.md)
 - alsamixer shows x instead of proper bars
 - hot reloading of font family does not work
@@ -24,9 +24,19 @@
 - hyperlink-opened files in new terminal should also preserve same profile
 - double/tripple click action should heppen on ButtonPress, not on ButtonRelease.
 - reset selection upon primary/alternate screen switch
+- respect propotion of colored (emoji) glyph (y-offset / bearing)?
 
 ### QA: Refactoring:
 
+- terminal::Mode to have enum values being consecutively increasing;
+  then refactor Modes to make use of a bitset instead; vector<bool> or at least array<Mode>;
+- SaveCursor/RestoreCursor greatly shows that the cursor is more than just a position, but
+  also contains SGR, autoWrap, origin, character settings, selective erase attrs, SS2/SS3 states.
+  Therefore we could refactor that into its own struct that isolates all of these attributes.
+- savedLines screen history should be paged for 2 reasons (performance & easy on-disk swapping)
+    - implement on-disk paging on top of that.
+- Let go of `unsigned` (including `size_t`) unless it is meant for bit-pattern
+- Use smallest integer type that is required to fit the
 - Make use of MagicEnums
 - Make use of the one ranges-v3
 - yaml-cpp: see if we can use system package instead of git submodule here
@@ -62,6 +72,10 @@
 
 ### Features
 
+- Evaluate Shell Integration proposals from: http://per.bothner.com/blog/2019/shell-integration-proposal/
+- [Tab/Decoration styling](https://gitlab.gnome.org/GNOME/gnome-terminal/-/issues/142)
+- OSC 7: [Set/unset current working directory](https://gitlab.freedesktop.org/terminal-wg/specifications/-/merge_requests/7)
+- OSC 6: [Set/unset current working document WTF?](https://gitlab.freedesktop.org/terminal-wg/specifications/-/merge_requests/7)
 - OSC 777: OSC Growl
 - OSC 777: Windows Toast
 - decorator: CrossedOut (draw line at y = baseline + (hight - baseline) / 2, with std thickness again
@@ -70,10 +84,8 @@
 - curly line thickness should adapt to font size
 - Windows Font Matching (fontconfig equivalent?) - https://docs.microsoft.com/en-us/windows/win32/directwrite/custom-font-sets-win10
 - mouse shift-clicks
-- respect propotion of colored (emoji) glyph (y-offset / bearing)?
 - DCS + q Pt ST
 - DCS + p Pt ST
 - INVESTIGATE: is VT color setting for CMY and CMYK supported by other VTEs (other than mintty?)? What apps use that?
 - create own terminfo file (ideally auto-generated from source code's knowledge)
 - "Option-Click moves cursor" from https://www.iterm2.com/documentation-preferences-pointer.html
-
