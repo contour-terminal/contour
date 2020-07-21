@@ -23,7 +23,7 @@ namespace org::coding_style::naming_conventions
 {
     void eastConst() {
         int const a = 42;        // a is const
-        int const *p = &a;       // value in p is const, p is not const.
+        int const* p = &a;       // value in p is const, p is not const.
         int const *const p = &a; // both value and p are const.
     }
 
