@@ -439,6 +439,13 @@ class Screen {
     }
 
     // Gets a reference to the cell relative to screen origin (top left, 1:1).
+    Cell const& at(Coordinate const& _coord) const noexcept
+    {
+        auto const y = static_cast<cursor_pos_t>(currentBuffer().savedLines.size() + _coord.row - scrollOffset_);
+        return absoluteAt(Coordinate{y, _coord.column});
+    }
+
+    // Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(cursor_pos_t _rowNr, cursor_pos_t _colNr) const noexcept
     {
         return const_cast<Screen&>(*this).at(Coordinate{_rowNr, _colNr});
