@@ -63,39 +63,6 @@ struct FunctionDefinition { // TODO: rename Function
     }
 
     constexpr operator unsigned () const noexcept { return id(); }
-
-    // Semantic constructors
-    //
-    // constexpr static auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
-    // }
-    //
-    // constexpr static auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    // {
-    //     return FunctionDefinition{
-    //         FunctionCategory::CSI,
-    //         _leader.value_or(0),
-    //         _intermediate.value_or(0),
-    //         _final,
-    //         _argc0,
-    //         _argc1,
-    //         _vt,
-    //         _mnemonic,
-    //         _description
-    //     };
-    // }
-    // }
 };
 
 constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
