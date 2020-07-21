@@ -64,7 +64,6 @@
 
 - OSC 777: OSC Growl
 - OSC 777: Windows Toast
-- synchronized output
 - decorator: CrossedOut (draw line at y = baseline + (hight - baseline) / 2, with std thickness again
 - decorator: Box (definitely!)
 - decorator: Circle (maybe skip?)
