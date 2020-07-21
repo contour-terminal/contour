@@ -78,6 +78,7 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::ResetFontSize>("ResetFontSize"),
         mapAction<actions::ReloadConfig>("ReloadConfig"),
         mapAction<actions::ResetConfig>("ResetConfig"),
+        mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
     };
 
     auto const name = toLower(_name);
