@@ -666,7 +666,13 @@ void Screen::operator()(Hyperlink const& v)
 
 void Screen::operator()(MoveCursorUp const& v)
 {
-    auto const n = min(v.n, cursorPosition().row - buffer_->margin_.vertical.from);
+    auto const n = min(
+        v.n,
+        cursorPosition().row > buffer_->margin_.vertical.from
+            ? cursorPosition().row - buffer_->margin_.vertical.from
+            : cursorPosition().row
+    );
+
     buffer_->cursor.row -= n;
     buffer_->currentLine = prev(buffer_->currentLine, n);
     buffer_->setCurrentColumn(cursorPosition().column);
