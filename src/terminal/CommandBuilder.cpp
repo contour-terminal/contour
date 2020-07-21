@@ -137,6 +137,8 @@ namespace impl // {{{ some command generator helpers
 				return ApplyResult::Ok;
 			case 2004:
 				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
+            case 2001:
+                return emitCommand<SetMode>(_output, Mode::BatchedRendering, _enable);
 			default:
 				return ApplyResult::Unsupported;
 		}

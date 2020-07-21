@@ -147,7 +147,7 @@ class Terminal : public ScreenEvents {
     template <typename... RenderPasses>
     uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
     {
-        auto _l = std::lock_guard{screenLock_};
+        auto _l = std::lock_guard{*this};
         auto const changes = preRender(_now);
         renderPass(pass, std::forward<RenderPasses>(passes)...);
         return changes;

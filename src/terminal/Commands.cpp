@@ -158,6 +158,8 @@ string to_string(Mode m)
             return "MouseURXVT";
         case Mode::MouseAlternateScroll:
             return "MouseAlternateScroll";
+        case Mode::BatchedRendering:
+            return "BatchedRendering";
     }
     return "?";
 }
