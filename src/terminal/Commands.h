@@ -1099,7 +1099,7 @@ namespace fmt {
                 case DynamicColorName::DefaultForegroundColor:
                     return format_to(ctx.out(), "DefaultForegroundColor");
                 case DynamicColorName::DefaultBackgroundColor:
-                    return format_to(ctx.out(), "DefaultForegroundColor");
+                    return format_to(ctx.out(), "DefaultBackgroundColor");
                 case DynamicColorName::TextCursorColor:
                     return format_to(ctx.out(), "TextCursorColor");
                 case DynamicColorName::MouseForegroundColor:
