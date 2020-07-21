@@ -1035,7 +1035,7 @@ class CommandVisitor {
     virtual void visit(DeleteLines const& v) = 0;
     virtual void visit(DesignateCharset const& v) = 0;
     virtual void visit(DeviceStatusReport const& v) = 0;
-    virtual void visit(DumpState const&) = 0;
+    virtual void visit(DumpState const& v) = 0;
     virtual void visit(EraseCharacters const& v) = 0;
     virtual void visit(ForwardIndex const& v) = 0;
     virtual void visit(FullReset const& v) = 0;
@@ -1083,7 +1083,7 @@ class CommandVisitor {
     virtual void visit(SetForegroundColor const& v) = 0;
     virtual void visit(SetGraphicsRendition const& v) = 0;
     virtual void visit(SetLeftRightMargin const& v) = 0;
-    virtual void visit(SetMark const&) = 0;
+    virtual void visit(SetMark const& v) = 0;
     virtual void visit(SetMode const& v) = 0;
     virtual void visit(SetTopBottomMargin const& v) = 0;
     virtual void visit(SetUnderlineColor const& v) = 0;
