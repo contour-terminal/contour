@@ -23,8 +23,15 @@
 #include <optional>
 #include <utility>
 
-using namespace std;
-using namespace crispy;
+using std::array;
+using std::get;
+using std::max;
+using std::nullopt;
+using std::optional;
+using std::pair;
+using std::string;
+
+namespace atlas = crispy::atlas;
 
 namespace terminal::view {
 

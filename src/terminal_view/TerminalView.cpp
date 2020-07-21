@@ -23,9 +23,11 @@
 #include <iostream>
 #include <utility>
 
-using namespace std;
-using namespace std::placeholders;
-using namespace crispy;
+using std::chrono::milliseconds;
+using std::chrono::steady_clock;
+using std::nullopt;
+using std::optional;
+using std::string;
 
 namespace terminal::view {
 
@@ -39,15 +41,15 @@ inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _op
     };
 }
 
-TerminalView::TerminalView(std::chrono::steady_clock::time_point _now,
+TerminalView::TerminalView(steady_clock::time_point _now,
                            WindowSize const& _winSize,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
-                           std::string const& _wordDelimiters,
+                           string const& _wordDelimiters,
                            FontConfig const& _fonts,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
-                           chrono::milliseconds _cursorBlinkInterval,
+                           milliseconds _cursorBlinkInterval,
                            terminal::ColorProfile _colorProfile,
                            terminal::Opacity _backgroundOpacity,
                            Decorator _hyperlinkNormal,
@@ -205,7 +207,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
     }
 
 #if !defined(NDEBUG)
-    cout << fmt::format(
+    std::cout << fmt::format(
         "Resized to pixelSize: {}x{}, screenSize: {}x{}, margin: {}x{}, cellSize: {}x{}\n",
         _width, _height,
         newScreenSize.columns, newScreenSize.rows,
@@ -226,7 +228,7 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
         return false;
 
 #if !defined(NDEBUG)
-    cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _newSize);
+    std::cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _newSize);
 #endif
 
     renderer_.setScreenSize(_newSize);
@@ -235,7 +237,7 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
     return true;
 }
 
-uint64_t TerminalView::render(chrono::steady_clock::time_point const& _now)
+uint64_t TerminalView::render(steady_clock::time_point const& _now)
 {
     return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition());
 }

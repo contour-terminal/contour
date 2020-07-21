@@ -20,7 +20,12 @@
 #include <stdexcept>
 #include <vector>
 
-using namespace std;
+using std::get;
+using std::max;
+using std::nullopt;
+using std::optional;
+using std::runtime_error;
+using std::string;
 
 namespace terminal::view {
 

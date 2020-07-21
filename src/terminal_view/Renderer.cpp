@@ -16,10 +16,8 @@
 
 #include <functional>
 
-using namespace std;
-using namespace std::chrono;
-using namespace std::placeholders;
-using namespace crispy;
+using std::scoped_lock;
+using std::chrono::steady_clock;
 
 namespace terminal::view {
 

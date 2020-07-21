@@ -19,11 +19,26 @@
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
 
-namespace terminal::view {
+using std::get;
+using std::nullopt;
+using std::optional;
+using std::u32string;
+using std::u32string_view;
+using std::vector;
 
-using namespace crispy;
-using namespace std;
+using crispy::copy;
+using crispy::text::Font;
+using crispy::text::FontList;
+using crispy::text::FontStyle;
+using crispy::text::GlyphBitmap;
+using crispy::text::GlyphPositionList;
+using crispy::times;
+
 using unicode::out;
+
+namespace atlas = crispy::atlas;
+
+namespace terminal::view {
 
 #if !defined(NDEBUG)
 #define METRIC_INCREMENT(name) do { ++renderMetrics_. name ; } while (0)
@@ -152,7 +167,7 @@ void TextRenderer::flushPendingSegments()
     );
 }
 
-crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
+GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
     auto const key = CacheKey{
@@ -177,31 +192,31 @@ crispy::text::GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     }
 }
 
-crispy::text::GlyphPositionList TextRenderer::requestGlyphPositions()
+GlyphPositionList TextRenderer::requestGlyphPositions()
 {
     // if (attributes_.styles.mask() != 0)
     //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", attributes_.styles);
-    text::GlyphPositionList glyphPositions;
+    GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run)))
     {
         METRIC_INCREMENT(shapedText);
-        copy(prepareRun(run), std::back_inserter(glyphPositions));
+        crispy::copy(prepareRun(run), std::back_inserter(glyphPositions));
     }
 
     return glyphPositions;
 }
 
-text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
+GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
 {
-    text::FontStyle textStyle = text::FontStyle::Regular;
+    FontStyle textStyle = FontStyle::Regular;
 
     if (attributes_.styles & CharacterStyleMask::Bold)
-        textStyle |= text::FontStyle::Bold;
+        textStyle |= FontStyle::Bold;
 
     if (attributes_.styles & CharacterStyleMask::Italic)
-        textStyle |= text::FontStyle::Italic;
+        textStyle |= FontStyle::Italic;
 
     if (attributes_.styles & CharacterStyleMask::Blinking)
     {
@@ -211,24 +226,24 @@ text::GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range c
     if ((attributes_.styles & CharacterStyleMask::Hidden))
         return {};
 
-    auto& textFont = [&](text::FontStyle _style) -> text::FontList& {
+    auto& textFont = [&](FontStyle _style) -> FontList& {
         switch (_style)
         {
-            case text::FontStyle::Bold:
+            case FontStyle::Bold:
                 return fonts_.bold;
-            case text::FontStyle::Italic:
+            case FontStyle::Italic:
                 return fonts_.italic;
-            case text::FontStyle::BoldItalic:
+            case FontStyle::BoldItalic:
                 return fonts_.boldItalic;
-            case text::FontStyle::Regular:
+            case FontStyle::Regular:
                 return fonts_.regular;
         }
         return fonts_.regular;
     }(textStyle);
 
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-    text::FontList& font = isEmojiPresentation ? fonts_.emoji
-                                               : textFont;
+    FontList& font = isEmojiPresentation ? fonts_.emoji
+                                         : textFont;
 
     unsigned const advanceX = fonts_.regular.first.get().maxAdvance();
 
@@ -301,8 +316,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     if (optional<DataRef> const dataRef = _atlas.get(_id); dataRef.has_value())
         return dataRef;
 
-    crispy::text::Font& font = _id.font.get();
-    optional<crispy::text::GlyphBitmap> bitmap = font.loadGlyphByIndex(_id.glyphIndex);
+    Font& font = _id.font.get();
+    optional<GlyphBitmap> bitmap = font.loadGlyphByIndex(_id.glyphIndex);
     if (!bitmap.has_value())
         return nullopt;
 
