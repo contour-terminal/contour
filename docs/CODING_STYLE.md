@@ -14,12 +14,19 @@
 - function parameters: lowerCamelCase with leading underscore
 - Template parameter name: UpperCamelCase
 - preprocessor definitions: `SCREAMING_CASE`
+- east const instead of west const
 
 ### Example
 
 ```cpp
 namespace org::coding_style::naming_conventions
 {
+    void eastConst() {
+        int const a = 42;        // a is const
+        int const* p = &a;       // value in p is const, p is not const.
+        int const *const p = &a; // both value and p are const.
+    }
+
     enum class Role { Employed, Unemployed };
 
     struct User
