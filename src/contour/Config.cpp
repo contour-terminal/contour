@@ -887,7 +887,7 @@ std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
 
     auto const prependVersionPragma = [&](string const& _code) {
         if (QOpenGLContext::currentContext()->isOpenGLES())
-            return "#version 320 es\n#line 1\n" + _code;
+            return "#version 300 es\n#line 1\n" + _code;
         else
             return "#version 330\n#line 1\n" + _code;
     };
