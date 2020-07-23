@@ -28,32 +28,9 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 - ✅ Key binding customization
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
+- ✅ Synchronized rendering (via `DECSM 2001` / `DECRM 2001`)
 - ✅ Clickable hyperlinks via OSC 8
-- ✅ Synchronized Rendering (via `DECSM`/`DECRM` 2001)
-
-## A word on vertical line markers
-
-Suppose you type a lot in the terminal, and I bet you do. Some commands may have inconveniently long
-output and you need a way to conveniently scroll the terminal viewport up to the top of that
-command. This is what this feature is there for. You can easily walk up/down your markers
-like you'd walk up code folds or markers in VIM or other editors.
-
-Set a mark:
-
-```sh
-echo -ne "\033[>M"
-```
-
-Example key bindings:
-
-```yaml
-input_mapping:
-    - { mods: [Alt, Shift], key: 'k', action: ScrollMarkUp }
-    - { mods: [Alt, Shift], key: 'j', action: ScrollMarkDown }
-```
-
-It is recommended to integrate the marker into your command prompt, such as `$PS1` in bash or sh to
-have automatic markers set.
+- ✅ Clipboard setting via OSC 52
 
 ## CLI - Command Line Interface
 
