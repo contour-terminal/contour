@@ -6,6 +6,12 @@
 
 namespace crispy {
 
+template <typename T>
+constexpr bool ascending(T low, T val, T high) noexcept
+{
+    return low <= val && val <= high;
+}
+
 constexpr unsigned long strntoul(char const* _data, size_t _count, char const** _eptr, unsigned _base = 10)
 {
     constexpr auto values = std::string_view{"0123456789ABCDEF"};
