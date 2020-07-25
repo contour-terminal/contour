@@ -203,7 +203,23 @@ void DecorationRenderer::rebuild()
             move(image)
         );
     } // }}}
-    // TODO: CrossedOut
+    { // {{{ crossed-out
+        auto const middleCell = screenCoordinates_.cellHeight / 2;
+        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto image = atlas::Buffer(width * middleCell, 0u);
+
+        for (unsigned y = 0; y < thickness; ++y)
+            for (unsigned x = 0; x < width; ++x)
+                image[y * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::CrossedOut,
+            width, middleCell - thickness / 2,
+            width, middleCell - thickness / 2,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
     // TODO: Framed
     // TODO: Encircle
 }
