@@ -663,7 +663,7 @@ namespace fmt {
         auto format(terminal::CharacterStyleMask const& _mask, FormatContext& ctx)
         {
             using Mask = terminal::CharacterStyleMask;
-            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 11>{
+            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 12>{
                 std::pair{Mask::Bold, "bold"},
                 std::pair{Mask::Faint, "faint"},
                 std::pair{Mask::Italic, "italic"},
@@ -674,6 +674,7 @@ namespace fmt {
                 std::pair{Mask::CrossedOut, "crossedOut"},
                 std::pair{Mask::DoublyUnderlined, "doublyUnderlined"},
                 std::pair{Mask::CurlyUnderlined, "curlyUnderlined"},
+                std::pair{Mask::Framed, "framed"},
                 std::pair{Mask::Overline, "overline"}
             };
             int i = 0;

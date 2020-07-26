@@ -295,7 +295,9 @@ namespace impl // {{{ some command generator helpers
 				case 47: emitCommand<SetBackgroundColor>(_output, IndexedColor::White); break;
 				case 48: i = parseColor<SetBackgroundColor>(_ctx, i, _output); break;
 				case 49: emitCommand<SetBackgroundColor>(_output, DefaultColor{}); break;
+                case 51: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Framed); break;
                 case 53: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::Overline); break;
+                case 54: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoFramed); break;
                 case 55: emitCommand<SetGraphicsRendition>(_output, GraphicsRendition::NoOverline); break;
                 // 58 is reserved, but used for setting underline/decoration colors by some other VTEs (such as mintty, kitty, libvte)
                 case 58: i = parseColor<SetUnderlineColor>(_ctx, i, _output); break;

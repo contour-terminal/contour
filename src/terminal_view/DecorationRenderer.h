@@ -45,7 +45,7 @@ enum class Decorator {
     /// Draws a box around the glyph, this is literally the bounding box of a grid cell.
     /// This could be used for debugging.
     /// TODO: That should span the box around the whole (potentially wide) character
-    Frame,
+    Framed,
     /// Puts a circle-shape around into the cell (and ideally around the glyph)
     /// TODO: How'd that look like with double-width characters?
     Encircle,

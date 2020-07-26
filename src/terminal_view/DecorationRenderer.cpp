@@ -37,7 +37,7 @@ optional<Decorator> to_decorator(std::string const& _value)
         pair{"dashed-underline", Decorator::DashedUnderline},
         pair{"overline", Decorator::Overline},
         pair{"crossed-out", Decorator::CrossedOut},
-        pair{"framed", Decorator::Frame},
+        pair{"framed", Decorator::Framed},
         pair{"encircle", Decorator::Encircle},
     };
 
@@ -186,6 +186,35 @@ void DecorationRenderer::rebuild()
             move(image)
         );
     } // }}}
+    { // {{{ framed
+        auto const cellHeight = screenCoordinates_.cellHeight;
+        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto image = atlas::Buffer(width * cellHeight, 0u);
+
+        // Draws the top and bottom horizontal lines
+        for (unsigned y = 0; y < thickness; ++y)
+            for (unsigned x = 0; x < width; ++x)
+            {
+                image[y * width + x] = 0xFF;
+                image[(cellHeight - 1 - y) * width + x] = 0xFF;
+            }
+        
+        // Draws the left and right vertical lines
+        for (unsigned y = 0; y < cellHeight; y++)
+            for (unsigned x = 0; x < thickness; ++x)
+            {
+                image[y * width + x] = 0xFF;
+                image[y * width + (width - 1 - x)] = 0xFF;
+            }
+
+        atlas_.insert(
+            Decorator::Framed,
+            width, cellHeight,
+            width, cellHeight,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
     { // {{{ overline
         auto const cellHeight = screenCoordinates_.cellHeight;
         auto const thickness = max(lineThickness_ * baseline / 3, 1u);
@@ -204,7 +233,6 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     // TODO: CrossedOut
-    // TODO: Framed
     // TODO: Encircle
 }
 
@@ -240,7 +268,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
     auto constexpr supplementalMappings = array{
         pair{CharacterStyleMask::Overline, Decorator::Overline},
         pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},
-        pair{CharacterStyleMask::Framed, Decorator::Frame},
+        pair{CharacterStyleMask::Framed, Decorator::Framed},
         pair{CharacterStyleMask::Encircled, Decorator::Encircle},
     };
 

@@ -100,7 +100,9 @@ enum class GraphicsRendition {
     CurlyUnderlined = 30,   //!< Curly line below the baseline.
     DottedUnderline = 31,   //!< Dotted line below the baseline.
     DashedUnderline = 32,   //!< Dashed line below the baseline.
+    Framed = 51,            //!< Frames the glyph with lines on all sides
     Overline = 53,          //!< Overlined glyph
+    NoFramed = 54,          //!< Reverses Framed
     NoOverline = 55,        //!< Reverses Overline.
 };
 
