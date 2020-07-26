@@ -188,20 +188,21 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = screenCoordinates_.cellHeight;
-        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto const thickness = max(lineThickness_ * width / 20, 1u);
         auto image = atlas::Buffer(width * cellHeight, 0u);
+        auto const gap = thickness;
 
         // Draws the top and bottom horizontal lines
-        for (unsigned y = 0; y < thickness; ++y)
-            for (unsigned x = 0; x < width; ++x)
+        for (unsigned y = gap; y < thickness + gap; ++y)
+            for (unsigned x = gap; x < width - gap; ++x)
             {
                 image[y * width + x] = 0xFF;
                 image[(cellHeight - 1 - y) * width + x] = 0xFF;
             }
-        
+
         // Draws the left and right vertical lines
-        for (unsigned y = 0; y < cellHeight; y++)
-            for (unsigned x = 0; x < thickness; ++x)
+        for (unsigned y = gap; y < cellHeight - gap; y++)
+            for (unsigned x = gap; x < thickness + gap; ++x)
             {
                 image[y * width + x] = 0xFF;
                 image[y * width + (width - 1 - x)] = 0xFF;
@@ -232,7 +233,23 @@ void DecorationRenderer::rebuild()
             move(image)
         );
     } // }}}
-    // TODO: CrossedOut
+    { // {{{ crossed-out
+        auto const middleCell = screenCoordinates_.cellHeight / 2;
+        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto image = atlas::Buffer(width * middleCell, 0u);
+
+        for (unsigned y = 0; y < thickness; ++y)
+            for (unsigned x = 0; x < width; ++x)
+                image[y * width + x] = 0xFF;
+
+        atlas_.insert(
+            Decorator::CrossedOut,
+            width, middleCell - thickness / 2,
+            width, middleCell - thickness / 2,
+            GL_RED,
+            move(image)
+        );
+    } // }}}
     // TODO: Encircle
 }
 
