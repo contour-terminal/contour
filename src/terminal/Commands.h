@@ -180,8 +180,8 @@ enum class Mode {
     // {{{ Extensions
     // This merely resembles the "Synchronized Output" feature from iTerm2, except that it is using
     // a different VT sequence to be enabled. Instead of a DCS,
-    // this feature is using CSI ? 2001 h (DECSM and DECRM).
-    BatchedRendering = 2001,
+    // this feature is using CSI ? 2026 h (DECSM and DECRM).
+    BatchedRendering = 2026,
     // }}}
 };
 
@@ -250,7 +250,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::MouseSGR: return "?1006";
         case Mode::MouseURXVT: return "?1015";
         case Mode::MouseAlternateScroll: return "?1007";
-        case Mode::BatchedRendering: return "2001";
+        case Mode::BatchedRendering: return "2026";
     }
     return "0";
 }

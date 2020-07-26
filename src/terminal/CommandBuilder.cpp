@@ -137,7 +137,7 @@ namespace impl // {{{ some command generator helpers
 				return ApplyResult::Ok;
 			case 2004:
 				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
-            case 2001:
+            case 2026:
                 return emitCommand<SetMode>(_output, Mode::BatchedRendering, _enable);
 			default:
 				return ApplyResult::Unsupported;
@@ -390,6 +390,7 @@ namespace impl // {{{ some command generator helpers
 			case 103: // DECHDPXM, Half-duplex
 			case 104: // DECESKM, Secondary keyboard language
 			case 106: // DECOSCNM, Overscan
+            case 2026: // Batched rendering (Synchronized output)
 				return ApplyResult::Unsupported;
 			default:
 				return ApplyResult::Invalid;
