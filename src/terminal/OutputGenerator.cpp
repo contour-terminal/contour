@@ -42,32 +42,32 @@ void OutputGenerator::operator()(std::vector<Command> const& commands)
         (*this)(command);
 }
 
-constexpr optional<char> gnumber(CharsetTable table, Charset charset)
+constexpr optional<char> gnumber(CharsetTable table, CharsetId charset)
 {
     array<char, 4> const std = {'(', ')', '*', '+'};
 
     switch (charset)
     {
-        case Charset::Special:
-        case Charset::UK:
-        case Charset::USASCII:
-        case Charset::German:
+        case CharsetId::Special:
+        case CharsetId::UK:
+        case CharsetId::USASCII:
+        case CharsetId::German:
             return {std.at(static_cast<size_t>(table))};
     }
     return nullopt;
 }
 
-optional<char> finalChar(Charset charset)
+optional<char> finalChar(CharsetId charset)
 {
     switch (charset)
     {
-        case Charset::Special:
+        case CharsetId::Special:
             return {'0'};
-        case Charset::UK:
+        case CharsetId::UK:
             return {'A'};
-        case Charset::USASCII:
+        case CharsetId::USASCII:
             return {'B'};
-        case Charset::German:
+        case CharsetId::German:
             return {'K'};
     }
     return nullopt;

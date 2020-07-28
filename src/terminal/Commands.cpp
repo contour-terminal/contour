@@ -184,20 +184,20 @@ string to_string(CharsetTable i)
     return "G" + std::to_string(static_cast<int>(i));
 }
 
-string to_string(Charset charset)
+string to_string(CharsetId charset)
 {
     switch (charset)
     {
-        case Charset::Special:
+        case CharsetId::Special:
             return "Special";
-        case Charset::UK:
+        case CharsetId::UK:
             return "UK";
-        case Charset::USASCII:
+        case CharsetId::USASCII:
             return "USASCII";
-        case Charset::German:
+        case CharsetId::German:
             return "German";
     }
-    return fmt::format("<?Charset:{}>", static_cast<unsigned>(charset));
+    return fmt::format("<?CharsetId:{}>", static_cast<unsigned>(charset));
 }
 
 unsigned to_code(MouseProtocol protocol) noexcept

@@ -266,7 +266,7 @@ enum class CharsetTable {
 
 std::string to_string(CharsetTable i);
 
-enum class Charset {
+enum class CharsetId {
     Special, // Special Character and Line Drawing Set
 
     UK,
@@ -276,7 +276,7 @@ enum class Charset {
     // ... TODO
 };
 
-std::string to_string(Charset charset);
+std::string to_string(CharsetId charset);
 
 struct Bell {};
 
@@ -666,7 +666,7 @@ struct SendMouseEvents { MouseProtocol protocol; bool enable; };
 /// - https://vt100.net/docs/vt510-rm/DECKPNM.html
 struct ApplicationKeypadMode { bool enable; };
 
-struct DesignateCharset { CharsetTable table; Charset charset; };
+struct DesignateCharset { CharsetTable table; CharsetId charset; };
 
 //! Selects given CharsetTable for the very next character only.
 struct SingleShiftSelect { CharsetTable table; };

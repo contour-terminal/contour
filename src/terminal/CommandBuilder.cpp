@@ -803,10 +803,10 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case CR: return emitCommand<MoveCursorToBeginOfLine>(_output);
 
         // ESC
-        case SCS_G0_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::Special);
-        case SCS_G0_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, Charset::USASCII);
-        case SCS_G1_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::Special);
-        case SCS_G1_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, Charset::USASCII);
+        case SCS_G0_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, CharsetId::Special);
+        case SCS_G0_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G0, CharsetId::USASCII);
+        case SCS_G1_SPECIAL: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, CharsetId::Special);
+        case SCS_G1_USASCII: return emitCommand<DesignateCharset>(_output, CharsetTable::G1, CharsetId::USASCII);
         case DECALN: return emitCommand<ScreenAlignmentPattern>(_output);
         case DECBI: return emitCommand<BackIndex>(_output);
         case DECFI: return emitCommand<ForwardIndex>(_output);

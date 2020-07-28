@@ -149,7 +149,7 @@ TEST_CASE("CommandBuilder.set_g1_special", "[CommandBuilder]")
     REQUIRE(holds_alternative<DesignateCharset>(output.commands()[0]));
     auto ct = get<DesignateCharset>(output.commands()[0]);
     REQUIRE(CharsetTable::G1 == ct.table);
-    REQUIRE(Charset::Special == ct.charset);
+    REQUIRE(CharsetId::Special == ct.charset);
 }
 
 TEST_CASE("CommandBuilder.color_fg_indexed", "[CommandBuilder]")
