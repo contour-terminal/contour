@@ -165,10 +165,8 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
             {
                 screen_.setSelector(make_unique<Selector>(
                     selectionMode,
-                    [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
                     wordDelimiters_,
-                    screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
-                    screenSize().columns,
+                    screen_,
                     absoluteCoordinate(currentMousePosition_)
                 ));
 
@@ -210,10 +208,8 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     {
         screen_.setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
-            [this](Coordinate const& _coord) -> Cell const* { return absoluteAt(_coord); },
             wordDelimiters_,
-            screenSize().rows + static_cast<cursor_pos_t>(historyLineCount()),
-            screenSize().columns,
+            screen_,
             absoluteCoordinate(currentMousePosition_)
         ));
     }

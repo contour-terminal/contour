@@ -1187,15 +1187,15 @@ string TerminalWindow::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_->terminal().screen().renderSelection([&](cursor_pos_t /*_row*/, cursor_pos_t _col, Cell const& _cell) {
-        if (_col <= lastColumn)
+    terminalView_->terminal().screen().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
+        if (_pos.column <= lastColumn)
         {
             text += currentLine;
             text += '\n';
             currentLine.clear();
         }
         currentLine += _cell.toUtf8();
-        lastColumn = _col;
+        lastColumn = _pos.column;
     });
     text += currentLine;
 

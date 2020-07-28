@@ -25,6 +25,8 @@
 
 namespace terminal {
 
+class Screen;
+
 /**
  * Selector API.
  *
@@ -82,23 +84,8 @@ class Selector {
 	/// Convenience constructor when access to Screen is available.
     Selector(Mode _mode,
 			 std::u32string const& _wordDelimiters,
-			 ScreenBuffer const& _screenBuffer,
-			 Coordinate const& _from) :
-		Selector{
-			_mode,
-            [screenBuffer = std::ref(_screenBuffer)](Coordinate const& _coord) -> Cell const* {
-                if (_coord.row <= screenBuffer.get().size().rows)
-                    return &screenBuffer.get().absoluteAt(_coord);
-                else
-                    return nullptr;
-            },
-			_wordDelimiters,
-			_screenBuffer.size().rows + static_cast<cursor_pos_t>(_screenBuffer.historyLineCount()),
-			_screenBuffer.size().columns,
-			_from
-		}
-	{
-	}
+			 Screen const& _screen,
+			 Coordinate const& _from);
 
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
@@ -131,7 +118,7 @@ class Selector {
 
     /// Eventually stretches the coordinate a few cells to the right if the cell at given coordinate
     /// contains a wide character - or if the cell is empty, until the end of emptyness.
-    Coordinate stretchedColumn(Coordinate _coord) const noexcept;
+    Coordinate stretchedColumn(Coordinate _pos) const noexcept;
 
 	/// Retrieves a vector of ranges (with one range per line) of selected cells.
 	std::vector<Range> selection() const;
@@ -145,8 +132,25 @@ class Selector {
 	/// Constructs a vector of ranges for a rectangular selection strategy.
 	std::vector<Range> rectangular() const;
 
-	/// Renders the current selection into @p _render.
-	void render(Renderer const& _render);
+    /// Renders the current selection into @p _render.
+    template <typename Renderer>
+    void render(Renderer& _render) const
+    {
+        for (auto const& range : selection())
+            for (auto const col : crispy::times(range.fromColumn, range.length()))
+                if (Cell const* cell = at({range.line, col}); cell != nullptr)
+                {
+                    auto const pos = Coordinate{range.line, col};
+                    _render(pos, *cell);
+                }
+    }
+
+    /// Renders the current selection into @p _render.
+    template <typename Renderer>
+    void render(Renderer const& _render) const
+    {
+        render(const_cast<Renderer&>(_render));
+    }
 
   private:
 	bool isWordWiseSelection() const noexcept
@@ -160,7 +164,7 @@ class Selector {
 		}
 	}
 
-	Cell const* at(Coordinate const& _coord) const { return getCellAt_(_coord); }
+	Cell const* at(Coordinate const& _pos) const { return getCellAt_(_pos); }
 
 	void extendSelectionBackward();
 	void extendSelectionForward();

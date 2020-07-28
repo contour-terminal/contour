@@ -12,7 +12,10 @@
  * limitations under the License.
  */
 #include <terminal/Selector.h>
+#include <terminal/Screen.h>
 #include <terminal/Terminal.h>
+#include <crispy/times.h>
+#include <cassert>
 
 using namespace std;
 
@@ -46,6 +49,29 @@ Selector::Selector(Mode _mode,
 		swapDirection();
 		extendSelectionForward();
 	}
+}
+
+Selector::Selector(Mode _mode,
+                   std::u32string const& _wordDelimiters,
+                   Screen const& _screen,
+                   Coordinate const& _from) :
+    Selector{
+        _mode,
+        [screen = std::ref(_screen)](Coordinate const& _pos) -> Cell const* {
+            assert(_pos.row >= 0 && "must be absolute coordinate");
+            auto const& buffer = screen.get();
+            auto const row = _pos.row - buffer.historyLineCount(); // translate to coordinate relative to the screen's home position
+            if (row <= buffer.size().rows)
+                return &buffer.at({row, _pos.column});
+            else
+                return nullptr;
+        },
+        _wordDelimiters,
+        _screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
+        _screen.size().columns,
+        _from
+    }
+{
 }
 
 Coordinate Selector::stretchedColumn(Coordinate _coord) const noexcept
@@ -209,14 +235,6 @@ vector<Selector::Range> Selector::selection() const
 			return rectangular();
 	}
 	return {};
-}
-
-void Selector::render(Selector::Renderer const& _render)
-{
-    for (auto const& range : selection())
-        for (auto col = range.fromColumn; col <= range.toColumn; ++col)
-            if (Cell const* cell = at({range.line, col}); cell != nullptr)
-                _render(range.line, col, *cell);
 }
 
 vector<Selector::Range> Selector::linear() const
