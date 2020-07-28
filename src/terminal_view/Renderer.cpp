@@ -140,8 +140,8 @@ void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
 }
 
 uint64_t Renderer::render(Terminal& _terminal,
-                            steady_clock::time_point _now,
-                            terminal::Coordinate const& _currentMousePosition)
+                          steady_clock::time_point _now,
+                          terminal::Coordinate const& _currentMousePosition)
 {
     metrics_.clear();
 
