@@ -21,6 +21,8 @@
 
 #include <unicode/width.h>
 
+#include <crispy/times.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -101,14 +103,14 @@ constexpr bool operator!(CharacterStyleMask const& a) noexcept
 
 struct Margin {
 	struct Range {
-		unsigned int from;
-		unsigned int to;
+		int from;
+		int to;
 
-		constexpr unsigned int length() const noexcept { return to - from + 1; }
+		constexpr int length() const noexcept { return to - from + 1; }
 		constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
 		constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
 
-		constexpr bool contains(unsigned int _value) const noexcept { return from <= _value && _value <= to; }
+		constexpr bool contains(int _value) const noexcept { return from <= _value && _value <= to; }
 	};
 
 	Range vertical{}; // top-bottom
@@ -202,11 +204,11 @@ class Cell {
     }
 
     constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
-    constexpr unsigned codepointCount() const noexcept { return codepointCount_; }
+    constexpr int codepointCount() const noexcept { return codepointCount_; }
 
     constexpr bool empty() const noexcept { return codepointCount_ == 0; }
 
-    constexpr unsigned width() const noexcept { return width_; }
+    constexpr int width() const noexcept { return width_; }
 
     constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
     constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
@@ -226,7 +228,7 @@ class Cell {
         }
     }
 
-    void setWidth(unsigned _width) noexcept
+    void setWidth(int _width) noexcept
     {
         width_ = _width;
     }
@@ -360,7 +362,7 @@ struct ScreenBuffer {
 			  {1, _size.rows},
 			  {1, _size.columns}
 		  },
-		  lines{ _size.rows, Line{_size.columns, Cell{}} }
+		  lines{ static_cast<size_t>(_size.rows), Line{static_cast<size_t>(_size.columns), Cell{}} }
 	{
 		verifyState();
 	}
@@ -370,13 +372,13 @@ struct ScreenBuffer {
         *this = ScreenBuffer(type_, size_, maxHistoryLineCount_);
     }
 
-    size_t historyLineCount() const noexcept
+    int historyLineCount() const noexcept
     {
-        return savedLines.size();
+        return static_cast<int>(savedLines.size());
     }
 
-    std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const;
-    std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const;
+    std::optional<int> findPrevMarker(int _currentScrollOffset) const;
+    std::optional<int> findNextMarker(int _currentScrollOffset) const;
 
     /// Finds the previous marker right next to the given line position.
     ///
@@ -397,7 +399,7 @@ struct ScreenBuffer {
 	bool autoWrap{false};
 	bool wrapPending{false};
 	bool cursorRestrictedToMargin{false};
-	unsigned int tabWidth{8};
+	int tabWidth{8};
     std::vector<cursor_pos_t> tabs;
 	GraphicsAttributes graphicsRendition{};
 	std::stack<SavedState> savedStates{};
@@ -414,7 +416,7 @@ struct ScreenBuffer {
 
 	void appendChar(char32_t _codepoint, bool _consecutive);
 	void writeCharToCurrentAndAdvance(char32_t _codepoint);
-    void clearAndAdvance(unsigned _offset);
+    void clearAndAdvance(int _offset);
 
 	// Applies LF but also moves cursor to given column @p _column.
 	void linefeed(cursor_pos_t _column);
@@ -598,7 +600,7 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
     if (!(a.attributes() == b.attributes()))
         return false;
 
-    for (size_t i = 0; i < a.codepointCount(); ++i)
+    for (auto const i : crispy::times(a.codepointCount()))
         if (a.codepoint(i) != b.codepoint(i))
             return false;
 
@@ -627,7 +629,7 @@ namespace fmt {
         auto format(terminal::Cell const& cell, FormatContext& ctx)
         {
             std::string codepoints;
-            for (size_t i = 0; i < cell.codepointCount(); ++i)
+            for (auto const i : crispy::times(cell.codepointCount()))
             {
                 if (i)
                     codepoints += ", ";

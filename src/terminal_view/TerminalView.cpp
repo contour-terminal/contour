@@ -156,7 +156,7 @@ void TerminalView::setFont(FontConfig const& _fonts)
     resize(size_.width(), size_.height());
 }
 
-bool TerminalView::setFontSize(unsigned int _fontSize)
+bool TerminalView::setFontSize(int _fontSize)
 {
     if (!renderer_.setFontSize(_fontSize))
         return false;

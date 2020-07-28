@@ -49,10 +49,10 @@ TextShaper::~TextShaper()
 
 GlyphPositionList TextShaper::shape(unicode::Script _script,
                                     FontList const& _fonts,
-                                    unsigned _advanceX,
-                                    size_t _size,
+                                    int _advanceX,
+                                    int _size,
                                     char32_t const* _codepoints,
-                                    unsigned const* _clusters,
+                                    int const* _clusters,
                                     int _clusterGap)
 {
     GlyphPositionList glyphPositions;
@@ -108,13 +108,13 @@ constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
     }
 }
 
-bool TextShaper::shape(size_t _size,
+bool TextShaper::shape(int _size,
                        char32_t const* _codepoints,
-                       unsigned const* _clusters,
+                       int const* _clusters,
                        int _clusterGap,
                        unicode::Script _script,
                        Font& _font,
-                       unsigned _advanceX,
+                       int _advanceX,
                        reference<GlyphPositionList> _result)
 {
     hb_buffer_clear_contents(hb_buf_);
@@ -141,18 +141,18 @@ bool TextShaper::shape(size_t _size,
 
     hb_buffer_normalize_glyphs(hb_buf_);
 
-    unsigned const glyphCount = hb_buffer_get_length(hb_buf_);
+    auto const glyphCount = static_cast<int>(hb_buffer_get_length(hb_buf_));
     hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
     hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
 
     _result.get().clear();
     _result.get().reserve(glyphCount);
 
-    unsigned int cx = 0;
-    unsigned int cy = 0;
-    for (unsigned const i : times(glyphCount))
+    int cx = 0;
+    int cy = 0;
+    for (auto const i : times(glyphCount))
     {
-        cx = info[i].cluster * _advanceX;
+        cx = static_cast<int>(info[i].cluster) * _advanceX;
         //cx = _clusters[i] * _advanceX;
 
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
@@ -161,7 +161,7 @@ bool TextShaper::shape(size_t _size,
             cx + (pos[i].x_offset >> 6),
             cy + (pos[i].y_offset >> 6),
             info[i].codepoint,
-            info[i].cluster
+            static_cast<int>(info[i].cluster)
         });
     }
 

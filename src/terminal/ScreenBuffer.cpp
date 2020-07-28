@@ -63,10 +63,10 @@ std::optional<int> ScreenBuffer::findMarkerBackwards(int _currentCursorLine) con
 
     // saved-lines area
     auto const scrollOffset = _currentCursorLine < 0
-        ? min(static_cast<size_t>(-_currentCursorLine), savedLines.size())
+        ? min(-_currentCursorLine, historyLineCount())
         : 0;
 
-    if (scrollOffset + 1 < savedLines.size())
+    if (scrollOffset + 1 < historyLineCount())
     {
         auto const i = find_if(
             next(rbegin(savedLines), scrollOffset + 1),
@@ -80,11 +80,11 @@ std::optional<int> ScreenBuffer::findMarkerBackwards(int _currentCursorLine) con
     return nullopt;
 }
 
-std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
+std::optional<int> ScreenBuffer::findPrevMarker(int _scrollOffset) const
 {
-    _scrollOffset = min(_scrollOffset, savedLines.size());
+    _scrollOffset = min(_scrollOffset, historyLineCount());
 
-    if (_scrollOffset + 1 < savedLines.size())
+    if (_scrollOffset + 1 < historyLineCount())
     {
         auto const i = find_if(
             next(rbegin(savedLines), _scrollOffset + 1),
@@ -98,12 +98,12 @@ std::optional<size_t> ScreenBuffer::findPrevMarker(size_t _scrollOffset) const
     return nullopt;
 }
 
-std::optional<size_t> ScreenBuffer::findNextMarker(size_t _scrollOffset) const
+std::optional<int> ScreenBuffer::findNextMarker(int _scrollOffset) const
 {
-    _scrollOffset = min(_scrollOffset, savedLines.size());
-    cursor_pos_t rowNumber = static_cast<cursor_pos_t>(_scrollOffset) - 1;
+    _scrollOffset = min(_scrollOffset, historyLineCount());
+    auto rowNumber = _scrollOffset - 1;
 
-    if (rowNumber < savedLines.size())
+    if (rowNumber < historyLineCount())
         for (auto line = prev(end(savedLines), rowNumber); rowNumber > 0; ++line, --rowNumber)
             if (line->marked)
                 return {rowNumber};
@@ -119,7 +119,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until size_.rows == _newSize.rows.
         auto const extendCount = _newSize.rows - size_.rows;
-        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned int>(std::size(savedLines)));
+        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<int>(std::size(savedLines)));
 
         for_each(
             crispy::times(rowsToTakeFromSavedLines),
@@ -136,7 +136,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         generate_n(
             back_inserter(lines),
             fillLineCount,
-            [=]() { return Line{_newSize.columns, Cell{}}; });
+            [=]() { return Line{static_cast<size_t>(_newSize.columns), Cell{}}; });
     }
     else if (_newSize.rows < size_.rows)
     {
@@ -159,7 +159,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
             // Hard-cut below cursor by the number of lines to shrink.
             lines.resize(_newSize.rows);
 
-        assert(lines.size() == _newSize.rows);
+        assert(lines.size() == static_cast<size_t>(_newSize.rows));
     }
 
     if (_newSize.columns > size_.columns)
@@ -286,7 +286,7 @@ Cell const& ScreenBuffer::absoluteAt(Coordinate const& _coord) const
 
 Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
 {
-    if (_coord.row <= savedLines.size())
+    if (static_cast<size_t>(_coord.row) <= savedLines.size())
         return *next(begin(*next(begin(savedLines), _coord.row - 1)), _coord.column - 1);
     else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(savedLines.size()); rowNr <= size_.rows)
         return at(rowNr, _coord.column);
@@ -298,7 +298,7 @@ Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
 {
     assert(_row >= 1 && _row <= size_.rows);
     assert(_col >= 1 && _col <= size_.columns);
-    assert(size_.rows == lines.size());
+    assert(static_cast<size_t>(size_.rows) == lines.size());
 
     return (*next(begin(lines), _row - 1))[_col - 1];
 }
@@ -312,7 +312,7 @@ Cell& ScreenBuffer::at(Coordinate const& _coord)
 {
     assert(_coord.row >= 1 && _coord.row <= size_.rows);
     assert(_coord.column >= 1 && _coord.column <= size_.columns);
-    assert(size_.rows == lines.size());
+    assert(static_cast<size_t>(size_.rows) == lines.size());
 
     return (*next(begin(lines), _coord.row - 1))[_coord.column - 1];
 }
@@ -369,7 +369,7 @@ void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
     }
 }
 
-void ScreenBuffer::clearAndAdvance(unsigned _offset)
+void ScreenBuffer::clearAndAdvance(int _offset)
 {
     if (_offset == 0)
         return;
@@ -381,7 +381,7 @@ void ScreenBuffer::clearAndAdvance(unsigned _offset)
     {
         assert(n > 0);
         cursor.column += n;
-        for (unsigned i = 0; i < n; ++i)
+        for (auto i = 0; i < n; ++i)
             (currentColumn++)->reset(graphicsRendition, currentHyperlink);
     }
     else if (autoWrap)
@@ -411,7 +411,7 @@ void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t _character)
         assert(n > 0);
         cursor.column += n;
         currentColumn++;
-        for (unsigned i = 1; i < n; ++i)
+        for (int i = 1; i < n; ++i)
             (currentColumn++)->reset(graphicsRendition, currentHyperlink);
         verifyState();
     }
@@ -488,7 +488,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             generate_n(
                 back_inserter(lines),
                 n,
-                [this]() { return Line{size_.columns, Cell{{}, graphicsRendition}}; }
+                [this]() { return Line{static_cast<size_t>(size_.columns), Cell{{}, graphicsRendition}}; }
             );
         }
     }
@@ -744,7 +744,7 @@ void ScreenBuffer::verifyState() const
         ));
     }
 
-    if (size_.rows != lines.size())
+    if (static_cast<size_t>(size_.rows) != lines.size())
         fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines.size(), size_.rows));
 
     // verify cursor positions

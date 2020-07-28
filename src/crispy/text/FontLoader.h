@@ -42,10 +42,10 @@ class FontLoader {
     FontLoader& operator=(FontLoader const&) = delete;
     ~FontLoader();
 
-    FontList load(std::string const& _fontPattern, unsigned _fontSize);
+    FontList load(std::string const& _fontPattern, int _fontSize);
 
   private:
-    Font* loadFromFilePath(std::string const& _filePath, unsigned _fontSize);
+    Font* loadFromFilePath(std::string const& _filePath, int _fontSize);
 
   private:
     std::ostream* logger_;

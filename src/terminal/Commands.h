@@ -25,7 +25,7 @@
 
 namespace terminal {
 
-using cursor_pos_t = unsigned int;
+using cursor_pos_t = int;
 
 /// Screen coordinates between 1..n including.
 struct Coordinate {
@@ -558,7 +558,7 @@ struct MoveCursorToNextTab {};
 ///
 /// Move the active position n tabs backward. (default: 1)
 struct CursorBackwardTab {
-    unsigned count = 1;
+    int count = 1;
 };
 
 /// VPA - Vertical Line Position Absolute
@@ -751,8 +751,8 @@ struct ChangeWindowTitle { std::string title; };
 struct ResizeWindow {
     enum class Unit { Characters, Pixels };
 
-    unsigned int width;
-    unsigned int height;
+    int width;
+    int height;
     Unit unit;
 };
 

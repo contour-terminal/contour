@@ -80,14 +80,14 @@ struct TerminalProfile {
 
     terminal::WindowSize terminalSize;
 
-    std::optional<size_t> maxHistoryLineCount;
-    size_t historyScrollMultiplier;
+    std::optional<int> maxHistoryLineCount;
+    int historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
-    unsigned short fontSize;
+    short fontSize;
     FontSpecList fonts;
 
-    unsigned int tabWidth;
+    int tabWidth;
 
     terminal::ColorProfile colors;
 

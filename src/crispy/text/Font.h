@@ -39,7 +39,7 @@ namespace crispy {
 
     struct Codepoint {
         char32_t value;
-        unsigned cluster;
+        int cluster;
     };
     using CodepointSequence = std::vector<Codepoint>;
 
@@ -141,8 +141,8 @@ constexpr FontStyle& operator|=(FontStyle& lhs, FontStyle rhs)
 }
 
 struct GlyphBitmap {
-    unsigned int width;
-    unsigned int height;
+    int width;
+    int height;
     std::vector<uint8_t> buffer;
 };
 
@@ -150,12 +150,12 @@ class Font;
 
 struct GlyphPosition {
     std::reference_wrapper<Font> font;
-    unsigned int x;
-    unsigned int y;
-    unsigned int glyphIndex;
-    unsigned cluster;
+    int x;
+    int y;
+    uint32_t glyphIndex;
+    int cluster;
 
-    GlyphPosition(Font& _font, unsigned _x, unsigned _y, unsigned _gi, unsigned _cluster) :
+    GlyphPosition(Font& _font, int _x, int _y, uint32_t _gi, int _cluster) :
         font{_font}, x{_x}, y{_y}, glyphIndex{_gi}, cluster{_cluster} {}
 };
 
@@ -166,7 +166,7 @@ using GlyphPositionList = std::vector<GlyphPosition>;
  */
 class Font {
   public:
-    Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, unsigned int _fontSize, std::string _fontPath);
+    Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
     Font(Font&&) noexcept;
@@ -176,41 +176,41 @@ class Font {
     std::string const& filePath() const noexcept { return filePath_; }
     std::size_t hashCode() const noexcept { return hashCode_; }
 
-    void setFontSize(unsigned int _fontSize);
-    unsigned int fontSize() const noexcept { return fontSize_; }
+    void setFontSize(int _fontSize);
+    int fontSize() const noexcept { return fontSize_; }
 
     bool hasColor() const noexcept { return FT_HAS_COLOR(face_); }
 
-    unsigned bitmapWidth() const noexcept { return bitmapWidth_; }
-    unsigned bitmapHeight() const noexcept { return bitmapHeight_; }
-    unsigned lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
-    unsigned maxAdvance() const noexcept { return maxAdvance_; }
-    unsigned baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
+    int bitmapWidth() const noexcept { return bitmapWidth_; }
+    int bitmapHeight() const noexcept { return bitmapHeight_; }
+    int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
+    int maxAdvance() const noexcept { return maxAdvance_; }
+    int baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
 
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    std::optional<GlyphBitmap> loadGlyphByIndex(unsigned int _glyphIndex);
+    std::optional<GlyphBitmap> loadGlyphByIndex(int _glyphIndex);
 
     operator FT_Face () noexcept { return face_; }
     FT_Face operator->() noexcept { return face_; }
 
-    static FT_Face loadFace(std::ostream* _logger,FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize);
+    static FT_Face loadFace(std::ostream* _logger,FT_Library _ft, std::string const& _fontPath, int _fontSize);
 
   private:
-    static bool doSetFontSize(std::ostream* _logger, FT_Face _face, unsigned int _fontSize);
+    static bool doSetFontSize(std::ostream* _logger, FT_Face _face, int _fontSize);
     void updateBitmapDimensions();
 
   private:
     std::ostream* logger_;
     FT_Library ft_;
     FT_Face face_;
-    unsigned int fontSize_ = 0;
+    int fontSize_ = 0;
 
-    unsigned bitmapWidth_ = 0;
-    unsigned bitmapHeight_ = 0;
-    unsigned maxAdvance_;
+    int bitmapWidth_ = 0;
+    int bitmapHeight_ = 0;
+    int maxAdvance_;
 
     std::string filePath_;
     std::size_t hashCode_;
@@ -244,7 +244,7 @@ namespace std {
 
     inline ostream& operator<<(ostream& _os, crispy::text::GlyphPositionList const& _list)
     {
-        unsigned i = 0;
+        int i = 0;
         for (auto const& gp : _list)
         {
             _os << (i ? " " : "") << gp;

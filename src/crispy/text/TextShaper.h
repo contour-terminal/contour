@@ -47,10 +47,10 @@ class TextShaper {
     /// @returns pointer to the shape result
     GlyphPositionList shape(unicode::Script _script,
                             FontList const& _font,
-                            unsigned _advanceX,
-                            size_t _size,
+                            int _advanceX,
+                            int _size,
                             char32_t const* _codepoints,
-                            unsigned const* _clusters,
+                            int const* _clusters,
                             int _clusterGap = 0);
 
     /// Replaces all missing glyphs with the missing-glyph glyph.
@@ -61,13 +61,13 @@ class TextShaper {
 
   private:
     /// Performs text shaping for given text using the given font.
-    bool shape(size_t _size,
+    bool shape(int _size,
                char32_t const* _codepoints,
-               unsigned const* _clusters,
+               int const* _clusters,
                int _clusterGap,
                unicode::Script _script,
                Font& _font,
-               unsigned _advanceX,
+               int _advanceX,
                reference<GlyphPositionList> _result);
 
   private:

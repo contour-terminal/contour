@@ -375,7 +375,7 @@ void Terminal::resizeScreen(WindowSize const& _newWindowSize)
     pty_.resizeScreen(_newWindowSize);
 }
 
-Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept
+Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, int _scrollOffset) const noexcept
 {
     // TODO: unit test case me BEFORE merge, yo !
     auto const row = screen_.historyLineCount() - min(_scrollOffset, screen_.historyLineCount()) + _viewportCoordinate.row;

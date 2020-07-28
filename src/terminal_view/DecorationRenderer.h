@@ -71,7 +71,7 @@ class DecorationRenderer {
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover,
-                       unsigned _lineThickness,
+                       int _lineThickness,
                        float _curlyAmplitude,
                        float _curlyFrequency);
 
@@ -91,7 +91,7 @@ class DecorationRenderer {
     void renderDecoration(Decorator _decoration,
                           cursor_pos_t _row,
                           cursor_pos_t _col,
-                          unsigned _columnCount,
+                          int _columnCount,
                           RGBColor const& _color);
 
     void clearCache();
@@ -110,7 +110,7 @@ class DecorationRenderer {
 
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
-    unsigned lineThickness_ = 1;
+    int lineThickness_ = 1;
     float curlyAmplitude_ = 1.0f;
     float curlyFrequency_ = 1.0f;
 

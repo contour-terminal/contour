@@ -105,8 +105,8 @@ namespace std
 namespace terminal::view {
 
 struct CellSize {
-    unsigned width;
-    unsigned height;
+    int width;
+    int height;
 };
 constexpr bool operator==(CellSize const& a, CellSize const& b) noexcept { return a.width == b.width && a.height == b.height; }
 constexpr bool operator!=(CellSize const& a, CellSize const& b) noexcept { return !(a == b); }
@@ -192,7 +192,7 @@ class TextRenderer {
     cursor_pos_t startColumn_ = 1;
     GraphicsAttributes attributes_ = {};
     std::vector<char32_t> codepoints_{};
-    std::vector<unsigned> clusters_{};
+    std::vector<int> clusters_{};
     unsigned clusterOffset_ = 0;
 
     // text shaping cache

@@ -245,7 +245,7 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
     FontList& font = isEmojiPresentation ? fonts_.emoji
                                          : textFont;
 
-    unsigned const advanceX = fonts_.regular.first.get().maxAdvance();
+    auto const advanceX = fonts_.regular.first.get().maxAdvance();
 
 #if 0 // {{{ debug print
     cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
@@ -262,7 +262,7 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
         std::get<unicode::Script>(_run.properties),
         font,
         advanceX,
-        _run.end - _run.start,
+        static_cast<int>(_run.end - _run.start),
         codepoints_.data() + _run.start,
         clusters_.data() + _run.start,
         -static_cast<int>(clusters_[0])

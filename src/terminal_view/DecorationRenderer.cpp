@@ -61,7 +61,7 @@ DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover,
-                                       unsigned _lineThickness,
+                                       int _lineThickness,
                                        float _curlyAmplitude,
                                        float _curlyFrequency) :
     screenCoordinates_{ _screenCoordinates },
@@ -92,13 +92,13 @@ void DecorationRenderer::rebuild()
     auto const baseline = screenCoordinates_.textBaseline;
 
     { // {{{ underline
-        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto const thickness = max(lineThickness_ * baseline / 3, 1);
         auto const height = baseline;
-        auto const base_y = max((height - thickness) / 2, 0u);
-        auto image = atlas::Buffer(width * height, 0u);
+        auto const base_y = max((height - thickness) / 2, 0);
+        auto image = atlas::Buffer(width * height, 0);
 
-        for (unsigned y = 1; y <= thickness; ++y)
-            for (unsigned x = 0; x < width; ++x)
+        for (int y = 1; y <= thickness; ++y)
+            for (int x = 0; x < width; ++x)
                 image[(base_y + y) * width + x] = 0xFF;
 
         atlas_.insert(
@@ -110,13 +110,13 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ double underline
-        auto const height = max(baseline - 1, 3u);
+        auto const height = max(baseline - 1, 3);
         auto const thickness = height / (3 * lineThickness_);
-        auto image = atlas::Buffer(width * height, 0u);
+        auto image = atlas::Buffer(width * height, 0);
 
-        for (unsigned y = 0; y < thickness; ++y)
+        for (int y = 0; y < thickness; ++y)
         {
-            for (unsigned x = 0; x < width; ++x)
+            for (int x = 0; x < width; ++x)
             {
                 image[y * width + x] = 0xFF;
                 image[(height - 1 - y) * width + x] = 0xFF;
@@ -132,18 +132,18 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = max(static_cast<unsigned>(curlyAmplitude_ * static_cast<float>(screenCoordinates_.textBaseline)), lineThickness_ * 3) - lineThickness_;
-        auto image = atlas::Buffer(width * height, 0u);
+        auto const height = max(static_cast<int>(curlyAmplitude_ * static_cast<float>(screenCoordinates_.textBaseline)), lineThickness_ * 3) - lineThickness_;
+        auto image = atlas::Buffer(width * height, 0);
 
-        for (unsigned x = 0; x < width; ++x)
+        for (int x = 0; x < width; ++x)
         {
             auto const normalizedX = static_cast<double>(x) / static_cast<double>(width);
             auto const sin_x = curlyFrequency_ * normalizedX * 2.0 * M_PI;
             auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
-            auto const y = static_cast<unsigned>(normalizedY * static_cast<float>(height - lineThickness_));
+            auto const y = static_cast<int>(normalizedY * static_cast<float>(height - lineThickness_));
             assert(y < height);
-            for (unsigned yi = 0; yi < lineThickness_; ++yi)
+            for (int yi = 0; yi < lineThickness_; ++yi)
                 image[(y + yi) * width + x] = 0xFF;
         }
 
@@ -156,13 +156,13 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const thickness = max(lineThickness_ * width / 6, 1u);
+        auto const thickness = max(lineThickness_ * width / 6, 1);
         auto const height = thickness;
-        auto image = atlas::Buffer(width * height, 0u);
+        auto image = atlas::Buffer(width * height, 0);
 
-        for (unsigned x = 0; x < width; ++x)
+        for (int x = 0; x < width; ++x)
             if ((x / thickness) % 3 == 1)
-                for (unsigned y = 0; y < height; ++y)
+                for (int y = 0; y < height; ++y)
                     image[y * width + x] = 0xFF;
 
         atlas_.insert(
@@ -176,13 +176,13 @@ void DecorationRenderer::rebuild()
     { // {{{ dashed underline
         // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
         // whereas the middle one is being skipped.
-        auto const thickness = max(lineThickness_ * width / 4, 1u);
+        auto const thickness = max(lineThickness_ * width / 4, 1);
         auto const height = thickness;
-        auto image = atlas::Buffer(width * height, 0u);
+        auto image = atlas::Buffer(width * height, 0);
 
-        for (unsigned x = 0; x < width; ++x)
+        for (int x = 0; x < width; ++x)
             if (fabs(float(x) / float(width) - 0.5f) >= 0.25f)
-                for (unsigned y = 0; y < height; ++y)
+                for (int y = 0; y < height; ++y)
                     image[y * width + x] = 0xFF;
 
         atlas_.insert(
@@ -225,11 +225,11 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ overline
         auto const cellHeight = screenCoordinates_.cellHeight;
-        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
-        auto image = atlas::Buffer(width * cellHeight, 0u);
+        auto const thickness = max(lineThickness_ * baseline / 3, 1);
+        auto image = atlas::Buffer(width * cellHeight, 0);
 
-        for (unsigned y = 0; y < thickness; ++y)
-            for (unsigned x = 0; x < width; ++x)
+        for (int y = 0; y < thickness; ++y)
+            for (int x = 0; x < width; ++x)
                 image[y * width + x] = 0xFF;
 
         atlas_.insert(
@@ -242,11 +242,11 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ crossed-out
         auto const middleCell = screenCoordinates_.cellHeight / 2;
-        auto const thickness = max(lineThickness_ * baseline / 3, 1u);
+        auto const thickness = max(lineThickness_ * baseline / 3, 1);
         auto image = atlas::Buffer(width * middleCell, 0u);
 
-        for (unsigned y = 0; y < thickness; ++y)
-            for (unsigned x = 0; x < width; ++x)
+        for (int y = 0; y < thickness; ++y)
+            for (int x = 0; x < width; ++x)
                 image[y * width + x] = 0xFF;
 
         atlas_.insert(
@@ -318,7 +318,7 @@ optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _
 void DecorationRenderer::renderDecoration(Decorator _decoration,
                                           cursor_pos_t _row,
                                           cursor_pos_t _col,
-                                          unsigned _columnCount,
+                                          int _columnCount,
                                           RGBColor const& _color)
 {
     if (optional<DataRef> const dataRef = getDataRef(_decoration); dataRef.has_value())
@@ -336,7 +336,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
 #else
         auto const y = pos.y() + screenCoordinates_.cellHeight;
 #endif
-        auto const z = 0u;
+        auto const z = 0;
         auto const color = QVector4D(
             static_cast<float>(_color.red) / 255.0f,
             static_cast<float>(_color.green) / 255.0f,

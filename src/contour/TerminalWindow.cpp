@@ -799,8 +799,8 @@ void TerminalWindow::mouseMoveEvent(QMouseEvent* _event)
         auto constexpr MarginTop = 0;
         auto constexpr MarginLeft = 0;
 
-        auto const row = static_cast<unsigned>(1 + (max(_event->y(), 0) - MarginTop) / terminalView_->cellHeight());
-        auto const col = static_cast<unsigned>(1 + (max(_event->x(), 0) - MarginLeft) / terminalView_->cellWidth());
+        auto const row = int{1 + (max(_event->y(), 0) - MarginTop) / terminalView_->cellHeight()};
+        auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / terminalView_->cellWidth()};
         auto const mod = makeModifier(_event->modifiers());
 
         {
@@ -906,7 +906,7 @@ void TerminalWindow::toggleFullScreen()
         setVisibility(QWindow::FullScreen);
 }
 
-bool TerminalWindow::setFontSize(unsigned _fontSize)
+bool TerminalWindow::setFontSize(int _fontSize)
 {
     // cout << fmt::format("TerminalWindow.setFontSize: {} -> {}\n", profile().fontSize, _fontSize);
 
@@ -916,7 +916,7 @@ bool TerminalWindow::setFontSize(unsigned _fontSize)
     if (_fontSize > 100)
         return false;
 
-    terminalView_->setFontSize(static_cast<unsigned>(static_cast<float>(_fontSize) * contentScale()));
+    terminalView_->setFontSize(static_cast<int>(static_cast<float>(_fontSize) * contentScale()));
 
     profile().fontSize = _fontSize;
 

@@ -255,7 +255,7 @@ class Screen {
     }
 
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
-    size_t historyLineCount() const noexcept { return buffer_->historyLineCount(); }
+    int historyLineCount() const noexcept { return buffer_->historyLineCount(); }
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -268,7 +268,7 @@ class Screen {
     void write(std::u32string_view const& _text);
 
     /// Renders the full screen by passing every grid cell to the callback.
-    void render(Renderer const& _renderer, size_t _scrollOffset = 0) const;
+    void render(Renderer const& _renderer, int _scrollOffset = 0) const;
 
     /// Renders a single text line.
     std::string renderTextLine(cursor_pos_t _row) const { return buffer_->renderTextLine(_row); }
@@ -375,10 +375,10 @@ class Screen {
     void resize(WindowSize const& _newSize);
 
     /// {{{ viewport management API
-    size_t scrollOffset() const noexcept { return scrollOffset_; }
+    int scrollOffset() const noexcept { return scrollOffset_; }
     bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
-    bool scrollUp(size_t _numLines);
-    bool scrollDown(size_t _numLines);
+    bool scrollUp(int _numLines);
+    bool scrollDown(int _numLines);
     bool scrollToTop();
     bool scrollToBottom();
     bool scrollMarkUp();
@@ -434,14 +434,14 @@ class Screen {
     // Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept
     {
-        auto const y = static_cast<cursor_pos_t>(currentBuffer().savedLines.size() + _coord.row - scrollOffset_);
+        auto const y = currentBuffer().historyLineCount() + _coord.row - scrollOffset_;
         return absoluteAt(Coordinate{y, _coord.column});
     }
 
     // Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(Coordinate const& _coord) const noexcept
     {
-        auto const y = static_cast<cursor_pos_t>(currentBuffer().savedLines.size() + _coord.row - scrollOffset_);
+        auto const y = currentBuffer().historyLineCount() + _coord.row - scrollOffset_;
         return absoluteAt(Coordinate{y, _coord.column});
     }
 
@@ -474,7 +474,7 @@ class Screen {
     Margin const& margin() const noexcept { return buffer_->margin_; }
     ScreenBuffer::Lines const& scrollbackLines() const noexcept { return buffer_->savedLines; }
 
-    void setTabWidth(unsigned int _value)
+    void setTabWidth(int _value)
     {
         // TODO: Find out if we need to have that attribute per buffer or if having it across buffers is sufficient.
         primaryBuffer_.tabWidth = _value;
@@ -492,12 +492,12 @@ class Screen {
 
     std::string const& windowTitle() const noexcept { return windowTitle_; }
 
-    std::optional<size_t> findPrevMarker(size_t _currentScrollOffset) const
+    std::optional<int> findPrevMarker(int _currentScrollOffset) const
     {
         return buffer_->findPrevMarker(_currentScrollOffset);
     }
 
-    std::optional<size_t> findNextMarker(size_t _currentScrollOffset) const
+    std::optional<int> findNextMarker(int _currentScrollOffset) const
     {
         return buffer_->findNextMarker(_currentScrollOffset);
     }
@@ -557,7 +557,7 @@ class Screen {
 
     CommandBuilder commandBuilder_;
     Parser parser_;
-    unsigned long instructionCounter_ = 0;
+    int64_t instructionCounter_ = 0;
 
     VTType terminalId_ = VTType::VT525;
 
@@ -574,7 +574,7 @@ class Screen {
     SynchronizedCommandExecutor synchronizedExecutor_;
     CommandVisitor* commandExecutor_ = nullptr;
 
-    size_t scrollOffset_ = 0;
+    int scrollOffset_ = 0;
 
     std::unique_ptr<Selector> selector_;
 };

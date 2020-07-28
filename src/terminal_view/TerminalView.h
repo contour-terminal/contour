@@ -78,8 +78,8 @@ class TerminalView : private Terminal::Events {
     TerminalView& operator=(TerminalView&&) = delete;
     ~TerminalView() = default;
 
-    size_t cellHeight() const noexcept { return renderer_.cellHeight(); }
-    size_t cellWidth() const noexcept { return renderer_.cellWidth(); }
+    int cellHeight() const noexcept { return renderer_.cellHeight(); }
+    int cellWidth() const noexcept { return renderer_.cellWidth(); }
 
     /// Resizes the terminal view to the given number of pixels.
     ///
@@ -89,7 +89,7 @@ class TerminalView : private Terminal::Events {
     void resize(unsigned _width, unsigned _height);
 
     void setFont(FontConfig const& _fonts);
-    bool setFontSize(unsigned int _fontSize);
+    bool setFontSize(int _fontSize);
     bool setTerminalSize(WindowSize const& _newSize);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }

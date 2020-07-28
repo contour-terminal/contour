@@ -584,9 +584,9 @@ bool InputGenerator::generateMouse(MouseButton _button,
                 append("\033[<");
                 append(static_cast<unsigned>(button | modifier));
                 append(';');
-                append(_column);
+                append(static_cast<unsigned>(_column));
                 append(';');
-                append(_row);
+                append(static_cast<unsigned>(_row));
                 append(_eventType != MouseEventType::Release ? 'M' : 'm');
             }
             return true;
@@ -595,9 +595,9 @@ bool InputGenerator::generateMouse(MouseButton _button,
                 append("\033[");
                 append(static_cast<unsigned>(button | modifier));
                 append(';');
-                append(_column);
+                append(static_cast<unsigned>(_column));
                 append(';');
-                append(_row);
+                append(static_cast<unsigned>(_row));
                 append('M');
             }
             return true;

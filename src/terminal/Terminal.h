@@ -99,9 +99,9 @@ class Terminal : public ScreenEvents {
     // {{{ screen proxy
     void setLogTraceOutput(bool _enabled) { screen_.setLogTrace(_enabled); }
     void setLogRawOutput(bool _enabled) { screen_.setLogRaw(_enabled); }
-    void setTabWidth(unsigned int _tabWidth) { screen_.setTabWidth(_tabWidth); }
+    void setTabWidth(int _tabWidth) { screen_.setTabWidth(_tabWidth); }
     void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount) { screen_.setMaxHistoryLineCount(_maxHistoryLineCount); }
-    size_t historyLineCount() const noexcept { return screen_.historyLineCount(); }
+    int historyLineCount() const noexcept { return screen_.historyLineCount(); }
     std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
     ScreenBuffer::Type screenBufferType() const noexcept { return screen_.bufferType(); }
 
@@ -115,7 +115,7 @@ class Terminal : public ScreenEvents {
     Cell const* absoluteAt(Coordinate const& _coord) const;
 
     /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
-    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, size_t _scrollOffset) const noexcept;
+    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, int _scrollOffset) const noexcept;
 
     /// @returns absolute coordinate of given _viewportCoordinate at the current viewport scroll offset.
     Coordinate absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept { return absoluteCoordinate(_viewportCoordinate, screen_.scrollOffset()); }
@@ -127,7 +127,7 @@ class Terminal : public ScreenEvents {
 
     // viewport management
     bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept { return screen_.isAbsoluteLineVisible(_row); }
-    size_t scrollOffset() const noexcept { return screen_.scrollOffset(); }
+    int scrollOffset() const noexcept { return screen_.scrollOffset(); }
     bool scrollUp(size_t _numLines) { return screen_.scrollUp(_numLines); }
     bool scrollDown(size_t _numLines) { return screen_.scrollDown(_numLines); }
     bool scrollToTop() { return screen_.scrollToTop(); }

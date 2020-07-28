@@ -63,14 +63,14 @@ class Renderer {
              ShaderConfig const& _textShaderConfig,
              QMatrix4x4 const& _projectionMatrix);
 
-    unsigned cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
-    unsigned cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
+    int cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
+    int cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
     CellSize cellSize() const noexcept { return CellSize{cellWidth(), cellHeight()}; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setFont(FontConfig const& _fonts);
-    bool setFontSize(unsigned int _fontSize);
+    bool setFontSize(int _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)

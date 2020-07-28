@@ -36,7 +36,7 @@ class CursorRenderer {
     void setShape(CursorShape _shape);
     void setColor(QVector4D const& _color);
 
-    void render(QPoint _pos, unsigned _columnWidth);
+    void render(QPoint _pos, int _columnWidth);
     void clearCache();
 
   private:
@@ -53,7 +53,7 @@ class CursorRenderer {
 
     CursorShape shape_;
     QVector4D color_;
-    unsigned columnWidth_;
+    int columnWidth_;
 };
 
 } // namespace terminal::view

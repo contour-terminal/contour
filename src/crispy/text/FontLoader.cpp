@@ -104,7 +104,7 @@ FontLoader::~FontLoader()
     FT_Done_FreeType(ft_);
 }
 
-FontList FontLoader::load(string const& _fontPattern, unsigned _fontSize)
+FontList FontLoader::load(string const& _fontPattern, int _fontSize)
 {
     vector<string> const filePaths = getFontFilePaths(_fontPattern);
 
@@ -131,7 +131,7 @@ FontList FontLoader::load(string const& _fontPattern, unsigned _fontSize)
     return {*primaryFont, fallbackList};
 }
 
-Font* FontLoader::loadFromFilePath(std::string const& _path, unsigned _fontSize)
+Font* FontLoader::loadFromFilePath(std::string const& _path, int _fontSize)
 {
     if (auto k = fonts_.find(_path); k != fonts_.end())
     {

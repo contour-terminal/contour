@@ -18,8 +18,8 @@
 namespace terminal {
 
 struct [[nodiscard]] WindowSize {
-    unsigned int columns;
-	unsigned int rows;
+    int columns;
+	int rows;
 };
 
 constexpr bool operator==(WindowSize const& _a, WindowSize const& _b) noexcept

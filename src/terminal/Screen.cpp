@@ -141,7 +141,7 @@ void Screen::write(std::u32string_view const& _text)
     }
 }
 
-void Screen::render(Renderer const& _render, size_t _scrollOffset) const
+void Screen::render(Renderer const& _render, int _scrollOffset) const
 {
     if (!_scrollOffset)
     {
@@ -155,14 +155,14 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
     }
     else
     {
-        _scrollOffset = min(_scrollOffset, buffer_->savedLines.size());
-        auto const historyLineCount = min(size_.rows, static_cast<unsigned int>(_scrollOffset));
+        _scrollOffset = min(_scrollOffset, buffer_->historyLineCount());
+        auto const historyLineCount = min(size_.rows, static_cast<int>(_scrollOffset));
         auto const mainLineCount = size_.rows - historyLineCount;
 
         cursor_pos_t rowNumber = 1;
         for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
         {
-            if (line->size() < size_.columns)
+            if (static_cast<int>(line->size()) < size_.columns)
                 line->resize(size_.columns);
 
             auto column = begin(*line);
@@ -181,7 +181,7 @@ void Screen::render(Renderer const& _render, size_t _scrollOffset) const
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
-    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->savedLines.size());
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->historyLineCount());
     string line;
     line.reserve(size_.columns);
     auto const lineIter = next(buffer_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
@@ -216,7 +216,7 @@ bool Screen::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
         && _row <= historyLineCount() - scrollOffset_ + size().rows;
 }
 
-bool Screen::scrollUp(size_t _numLines)
+bool Screen::scrollUp(int _numLines)
 {
     if (isAlternateScreen()) // TODO: make configurable
         return false;
@@ -230,7 +230,7 @@ bool Screen::scrollUp(size_t _numLines)
         return false;
 }
 
-bool Screen::scrollDown(size_t _numLines)
+bool Screen::scrollDown(int _numLines)
 {
     if (isAlternateScreen()) // TODO: make configurable
         return false;
@@ -786,7 +786,7 @@ void Screen::operator()(CursorBackwardTab const& v)
 
     if (!buffer_->tabs.empty())
     {
-        for (unsigned k = 0; k < v.count; ++k)
+        for (int k = 0; k < v.count; ++k)
         {
             auto const i = std::find_if(rbegin(buffer_->tabs), rend(buffer_->tabs),
                                         [&](auto tabPos) -> bool {
@@ -1205,7 +1205,7 @@ void Screen::operator()(RequestTabStops const&)
     else if (buffer_->tabWidth != 0)
     {
         dcs << buffer_->tabWidth + 1;
-        for (unsigned column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
+        for (int column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
             dcs << '/' << column;
     }
     dcs << '\x5c'; // ST

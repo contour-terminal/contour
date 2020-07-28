@@ -39,8 +39,8 @@ struct FunctionDefinition { // TODO: rename Function
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
-    uint32_t minimumParameters; // (4 bits) 0..7
-    uint32_t maximumParameters; // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
+    int32_t minimumParameters;  // (4 bits) 0..7
+    int32_t maximumParameters;  // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
 
     VTType conformanceLevel;
     std::string_view mnemonic;
@@ -99,7 +99,7 @@ struct FunctionSelector
     /// an optional value between 0x3C .. 0x3F
     char leader;
     /// number of arguments supplied
-    unsigned argc;
+    int argc;
     /// an optional intermediate character between (0x20 .. 0x2F)
     char intermediate;
     /// between 0x40 .. 0x7F
@@ -135,7 +135,7 @@ constexpr int compare(FunctionSelector const& a, FunctionDefinition const& b) no
 /// Helps constructing VT functions as they're being parsed by the VT parser.
 class Sequence {
   public:
-    using Parameter = unsigned int;
+    using Parameter = int;
     using ParameterList = std::vector<std::vector<Parameter>>;
     using Intermediaries = std::string;
 
@@ -183,7 +183,7 @@ class Sequence {
         switch (category_)
         {
             case FunctionCategory::OSC:
-                return FunctionSelector{category_, 0, static_cast<unsigned>(parameters_[0][0]), 0, 0};
+                return FunctionSelector{category_, 0, parameters_[0][0], 0, 0};
             default:
             {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
@@ -191,7 +191,7 @@ class Sequence {
                     ? static_cast<char>(intermediateCharacters_[0])
                     : char{};
 
-                return FunctionSelector{category_, leaderSymbol_, static_cast<unsigned>(parameters_.size()), intermediate, finalChar_};
+                return FunctionSelector{category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_};
             }
         }
     }
@@ -219,14 +219,14 @@ class Sequence {
         return param_opt(_index).value_or(_defaultValue);
     }
 
-    unsigned int param(size_t _index) const noexcept
+    int param(size_t _index) const noexcept
     {
         assert(_index < parameters_.size());
         assert(0 < parameters_[_index].size());
         return parameters_[_index][0];
     }
 
-    unsigned int subparam(size_t _index, size_t _subIndex) const noexcept
+    int subparam(size_t _index, size_t _subIndex) const noexcept
     {
         assert(_index < parameters_.size());
         assert(_subIndex + 1 < parameters_[_index].size());
@@ -241,7 +241,7 @@ namespace detail // {{{
         return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
     }
 
-    constexpr auto OSC(unsigned _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto OSC(int _code, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
     }
@@ -251,7 +251,7 @@ namespace detail // {{{
         return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
     }
 
-    constexpr auto CSI(std::optional<char> _leader, unsigned _argc0, unsigned _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto CSI(std::optional<char> _leader, int _argc0, int _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         // TODO: static_assert on _leader/_intermediate range-or-null
         return FunctionDefinition{
@@ -518,7 +518,7 @@ inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectControl(char _leader, unsigned _argc, char _intermediate, char _final)
+inline FunctionDefinition const* selectControl(char _leader, int _argc, char _intermediate, char _final)
 {
     return select({FunctionCategory::CSI, _leader, _argc, _intermediate, _final});
 }
@@ -530,7 +530,7 @@ inline FunctionDefinition const* selectControl(char _leader, unsigned _argc, cha
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectOSCommand(unsigned _id)
+inline FunctionDefinition const* selectOSCommand(int _id)
 {
     return select({FunctionCategory::OSC, 0, _id, 0, 0});
 }

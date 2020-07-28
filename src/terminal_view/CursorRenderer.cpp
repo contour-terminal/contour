@@ -125,13 +125,13 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Underscore
-        auto const thickness = max(LineThickness * baseline / 3, 1u);
+        auto const thickness = max(LineThickness * baseline / 3, 1);
         auto const height = baseline;
-        auto const base_y = max((height - thickness) / 2, 0u);
-        auto image = crispy::atlas::Buffer(width * height, 0u);
+        auto const base_y = max((height - thickness) / 2, 0);
+        auto image = crispy::atlas::Buffer(width * height, 0);
 
-        for (unsigned y = 1; y <= thickness; ++y)
-            for (unsigned x = 0; x < width; ++x)
+        for (int y = 1; y <= thickness; ++y)
+            for (int x = 0; x < width; ++x)
                 image[(base_y + y) * width + x] = 0xFF;
 
         textureAtlas_.insert(
@@ -143,13 +143,13 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Bar
-        auto const thickness = max(LineThickness * baseline / 3, 1u);
+        auto const thickness = max(LineThickness * baseline / 3, 1);
         auto const height = screenCoordinates_.cellHeight;
-        //auto const base_y = max((height - thickness) / 2, 0u);
-        auto image = crispy::atlas::Buffer(width * height, 0u);
+        //auto const base_y = max((height - thickness) / 2, 0);
+        auto image = crispy::atlas::Buffer(width * height, 0);
 
-        for (unsigned x = 0; x < thickness; ++x)
-            for (unsigned y = 0; y < height; ++y)
+        for (int x = 0; x < thickness; ++x)
+            for (int y = 0; y < height; ++y)
                 image[y * width + x] = 0xFF;
 
         textureAtlas_.insert(
@@ -163,13 +163,13 @@ void CursorRenderer::rebuild()
     { // {{{ CursorShape::Rectangle
         auto const height = screenCoordinates_.cellHeight;
         auto image = crispy::atlas::Buffer(width * height, 0xFFu);
-        auto const thickness = max(width / 12, 1u);
+        auto const thickness = max(width / 12, 1);
 
         auto const innerWidth = width - 2 * thickness;
         auto const innerHeight = height - 2 * thickness;
 
-        for (unsigned y = thickness; y <= innerHeight; ++y)
-            for (unsigned x = thickness; x <= innerWidth; ++x)
+        for (int y = thickness; y <= innerHeight; ++y)
+            for (int x = thickness; x <= innerWidth; ++x)
                 image[y * width + x] = 0;
 
         textureAtlas_.insert(
@@ -196,7 +196,7 @@ optional<CursorRenderer::DataRef> CursorRenderer::getDataRef(CursorShape _shape)
     return nullopt;
 }
 
-void CursorRenderer::render(QPoint _pos, unsigned _columnWidth)
+void CursorRenderer::render(QPoint _pos, int _columnWidth)
 {
     if (columnWidth_ != _columnWidth)
     {

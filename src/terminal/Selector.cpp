@@ -84,7 +84,7 @@ bool Selector::extend(Coordinate const& _coord)
 
     auto const coord = Coordinate{
         _coord.row,
-        clamp(_coord.column, 1u, columnCount_)
+        clamp(_coord.column, 1, columnCount_)
     };
 
     state_ = State::InProgress;
@@ -254,7 +254,7 @@ vector<Selector::Range> Selector::lines() const
 {
     auto [result, from, to] = prepare(*this);
 
-    for (cursor_pos_t row = 0; row < result.size(); ++row)
+    for (cursor_pos_t row = 0; row < static_cast<int>(result.size()); ++row)
     {
         result[row] = Range{
             from.row + row,
@@ -270,7 +270,7 @@ vector<Selector::Range> Selector::rectangular() const
 {
     auto [result, from, to] = prepare(*this);
 
-    for (cursor_pos_t row = 0; row < result.size(); ++row)
+    for (cursor_pos_t row = 0; row < static_cast<int>(result.size()); ++row)
     {
         result[row] = Range{
             from.row + row,

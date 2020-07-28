@@ -98,7 +98,7 @@ void Renderer::setFont(FontConfig const& _fonts)
     textRenderer_.setFont(_fonts);
 }
 
-bool Renderer::setFontSize(unsigned int _fontSize)
+bool Renderer::setFontSize(int _fontSize)
 {
     if (_fontSize == fonts_.regular.first.get().fontSize())
         return false;

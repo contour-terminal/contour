@@ -86,7 +86,7 @@ class TerminalWindow :
     bool fullscreen() const;
     void toggleFullScreen();
 
-    bool setFontSize(unsigned _fontSize);
+    bool setFontSize(int _fontSize);
     std::string extractSelectionText();
     void spawnNewTerminal(std::string const& _profileName);
 

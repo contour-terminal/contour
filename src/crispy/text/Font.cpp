@@ -47,13 +47,13 @@ namespace { // {{{ helper functions
         return "(Unknown error)";
     }
 
-    unsigned computeMaxAdvance(FT_Face _face)
+    int computeMaxAdvance(FT_Face _face)
     {
         if (FT_Load_Char(_face, 'M', FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)
             return _face->glyph->advance.x >> 6;
 
-        unsigned long long maxAdvance = 0;
-        unsigned count = 0;
+        long long maxAdvance = 0;
+        int count = 0;
         for (FT_Long glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
         {
             if (FT_Load_Glyph(_face, glyphIndex, FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)// FT_LOAD_BITMAP_METRICS_ONLY);
@@ -63,13 +63,13 @@ namespace { // {{{ helper functions
             }
         }
         if (count != 0)
-            return static_cast<unsigned>(maxAdvance / count);
+            return static_cast<int>(maxAdvance / count);
 
         return 8; // What else would it be.
     }
 } // }}}
 
-FT_Face Font::loadFace(ostream* _logger, FT_Library _ft, std::string const& _fontPath, unsigned int _fontSize)
+FT_Face Font::loadFace(ostream* _logger, FT_Library _ft, std::string const& _fontPath, int _fontSize)
 {
     FT_Face face{};
     if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face))
@@ -89,7 +89,7 @@ FT_Face Font::loadFace(ostream* _logger, FT_Library _ft, std::string const& _fon
     return nullptr;
 }
 
-Font::Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, unsigned int _fontSize, std::string _fontPath) :
+Font::Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath) :
     logger_{ _logger },
     ft_{ _ft },
     face_{ _face },
@@ -154,7 +154,7 @@ Font::~Font()
 
 #define LIBTERMINAL_VIEW_NATURAL_COORDS 1
 
-optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
+optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
 {
     FT_Int32 flags = FT_LOAD_DEFAULT;
     if (FT_HAS_COLOR(face_))
@@ -190,8 +190,8 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
         if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
             return {GlyphBitmap{}};
 
-    auto const width = face_->glyph->bitmap.width;
-    auto const height = face_->glyph->bitmap.rows;
+    auto const width = static_cast<int>(face_->glyph->bitmap.width);
+    auto const height = static_cast<int>(face_->glyph->bitmap.rows);
     auto const buffer = face_->glyph->bitmap.buffer;
 
     vector<uint8_t> bitmap;
@@ -199,8 +199,8 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
     {
         auto const pitch = face_->glyph->bitmap.pitch;
         bitmap.resize(height * width);
-        for (unsigned i = 0; i < height; ++i)
-            for (unsigned j = 0; j < face_->glyph->bitmap.width; ++j)
+        for (int i = 0; i < height; ++i)
+            for (int j = 0; j < width; ++j)
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
                 bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
 #else
@@ -213,7 +213,7 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
         auto t = bitmap.begin();
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
         auto s = buffer;
-        for (unsigned i = 0; i < width * height; ++i)
+        for (int i = 0; i < width * height; ++i)
         {
             // BGRA -> RGBA
             *t++ = s[2];
@@ -223,10 +223,10 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
             s += 4;
         }
 #else
-        for (unsigned y = 0; y < height; ++y)
+        for (int y = 0; y < height; ++y)
         {
             auto s = buffer + (height - y - 1) * width * 4;
-            for (unsigned x = 0; x < width * 4; x += 4)
+            for (int x = 0; x < width * 4; x += 4)
             {
                 // BGRA -> RGBA
                 *t++ = s[2];
@@ -246,7 +246,7 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(unsigned int _glyphIndex)
     }};
 }
 
-bool Font::doSetFontSize(ostream* _logger, FT_Face _face, unsigned int _fontSize)
+bool Font::doSetFontSize(ostream* _logger, FT_Face _face, int _fontSize)
 {
     if (FT_HAS_COLOR(_face))
     {
@@ -269,7 +269,7 @@ bool Font::doSetFontSize(ostream* _logger, FT_Face _face, unsigned int _fontSize
     return true;
 }
 
-void Font::setFontSize(unsigned int _fontSize)
+void Font::setFontSize(int _fontSize)
 {
     if (fontSize_ != _fontSize && doSetFontSize(logger_, face_, _fontSize))
     {
