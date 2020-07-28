@@ -141,44 +141,6 @@ void Screen::write(std::u32string_view const& _text)
     }
 }
 
-void Screen::render(Renderer const& _render, int _scrollOffset) const
-{
-    if (!_scrollOffset)
-    {
-        for_each(
-            times(1, size_.rows) * times(1, size_.columns),
-            [&](auto pos) {
-                auto const [row, col] = pos;
-                _render(row, col, at({row, col}));
-            }
-        );
-    }
-    else
-    {
-        _scrollOffset = min(_scrollOffset, buffer_->historyLineCount());
-        auto const historyLineCount = min(size_.rows, static_cast<int>(_scrollOffset));
-        auto const mainLineCount = size_.rows - historyLineCount;
-
-        cursor_pos_t rowNumber = 1;
-        for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
-        {
-            if (static_cast<int>(line->size()) < size_.columns)
-                line->resize(size_.columns);
-
-            auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
-                _render(rowNumber, colNumber, *column);
-        }
-
-        for (auto line = begin(buffer_->lines); line != next(begin(buffer_->lines), mainLineCount); ++line, ++rowNumber)
-        {
-            auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
-                _render(rowNumber, colNumber, *column);
-        }
-    }
-}
-
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
     assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->historyLineCount());
@@ -199,7 +161,6 @@ void Screen::renderSelection(terminal::Screen::Renderer const& _render) const
     if (selector_)
         selector_->render(_render);
 }
-
 
 vector<Selector::Range> Screen::selection() const
 {

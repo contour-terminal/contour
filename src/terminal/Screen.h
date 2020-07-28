@@ -26,6 +26,9 @@
 #include <terminal/ScreenBuffer.h>
 #include <terminal/ScreenEvents.h>
 
+#include <crispy/algorithm.h>
+#include <crispy/times.h>
+
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/width.h>
 #include <unicode/utf8.h>
@@ -268,7 +271,8 @@ class Screen {
     void write(std::u32string_view const& _text);
 
     /// Renders the full screen by passing every grid cell to the callback.
-    void render(Renderer const& _renderer, int _scrollOffset = 0) const;
+    template <typename RendererT>
+    void render(RendererT _renderer, int _scrollOffset = 0) const;
 
     /// Renders a single text line.
     std::string renderTextLine(cursor_pos_t _row) const { return buffer_->renderTextLine(_row); }
@@ -567,5 +571,48 @@ class Screen {
 
     std::unique_ptr<Selector> selector_;
 };
+
+template <typename RendererT>
+void Screen::render(RendererT _render, int _scrollOffset) const
+{
+    if (!_scrollOffset)
+    {
+        crispy::for_each(
+            crispy::times(1, size_.rows) * crispy::times(1, size_.columns),
+            [&](auto const& _pos) {
+                auto const [row, col] = _pos;
+                auto const pos = Coordinate{row, col};
+                _render({row, col}, at(pos));
+            }
+        );
+    }
+    else
+    {
+        _scrollOffset = std::min(_scrollOffset, buffer_->historyLineCount());
+        auto const historyLineCount = std::min(size_.rows, static_cast<int>(_scrollOffset));
+        auto const mainLineCount = size_.rows - historyLineCount;
+
+        cursor_pos_t rowNumber = 1;
+
+        // render first part from history
+        for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
+        {
+            if (static_cast<int>(line->size()) < size_.columns)
+                line->resize(size_.columns);
+
+            auto column = begin(*line);
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+                _render({rowNumber, colNumber}, *column);
+        }
+
+        // render second part from main screen buffer
+        for (auto line = begin(buffer_->lines); line != next(begin(buffer_->lines), mainLineCount); ++line, ++rowNumber)
+        {
+            auto column = begin(*line);
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+                _render({rowNumber, colNumber}, *column);
+        }
+    }
+}
 
 }  // namespace terminal
