@@ -1239,14 +1239,16 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     screen(SetMode{Mode::AutoWrap, false});
     screen(SaveCursor{});
 
+    // mutate the cursor's position, autowrap and origin flags
     screen(MoveCursorTo{3, 3});
     screen(SetMode{Mode::AutoWrap, true});
     screen(SetMode{Mode::Origin, true});
 
+    // restore cursor and see if the changes have been reverted
     screen(RestoreCursor{});
     CHECK(screen.cursorPosition() == Coordinate{1, 1});
-    CHECK(screen.isModeEnabled(Mode::AutoWrap) == false);
-    CHECK(screen.isModeEnabled(Mode::Origin) == false);
+    CHECK_FALSE(screen.isModeEnabled(Mode::AutoWrap));
+    CHECK_FALSE(screen.isModeEnabled(Mode::Origin));
 }
 
 TEST_CASE("Index_outside_margin", "[screen]")
@@ -2067,26 +2069,30 @@ TEST_CASE("findPrevMarker", "[screen]")
 //     REQUIRE_FALSE(screen.findMarkerBackwards(6).has_value()); // overflow
 //
 //     SECTION("no marks") {
-//         screen.write("1abc\r\n"sv);
-//         screen.write("2def\r\n"sv);
-//         screen.write("3ghi\r\n"sv);
-//         screen.write("4jkl\r\n"sv);
-//         screen.write("5mno\r\n"sv);
-//         screen.write("6pqr\r\n"sv);
+//         screen.write("1abc"sv);
+//         screen.write("2def"sv);
+//         screen.write("3ghi"sv);
+//         screen.write("4jkl"sv);
+//         screen.write("5mno"sv);
+//         screen.write("6pqr"sv);
 //
-//         auto mark = screen.findMarkerBackwards(screen.size().rows);
+//         REQUIRE(screen.historyLineCount() == 3);
+//
+//         auto& sb = screen.currentBuffer();
+//
+//         auto mark = sb.findMarkerBackwards(screen.size().rows);
 //         REQUIRE_FALSE(mark.has_value());
 //
 //         // test one line beyond history line count
-//         mark = screen.findPrevMarker(screen.historyLineCount());
+//         mark = sb.findPrevMarker(-3);
 //         REQUIRE_FALSE(mark.has_value());
 //
 //         // test last history line
-//         mark = screen.findPrevMarker(-(screen.historyLineCount() - 1));
+//         mark = screen.findPrevMarker(-2);
 //         REQUIRE_FALSE(mark.has_value());
 //
 //         // test second-last history line
-//         mark = screen.findPrevMarker(screen.historyLineCount() - 2);
+//         mark = screen.findPrevMarker(-1);
 //         REQUIRE_FALSE(mark.has_value());
 //
 //         // test first history line

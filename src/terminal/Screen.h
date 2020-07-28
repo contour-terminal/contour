@@ -375,6 +375,11 @@ class Screen {
     void resetSoft();
     void resetHard();
 
+    // for DECSC and DECRC
+    void setMode(Mode _mode, bool _enabled);
+    void saveCursor();
+    void restoreCursor();
+
     WindowSize const& size() const noexcept { return size_; }
     void resize(WindowSize const& _newSize);
 
@@ -440,10 +445,7 @@ class Screen {
 
     bool isModeEnabled(Mode m) const noexcept
     {
-        if (m == Mode::UseAlternateScreen)
-            return isAlternateScreen();
-        else
-            return buffer_->enabledModes_.find(m) != end(buffer_->enabledModes_);
+        return modes_.enabled(m);
     }
 
     bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::Origin); }
@@ -526,7 +528,20 @@ class Screen {
     }
 
   private:
+    // Savable states for DECSC & DECRC
+    struct SavedCursor {
+        Coordinate cursorPosition;
+        GraphicsAttributes graphicsRendition{};
+        // TODO: CharacterSet for GL and GR
+        bool autowrap = false;
+        bool originMode = false;
+        // TODO: Selective Erase Attribute (DECSCA)
+        // TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
+    };
+
     ScreenEvents& eventListener_;
+
+    std::stack<SavedCursor> savedCursors_{};
 
     Logger const logger_;
     bool logRaw_ = false;
@@ -538,6 +553,8 @@ class Screen {
     int64_t instructionCounter_ = 0;
 
     VTType terminalId_ = VTType::VT525;
+
+    Modes modes_;
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;

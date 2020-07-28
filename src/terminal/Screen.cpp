@@ -58,8 +58,9 @@ Screen::Screen(WindowSize const& _size,
         ref(commandBuilder_),
         [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
     },
-    primaryBuffer_{ ScreenBuffer::Type::Main, _size, _maxHistoryLineCount },
-    alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, nullopt },
+    modes_{},
+    primaryBuffer_{ ScreenBuffer::Type::Main, _size, modes_, _maxHistoryLineCount },
+    alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, modes_, nullopt },
     buffer_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
@@ -251,6 +252,33 @@ bool Screen::scrollToBottom()
 // }}}
 
 // {{{ others
+void Screen::saveCursor()
+{
+    // https://vt100.net/docs/vt510-rm/DECSC.html
+
+    // TODO: character sets
+    // TODO: selective erase attribute
+    // TODO: SS2/SS3 states
+    savedCursors_.emplace(SavedCursor{
+        realCursorPosition(),
+        currentBuffer().graphicsRendition,
+        isModeEnabled(Mode::AutoWrap),
+        isModeEnabled(Mode::Origin)
+    });
+}
+
+void Screen::restoreCursor()
+{
+    if (!savedCursors_.empty())
+    {
+        auto const& saved = savedCursors_.top();
+        moveCursorTo(saved.cursorPosition);
+        setMode(Mode::AutoWrap, saved.autowrap);
+        setMode(Mode::Origin, saved.originMode);
+        savedCursors_.pop();
+    }
+}
+
 void Screen::resetSoft()
 {
     (*this)(SetMode{Mode::BatchedRendering, false});
@@ -788,12 +816,12 @@ void Screen::operator()(CursorBackwardTab const& v)
 
 void Screen::operator()(SaveCursor const&)
 {
-    buffer_->saveState();
+    saveCursor();
 }
 
 void Screen::operator()(RestoreCursor const&)
 {
-    buffer_->restoreState();
+    restoreCursor();
 }
 
 void Screen::operator()(Index const&)
@@ -938,12 +966,19 @@ void Screen::operator()(SetMark const&)
 
 void Screen::operator()(SetMode const& v)
 {
-    buffer_->setMode(v.mode, v.enable);
+    setMode(v.mode, v.enable);
+}
 
-    switch (v.mode)
+void Screen::setMode(Mode _mode, bool _enable)
+{
+    modes_.set(_mode, _enable);
+
+    buffer_->setMode(_mode, _enable);
+
+    switch (_mode)
     {
         case Mode::BatchedRendering:
-            if (v.enable)
+            if (_enable)
                 commandExecutor_ = &synchronizedExecutor_;
             else
             {
@@ -952,23 +987,23 @@ void Screen::operator()(SetMode const& v)
             }
             break;
         case Mode::UseAlternateScreen:
-            if (v.enable)
+            if (_enable)
                 setBuffer(ScreenBuffer::Type::Alternate);
             else
                 setBuffer(ScreenBuffer::Type::Main);
             break;
         case Mode::UseApplicationCursorKeys:
-            eventListener_.useApplicationCursorKeys(v.enable);
+            eventListener_.useApplicationCursorKeys(_enable);
             if (isAlternateScreen())
             {
-                if (v.enable)
+                if (_enable)
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             }
             break;
         case Mode::BracketedPaste:
-            eventListener_.setBracketedPaste(v.enable);
+            eventListener_.setBracketedPaste(_enable);
             break;
         case Mode::MouseSGR:
             eventListener_.setMouseTransport(MouseTransport::SGR);
@@ -980,13 +1015,13 @@ void Screen::operator()(SetMode const& v)
             eventListener_.setMouseTransport(MouseTransport::URXVT);
             break;
         case Mode::MouseAlternateScroll:
-            if (v.enable)
+            if (_enable)
                 eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
             else
                 eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             break;
         case Mode::FocusTracking:
-            eventListener_.setGenerateFocusEvents(v.enable);
+            eventListener_.setGenerateFocusEvents(_enable);
             break;
         default:
             break;

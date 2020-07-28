@@ -207,42 +207,9 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
     updateCursorIterators();
 }
 
-void ScreenBuffer::saveState()
-{
-    // https://vt100.net/docs/vt510-rm/DECSC.html
-
-    // TODO: character sets
-    // TODO: selective erase attribute
-    // TODO: SS2/SS3 states
-    savedStates.emplace(SavedState{
-        realCursorPosition(),
-        graphicsRendition,
-        autoWrap,
-        cursorRestrictedToMargin
-    });
-}
-
-void ScreenBuffer::restoreState()
-{
-    if (!savedStates.empty())
-    {
-        auto const& saved = savedStates.top();
-        moveCursorTo(saved.cursorPosition);
-        setMode(Mode::AutoWrap, saved.autowrap);
-        setMode(Mode::Origin, saved.originMode);
-        savedStates.pop();
-    }
-}
-
 void ScreenBuffer::setMode(Mode _mode, bool _enable)
 {
-    if (_mode != Mode::UseAlternateScreen)
-    {
-        if (_enable)
-            enabledModes_.insert(_mode);
-        else if (auto i = enabledModes_.find(_mode); i != enabledModes_.end())
-            enabledModes_.erase(i);
-    }
+    // TODO: rename this function  to indicate this is more an event to be act upon.
 
     // TODO: thse member variables aren't really needed anymore (are they?), remove them.
     switch (_mode)

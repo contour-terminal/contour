@@ -38,6 +38,29 @@
 
 namespace terminal {
 
+/// API for setting/querying terminal modes.
+///
+/// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
+class Modes {
+  public:
+    void set(Mode _mode, bool _enabled)
+    {
+        if (_enabled)
+            enabled_.insert(_mode);
+        else if (auto i = enabled_.find(_mode); i != enabled_.end())
+            enabled_.erase(i);
+    }
+
+    bool enabled(Mode _mode) const noexcept
+    {
+        return enabled_.find(_mode) != enabled_.end();
+    }
+
+  private:
+    // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode enum values.
+    std::set<Mode> enabled_;
+};
+
 class CharacterStyleMask {
   public:
 	enum Mask : uint16_t {
@@ -343,20 +366,10 @@ struct ScreenBuffer {
         }
     };
 
-	// Savable states for DECSC & DECRC
-	struct SavedState {
-		Coordinate cursorPosition;
-		GraphicsAttributes graphicsRendition{};
-		// TODO: CharacterSet for GL and GR
-		bool autowrap = false;
-		bool originMode = false;
-		// TODO: Selective Erase Attribute (DECSCA)
-		// TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
-	};
-
-	ScreenBuffer(Type _type, WindowSize const& _size, std::optional<size_t> _maxHistoryLineCount)
+	ScreenBuffer(Type _type, WindowSize const& _size, Modes& _modes, std::optional<size_t> _maxHistoryLineCount)
 		: type_{ _type },
           size_{ _size },
+          modes_{ _modes },
           maxHistoryLineCount_{ _maxHistoryLineCount },
 		  margin_{
 			  {1, _size.rows},
@@ -369,7 +382,7 @@ struct ScreenBuffer {
 
     void reset()
     {
-        *this = ScreenBuffer(type_, size_, maxHistoryLineCount_);
+        *this = ScreenBuffer(type_, size_, modes_.get(), maxHistoryLineCount_);
     }
 
     int historyLineCount() const noexcept
@@ -390,9 +403,9 @@ struct ScreenBuffer {
 
     Type type_;
 	WindowSize size_;
+    std::reference_wrapper<Modes> modes_;
     std::optional<size_t> maxHistoryLineCount_;
 	Margin margin_;
-	std::set<Mode> enabledModes_{};
 	Cursor cursor{};
 	Lines lines;
 	Lines savedLines{};
@@ -402,7 +415,6 @@ struct ScreenBuffer {
 	int tabWidth{8};
     std::vector<cursor_pos_t> tabs;
 	GraphicsAttributes graphicsRendition{};
-	std::stack<SavedState> savedStates{};
 
 	LineIterator currentLine{std::begin(lines)};
 	ColumnIterator currentColumn{currentLine->begin()};
@@ -463,15 +475,13 @@ struct ScreenBuffer {
 
     bool isModeEnabled(Mode _mode) const noexcept
     {
-        return enabledModes_.find(_mode) != enabledModes_.end();
+        return modes_.get().enabled(_mode);
     }
 
     void clampSavedLines();
 	void verifyState() const;
     void dumpState(std::string const& _message) const;
     void fail(std::string const& _message) const;
-	void saveState();
-	void restoreState();
 
     void updateCursorIterators()
     {
