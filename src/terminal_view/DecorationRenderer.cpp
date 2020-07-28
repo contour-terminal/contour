@@ -195,21 +195,21 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = screenCoordinates_.cellHeight;
-        auto const thickness = max(lineThickness_ * width / 20, 1u);
+        auto const thickness = max(lineThickness_ * width / 20, 1);
         auto image = atlas::Buffer(width * cellHeight, 0u);
         auto const gap = thickness;
 
         // Draws the top and bottom horizontal lines
-        for (unsigned y = gap; y < thickness + gap; ++y)
-            for (unsigned x = gap; x < width - gap; ++x)
+        for (int y = gap; y < thickness + gap; ++y)
+            for (int x = gap; x < width - gap; ++x)
             {
                 image[y * width + x] = 0xFF;
                 image[(cellHeight - 1 - y) * width + x] = 0xFF;
             }
 
         // Draws the left and right vertical lines
-        for (unsigned y = gap; y < cellHeight - gap; y++)
-            for (unsigned x = gap; x < thickness + gap; ++x)
+        for (int y = gap; y < cellHeight - gap; y++)
+            for (int x = gap; x < thickness + gap; ++x)
             {
                 image[y * width + x] = 0xFF;
                 image[y * width + (width - 1 - x)] = 0xFF;
