@@ -331,7 +331,7 @@ struct ScreenBuffer {
 	using Lines = std::deque<Line>;
     using LineIterator = Lines::iterator;
 
-    using Renderer = std::function<void(cursor_pos_t row, cursor_pos_t col, Cell const& cell)>;
+    using Renderer = std::function<void(Coordinate const&, Cell const&)>;
 
     struct Cursor : public Coordinate {
         bool visible = true;
@@ -515,17 +515,12 @@ struct ScreenBuffer {
 			return {1, 1};
 	}
 
-    Cell& absoluteAt(Coordinate const& _coord);
-    Cell const& absoluteAt(Coordinate const& _coord) const;
+	Cell& at(Coordinate const& _coord) noexcept;
 
-	Cell& at(Coordinate const& _coord);
-	Cell const& at(Coordinate const& _coord) const;
-
-	Cell& at(cursor_pos_t row, cursor_pos_t col);
-	Cell const& at(cursor_pos_t row, cursor_pos_t col) const;
-
-	/// Retrieves the cell at given cursor, respecting origin mode.
-	Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col);
+    Cell const& at(Coordinate const& _pos) const noexcept
+    {
+        return const_cast<ScreenBuffer*>(this)->at(_pos);
+    }
 
 	/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
 	Coordinate toRealCoordinate(Coordinate const& pos) const noexcept

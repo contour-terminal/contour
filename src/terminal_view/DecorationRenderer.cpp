@@ -260,8 +260,7 @@ void DecorationRenderer::rebuild()
     // TODO: Encircle
 }
 
-void DecorationRenderer::renderCell(cursor_pos_t _row,
-                                    cursor_pos_t _col,
+void DecorationRenderer::renderCell(Coordinate const& _pos,
                                     Cell const& _cell)
 {
     if (_cell.hyperlink())
@@ -272,7 +271,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
         auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
                             ? hyperlinkHover_
                             : hyperlinkNormal_;
-        renderDecoration(decoration, _row, _col, 1, color);
+        renderDecoration(decoration, _pos, 1, color);
     }
     else
     {
@@ -286,7 +285,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
 
         for (auto const& mapping : underlineMappings)
             if (_cell.attributes().styles & mapping.first)
-                renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
     }
 
     auto constexpr supplementalMappings = array{
@@ -298,7 +297,7 @@ void DecorationRenderer::renderCell(cursor_pos_t _row,
 
     for (auto const& mapping : supplementalMappings)
         if (_cell.attributes().styles & mapping.first)
-            renderDecoration(mapping.second, _row, _col, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)
@@ -316,8 +315,7 @@ optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _
 }
 
 void DecorationRenderer::renderDecoration(Decorator _decoration,
-                                          cursor_pos_t _row,
-                                          cursor_pos_t _col,
+                                          Coordinate const& _pos,
                                           int _columnCount,
                                           RGBColor const& _color)
 {
@@ -325,11 +323,11 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
     {
 #if 0 // !defined(NDEBUG)
         cout << fmt::format(
-            "DecorationRenderer.renderDecoration: {} from {}:{} with {} cells, color {}\n",
-            _decoration, _row, _col, _columnCount, _color
+            "DecorationRenderer.renderDecoration: {} from {} with {} cells, color {}\n",
+            _decoration, _pos, _columnCount, _color
         );
 #endif
-        auto const pos = screenCoordinates_.map(_col, _row);
+        auto const pos = screenCoordinates_.map(_pos);
         auto const x = pos.x();
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
         auto const y = pos.y();
@@ -361,8 +359,8 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
     {
 #if 0 // !defined(NDEBUG)
         cout << fmt::format(
-            "DecorationRenderer.renderDecoration: {} from {}:{} with {} cells (MISSING IMPLEMENTATION)\n",
-            _decoration, _row, _col, _columnCount, _color
+            "DecorationRenderer.renderDecoration: {} from {} with {} cells (MISSING IMPLEMENTATION)\n",
+            _decoration, _pos, _columnCount, _color
         );
 #endif
     }

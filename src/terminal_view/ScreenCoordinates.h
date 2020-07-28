@@ -25,12 +25,16 @@ struct ScreenCoordinates {
     ///
     /// @return 2D point into drawing coordinate system
     constexpr QPoint map(cursor_pos_t col, cursor_pos_t row) const noexcept {
+        return map(Coordinate{row, col});
+    }
+
+    constexpr QPoint map(Coordinate const& _pos) const noexcept {
         return QPoint{
-            static_cast<int>(leftMargin + (col - 1) * cellWidth),
+            static_cast<int>(leftMargin + (_pos.column - 1) * cellWidth),
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
-            static_cast<int>(bottomMargin + (screenSize.rows - row) * cellHeight)
+            static_cast<int>(bottomMargin + (screenSize.rows - _pos.row) * cellHeight)
 #else
-            static_cast<int>((row - 1) * cellHeight)
+            static_cast<int>((_pos.row - 1) * cellHeight)
 #endif
         };
     }

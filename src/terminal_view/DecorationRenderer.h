@@ -84,13 +84,10 @@ class DecorationRenderer {
         hyperlinkHover_ = _hover;
     }
 
-    void renderCell(cursor_pos_t _row,
-                    cursor_pos_t _col,
-                    Cell const& _cell);
+    void renderCell(Coordinate const& _pos, Cell const& _cell);
 
     void renderDecoration(Decorator _decoration,
-                          cursor_pos_t _row,
-                          cursor_pos_t _col,
+                          Coordinate const& _pos,
                           int _columnCount,
                           RGBColor const& _color);
 

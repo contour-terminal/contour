@@ -355,11 +355,11 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
         return chrono::milliseconds::min();
 }
 
-Cell const* Terminal::absoluteAt(Coordinate const& _coord) const
+Cell const* Terminal::at(Coordinate const& _coord) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    if (_coord.row <= screen_.size().rows)
-        return &screen_.absoluteAt(_coord);
+    if (-screen_.historyLineCount() < _coord.row && _coord.row <= screen_.size().rows)
+        return &screen_.at(_coord);
     else
         return nullptr;
 }
@@ -369,14 +369,6 @@ void Terminal::resizeScreen(WindowSize const& _newWindowSize)
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     screen_.resize(_newWindowSize);
     pty_.resizeScreen(_newWindowSize);
-}
-
-Coordinate Terminal::absoluteCoordinate(Coordinate _viewportCoordinate, int _scrollOffset) const noexcept
-{
-    // TODO: unit test case me BEFORE merge, yo !
-    auto const row = screen_.historyLineCount() - min(_scrollOffset, screen_.historyLineCount()) + _viewportCoordinate.row;
-    auto const col = _viewportCoordinate.column;
-    return {static_cast<cursor_pos_t>(row), col};
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)

@@ -41,10 +41,10 @@ class BackgroundRenderer {
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
-    void renderCell(cursor_pos_t _row, cursor_pos_t _col, RGBColor const& _color);
+    void renderCell(Coordinate const& _pos, Cell const& _cell);
+    void renderCell(Coordinate const& _pos, RGBColor const& _color);
 
-    void renderOnce(cursor_pos_t _row, cursor_pos_t _col, RGBColor const& _color, unsigned _count);
+    void renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count);
 
     void renderPendingCells();
     void finish();

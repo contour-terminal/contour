@@ -31,33 +31,33 @@ BackgroundRenderer::BackgroundRenderer(ScreenCoordinates const& _screenCoordinat
 {
 }
 
-void BackgroundRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell)
+void BackgroundRenderer::renderCell(Coordinate const& _pos, Cell const& _cell)
 {
     RGBColor const color = _cell.attributes().makeColors(colorProfile_).second;
-    renderCell(_row, _col, color);
+    renderCell(_pos, color);
 }
 
-void BackgroundRenderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, RGBColor const& _color)
+void BackgroundRenderer::renderCell(Coordinate const& _pos, RGBColor const& _color)
 {
-    if (row_ == _row && color_ == _color)
+    if (row_ == _pos.row && color_ == _color)
         columnCount_++;
     else
     {
         renderPendingCells();
 
-        startColumn_ = _col;
-        row_ = _row;
+        startColumn_ = _pos.column;
+        row_ = _pos.row;
         color_ = _color;
         columnCount_ = 1;
     }
 }
 
-void BackgroundRenderer::renderOnce(cursor_pos_t _row, cursor_pos_t _col, RGBColor const& _color, unsigned _count)
+void BackgroundRenderer::renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count)
 {
     renderPendingCells();
 
-    startColumn_ = _col;
-    row_ = _row;
+    startColumn_ = _pos.column;
+    row_ = _pos.row;
     columnCount_ = _count;
     color_ = _color;
 

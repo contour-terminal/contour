@@ -19,6 +19,7 @@
 
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <crispy/utils.h>
 
 #include <algorithm>
 #include <stdexcept>
@@ -52,6 +53,9 @@ std::string Cell::toUtf8() const
 std::optional<int> ScreenBuffer::findMarkerBackwards(int _currentCursorLine) const
 {
     // TODO: unit- tests for all cases.
+
+    if (_currentCursorLine > size().rows || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
+        return nullopt;
 
     if (_currentCursorLine >= 1) // main screen area
     {
@@ -269,57 +273,15 @@ void ScreenBuffer::moveCursorTo(Coordinate to)
     updateCursorIterators();
 }
 
-Cell& ScreenBuffer::withOriginAt(cursor_pos_t row, cursor_pos_t col)
+Cell& ScreenBuffer::at(Coordinate const& _pos) noexcept
 {
-    if (cursorRestrictedToMargin)
-    {
-        row += margin_.vertical.from - 1;
-        col += margin_.horizontal.from - 1;
-    }
-    return at(row, col);
-}
+    assert(crispy::ascending(1 - historyLineCount(), _pos.row, size_.rows));
+    assert(crispy::ascending(1, _pos.column, size_.columns));
 
-Cell const& ScreenBuffer::absoluteAt(Coordinate const& _coord) const
-{
-    return const_cast<ScreenBuffer&>(*this).absoluteAt(_coord);
-}
-
-Cell& ScreenBuffer::absoluteAt(Coordinate const& _coord)
-{
-    if (static_cast<size_t>(_coord.row) <= savedLines.size())
-        return *next(begin(*next(begin(savedLines), _coord.row - 1)), _coord.column - 1);
-    else if (auto const rowNr = _coord.row - static_cast<cursor_pos_t>(savedLines.size()); rowNr <= size_.rows)
-        return at(rowNr, _coord.column);
+    if (_pos.row > 0)
+        return (*next(begin(lines), _pos.row - 1))[_pos.column - 1];
     else
-        throw std::invalid_argument{"Row number exceeds boundaries."};
-}
-
-Cell& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col)
-{
-    assert(_row >= 1 && _row <= size_.rows);
-    assert(_col >= 1 && _col <= size_.columns);
-    assert(static_cast<size_t>(size_.rows) == lines.size());
-
-    return (*next(begin(lines), _row - 1))[_col - 1];
-}
-
-Cell const& ScreenBuffer::at(cursor_pos_t _row, cursor_pos_t _col) const
-{
-    return const_cast<ScreenBuffer*>(this)->at(_row, _col);
-}
-
-Cell& ScreenBuffer::at(Coordinate const& _coord)
-{
-    assert(_coord.row >= 1 && _coord.row <= size_.rows);
-    assert(_coord.column >= 1 && _coord.column <= size_.columns);
-    assert(static_cast<size_t>(size_.rows) == lines.size());
-
-    return (*next(begin(lines), _coord.row - 1))[_coord.column - 1];
-}
-
-Cell const& ScreenBuffer::at(Coordinate const& _coord) const
-{
-    return const_cast<ScreenBuffer*>(this)->at(_coord);
+        return (*next(rbegin(savedLines), -_pos.row))[_pos.column - 1];
 }
 
 void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
@@ -809,7 +771,7 @@ string ScreenBuffer::renderTextLine(cursor_pos_t row) const
     string line;
     line.reserve(size_.columns);
     for (cursor_pos_t col = 1; col <= size_.columns; ++col)
-        if (auto const& cell = at(row, col); cell.codepointCount())
+        if (auto const& cell = at({row, col}); cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -840,7 +802,7 @@ std::string ScreenBuffer::screenshot() const
     {
         for (cursor_pos_t const col : crispy::times(1, size_.columns))
         {
-            Cell const& cell = at(row, col);
+            Cell const& cell = at({row, col});
 
             //TODO: some kind of: generator(SetGraphicsRendition{ cell.attributes().styles });
             if (cell.attributes().styles & CharacterStyleMask::Bold)

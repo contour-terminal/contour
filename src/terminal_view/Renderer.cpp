@@ -159,7 +159,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             }
 
             changes = _terminal.preRender(_now);
-            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell) { renderCell(_row, _col, _cell); },
+            _terminal.screen().render([this](Coordinate const& _pos, Cell const& _cell) { renderCell(_pos, _cell); },
                                       _terminal.screen().scrollOffset());
 
             if (cellAtMouse.hyperlink())
@@ -168,7 +168,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         else
         {
             changes = _terminal.preRender(_now);
-            _terminal.screen().render([this](cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell) { renderCell(_row, _col, _cell); },
+            _terminal.screen().render([this](Coordinate const& pos, Cell const& _cell) { renderCell(pos, _cell); },
                                       _terminal.screen().scrollOffset());
         }
     }
@@ -193,7 +193,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
     // TODO: check if CursorStyle has changed, and update render context accordingly.
     if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
     {
-        Cell const& cursorCell = *_terminal.absoluteAt(_terminal.cursor());
+        Cell const& cursorCell = *_terminal.at(_terminal.cursor());
 
         auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
                                                               : CursorShape::Rectangle;
@@ -201,7 +201,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
         cursorRenderer_.setShape(cursorShape);
 
         cursorRenderer_.render(
-            screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + static_cast<cursor_pos_t>(_terminal.scrollOffset())),
+            screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + _terminal.scrollOffset()),
             cursorCell.width()
         );
     }
@@ -213,18 +213,18 @@ void Renderer::renderSelection(Terminal const& _terminal)
     {
         // TODO: don't abouse BackgroundRenderer here, maybe invent RectRenderer?
         backgroundRenderer_.setOpacity(colorProfile_.selectionOpacity);
-        for (Selector::Range const& range : _terminal.screen().selection())
+        Screen const& screen = _terminal.screen();
+        auto const selection = screen.selection();
+        for (Selector::Range const& range : selection) // _terminal.screen().selection())
         {
-            if (_terminal.isAbsoluteLineVisible(range.line))
+            // TODO: see if we can extract and then unit-test this display rendering of selection
+            auto const relativeLineNr = range.line - _terminal.historyLineCount() - _terminal.scrollOffset();
+            if (_terminal.isLineVisible(relativeLineNr))
             {
-                cursor_pos_t const row = range.line - static_cast<cursor_pos_t>(_terminal.historyLineCount() - _terminal.scrollOffset());
+                auto const pos = Coordinate{relativeLineNr, range.fromColumn};
+                auto const count = 1 + range.toColumn - range.fromColumn;
+                backgroundRenderer_.renderOnce(pos, colorProfile_.selection, count);
                 ++metrics_.cellBackgroundRenderCount;
-                backgroundRenderer_.renderOnce(
-                    row,
-                    range.fromColumn,
-                    colorProfile_.selection,
-                    1 + range.toColumn - range.fromColumn
-                );
             }
         }
         backgroundRenderer_.renderPendingCells();
@@ -232,11 +232,11 @@ void Renderer::renderSelection(Terminal const& _terminal)
     }
 }
 
-void Renderer::renderCell(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell)
+void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell)
 {
-    backgroundRenderer_.renderCell(_row, _col, _cell);
-    decorationRenderer_.renderCell(_row, _col, _cell);
-    textRenderer_.schedule(_row, _col, _cell);
+    backgroundRenderer_.renderCell(_pos, _cell);
+    decorationRenderer_.renderCell(_pos, _cell);
+    textRenderer_.schedule(_pos, _cell);
 }
 
 } // end namespace

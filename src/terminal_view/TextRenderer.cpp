@@ -91,11 +91,11 @@ void TextRenderer::setFont(FontConfig const& _fonts)
     clearCache();
 }
 
-void TextRenderer::reset(cursor_pos_t _row, cursor_pos_t _col, GraphicsAttributes const& _attr)
+void TextRenderer::reset(Coordinate const& _pos, GraphicsAttributes const& _attr)
 {
     //std::cout << fmt::format("TextRenderer.reset(): attr:{}\n", _attr.styles);
-    row_ = _row;
-    startColumn_ = _col;
+    row_ = _pos.row;
+    startColumn_ = _pos.column;
     attributes_ = _attr;
     codepoints_.clear();
     clusters_.clear();
@@ -112,7 +112,7 @@ void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] cursor_pos_t _colu
     ++clusterOffset_;
 }
 
-void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell)
+void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
 {
     constexpr char32_t SP = 0x20;
 
@@ -122,13 +122,13 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _c
             if (!_cell.empty() && _cell.codepoint(0) != SP)
             {
                 state_ = State::Filling;
-                reset(_row, _col, _cell.attributes());
-                extend(_cell, _col);
+                reset(_pos, _cell.attributes());
+                extend(_cell, _pos.column);
             }
             break;
         case State::Filling:
-            if (!_cell.empty() && row_ == _row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
-                extend(_cell, _col);
+            if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
+                extend(_cell, _pos.column);
             else
             {
                 flushPendingSegments();
@@ -136,8 +136,8 @@ void TextRenderer::schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _c
                     state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
-                    reset(_row, _col, _cell.attributes());
-                    extend(_cell, _col);
+                    reset(_pos, _cell.attributes());
+                    extend(_cell, _pos.column);
                 }
             }
             break;

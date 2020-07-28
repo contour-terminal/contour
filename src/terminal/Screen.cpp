@@ -19,6 +19,7 @@
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
 #include <crispy/times.h>
+#include <crispy/utils.h>
 
 #include <unicode/emoji_segmenter.h>
 #include <unicode/word_segmenter.h>
@@ -171,10 +172,9 @@ vector<Selector::Range> Screen::selection() const
 }
 
 // {{{ viewport management
-bool Screen::isAbsoluteLineVisible(cursor_pos_t _row) const noexcept
+bool Screen::isLineVisible(cursor_pos_t _row) const noexcept
 {
-    return _row >= historyLineCount() - scrollOffset_
-        && _row <= historyLineCount() - scrollOffset_ + size().rows;
+    return crispy::ascending(1 - scrollOffset_, _row, size_.rows - scrollOffset_);
 }
 
 bool Screen::scrollUp(int _numLines)

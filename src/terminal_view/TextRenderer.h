@@ -130,14 +130,14 @@ class TextRenderer {
     void setCellSize(CellSize const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
-    void schedule(cursor_pos_t _row, cursor_pos_t _col, Cell const& _cell);
+    void schedule(Coordinate const& _pos, Cell const& _cell);
     void flushPendingSegments();
     void finish();
 
     void clearCache();
 
   private:
-    void reset(cursor_pos_t _row, cursor_pos_t _col, GraphicsAttributes const& _attr);
+    void reset(Coordinate const& _pos, GraphicsAttributes const& _attr);
     void extend(Cell const& _cell, cursor_pos_t _column);
     crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
 

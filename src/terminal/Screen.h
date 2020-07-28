@@ -380,7 +380,7 @@ class Screen {
 
     /// {{{ viewport management API
     int scrollOffset() const noexcept { return scrollOffset_; }
-    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept;
+    bool isLineVisible(cursor_pos_t _row) const noexcept;
     bool scrollUp(int _numLines);
     bool scrollDown(int _numLines);
     bool scrollToTop();
@@ -420,32 +420,17 @@ class Screen {
 
     void moveCursorTo(Coordinate to);
 
-    Cell& absoluteAt(Coordinate const& _coord)
-    {
-        return buffer_->absoluteAt(_coord);
-    }
-
-    Cell const& absoluteAt(Coordinate const& _coord) const
-    {
-        return const_cast<Screen&>(*this).absoluteAt(_coord);
-    }
-
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept
     {
-        auto const y = currentBuffer().historyLineCount() + _coord.row;
-        return absoluteAt(Coordinate{y, _coord.column});
+        return buffer_->at(_coord);
     }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(Coordinate const& _coord) const noexcept
     {
-        auto const y = currentBuffer().historyLineCount() + _coord.row;
-        return absoluteAt(Coordinate{y, _coord.column});
+        return const_cast<Screen&>(*this).at(_coord);
     }
-
-    /// Retrieves the cell at given cursor, respecting origin mode.
-    Cell& withOriginAt(cursor_pos_t row, cursor_pos_t col) { return buffer_->withOriginAt(row, col); }
 
     bool isPrimaryScreen() const noexcept { return buffer_ == &primaryBuffer_; }
     bool isAlternateScreen() const noexcept { return buffer_ == &alternateBuffer_; }

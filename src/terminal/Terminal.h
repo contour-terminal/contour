@@ -111,14 +111,17 @@ class Terminal : public ScreenEvents {
     /// @returns the current Cursor state.
     Cursor cursor() const;
 
-    /// @returns a reference to the cell at the given absolute coordinate.
-    Cell const* absoluteAt(Coordinate const& _coord) const;
+    /// @returns a reference to the cell at the given coordinate.
+    Cell const* at(Coordinate const& _coord) const;
 
-    /// @returns absolute coordinate of given _viewportCoordinate and _scrollOffset.
-    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate, int _scrollOffset) const noexcept;
-
-    /// @returns absolute coordinate of given _viewportCoordinate at the current viewport scroll offset.
-    Coordinate absoluteCoordinate(Coordinate _viewportCoordinate) const noexcept { return absoluteCoordinate(_viewportCoordinate, screen_.scrollOffset()); }
+    /// @returns absolute coordinate of @p _pos with scroll offset and applied.
+    Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
+    {
+        // TODO: unit test case me BEFORE merge, yo !
+        auto const row = screen_.historyLineCount() - std::min(screen_.scrollOffset(), screen_.historyLineCount()) + _pos.row;
+        auto const col = _pos.column;
+        return Coordinate{row, col};
+    }
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
@@ -126,7 +129,7 @@ class Terminal : public ScreenEvents {
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
 
     // viewport management
-    bool isAbsoluteLineVisible(cursor_pos_t _row) const noexcept { return screen_.isAbsoluteLineVisible(_row); }
+    bool isLineVisible(cursor_pos_t _row) const noexcept { return screen_.isLineVisible(_row); }
     int scrollOffset() const noexcept { return screen_.scrollOffset(); }
     bool scrollUp(size_t _numLines) { return screen_.scrollUp(_numLines); }
     bool scrollDown(size_t _numLines) { return screen_.scrollDown(_numLines); }

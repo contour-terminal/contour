@@ -18,34 +18,71 @@
 using namespace terminal;
 using namespace std;
 
-void logScreenText(Screen const& screen, string const& headline = "")
+namespace
 {
-    if (headline.empty())
-        UNSCOPED_INFO("dump:");
-    else
-        UNSCOPED_INFO(headline + ":");
+    void logScreenText(Screen const& screen, string const& headline = "")
+    {
+        if (headline.empty())
+            UNSCOPED_INFO("dump:");
+        else
+            UNSCOPED_INFO(headline + ":");
 
-    for (cursor_pos_t row = 1; row <= screen.size().rows; ++row)
-        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
+        for (cursor_pos_t row = 1; row <= screen.size().rows; ++row)
+            UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
+    }
+
+    class MockScreen : public MockScreenEvents,
+                       public Screen {
+      public:
+        explicit MockScreen(WindowSize const& _size) :
+            Screen{
+                _size,
+                *this,
+                [this](LogEvent const& _logEvent) { log(_logEvent); }
+            }
+        {
+        }
+
+        void log(LogEvent _logEvent)
+        {
+            INFO(fmt::format("{}", _logEvent));
+        }
+    };
 }
 
-class MockScreen : public MockScreenEvents,
-                   public Screen {
-  public:
-    explicit MockScreen(WindowSize const& _size) :
-        Screen{
-            _size,
-            *this,
-            [this](LogEvent const& _logEvent) { log(_logEvent); }
-        }
-    {
-    }
+TEST_CASE("Screen.isLineVisible", "[screen]")
+{
+    auto screen = MockScreen{WindowSize{2, 1}};
+    screen.write("10203040");
+    REQUIRE("40" == screen.renderTextLine(1));
+    REQUIRE("30" == screen.renderTextLine(0));
+    REQUIRE("20" == screen.renderTextLine(-1));
+    REQUIRE("10" == screen.renderTextLine(-2));
 
-    void log(LogEvent _logEvent)
-    {
-        INFO(fmt::format("{}", _logEvent));
-    }
-};
+    CHECK(screen.isLineVisible(1));
+    CHECK_FALSE(screen.isLineVisible(0));
+    CHECK_FALSE(screen.isLineVisible(-1));
+    CHECK_FALSE(screen.isLineVisible(-2));
+    CHECK_FALSE(screen.isLineVisible(-3)); // minimal out-of-bounds
+
+    screen.scrollUp(1);
+    CHECK_FALSE(screen.isLineVisible(1));
+    CHECK(screen.isLineVisible(0));
+    CHECK_FALSE(screen.isLineVisible(-1));
+    CHECK_FALSE(screen.isLineVisible(-2));
+
+    screen.scrollUp(1);
+    CHECK_FALSE(screen.isLineVisible(1));
+    CHECK_FALSE(screen.isLineVisible(0));
+    CHECK(screen.isLineVisible(-1));
+    CHECK_FALSE(screen.isLineVisible(-2));
+
+    screen.scrollUp(1);
+    CHECK_FALSE(screen.isLineVisible(1));
+    CHECK_FALSE(screen.isLineVisible(0));
+    CHECK_FALSE(screen.isLineVisible(-1));
+    CHECK(screen.isLineVisible(-2));
+}
 
 TEST_CASE("AppendChar", "[screen]")
 {
@@ -1145,17 +1182,21 @@ TEST_CASE("MoveCursorTo", "[screen]")
     }
 
     SECTION("origin-mode enabled") {
+        constexpr auto TopMargin = 2;
+        constexpr auto BottomMargin = 4;
+        constexpr auto LeftMargin = 2;
+        constexpr auto RightMargin = 4;
         screen(SetMode{Mode::LeftRightMargin, true});
-        screen(SetLeftRightMargin{2, 4});
-        screen(SetTopBottomMargin{2, 4});
+        screen(SetLeftRightMargin{LeftMargin, RightMargin});
+        screen(SetTopBottomMargin{TopMargin, BottomMargin});
         screen(SetMode{Mode::Origin, true});
 
         SECTION("move to origin") {
             screen(MoveCursorTo{1, 1});
             CHECK(Coordinate{1, 1} == screen.cursorPosition());
             CHECK(Coordinate{2, 2} == screen.realCursorPosition());
-            CHECK('7' == (char)screen.withOriginAt(1, 1).codepoint(0));
-            CHECK('I' == (char)screen.withOriginAt(3, 3).codepoint(0));
+            CHECK('7' == (char)screen.at({1 + (TopMargin - 1), 1 + (LeftMargin - 1)}).codepoint(0));
+            CHECK('I' == (char)screen.at({3 + (TopMargin - 1), 3 + (LeftMargin - 1)}).codepoint(0));
         }
     }
 }
@@ -1631,27 +1672,30 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
     // first line in history
-    CHECK(screen.absoluteAt({1, 1}).codepoint(0) == '1');
-    CHECK(screen.absoluteAt({1, 2}).codepoint(0) == '2');
-    CHECK(screen.absoluteAt({1, 3}).codepoint(0) == '3');
+    CHECK(screen.at({-1, 1}).codepoint(0) == '1');
+    CHECK(screen.at({-1, 2}).codepoint(0) == '2');
+    CHECK(screen.at({-1, 3}).codepoint(0) == '3');
 
     // second line in history
-    CHECK(screen.absoluteAt({2, 1}).codepoint(0) == '4');
-    CHECK(screen.absoluteAt({2, 2}).codepoint(0) == '5');
-    CHECK(screen.absoluteAt({2, 3}).codepoint(0) == '6');
+    CHECK(screen.at({0, 1}).codepoint(0) == '4');
+    CHECK(screen.at({0, 2}).codepoint(0) == '5');
+    CHECK(screen.at({0, 3}).codepoint(0) == '6');
 
     // first line on screen buffer
-    CHECK(screen.absoluteAt({3, 1}).codepoint(0) == 'A');
-    CHECK(screen.absoluteAt({3, 2}).codepoint(0) == 'B');
-    CHECK(screen.absoluteAt({3, 3}).codepoint(0) == 'C');
+    CHECK(screen.at({1, 1}).codepoint(0) == 'A');
+    CHECK(screen.at({1, 2}).codepoint(0) == 'B');
+    CHECK(screen.at({1, 3}).codepoint(0) == 'C');
 
     // second line on screen buffer
-    CHECK(screen.absoluteAt({4, 1}).codepoint(0) == 'D');
-    CHECK(screen.absoluteAt({4, 2}).codepoint(0) == 'E');
-    CHECK(screen.absoluteAt({4, 3}).codepoint(0) == 'F');
+    CHECK(screen.at({2, 1}).codepoint(0) == 'D');
+    CHECK(screen.at({2, 2}).codepoint(0) == 'E');
+    CHECK(screen.at({2, 3}).codepoint(0) == 'F');
 
-    // too big row number
-    CHECK_THROWS(screen.absoluteAt({5, 1}));
+    // out-of-range corner cases
+    // CHECK_THROWS(screen.at({3, 1}));
+    // CHECK_THROWS(screen.at({2, 4}));
+    // CHECK_THROWS(screen.at({2, 0}));
+    // XXX currently not checked, as they're intentionally using assert() instead.
 }
 
 TEST_CASE("render into history", "[screen]")
@@ -1664,10 +1708,10 @@ TEST_CASE("render into history", "[screen]")
 
     string renderedText;
     renderedText.resize(2 * 6);
-    auto const renderer = [&](auto rowNumber, auto columnNumber, Cell const& cell) {
-        renderedText[(rowNumber - 1) * 6 + (columnNumber - 1)] = static_cast<char>(cell.codepoint(0));
-        if (columnNumber == 5)
-            renderedText[(rowNumber - 1) * 6 + (columnNumber)] = '\n';
+    auto const renderer = [&](Coordinate const& pos, Cell const& cell) {
+        renderedText[(pos.row - 1) * 6 + (pos.column - 1)] = static_cast<char>(cell.codepoint(0));
+        if (pos.column == 5)
+            renderedText[(pos.row - 1) * 6 + (pos.column)] = '\n';
     };
 
     SECTION("main area") {
