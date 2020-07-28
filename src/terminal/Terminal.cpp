@@ -171,9 +171,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                 ));
 
                 if (selectionMode != Selector::Mode::Linear)
-                {
                     screen_.selector()->extend(absoluteCoordinate(currentMousePosition_));
-                }
             }
             else if (screen_.selector()->state() == Selector::State::Complete)
                 clearSelection();
@@ -220,6 +218,8 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
         changes_++;
         return true;
     }
+
+    // TODO: adjust selector's start lines according the the current viewport
 
     return false;
 }
