@@ -1,6 +1,13 @@
 
+
 # Coding Style Guidelines
 
+- Prefer CppCoreGuidelines if possible.
+- Avoid `friend` keyword.
+- Use signed integers unless the integer is holding a bit pattern.
+- Use the smallest integer type that is required to hold all desired values.
+- Do not cast from signed to unsigned unless you want the bit pattern, prefer to cast from unsigned
+  to signed instead.
 
 ## Naming Conventions
 
