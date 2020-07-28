@@ -1947,204 +1947,254 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     }
 }
 
-TEST_CASE("findNextMarker", "[screen]")
-{
-    auto screen = MockScreen{{4, 2}};
-
-    REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
-
-    SECTION("no marks") {
-        screen.write("1abc\r\n"s);
-        screen.write("2def\r\n"s);
-        screen.write("3ghi\r\n"s);
-        screen.write("4jkl\r\n"s);
-        screen.write("5mno\r\n"s);
-
-        CHECK(screen.findNextMarker(0).value() == 0);
-        CHECK(screen.findNextMarker(1).value() == 0);
-        CHECK(screen.findNextMarker(2).value() == 0);
-        CHECK(screen.findNextMarker(3).value() == 0);
-        CHECK(screen.findNextMarker(4).value() == 0);
-        CHECK(screen.findNextMarker(5).value() == 0);
-    }
-
-    SECTION("with marks") {
-        screen.write(SetMark{});
-        screen.write("1abc\r\n"s);
-        screen.write("2def\r\n"s);
-        screen.write(SetMark{});
-        screen.write(SetMark{});
-        screen.write("3ghi\r\n"s);
-        screen.write(SetMark{});
-        screen.write("4jkl\r\n"s);
-        screen.write("5mno\r\n"s);
-
-        REQUIRE(screen.renderTextLine(1) == "5mno");
-        REQUIRE(screen.renderTextLine(2) == "    ");
-
-        CHECK(screen.findNextMarker(0).value() == 0);
-
-        CHECK(screen.findNextMarker(1).has_value());
-        CHECK(screen.findNextMarker(1).value() == 0); // 3ghi
-
-        CHECK(screen.findNextMarker(2).has_value());
-        CHECK(screen.findNextMarker(2).value() == 1); // 2def
-
-        CHECK(screen.findNextMarker(4).has_value());
-        CHECK(screen.findNextMarker(4).value() == 2); // 2def
-    }
-}
-
-TEST_CASE("findPrevMarker", "[screen]")
-{
-    auto screen = MockScreen{{4, 2}};
-    REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
-
-    SECTION("no marks") {
-        screen.write("1abc\r\n"s);
-        screen.write("2def\r\n"s);
-        screen.write("3ghi\r\n"s);
-        screen.write("4jkl\r\n"s);
-        screen.write("5mno\r\n"s);
-        REQUIRE_FALSE(screen.findPrevMarker(0).has_value());
-
-        auto mark = screen.findPrevMarker(0);
-        REQUIRE_FALSE(mark.has_value());
-
-        mark = screen.findPrevMarker(screen.historyLineCount() - 1);
-        REQUIRE_FALSE(mark.has_value());
-
-        mark = screen.findPrevMarker(screen.historyLineCount());
-        REQUIRE_FALSE(mark.has_value());
-
-        mark = screen.findPrevMarker(screen.historyLineCount() + 1);
-        REQUIRE_FALSE(mark.has_value());
-    }
-
-    SECTION("with marks") {
-        screen.write(SetMark{});
-        screen.write("1abc\r\n"s);
-        screen.write("2def\r\n"s);
-        screen.write(SetMark{});
-        screen.write(SetMark{});
-        screen.write("3ghi\r\n"s);
-        screen.write(SetMark{});
-        screen.write("4jkl\r\n"s);
-        screen.write("5mno\r\n"s);
-
-        REQUIRE(screen.renderTextLine(1) == "5mno");
-        REQUIRE(screen.renderTextLine(2) == "    ");
-
-        // 0: -> 1
-        auto marker = screen.findPrevMarker(0);
-        REQUIRE(marker.has_value());
-        REQUIRE(marker.value() == 1); // 4jkl
-
-        // 1: -> 3
-        marker = screen.findPrevMarker(1);
-        REQUIRE(marker.has_value());
-        REQUIRE(marker.value() == 3); // 3ghi
-
-        // 2: -> 3
-        marker = screen.findPrevMarker(2);
-        REQUIRE(marker.has_value());
-        REQUIRE(marker.value() == 3); // 3ghi
-
-        // 3: -> NONE
-        marker = screen.findPrevMarker(3);
-        REQUIRE_FALSE(marker.has_value());
-    }
-}
-
-// TODO: finish adjusting test
-// TEST_CASE("DISABLED_findMarkerBackwards", "[screen]")
+// TEST_CASE("findNextMarker", "[screen]")
 // {
-//     auto screen = MockScreen{{4, 3}};
-//     REQUIRE_FALSE(screen.findMarkerBackwards(0).has_value()); // peak into history
-//     REQUIRE_FALSE(screen.findMarkerBackwards(1).has_value());
-//     REQUIRE_FALSE(screen.findMarkerBackwards(2).has_value());
-//     REQUIRE_FALSE(screen.findMarkerBackwards(3).has_value());
-//     REQUIRE_FALSE(screen.findMarkerBackwards(4).has_value());
-//     REQUIRE_FALSE(screen.findMarkerBackwards(5).has_value());
-//     REQUIRE_FALSE(screen.findMarkerBackwards(6).has_value()); // overflow
+//     auto screen = MockScreen{{4, 2}};
+//
+//     //REQUIRE_FALSE(screen.findNextMarker(0).has_value());
 //
 //     SECTION("no marks") {
-//         screen.write("1abc"sv);
-//         screen.write("2def"sv);
-//         screen.write("3ghi"sv);
-//         screen.write("4jkl"sv);
-//         screen.write("5mno"sv);
-//         screen.write("6pqr"sv);
+//         screen.write("1abc\r\n"s);
+//         screen.write("2def\r\n"s);
+//         screen.write("3ghi\r\n"s);
+//         screen.write("4jkl\r\n"s);
+//         screen.write("5mno\r\n"s);
 //
-//         REQUIRE(screen.historyLineCount() == 3);
+//         auto marker = screen.findNextMarker(0);
+//         REQUIRE(marker.has_value());
+//         CHECK(marker.value() == 0);
 //
-//         auto& sb = screen.currentBuffer();
-//
-//         auto mark = sb.findMarkerBackwards(screen.size().rows);
-//         REQUIRE_FALSE(mark.has_value());
-//
-//         // test one line beyond history line count
-//         mark = sb.findPrevMarker(-3);
-//         REQUIRE_FALSE(mark.has_value());
-//
-//         // test last history line
-//         mark = screen.findPrevMarker(-2);
-//         REQUIRE_FALSE(mark.has_value());
-//
-//         // test second-last history line
-//         mark = screen.findPrevMarker(-1);
-//         REQUIRE_FALSE(mark.has_value());
-//
-//         // test first history line
-//         mark = screen.findPrevMarker(0);
-//         REQUIRE_FALSE(mark.has_value());
+//         // CHECK(screen.findNextMarker(0).value() == 0);
+//         // CHECK(screen.findNextMarker(1).value() == 0);
+//         // CHECK(screen.findNextMarker(2).value() == 0);
+//         // CHECK(screen.findNextMarker(3).value() == 0);
+//         // CHECK(screen.findNextMarker(4).value() == 0);
+//         // CHECK(screen.findNextMarker(5).value() == 0);
 //     }
 //
 //     SECTION("with marks") {
-//         // saved lines
+//         // history area
 //         screen.write(SetMark{});
-//         screen.write("1abc\r\n"sv);
-//         screen.write("2def\r\n"sv);
+//         screen.write("1abc\r\n"s);  // 2
 //         screen.write(SetMark{});
-//         screen.write("3ghi\r\n"sv);
-//
-//         // visibile screen
+//         screen.write("2def\r\n"s);  // 1
 //         screen.write(SetMark{});
-//         screen.write("4jkl\r\n"sv);
-//         screen.write("5mno\r\n"sv);
+//         screen.write("3ghi\r\n"s);  // 0
+//
+//         // screen area
 //         screen.write(SetMark{});
-//         screen.write("6pqr"sv);
+//         screen.write("4jkl\r\n"s);
+//         screen.write("5mno\r\n"s);
 //
-//         REQUIRE(screen.renderTextLine(-2) == "1abc");
-//         REQUIRE(screen.renderTextLine(-1) == "2def");
-//         REQUIRE(screen.renderTextLine(0) == "3ghi");
+//         REQUIRE(screen.renderTextLine(1) == "5mno");
+//         REQUIRE(screen.renderTextLine(2) == "    ");
 //
-//         REQUIRE(screen.renderTextLine(1) == "4jkl");
-//         REQUIRE(screen.renderTextLine(2) == "5mno");
-//         REQUIRE(screen.renderTextLine(3) == "6pqr");
+//         auto marker = screen.findNextMarker(0);
+//         CHECK(marker.value() == 0);
 //
-//         // ======================================================
+//         marker = screen.findNextMarker(1);
+//         CHECK(marker.has_value());
+//         CHECK(marker.value() == 0); // 3ghi
 //
-//         // 0: -> 1
-//         auto marker = screen.findPrevMarker(0);
-//         REQUIRE(marker.has_value());
-//         REQUIRE(marker.value() == 1); // 4jkl
-//
-//         // 1: -> 3
-//         marker = screen.findPrevMarker(1);
-//         REQUIRE(marker.has_value());
-//         REQUIRE(marker.value() == 3); // 3ghi
-//
-//         // 2: -> 3
-//         marker = screen.findPrevMarker(2);
-//         REQUIRE(marker.has_value());
-//         REQUIRE(marker.value() == 3); // 3ghi
-//
-//         // 3: -> NONE
-//         marker = screen.findPrevMarker(3);
-//         REQUIRE_FALSE(marker.has_value());
+//         marker = screen.findNextMarker(2);
+//         CHECK(marker.has_value());
+//         CHECK(marker.value() == 1); // 2def
 //     }
 // }
+
+TEST_CASE("findMarkerForward", "[screen]")
+{
+    auto screen = MockScreen{{4, 3}};
+    REQUIRE_FALSE(screen.findMarkerForward(0).has_value()); // peak into history
+    REQUIRE_FALSE(screen.findMarkerForward(1).has_value());
+    REQUIRE_FALSE(screen.findMarkerForward(2).has_value());
+    REQUIRE_FALSE(screen.findMarkerForward(3).has_value());
+    REQUIRE_FALSE(screen.findMarkerForward(4).has_value()); // overflow
+
+    SECTION("no marks") {
+        screen.write("1abc"sv); // +
+        screen.write("2def"sv); // | history
+        screen.write("3ghi"sv); // +
+        screen.write("4jkl"sv); // +
+        screen.write("5mno"sv); // | main screen
+        screen.write("6pqr"sv); // +
+
+        REQUIRE(screen.historyLineCount() == 3);
+
+        auto mark = screen.findMarkerForward(3);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test one line beyond history line count
+        mark = screen.findMarkerForward(-3);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test last history line
+        mark = screen.findMarkerForward(-2);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test second-last history line
+        mark = screen.findMarkerForward(-1);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test first history line
+        mark = screen.findMarkerForward(0);
+        REQUIRE_FALSE(mark.has_value());
+    }
+
+    SECTION("with marks") {
+        // saved lines
+        screen.write(SetMark{});    // -2
+        screen.write("1abc\r\n"sv);
+        screen.write("2def\r\n"sv); // -1
+        screen.write(SetMark{});
+        screen.write("3ghi\r\n"sv); // 0
+
+        // visibile screen
+        screen.write(SetMark{});    // 1
+        screen.write("4jkl\r\n"sv);
+        screen.write("5mno\r\n"sv); // 2
+        screen.write(SetMark{});    // 3
+        screen.write("6pqr"sv);
+
+        REQUIRE(screen.renderTextLine(-2) == "1abc");
+        REQUIRE(screen.renderTextLine(-1) == "2def");
+        REQUIRE(screen.renderTextLine(0) == "3ghi");
+
+        REQUIRE(screen.renderTextLine(1) == "4jkl");
+        REQUIRE(screen.renderTextLine(2) == "5mno");
+        REQUIRE(screen.renderTextLine(3) == "6pqr");
+
+        // ======================================================
+
+        // -2: -> 0
+        auto marker = screen.findMarkerForward(-2);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 0); // 3ghi
+
+        // -1: -> 0
+        marker = screen.findMarkerForward(-1);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 0); // 3ghi
+
+        // 0: -> 1
+        marker = screen.findMarkerForward(0);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 1); // 4jkl
+
+        // 1: -> 3
+        marker = screen.findMarkerForward(1);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 3); // 6pqn
+
+        // 2: -> 3
+        marker = screen.findMarkerForward(2);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 3); // 6pqn
+
+        // 3: -> NONE (bottom of screen already)
+        marker = screen.findMarkerForward(3);
+        CHECK_FALSE(marker.has_value());
+    }
+}
+
+TEST_CASE("findMarkerBackward", "[screen]")
+{
+    auto screen = MockScreen{{4, 3}};
+    REQUIRE_FALSE(screen.findMarkerBackward(0).has_value()); // peak into history
+    REQUIRE_FALSE(screen.findMarkerBackward(1).has_value());
+    REQUIRE_FALSE(screen.findMarkerBackward(2).has_value());
+    REQUIRE_FALSE(screen.findMarkerBackward(3).has_value());
+    REQUIRE_FALSE(screen.findMarkerBackward(4).has_value()); // overflow
+
+    SECTION("no marks") {
+        screen.write("1abc"sv);
+        screen.write("2def"sv);
+        screen.write("3ghi"sv);
+        screen.write("4jkl"sv);
+        screen.write("5mno"sv);
+        screen.write("6pqr"sv);
+
+        REQUIRE(screen.historyLineCount() == 3);
+
+        auto mark = screen.findMarkerBackward(screen.size().rows);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test one line beyond history line count
+        mark = screen.findMarkerBackward(-3);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test last history line
+        mark = screen.findMarkerBackward(-2);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test second-last history line
+        mark = screen.findMarkerBackward(-1);
+        REQUIRE_FALSE(mark.has_value());
+
+        // test first history line
+        mark = screen.findMarkerBackward(0);
+        REQUIRE_FALSE(mark.has_value());
+    }
+
+    SECTION("with marks") {
+        // saved lines
+        screen.write(SetMark{});
+        screen.write("1abc\r\n"sv);
+        screen.write("2def\r\n"sv);
+        screen.write(SetMark{});
+        screen.write("3ghi\r\n"sv);
+
+        // visibile screen
+        screen.write(SetMark{});
+        screen.write("4jkl\r\n"sv);
+        screen.write("5mno\r\n"sv);
+        screen.write(SetMark{});
+        screen.write("6pqr"sv);
+
+        REQUIRE(screen.renderTextLine(-2) == "1abc");
+        REQUIRE(screen.renderTextLine(-1) == "2def");
+        REQUIRE(screen.renderTextLine(0) == "3ghi");
+
+        REQUIRE(screen.renderTextLine(1) == "4jkl");
+        REQUIRE(screen.renderTextLine(2) == "5mno");
+        REQUIRE(screen.renderTextLine(3) == "6pqr");
+
+        // ======================================================
+
+        // 3: -> 1
+        auto marker = screen.findMarkerBackward(3);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 1); // 4jkl
+
+        // 2: -> 1
+        marker = screen.findMarkerBackward(2);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 1); // 4jkl
+
+        // 1: -> 0
+        marker = screen.findMarkerBackward(1);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == 0); // 3gh
+
+        // 0: -> -2
+        marker = screen.findMarkerBackward(0);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == -2); // 1abc
+
+        // -1: -> -2
+        marker = screen.findMarkerBackward(-1);
+        REQUIRE(marker.has_value());
+        CHECK(marker.value() == -2); // 1abc
+
+        // -2: -> NONE
+        marker = screen.findMarkerBackward(-2);
+        CHECK_FALSE(marker.has_value());
+
+        // -3: -> NONE (one off edge case)
+        marker = screen.findMarkerBackward(-3);
+        CHECK_FALSE(marker.has_value());
+    }
+}
 
 TEST_CASE("DECTABSR", "[screen]")
 {

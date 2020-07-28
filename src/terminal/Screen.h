@@ -472,19 +472,14 @@ class Screen {
 
     std::string const& windowTitle() const noexcept { return windowTitle_; }
 
-    std::optional<int> findPrevMarker(int _currentScrollOffset) const
+    std::optional<int> findMarkerForward(int _currentCursorLine) const // TODO: remove me?
     {
-        return buffer_->findPrevMarker(_currentScrollOffset);
+        return buffer_->findMarkerForward(_currentCursorLine);
     }
 
-    std::optional<int> findNextMarker(int _currentScrollOffset) const
+    std::optional<int> findMarkerBackward(int _currentCursorLine) const // TODO: remove me?
     {
-        return buffer_->findNextMarker(_currentScrollOffset);
-    }
-
-    std::optional<int> findMarkerBackwards(int _currentCursorLine) const
-    {
-        return buffer_->findMarkerBackwards(_currentCursorLine);
+        return buffer_->findMarkerBackward(_currentCursorLine);
     }
 
     ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }

@@ -36,6 +36,7 @@
 using std::cerr;
 using std::endl;
 using std::min;
+using std::max;
 using std::next;
 using std::nullopt;
 using std::optional;
@@ -50,70 +51,42 @@ std::string Cell::toUtf8() const
     return unicode::to_utf8(codepoints_.data(), codepointCount_);
 }
 
-std::optional<int> ScreenBuffer::findMarkerBackwards(int _currentCursorLine) const
+std::optional<int> ScreenBuffer::findMarkerBackward(int _currentCursorLine) const
 {
     // TODO: unit- tests for all cases.
 
     if (_currentCursorLine > size().rows || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
         return nullopt;
 
-    if (_currentCursorLine >= 1) // main screen area
+    if (_currentCursorLine >= 2) // main screen area
     {
-        auto currentLine = next(begin(lines), _currentCursorLine - 1);
-        for (int row = _currentCursorLine; row > 0; --row, --currentLine)
+        auto currentLine = next(begin(lines), _currentCursorLine - 2);
+        for (int row = _currentCursorLine - 1; row > 0; --row, --currentLine)
             if (currentLine->marked)
                 return {row};
     }
 
     // saved-lines area
-    auto const scrollOffset = _currentCursorLine < 0
-        ? min(-_currentCursorLine, historyLineCount())
-        : 0;
+    auto const scrollOffset = _currentCursorLine <= 0 ? -_currentCursorLine + 1 : 0;
 
-    if (scrollOffset + 1 < historyLineCount())
-    {
-        auto const i = find_if(
-            next(rbegin(savedLines), scrollOffset + 1),
-            rend(savedLines),
-            [](Line const& line) -> bool { return line.marked; }
-        );
-        if (i != rend(savedLines))
-            return distance(rbegin(savedLines), i); // TODO
-    }
+    for (int i = scrollOffset; i < historyLineCount(); ++i)
+        if (Line const& line = savedLines.at(historyLineCount() - i - 1); line.marked)
+            return -i;
 
     return nullopt;
 }
 
-std::optional<int> ScreenBuffer::findPrevMarker(int _scrollOffset) const
+std::optional<int> ScreenBuffer::findMarkerForward(int _currentCursorLine) const
 {
-    _scrollOffset = min(_scrollOffset, historyLineCount());
+    for (int i = _currentCursorLine + 1; i <= 0; ++i)
+        if (int const ri = historyLineCount() + i - 1; savedLines.at(ri).marked)
+            return {i};
 
-    if (_scrollOffset + 1 < historyLineCount())
-    {
-        auto const i = find_if(
-            next(rbegin(savedLines), _scrollOffset + 1),
-            rend(savedLines),
-            [](Line const& line) -> bool { return line.marked; }
-        );
-        if (i != rend(savedLines))
-            return distance(rbegin(savedLines), i);
-    }
+    for (int i = max(_currentCursorLine + 1, 1); i <= size_.rows; ++i)
+        if (Line const& line = lines.at(i - 1); line.marked)
+            return {i};
 
     return nullopt;
-}
-
-std::optional<int> ScreenBuffer::findNextMarker(int _scrollOffset) const
-{
-    _scrollOffset = min(_scrollOffset, historyLineCount());
-    auto rowNumber = _scrollOffset - 1;
-
-    if (rowNumber < historyLineCount())
-        for (auto line = prev(end(savedLines), rowNumber); rowNumber > 0; ++line, --rowNumber)
-            if (line->marked)
-                return {rowNumber};
-
-    // default to bottom
-    return 0;
 }
 
 void ScreenBuffer::resize(WindowSize const& _newSize)

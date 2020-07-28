@@ -208,9 +208,9 @@ bool Screen::scrollDown(int _numLines)
 
 bool Screen::scrollMarkUp()
 {
-    if (auto const newScrollOffset = findPrevMarker(scrollOffset_); newScrollOffset.has_value())
+    if (auto const newScrollOffset = buffer_->findMarkerBackward(-scrollOffset_); newScrollOffset.has_value())
     {
-        scrollOffset_ = 1 + newScrollOffset.value();
+        scrollOffset_ = 1 - newScrollOffset.value();
         return true;
     }
 
@@ -219,9 +219,9 @@ bool Screen::scrollMarkUp()
 
 bool Screen::scrollMarkDown()
 {
-    if (auto const newScrollOffset = findNextMarker(scrollOffset_); newScrollOffset.has_value())
+    if (auto const newScrollOffset = buffer_->findMarkerForward(1 - scrollOffset_); newScrollOffset.has_value())
     {
-        scrollOffset_ = newScrollOffset.value();
+        scrollOffset_ = *newScrollOffset < 0 ? 1 - newScrollOffset.value() : 0;
         return true;
     }
 

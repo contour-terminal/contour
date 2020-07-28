@@ -390,16 +390,15 @@ struct ScreenBuffer {
         return static_cast<int>(savedLines.size());
     }
 
-    std::optional<int> findPrevMarker(int _currentScrollOffset) const;
-    std::optional<int> findNextMarker(int _currentScrollOffset) const;
-
     /// Finds the previous marker right next to the given line position.
     ///
     /// @paramn _currentCursorLine the line number of the current cursor (1..N) for screen area, or
     ///                            (0..-N) for savedLines area
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
-    std::optional<int> findMarkerBackwards(int _currentCursorLine) const;
+    std::optional<int> findMarkerBackward(int _currentCursorLine) const;
+
+    std::optional<int> findMarkerForward(int _currentCursorLine) const;
 
     Type type_;
 	WindowSize size_;
