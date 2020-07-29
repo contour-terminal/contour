@@ -179,6 +179,21 @@ struct GraphicsAttributes {
     }
 };
 
+/// Terminal cursor data structure.
+///
+/// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
+struct Cursor
+{
+    Coordinate position{1, 1};
+    bool autoWrap = false;
+    bool originMode = false;
+    bool visible = true;
+    GraphicsAttributes graphicsRendition{};
+    // TODO: selective erase attribute
+    // TODO: SS2/SS3 states
+    // TODO: CharacterSet for GL and GR
+};
+
 /// Grid cell with character and graphics rendition information.
 class Cell {
   public:
@@ -356,16 +371,6 @@ struct ScreenBuffer {
 
     using Renderer = std::function<void(Coordinate const&, Cell const&)>;
 
-    struct Cursor : public Coordinate {
-        bool visible = true;
-
-        Cursor& operator=(Coordinate const& coords) noexcept {
-            column = coords.column;
-            row = coords.row;
-            return *this;
-        }
-    };
-
 	ScreenBuffer(Type _type, WindowSize const& _size, Modes& _modes, std::optional<size_t> _maxHistoryLineCount)
 		: type_{ _type },
           size_{ _size },
@@ -408,18 +413,15 @@ struct ScreenBuffer {
 	Cursor cursor{};
 	Lines lines;
 	Lines savedLines{};
-	bool autoWrap{false};
 	bool wrapPending{false};
-	bool cursorRestrictedToMargin{false};
 	int tabWidth{8};
     std::vector<cursor_pos_t> tabs;
-	GraphicsAttributes graphicsRendition{};
 
 	LineIterator currentLine{std::begin(lines)};
 	ColumnIterator currentColumn{currentLine->begin()};
 
     ColumnIterator lastColumn{currentColumn};
-    Cursor lastCursor{};
+    Coordinate lastCursorPosition{};
 
     HyperlinkRef currentHyperlink = {};
     // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
@@ -484,13 +486,13 @@ struct ScreenBuffer {
 
     void updateCursorIterators()
     {
-        currentLine = next(begin(lines), cursor.row - 1);
+        currentLine = next(begin(lines), cursor.position.row - 1);
         updateColumnIterator();
     }
 
     void updateColumnIterator()
     {
-        currentColumn = columnIteratorAt(cursor.column);
+        currentColumn = columnIteratorAt(cursor.position.column);
     }
 
     void clearAllTabs();
@@ -505,20 +507,20 @@ struct ScreenBuffer {
 
     std::string screenshot() const;
 
-	constexpr Coordinate realCursorPosition() const noexcept { return {cursor.row, cursor.column}; }
+	constexpr Coordinate realCursorPosition() const noexcept { return cursor.position; }
 
 	constexpr Coordinate cursorPosition() const noexcept {
-		if (!cursorRestrictedToMargin)
+		if (!cursor.originMode)
 			return realCursorPosition();
 		else
 			return Coordinate{
-				cursor.row - margin_.vertical.from + 1,
-				cursor.column - margin_.horizontal.from + 1
+				cursor.position.row - margin_.vertical.from + 1,
+				cursor.position.column - margin_.horizontal.from + 1
 			};
 	}
 
 	constexpr Coordinate origin() const noexcept {
-		if (cursorRestrictedToMargin)
+		if (cursor.originMode)
 			return {margin_.vertical.from, margin_.horizontal.from};
 		else
 			return {1, 1};
@@ -534,7 +536,7 @@ struct ScreenBuffer {
 	/// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
 	Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
 	{
-		if (!cursorRestrictedToMargin)
+		if (!cursor.originMode)
 			return pos;
 		else
 			return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
@@ -543,7 +545,7 @@ struct ScreenBuffer {
 	/// Clamps given coordinates, respecting DECOM (Origin Mode).
 	Coordinate clampCoordinate(Coordinate const& coord) const noexcept
 	{
-		if (!cursorRestrictedToMargin)
+		if (!cursor.originMode)
             return clampToOrigin(coord);
 		else
             return clampToScreen(coord);
@@ -570,8 +572,9 @@ struct ScreenBuffer {
 
     bool isCursorInsideMargins() const noexcept
     {
-        bool const insideVerticalMargin = margin_.vertical.contains(cursor.row);
-        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin) || margin_.horizontal.contains(cursor.column);
+        bool const insideVerticalMargin = margin_.vertical.contains(cursor.position.row);
+        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin)
+                                         || margin_.horizontal.contains(cursor.position.column);
         return insideVerticalMargin && insideHorizontalMargin;
     }
 };
@@ -615,13 +618,13 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 
 namespace fmt {
     template <>
-    struct formatter<terminal::ScreenBuffer::Cursor> {
+    struct formatter<terminal::Cursor> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(const terminal::ScreenBuffer::Cursor cursor, FormatContext& ctx)
+        auto format(const terminal::Cursor cursor, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}:{}{})", cursor.row, cursor.column, cursor.visible ? "" : ", (invis)");
+            return format_to(ctx.out(), "({}:{}{})", cursor.position.row, cursor.position.column, cursor.visible ? "" : ", (invis)");
         }
     };
 

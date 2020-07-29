@@ -14,17 +14,17 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Commands.h>
 #include <terminal/CommandBuilder.h>
+#include <terminal/Commands.h>
+#include <terminal/Hyperlink.h>
+#include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/Logger.h>
 #include <terminal/Parser.h>
-#include <terminal/WindowSize.h>
-#include <terminal/Hyperlink.h>
-#include <terminal/Selector.h>
-#include <terminal/InputGenerator.h> // MouseTransport
-#include <terminal/VTType.h>
 #include <terminal/ScreenBuffer.h>
 #include <terminal/ScreenEvents.h>
+#include <terminal/Selector.h>
+#include <terminal/VTType.h>
+#include <terminal/WindowSize.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
@@ -227,7 +227,6 @@ class SynchronizedCommandExecutor : public CommandExecutor {
  */
 class Screen {
   public:
-    using Cursor = ScreenBuffer::Cursor;
     using Renderer = ScreenBuffer::Renderer;
 
     /**
@@ -523,20 +522,9 @@ class Screen {
     }
 
   private:
-    // Savable states for DECSC & DECRC
-    struct SavedCursor {
-        Coordinate cursorPosition;
-        GraphicsAttributes graphicsRendition{};
-        // TODO: CharacterSet for GL and GR
-        bool autowrap = false;
-        bool originMode = false;
-        // TODO: Selective Erase Attribute (DECSCA)
-        // TODO: Any single shift 2 (SS2) or single shift 3 (SS3) functions sent
-    };
-
     ScreenEvents& eventListener_;
 
-    std::stack<SavedCursor> savedCursors_{};
+    std::stack<Cursor> savedCursors_{};
 
     Logger const logger_;
     bool logRaw_ = false;

@@ -107,7 +107,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
             }
         );
 
-        cursor.row += rowsToTakeFromSavedLines;
+        cursor.position.row += rowsToTakeFromSavedLines;
 
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
         generate_n(
@@ -119,7 +119,7 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
     {
         // Shrink existing line count to _newSize.rows
         // by splicing the number of lines to be shrinked by into savedLines bottom.
-        if (cursor.row == size_.rows)
+        if (cursor.position.row == size_.rows)
         {
             auto const n = size_.rows - _newSize.rows;
             for_each(
@@ -148,14 +148,14 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
             [=](auto& line) { line.resize(_newSize.columns); }
         );
         if (wrapPending)
-            cursor.column++;
+            cursor.position.column++;
         wrapPending = false;
     }
     else if (_newSize.columns < size_.columns)
     {
         // Shrink existing columns to _newSize.columns.
         // Nothing should be done, I think, as we preserve prior (now exceeding) content.
-        if (cursor.column == size_.columns)
+        if (cursor.position.column == size_.columns)
             wrapPending = true;
 
         // truncating tabs
@@ -172,11 +172,11 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
 
     size_ = _newSize;
 
-    lastCursor = clampCoordinate(lastCursor);
-    auto lastLine = next(begin(lines), lastCursor.row - 1);
-    lastColumn = columnIteratorAt(begin(*lastLine), lastCursor.column);
+    lastCursorPosition = clampCoordinate(lastCursorPosition);
+    auto lastLine = next(begin(lines), lastCursorPosition.row - 1);
+    lastColumn = columnIteratorAt(begin(*lastLine), lastCursorPosition.column);
 
-    cursor = clampCoordinate(cursor);
+    cursor.position = clampCoordinate(cursor.position);
     updateCursorIterators();
 }
 
@@ -188,7 +188,7 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
     switch (_mode)
     {
         case Mode::AutoWrap:
-            autoWrap = _enable;
+            cursor.autoWrap = _enable;
             break;
         case Mode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
@@ -196,7 +196,7 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
                 margin_.horizontal = {1, size_.columns};
             break;
         case Mode::Origin:
-            cursorRestrictedToMargin = _enable;
+            cursor.originMode = _enable;
             break;
         case Mode::VisibleCursor:
             cursor.visible = _enable;
@@ -209,7 +209,7 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
 void ScreenBuffer::moveCursorTo(Coordinate to)
 {
     wrapPending = false;
-    cursor = clampToScreen(toRealCoordinate(to));
+    cursor.position = clampToScreen(toRealCoordinate(to));
     updateCursorIterators();
 }
 
@@ -238,8 +238,8 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
         // using moveCursorTo() would embrace code reusage, but due to the fact that it's fully recalculating iterators,
         // it may be faster to just incrementally update them.
         // moveCursorTo({cursorPosition().row + 1, margin_.horizontal.from});
-        cursor.row++;
-        cursor.column = _newColumn;
+        cursor.position.row++;
+        cursor.position.column = _newColumn;
         currentLine++;
         updateColumnIterator();
     }
@@ -250,7 +250,7 @@ void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
 {
     verifyState();
 
-    if (wrapPending && autoWrap)
+    if (wrapPending && cursor.autoWrap)
         linefeed(margin_.horizontal.from);
 
     auto const ch = _ch == 0x7F ? ' ' : _ch;
@@ -276,17 +276,17 @@ void ScreenBuffer::clearAndAdvance(int _offset)
     if (_offset == 0)
         return;
 
-    auto const availableColumnCount = margin_.horizontal.length() - cursor.column;
+    auto const availableColumnCount = margin_.horizontal.length() - cursor.position.column;
     auto const n = min(_offset, availableColumnCount);
 
     if (n == _offset)
     {
         assert(n > 0);
-        cursor.column += n;
+        cursor.position.column += n;
         for (auto i = 0; i < n; ++i)
-            (currentColumn++)->reset(graphicsRendition, currentHyperlink);
+            (currentColumn++)->reset(cursor.graphicsRendition, currentHyperlink);
     }
-    else if (autoWrap)
+    else if (cursor.autoWrap)
     {
         wrapPending = true;
     }
@@ -296,28 +296,28 @@ void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t _character)
 {
     Cell& cell = *currentColumn;
     cell.setCharacter(_character);
-    cell.attributes() = graphicsRendition;
+    cell.attributes() = cursor.graphicsRendition;
     cell.setHyperlink(currentHyperlink);
 
     lastColumn = currentColumn;
-    lastCursor = cursor;
+    lastCursorPosition = cursor.position;
 
     bool const cursorInsideMargin = isModeEnabled(Mode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor.column
-                                                   : size_.columns - cursor.column;
+    auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor.position.column
+                                                   : size_.columns - cursor.position.column;
 
     auto const n = min(cell.width(), cellsAvailable);
 
     if (n == cell.width())
     {
         assert(n > 0);
-        cursor.column += n;
+        cursor.position.column += n;
         currentColumn++;
         for (int i = 1; i < n; ++i)
-            (currentColumn++)->reset(graphicsRendition, currentHyperlink);
+            (currentColumn++)->reset(cursor.graphicsRendition, currentHyperlink);
         verifyState();
     }
-    else if (autoWrap)
+    else if (cursor.autoWrap)
     {
         wrapPending = true;
         verifyState();
@@ -365,7 +365,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
                 fill_n(
                     next(begin(line), margin.horizontal.from - 1),
                     margin.horizontal.length(),
-                    Cell{{}, graphicsRendition}
+                    Cell{{}, cursor.graphicsRendition}
                 );
             }
         );
@@ -390,7 +390,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             generate_n(
                 back_inserter(lines),
                 n,
-                [this]() { return Line{static_cast<size_t>(size_.columns), Cell{{}, graphicsRendition}}; }
+                [this]() { return Line{static_cast<size_t>(size_.columns), Cell{{}, cursor.graphicsRendition}}; }
             );
         }
     }
@@ -413,7 +413,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             next(begin(lines), margin.vertical.to - n),
             next(begin(lines), margin.vertical.to),
             [&](Line& line) {
-                fill(begin(line), end(line), Cell{{}, graphicsRendition});
+                fill(begin(line), end(line), Cell{{}, cursor.graphicsRendition});
             }
         );
     }
@@ -464,7 +464,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
-                        Cell{{}, graphicsRendition}
+                        Cell{{}, cursor.graphicsRendition}
                     );
                 }
             );
@@ -479,7 +479,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
                     fill_n(
                         next(begin(line), _margin.horizontal.from - 1),
                         _margin.horizontal.length(),
-                        Cell{{}, graphicsRendition}
+                        Cell{{}, cursor.graphicsRendition}
                     );
                 }
             );
@@ -500,7 +500,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
                 fill(
                     begin(line),
                     end(line),
-                    Cell{{}, graphicsRendition}
+                    Cell{{}, cursor.graphicsRendition}
                 );
             }
         );
@@ -521,7 +521,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
                 fill(
                     begin(line),
                     end(line),
-                    Cell{{}, graphicsRendition}
+                    Cell{{}, cursor.graphicsRendition}
                 );
             }
         );
@@ -546,7 +546,7 @@ void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
     fill(
         prev(rightMargin, n),
         rightMargin,
-        Cell{L' ', graphicsRendition}
+        Cell{L' ', cursor.graphicsRendition}
     );
 }
 
@@ -570,9 +570,9 @@ void ScreenBuffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
         updateColumnIterator();
 
     fill_n(
-        columnIteratorAt(begin(*line), cursor.column),
+        columnIteratorAt(begin(*line), cursor.position.column),
         n,
-        Cell{L' ', graphicsRendition}
+        Cell{L' ', cursor.graphicsRendition}
     );
 }
 
@@ -584,9 +584,9 @@ void ScreenBuffer::insertColumns(cursor_pos_t _n)
 
 void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 {
-    auto const col = cursorRestrictedToMargin ? margin_.horizontal.from + _n - 1 : _n;
+    auto const col = cursor.originMode ? margin_.horizontal.from + _n - 1 : _n;
     auto const clampedCol = min(col, size_.columns);
-    cursor.column = clampedCol;
+    cursor.position.column = clampedCol;
     updateColumnIterator();
 
     verifyState();
@@ -594,8 +594,8 @@ void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 
 bool ScreenBuffer::incrementCursorColumn(cursor_pos_t _n)
 {
-    auto const n = min(_n,  margin_.horizontal.length() - cursor.column);
-    cursor.column += n;
+    auto const n = min(_n,  margin_.horizontal.length() - cursor.position.column);
+    cursor.position.column += n;
     updateColumnIterator();
     verifyState();
     return n == _n;
@@ -637,12 +637,12 @@ void ScreenBuffer::verifyState() const
 #if !defined(NDEBUG)
     auto const lrmm = isModeEnabled(Mode::LeftRightMargin);
     if (wrapPending &&
-            ((lrmm && cursor.column != margin_.horizontal.to)
-            || (!lrmm && cursor.column != size_.columns)))
+            ((lrmm && cursor.position.column != margin_.horizontal.to)
+            || (!lrmm && cursor.position.column != size_.columns)))
     {
         fail(fmt::format(
             "Wrap is pending but cursor's column ({}) is not at right side of margin ({}) or screen ({}).",
-            cursor.column, margin_.horizontal.to, size_.columns
+            cursor.position.column, margin_.horizontal.to, size_.columns
         ));
     }
 
@@ -650,21 +650,21 @@ void ScreenBuffer::verifyState() const
         fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines.size(), size_.rows));
 
     // verify cursor positions
-    [[maybe_unused]] auto const clampedCursor = clampToScreen(cursor);
-    if (cursor != clampedCursor)
-        fail(fmt::format("Cursor {} does not match clamp to screen {}.", cursor, clampedCursor));
+    [[maybe_unused]] auto const clampedCursorPos = clampToScreen(cursor.position);
+    if (cursor.position != clampedCursorPos)
+        fail(fmt::format("Cursor {} does not match clamp to screen {}.", cursor, clampedCursorPos));
     // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
 
     // verify iterators
-    [[maybe_unused]] auto const line = next(begin(lines), cursor.row - 1);
-    [[maybe_unused]] auto const col = columnIteratorAt(cursor.column);
+    [[maybe_unused]] auto const line = next(begin(lines), cursor.position.row - 1);
+    [[maybe_unused]] auto const col = columnIteratorAt(cursor.position.column);
 
     if (line != currentLine)
         fail(fmt::format("Calculated current line does not match."));
     else if (col != currentColumn)
         fail(fmt::format("Calculated current column does not match."));
 
-    if (wrapPending && cursor.column != size_.columns && cursor.column != margin_.horizontal.to)
+    if (wrapPending && cursor.position.column != size_.columns && cursor.position.column != margin_.horizontal.to)
         fail(fmt::format("wrapPending flag set when cursor is not in last column."));
 #endif
 }
@@ -681,8 +681,8 @@ void ScreenBuffer::dumpState(std::string const& _message) const
     hline();
 
     cerr << fmt::format("Rendered screen at the time of failure: {}, cursor at {}", size_, cursor);
-    if (cursorRestrictedToMargin)
-        cerr << fmt::format(" (real: {})", toRealCoordinate(cursor));
+    if (cursor.originMode)
+        cerr << fmt::format(" (real: {})", toRealCoordinate(cursor.position));
     cerr << '\n';
 
     hline();

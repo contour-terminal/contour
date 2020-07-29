@@ -59,8 +59,6 @@ class Terminal : public ScreenEvents {
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     };
 
-    using Cursor = Screen::Cursor; //TODO: CursorShape shape;
-
     Terminal(WindowSize _winSize,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,

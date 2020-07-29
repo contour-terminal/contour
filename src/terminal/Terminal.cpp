@@ -317,7 +317,7 @@ void Terminal::writeToScreen(char const* data, size_t size)
     screen_.write(data, size);
 }
 
-Terminal::Cursor Terminal::cursor() const
+Cursor Terminal::cursor() const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
     return screen_.realCursor();

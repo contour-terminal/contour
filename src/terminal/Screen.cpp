@@ -256,15 +256,7 @@ void Screen::saveCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECSC.html
 
-    // TODO: character sets
-    // TODO: selective erase attribute
-    // TODO: SS2/SS3 states
-    savedCursors_.emplace(SavedCursor{
-        realCursorPosition(),
-        currentBuffer().graphicsRendition,
-        isModeEnabled(Mode::AutoWrap),
-        isModeEnabled(Mode::Origin)
-    });
+    savedCursors_.emplace(currentBuffer().cursor);
 }
 
 void Screen::restoreCursor()
@@ -272,8 +264,8 @@ void Screen::restoreCursor()
     if (!savedCursors_.empty())
     {
         auto const& saved = savedCursors_.top();
-        moveCursorTo(saved.cursorPosition);
-        setMode(Mode::AutoWrap, saved.autowrap);
+        moveCursorTo(saved.position);
+        setMode(Mode::AutoWrap, saved.autoWrap);
         setMode(Mode::Origin, saved.originMode);
         savedCursors_.pop();
     }
@@ -449,7 +441,7 @@ void Screen::operator()(CopyToClipboard const& v)
 
 void Screen::operator()(ClearToEndOfScreen const&)
 {
-    if (isAlternateScreen() && buffer_->cursor.row == 1 && buffer_->cursor.column == 1)
+    if (isAlternateScreen() && buffer_->cursor.position.row == 1 && buffer_->cursor.position.column == 1)
         buffer_->hyperlinks.clear();
 
     (*this)(ClearToEndOfLine{});
@@ -459,7 +451,7 @@ void Screen::operator()(ClearToEndOfScreen const&)
         next(buffer_->currentLine),
         end(buffer_->lines),
         [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
+            fill(begin(line), end(line), Cell{{}, buffer_->cursor.graphicsRendition});
         }
     );
 }
@@ -473,7 +465,7 @@ void Screen::operator()(ClearToBeginOfScreen const&)
         begin(buffer_->lines),
         buffer_->currentLine,
         [&](ScreenBuffer::Line& line) {
-            fill(begin(line), end(line), Cell{{}, buffer_->graphicsRendition});
+            fill(begin(line), end(line), Cell{{}, buffer_->cursor.graphicsRendition});
         }
     );
 }
@@ -500,7 +492,7 @@ void Screen::operator()(EraseCharacters const& v)
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
     size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
-    fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->graphicsRendition});
+    fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->cursor.graphicsRendition});
 }
 
 void Screen::operator()(ScrollUp const& v)
@@ -518,7 +510,7 @@ void Screen::operator()(ClearToEndOfLine const&)
     fill(
         buffer_->currentColumn,
         end(*buffer_->currentLine),
-        Cell{{}, buffer_->graphicsRendition}
+        Cell{{}, buffer_->cursor.graphicsRendition}
     );
 }
 
@@ -527,7 +519,7 @@ void Screen::operator()(ClearToBeginOfLine const&)
     fill(
         begin(*buffer_->currentLine),
         next(buffer_->currentColumn),
-        Cell{{}, buffer_->graphicsRendition}
+        Cell{{}, buffer_->cursor.graphicsRendition}
     );
 }
 
@@ -536,7 +528,7 @@ void Screen::operator()(ClearLine const&)
     fill(
         begin(*buffer_->currentLine),
         end(*buffer_->currentLine),
-        Cell{{}, buffer_->graphicsRendition}
+        Cell{{}, buffer_->cursor.graphicsRendition}
     );
 }
 
@@ -564,7 +556,7 @@ void Screen::operator()(InsertLines const& v)
         buffer_->scrollDown(
             v.n,
             Margin{
-                { buffer_->cursor.row, buffer_->margin_.vertical.to },
+                { buffer_->cursor.position.row, buffer_->margin_.vertical.to },
                 buffer_->margin_.horizontal
             }
         );
@@ -584,7 +576,7 @@ void Screen::operator()(DeleteLines const& v)
         buffer_->scrollUp(
             v.n,
             Margin{
-                { buffer_->cursor.row, buffer_->margin_.vertical.to },
+                { buffer_->cursor.position.row, buffer_->margin_.vertical.to },
                 buffer_->margin_.horizontal
             }
         );
@@ -662,7 +654,7 @@ void Screen::operator()(MoveCursorUp const& v)
             : cursorPosition().row
     );
 
-    buffer_->cursor.row -= n;
+    buffer_->cursor.position.row -= n;
     buffer_->currentLine = prev(buffer_->currentLine, n);
     buffer_->setCurrentColumn(cursorPosition().column);
     buffer_->verifyState();
@@ -671,7 +663,7 @@ void Screen::operator()(MoveCursorUp const& v)
 void Screen::operator()(MoveCursorDown const& v)
 {
     auto const n = min(v.n, size_.rows - cursorPosition().row);
-    buffer_->cursor.row += n;
+    buffer_->cursor.position.row += n;
     buffer_->currentLine = next(buffer_->currentLine, n);
     buffer_->setCurrentColumn(cursorPosition().column);
 }
@@ -687,8 +679,8 @@ void Screen::operator()(MoveCursorBackward const& v)
     buffer_->wrapPending = false;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
-    auto const n = min(v.n, buffer_->cursor.column - 1);
-    buffer_->setCurrentColumn(buffer_->cursor.column - n);
+    auto const n = min(v.n, buffer_->cursor.position.column - 1);
+    buffer_->setCurrentColumn(buffer_->cursor.position.column - n);
 }
 
 void Screen::operator()(MoveCursorToColumn const& v)
@@ -712,7 +704,7 @@ void Screen::operator()(MoveCursorTo const& v)
 
 void Screen::operator()(MoveCursorToLine const& v)
 {
-    moveCursorTo({v.row, buffer_->cursor.column});
+    moveCursorTo({v.row, buffer_->cursor.position.column});
 }
 
 void Screen::operator()(MoveCursorToNextTab const&)
@@ -742,7 +734,7 @@ void Screen::operator()(MoveCursorToNextTab const&)
         if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
         {
             auto const n = min(
-                buffer_->tabWidth - (buffer_->cursor.column - 1) % buffer_->tabWidth,
+                buffer_->tabWidth - (buffer_->cursor.position.column - 1) % buffer_->tabWidth,
                 size_.columns - cursorPosition().column
             );
             (*this)(MoveCursorForward{n});
@@ -796,11 +788,11 @@ void Screen::operator()(CursorBackwardTab const& v)
     else if (buffer_->tabWidth)
     {
         // default tab settings
-        if (buffer_->cursor.column <= buffer_->tabWidth)
+        if (buffer_->cursor.position.column <= buffer_->tabWidth)
             (*this)(MoveCursorToBeginOfLine{});
         else
         {
-            auto const m = buffer_->cursor.column % buffer_->tabWidth;
+            auto const m = buffer_->cursor.position.column % buffer_->tabWidth;
             auto const n = m
                          ? (v.count - 1) * buffer_->tabWidth + m
                          : v.count * buffer_->tabWidth + m;
@@ -858,17 +850,17 @@ void Screen::operator()(ForwardIndex const&)
 
 void Screen::operator()(SetForegroundColor const& v)
 {
-    buffer_->graphicsRendition.foregroundColor = v.color;
+    buffer_->cursor.graphicsRendition.foregroundColor = v.color;
 }
 
 void Screen::operator()(SetBackgroundColor const& v)
 {
-    buffer_->graphicsRendition.backgroundColor = v.color;
+    buffer_->cursor.graphicsRendition.backgroundColor = v.color;
 }
 
 void Screen::operator()(SetUnderlineColor const& v)
 {
-    buffer_->graphicsRendition.underlineColor = v.color;
+    buffer_->cursor.graphicsRendition.underlineColor = v.color;
 }
 
 void Screen::operator()(SetCursorStyle const& v)
@@ -885,76 +877,76 @@ void Screen::operator()(SetGraphicsRendition const& v)
     switch (v.rendition)
     {
         case GraphicsRendition::Reset:
-            buffer_->graphicsRendition = {};
+            buffer_->cursor.graphicsRendition = {};
             break;
         case GraphicsRendition::Bold:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Bold;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Bold;
             break;
         case GraphicsRendition::Faint:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Faint;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Faint;
             break;
         case GraphicsRendition::Italic:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Italic;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Italic;
             break;
         case GraphicsRendition::Underline:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Underline;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Underline;
             break;
         case GraphicsRendition::Blinking:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Blinking;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Blinking;
             break;
         case GraphicsRendition::Inverse:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Inverse;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Inverse;
             break;
         case GraphicsRendition::Hidden:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Hidden;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Hidden;
             break;
         case GraphicsRendition::CrossedOut:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::CrossedOut;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::CrossedOut;
             break;
         case GraphicsRendition::DoublyUnderlined:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
             break;
         case GraphicsRendition::CurlyUnderlined:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::CurlyUnderlined;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::CurlyUnderlined;
             break;
         case GraphicsRendition::DottedUnderline:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::DottedUnderline;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::DottedUnderline;
             break;
         case GraphicsRendition::DashedUnderline:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::DashedUnderline;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::DashedUnderline;
             break;
         case GraphicsRendition::Framed:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Framed;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Framed;
             break;
         case GraphicsRendition::Overline:
-            buffer_->graphicsRendition.styles |= CharacterStyleMask::Overline;
+            buffer_->cursor.graphicsRendition.styles |= CharacterStyleMask::Overline;
             break;
         case GraphicsRendition::Normal:
-            buffer_->graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
+            buffer_->cursor.graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
             break;
         case GraphicsRendition::NoItalic:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Italic;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Italic;
             break;
         case GraphicsRendition::NoUnderline:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Underline;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Underline;
             break;
         case GraphicsRendition::NoBlinking:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Blinking;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Blinking;
             break;
         case GraphicsRendition::NoInverse:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Inverse;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Inverse;
             break;
         case GraphicsRendition::NoHidden:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Hidden;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Hidden;
             break;
         case GraphicsRendition::NoCrossedOut:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
             break;
         case GraphicsRendition::NoFramed:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Framed;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Framed;
             break;
         case GraphicsRendition::NoOverline:
-            buffer_->graphicsRendition.styles &= ~CharacterStyleMask::Overline;
+            buffer_->cursor.graphicsRendition.styles &= ~CharacterStyleMask::Overline;
             break;
     }
 }
@@ -1102,7 +1094,7 @@ void Screen::operator()(ScreenAlignmentPattern const&)
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 begin(line),
                 end(line),
-                Cell{'X', buffer_->graphicsRendition}
+                Cell{'X', buffer_->cursor.graphicsRendition}
             );
         }
     );

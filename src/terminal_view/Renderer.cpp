@@ -191,9 +191,9 @@ uint64_t Renderer::render(Terminal& _terminal,
 void Renderer::renderCursor(Terminal const& _terminal)
 {
     // TODO: check if CursorStyle has changed, and update render context accordingly.
-    if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().row <= _terminal.screenSize().rows)
+    if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().position.row <= _terminal.screenSize().rows)
     {
-        Cell const& cursorCell = *_terminal.at(_terminal.cursor());
+        Cell const& cursorCell = *_terminal.at(_terminal.cursor().position);
 
         auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
                                                               : CursorShape::Rectangle;
@@ -201,7 +201,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
         cursorRenderer_.setShape(cursorShape);
 
         cursorRenderer_.render(
-            screenCoordinates_.map(_terminal.cursor().column, _terminal.cursor().row + _terminal.scrollOffset()),
+            screenCoordinates_.map(_terminal.cursor().position.column, _terminal.cursor().position.row + _terminal.scrollOffset()),
             cursorCell.width()
         );
     }
