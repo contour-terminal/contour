@@ -49,10 +49,11 @@ constexpr optional<char> gnumber(CharsetTable table, CharsetId charset)
     switch (charset)
     {
         case CharsetId::Special:
-        case CharsetId::UK:
+        case CharsetId::British:
         case CharsetId::USASCII:
         case CharsetId::German:
             return {std.at(static_cast<size_t>(table))};
+        // TODO: other cases
     }
     return nullopt;
 }
@@ -63,12 +64,13 @@ optional<char> finalChar(CharsetId charset)
     {
         case CharsetId::Special:
             return {'0'};
-        case CharsetId::UK:
+        case CharsetId::British:
             return {'A'};
         case CharsetId::USASCII:
             return {'B'};
         case CharsetId::German:
             return {'K'};
+        // TODO: other cases
     }
     return nullopt;
 }

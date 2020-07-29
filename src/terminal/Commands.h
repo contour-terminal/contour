@@ -269,11 +269,17 @@ std::string to_string(CharsetTable i);
 enum class CharsetId {
     Special, // Special Character and Line Drawing Set
 
-    UK,
-    USASCII,
+    British,
+    Dutch,
+    Finish,
+    French,
+    FrenchCanadian,
     German,
-
-    // ... TODO
+    NorwegianDanish,
+    Spanish,
+    Swedish,
+    Swiss,
+    USASCII
 };
 
 std::string to_string(CharsetId charset);

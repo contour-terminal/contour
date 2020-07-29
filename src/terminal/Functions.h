@@ -280,6 +280,30 @@ constexpr inline auto CR  = detail::C0('\x0D', "CR", "Carriage Return");
 constexpr inline auto SO  = detail::C0('\x0E', "SO", "Shift Out; Switch to an alternative character set. ");
 constexpr inline auto SI  = detail::C0('\x0F', "SI", "Shift In; Return to regular character set after Shift Out.");
 
+// SCS to support (G0, G1, G2, G3)
+// A        UK (British), VT100
+// B        USASCII, VT100
+// 4        Dutch, VT200
+// C
+// S        Finnish, VT200
+// R
+// f        French, VT200
+// Q
+// 9        French Canadian, VT200
+// K        VT200
+// " >      Greek VT500
+// % =      Hebrew VT500
+// Y        Italian, VT200
+// `
+// E
+// 6        Norwegian/Danish, VT200
+// % 6      Portuguese, VT300
+// Z        Spanish, VT200.
+// H
+// 7        Swedish, VT200.
+// =        Swiss, VT200.
+// % 2      Turkish, VT500.
+
 // ESC functions
 constexpr inline auto SCS_G0_SPECIAL = detail::ESC('(', '0', VTType::VT100, "SCS_G0_SPECIAL", "Set G0 to DEC Special Character and Line Drawing Set");
 constexpr inline auto SCS_G0_USASCII = detail::ESC('(', 'B', VTType::VT100, "SCS_G0_USASCII", "Set G0 to USASCII");

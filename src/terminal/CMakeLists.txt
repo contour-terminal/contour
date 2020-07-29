@@ -15,6 +15,7 @@ if(MSVC)
 endif()
 
 set(terminal_HEADERS
+    Charset.h
     Color.h
     CommandBuilder.h
     Commands.h
@@ -35,6 +36,7 @@ set(terminal_HEADERS
 )
 
 set(terminal_SOURCES
+    Charset.cpp
     Color.cpp
     CommandBuilder.cpp
     Commands.cpp

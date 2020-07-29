@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/Charset.h>
 #include <terminal/Color.h>
 #include <terminal/Commands.h>              // Coordinate, cursor_pos_t, Mode
 #include <terminal/Hyperlink.h>
@@ -189,6 +190,7 @@ struct Cursor
     bool originMode = false;
     bool visible = true;
     GraphicsAttributes graphicsRendition{};
+    CharsetMapping charsets{};
     // TODO: selective erase attribute
     // TODO: SS2/SS3 states
     // TODO: CharacterSet for GL and GR

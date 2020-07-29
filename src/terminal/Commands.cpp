@@ -188,15 +188,20 @@ string to_string(CharsetId charset)
 {
     switch (charset)
     {
-        case CharsetId::Special:
-            return "Special";
-        case CharsetId::UK:
-            return "UK";
-        case CharsetId::USASCII:
-            return "USASCII";
-        case CharsetId::German:
-            return "German";
+        case CharsetId::British: return "British";
+        case CharsetId::Dutch: return "Dutch";
+        case CharsetId::Finish: return "Finish";
+        case CharsetId::French: return "French";
+        case CharsetId::FrenchCanadian: return "FrenchCanadian";
+        case CharsetId::German: return "German";
+        case CharsetId::NorwegianDanish: return "NorwegianDanish";
+        case CharsetId::Spanish: return "Spanish";
+        case CharsetId::Special: return "Special";
+        case CharsetId::Swedish: return "Swedish";
+        case CharsetId::Swiss: return "Swiss";
+        case CharsetId::USASCII: return "USASCII";
     }
+
     return fmt::format("<?CharsetId:{}>", static_cast<unsigned>(charset));
 }
 

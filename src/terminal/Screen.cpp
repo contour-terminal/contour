@@ -1110,14 +1110,17 @@ void Screen::operator()(ApplicationKeypadMode const& v)
     eventListener_.setApplicationkeypadMode(v.enable);
 }
 
-void Screen::operator()(DesignateCharset const&)
+void Screen::operator()(DesignateCharset const& v)
 {
-    // TODO
+    // TODO: unit test SCS and see if they also behave well with reset/softreset
+    // Also, is the cursor shared between the two buffers?
+    buffer_->cursor.charsets.select(v.table, v.charset);
 }
 
-void Screen::operator()(SingleShiftSelect const&)
+void Screen::operator()(SingleShiftSelect const& v)
 {
-    // TODO
+    // TODO: unit test SS2, SS3
+    buffer_->cursor.charsets.singleShift(v.table);
 }
 
 void Screen::operator()(SoftTerminalReset const&)

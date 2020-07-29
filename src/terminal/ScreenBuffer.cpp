@@ -253,7 +253,9 @@ void ScreenBuffer::appendChar(char32_t _ch, bool _consecutive)
     if (wrapPending && cursor.autoWrap)
         linefeed(margin_.horizontal.from);
 
-    auto const ch = _ch == 0x7F ? ' ' : _ch;
+    auto const ch =
+        _ch < 127 ? cursor.charsets.map(static_cast<char>(_ch))
+                  : _ch == 0x7F ? ' ' : _ch;
 
     bool const insertToPrev =
         _consecutive
