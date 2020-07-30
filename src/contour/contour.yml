@@ -155,6 +155,7 @@ color_schemes:
 #
 # Actions:
 # - ChangeProfile     Changes the profile to the given profile `name`.
+# - CopyPreviousMarkRange   Copies the most recent range that is delimited by vertical line marks into clipboard.
 # - CopySelection     Copies the current selection into the clipboard buffer.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
@@ -171,18 +172,18 @@ color_schemes:
 # - ResetFontSize     Resets font size to what is configured in the config file.
 # - ScreenshotVT      Takes a screenshot in form of VT escape sequences.
 # - ScrollDown        Scrolls down by the multiplier factor.
+# - ScrollMarkDown    Scrolls one mark down (if none present, bottom of the screen)
+# - ScrollMarkUp      Scrolls one mark up
 # - ScrollOneDown     Scrolls down by exactly one line.
 # - ScrollOneUp       Scrolls up by exactly one line.
 # - ScrollPageDown    Scrolls a page down.
 # - ScrollPageUp      Scrolls a page up.
-# - ScrollMarkUp      Scrolls one mark up
-# - ScrollMarkDown    Scrolls one mark down (if none present, bottom of the screen)
 # - ScrollToBottom    Scrolls to the bottom of the screen buffer.
 # - ScrollToTop       Scrolls to the top of the screen buffer.
 # - ScrollUp          Scrolls up by the multiplier factor.
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleFullScreen  Enables/disables full screen mode.
-# - WriteScreen:      Writes VT sequence in `chars` member to the screen (bypassing the application).
+# - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:
     - { mods: [Control],        mouse: Left,        action: FollowHyperlink }
