@@ -108,7 +108,7 @@ void CursorRenderer::rebuild()
 {
     clearCache();
 
-    auto const width = screenCoordinates_.cellWidth;
+    auto const width = screenCoordinates_.cellWidth * columnWidth_;
     auto const baseline = screenCoordinates_.textBaseline;
     auto constexpr LineThickness = 1;
 

@@ -147,6 +147,8 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
+    renderCursor(_terminal);
+
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
@@ -177,8 +179,6 @@ uint64_t Renderer::render(Terminal& _terminal,
     backgroundRenderer_.finish();
 
     renderSelection(_terminal);
-
-    renderCursor(_terminal);
 
     textRenderer_.flushPendingSegments();
     textRenderer_.finish();

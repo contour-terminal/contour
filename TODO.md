@@ -1,7 +1,5 @@
 ### Known Bugs
 
-- PRIO-0: use signed int for `cursor_pos_t` and use negative numbers (maybe?) for accessing savedLines
-- PRIO-1: wide cells don't show wide cursor (see README.md)
 - charset SCS/SS not well tested (i.e.: write unit tests)
 - hot reloading of font family does not work
 - mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
