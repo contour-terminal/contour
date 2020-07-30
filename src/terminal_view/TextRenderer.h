@@ -31,6 +31,7 @@
 #include <QtGui/QVector4D>
 
 #include <functional>
+#include <list>
 #include <unordered_map>
 #include <vector>
 
@@ -197,7 +198,7 @@ class TextRenderer {
 
     // text shaping cache
     //
-    std::unordered_map<std::u32string_view, std::u32string> cacheKeyStorage_;
+    std::list<std::u32string> cacheKeyStorage_;
     std::unordered_map<CacheKey, crispy::text::GlyphPositionList> cache_;
 
     // target surface rendering

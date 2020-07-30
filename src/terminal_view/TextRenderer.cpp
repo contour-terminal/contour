@@ -181,10 +181,10 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     }
     else
     {
-        cacheKeyStorage_[codepoints] = u32string(codepoints);
+        cacheKeyStorage_.emplace_back(u32string{codepoints});
 
         auto const cacheKeyFromStorage = CacheKey{
-            cacheKeyStorage_[codepoints],
+            cacheKeyStorage_.back(),
             attributes_.styles
         };
 
