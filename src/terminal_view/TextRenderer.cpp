@@ -170,10 +170,7 @@ void TextRenderer::flushPendingSegments()
 GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    auto const key = CacheKey{
-        codepoints,
-        attributes_.styles
-    };
+    auto const key = CacheKey{codepoints, attributes_.styles};
     if (auto const cached = cache_.find(key); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
@@ -182,6 +179,9 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     else
     {
         cacheKeyStorage_.emplace_back(u32string{codepoints});
+        std::cout << fmt::format("TextRenderer.newEntry({}): {}\n",
+                cacheKeyStorage_.size(),
+                unicode::to_utf8(cacheKeyStorage_.back()).c_str());
 
         auto const cacheKeyFromStorage = CacheKey{
             cacheKeyStorage_.back(),

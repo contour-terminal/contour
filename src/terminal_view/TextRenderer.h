@@ -98,7 +98,7 @@ namespace std
         size_t operator()(terminal::view::CacheKey const& _key) const noexcept
         {
             auto fnv = crispy::FNV<char32_t>{};
-            return static_cast<size_t>(fnv(fnv(&_key.text[0], _key.text.size()), static_cast<char32_t>(_key.styles)));
+            return static_cast<size_t>(fnv(fnv(_key.text.data(), _key.text.size()), static_cast<char32_t>(_key.styles)));
         }
     };
 }
