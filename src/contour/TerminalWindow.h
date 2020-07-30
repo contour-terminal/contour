@@ -88,6 +88,7 @@ class TerminalWindow :
 
     bool setFontSize(int _fontSize);
     std::string extractSelectionText();
+    std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);
 
     void onScreenBufferChanged(terminal::ScreenBuffer::Type _type);

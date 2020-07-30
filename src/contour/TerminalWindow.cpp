@@ -993,44 +993,7 @@ bool TerminalWindow::executeAction(Action const& _action)
             return terminalView_->terminal().scrollToTop() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::CopyPreviousMarkRange) -> Result {
-            using terminal::Coordinate;
-            using terminal::cursor_pos_t;
-            using terminal::Cell;
-
-            auto const _l = std::lock_guard{terminalView_->terminal()};
-            std::cout << "1" << std::endl;
-            auto const& _screen = terminalView_->terminal().screen();
-            std::cout << "2" << std::endl;
-            auto const& _currentBuffer = _screen.currentBuffer();
-            std::cout << "3" << std::endl;
-            auto const colCount = _screen.size().columns;
-            std::cout << "4" << std::endl;
-            auto const bottomLine = _screen.currentBuffer().historyLineCount() +
-                                    _screen.size().rows;
-
-            std::cout << "5" << std::endl;
-            auto const marker1 = _currentBuffer.findPrevMarker(bottomLine);
-            std::cout << "6" << std::endl;
-            auto const marker0 = _currentBuffer.findPrevMarker(marker1.value());
-            std::cout << "7" << std::endl;
-            string text;
-
-            for (auto lineNum = *marker0; lineNum <= marker1; ++lineNum)
-            {
-                for (auto colNum = 1; colNum < colCount; ++colNum)
-                {
-                    auto const coord = Coordinate{
-                        static_cast<cursor_pos_t>(lineNum),
-                        static_cast<cursor_pos_t>(colNum)
-                    };
-
-                    Cell const& cell = _screen.absoluteAt(coord);
-                    text += cell.toUtf8();
-                }
-            }
-
-            copyToClipboard(text);
-
+            copyToClipboard(extractLastMarkRange());
             return Result::Silently;
         },
         [this](actions::ScrollToBottom) -> Result {
@@ -1239,6 +1202,44 @@ string TerminalWindow::extractSelectionText()
         lastColumn = _pos.column;
     });
     text += currentLine;
+
+    return text;
+}
+
+string TerminalWindow::extractLastMarkRange()
+{
+    using terminal::Coordinate;
+    using terminal::cursor_pos_t;
+    using terminal::Cell;
+
+    auto const _l = std::lock_guard{terminalView_->terminal()};
+
+    auto const& screen = terminalView_->terminal().screen();
+    auto const colCount = screen.size().columns;
+    auto const bottomLine = screen.cursor().position.row + 1;
+
+    auto const marker1 =
+        screen.cursor().position.row == screen.size().rows
+            ? optional{screen.size().rows - 1}
+            : screen.findMarkerBackward(bottomLine);
+    if (!marker1.has_value())
+        return {};
+
+    auto const marker0 = screen.findMarkerBackward(marker1.value());
+    if (!marker0.has_value())
+        return {};
+
+    auto const firstLine = *marker0 + 1;
+    auto const lastLine = *marker1 - 1;
+
+    string text;
+
+    for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
+    {
+        for (auto colNum = 1; colNum < colCount; ++colNum)
+            text += screen.at({lineNum, colNum}).toUtf8();
+        text += '\n';
+    }
 
     return text;
 }
