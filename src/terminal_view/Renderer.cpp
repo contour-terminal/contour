@@ -191,7 +191,7 @@ uint64_t Renderer::render(Terminal& _terminal,
 void Renderer::renderCursor(Terminal const& _terminal)
 {
     // TODO: check if CursorStyle has changed, and update render context accordingly.
-    if (_terminal.shouldDisplayCursor() && _terminal.scrollOffset() + _terminal.cursor().position.row <= _terminal.screenSize().rows)
+    if (_terminal.shouldDisplayCursor() && _terminal.isLineVisible(_terminal.cursor().position.row))
     {
         Cell const& cursorCell = *_terminal.at(_terminal.cursor().position);
 
