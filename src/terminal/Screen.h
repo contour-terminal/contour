@@ -397,7 +397,7 @@ class Screen {
 
     Coordinate realCursorPosition() const noexcept { return buffer_->realCursorPosition(); }
     Coordinate cursorPosition() const noexcept { return buffer_->cursorPosition(); }
-    Cursor const& realCursor() const noexcept { return buffer_->cursor; }
+    Cursor const& cursor() const noexcept { return buffer_->cursor; }
 
     // Tests if given coordinate is within the visible screen area.
     constexpr bool contains(Coordinate const& _coord) const noexcept
