@@ -343,19 +343,19 @@ TEST_CASE("Backspace", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 
     screen.write("12");
-    CHECK("12 " == screen.renderTextLine(1));;
+    CHECK("12 " == screen.renderTextLine(1));
     REQUIRE(screen.cursorPosition() == Coordinate{1, 3});
 
     screen.write("\b");
-    CHECK("12 " == screen.renderTextLine(1));;
+    CHECK("12 " == screen.renderTextLine(1));
     REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
 
     screen.write("\b");
-    CHECK("12 " == screen.renderTextLine(1));;
+    CHECK("12 " == screen.renderTextLine(1));
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 
     screen.write("\b");
-    CHECK("12 " == screen.renderTextLine(1));;
+    CHECK("12 " == screen.renderTextLine(1));
     REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 }
 
