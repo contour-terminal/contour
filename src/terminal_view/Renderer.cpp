@@ -149,12 +149,13 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
-    renderCursor(_terminal);
+    if (!_pressure)
+        renderCursor(_terminal);
 
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
-        if (_terminal.screen().contains(_currentMousePosition))
+        if (!_pressure && _terminal.screen().contains(_currentMousePosition))
         {
             auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
             if (cellAtMouse.hyperlink())
