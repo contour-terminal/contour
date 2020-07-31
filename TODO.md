@@ -1,5 +1,15 @@
+
+### random
+
+- [ ] make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
+
+### vttest
+
+- [ ] SGR underline not visible when inverse is set
+
 ### Known Bugs
 
+- Do not do pressure-performance optimization when in alt-buffer
 - charset SCS/SS not well tested (i.e.: write unit tests)
 - hot reloading of font family does not work
 - mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
@@ -16,6 +26,8 @@
 
 ### Usability Improvements
 
+- I-beam cursor thickness configurable (in pt, properly scaling with DPI)
+- cursor box thicknes configurable (like I-beam)
 - fade screen cursor when window/view is not in focus
 - upon config reload, preserve currently active profile
 - curly underline default amplitude too small in smaler font? (not actually visible that it's curly)
@@ -26,20 +38,17 @@
 
 ### QA: Refactoring:
 
+- Refactor tests so that they could run automated against any terminal emulator,
+  which requires special DCS for requesting screen buffer and states.
+  Target could be a real terminal as well as a mocked version for headless testing libterminal.
 - terminal::Mode to have enum values being consecutively increasing;
   then refactor Modes to make use of a bitset instead; vector<bool> or at least array<Mode>;
-- SaveCursor/RestoreCursor greatly shows that the cursor is more than just a position, but
-  also contains SGR, autoWrap, origin, character settings, selective erase attrs, SS2/SS3 states.
-  Therefore we could refactor that into its own struct that isolates all of these attributes.
 - savedLines screen history should be paged for 2 reasons (performance & easy on-disk swapping)
     - implement on-disk paging on top of that.
-- Let go of `unsigned` (including `size_t`) unless it is meant for bit-pattern
-- Use smallest integer type that is required to fit the
 - Make use of MagicEnums
 - Make use of the one ranges-v3
 - yaml-cpp: see if we can use system package instead of git submodule here
 - Functions: move C0 into it too (via FunctionCategory::Control)
-- Functions: move OSCs into it too
 - have all schedule() calls that require a color to directly pass calculated color
 - flip OpenGL textures so that they're better introspectible in qrenderdoc
 - font fallback into a list of fonts, iterate instead of recurse until success or done
@@ -63,10 +72,14 @@
 
 - CI: Finish release CI action (windows, osx, linux)
 - CI: (release): ArchLinux: https://github.com/marketplace/actions/arch-linux-pkgbuild-builder-action
-- CI: (release): to auto generate executables / packages [WINDOWS].
+- CI: (release): to auto generate executables / packages [WINDOWS](https://docs.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool)
 - CI: (release): to auto generate executables / packages [OSX].
 - CI: (release): action: flatpak package
 - CI: (release): action: Fedora package
+
+### VT conformance
+
+- CSI Pl ; Pc " p (Set conformance level (DECSCL), VT220 and up.)
 
 ### Features
 
