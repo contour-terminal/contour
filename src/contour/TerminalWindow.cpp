@@ -1512,6 +1512,11 @@ void TerminalWindow::copyToClipboard(std::string_view const& _text)
         clipboard->setText(QString::fromUtf8(_text.data(), static_cast<int>(_text.size())));
 }
 
+void TerminalWindow::dumpState()
+{
+    terminalView_->terminal().screen().currentBuffer().dumpState("Dump screen state.");
+    terminalView_->renderer().dumpState(std::cout);
+}
 // }}}
 
 } // namespace contour

@@ -135,6 +135,7 @@ class TextRenderer {
     void flushPendingSegments();
     void finish();
 
+    void debugCache(std::ostream& _textOutput) const;
     void clearCache();
 
   private:
@@ -200,6 +201,9 @@ class TextRenderer {
     //
     std::list<std::u32string> cacheKeyStorage_;
     std::unordered_map<CacheKey, crispy::text::GlyphPositionList> cache_;
+#if !defined(NDEBUG)
+    std::unordered_map<CacheKey, int64_t> cacheHits_;
+#endif
 
     // target surface rendering
     //

@@ -19,6 +19,7 @@ class ScreenEvents {
     virtual void bufferChanged(ScreenBuffer::Type) {}
     virtual void commands(CommandList const& /*_commands*/) {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+    virtual void dumpState() {}
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
     virtual void reply(std::string_view const& /*_response*/) {}
     virtual void resetDynamicColor(DynamicColorName /*_name*/) {}

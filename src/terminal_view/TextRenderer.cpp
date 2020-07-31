@@ -73,6 +73,9 @@ void TextRenderer::clearCache()
 
     cacheKeyStorage_.clear();
     cache_.clear();
+#if !defined(NDEBUG)
+    cacheHits_.clear();
+#endif
 }
 
 void TextRenderer::setCellSize(CellSize const& _cellSize)
@@ -174,19 +177,27 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     if (auto const cached = cache_.find(key); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
+#if !defined(NDEBUG)
+        cacheHits_[cached->first]++;
+#endif
         return cached->second;
     }
     else
     {
         cacheKeyStorage_.emplace_back(u32string{codepoints});
-        std::cout << fmt::format("TextRenderer.newEntry({}): {}\n",
-                cacheKeyStorage_.size(),
-                unicode::to_utf8(cacheKeyStorage_.back()).c_str());
+
+        // std::cout << fmt::format("TextRenderer.newEntry({}): {}\n",
+        //         cacheKeyStorage_.size(),
+        //         unicode::to_utf8(cacheKeyStorage_.back()).c_str());
 
         auto const cacheKeyFromStorage = CacheKey{
             cacheKeyStorage_.back(),
             attributes_.styles
         };
+
+#if !defined(NDEBUG)
+        cacheHits_[cacheKeyFromStorage] = 0;
+#endif
 
         return cache_[cacheKeyFromStorage] = requestGlyphPositions();
     }
@@ -405,6 +416,30 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     auto const y = _pos.y();
     auto const z = 0;
     commandListener_.renderTexture({_textureInfo, x, y, z, _color});
+}
+
+void TextRenderer::debugCache(std::ostream& _textOutput) const
+{
+    std::map<u32string, CacheKey> orderedKeys;
+
+    for (auto && [key, val] : cache_)
+    {
+        (void) val;
+        orderedKeys[u32string(key.text)] = key;
+    }
+
+    _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
+    for (auto && [word, key] : orderedKeys)
+    {
+#if !defined(NDEBUG)
+        auto hits = int64_t{};
+        if (auto i = cacheHits_.find(key); i != cacheHits_.end())
+            hits = i->second;
+        _textOutput << fmt::format("{:>5} : {}\n", hits, unicode::to_utf8(word));
+#else
+        _textOutput << fmt::format("  {}\n", unicode::to_utf8(word));
+#endif
+    }
 }
 
 } // end namespace

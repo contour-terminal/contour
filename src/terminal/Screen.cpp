@@ -1216,9 +1216,8 @@ void Screen::operator()(SetDynamicColor const& v)
 
 void Screen::operator()(DumpState const&)
 {
-    buffer_->dumpState("Dumping screen state");
+    eventListener_.dumpState();
 }
-
 // }}}
 
 // {{{ CommandExecutor

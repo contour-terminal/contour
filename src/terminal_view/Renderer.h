@@ -114,6 +114,8 @@ class Renderer {
 
     void clearCache();
 
+    void dumpState(std::ostream& _textOutput) const;
+
   private:
     void renderCell(Coordinate const& _pos, Cell const& _cell);
     void renderCursor(Terminal const& _terminal);

@@ -239,4 +239,9 @@ void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell)
     textRenderer_.schedule(_pos, _cell);
 }
 
+void Renderer::dumpState(std::ostream& _textOutput) const
+{
+    textRenderer_.debugCache(_textOutput);
+}
+
 } // end namespace

@@ -109,14 +109,15 @@ class TerminalWindow :
 
   private:
     void bell() override;
-    void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
-    void setWindowTitle(std::string_view const& /*_title*/) override;
-    void onSelectionComplete() override;
     void bufferChanged(terminal::ScreenBuffer::Type) override;
     void commands(terminal::CommandList const& /*_commands*/) override;
-    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
-    void onClosed() override;
     void copyToClipboard(std::string_view const& _data) override;
+    void dumpState() override;
+    void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
+    void onClosed() override;
+    void onSelectionComplete() override;
+    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
+    void setWindowTitle(std::string_view const& /*_title*/) override;
 
   signals:
     void showNotification(QString const& _title, QString const& _body);

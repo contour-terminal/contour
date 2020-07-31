@@ -46,6 +46,7 @@ class TerminalView : private Terminal::Events {
         virtual void bufferChanged(ScreenBuffer::Type) {}
         virtual void commands(CommandList const& /*_commands*/) {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+        virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
@@ -131,6 +132,7 @@ class TerminalView : private Terminal::Events {
     void bufferChanged(ScreenBuffer::Type) override;
     void commands(CommandList const& /*_commands*/) override;
     void copyToClipboard(std::string_view const& _data) override;
+    void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
     void onClosed() override;
     void onSelectionComplete() override;
