@@ -467,6 +467,9 @@ void TerminalWindow::initializeGL()
     initializeOpenGLFunctions();
 
     // {{{ some stats
+    cout << fmt::format("DPI             : {}x{} physical; {}x{} logical\n",
+                        physicalDpiX(), physicalDpiY(),
+                        logicalDpiX(), logicalDpiY());
     cout << fmt::format("OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
     cout << fmt::format("OpenGL renderer : {}\n", glGetString(GL_RENDERER));
 
@@ -476,6 +479,9 @@ void TerminalWindow::initializeGL()
     QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
     cout << fmt::format("OpenGL version  : {}.{}\n", versionMajor, versionMinor);
     cout << fmt::format("GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+    // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
+    // TODO: also take window monitor switches into account
 
     GLint glslNumShaderVersions{};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
@@ -908,17 +914,20 @@ void TerminalWindow::toggleFullScreen()
 
 bool TerminalWindow::setFontSize(int _fontSize)
 {
-    // cout << fmt::format("TerminalWindow.setFontSize: {} -> {}\n", profile().fontSize, _fontSize);
-
     if (_fontSize < 5) // Let's not be crazy.
         return false;
 
     if (_fontSize > 100)
         return false;
 
-    terminalView_->setFontSize(static_cast<int>(static_cast<float>(_fontSize) * contentScale()));
+    float const fontSize = (static_cast<float>(_fontSize) / 72.0f) * static_cast<float>(logicalDpiX());
 
-    profile().fontSize = _fontSize;
+    // cout << fmt::format("TerminalWindow.setFontSize: {} -> {}; {} * {}\n",
+    //                     profile().fontSize, _fontSize, fontSize, contentScale());
+
+    terminalView_->setFontSize(static_cast<int>(fontSize * contentScale()));
+
+    profile().fontSize = static_cast<short>(_fontSize);
 
     return true;
 }
@@ -1133,7 +1142,11 @@ void TerminalWindow::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
 
 terminal::view::FontConfig TerminalWindow::loadFonts(config::TerminalProfile const& _profile)
 {
-    unsigned const fontSize = static_cast<unsigned>(static_cast<float>(_profile.fontSize) * contentScale());
+    int const fontSize = static_cast<int>((static_cast<float>(_profile.fontSize) / 72.0f) * static_cast<float>(logicalDpiX()));
+
+    // cout << fmt::format("TerminalWindow.loadFonts: size: {}; {} * {}\n",
+    //                     _profile.fontSize, fontSize, contentScale());
+
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
         fontLoader_.load(_profile.fonts.regular.pattern, fontSize),
