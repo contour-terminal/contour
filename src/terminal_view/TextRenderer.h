@@ -131,6 +131,8 @@ class TextRenderer {
     void setCellSize(CellSize const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
+    void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
+
     void schedule(Coordinate const& _pos, Cell const& _cell);
     void flushPendingSegments();
     void finish();
@@ -196,6 +198,10 @@ class TextRenderer {
     std::vector<char32_t> codepoints_{};
     std::vector<int> clusters_{};
     unsigned clusterOffset_ = 0;
+
+    // performance optimizations
+    //
+    bool pressure_ = false;
 
     // text shaping cache
     //

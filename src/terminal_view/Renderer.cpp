@@ -141,9 +141,11 @@ void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
 
 uint64_t Renderer::render(Terminal& _terminal,
                           steady_clock::time_point _now,
-                          terminal::Coordinate const& _currentMousePosition)
+                          terminal::Coordinate const& _currentMousePosition,
+                          bool _pressure)
 {
     metrics_.clear();
+    textRenderer_.setPressure(_pressure);
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 

@@ -98,7 +98,7 @@ class TerminalView : private Terminal::Events {
     void setProjection(QMatrix4x4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
 
     /// Renders the screen buffer to the current OpenGL screen.
-    uint64_t render(std::chrono::steady_clock::time_point const& _now);
+    uint64_t render(std::chrono::steady_clock::time_point const& _now, bool _pressure);
 
     /// Checks if there is still a slave connected to the PTY.
     bool alive() const;

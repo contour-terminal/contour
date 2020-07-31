@@ -97,7 +97,8 @@ class Renderer {
      */
     uint64_t render(Terminal& _terminal,
                     std::chrono::steady_clock::time_point _now,
-                    terminal::Coordinate const& _currentMousePosition);
+                    terminal::Coordinate const& _currentMousePosition,
+                    bool _pressure);
 
     RenderMetrics const& metrics() const noexcept { return metrics_; }
 

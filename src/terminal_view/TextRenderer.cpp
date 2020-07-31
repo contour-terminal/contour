@@ -130,7 +130,20 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
             }
             break;
         case State::Filling:
-            if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
+        {
+            //if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
+            bool const sameLine = _pos.row == row_;
+            bool const sameSGR = _cell.attributes() == attributes_;
+            bool const nonspace = !_cell.empty() && _cell.codepoint(0) != SP;
+
+            // Do not perform multi-column text shaping when under rendering pressure.
+            // This usually only happens in bandwidth heavy commands (such as cat), where
+            // ligature rendering isn't that important anyways?
+            // Performing multi-column text shaping under pressure would cause the cache to be
+            // filled up needlessly with half printed words. We mitigate that by shaping cell-wise
+            // in such cases.
+
+            if (!pressure_ && nonspace && sameLine && sameSGR)
                 extend(_cell, _pos.column);
             else
             {
@@ -144,6 +157,7 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
                 }
             }
             break;
+        }
     }
 }
 

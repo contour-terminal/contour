@@ -440,6 +440,7 @@ void TerminalWindow::onFrameSwapped()
 
                 //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
                 //requestUpdate();
+                renderingPressure_ = true;
                 update();
                 return;
             case State::CleanPainting:
@@ -447,6 +448,7 @@ void TerminalWindow::onFrameSwapped()
                     break;
                 [[fallthrough]];
             case State::CleanIdle:
+                renderingPressure_ = false;
                 STATS_ZERO(consecutiveRenderCount);
                 if (profile().cursorDisplay == terminal::CursorDisplay::Blink
                         && this->terminalView_->terminal().cursor().visible)
@@ -598,7 +600,7 @@ void TerminalWindow::paintGL()
         glClear(GL_COLOR_BUFFER_BIT);
 
         //terminal::view::render(terminalView_, now_);
-        STATS_SET(updatesSinceRendering) terminalView_->render(now_);
+        STATS_SET(updatesSinceRendering) terminalView_->render(now_, renderingPressure_);
     }
     catch (exception const& e)
     {

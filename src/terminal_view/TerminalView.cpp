@@ -237,9 +237,9 @@ bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
     return true;
 }
 
-uint64_t TerminalView::render(steady_clock::time_point const& _now)
+uint64_t TerminalView::render(steady_clock::time_point const& _now, bool _pressure)
 {
-    return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition());
+    return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition(), _pressure);
 }
 
 void TerminalView::wait()
