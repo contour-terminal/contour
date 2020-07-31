@@ -187,8 +187,7 @@ void TextRenderer::flushPendingSegments()
 GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    auto const key = CacheKey{codepoints, attributes_.styles};
-    if (auto const cached = cache_.find(key); cached != cache_.end())
+    if (auto const cached = cache_.find(CacheKey{codepoints, attributes_.styles}); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
 #if !defined(NDEBUG)
