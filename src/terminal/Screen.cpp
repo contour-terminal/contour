@@ -15,6 +15,7 @@
 #include <terminal/Commands.h>
 #include <terminal/VTType.h>
 #include <terminal/Logger.h>
+#include <terminal/Debugger.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -66,9 +67,15 @@ Screen::Screen(WindowSize const& _size,
     maxHistoryLineCount_{ _maxHistoryLineCount },
     directExecutor_{ *this },
     synchronizedExecutor_{ *this },
+    debugExecutor_{},
     commandExecutor_ { &directExecutor_ }
 {
     (*this)(SetMode{Mode::AutoWrap, true});
+}
+
+Debugger* Screen::debugger() noexcept
+{
+    return static_cast<Debugger*>(debugExecutor_.get());
 }
 
 void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
@@ -92,7 +99,11 @@ void Screen::resize(WindowSize const& _newSize)
 void Screen::write(Command const& _command)
 {
     buffer_->verifyState();
-    visit(*commandExecutor_, _command);
+
+    if (debugging())
+        visit(directExecutor_, _command);
+    else
+        visit(*commandExecutor_, _command);
 
     buffer_->verifyState();
     instructionCounter_++;
@@ -972,6 +983,24 @@ void Screen::operator()(SetMode const& v)
     setMode(v.mode, v.enable);
 }
 
+void Screen::setDebugging(bool _enabled)
+{
+    if (_enabled == debugging())
+        return;
+
+    if (_enabled)
+    {
+        debugExecutor_ = make_unique<Debugger>(*this);
+        commandExecutor_ = debugExecutor_.get();
+    }
+    else
+    {
+        commandExecutor_ = &directExecutor_;
+        debugger()->flush();
+        debugExecutor_.reset();
+    }
+}
+
 void Screen::setMode(Mode _mode, bool _enable)
 {
     switch (_mode)
@@ -995,12 +1024,16 @@ void Screen::setMode(Mode _mode, bool _enable)
             break;
         }
         case Mode::BatchedRendering:
-            if (_enable)
-                commandExecutor_ = &synchronizedExecutor_;
-            else
+            // Only perform batched rendering when NOT in debugging mode.
+            if (!debugging())
             {
-                commandExecutor_ = &directExecutor_;
-                synchronizedExecutor_.flush();
+                if (_enable)
+                    commandExecutor_ = &synchronizedExecutor_;
+                else
+                {
+                    commandExecutor_ = &directExecutor_;
+                    synchronizedExecutor_.flush();
+                }
             }
             break;
         case Mode::UseAlternateScreen:

@@ -39,6 +39,7 @@
 #include <deque>
 #include <functional>
 #include <list>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -50,6 +51,7 @@
 namespace terminal {
 
 class Screen;
+class Debugger;
 
 /// VT Sequence Executor for directly executing the VT sequences as they arive.
 class CommandExecutor : public CommandVisitor {
@@ -507,6 +509,13 @@ class Screen {
     /// Renders only the selected area.
     void renderSelection(Renderer const& _render) const;
 
+    /// @returns true when currently in debugging mode and false otherwise.
+    bool debugging() const noexcept { return debugExecutor_.get(); }
+    void setDebugging(bool _enabled);
+
+    /// @returns pointer to DebugExecutor if debugging, nullptr otherwise.
+    Debugger* debugger() noexcept;
+
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
   private:
@@ -553,6 +562,7 @@ class Screen {
 
     CommandExecutor directExecutor_;
     SynchronizedCommandExecutor synchronizedExecutor_;
+    std::unique_ptr<CommandVisitor> debugExecutor_;
     CommandVisitor* commandExecutor_ = nullptr;
 
     int scrollOffset_ = 0;
@@ -560,6 +570,7 @@ class Screen {
     std::unique_ptr<Selector> selector_;
 };
 
+// {{{ template functions
 template <typename RendererT>
 void Screen::render(RendererT _render, int _scrollOffset) const
 {
@@ -602,5 +613,6 @@ void Screen::render(RendererT _render, int _scrollOffset) const
         }
     }
 }
+// }}}
 
 }  // namespace terminal

@@ -73,6 +73,8 @@ class TerminalWindow :
     /// Applies given profile, potentially setting/resetting terminal configuration.
     void setProfile(config::TerminalProfile _newProfile);
 
+    terminal::view::TerminalView* view() const noexcept { return terminalView_.get(); }
+
   public Q_SLOTS:
     void onFrameSwapped();
     void onScreenChanged(QScreen* _screen);

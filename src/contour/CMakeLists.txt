@@ -25,6 +25,7 @@ set(contour_SRCS
     Actions.cpp Actions.h
     Config.cpp Config.h
     Controller.cpp Controller.h
+    DebuggerService.cpp DebuggerService.h
     FileChangeWatcher.cpp FileChangeWatcher.h
     LoggingSink.cpp LoggingSink.h
     TerminalWindow.cpp TerminalWindow.h

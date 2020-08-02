@@ -14,13 +14,19 @@
 #pragma once
 
 #include <contour/Config.h>
+#include <contour/DebuggerService.h>
 
 #include <QtCore/QThread>
 #include <QtWidgets/QSystemTrayIcon>
 
 #include <string>
 
+#include <thread>
+#include <memory>
+
 namespace contour {
+
+class TerminalWindow;
 
 class Controller : public QThread {
   public:
@@ -30,14 +36,26 @@ class Controller : public QThread {
 
     ~Controller();
 
+    std::list<TerminalWindow*> const& terminalWindows() const noexcept { return terminalWindows_; }
+
   public slots:
     void newWindow();
     void showNotification(QString const& _title, QString const& _content);
 
   private:
+    static void onSigInt(int _signum);
+    void runDebugger();
+    void debuggerMain();
+
+  private:
+    static Controller* self_;
+
     std::string programPath_;
     contour::config::Config config_;
     std::string profileName_;
+
+    std::list<TerminalWindow*> terminalWindows_;
+    std::unique_ptr<DebuggerService> debuggerService_;
 
     QSystemTrayIcon* systrayIcon_ = nullptr;
 };

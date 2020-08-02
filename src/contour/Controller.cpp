@@ -13,12 +13,20 @@
  */
 #include <contour/Controller.h>
 #include <contour/TerminalWindow.h>
+#include <contour/DebuggerService.h>
 
 #include <QtCore/QProcess>
+
+#if defined(__linux__) // debugger
+#include <csignal>
+#include <unistd.h>
+#endif
 
 using namespace std;
 
 namespace contour {
+
+Controller* Controller::self_ = nullptr;
 
 Controller::Controller(std::string _programPath,
                        config::Config _config,
@@ -33,6 +41,10 @@ Controller::Controller(std::string _programPath,
     // TODO: systrayIcon_: add context menu?
 
     connect(this, &Controller::started, this, [this]() { newWindow(); });
+
+    self_ = this;
+
+    debuggerService_ = make_unique<DebuggerService>(this);
 }
 
 Controller::~Controller()
@@ -48,8 +60,12 @@ void Controller::newWindow()
     };
     mainWindow->show();
 
+    terminalWindows_.push_back(mainWindow);
+    // TODO: Remove window from list when destroyed.
+
     QObject::connect(mainWindow, &TerminalWindow::showNotification,
                      this, &Controller::showNotification);
+
 }
 
 void Controller::showNotification(QString const& _title, QString const& _content)

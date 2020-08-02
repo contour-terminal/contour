@@ -19,6 +19,7 @@ set(terminal_HEADERS
     Color.h
     CommandBuilder.h
     Commands.h
+    Debugger.h
     Functions.h
     InputGenerator.h
     OutputGenerator.h
@@ -39,6 +40,7 @@ set(terminal_SOURCES
     Color.cpp
     CommandBuilder.cpp
     Commands.cpp
+    Debugger.cpp
     Functions.cpp
     InputGenerator.cpp
     OutputGenerator.cpp
