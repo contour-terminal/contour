@@ -974,10 +974,6 @@ void Screen::operator()(SetMode const& v)
 
 void Screen::setMode(Mode _mode, bool _enable)
 {
-    modes_.set(_mode, _enable);
-
-    buffer_->setMode(_mode, _enable);
-
     switch (_mode)
     {
         case Mode::BatchedRendering:
@@ -1029,6 +1025,9 @@ void Screen::setMode(Mode _mode, bool _enable)
         default:
             break;
     }
+
+    modes_.set(_mode, _enable);
+    buffer_->setMode(_mode, _enable);
 }
 
 void Screen::operator()(RequestMode const& v)
