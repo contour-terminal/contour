@@ -13,111 +13,110 @@
  */
 #include <terminal/ControlCode.h>
 #include <terminal/Parser.h>
-#include <terminal/ParserTables.h>
 
 #include <crispy/escape.h>
 #include <crispy/overloaded.h>
+#include <crispy/indexed.h>
 
 #include <unicode/utf8.h>
 
 #include <array>
 #include <cctype>
 #include <cstdio>
-#include <iostream>
+#include <map>
+#include <ostream>
 
 #include <fmt/format.h>
 
-namespace terminal {
+namespace terminal::parser {
 
 using namespace std;
 
+using Transition = pair<State, State>;
 using Range = ParserTable::Range;
+using RangeSet = std::vector<Range>;
 
-constexpr bool includes(Range const& range, char32_t value) noexcept
+void dot(std::ostream& _os, ParserTable const& _table)
 {
-    return range.first <= value && value <= range.last;
-}
-
-constexpr bool isExecuteChar(char32_t value) noexcept
-{
-    return includes(Range{0x00, 0x17}, value) || value == 0x19 || includes(Range{0x1C, 0x1F}, value);
-}
-
-constexpr bool isParamChar(char32_t value) noexcept
-{
-    return includes(Range{0x30, 0x3B}, value);
-}
-
-constexpr bool isC1(char32_t value) noexcept
-{
-    return includes(Range{0x80, 0x9F}, value);
-}
-
-constexpr bool isPrintChar(char32_t value) noexcept
-{
-    return includes(Range{0x20, 0x7F}, value) || (value > 0x7F && !isC1(value));
-}
-
-void Parser::parseFragment(uint8_t const* begin, uint8_t const* end)
-{
-    begin_ = begin;
-    end_ = end;
-
-    parse();
-}
-
-void Parser::parse()
-{
-    static constexpr char32_t ReplacementCharacter {0xFFFD};
-
-    while (dataAvailable())
+    // (State, Byte) -> State
+    auto transitions = map<Transition, RangeSet>{};
+    for ([[maybe_unused]] auto const && [sourceState, sourceTransitions] : crispy::indexed(_table.transitions))
     {
-        visit(
-            overloaded{
-                [&](unicode::Incomplete) {},
-                [&](unicode::Invalid) {
-                    if (parseError_)
-                        parseError_("Invalid UTF-8 byte sequence received.");
-                    currentChar_ = ReplacementCharacter;
-                    handleViaTables();
-                },
-                [&](unicode::Success const& success) {
-                    currentChar_ = success.value;
-                    handleViaTables();
-                },
-            },
-            unicode::from_utf8(utf8DecoderState_, currentByte())
-        );
-
-        advance();
+        for (auto const [i, targetState] : crispy::indexed(sourceTransitions))
+        {
+            auto const ch = static_cast<uint8_t>(i);
+            if (targetState != State::Undefined)
+            {
+                //_os << fmt::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch, targetState);
+                auto const t = Transition{static_cast<State>(sourceState), targetState};
+                if (!transitions[t].empty() && ch == transitions[t].back().last + 1)
+                    transitions[t].back().last++;
+                else
+                    transitions[t].emplace_back(Range{ch, ch});
+            }
+        }
     }
-}
+    // TODO: isReachableFromAnywhere(targetState) to check if x can be reached from anywhere.
 
-void Parser::invokeAction(ActionClass actionClass, Action action)
-{
-    if (actionHandler_)
-        actionHandler_(actionClass, action, currentChar());
-}
+    _os << "digraph {\n";
+    _os << "  node [shape=box];\n";
+    _os << "  ranksep = 0.75;\n";
+    _os << "  rankdir = LR;\n";
+    _os << "  concentrate = true;\n";
 
-void Parser::handleViaTables()
-{
-    auto const s = static_cast<size_t>(state_);
+    unsigned groundCount = 0;
 
-    ParserTable static constexpr table = ParserTable::get();
-
-    auto const ch = currentChar() < 0xFF ? currentChar() : static_cast<char32_t>(ParserTable::UnicodeCodepoint::Value);
-
-    if (auto const t = table.transitions[s][ch]; t != State::Undefined)
+    for (auto const& t : transitions)
     {
-        invokeAction(ActionClass::Leave, table.exitEvents[s]);
-        invokeAction(ActionClass::Transition, table.events[s][ch]);
-        state_ = t;
-        invokeAction(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)]);
+        auto const sourceState = t.first.first;
+        auto const targetState = t.first.second;
+
+        if (sourceState == State::Undefined)
+            continue;
+
+        auto const targetStateName = targetState == State::Ground && targetState != sourceState
+            ? fmt::format("{}_{}", targetState, ++groundCount)
+            : fmt::format("{}", targetState);
+
+        // if (isReachableFromAnywhere(targetState))
+        //     _os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n", sourceStateName);
+
+        if (targetState == State::Ground && sourceState != State::Ground)
+            _os << fmt::format("  {} [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n", targetStateName);
+
+        _os << fmt::format("  {} -> {} ", sourceState, targetStateName);
+        _os << "[";
+        _os << "label=\"";
+        for (auto const && [rangeCount, u] : crispy::indexed(t.second))
+        {
+            if (rangeCount)
+            {
+                _os << ", ";
+                if (rangeCount % 3 == 0)
+                    _os << "\\n";
+            }
+            if (u.first == u.last)
+                _os << fmt::format("{:02X}", u.first);
+            else
+                _os << fmt::format("{:02X}-{:02X}", u.first, u.last);
+        }
+        _os << "\"";
+        _os << "]";
+        _os << ";\n";
     }
-    else if (Action const a = table.events[s][ch]; a != Action::Undefined)
-        invokeAction(ActionClass::Event, a);
-    else if (parseError_)
-        parseError_(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
+
+    // equal ranks
+    _os << "  { rank=same; ";
+    for (auto const state : {State::CSI_Entry, State::DCS_Entry, State::OSC_String})
+        _os << fmt::format("{}; ", state);
+    _os << "};\n";
+
+    _os << "  { rank=same; ";
+    for (auto const state : {State::CSI_Param, State::DCS_Param, State::OSC_String})
+        _os << fmt::format("{}; ", state);
+    _os << "};\n";
+
+    _os << "}\n";
 }
 
 }  // namespace terminal

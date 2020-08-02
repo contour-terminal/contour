@@ -23,7 +23,6 @@ set(terminal_HEADERS
     InputGenerator.h
     OutputGenerator.h
     Parser.h
-    ParserTables.h
     Process.h
     PseudoTerminal.h
     Screen.h
@@ -44,7 +43,6 @@ set(terminal_SOURCES
     InputGenerator.cpp
     OutputGenerator.cpp
     Parser.cpp
-    ParserTables.cpp
     Process.cpp
     PseudoTerminal.cpp
     Screen.cpp

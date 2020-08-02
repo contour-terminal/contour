@@ -14,7 +14,7 @@
 #include <contour/Config.h>
 #include <contour/Controller.h>
 
-#include <terminal/ParserTables.h>
+#include <terminal/Parser.h>
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QThread>
@@ -76,7 +76,7 @@ int main(int argc, char* argv[])
 
         if (cli.isSet(cli.parserTable))
         {
-            terminal::dot(std::cout, terminal::ParserTable::get());
+            terminal::parser::dot(std::cout, terminal::parser::ParserTable::get());
             return EXIT_SUCCESS;
         }
 

@@ -38,7 +38,7 @@ TEST_CASE("CommandBuilder.parseColor", "[CommandBuilder]")
 TEST_CASE("CommandBuilder.utf8_single", "[CommandBuilder]")  // TODO: move to Parser_test
 {
     auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{ref(output)};
+    auto parser = parser::Parser{ref(output)};
 
     parser.parseFragment("\xC3\xB6");  // ö
 
@@ -54,7 +54,7 @@ TEST_CASE("CommandBuilder.utf8_single", "[CommandBuilder]")  // TODO: move to Pa
 TEST_CASE("CommandBuilder.OSC_2", "[CommandBuilder]")
 {
     auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{ref(output)};
+    auto parser = parser::Parser{ref(output)};
     parser.parseFragment("\033]2;abcd\033\\");
     REQUIRE(1 == output.commands().size());
     REQUIRE(holds_alternative<terminal::ChangeWindowTitle>(output.commands()[0]));
@@ -64,7 +64,7 @@ TEST_CASE("CommandBuilder.OSC_2", "[CommandBuilder]")
 TEST_CASE("CommandBuilder.OSC_8", "[CommandBuilder]")
 {
     auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{ref(output)};
+    auto parser = parser::Parser{ref(output)};
     SECTION("no attribs") {
         parser.parseFragment("\033]8;;file://local/path/to\033\\");
         REQUIRE(1 == output.commands().size());
@@ -96,7 +96,7 @@ TEST_CASE("CommandBuilder.OSC_8", "[CommandBuilder]")
 TEST_CASE("CommandBuilder.sub_parameters", "[CommandBuilder]")
 {
     auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{ref(output)};
+    auto parser = parser::Parser{ref(output)};
 
     SECTION("curly underline") {
         parser.parseFragment("\033[4:3m");
@@ -118,7 +118,7 @@ TEST_CASE("CommandBuilder.utf8_middle", "[CommandBuilder]")  // TODO: move to Pa
 {
     auto output = CommandBuilder{
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{
+    auto parser = parser::Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("parser: {}", msg)); }};
 
@@ -140,7 +140,7 @@ TEST_CASE("CommandBuilder.set_g1_special", "[CommandBuilder]")
 {
     auto output = CommandBuilder{
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{
+    auto parser = parser::Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
@@ -156,7 +156,7 @@ TEST_CASE("CommandBuilder.color_fg_indexed", "[CommandBuilder]")
 {
     auto output = CommandBuilder{
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{
+    auto parser = parser::Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
@@ -174,7 +174,7 @@ TEST_CASE("CommandBuilder.color_bg_indexed", "[CommandBuilder]")
 {
     auto output = CommandBuilder{
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{
+    auto parser = parser::Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 
@@ -192,7 +192,7 @@ TEST_CASE("CommandBuilder.SETMARK", "[CommandBuilder]")
 {
     auto output = CommandBuilder{
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
-    auto parser = Parser{
+    auto parser = parser::Parser{
             ref(output),
             [&](auto const& msg) { UNSCOPED_INFO(fmt::format("{}", msg)); }};
 

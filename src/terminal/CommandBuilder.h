@@ -44,8 +44,8 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context,
 /// appropriate commands.
 class CommandBuilder {
   public:
-    using ActionClass = Parser::ActionClass;
-    using Action = Parser::Action;
+    using ActionClass = parser::ActionClass;
+    using Action = parser::Action;
 
     /// Constructs the sequencer stage.
     ///

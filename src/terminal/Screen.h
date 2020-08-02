@@ -535,7 +535,7 @@ class Screen {
     bool focused_ = true;
 
     CommandBuilder commandBuilder_;
-    Parser parser_;
+    parser::Parser parser_;
     int64_t instructionCounter_ = 0;
 
     VTType terminalId_ = VTType::VT525;
