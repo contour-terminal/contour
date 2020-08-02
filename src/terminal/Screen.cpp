@@ -976,6 +976,24 @@ void Screen::setMode(Mode _mode, bool _enable)
 {
     switch (_mode)
     {
+        case Mode::Columns132:
+        {
+            if (_enable != isModeEnabled(Mode::Columns132))
+            {
+                // TODO: Well, should we also actually set column width to 132 or 80?
+                (*this)(ClearScreen{});                         // ED
+                (*this)(SetTopBottomMargin{1, size().rows});    // DECSTBM
+                (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
+            }
+
+            cursor_pos_t const columns = _enable ? 132 : 80;
+            cursor_pos_t const rows = size().rows;
+            bool const unitInPixels = false;
+            eventListener_.resizeWindow(columns, rows, unitInPixels);
+
+            setMode(Mode::LeftRightMargin, false);
+            break;
+        }
         case Mode::BatchedRendering:
             if (_enable)
                 commandExecutor_ = &synchronizedExecutor_;
