@@ -662,7 +662,7 @@ void Screen::operator()(MoveCursorUp const& v)
         v.n,
         cursorPosition().row > buffer_->margin_.vertical.from
             ? cursorPosition().row - buffer_->margin_.vertical.from
-            : cursorPosition().row
+            : cursorPosition().row - 1
     );
 
     buffer_->cursor.position.row -= n;
