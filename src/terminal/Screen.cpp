@@ -112,18 +112,23 @@ void Screen::write(char const * _data, size_t _size)
 
     buffer_->verifyState();
 
-    #if defined(LIBTERMINAL_LOG_TRACE)
-    if (logTrace_ && logger_)
-    {
-        auto const traces = to_mnemonic(commandBuilder_.commands(), true, true);
-        for (auto const& trace : traces)
-            logger_(TraceOutputEvent{trace});
-    }
-    #endif
+    // #if defined(LIBTERMINAL_LOG_TRACE)
+    // if (logTrace_ && logger_)
+    // {
+    //     auto const traces = to_mnemonic(commandBuilder_.commands(), true, true);
+    //     for (auto const& trace : traces)
+    //         logger_(TraceOutputEvent{trace});
+    // }
+    // #endif
 
     for_each(
         commandBuilder_.commands(),
         [&](Command const& _command) {
+            buffer_->verifyState();
+#if defined(LIBTERMINAL_LOG_TRACE)
+            auto const trace = to_mnemonic(_command, true, true);
+            logger_(TraceOutputEvent{trace});
+#endif
             visit(*commandExecutor_, _command);
             instructionCounter_++;
             buffer_->verifyState();
