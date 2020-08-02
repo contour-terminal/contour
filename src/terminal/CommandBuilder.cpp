@@ -829,7 +829,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case CNL: return emitCommand<CursorNextLine>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case CPL: return emitCommand<CursorPreviousLine>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case CPR: return impl::CPR(_ctx, _output);
-        case CUB: return emitCommand<MoveCursorBackward>(_output, _ctx.param_or(0, Sequence::Parameter{0}));
+        case CUB: return emitCommand<MoveCursorBackward>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case CUD: return emitCommand<MoveCursorDown>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case CUF: return emitCommand<MoveCursorForward>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case CUP: return emitCommand<MoveCursorTo>(_output, _ctx.param_or(0, Sequence::Parameter{1}), _ctx.param_or(1, Sequence::Parameter{1}));
