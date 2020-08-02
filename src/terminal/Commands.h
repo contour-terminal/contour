@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
+#include <terminal/VTType.h>
 
 #include <functional>
 #include <iostream>
@@ -360,6 +361,17 @@ struct ClearToBeginOfScreen {};
 struct ClearScreen {};
 
 struct ClearScrollbackBuffer {};
+
+enum class ControlTransmissionMode {
+    S7C1T, // 7-bit controls
+    S8C1T, // 8-bit controls
+};
+
+/// DECSCL - Select Conformance Level
+struct SelectConformanceLevel {
+    VTType level;
+    ControlTransmissionMode c1t;
+};
 
 /// SU - Pan Down.
 ///
@@ -1000,6 +1012,7 @@ using Command = std::variant<
     ScreenAlignmentPattern,
     ScrollDown,
     ScrollUp,
+    SelectConformanceLevel,
     SendDeviceAttributes,
     SendMouseEvents,
     SendTerminalId,
@@ -1090,6 +1103,7 @@ class CommandVisitor {
     virtual void visit(ScreenAlignmentPattern const& v) = 0;
     virtual void visit(ScrollDown const& v) = 0;
     virtual void visit(ScrollUp const& v) = 0;
+    virtual void visit(SelectConformanceLevel const& v) = 0;
     virtual void visit(SendDeviceAttributes const& v) = 0;
     virtual void visit(SendMouseEvents const& v) = 0;
     virtual void visit(SendTerminalId const& v) = 0;
@@ -1169,6 +1183,7 @@ class CommandVisitor {
     void operator()(ScreenAlignmentPattern const& v) { visit(v); }
     void operator()(ScrollDown const& v) { visit(v); }
     void operator()(ScrollUp const& v) { visit(v); }
+    void operator()(SelectConformanceLevel const& v) { visit(v); }
     void operator()(SendDeviceAttributes const& v) { visit(v); }
     void operator()(SendMouseEvents const& v) { visit(v); }
     void operator()(SendTerminalId const& v) { visit(v); }

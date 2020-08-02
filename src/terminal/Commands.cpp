@@ -263,6 +263,7 @@ class MnemonicBuilder {
     void operator()(DeviceStatusReport const&) { build("TODO:DeviceStatusReport"); }
     void operator()(ReportCursorPosition const&) { build("CPR", "Report cursor position"); }
     void operator()(ReportExtendedCursorPosition const&) { build("DECXCPR", "Report cursor position (extended)."); }
+    void operator()(SelectConformanceLevel const&) { build("DECSCL", "Select conformance level."); }
     void operator()(SendDeviceAttributes const&) { build("DA1", "Primary Device Attributes"); }
     void operator()(SendTerminalId const&) { build("SendTerminalId"); }
     void operator()(ClearToEndOfScreen const&) { build("ED", "Clear to end of screen", 0); }

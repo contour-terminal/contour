@@ -142,6 +142,24 @@ void OutputGenerator::operator()(Command const& command)
         [&](DeviceStatusReport) { write("\033[5n"); },
         [&](ReportCursorPosition) { write("\033[6n"); },
         [&](ReportExtendedCursorPosition) { write("\033[?6n"); },
+        [&](SelectConformanceLevel const& v) {
+            auto level = 61;
+            switch (v.level) {
+                case VTType::VT525:
+                case VTType::VT520:
+                case VTType::VT510: level = 65; break;
+                case VTType::VT420: level = 64; break;
+                case VTType::VT340:
+                case VTType::VT330:
+                case VTType::VT320: level = 63; break;
+                case VTType::VT240:
+                case VTType::VT220: level = 62; break;
+                case VTType::VT100: level = 61; break;
+                break;
+            }
+            auto const c1t = v.c1t == ControlTransmissionMode::S8C1T ? 0 : 1;
+            write("\033[{};{}\"p", level, c1t);
+        },
         [&](SendDeviceAttributes) { write("\033[c"); }, // Primary DA
         [&](SendTerminalId) { write("\033[>c"); }, // FIXME: this is Secondary DA!
         [&](ClearToEndOfScreen) { write("\033[0J"); },

@@ -122,6 +122,7 @@ class CommandExecutor : public CommandVisitor {
     void visit(ScreenAlignmentPattern const& v) override;
     void visit(ScrollDown const& v) override;
     void visit(ScrollUp const& v) override;
+    void visit(SelectConformanceLevel const& v) override;
     void visit(SendDeviceAttributes const& v) override;
     void visit(SendMouseEvents const& v) override;
     void visit(SendTerminalId const& v) override;
@@ -353,6 +354,7 @@ class Screen {
     void operator()(ScreenAlignmentPattern const& v);
     void operator()(ScrollDown const& v);
     void operator()(ScrollUp const& v);
+    void operator()(SelectConformanceLevel const& v);
     void operator()(SendDeviceAttributes const& v);
     void operator()(SendMouseEvents const& v);
     void operator()(SendTerminalId const& v);

@@ -375,6 +375,12 @@ void Screen::operator()(ReportExtendedCursorPosition const&)
     reply("\033[{};{};{}R", cursorPosition().row, cursorPosition().column, pageNum);
 }
 
+void Screen::operator()(SelectConformanceLevel const& v)
+{
+    // Don't enforce the selected conformance level, just remember it.
+    terminalId_ = v.level;
+}
+
 void Screen::operator()(SendDeviceAttributes const&)
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
@@ -1283,6 +1289,7 @@ void CommandExecutor::visit(SaveWindowTitle const& v) { screen_(v); }
 void CommandExecutor::visit(ScreenAlignmentPattern const& v) { screen_(v); }
 void CommandExecutor::visit(ScrollDown const& v) { screen_(v); }
 void CommandExecutor::visit(ScrollUp const& v) { screen_(v); }
+void CommandExecutor::visit(SelectConformanceLevel const& v) { screen_(v); }
 void CommandExecutor::visit(SendDeviceAttributes const& v) { screen_(v); }
 void CommandExecutor::visit(SendMouseEvents const& v) { screen_(v); }
 void CommandExecutor::visit(SendTerminalId const& v) { screen_(v); }
