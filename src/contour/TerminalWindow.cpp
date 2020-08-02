@@ -1428,6 +1428,9 @@ void TerminalWindow::commands(terminal::CommandList const& _commands)
 
 void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPixels)
 {
+    // cerr << fmt::format("Application request to resize window: {}x{} {}\n",
+    //                     _width, _height, _inPixels ? "px" : "cells");
+
     bool resizePending = false;
     if (fullscreen())
     {
