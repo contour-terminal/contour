@@ -72,7 +72,7 @@ string Sequence::str() const
 {
     stringstream sstr;
 
-    sstr << fmt::format("{} ", category_);
+    sstr << fmt::format("{}", category_);
 
     if (leaderSymbol_)
         sstr << ' ' << leaderSymbol_;
@@ -113,6 +113,9 @@ string Sequence::str() const
 
     if (finalChar_)
         sstr << ' ' << finalChar_;
+
+    if (!dataString_.empty())
+        sstr << ' ' << dataString_ << " ST";
 
     return sstr.str();
 }

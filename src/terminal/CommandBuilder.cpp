@@ -640,15 +640,21 @@ void CommandBuilder::handleAction(ActionClass /*_actionClass*/, Action _action, 
             dispatchOSC();
             sequence_.clear();
             break;
-        case Action::Hook:
-        case Action::Put:
-        case Action::Unhook:
-            log<UnsupportedOutputEvent>(fmt::format(
-                "Action: {} {} \"{}\"",
-                to_string(_action),
-                crispy::escape(unicode::to_utf8(_currentChar)),
-                crispy::escape(sequence_.intermediateCharacters())));
-            return;
+        case Action::Hook: // this is actually state DCS_PassThrough
+            sequence_.setCategory(FunctionCategory::DCS);
+            sequence_.setFinalChar(static_cast<char>(_currentChar));
+            break;
+        case Action::Put: // DCS_PassThrough: DCS data string
+            {
+                uint8_t u8[4];
+                size_t const count = unicode::to_utf8(_currentChar, u8);
+                for (size_t i = 0; i < count; ++i)
+                    sequence_.dataString().push_back(u8[i]);
+            }
+            break;
+        case Action::Unhook: // DCS_PassThrough: DCS data string complete
+            emitSequence();
+            break;
         case Action::Ignore:
         case Action::Undefined:
             return;

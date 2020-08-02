@@ -31,11 +31,12 @@ enum class FunctionCategory {
     ESC  = 1,
     CSI  = 2,
     OSC  = 3,
+    DCS  = 4,
 };
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
 struct FunctionDefinition { // TODO: rename Function
-    FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC
+    FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC, DCS
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
@@ -138,6 +139,7 @@ class Sequence {
     using Parameter = int;
     using ParameterList = std::vector<std::vector<Parameter>>;
     using Intermediaries = std::string;
+    using DataString = std::string;
 
   private:
     FunctionCategory category_;
@@ -145,6 +147,7 @@ class Sequence {
     ParameterList parameters_;
     Intermediaries intermediateCharacters_;
     char finalChar_ = 0;
+    DataString dataString_;
 
   public:
     size_t constexpr static MaxParameters = 16;
@@ -166,6 +169,7 @@ class Sequence {
         intermediateCharacters_.clear();
         parameters_.clear();
         finalChar_ = 0;
+        dataString_.clear();
     }
 
     void setCategory(FunctionCategory _cat) noexcept { category_ = _cat; }
@@ -173,6 +177,9 @@ class Sequence {
     ParameterList& parameters() noexcept { return parameters_; }
     Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
     void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
+
+    DataString const& dataString() const noexcept { return dataString_; }
+    DataString& dataString() noexcept { return dataString_; }
 
     /// Converts a FunctionDefinition with a given context back into a human readable VT sequence.
     std::string str() const;
@@ -590,6 +597,7 @@ namespace fmt {
                 case FunctionCategory::ESC:  return format_to(ctx.out(), "ESC");
                 case FunctionCategory::CSI:  return format_to(ctx.out(), "CSI");
                 case FunctionCategory::OSC:  return format_to(ctx.out(), "OSC");
+                case FunctionCategory::DCS:  return format_to(ctx.out(), "DCS");
             }
             return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
         }
@@ -625,6 +633,7 @@ namespace fmt {
                         f.category,
                         f.maximumParameters
                     );
+                case terminal::FunctionCategory::DCS:
                 case terminal::FunctionCategory::CSI:
                     if (f.minimumParameters == f.maximumParameters)
                         return format_to(
