@@ -816,6 +816,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case DECSC: return emitCommand<SaveCursor>(_output);
         case HTS: return emitCommand<HorizontalTabSet>(_output);
         case IND: return emitCommand<Index>(_output);
+        case NEL: return emitCommand<CursorNextLine>(_output, 1);
         case RI: return emitCommand<ReverseIndex>(_output);
         case RIS: return emitCommand<FullReset>(_output);
         case SS2: return emitCommand<SingleShiftSelect>(_output, CharsetTable::G2);
