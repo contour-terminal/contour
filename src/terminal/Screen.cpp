@@ -1240,6 +1240,47 @@ void Screen::operator()(RequestDynamicColor const& v)
     }
 }
 
+void Screen::operator()(RequestStatusString const& v)
+{
+    // xterm responds with DCS 1 $ r Pt ST for valid requests
+    // or DCS 0 $ r Pt ST for invalid requests.
+    auto const [status, response] = [&](RequestStatusString::Value _value) -> pair<bool, std::string> {
+        switch (_value)
+        {
+            case RequestStatusString::Value::DECSCL:
+            {
+                auto level = 61;
+                switch (terminalId_) {
+                    case VTType::VT525:
+                    case VTType::VT520:
+                    case VTType::VT510: level = 65; break;
+                    case VTType::VT420: level = 64; break;
+                    case VTType::VT340:
+                    case VTType::VT330:
+                    case VTType::VT320: level = 63; break;
+                    case VTType::VT240:
+                    case VTType::VT220: level = 62; break;
+                    case VTType::VT100: level = 61; break;
+                }
+
+                auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
+                auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
+
+                return {true, fmt::format("{};{}", level, c1t)};
+            }
+            default:
+                return {false, ""};
+        }
+    }(v.value);
+
+    reply(
+        "\033P{}$r{}\033\\",
+        status ? 1 : 0,
+        response,
+        "\"p"
+    );
+}
+
 void Screen::operator()(RequestTabStops const&)
 {
     // Response: `DCS 2 $ u Pt ST`
@@ -1333,6 +1374,7 @@ void CommandExecutor::visit(ReportCursorPosition const& v) { screen_(v); }
 void CommandExecutor::visit(ReportExtendedCursorPosition const& v) { screen_(v); }
 void CommandExecutor::visit(RequestDynamicColor const& v) { screen_(v); }
 void CommandExecutor::visit(RequestMode const& v) { screen_(v); }
+void CommandExecutor::visit(RequestStatusString const& v) { screen_(v); }
 void CommandExecutor::visit(RequestTabStops const& v) { screen_(v); }
 void CommandExecutor::visit(ResetDynamicColor const& v) { screen_(v); }
 void CommandExecutor::visit(ResizeWindow const& v) { screen_(v); }

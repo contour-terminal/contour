@@ -225,6 +225,23 @@ void OutputGenerator::operator()(Command const& command)
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
         [&](RequestDynamicColor const& v) { write("\033];?\x07", setDynamicColorCommand(v.name)); },
+        [&](RequestStatusString const& v) {
+            auto const s = [&](auto value) -> string_view {
+                switch (value) {
+                    case RequestStatusString::Value::SGR: return "m";
+                    case RequestStatusString::Value::DECSCL: return "\"p";
+                    case RequestStatusString::Value::DECSCUSR: return " q";
+                    case RequestStatusString::Value::DECSCA: return "\"q";
+                    case RequestStatusString::Value::DECSTBM: return "r";
+                    case RequestStatusString::Value::DECSLRM: return "s";
+                    case RequestStatusString::Value::DECSLPP: return "t";
+                    case RequestStatusString::Value::DECSCPP: return "$";
+                    case RequestStatusString::Value::DECSNLS: return "*";
+                }
+                return "";
+            }(v.value);
+            write("\033P$p{}\033\\", s);
+        },
         [&](RequestTabStops const&) { write("\033[2$w"); },
         [&](SetDynamicColor const& v) { write("\033]{};{}\x07", setDynamicColorCommand(v.name), setDynamicColorValue(v.color)); },
         [&](DumpState const&) { write("\033]{}\x07", "888"); },

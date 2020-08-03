@@ -114,6 +114,7 @@ class CommandExecutor : public CommandVisitor {
     void visit(ReportExtendedCursorPosition const& v) override;
     void visit(RequestDynamicColor const& v) override;
     void visit(RequestMode const& v) override;
+    void visit(RequestStatusString const& v) override;
     void visit(RequestTabStops const& v) override;
     void visit(ResetDynamicColor const& v) override;
     void visit(ResizeWindow const& v) override;
@@ -346,6 +347,7 @@ class Screen {
     void operator()(ReportExtendedCursorPosition const& v);
     void operator()(RequestDynamicColor const& v);
     void operator()(RequestMode const& v);
+    void operator()(RequestStatusString const& v);
     void operator()(RequestTabStops const& v);
     void operator()(ResetDynamicColor const& v);
     void operator()(ResizeWindow const& v);

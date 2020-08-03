@@ -889,6 +889,23 @@ struct RequestDynamicColor {
     DynamicColorName name;
 };
 
+/// DECRQSS - Request Status String
+struct RequestStatusString {
+    enum class Value {
+        SGR,
+        DECSCL,
+        DECSCUSR,
+        DECSCA,
+        DECSTBM,
+        DECSLRM,
+        DECSLPP,
+        DECSCPP,
+        DECSNLS
+    };
+
+    Value value;
+};
+
 /// DECTABSR - Tab Stop Report
 ///
 /// Requests currently configured tab stops.
@@ -1001,6 +1018,7 @@ using Command = std::variant<
     ReportExtendedCursorPosition,
     RequestDynamicColor,
     RequestMode,
+    RequestStatusString,
     RequestTabStops,
     ResetDynamicColor,
     ResizeWindow,
@@ -1092,6 +1110,7 @@ class CommandVisitor {
     virtual void visit(ReportExtendedCursorPosition const& v) = 0;
     virtual void visit(RequestDynamicColor const& v) = 0;
     virtual void visit(RequestMode const& v) = 0;
+    virtual void visit(RequestStatusString const& v) = 0;
     virtual void visit(RequestTabStops const& v) = 0;
     virtual void visit(ResetDynamicColor const& v) = 0;
     virtual void visit(ResizeWindow const& v) = 0;
@@ -1172,6 +1191,7 @@ class CommandVisitor {
     void operator()(ReportExtendedCursorPosition const& v) { visit(v); }
     void operator()(RequestDynamicColor const& v) { visit(v); }
     void operator()(RequestMode const& v) { visit(v); }
+    void operator()(RequestStatusString const& v) { visit(v); }
     void operator()(RequestTabStops const& v) { visit(v); }
     void operator()(ResetDynamicColor const& v) { visit(v); }
     void operator()(ResizeWindow const& v) { visit(v); }

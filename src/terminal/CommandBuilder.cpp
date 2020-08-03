@@ -25,13 +25,17 @@
 
 #include <fmt/format.h>
 
+#include <array>
 #include <cstdlib>
 #include <numeric>
 #include <optional>
 #include <sstream>
 
-using std::string;
+using std::array;
+using std::nullopt;
+using std::optional;
 using std::pair;
+using std::string;
 
 namespace terminal {
 
@@ -546,6 +550,34 @@ namespace impl // {{{ some command generator helpers
             return ApplyResult::Invalid;
     }
 
+    ApplyResult DECRQSS(Sequence const& _ctx, CommandList& _output)
+    {
+        auto const s = [](std::string const& _dataString) -> optional<RequestStatusString::Value> {
+            auto const mappings = std::array<std::pair<std::string_view, RequestStatusString::Value>, 9>{
+                pair{"m",   RequestStatusString::Value::SGR},
+                pair{"\"p", RequestStatusString::Value::DECSCL},
+                pair{" q",  RequestStatusString::Value::DECSCUSR},
+                pair{"\"q", RequestStatusString::Value::DECSCA},
+                pair{"r",   RequestStatusString::Value::DECSTBM},
+                pair{"s",   RequestStatusString::Value::DECSLRM},
+                pair{"t",   RequestStatusString::Value::DECSLPP},
+                pair{"$|",  RequestStatusString::Value::DECSCPP},
+                pair{"*|",  RequestStatusString::Value::DECSNLS}
+            };
+            for (auto const& mapping : mappings)
+                if (_dataString == mapping.first)
+                    return mapping.second;
+            return nullopt;
+        }(_ctx.dataString());
+
+        if (s.has_value())
+            return emitCommand<RequestStatusString>(_output, s.value());
+        else
+            return ApplyResult::Invalid;
+
+        return ApplyResult::Unsupported;
+    }
+
     ApplyResult WINDOWMANIP(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 3)
@@ -875,6 +907,9 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case TBC: return impl::TBC(_ctx, _output);
         case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
+
+        // DCS
+        case DECRQSS: return impl::DECRQSS(_ctx, _output);
 
         // OSC
         case SETICON: return emitCommand<ChangeIconTitle>(_output, _ctx.intermediateCharacters());

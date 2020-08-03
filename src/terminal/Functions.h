@@ -273,6 +273,22 @@ namespace detail // {{{
             _description
         };
     }
+
+    constexpr auto DCS(std::optional<char> _leader, int _argc0, int _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    {
+        // TODO: static_assert on _leader/_intermediate range-or-null
+        return FunctionDefinition{
+            FunctionCategory::DCS,
+            _leader.value_or(0),
+            _intermediate.value_or(0),
+            _final,
+            _argc0,
+            _argc1,
+            _vt,
+            _mnemonic,
+            _description
+        };
+    }
 } // }}}
 
 // C0
@@ -383,6 +399,9 @@ constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt
 constexpr inline auto CBT         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'Z', VTType::VT100, "CBT", "Cursor Backward Tabulation");
 constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VTType::VT100, "SETMARK", "Set Vertical Mark");
 
+// CSI functions
+constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
+
 // OSC
 constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Window Icon");
 constexpr inline auto SETWINTITLE   = detail::OSC(2, "SETWINTITLE", "Change Window Title");
@@ -492,6 +511,9 @@ inline auto const& functions()
             TBC,
             VPA,
             WINMANIP,
+
+            // DCS
+            DECRQSS,
 
             // OSC
             SETICON,

@@ -101,6 +101,7 @@ class Debugger : public CommandVisitor {
     void visit(ReportExtendedCursorPosition const& v) override { enqueue(v); };
     void visit(RequestDynamicColor const& v) override { enqueue(v); };
     void visit(RequestMode const& v) override { enqueue(v); };
+    void visit(RequestStatusString const& v) override { enqueue(v); };
     void visit(RequestTabStops const& v) override { enqueue(v); };
     void visit(ResetDynamicColor const& v) override { enqueue(v); };
     void visit(ResizeWindow const& v) override { enqueue(v); };
