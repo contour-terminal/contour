@@ -51,6 +51,7 @@ namespace terminal {
 
 class Screen;
 
+/// VT Sequence Executor for directly executing the VT sequences as they arive.
 class CommandExecutor : public CommandVisitor {
   protected:
     Screen& screen_;
