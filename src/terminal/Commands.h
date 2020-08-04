@@ -1277,7 +1277,7 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::Coordinate& coord, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}, {})", coord.row, coord.column);
+            return format_to(ctx.out(), "({}:{})", coord.row, coord.column);
         }
     };
 

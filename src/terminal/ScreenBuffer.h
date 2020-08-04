@@ -627,6 +627,17 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 
 namespace fmt {
     template <>
+    struct formatter<terminal::Margin::Range> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::Margin::Range range, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}..{}", range.from, range.to);
+        }
+    };
+
+    template <>
     struct formatter<terminal::Cursor> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }

@@ -682,10 +682,12 @@ void ScreenBuffer::dumpState(std::string const& _message) const
     cerr << "\033[1;37;41m" << _message << "\033[m" << endl;
     hline();
 
-    cerr << fmt::format("Rendered screen at the time of failure: {}, cursor at {}", size_, cursor);
+    cerr << fmt::format("Rendered screen at the time of failure: {}\n", size_);
+    cerr << fmt::format("cursor position      : {}\n", cursor);
     if (cursor.originMode)
-        cerr << fmt::format(" (real: {})", toRealCoordinate(cursor.position));
-    cerr << '\n';
+        cerr << fmt::format("real cursor position : {})\n", toRealCoordinate(cursor.position));
+    cerr << fmt::format("vertical margins     : {}\n", margin_.vertical);
+    cerr << fmt::format("horizontal margins   : {}\n", margin_.horizontal);
 
     hline();
     cerr << screenshot();
