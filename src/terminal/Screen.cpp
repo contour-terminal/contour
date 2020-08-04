@@ -1018,6 +1018,11 @@ void Screen::setMode(Mode _mode, bool _enable)
             cursor_pos_t const columns = _enable ? 132 : 80;
             cursor_pos_t const rows = size().rows;
             bool const unitInPixels = false;
+
+            // Pre-resize in case the event callback right after is not actually resizing the window
+            // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
+            resize(WindowSize{columns, rows});
+
             eventListener_.resizeWindow(columns, rows, unitInPixels);
 
             setMode(Mode::LeftRightMargin, false);
@@ -1155,7 +1160,7 @@ void Screen::operator()(ScreenAlignmentPattern const&)
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 begin(line),
                 end(line),
-                Cell{'X', buffer_->cursor.graphicsRendition}
+                Cell{'E', buffer_->cursor.graphicsRendition}
             );
         }
     );
