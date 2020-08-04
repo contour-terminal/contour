@@ -181,8 +181,11 @@ class Sequence {
     DataString const& dataString() const noexcept { return dataString_; }
     DataString& dataString() noexcept { return dataString_; }
 
-    /// Converts a FunctionDefinition with a given context back into a human readable VT sequence.
-    std::string str() const;
+    /// @returns this VT-sequence into a human readable string form.
+    std::string text() const;
+
+    /// @returns the raw VT-sequence string.
+    std::string raw() const;
 
     /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding FunctionDefinition.
     FunctionSelector selector() const noexcept
@@ -604,7 +607,19 @@ namespace std {
     };
 }
 
-namespace fmt {
+namespace fmt // {{{
+{
+    template <>
+    struct formatter<terminal::Sequence> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Sequence const& seq, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}", seq.text());
+        }
+    };
+
     template <>
     struct formatter<terminal::FunctionCategory> {
         template <typename ParseContext>
@@ -722,4 +737,4 @@ namespace fmt {
             }
         }
     };
-}
+} // }}}

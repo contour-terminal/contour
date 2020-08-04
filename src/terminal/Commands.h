@@ -15,6 +15,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/VTType.h>
+#include <terminal/Functions.h>
 
 #include <functional>
 #include <iostream>
@@ -284,6 +285,10 @@ enum class CharsetId {
 };
 
 std::string to_string(CharsetId charset);
+
+struct UnknownCommand {
+    Sequence sequence;
+};
 
 struct Bell {};
 
@@ -1045,7 +1050,8 @@ using Command = std::variant<
     SetTopBottomMargin,
     SetUnderlineColor,
     SingleShiftSelect,
-    SoftTerminalReset
+    SoftTerminalReset,
+    UnknownCommand
 >;
 
 using CommandList = std::vector<Command>;
@@ -1138,6 +1144,7 @@ class CommandVisitor {
     virtual void visit(SetUnderlineColor const& v) = 0;
     virtual void visit(SingleShiftSelect const& v) = 0;
     virtual void visit(SoftTerminalReset const& v) = 0;
+    virtual void visit(UnknownCommand const& v) = 0;
 
     // {{{ Secret std::visit() workaround
     void operator()(AppendChar const& v) { visit(v); }
@@ -1219,6 +1226,7 @@ class CommandVisitor {
     void operator()(SetUnderlineColor const& v) { visit(v); }
     void operator()(SingleShiftSelect const& v) { visit(v); }
     void operator()(SoftTerminalReset const& v) { visit(v); }
+    void operator()(UnknownCommand const& v) { visit(v); }
     // }}}
 };
 

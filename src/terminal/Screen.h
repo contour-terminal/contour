@@ -142,6 +142,7 @@ class CommandExecutor : public CommandVisitor {
     void visit(SetUnderlineColor const& v) override;
     void visit(SingleShiftSelect const& v) override;
     void visit(SoftTerminalReset const& v) override;
+    void visit(UnknownCommand const& v) override;
 };
 
 /// Batches any drawing related command until synchronization point, or
@@ -220,6 +221,7 @@ class SynchronizedCommandExecutor : public CommandExecutor {
     void visit(SetTopBottomMargin const& v) override { enqueue(v); }
     void visit(SetUnderlineColor const& v) override { enqueue(v); }
     void visit(SingleShiftSelect const& v) override { enqueue(v); }
+    void visit(UnknownCommand const& v) override { enqueue(v); }
 };
 
 /**
@@ -375,6 +377,7 @@ class Screen {
     void operator()(SetUnderlineColor const& v);
     void operator()(SingleShiftSelect const& v);
     void operator()(SoftTerminalReset const& v);
+    void operator()(UnknownCommand const& v);
     // }}}
 
     // reset screen

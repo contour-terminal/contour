@@ -129,6 +129,7 @@ class Debugger : public CommandVisitor {
     void visit(SetUnderlineColor const& v) override { enqueue(v); };
     void visit(SingleShiftSelect const& v) override { enqueue(v); };
     void visit(SoftTerminalReset const& v) override { enqueue(v); };
+    void visit(UnknownCommand const& v) override { enqueue(v); };
     // }}}
 
   private:

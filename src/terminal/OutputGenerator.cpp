@@ -442,6 +442,7 @@ void OutputGenerator::operator()(Command const& command)
         },
         [&](SaveWindowTitle const&) { write("\033[22;0;0t"); },
         [&](RestoreWindowTitle const&) { write("\033[23;0;0t"); },
+        [&](UnknownCommand const& v) { write(v.sequence.raw()); }
     }, command);
 }
 

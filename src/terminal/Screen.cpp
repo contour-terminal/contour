@@ -1194,6 +1194,12 @@ void Screen::operator()(SoftTerminalReset const&)
     resetSoft();
 }
 
+void Screen::operator()(UnknownCommand const& v)
+{
+    logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"});
+    //std::cerr << "Unknown VT sequence: " << v.sequence.text() << std::endl;
+}
+
 void Screen::operator()(ChangeIconTitle const&)
 {
     // Not supported (for now), ignored.
@@ -1407,6 +1413,7 @@ void CommandExecutor::visit(SetTopBottomMargin const& v) { screen_(v); }
 void CommandExecutor::visit(SetUnderlineColor const& v) { screen_(v); }
 void CommandExecutor::visit(SingleShiftSelect const& v) { screen_(v); }
 void CommandExecutor::visit(SoftTerminalReset const& v) { screen_(v); }
+void CommandExecutor::visit(UnknownCommand const& v) { screen_(v); }
 // }}}
 
 // {{{ SynchronizedCommandExecutor

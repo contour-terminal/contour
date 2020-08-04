@@ -407,6 +407,9 @@ class MnemonicBuilder {
     void operator()(RequestTabStops) {
         build("DECTABSR");
     }
+    void operator()(UnknownCommand const& v) {
+        build("UNKNOWN", fmt::format("{}", v.sequence));
+    }
 
   private:
     bool withParameters_;

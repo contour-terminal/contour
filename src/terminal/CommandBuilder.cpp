@@ -781,21 +781,18 @@ void CommandBuilder::emitSequence()
 {
     if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
     {
-        ApplyResult const result = apply(*funcSpec, sequence_, commands_);
-        switch (result)
+        switch (apply(*funcSpec, sequence_, commands_))
         {
             case ApplyResult::Unsupported:
-                log<UnsupportedOutputEvent>(sequence_.str());
-                break;
             case ApplyResult::Invalid:
-                log<InvalidOutputEvent>(sequence_.str(), "Invalid");
+                emitCommand<UnknownCommand>(sequence_);
                 break;
             case ApplyResult::Ok:
                 break;
         }
     }
     else
-        log<InvalidOutputEvent>(sequence_.str(), "");
+        emitCommand<UnknownCommand>(sequence_);
 }
 
 std::optional<RGBColor> CommandBuilder::parseColor(std::string_view const& _value)
@@ -932,8 +929,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case DUMPSTATE: return emitCommand<DumpState>(_output);
 
         default:
-           std::cerr << "NOT FOUND: " << _ctx.str() << std::endl;
-           return ApplyResult::Unsupported;
+            return emitCommand<UnknownCommand>(_output, _ctx);
     }
 }
 
