@@ -332,9 +332,9 @@ class MnemonicBuilder {
     void operator()(SetMark const&) { build("SETMARK", "Sets vertical jump-mark in current line"); }
     void operator()(SetMode const& v) {
         if (v.enable)
-            build("SM", fmt::format("Set mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
+            build("SM", fmt::format("Set mode {}", to_string(v.mode)), to_code(v.mode));
         else
-            build("RM", fmt::format("Reset mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
+            build("RM", fmt::format("Reset mode {}", to_string(v.mode)), to_code(v.mode));
     }
     void operator()(RequestMode const& v) {
         build("DECRQM", fmt::format("Reuqest mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));
