@@ -297,6 +297,7 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
 void TextRenderer::finish()
 {
     state_ = State::Empty;
+    codepoints_.clear();
 }
 
 void TextRenderer::render(QPoint _pos,
