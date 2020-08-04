@@ -37,6 +37,8 @@
 #include <string_view>
 #include <vector>
 
+using std::pair;
+
 namespace terminal {
 
 /// API for setting/querying terminal modes.
@@ -161,9 +163,9 @@ struct GraphicsAttributes {
         return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
     }
 
-    std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile) const noexcept
+    std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, bool _reverseVideo) const noexcept
     {
-        float const opacity = [=]() {
+        float const opacity = [=]() { // TODO: don't make opacity dependant on Faint-attribute.
             if (styles & CharacterStyleMask::Faint)
                 return 0.5f;
             else
@@ -172,11 +174,16 @@ struct GraphicsAttributes {
 
         bool const bright = (styles & CharacterStyleMask::Bold) != 0;
 
-        return (styles & CharacterStyleMask::Inverse)
-            ? std::pair{ apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) * opacity,
-                         apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) }
-            : std::pair{ apply(_colorProfile, foregroundColor, ColorTarget::Foreground, bright) * opacity,
-                         apply(_colorProfile, backgroundColor, ColorTarget::Background, bright) };
+        auto const [fgColorTarget, bgColorTarget] =
+            _reverseVideo
+                ? pair{ ColorTarget::Background, ColorTarget::Foreground }
+                : pair{ ColorTarget::Foreground, ColorTarget::Background };
+
+        return (styles & CharacterStyleMask::Inverse) == 0
+            ? pair{ apply(_colorProfile, foregroundColor, fgColorTarget, bright) * opacity,
+                    apply(_colorProfile, backgroundColor, bgColorTarget, bright) }
+            : pair{ apply(_colorProfile, backgroundColor, bgColorTarget, bright) * opacity,
+                    apply(_colorProfile, foregroundColor, fgColorTarget, bright) };
     }
 };
 

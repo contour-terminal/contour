@@ -33,7 +33,7 @@ BackgroundRenderer::BackgroundRenderer(ScreenCoordinates const& _screenCoordinat
 
 void BackgroundRenderer::renderCell(Coordinate const& _pos, Cell const& _cell)
 {
-    RGBColor const color = _cell.attributes().makeColors(colorProfile_).second;
+    RGBColor const color = _cell.attributes().makeColors(colorProfile_, false).second;
     renderCell(_pos, color);
 }
 

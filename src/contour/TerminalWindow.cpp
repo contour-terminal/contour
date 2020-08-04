@@ -590,7 +590,15 @@ void TerminalWindow::paintGL()
             for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
         }
 
-        QVector4D const bg = Renderer::canonicalColor(profile().colors.defaultBackground, profile().backgroundOpacity);
+        bool const reverseVideo =
+            terminalView_->terminal().screen().isModeEnabled(terminal::Mode::ReverseVideo);
+
+        QVector4D const bg = Renderer::canonicalColor(
+            reverseVideo
+                ? profile().colors.defaultForeground
+                : profile().colors.defaultBackground,
+            profile().backgroundOpacity);
+
         if (bg != renderStateCache_.backgroundColor)
         {
             glClearColor(bg[0], bg[1], bg[2], bg[3]);

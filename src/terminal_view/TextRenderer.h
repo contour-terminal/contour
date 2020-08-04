@@ -133,6 +133,8 @@ class TextRenderer {
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
+    void setReverseVideo(bool _reverse) noexcept { reverseVideo_ = _reverse; }
+
     void schedule(Coordinate const& _pos, Cell const& _cell);
     void flushPendingSegments();
     void finish();
@@ -186,6 +188,7 @@ class TextRenderer {
     RenderMetrics& renderMetrics_;
     ScreenCoordinates const& screenCoordinates_;
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
+    bool reverseVideo_ = false;
     FontConfig fonts_;
 
     // text run segmentation

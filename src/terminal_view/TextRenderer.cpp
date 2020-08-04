@@ -166,7 +166,7 @@ void TextRenderer::flushPendingSegments()
     if (codepoints_.empty())
         return;
 
-    auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_);
+    auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_, reverseVideo_);
 
     render(
         #if 1

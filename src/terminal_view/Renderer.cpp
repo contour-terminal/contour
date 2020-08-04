@@ -156,6 +156,7 @@ uint64_t Renderer::render(Terminal& _terminal,
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
+        textRenderer_.setReverseVideo(_terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo));
         if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
             auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
@@ -165,6 +166,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             }
 
             changes = _terminal.preRender(_now);
+
             _terminal.screen().render([this](Coordinate const& _pos, Cell const& _cell) { renderCell(_pos, _cell); },
                                       _terminal.screen().scrollOffset());
 
