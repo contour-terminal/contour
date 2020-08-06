@@ -130,8 +130,8 @@ class Terminal : public ScreenEvents {
     // viewport management
     bool isLineVisible(cursor_pos_t _row) const noexcept { return screen_.isLineVisible(_row); }
     int scrollOffset() const noexcept { return screen_.scrollOffset(); }
-    bool scrollUp(size_t _numLines) { return screen_.scrollUp(_numLines); }
-    bool scrollDown(size_t _numLines) { return screen_.scrollDown(_numLines); }
+    bool scrollUp(int _numLines) { return screen_.scrollUp(_numLines); }
+    bool scrollDown(int  _numLines) { return screen_.scrollDown(_numLines); }
     bool scrollToTop() { return screen_.scrollToTop(); }
     bool scrollToBottom() { return screen_.scrollToBottom(); }
     bool scrollMarkUp() { return screen_.scrollMarkUp(); }
