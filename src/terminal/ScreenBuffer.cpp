@@ -58,12 +58,19 @@ std::optional<int> ScreenBuffer::findMarkerBackward(int _currentCursorLine) cons
     if (_currentCursorLine > size().rows || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
         return nullopt;
 
+    // we start looking in the main screen area only if @p _currentCursorLine is at least 2,
+    // i.e. when there is at least one line to check.
     if (_currentCursorLine >= 2) // main screen area
     {
-        auto currentLine = next(begin(lines), _currentCursorLine - 2);
-        for (int row = _currentCursorLine - 1; row > 0; --row, --currentLine)
+        int row = _currentCursorLine - 1;
+        while (row > 0)
+        {
+            auto const currentLine = next(begin(lines), row - 1);
             if (currentLine->marked)
                 return {row};
+
+            --row;
+        }
     }
 
     // saved-lines area
