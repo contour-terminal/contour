@@ -31,7 +31,7 @@ constexpr CharsetMap usasciiCharset()
 constexpr CharsetMap createBritishCharset()
 {
     auto result = usasciiCharset();
-    result['#'] = U'£';
+    result['#'] = 0x00A3; // U'£';
     return result;
 }
 
@@ -41,14 +41,14 @@ constexpr CharsetMap createGermanCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('@')] = U'§';
-    result[static_cast<size_t>('[')] = U'Ä';
-    result[static_cast<size_t>('\\')] = U'Ö';
-    result[static_cast<size_t>(']')] = U'Ü';
-    result[static_cast<size_t>('{')] = U'ä';
-    result[static_cast<size_t>('|')] = U'ö';
-    result[static_cast<size_t>('}')] = U'ü';
-    result[static_cast<size_t>('~')] = U'ß';
+    result[static_cast<size_t>('@')] = 0x00A7; // U'§';
+    result[static_cast<size_t>('[')] = 0x00C4; // U'Ä';
+    result[static_cast<size_t>('\\')] = 0x00D6; // U'Ö';
+    result[static_cast<size_t>(']')] = 0x00DC; // U'Ü';
+    result[static_cast<size_t>('{')] = 0x00E4; // U'ä';
+    result[static_cast<size_t>('|')] = 0x00F6; // U'ö';
+    result[static_cast<size_t>('}')] = 0x00FC; // U'ü';
+    result[static_cast<size_t>('~')] = 0x00DF; //U'ß';
 
     return result;
 }
@@ -60,37 +60,37 @@ constexpr CharsetMap createSpecialCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('`')] = U'\u25c6'; // '◆'
-    result[static_cast<size_t>('a')] = U'\u2592'; // '▒'
-    result[static_cast<size_t>('b')] = U'\u2409'; // '␉'
-    result[static_cast<size_t>('c')] = U'\u240c'; // '␌'
-    result[static_cast<size_t>('d')] = U'\u240d'; // '␍'
-    result[static_cast<size_t>('e')] = U'\u240a'; // '␊'
-    result[static_cast<size_t>('f')] = U'\u00b0'; // '°'
-    result[static_cast<size_t>('g')] = U'\u00b1'; // '±'
-    result[static_cast<size_t>('h')] = U'\u2424'; // '␤'
-    result[static_cast<size_t>('i')] = U'\u240b'; // '␋'
-    result[static_cast<size_t>('j')] = U'\u2518'; // '┘'
-    result[static_cast<size_t>('k')] = U'\u2510'; // '┐'
-    result[static_cast<size_t>('l')] = U'\u250c'; // '┌'
-    result[static_cast<size_t>('m')] = U'\u2514'; // '└'
-    result[static_cast<size_t>('n')] = U'\u253c'; // '┼'
-    result[static_cast<size_t>('o')] = U'\u23ba'; // '⎺'
-    result[static_cast<size_t>('p')] = U'\u23bb'; // '⎻'
-    result[static_cast<size_t>('q')] = U'\u2500'; // '─'
-    result[static_cast<size_t>('r')] = U'\u23bc'; // '⎼'
-    result[static_cast<size_t>('s')] = U'\u23bd'; // '⎽'
-    result[static_cast<size_t>('t')] = U'\u251c'; // '├'
-    result[static_cast<size_t>('u')] = U'\u2524'; // '┤'
-    result[static_cast<size_t>('v')] = U'\u2534'; // '┴'
-    result[static_cast<size_t>('w')] = U'\u252c'; // '┬'
-    result[static_cast<size_t>('x')] = U'\u2502'; // '│'
-    result[static_cast<size_t>('y')] = U'\u2264'; // '≤'
-    result[static_cast<size_t>('z')] = U'\u2265'; // '≥'
-    result[static_cast<size_t>('{')] = U'\u03c0'; // 'π'
-    result[static_cast<size_t>('|')] = U'\u2260'; // '≠'
-    result[static_cast<size_t>('}')] = U'\u00a3'; // '£'
-    result[static_cast<size_t>('~')] = U'\u00b7'; // '·'
+    result[static_cast<size_t>('`')] = 0x25c6; // '◆'
+    result[static_cast<size_t>('a')] = 0x2592; // '▒'
+    result[static_cast<size_t>('b')] = 0x2409; // '␉'
+    result[static_cast<size_t>('c')] = 0x240c; // '␌'
+    result[static_cast<size_t>('d')] = 0x240d; // '␍'
+    result[static_cast<size_t>('e')] = 0x240a; // '␊'
+    result[static_cast<size_t>('f')] = 0x00b0; // '°'
+    result[static_cast<size_t>('g')] = 0x00b1; // '±'
+    result[static_cast<size_t>('h')] = 0x2424; // '␤'
+    result[static_cast<size_t>('i')] = 0x240b; // '␋'
+    result[static_cast<size_t>('j')] = 0x2518; // '┘'
+    result[static_cast<size_t>('k')] = 0x2510; // '┐'
+    result[static_cast<size_t>('l')] = 0x250c; // '┌'
+    result[static_cast<size_t>('m')] = 0x2514; // '└'
+    result[static_cast<size_t>('n')] = 0x253c; // '┼'
+    result[static_cast<size_t>('o')] = 0x23ba; // '⎺'
+    result[static_cast<size_t>('p')] = 0x23bb; // '⎻'
+    result[static_cast<size_t>('q')] = 0x2500; // '─'
+    result[static_cast<size_t>('r')] = 0x23bc; // '⎼'
+    result[static_cast<size_t>('s')] = 0x23bd; // '⎽'
+    result[static_cast<size_t>('t')] = 0x251c; // '├'
+    result[static_cast<size_t>('u')] = 0x2524; // '┤'
+    result[static_cast<size_t>('v')] = 0x2534; // '┴'
+    result[static_cast<size_t>('w')] = 0x252c; // '┬'
+    result[static_cast<size_t>('x')] = 0x2502; // '│'
+    result[static_cast<size_t>('y')] = 0x2264; // '≤'
+    result[static_cast<size_t>('z')] = 0x2265; // '≥'
+    result[static_cast<size_t>('{')] = 0x03c0; // 'π'
+    result[static_cast<size_t>('|')] = 0x2260; // '≠'
+    result[static_cast<size_t>('}')] = 0x00a3; // '£'
+    result[static_cast<size_t>('~')] = 0x00b7; // '·'
 
     return result;
 }
@@ -102,15 +102,15 @@ constexpr CharsetMap createDutchCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('#')] = U'£';
-    result[static_cast<size_t>('@')] = U'¾';
+    result[static_cast<size_t>('#')] = 0x00A3; // U'£';
+    result[static_cast<size_t>('@')] = 0x00BE; // U'¾';
     //TODO: result[static_cast<size_t>('[')] = U'ij';
-    result[static_cast<size_t>('\\')] = U'½';
-    result[static_cast<size_t>(']')] = U'|';
-    result[static_cast<size_t>('{')] = U'¨';
-    result[static_cast<size_t>('|')] = U'f';
-    result[static_cast<size_t>('}')] = U'¼';
-    result[static_cast<size_t>('~')] = U'´';
+    result[static_cast<size_t>('\\')] = 0x00BD; // U'½';
+    result[static_cast<size_t>(']')] = 0x007C; // U'|';
+    result[static_cast<size_t>('{')] = 0x00A8; // U'¨';
+    result[static_cast<size_t>('|')] = 0x0066; // U'f';
+    result[static_cast<size_t>('}')] = 0x00BC; // U'¼';
+    result[static_cast<size_t>('~')] = 0x00B4; // U'´';
 
     return result;
 }
@@ -122,15 +122,15 @@ constexpr CharsetMap createFinishCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('[')] = U'Ä';
-    result[static_cast<size_t>('\\')] = U'Ö';
-    result[static_cast<size_t>(']')] = U'Å';
-    result[static_cast<size_t>('^')] = U'Ü';
-    result[static_cast<size_t>('`')] = U'é';
-    result[static_cast<size_t>('{')] = U'ä';
-    result[static_cast<size_t>('|')] = U'ö';
-    result[static_cast<size_t>('}')] = U'å';
-    result[static_cast<size_t>('~')] = U'ü';
+    result[static_cast<size_t>('[')] = 0x00C4; // U'Ä';
+    result[static_cast<size_t>('\\')] = 0x00D6; // U'Ö';
+    result[static_cast<size_t>(']')] = 0x00C5; // U'Å';
+    result[static_cast<size_t>('^')] = 0x00DC; // U'Ü';
+    result[static_cast<size_t>('`')] = 0x00E9; // U'é';
+    result[static_cast<size_t>('{')] = 0x00E4; // U'ä';
+    result[static_cast<size_t>('|')] = 0x00F6; // U'ö';
+    result[static_cast<size_t>('}')] = 0x00E5; // U'å';
+    result[static_cast<size_t>('~')] = 0x00FC; // U'ü';
 
     return result;
 }
@@ -141,15 +141,15 @@ constexpr CharsetMap createFrenchCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('#')] = U'£';
-    result[static_cast<size_t>('@')] = U'à';
-    result[static_cast<size_t>('[')] = U'°';
-    result[static_cast<size_t>('\\')] = U'ç';
-    result[static_cast<size_t>(']')] = U'§';
-    result[static_cast<size_t>('{')] = U'é';
-    result[static_cast<size_t>('|')] = U'ù';
-    result[static_cast<size_t>('}')] = U'è';
-    result[static_cast<size_t>('~')] = U'¨';
+    result[static_cast<size_t>('#')] = 0x00A3; // U'£';
+    result[static_cast<size_t>('@')] = 0x00E0; // U'à';
+    result[static_cast<size_t>('[')] = 0x00B0; // U'°';
+    result[static_cast<size_t>('\\')] = 0x00E7; // U'ç';
+    result[static_cast<size_t>(']')] = 0x00A7; // U'§';
+    result[static_cast<size_t>('{')] = 0x00E9; // U'é';
+    result[static_cast<size_t>('|')] = 0x00F9; // U'ù';
+    result[static_cast<size_t>('}')] = 0x00E8; // U'è';
+    result[static_cast<size_t>('~')] = 0x00A8; // U'¨';
 
     return result;
 }
@@ -160,16 +160,16 @@ constexpr CharsetMap createFrenchCanadianCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('@')] = U'à';
-    result[static_cast<size_t>('[')] = U'â';
-    result[static_cast<size_t>('\\')] = U'ç';
-    result[static_cast<size_t>(']')] = U'ê';
-    result[static_cast<size_t>('^')] = U'î';
-    result[static_cast<size_t>('`')] = U'ô';
-    result[static_cast<size_t>('{')] = U'é';
-    result[static_cast<size_t>('|')] = U'ù';
-    result[static_cast<size_t>('}')] = U'è';
-    result[static_cast<size_t>('~')] = U'û';
+    result[static_cast<size_t>('@')] = 0x00E0; // U'à';
+    result[static_cast<size_t>('[')] = 0x00E2; // U'â';
+    result[static_cast<size_t>('\\')] = 0x00E7; // U'ç';
+    result[static_cast<size_t>(']')] = 0x00EA; // U'ê';
+    result[static_cast<size_t>('^')] = 0x00EE; // U'î';
+    result[static_cast<size_t>('`')] = 0x00F4; // U'ô';
+    result[static_cast<size_t>('{')] = 0x00E9; // U'é';
+    result[static_cast<size_t>('|')] = 0x00F9; // U'ù';
+    result[static_cast<size_t>('}')] = 0x00E8; // U'è';
+    result[static_cast<size_t>('~')] = 0x00FB; // U'û';
 
     return result;
 }
@@ -181,16 +181,16 @@ constexpr CharsetMap createNorwegianDanishCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('@')] = U'Ä';
-    result[static_cast<size_t>('[')] = U'Æ';
-    result[static_cast<size_t>('\\')] = U'Ø';
-    result[static_cast<size_t>(']')] = U'Å';
-    result[static_cast<size_t>('^')] = U'Ü';
-    result[static_cast<size_t>('`')] = U'ä';
-    result[static_cast<size_t>('{')] = U'æ';
-    result[static_cast<size_t>('|')] = U'ø';
-    result[static_cast<size_t>('}')] = U'å';
-    result[static_cast<size_t>('~')] = U'ü';
+    result[static_cast<size_t>('@')] = 0x00C4; // U'Ä';
+    result[static_cast<size_t>('[')] = 0x00C6; // U'Æ';
+    result[static_cast<size_t>('\\')] = 0x00D8; // U'Ø';
+    result[static_cast<size_t>(']')] = 0x00C5; // U'Å';
+    result[static_cast<size_t>('^')] = 0x00DC; // U'Ü';
+    result[static_cast<size_t>('`')] = 0x00E4; // U'ä';
+    result[static_cast<size_t>('{')] = 0x00E6; // U'æ';
+    result[static_cast<size_t>('|')] = 0x00F8; // U'ø';
+    result[static_cast<size_t>('}')] = 0x00E5; // U'å';
+    result[static_cast<size_t>('~')] = 0x00FC; // U'ü';
 
     return result;
 }
@@ -201,14 +201,14 @@ constexpr CharsetMap createSpanishCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('#')] = U'£';
-    result[static_cast<size_t>('@')] = U'§';
-    result[static_cast<size_t>('[')] = U'¡';
-    result[static_cast<size_t>('\\')] = U'Ñ';
-    result[static_cast<size_t>(']')] = U'¿';
-    result[static_cast<size_t>('{')] = U'°';
-    result[static_cast<size_t>('|')] = U'ñ';
-    result[static_cast<size_t>('}')] = U'ç';
+    result[static_cast<size_t>('#')] = 0x00A3; // U'£';
+    result[static_cast<size_t>('@')] = 0x00A7; // U'§';
+    result[static_cast<size_t>('[')] = 0x00A1; // U'¡';
+    result[static_cast<size_t>('\\')] = 0x00D1; // U'Ñ';
+    result[static_cast<size_t>(']')] = 0x00BF; // U'¿';
+    result[static_cast<size_t>('{')] = 0x00B0; // U'°';
+    result[static_cast<size_t>('|')] = 0x00F1; // U'ñ';
+    result[static_cast<size_t>('}')] = 0x00E7; // U'ç';
 
     return result;
 }
@@ -220,16 +220,16 @@ constexpr CharsetMap createSwedishCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('@')] = U'É';
-    result[static_cast<size_t>('[')] = U'Ä';
-    result[static_cast<size_t>('\\')] = U'Ö';
-    result[static_cast<size_t>(']')] = U'Å';
-    result[static_cast<size_t>('^')] = U'Ü';
-    result[static_cast<size_t>('`')] = U'é';
-    result[static_cast<size_t>('{')] = U'ä';
-    result[static_cast<size_t>('|')] = U'ö';
-    result[static_cast<size_t>('}')] = U'å';
-    result[static_cast<size_t>('~')] = U'ü';
+    result[static_cast<size_t>('@')] = 0x00C9; // U'É';
+    result[static_cast<size_t>('[')] = 0x00C4; // U'Ä';
+    result[static_cast<size_t>('\\')] = 0x00D6; // U'Ö';
+    result[static_cast<size_t>(']')] = 0x00C5; // U'Å';
+    result[static_cast<size_t>('^')] = 0x00DC; // U'Ü';
+    result[static_cast<size_t>('`')] = 0x00E9; // U'é';
+    result[static_cast<size_t>('{')] = 0x00E4; // U'ä';
+    result[static_cast<size_t>('|')] = 0x00F6; // U'ö';
+    result[static_cast<size_t>('}')] = 0x00E5; // U'å';
+    result[static_cast<size_t>('~')] = 0x00FC; // U'ü';
 
     return result;
 }
@@ -240,18 +240,18 @@ constexpr CharsetMap createSwissCharset()
 {
     auto result = usasciiCharset();
 
-    result[static_cast<size_t>('#')] = U'ù';
-    result[static_cast<size_t>('@')] = U'à';
-    result[static_cast<size_t>('[')] = U'é';
-    result[static_cast<size_t>('\\')] = U'ç';
-    result[static_cast<size_t>(']')] = U'ê';
-    result[static_cast<size_t>('^')] = U'î';
-    result[static_cast<size_t>('_')] = U'è';
-    result[static_cast<size_t>('`')] = U'ô';
-    result[static_cast<size_t>('{')] = U'ä';
-    result[static_cast<size_t>('|')] = U'ö';
-    result[static_cast<size_t>('}')] = U'ü';
-    result[static_cast<size_t>('~')] = U'û';
+    result[static_cast<size_t>('#')] = 0x00F9; // U'ù';
+    result[static_cast<size_t>('@')] = 0x00E0; // U'à';
+    result[static_cast<size_t>('[')] = 0x00E9; // U'é';
+    result[static_cast<size_t>('\\')] = 0x00E7; // U'ç';
+    result[static_cast<size_t>(']')] = 0x00EA; // U'ê';
+    result[static_cast<size_t>('^')] = 0x00EE; // U'î';
+    result[static_cast<size_t>('_')] = 0x00E8; // U'è';
+    result[static_cast<size_t>('`')] = 0x00F4; // U'ô';
+    result[static_cast<size_t>('{')] = 0x00E4; // U'ä';
+    result[static_cast<size_t>('|')] = 0x00F6; // U'ö';
+    result[static_cast<size_t>('}')] = 0x00FC; // U'ü';
+    result[static_cast<size_t>('~')] = 0x00FB; // U'û';
 
     return result;
 }
