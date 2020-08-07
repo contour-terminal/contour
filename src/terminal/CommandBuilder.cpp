@@ -41,6 +41,28 @@ namespace terminal {
 
 namespace // {{{ helpers
 {
+    /// @returns parsed tuple with OSC code and offset to first data parameter byte.
+    pair<int, int> parseOSC(string const& _data)
+    {
+        int code = 0;
+        size_t i = 0;
+
+        while (i < _data.size() && isdigit(_data[i]))
+            code = code * 10 + _data[i++] - '0';
+
+        if (i == 0 && !_data.empty() && _data[0] != ';')
+        {
+            // such as 'L' is encoded as -'L'
+            code = -_data[0];
+            ++i;
+        }
+
+        if (i < _data.size() && _data[i] == ';')
+            ++i;
+
+        return pair{code, i};
+    }
+
     template <typename T, typename... Args>
     ApplyResult emitCommand(CommandList& _output, Args&&... args)
     {
@@ -610,8 +632,11 @@ CommandBuilder::CommandBuilder(Logger _logger) :
 {
 }
 
-void CommandBuilder::handleAction(ActionClass /*_actionClass*/, Action _action, char32_t _currentChar)
+void CommandBuilder::handleAction(ActionClass _actionClass, Action _action, char32_t _currentChar)
 {
+    (void) _actionClass;
+    // std::cout << fmt::format("CommandBuilder.onAction: class:{}, action:{}, ch:{}\n", _actionClass, _action, crispy::escape(unicode::to_utf8(_currentChar)));
+
     switch (_action)
     {
         case Action::Clear:
@@ -658,20 +683,25 @@ void CommandBuilder::handleAction(ActionClass /*_actionClass*/, Action _action, 
             dispatchESC(static_cast<char>(_currentChar));
             return;
         case Action::OSC_Start:
-            // no need, we inline OSC_Put and OSC_End's actions
+            sequence_.setCategory(FunctionCategory::OSC);
             break;
         case Action::OSC_Put:
-            {
-                uint8_t u8[4];
-                size_t const count = unicode::to_utf8(_currentChar, u8);
-                for (size_t i = 0; i < count; ++i)
-                    sequence_.intermediateCharacters().push_back(u8[i]);
-            }
+        {
+            uint8_t u8[4];
+            size_t const count = unicode::to_utf8(_currentChar, u8);
+            for (size_t i = 0; i < count; ++i)
+                sequence_.intermediateCharacters().push_back(u8[i]);
             break;
+        }
         case Action::OSC_End:
-            dispatchOSC();
+        {
+            auto const [code, skipCount] = parseOSC(sequence_.intermediateCharacters());
+            sequence_.parameters().push_back({static_cast<Sequence::Parameter>(code)});
+            sequence_.intermediateCharacters().erase(0, skipCount);
+            emitSequence();
             sequence_.clear();
             break;
+        }
         case Action::Hook: // this is actually state DCS_PassThrough
             sequence_.setCategory(FunctionCategory::DCS);
             sequence_.setFinalChar(static_cast<char>(_currentChar));
@@ -691,31 +721,6 @@ void CommandBuilder::handleAction(ActionClass /*_actionClass*/, Action _action, 
         case Action::Undefined:
             return;
     }
-}
-
-void CommandBuilder::dispatchOSC()
-{
-    auto const [code, skipCount] = [](std::string const& _data) {
-        int code = 0;
-        size_t i = 0;
-        while (i < _data.size() && isdigit(_data[i]))
-            code = code * 10 + _data[i++] - '0';
-        if (i == 0 && !_data.empty() && _data[0] != ';')
-        {
-            // such as 'L' is encoded as -'L'
-            code = -_data[0];
-            ++i;
-        }
-        if (i < _data.size() && _data[i] == ';')
-            ++i;
-
-        return pair{code, i};
-    }(sequence_.intermediateCharacters());
-
-    sequence_.setCategory(FunctionCategory::OSC);
-    sequence_.parameters().push_back({static_cast<Sequence::Parameter>(code)});
-    sequence_.intermediateCharacters().erase(0, skipCount);
-    emitSequence();
 }
 
 void CommandBuilder::executeControlFunction(char _c0)
@@ -784,6 +789,8 @@ void CommandBuilder::emitSequence()
         switch (apply(*funcSpec, sequence_, commands_))
         {
             case ApplyResult::Unsupported:
+                emitCommand<UnknownCommand>(sequence_);
+                break;
             case ApplyResult::Invalid:
                 emitCommand<UnknownCommand>(sequence_);
                 break;

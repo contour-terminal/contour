@@ -587,10 +587,9 @@ constexpr ParserTable ParserTable::get() // {{{
     t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x51, 0x57});
     t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x59);
     t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x5A);
-    t.transition(State::Escape, State::Ground, Action::OSC_End, 0x5C);
+    t.transition(State::Escape, State::Ground, Action::Ignore, 0x5C); // ST for OSC, DCS, ...
     t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x60, 0x7E});
     t.transition(State::Escape, State::EscapeIntermediate, Action::Collect, Range{0x20, 0x2F});
-    // XXX It is okay to directly transition from Escape to Ground with action OSC_End for now.
 
     // SOS_PM_APC_String
     t.event(State::SOS_PM_APC_String, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
@@ -743,8 +742,7 @@ class Parser {
 
   private:
     void parse();
-    void handleViaSwitch();
-    void handleViaTables();
+    void processInput();
 
     void invokeAction(ActionClass _actionClass, Action _action)
     {
@@ -781,11 +779,12 @@ inline void Parser::parse()
                     if (parseError_)
                         parseError_("Invalid UTF-8 byte sequence received.");
                     currentChar_ = ReplacementCharacter;
-                    handleViaTables();
+                    processInput();
                 },
                 [&](unicode::Success const& success) {
                     currentChar_ = success.value;
-                    handleViaTables();
+                    // std::cout << fmt::format("VTParser.parse: ch = {:04X}\n", static_cast<unsigned>(currentChar_));
+                    processInput();
                 },
             },
             unicode::from_utf8(utf8DecoderState_, currentByte())
@@ -795,7 +794,7 @@ inline void Parser::parse()
     }
 }
 
-inline void Parser::handleViaTables()
+inline void Parser::processInput()
 {
     auto const s = static_cast<size_t>(state_);
 

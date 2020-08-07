@@ -165,6 +165,7 @@ class Sequence {
     //
     void clear()
     {
+        category_ = FunctionCategory::C0;
         leaderSymbol_ = 0;
         intermediateCharacters_.clear();
         parameters_.clear();
