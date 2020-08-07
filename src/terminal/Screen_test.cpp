@@ -1472,7 +1472,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 
     SECTION("test") {
         screen(ScreenAlignmentPattern{});
-        REQUIRE("XXXXX\nXXXXX\nXXXXX\nXXXXX\nXXXXX\n" == screen.renderText());
+        REQUIRE("EEEEE\nEEEEE\nEEEEE\nEEEEE\nEEEEE\n" == screen.renderText());
 
         REQUIRE(screen.cursorPosition() == Coordinate{1, 1});
 
