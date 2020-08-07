@@ -201,3 +201,14 @@ TEST_CASE("CommandBuilder.SETMARK", "[CommandBuilder]")
     INFO(fmt::format("cmd: {}", to_string(output.commands()[0])));
     REQUIRE(holds_alternative<SetMark>(output.commands()[0]));
 }
+
+TEST_CASE("CommandBuilder.DCS_DECRQSS", "[CommandBuilder]")
+{
+    auto output = CommandBuilder{[&](auto const& msg) { UNSCOPED_INFO(fmt::format("[CommandBuilder]: {}", msg)); }};
+    auto parser = parser::Parser{ref(output)};
+    parser.parseFragment("\033P$q\"p\033\\");
+    REQUIRE(1 == output.commands().size());
+    REQUIRE(holds_alternative<terminal::RequestStatusString>(output.commands()[0]));
+    REQUIRE(get<RequestStatusString>(output.commands()[0]).value == RequestStatusString::Value::DECSCL);
+}
+
