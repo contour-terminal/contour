@@ -1340,4 +1340,15 @@ namespace fmt {
             return format_to(ctx.out(), "({})", static_cast<int>(name));
         }
     };
+
+    template <>
+    struct formatter<terminal::Command> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Command const& _command, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(), "{}", terminal::to_string(_command));
+        }
+    };
 }
