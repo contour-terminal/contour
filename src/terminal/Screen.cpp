@@ -65,12 +65,12 @@ Screen::Screen(WindowSize const& _size,
     buffer_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
-    directExecutor_{ *this },
-    synchronizedExecutor_{ *this },
+    directExecutor_{ *this, _logger },
+    synchronizedExecutor_{ *this, _logger },
     debugExecutor_{},
     commandExecutor_ { &directExecutor_ }
 {
-    (*this)(SetMode{Mode::AutoWrap, true});
+    setMode(Mode::AutoWrap, true);
 }
 
 Debugger* Screen::debugger() noexcept
@@ -157,6 +157,12 @@ void Screen::write(std::u32string_view const& _text)
         auto const len = unicode::to_utf8(codepoint, bytes);
         write((char const*) bytes, len);
     }
+}
+
+void Screen::writeText(char32_t _char)
+{
+    buffer_->appendChar(_char, instructionCounter_ == 1);
+    instructionCounter_ = 0;
 }
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
@@ -289,17 +295,17 @@ void Screen::restoreCursor()
 
 void Screen::resetSoft()
 {
-    (*this)(SetMode{Mode::BatchedRendering, false});
-    (*this)(SetGraphicsRendition{GraphicsRendition::Reset}); // SGR
-    (*this)(MoveCursorTo{1, 1}); // DECSC (Save cursor state)
-    (*this)(SetMode{Mode::VisibleCursor, true}); // DECTCEM (Text cursor enable)
-    (*this)(SetMode{Mode::Origin, false}); // DECOM
-    (*this)(SetMode{Mode::KeyboardAction, false}); // KAM
-    (*this)(SetMode{Mode::AutoWrap, false}); // DECAWM
-    (*this)(SetMode{Mode::Insert, false}); // IRM
-    (*this)(SetMode{Mode::UseApplicationCursorKeys, false}); // DECCKM (Cursor keys)
-    (*this)(SetTopBottomMargin{1, size().rows}); // DECSTBM
-    (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
+    setMode(Mode::BatchedRendering, false);
+    setGraphicsRendition(GraphicsRendition::Reset); // SGR
+    moveCursorTo({1, 1}); // DECSC (Save cursor state)
+    setMode(Mode::VisibleCursor, true); // DECTCEM (Text cursor enable)
+    setMode(Mode::Origin, false); // DECOM
+    setMode(Mode::KeyboardAction, false); // KAM
+    setMode(Mode::AutoWrap, false); // DECAWM
+    setMode(Mode::Insert, false); // IRM
+    setMode(Mode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+    setTopBottomMargin(1, size().rows); // DECSTBM
+    setLeftRightMargin(1, size().columns); // DECRLM
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -352,17 +358,7 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
 // }}}
 
 // {{{ ops
-void Screen::operator()(Bell const&)
-{
-    eventListener_.bell();
-}
-
-void Screen::operator()(FullReset const&)
-{
-    resetHard();
-}
-
-void Screen::operator()(Linefeed const&)
+void Screen::linefeed()
 {
     if (isModeEnabled(Mode::AutomaticNewLine))
         buffer_->linefeed(buffer_->margin_.horizontal.from);
@@ -370,34 +366,34 @@ void Screen::operator()(Linefeed const&)
         buffer_->linefeed(realCursorPosition().column);
 }
 
-void Screen::operator()(Backspace const&)
+void Screen::backspace()
 {
     moveCursorTo({cursorPosition().row, cursorPosition().column > 1 ? cursorPosition().column - 1 : 1});
 }
 
-void Screen::operator()(DeviceStatusReport const&)
+void Screen::deviceStatusReport()
 {
     reply("\033[0n");
 }
 
-void Screen::operator()(ReportCursorPosition const&)
+void Screen::reportCursorPosition()
 {
     reply("\033[{};{}R", cursorPosition().row, cursorPosition().column);
 }
 
-void Screen::operator()(ReportExtendedCursorPosition const&)
+void Screen::reportExtendedCursorPosition()
 {
     auto const pageNum = 1;
     reply("\033[{};{};{}R", cursorPosition().row, cursorPosition().column, pageNum);
 }
 
-void Screen::operator()(SelectConformanceLevel const& v)
+void Screen::selectConformanceLevel(VTType _level)
 {
     // Don't enforce the selected conformance level, just remember it.
-    terminalId_ = v.level;
+    terminalId_ = _level;
 }
 
-void Screen::operator()(SendDeviceAttributes const&)
+void Screen::sendDeviceAttributes()
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
 
@@ -438,7 +434,7 @@ void Screen::operator()(SendDeviceAttributes const&)
     reply("\033[?{};{}c", id, attrs);
 }
 
-void Screen::operator()(SendTerminalId const&)
+void Screen::sendTerminalId()
 {
     // Note, this is "Secondary DA".
     // It requests for the terminalID
@@ -456,17 +452,12 @@ void Screen::operator()(SendTerminalId const&)
     reply("\033[>{};{};{}c", Pp, Pv, Pc);
 }
 
-void Screen::operator()(CopyToClipboard const& v)
-{
-    eventListener_.copyToClipboard(v.data);
-}
-
-void Screen::operator()(ClearToEndOfScreen const&)
+void Screen::clearToEndOfScreen()
 {
     if (isAlternateScreen() && buffer_->cursor.position.row == 1 && buffer_->cursor.position.column == 1)
         buffer_->hyperlinks.clear();
 
-    (*this)(ClearToEndOfLine{});
+    clearToEndOfLine();
 
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
@@ -478,9 +469,9 @@ void Screen::operator()(ClearToEndOfScreen const&)
     );
 }
 
-void Screen::operator()(ClearToBeginOfScreen const&)
+void Screen::clearToBeginOfScreen()
 {
-    (*this)(ClearToBeginOfLine{});
+    clearToBeginOfLine();
 
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
@@ -492,7 +483,7 @@ void Screen::operator()(ClearToBeginOfScreen const&)
     );
 }
 
-void Screen::operator()(ClearScreen const&)
+void Screen::clearScreen()
 {
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
@@ -500,7 +491,7 @@ void Screen::operator()(ClearScreen const&)
     buffer_->scrollUp(size().rows);
 }
 
-void Screen::operator()(ClearScrollbackBuffer const&)
+void Screen::clearScrollbackBuffer()
 {
     if (selector_)
         selector_.reset();
@@ -508,26 +499,16 @@ void Screen::operator()(ClearScrollbackBuffer const&)
     buffer_->savedLines.clear();
 }
 
-void Screen::operator()(EraseCharacters const& v)
+void Screen::eraseCharacters(int _n)
 {
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, v.n == 0 ? 1 : v.n);
+    size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
     fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->cursor.graphicsRendition});
 }
 
-void Screen::operator()(ScrollUp const& v)
-{
-    buffer_->scrollUp(v.n);
-}
-
-void Screen::operator()(ScrollDown const& v)
-{
-    buffer_->scrollDown(v.n);
-}
-
-void Screen::operator()(ClearToEndOfLine const&)
+void Screen::clearToEndOfLine()
 {
     fill(
         buffer_->currentColumn,
@@ -536,7 +517,7 @@ void Screen::operator()(ClearToEndOfLine const&)
     );
 }
 
-void Screen::operator()(ClearToBeginOfLine const&)
+void Screen::clearToBeginOfLine()
 {
     fill(
         begin(*buffer_->currentLine),
@@ -545,7 +526,7 @@ void Screen::operator()(ClearToBeginOfLine const&)
     );
 }
 
-void Screen::operator()(ClearLine const&)
+void Screen::clearLine()
 {
     fill(
         begin(*buffer_->currentLine),
@@ -554,29 +535,29 @@ void Screen::operator()(ClearLine const&)
     );
 }
 
-void Screen::operator()(CursorNextLine const& v)
+void Screen::moveCursorToNextLine(int _n)
 {
-    buffer_->moveCursorTo({cursorPosition().row + v.n, 1});
+    buffer_->moveCursorTo({cursorPosition().row + _n, 1});
 }
 
-void Screen::operator()(CursorPreviousLine const& v)
+void Screen::moveCursorToPrevLine(int _n)
 {
-    auto const n = min(v.n, cursorPosition().row - 1);
+    auto const n = min(_n, cursorPosition().row - 1);
     buffer_->moveCursorTo({cursorPosition().row - n, 1});
 }
 
-void Screen::operator()(InsertCharacters const& v)
+void Screen::insertCharacters(int _n)
 {
     if (isCursorInsideMargins())
-        buffer_->insertChars(realCursorPosition().row, v.n);
+        buffer_->insertChars(realCursorPosition().row, _n);
 }
 
-void Screen::operator()(InsertLines const& v)
+void Screen::insertLines(int _n)
 {
     if (isCursorInsideMargins())
     {
         buffer_->scrollDown(
-            v.n,
+            _n,
             Margin{
                 { buffer_->cursor.position.row, buffer_->margin_.vertical.to },
                 buffer_->margin_.horizontal
@@ -585,18 +566,18 @@ void Screen::operator()(InsertLines const& v)
     }
 }
 
-void Screen::operator()(InsertColumns const& v)
+void Screen::insertColumns(int _n)
 {
     if (isCursorInsideMargins())
-        buffer_->insertColumns(v.n);
+        buffer_->insertColumns(_n);
 }
 
-void Screen::operator()(DeleteLines const& v)
+void Screen::deleteLines(int _n)
 {
     if (isCursorInsideMargins())
     {
         buffer_->scrollUp(
-            v.n,
+            _n,
             Margin{
                 { buffer_->cursor.position.row, buffer_->margin_.vertical.to },
                 buffer_->margin_.horizontal
@@ -605,34 +586,22 @@ void Screen::operator()(DeleteLines const& v)
     }
 }
 
-void Screen::operator()(DeleteCharacters const& v)
+void Screen::deleteCharacters(int _n)
 {
-    if (isCursorInsideMargins() && v.n != 0)
-        buffer_->deleteChars(realCursorPosition().row, v.n);
+    if (isCursorInsideMargins() && _n != 0)
+        buffer_->deleteChars(realCursorPosition().row, _n);
 }
 
-void Screen::operator()(DeleteColumns const& v)
+void Screen::deleteColumns(int _n)
 {
     if (isCursorInsideMargins())
         for (cursor_pos_t lineNo = buffer_->margin_.vertical.from; lineNo <= buffer_->margin_.vertical.to; ++lineNo)
-            buffer_->deleteChars(lineNo, v.n);
+            buffer_->deleteChars(lineNo, _n);
 }
 
-void Screen::operator()(HorizontalPositionAbsolute const& v)
+void Screen::horizontalTabClear(HorizontalTabClear::Which _which)
 {
-    // HPA: We only care about column-mode (not pixel/inches) for now.
-    (*this)(MoveCursorToColumn{v.n});
-}
-
-void Screen::operator()(HorizontalPositionRelative const& v)
-{
-    // HPR: We only care about column-mode (not pixel/inches) for now.
-    (*this)(MoveCursorForward{v.n});
-}
-
-void Screen::operator()(HorizontalTabClear const& v)
-{
-    switch (v.which)
+    switch (_which)
     {
         case HorizontalTabClear::AllTabs:
             buffer_->clearAllTabs();
@@ -643,23 +612,23 @@ void Screen::operator()(HorizontalTabClear const& v)
     }
 }
 
-void Screen::operator()(HorizontalTabSet const&)
+void Screen::horizontalTabSet()
 {
     buffer_->setTabUnderCursor();
 }
 
-void Screen::operator()(Hyperlink const& v)
+void Screen::hyperlink(string const& _id, string const& _uri)
 {
-    if (v.uri.empty())
+    if (_uri.empty())
         buffer_->currentHyperlink = nullptr;
-    else if (v.id.empty())
-        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.uri});
-    else if (auto i = buffer_->hyperlinks.find(v.id); i != buffer_->hyperlinks.end())
+    else if (_id.empty())
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{_id, _uri});
+    else if (auto i = buffer_->hyperlinks.find(_id); i != buffer_->hyperlinks.end())
         buffer_->currentHyperlink = i->second;
     else
     {
-        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{v.id, v.uri});
-        buffer_->hyperlinks[v.id] = buffer_->currentHyperlink;
+        buffer_->currentHyperlink = make_shared<HyperlinkInfo>(HyperlinkInfo{_id, _uri});
+        buffer_->hyperlinks[_id] = buffer_->currentHyperlink;
     }
     // TODO:
     // Care about eviction.
@@ -667,10 +636,10 @@ void Screen::operator()(Hyperlink const& v)
     // alternate screen (not for main screen!)
 }
 
-void Screen::operator()(MoveCursorUp const& v)
+void Screen::moveCursorUp(int _n)
 {
     auto const n = min(
-        v.n,
+        _n,
         cursorPosition().row > buffer_->margin_.vertical.from
             ? cursorPosition().row - buffer_->margin_.vertical.from
             : cursorPosition().row - 1
@@ -682,9 +651,9 @@ void Screen::operator()(MoveCursorUp const& v)
     buffer_->verifyState();
 }
 
-void Screen::operator()(MoveCursorDown const& v)
+void Screen::moveCursorDown(int _n)
 {
-    auto const n = min(v.n, size_.rows - cursorPosition().row);
+    auto const n = min(_n, size_.rows - cursorPosition().row);
     // auto const n =
     //     v.n > buffer_->margin_.vertical.to
     //         ? min(v.n, size_.rows - cursorPosition().row)
@@ -695,46 +664,41 @@ void Screen::operator()(MoveCursorDown const& v)
     buffer_->setCurrentColumn(cursorPosition().column);
 }
 
-void Screen::operator()(MoveCursorForward const& v)
+void Screen::moveCursorForward(int _n)
 {
-    buffer_->incrementCursorColumn(v.n);
+    buffer_->incrementCursorColumn(_n);
 }
 
-void Screen::operator()(MoveCursorBackward const& v)
+void Screen::moveCursorBackward(int _n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
     buffer_->wrapPending = false;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
-    auto const n = min(v.n, buffer_->cursor.position.column - 1);
+    auto const n = min(_n, buffer_->cursor.position.column - 1);
     buffer_->setCurrentColumn(buffer_->cursor.position.column - n);
 }
 
-void Screen::operator()(MoveCursorToColumn const& v)
+void Screen::moveCursorToColumn(int _column)
 {
     buffer_->wrapPending = false;
 
-    buffer_->setCurrentColumn(v.column);
+    buffer_->setCurrentColumn(_column);
 }
 
-void Screen::operator()(MoveCursorToBeginOfLine const&)
+void Screen::moveCursorToBeginOfLine()
 {
     buffer_->wrapPending = false;
 
     buffer_->setCurrentColumn(1);
 }
 
-void Screen::operator()(MoveCursorTo const& v)
+void Screen::moveCursorToLine(int _row)
 {
-    moveCursorTo(Coordinate{v.row, v.column});
+    moveCursorTo({_row, buffer_->cursor.position.column});
 }
 
-void Screen::operator()(MoveCursorToLine const& v)
-{
-    moveCursorTo({v.row, buffer_->cursor.position.column});
-}
-
-void Screen::operator()(MoveCursorToNextTab const&)
+void Screen::moveCursorToNextTab()
 {
     // TODO: I guess something must remember when a \t was added, for proper move-back?
     // TODO: respect HTS/TBC
@@ -749,11 +713,11 @@ void Screen::operator()(MoveCursorToNextTab const&)
         auto const currentCursorColumn = cursorPosition().column;
 
         if (i < buffer_->tabs.size())
-            (*this)(MoveCursorForward{buffer_->tabs[i] - currentCursorColumn});
+            moveCursorForward(buffer_->tabs[i] - currentCursorColumn);
         else if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
-            (*this)(MoveCursorForward{buffer_->margin_.horizontal.to - currentCursorColumn});
+            moveCursorForward(buffer_->margin_.horizontal.to - currentCursorColumn);
         else
-            (*this)(CursorNextLine{1});
+            moveCursorToNextLine(1);
     }
     else if (buffer_->tabWidth)
     {
@@ -764,37 +728,37 @@ void Screen::operator()(MoveCursorToNextTab const&)
                 buffer_->tabWidth - (buffer_->cursor.position.column - 1) % buffer_->tabWidth,
                 size_.columns - cursorPosition().column
             );
-            (*this)(MoveCursorForward{n});
+            moveCursorForward(n);
         }
         else
-            (*this)(CursorNextLine{1});
+            moveCursorToNextLine(1);
     }
     else
     {
         // no tab stops configured
         if (buffer_->realCursorPosition().column < buffer_->margin_.horizontal.to)
             // then TAB moves to the end of the screen
-            (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.to});
+            moveCursorToColumn(buffer_->margin_.horizontal.to);
         else
             // then TAB moves to next line left margin
-            (*this)(CursorNextLine{1});
+            moveCursorToNextLine(1);
     }
 }
 
-void Screen::operator()(Notify const& _notify)
+void Screen::notify(string const& _title, string const& _content)
 {
-    cout << "Screen.NOTIFY: title: '" << _notify.title << "', content: '" << _notify.content << "'\n";
-    eventListener_.notify(_notify.title, _notify.content);
+    cout << "Screen.NOTIFY: title: '" << _title << "', content: '" << _content << "'\n";
+    eventListener_.notify(_title, _content);
 }
 
-void Screen::operator()(CursorBackwardTab const& v)
+void Screen::cursorBackwardTab(int _count)
 {
-    if (v.count == 0)
+    if (_count == 0)
         return;
 
     if (!buffer_->tabs.empty())
     {
-        for (int k = 0; k < v.count; ++k)
+        for (int k = 0; k < _count; ++k)
         {
             auto const i = std::find_if(rbegin(buffer_->tabs), rend(buffer_->tabs),
                                         [&](auto tabPos) -> bool {
@@ -803,11 +767,11 @@ void Screen::operator()(CursorBackwardTab const& v)
             if (i != rend(buffer_->tabs))
             {
                 // prev tab found -> move to prev tab
-                (*this)(MoveCursorToColumn{*i});
+                moveCursorToColumn(*i);
             }
             else
             {
-                (*this)(MoveCursorToColumn{buffer_->margin_.horizontal.from});
+                moveCursorToColumn(buffer_->margin_.horizontal.from);
                 break;
             }
         }
@@ -816,34 +780,24 @@ void Screen::operator()(CursorBackwardTab const& v)
     {
         // default tab settings
         if (buffer_->cursor.position.column <= buffer_->tabWidth)
-            (*this)(MoveCursorToBeginOfLine{});
+            moveCursorToBeginOfLine();
         else
         {
             auto const m = buffer_->cursor.position.column % buffer_->tabWidth;
             auto const n = m
-                         ? (v.count - 1) * buffer_->tabWidth + m
-                         : v.count * buffer_->tabWidth + m;
-            (*this)(MoveCursorBackward{n - 1});
+                         ? (_count - 1) * buffer_->tabWidth + m
+                         : _count * buffer_->tabWidth + m;
+            moveCursorBackward(n - 1);
         }
     }
     else
     {
         // no tab stops configured
-        (*this)(MoveCursorToBeginOfLine{});
+        moveCursorToBeginOfLine();
     }
 }
 
-void Screen::operator()(SaveCursor const&)
-{
-    saveCursor();
-}
-
-void Screen::operator()(RestoreCursor const&)
-{
-    restoreCursor();
-}
-
-void Screen::operator()(Index const&)
+void Screen::index()
 {
     if (realCursorPosition().row == buffer_->margin_.vertical.to)
         buffer_->scrollUp(1);
@@ -851,7 +805,7 @@ void Screen::operator()(Index const&)
         moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
 }
 
-void Screen::operator()(ReverseIndex const&)
+void Screen::reverseIndex()
 {
     if (realCursorPosition().row == buffer_->margin_.vertical.from)
         buffer_->scrollDown(1);
@@ -859,7 +813,7 @@ void Screen::operator()(ReverseIndex const&)
         moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
 }
 
-void Screen::operator()(BackIndex const&)
+void Screen::backIndex()
 {
     if (realCursorPosition().column == buffer_->margin_.horizontal.from)
         ;// TODO: scrollRight(1);
@@ -867,7 +821,7 @@ void Screen::operator()(BackIndex const&)
         moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
 }
 
-void Screen::operator()(ForwardIndex const&)
+void Screen::forwardIndex()
 {
     if (realCursorPosition().column == buffer_->margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
@@ -875,33 +829,33 @@ void Screen::operator()(ForwardIndex const&)
         moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
 }
 
-void Screen::operator()(SetForegroundColor const& v)
+void Screen::setForegroundColor(Color const& _color)
 {
-    buffer_->cursor.graphicsRendition.foregroundColor = v.color;
+    buffer_->cursor.graphicsRendition.foregroundColor = _color;
 }
 
-void Screen::operator()(SetBackgroundColor const& v)
+void Screen::setBackgroundColor(Color const& _color)
 {
-    buffer_->cursor.graphicsRendition.backgroundColor = v.color;
+    buffer_->cursor.graphicsRendition.backgroundColor = _color;
 }
 
-void Screen::operator()(SetUnderlineColor const& v)
+void Screen::setUnderlineColor(Color const& _color)
 {
-    buffer_->cursor.graphicsRendition.underlineColor = v.color;
+    buffer_->cursor.graphicsRendition.underlineColor = _color;
 }
 
-void Screen::operator()(SetCursorStyle const& v)
+void Screen::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 {
-    eventListener_.setCursorStyle(v.display, v.shape);
+    eventListener_.setCursorStyle(_display, _shape);
 }
 
-void Screen::operator()(SetGraphicsRendition const& v)
+void Screen::setGraphicsRendition(GraphicsRendition _rendition)
 {
     // TODO: optimize this as there are only 3 cases
     // 1.) reset
     // 2.) set some bits |=
     // 3.) clear some bits &= ~
-    switch (v.rendition)
+    switch (_rendition)
     {
         case GraphicsRendition::Reset:
             buffer_->cursor.graphicsRendition = {};
@@ -978,14 +932,9 @@ void Screen::operator()(SetGraphicsRendition const& v)
     }
 }
 
-void Screen::operator()(SetMark const&)
+void Screen::setMark()
 {
     buffer_->currentLine->marked = true;
-}
-
-void Screen::operator()(SetMode const& v)
-{
-    setMode(v.mode, v.enable);
 }
 
 void Screen::setDebugging(bool _enabled)
@@ -1015,9 +964,9 @@ void Screen::setMode(Mode _mode, bool _enable)
             if (_enable != isModeEnabled(Mode::Columns132))
             {
                 // TODO: Well, should we also actually set column width to 132 or 80?
-                (*this)(ClearScreen{});                         // ED
-                (*this)(SetTopBottomMargin{1, size().rows});    // DECSTBM
-                (*this)(SetLeftRightMargin{1, size().columns}); // DECRLM
+                clearScreen();
+                setTopBottomMargin(1, size().rows);    // DECSTBM
+                setLeftRightMargin(1, size().columns); // DECRLM
             }
 
             cursor_pos_t const columns = _enable ? 132 : 80;
@@ -1091,7 +1040,7 @@ void Screen::setMode(Mode _mode, bool _enable)
     buffer_->setMode(_mode, _enable);
 }
 
-void Screen::operator()(RequestMode const& v)
+void Screen::requestMode(Mode _mode)
 {
     enum class ModeResponse { // TODO: respect response 0, 3, 4.
         NotRecognized = 0,
@@ -1101,23 +1050,23 @@ void Screen::operator()(RequestMode const& v)
         PermanentlyReset = 4
     };
 
-    ModeResponse const modeResponse = isModeEnabled(v.mode)
+    ModeResponse const modeResponse = isModeEnabled(_mode)
         ? ModeResponse::Set
         : ModeResponse::Reset;
 
-    if (isAnsiMode(v.mode))
-        reply("\033[{};{}$y", to_code(v.mode), static_cast<unsigned>(modeResponse));
+    if (isAnsiMode(_mode))
+        reply("\033[{};{}$y", to_code(_mode), static_cast<unsigned>(modeResponse));
     else
-        reply("\033[?{};{}$y", to_code(v.mode), static_cast<unsigned>(modeResponse));
+        reply("\033[?{};{}$y", to_code(_mode), static_cast<unsigned>(modeResponse));
 }
 
-void Screen::operator()(SetTopBottomMargin const& _margin)
+void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
 {
-	auto const bottom = _margin.bottom.has_value()
-		? min(_margin.bottom.value(), size_.rows)
+	auto const bottom = _bottom.has_value()
+		? min(_bottom.value(), size_.rows)
 		: size_.rows;
 
-	auto const top = _margin.top.value_or(1);
+	auto const top = _top.value_or(1);
 
 	if (top < bottom)
     {
@@ -1127,14 +1076,14 @@ void Screen::operator()(SetTopBottomMargin const& _margin)
     }
 }
 
-void Screen::operator()(SetLeftRightMargin const& margin)
+void Screen::setLeftRightMargin(optional<int> _left, optional<int> _right)
 {
     if (isModeEnabled(Mode::LeftRightMargin))
     {
-		auto const right = margin.right.has_value()
-			? min(margin.right.value(), size_.columns)
+		auto const right = _right.has_value()
+			? min(_right.value(), size_.columns)
 			: size_.columns;
-		auto const left = margin.left.value_or(1);
+		auto const left = _left.value_or(1);
 		if (left + 1 < right)
         {
             buffer_->margin_.horizontal.from = left;
@@ -1144,7 +1093,7 @@ void Screen::operator()(SetLeftRightMargin const& margin)
     }
 }
 
-void Screen::operator()(ScreenAlignmentPattern const&)
+void Screen::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
     buffer_->margin_.vertical.from = 1;
@@ -1171,92 +1120,63 @@ void Screen::operator()(ScreenAlignmentPattern const&)
     );
 }
 
-void Screen::operator()(SendMouseEvents const& v)
+void Screen::sendMouseEvents(MouseProtocol _protocol, bool _enable)
 {
-    eventListener_.setMouseProtocol(v.protocol, v.enable);
+    eventListener_.setMouseProtocol(_protocol, _enable);
 }
 
-void Screen::operator()(ApplicationKeypadMode const& v)
+void Screen::applicationKeypadMode(bool _enable)
 {
-    eventListener_.setApplicationkeypadMode(v.enable);
+    eventListener_.setApplicationkeypadMode(_enable);
 }
 
-void Screen::operator()(DesignateCharset const& v)
+void Screen::designateCharset(CharsetTable _table, CharsetId _charset)
 {
     // TODO: unit test SCS and see if they also behave well with reset/softreset
     // Also, is the cursor shared between the two buffers?
-    buffer_->cursor.charsets.select(v.table, v.charset);
+    buffer_->cursor.charsets.select(_table, _charset);
 }
 
-void Screen::operator()(SingleShiftSelect const& v)
+void Screen::singleShiftSelect(CharsetTable _table)
 {
     // TODO: unit test SS2, SS3
-    buffer_->cursor.charsets.singleShift(v.table);
+    buffer_->cursor.charsets.singleShift(_table);
 }
 
-void Screen::operator()(SoftTerminalReset const&)
+void Screen::setWindowTitle(std::string const& _title)
 {
-    resetSoft();
+    windowTitle_ = _title;
+    eventListener_.setWindowTitle(_title);
 }
 
-void Screen::operator()(UnknownCommand const& v)
-{
-    logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"});
-    //std::cerr << "Unknown VT sequence: " << v.sequence.text() << std::endl;
-}
-
-void Screen::operator()(ChangeIconTitle const&)
-{
-    // Not supported (for now), ignored.
-}
-
-void Screen::operator()(ChangeWindowTitle const& v)
-{
-    windowTitle_ = v.title;
-
-    eventListener_.setWindowTitle(v.title);
-}
-
-void Screen::operator()(SaveWindowTitle const&)
+void Screen::saveWindowTitle()
 {
     savedWindowTitles_.push(windowTitle_);
 }
 
-void Screen::operator()(RestoreWindowTitle const&)
+void Screen::restoreWindowTitle()
 {
     if (!savedWindowTitles_.empty())
     {
         windowTitle_ = savedWindowTitles_.top();
         savedWindowTitles_.pop();
-
         eventListener_.setWindowTitle(windowTitle_);
     }
 }
 
-void Screen::operator()(ResizeWindow const& v)
+void Screen::requestDynamicColor(DynamicColorName _name)
 {
-    eventListener_.resizeWindow(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels);
-}
-
-void Screen::operator()(AppendChar const& v)
-{
-    buffer_->appendChar(v.ch, instructionCounter_ == 1);
-    instructionCounter_ = 0;
-}
-
-void Screen::operator()(RequestDynamicColor const& v)
-{
-    if (auto const color = eventListener_.requestDynamicColor(v.name); color.has_value())
+    if (auto const color = eventListener_.requestDynamicColor(_name); color.has_value())
     {
         reply(
             "\033]{};{}\x07",
-            setDynamicColorCommand(v.name),
+            setDynamicColorCommand(_name),
             setDynamicColorValue(color.value())
         );
     }
 }
 
-void Screen::operator()(RequestStatusString const& v)
+void Screen::requestStatusString(RequestStatusString::Value _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
     // or DCS 0 $ r Pt ST for invalid requests.
@@ -1287,7 +1207,7 @@ void Screen::operator()(RequestStatusString const& v)
             default:
                 return {false, ""};
         }
-    }(v.value);
+    }(_value);
 
     reply(
         "\033P{}$r{}\033\\",
@@ -1297,7 +1217,7 @@ void Screen::operator()(RequestStatusString const& v)
     );
 }
 
-void Screen::operator()(RequestTabStops const&)
+void Screen::requestTabStops()
 {
     // Response: `DCS 2 $ u Pt ST`
     ostringstream dcs;
@@ -1322,103 +1242,103 @@ void Screen::operator()(RequestTabStops const&)
     reply(dcs.str());
 }
 
-void Screen::operator()(ResetDynamicColor const& v)
+void Screen::resetDynamicColor(DynamicColorName _name)
 {
-    eventListener_.resetDynamicColor(v.name);
+    eventListener_.resetDynamicColor(_name);
 }
 
-void Screen::operator()(SetDynamicColor const& v)
+void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
 {
-    eventListener_.setDynamicColor(v.name, v.color);
+    eventListener_.setDynamicColor(_name, _color);
 }
 
-void Screen::operator()(DumpState const&)
+void Screen::dumpState()
 {
     eventListener_.dumpState();
 }
 // }}}
 
 // {{{ DirectExecutor
-void DirectExecutor::visit(AppendChar const& v) { screen_(v); }
-void DirectExecutor::visit(ApplicationKeypadMode const& v) { screen_(v); }
-void DirectExecutor::visit(BackIndex const& v) { screen_(v); }
-void DirectExecutor::visit(Backspace const& v) { screen_(v); }
-void DirectExecutor::visit(Bell const& v) { screen_(v); }
-void DirectExecutor::visit(ChangeIconTitle const& v) { screen_(v); }
-void DirectExecutor::visit(ChangeWindowTitle const& v) { screen_(v); }
-void DirectExecutor::visit(ClearLine const& v) { screen_(v); }
-void DirectExecutor::visit(ClearScreen const& v) { screen_(v); }
-void DirectExecutor::visit(ClearScrollbackBuffer const& v) { screen_(v); }
-void DirectExecutor::visit(ClearToBeginOfLine const& v) { screen_(v); }
-void DirectExecutor::visit(ClearToBeginOfScreen const& v) { screen_(v); }
-void DirectExecutor::visit(ClearToEndOfLine const& v) { screen_(v); }
-void DirectExecutor::visit(ClearToEndOfScreen const& v) { screen_(v); }
-void DirectExecutor::visit(CopyToClipboard const& v) { screen_(v); }
-void DirectExecutor::visit(CursorBackwardTab const& v) { screen_(v); }
-void DirectExecutor::visit(CursorNextLine const& v) { screen_(v); }
-void DirectExecutor::visit(CursorPreviousLine const& v) { screen_(v); }
-void DirectExecutor::visit(DeleteCharacters const& v) { screen_(v); }
-void DirectExecutor::visit(DeleteColumns const& v) { screen_(v); }
-void DirectExecutor::visit(DeleteLines const& v) { screen_(v); }
-void DirectExecutor::visit(DesignateCharset const& v) { screen_(v); }
-void DirectExecutor::visit(DeviceStatusReport const& v) { screen_(v); }
-void DirectExecutor::visit(DumpState const& v) { screen_(v); }
-void DirectExecutor::visit(EraseCharacters const& v) { screen_(v); }
-void DirectExecutor::visit(ForwardIndex const& v) { screen_(v); }
-void DirectExecutor::visit(FullReset const& v) { screen_(v); }
-void DirectExecutor::visit(HorizontalPositionAbsolute const& v) { screen_(v); }
-void DirectExecutor::visit(HorizontalPositionRelative const& v) { screen_(v); }
-void DirectExecutor::visit(HorizontalTabClear const& v) { screen_(v); }
-void DirectExecutor::visit(HorizontalTabSet const& v) { screen_(v); }
-void DirectExecutor::visit(Hyperlink const& v) { screen_(v); }
-void DirectExecutor::visit(Index const& v) { screen_(v); }
-void DirectExecutor::visit(InsertCharacters const& v) { screen_(v); }
-void DirectExecutor::visit(InsertColumns const& v) { screen_(v); }
-void DirectExecutor::visit(InsertLines const& v) { screen_(v); }
-void DirectExecutor::visit(Linefeed const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorBackward const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorDown const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorForward const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorTo const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorToBeginOfLine const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorToColumn const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorToLine const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorToNextTab const& v) { screen_(v); }
-void DirectExecutor::visit(MoveCursorUp const& v) { screen_(v); }
-void DirectExecutor::visit(Notify const& v) { screen_(v); }
-void DirectExecutor::visit(ReportCursorPosition const& v) { screen_(v); }
-void DirectExecutor::visit(ReportExtendedCursorPosition const& v) { screen_(v); }
-void DirectExecutor::visit(RequestDynamicColor const& v) { screen_(v); }
-void DirectExecutor::visit(RequestMode const& v) { screen_(v); }
-void DirectExecutor::visit(RequestStatusString const& v) { screen_(v); }
-void DirectExecutor::visit(RequestTabStops const& v) { screen_(v); }
-void DirectExecutor::visit(ResetDynamicColor const& v) { screen_(v); }
-void DirectExecutor::visit(ResizeWindow const& v) { screen_(v); }
-void DirectExecutor::visit(RestoreCursor const& v) { screen_(v); }
-void DirectExecutor::visit(RestoreWindowTitle const& v) { screen_(v); }
-void DirectExecutor::visit(ReverseIndex const& v) { screen_(v); }
-void DirectExecutor::visit(SaveCursor const& v) { screen_(v); }
-void DirectExecutor::visit(SaveWindowTitle const& v) { screen_(v); }
-void DirectExecutor::visit(ScreenAlignmentPattern const& v) { screen_(v); }
-void DirectExecutor::visit(ScrollDown const& v) { screen_(v); }
-void DirectExecutor::visit(ScrollUp const& v) { screen_(v); }
-void DirectExecutor::visit(SelectConformanceLevel const& v) { screen_(v); }
-void DirectExecutor::visit(SendDeviceAttributes const& v) { screen_(v); }
-void DirectExecutor::visit(SendMouseEvents const& v) { screen_(v); }
-void DirectExecutor::visit(SendTerminalId const& v) { screen_(v); }
-void DirectExecutor::visit(SetBackgroundColor const& v) { screen_(v); }
-void DirectExecutor::visit(SetCursorStyle const& v) { screen_(v); }
-void DirectExecutor::visit(SetDynamicColor const& v) { screen_(v); }
-void DirectExecutor::visit(SetForegroundColor const& v) { screen_(v); }
-void DirectExecutor::visit(SetGraphicsRendition const& v) { screen_(v); }
-void DirectExecutor::visit(SetLeftRightMargin const& v) { screen_(v); }
-void DirectExecutor::visit(SetMark const& v) { screen_(v); }
-void DirectExecutor::visit(SetMode const& v) { screen_(v); }
-void DirectExecutor::visit(SetTopBottomMargin const& v) { screen_(v); }
-void DirectExecutor::visit(SetUnderlineColor const& v) { screen_(v); }
-void DirectExecutor::visit(SingleShiftSelect const& v) { screen_(v); }
-void DirectExecutor::visit(SoftTerminalReset const& v) { screen_(v); }
-void DirectExecutor::visit(UnknownCommand const& v) { screen_(v); }
+void DirectExecutor::visit(AppendChar const& v) { screen_.writeText(v.ch); }
+void DirectExecutor::visit(ApplicationKeypadMode const& v) { screen_.applicationKeypadMode(v.enable); }
+void DirectExecutor::visit(BackIndex const&) { screen_.backIndex(); }
+void DirectExecutor::visit(Backspace const&) { screen_.backspace(); }
+void DirectExecutor::visit(Bell const&) { screen_.eventListener().bell(); }
+void DirectExecutor::visit(ChangeIconTitle const& v) { (void) v; /*ignored*/ }
+void DirectExecutor::visit(ChangeWindowTitle const& v) { screen_.setWindowTitle(v.title); }
+void DirectExecutor::visit(ClearLine const&) { screen_.clearLine(); }
+void DirectExecutor::visit(ClearScreen const&) { screen_.clearScreen(); }
+void DirectExecutor::visit(ClearScrollbackBuffer const&) { screen_.clearScrollbackBuffer(); }
+void DirectExecutor::visit(ClearToBeginOfLine const&) { screen_.clearToBeginOfLine(); }
+void DirectExecutor::visit(ClearToBeginOfScreen const&) { screen_.clearToBeginOfScreen(); }
+void DirectExecutor::visit(ClearToEndOfLine const&) { screen_.clearToEndOfLine(); }
+void DirectExecutor::visit(ClearToEndOfScreen const&) { screen_.clearToEndOfScreen(); }
+void DirectExecutor::visit(CopyToClipboard const& v) { screen_.eventListener().copyToClipboard(v.data); }
+void DirectExecutor::visit(CursorBackwardTab const& v) { screen_.cursorBackwardTab(v.count); }
+void DirectExecutor::visit(CursorNextLine const& v) { screen_.moveCursorToNextLine(v.n); }
+void DirectExecutor::visit(CursorPreviousLine const& v) { screen_.moveCursorToPrevLine(v.n); }
+void DirectExecutor::visit(DeleteCharacters const& v) { screen_.deleteCharacters(v.n); }
+void DirectExecutor::visit(DeleteColumns const& v) { screen_.deleteColumns(v.n); }
+void DirectExecutor::visit(DeleteLines const& v) { screen_.deleteLines(v.n); }
+void DirectExecutor::visit(DesignateCharset const& v) { screen_.designateCharset(v.table, v.charset); }
+void DirectExecutor::visit(DeviceStatusReport const&) { screen_.deviceStatusReport(); }
+void DirectExecutor::visit(DumpState const&) { screen_.dumpState(); }
+void DirectExecutor::visit(EraseCharacters const& v) { screen_.eraseCharacters(v.n); }
+void DirectExecutor::visit(ForwardIndex const&) { screen_.forwardIndex(); }
+void DirectExecutor::visit(FullReset const&) { screen_.resetHard(); }
+void DirectExecutor::visit(HorizontalPositionAbsolute const& v) { screen_.moveCursorToColumn(v.n); }
+void DirectExecutor::visit(HorizontalPositionRelative const& v) { screen_.moveCursorForward(v.n); /* HPR: We only care about column-mode (not pixel/inches) for now. */ }
+void DirectExecutor::visit(HorizontalTabClear const& v) { screen_.horizontalTabClear(v.which); }
+void DirectExecutor::visit(HorizontalTabSet const&) { screen_.horizontalTabSet(); }
+void DirectExecutor::visit(Hyperlink const& v) { screen_.hyperlink(v.id, v.uri); }
+void DirectExecutor::visit(Index const&) { screen_.index(); }
+void DirectExecutor::visit(InsertCharacters const& v) { screen_.insertCharacters(v.n); }
+void DirectExecutor::visit(InsertColumns const& v) { screen_.insertColumns(v.n); }
+void DirectExecutor::visit(InsertLines const& v) { screen_.insertLines(v.n); }
+void DirectExecutor::visit(Linefeed const&) { screen_.linefeed(); }
+void DirectExecutor::visit(MoveCursorBackward const& v) { screen_.moveCursorBackward(v.n); }
+void DirectExecutor::visit(MoveCursorDown const& v) { screen_.moveCursorDown(v.n); }
+void DirectExecutor::visit(MoveCursorForward const& v) { screen_.moveCursorForward(v.n); }
+void DirectExecutor::visit(MoveCursorTo const& v) { screen_.moveCursorTo(Coordinate{v.row, v.column}); }
+void DirectExecutor::visit(MoveCursorToBeginOfLine const&) { screen_.moveCursorToBeginOfLine(); }
+void DirectExecutor::visit(MoveCursorToColumn const& v) { screen_.moveCursorToColumn(v.column); }
+void DirectExecutor::visit(MoveCursorToLine const& v) { screen_.moveCursorToLine(v.row); }
+void DirectExecutor::visit(MoveCursorToNextTab const&) { screen_.moveCursorToNextTab(); }
+void DirectExecutor::visit(MoveCursorUp const& v) { screen_.moveCursorUp(v.n); }
+void DirectExecutor::visit(Notify const& v) { screen_.notify(v.title, v.content); }
+void DirectExecutor::visit(ReportCursorPosition const&) { screen_.reportCursorPosition(); }
+void DirectExecutor::visit(ReportExtendedCursorPosition const&) { screen_.reportExtendedCursorPosition(); }
+void DirectExecutor::visit(RequestDynamicColor const& v) { screen_.requestDynamicColor(v.name); }
+void DirectExecutor::visit(RequestMode const& v) { screen_.requestMode(v.mode); }
+void DirectExecutor::visit(RequestStatusString const& v) { screen_.requestStatusString(v.value); }
+void DirectExecutor::visit(RequestTabStops const&) { screen_.requestTabStops(); }
+void DirectExecutor::visit(ResetDynamicColor const& v) { screen_.resetDynamicColor(v.name); }
+void DirectExecutor::visit(ResizeWindow const& v) { screen_.eventListener().resizeWindow(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels); }
+void DirectExecutor::visit(RestoreCursor const&) { screen_.restoreCursor(); }
+void DirectExecutor::visit(RestoreWindowTitle const&) { screen_.restoreWindowTitle(); }
+void DirectExecutor::visit(ReverseIndex const&) { screen_.reverseIndex(); }
+void DirectExecutor::visit(SaveCursor const&) { screen_.saveCursor(); }
+void DirectExecutor::visit(SaveWindowTitle const&) { screen_.saveWindowTitle(); }
+void DirectExecutor::visit(ScreenAlignmentPattern const&) { screen_.screenAlignmentPattern(); }
+void DirectExecutor::visit(ScrollDown const& v) { screen_.currentBuffer().scrollDown(v.n); }
+void DirectExecutor::visit(ScrollUp const& v) { screen_.currentBuffer().scrollUp(v.n); }
+void DirectExecutor::visit(SelectConformanceLevel const& v) { screen_.selectConformanceLevel(v.level /*TODO:, v.c1t*/); }
+void DirectExecutor::visit(SendDeviceAttributes const&) { screen_.sendDeviceAttributes(); }
+void DirectExecutor::visit(SendMouseEvents const& v) { screen_.sendMouseEvents(v.protocol, v.enable); }
+void DirectExecutor::visit(SendTerminalId const&) { screen_.sendTerminalId(); }
+void DirectExecutor::visit(SetBackgroundColor const& v) { screen_.setBackgroundColor(v.color); }
+void DirectExecutor::visit(SetCursorStyle const& v) { screen_.setCursorStyle(v.display, v.shape); }
+void DirectExecutor::visit(SetDynamicColor const& v) { screen_.setDynamicColor(v.name, v.color); }
+void DirectExecutor::visit(SetForegroundColor const& v) { screen_.setForegroundColor(v.color); }
+void DirectExecutor::visit(SetGraphicsRendition const& v) { screen_.setGraphicsRendition(v.rendition); }
+void DirectExecutor::visit(SetLeftRightMargin const& v) { screen_.setLeftRightMargin(v.left, v.right); }
+void DirectExecutor::visit(SetMark const&) { screen_.setMark(); }
+void DirectExecutor::visit(SetMode const& v) { screen_.setMode(v.mode, v.enable); }
+void DirectExecutor::visit(SetTopBottomMargin const& v) { screen_.setTopBottomMargin(v.top, v.bottom); }
+void DirectExecutor::visit(SetUnderlineColor const& v) { screen_.setUnderlineColor(v.color); }
+void DirectExecutor::visit(SingleShiftSelect const& v) { screen_.singleShiftSelect(v.table); }
+void DirectExecutor::visit(SoftTerminalReset const&) { screen_.resetSoft(); }
+void DirectExecutor::visit(InvalidCommand const& v) { if (logger_) logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"}); }
 // }}}
 
 // {{{ SynchronizedExecutor

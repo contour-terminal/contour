@@ -203,7 +203,7 @@ void DebuggerService::main()
             case 'i': // inspect state
             {
                 auto _l = scoped_lock{terminal};
-                screen(terminal::DumpState{});
+                screen.dumpState();
                 break;
             }
             case '?': // help

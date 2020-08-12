@@ -789,17 +789,17 @@ void CommandBuilder::emitSequence()
         switch (apply(*funcSpec, sequence_, commands_))
         {
             case ApplyResult::Unsupported:
-                emitCommand<UnknownCommand>(sequence_);
+                emitCommand<InvalidCommand>(sequence_, InvalidCommand::Reason::Unsupported);
                 break;
             case ApplyResult::Invalid:
-                emitCommand<UnknownCommand>(sequence_);
+                emitCommand<InvalidCommand>(sequence_, InvalidCommand::Reason::Invalid);
                 break;
             case ApplyResult::Ok:
                 break;
         }
     }
     else
-        emitCommand<UnknownCommand>(sequence_);
+        emitCommand<InvalidCommand>(sequence_, InvalidCommand::Reason::Unknown);
 }
 
 std::optional<RGBColor> CommandBuilder::parseColor(std::string_view const& _value)
@@ -940,7 +940,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case DUMPSTATE: return emitCommand<DumpState>(_output);
 
         default:
-            return emitCommand<UnknownCommand>(_output, _ctx);
+            return emitCommand<InvalidCommand>(_output, _ctx, InvalidCommand::Reason::Unsupported);
     }
 }
 

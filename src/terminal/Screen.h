@@ -57,10 +57,12 @@ class Debugger;
 class DirectExecutor : public CommandVisitor {
   protected:
     Screen& screen_;
+    Logger const logger_;
 
   public:
-    explicit DirectExecutor(Screen& _screen) :
-        screen_{ _screen }
+    explicit DirectExecutor(Screen& _screen, Logger _logger = Logger{}) :
+        screen_{ _screen },
+        logger_{ std::move(_logger) }
     {}
 
     void visit(AppendChar const& v) override;
@@ -142,7 +144,7 @@ class DirectExecutor : public CommandVisitor {
     void visit(SetUnderlineColor const& v) override;
     void visit(SingleShiftSelect const& v) override;
     void visit(SoftTerminalReset const& v) override;
-    void visit(UnknownCommand const& v) override;
+    void visit(InvalidCommand const& v) override;
 };
 
 /// Batches any drawing related command until synchronization point, or
@@ -152,8 +154,8 @@ class SynchronizedExecutor : public DirectExecutor {
     CommandList queuedCommands_;
 
   public:
-    explicit SynchronizedExecutor(Screen& _screen)
-        : DirectExecutor{_screen}
+    explicit SynchronizedExecutor(Screen& _screen, Logger _logger = Logger{})
+        : DirectExecutor{_screen, std::move(_logger)}
     {}
 
     // applies all queued commands.
@@ -221,7 +223,7 @@ class SynchronizedExecutor : public DirectExecutor {
     void visit(SetTopBottomMargin const& v) override { enqueue(v); }
     void visit(SetUnderlineColor const& v) override { enqueue(v); }
     void visit(SingleShiftSelect const& v) override { enqueue(v); }
-    void visit(UnknownCommand const& v) override { enqueue(v); }
+    void visit(InvalidCommand const& v) override { enqueue(v); }
 };
 
 /**
@@ -276,6 +278,8 @@ class Screen {
 
     void write(std::u32string_view const& _text);
 
+    void writeText(char32_t _char);
+
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
     void render(RendererT _renderer, int _scrollOffset = 0) const;
@@ -297,87 +301,81 @@ class Screen {
     void setFocus(bool _focused) { focused_ = _focused; }
     bool focused() const noexcept { return focused_; }
 
-    // {{{ Command processor
-    void operator()(AppendChar const& v);
-    void operator()(ApplicationKeypadMode const& v);
-    void operator()(BackIndex const& v);
-    void operator()(Backspace const& v);
-    void operator()(Bell const& v);
-    void operator()(ChangeIconTitle const& v);
-    void operator()(ChangeWindowTitle const& v);
-    void operator()(ClearLine const& v);
-    void operator()(ClearScreen const& v);
-    void operator()(ClearScrollbackBuffer const& v);
-    void operator()(ClearToBeginOfLine const& v);
-    void operator()(ClearToBeginOfScreen const& v);
-    void operator()(ClearToEndOfLine const& v);
-    void operator()(ClearToEndOfScreen const& v);
-    void operator()(CopyToClipboard const& v);
-    void operator()(CursorBackwardTab const& v);
-    void operator()(CursorNextLine const& v);
-    void operator()(CursorPreviousLine const& v);
-    void operator()(DeleteCharacters const& v);
-    void operator()(DeleteColumns const& v);
-    void operator()(DeleteLines const& v);
-    void operator()(DesignateCharset const& v);
-    void operator()(DeviceStatusReport const& v);
-    void operator()(DumpState const&);
-    void operator()(EraseCharacters const& v);
-    void operator()(ForwardIndex const& v);
-    void operator()(FullReset const& v);
-    void operator()(HorizontalPositionAbsolute const& v);
-    void operator()(HorizontalPositionRelative const& v);
-    void operator()(HorizontalTabClear const& v);
-    void operator()(HorizontalTabSet const& v);
-    void operator()(Hyperlink const& v);
-    void operator()(Index const& v);
-    void operator()(InsertCharacters const& v);
-    void operator()(InsertColumns const& v);
-    void operator()(InsertLines const& v);
-    void operator()(Linefeed const& v);
-    void operator()(MoveCursorBackward const& v);
-    void operator()(MoveCursorDown const& v);
-    void operator()(MoveCursorForward const& v);
-    void operator()(MoveCursorTo const& v);
-    void operator()(MoveCursorToBeginOfLine const& v);
-    void operator()(MoveCursorToColumn const& v);
-    void operator()(MoveCursorToLine const& v);
-    void operator()(MoveCursorToNextTab const& v);
-    void operator()(MoveCursorUp const& v);
-    void operator()(Notify const& v);
-    void operator()(ReportCursorPosition const& v);
-    void operator()(ReportExtendedCursorPosition const& v);
-    void operator()(RequestDynamicColor const& v);
-    void operator()(RequestMode const& v);
-    void operator()(RequestStatusString const& v);
-    void operator()(RequestTabStops const& v);
-    void operator()(ResetDynamicColor const& v);
-    void operator()(ResizeWindow const& v);
-    void operator()(RestoreCursor const& v);
-    void operator()(RestoreWindowTitle const& v);
-    void operator()(ReverseIndex const& v);
-    void operator()(SaveCursor const& v);
-    void operator()(SaveWindowTitle const& v);
-    void operator()(ScreenAlignmentPattern const& v);
-    void operator()(ScrollDown const& v);
-    void operator()(ScrollUp const& v);
-    void operator()(SelectConformanceLevel const& v);
-    void operator()(SendDeviceAttributes const& v);
-    void operator()(SendMouseEvents const& v);
-    void operator()(SendTerminalId const& v);
-    void operator()(SetBackgroundColor const& v);
-    void operator()(SetCursorStyle const& v);
-    void operator()(SetDynamicColor const& v);
-    void operator()(SetForegroundColor const& v);
-    void operator()(SetGraphicsRendition const& v);
-    void operator()(SetLeftRightMargin const& v);
-    void operator()(SetMark const&);
-    void operator()(SetMode const& v);
-    void operator()(SetTopBottomMargin const& v);
-    void operator()(SetUnderlineColor const& v);
-    void operator()(SingleShiftSelect const& v);
-    void operator()(SoftTerminalReset const& v);
-    void operator()(UnknownCommand const& v);
+    // {{{ VT API
+    void linefeed(); // LF
+
+    void clearToBeginOfLine();
+    void clearToEndOfLine();
+    void clearLine();
+
+    void clearToBeginOfScreen();
+    void clearToEndOfScreen();
+    void clearScreen();
+
+    void clearScrollbackBuffer();
+
+    void eraseCharacters(int _n);  // ECH
+    void insertCharacters(int _n); // ICH
+    void deleteCharacters(int _n); // DCH
+    void deleteColumns(int _n);    // DECDC
+    void insertLines(int _n);      // IL
+    void insertColumns(int _n);    // DECIC
+
+    void deleteLines(int _n);      // DL
+
+    void backIndex();    // DECBI
+    void forwardIndex(); // DECFI
+
+    void moveCursorBackward(int _n);      // CUB
+    void moveCursorDown(int _n);          // CUD
+    void moveCursorForward(int _n);       // CUF
+    void moveCursorTo(int _n);            // CUP
+    void moveCursorToBeginOfLine();       // CR
+    void moveCursorToColumn(int _n);      // CHA
+    void moveCursorToLine(int _n);        // VPA
+    void moveCursorToNextLine(int _n);    // CNL
+    void moveCursorToNextTab();           // HT
+    void moveCursorToPrevLine(int _n);    // CPL
+    void moveCursorUp(int _n);            // CUU
+
+    void cursorBackwardTab(int _n);       // CBT
+    void backspace();                     // BS
+    void horizontalTabClear(HorizontalTabClear::Which _which); // TBC
+    void horizontalTabSet();              // HTS
+
+    void index(); // IND
+    void reverseIndex(); // RI
+
+    void setMark();
+    void deviceStatusReport();            // DSR
+    void reportCursorPosition();          // CPR
+    void reportExtendedCursorPosition();  // DECXCPR
+    void selectConformanceLevel(VTType _level);
+    void requestDynamicColor(DynamicColorName _name);
+    void sendDeviceAttributes();
+    void sendTerminalId();
+
+    void hyperlink(std::string const& _id, std::string const& _uri); // OSC 8
+    void notify(std::string const& _title, std::string const& _content);
+
+    void setForegroundColor(Color const& _color);
+    void setBackgroundColor(Color const& _color);
+    void setUnderlineColor(Color const& _color);
+    void setCursorStyle(CursorDisplay _display, CursorShape _shape);
+    void setGraphicsRendition(GraphicsRendition _rendition);
+    void requestMode(Mode _mode);
+    void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
+    void setLeftRightMargin(std::optional<int> _left, std::optional<int> _right);
+    void screenAlignmentPattern();
+    void sendMouseEvents(MouseProtocol _protocol, bool _enable);
+    void applicationKeypadMode(bool _enable);
+    void designateCharset(CharsetTable _table, CharsetId _charset);
+    void singleShiftSelect(CharsetTable _table);
+    void requestStatusString(RequestStatusString::Value _value);
+    void requestTabStops();
+    void resetDynamicColor(DynamicColorName _name);
+    void setDynamicColor(DynamicColorName _name, RGBColor const& _color);
+    void dumpState();
     // }}}
 
     // reset screen
@@ -522,6 +520,13 @@ class Screen {
     Debugger* debugger() noexcept;
 
     bool synchronizeOutput() const noexcept { return false; } // TODO
+
+    ScreenEvents& eventListener() noexcept { return eventListener_; }
+    ScreenEvents const& eventListener()  const noexcept { return eventListener_; }
+
+    void setWindowTitle(std::string const& _title);
+    void saveWindowTitle();
+    void restoreWindowTitle();
 
   private:
     void setBuffer(ScreenBuffer::Type _type);

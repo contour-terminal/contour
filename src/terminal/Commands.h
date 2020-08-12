@@ -286,7 +286,17 @@ enum class CharsetId {
 
 std::string to_string(CharsetId charset);
 
-struct UnknownCommand {
+struct InvalidCommand {
+    enum class Reason {
+        Unknown,
+        Unsupported,
+        Invalid
+    };
+    Sequence sequence;
+    Reason reason;
+};
+
+struct UnsupportedCommand {
     Sequence sequence;
 };
 
@@ -1008,6 +1018,7 @@ using Command = std::variant<
     InsertCharacters,
     InsertColumns,
     InsertLines,
+    InvalidCommand,
     Linefeed,
     MoveCursorBackward,
     MoveCursorDown,
@@ -1050,8 +1061,7 @@ using Command = std::variant<
     SetTopBottomMargin,
     SetUnderlineColor,
     SingleShiftSelect,
-    SoftTerminalReset,
-    UnknownCommand
+    SoftTerminalReset
 >;
 
 using CommandList = std::vector<Command>;
@@ -1144,7 +1154,7 @@ class CommandVisitor {
     virtual void visit(SetUnderlineColor const& v) = 0;
     virtual void visit(SingleShiftSelect const& v) = 0;
     virtual void visit(SoftTerminalReset const& v) = 0;
-    virtual void visit(UnknownCommand const& v) = 0;
+    virtual void visit(InvalidCommand const& v) = 0;
 
     // {{{ Secret std::visit() workaround
     void operator()(AppendChar const& v) { visit(v); }
@@ -1226,7 +1236,7 @@ class CommandVisitor {
     void operator()(SetUnderlineColor const& v) { visit(v); }
     void operator()(SingleShiftSelect const& v) { visit(v); }
     void operator()(SoftTerminalReset const& v) { visit(v); }
-    void operator()(UnknownCommand const& v) { visit(v); }
+    void operator()(InvalidCommand const& v) { visit(v); }
     // }}}
 };
 
@@ -1338,6 +1348,27 @@ namespace fmt {
                     return format_to(ctx.out(), "HighlightBackgroundColor");
             }
             return format_to(ctx.out(), "({})", static_cast<int>(name));
+        }
+    };
+
+    template <>
+    struct formatter<terminal::InvalidCommand::Reason> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::InvalidCommand::Reason _reason, FormatContext& _ctx)
+        {
+            switch (_reason)
+            {
+                case terminal::InvalidCommand::Reason::Unsupported:
+                    return format_to(_ctx.out(), "unsupported");
+                case terminal::InvalidCommand::Reason::Invalid:
+                    return format_to(_ctx.out(), "invalid");
+                case terminal::InvalidCommand::Reason::Unknown:
+                    return format_to(_ctx.out(), "unknown");
+                default:
+                    return format_to(_ctx.out(), "({})", static_cast<int>(_reason));
+            }
         }
     };
 
