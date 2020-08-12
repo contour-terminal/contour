@@ -916,6 +916,10 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case DECRQSS: return impl::DECRQSS(_ctx, _output);
 
         // OSC
+        case SETTITLE:
+            emitCommand<ChangeIconTitle>(_output, _ctx.intermediateCharacters());
+            emitCommand<ChangeWindowTitle>(_output, _ctx.intermediateCharacters());
+            return ApplyResult::Ok;
         case SETICON: return emitCommand<ChangeIconTitle>(_output, _ctx.intermediateCharacters());
         case SETWINTITLE: return emitCommand<ChangeWindowTitle>(_output, _ctx.intermediateCharacters());
         case SETXPROP: return ApplyResult::Unsupported;

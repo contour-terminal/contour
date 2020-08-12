@@ -407,7 +407,8 @@ constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VT
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
 
 // OSC
-constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Window Icon");
+constexpr inline auto SETTITLE      = detail::OSC(0, "SETINICON", "Change Window & Icon Title");
+constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Icon Title");
 constexpr inline auto SETWINTITLE   = detail::OSC(2, "SETWINTITLE", "Change Window Title");
 constexpr inline auto SETXPROP      = detail::OSC(3, "SETXPROP", "Set X11 property");
 // TODO: Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
@@ -521,6 +522,7 @@ inline auto const& functions()
 
             // OSC
             SETICON,
+            SETTITLE,
             SETWINTITLE,
             SETXPROP,
             HYPERLINK,
