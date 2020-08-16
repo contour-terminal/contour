@@ -685,6 +685,11 @@ void Screen::operator()(MoveCursorUp const& v)
 void Screen::operator()(MoveCursorDown const& v)
 {
     auto const n = min(v.n, size_.rows - cursorPosition().row);
+    // auto const n =
+    //     v.n > buffer_->margin_.vertical.to
+    //         ? min(v.n, size_.rows - cursorPosition().row)
+    //         : min(v.n, buffer_->margin_.vertical.to - cursorPosition().row);
+
     buffer_->cursor.position.row += n;
     buffer_->currentLine = next(buffer_->currentLine, n);
     buffer_->setCurrentColumn(cursorPosition().column);
@@ -1333,91 +1338,91 @@ void Screen::operator()(DumpState const&)
 }
 // }}}
 
-// {{{ CommandExecutor
-void CommandExecutor::visit(AppendChar const& v) { screen_(v); }
-void CommandExecutor::visit(ApplicationKeypadMode const& v) { screen_(v); }
-void CommandExecutor::visit(BackIndex const& v) { screen_(v); }
-void CommandExecutor::visit(Backspace const& v) { screen_(v); }
-void CommandExecutor::visit(Bell const& v) { screen_(v); }
-void CommandExecutor::visit(ChangeIconTitle const& v) { screen_(v); }
-void CommandExecutor::visit(ChangeWindowTitle const& v) { screen_(v); }
-void CommandExecutor::visit(ClearLine const& v) { screen_(v); }
-void CommandExecutor::visit(ClearScreen const& v) { screen_(v); }
-void CommandExecutor::visit(ClearScrollbackBuffer const& v) { screen_(v); }
-void CommandExecutor::visit(ClearToBeginOfLine const& v) { screen_(v); }
-void CommandExecutor::visit(ClearToBeginOfScreen const& v) { screen_(v); }
-void CommandExecutor::visit(ClearToEndOfLine const& v) { screen_(v); }
-void CommandExecutor::visit(ClearToEndOfScreen const& v) { screen_(v); }
-void CommandExecutor::visit(CopyToClipboard const& v) { screen_(v); }
-void CommandExecutor::visit(CursorBackwardTab const& v) { screen_(v); }
-void CommandExecutor::visit(CursorNextLine const& v) { screen_(v); }
-void CommandExecutor::visit(CursorPreviousLine const& v) { screen_(v); }
-void CommandExecutor::visit(DeleteCharacters const& v) { screen_(v); }
-void CommandExecutor::visit(DeleteColumns const& v) { screen_(v); }
-void CommandExecutor::visit(DeleteLines const& v) { screen_(v); }
-void CommandExecutor::visit(DesignateCharset const& v) { screen_(v); }
-void CommandExecutor::visit(DeviceStatusReport const& v) { screen_(v); }
-void CommandExecutor::visit(DumpState const& v) { screen_(v); }
-void CommandExecutor::visit(EraseCharacters const& v) { screen_(v); }
-void CommandExecutor::visit(ForwardIndex const& v) { screen_(v); }
-void CommandExecutor::visit(FullReset const& v) { screen_(v); }
-void CommandExecutor::visit(HorizontalPositionAbsolute const& v) { screen_(v); }
-void CommandExecutor::visit(HorizontalPositionRelative const& v) { screen_(v); }
-void CommandExecutor::visit(HorizontalTabClear const& v) { screen_(v); }
-void CommandExecutor::visit(HorizontalTabSet const& v) { screen_(v); }
-void CommandExecutor::visit(Hyperlink const& v) { screen_(v); }
-void CommandExecutor::visit(Index const& v) { screen_(v); }
-void CommandExecutor::visit(InsertCharacters const& v) { screen_(v); }
-void CommandExecutor::visit(InsertColumns const& v) { screen_(v); }
-void CommandExecutor::visit(InsertLines const& v) { screen_(v); }
-void CommandExecutor::visit(Linefeed const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorBackward const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorDown const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorForward const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorTo const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorToBeginOfLine const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorToColumn const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorToLine const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorToNextTab const& v) { screen_(v); }
-void CommandExecutor::visit(MoveCursorUp const& v) { screen_(v); }
-void CommandExecutor::visit(Notify const& v) { screen_(v); }
-void CommandExecutor::visit(ReportCursorPosition const& v) { screen_(v); }
-void CommandExecutor::visit(ReportExtendedCursorPosition const& v) { screen_(v); }
-void CommandExecutor::visit(RequestDynamicColor const& v) { screen_(v); }
-void CommandExecutor::visit(RequestMode const& v) { screen_(v); }
-void CommandExecutor::visit(RequestStatusString const& v) { screen_(v); }
-void CommandExecutor::visit(RequestTabStops const& v) { screen_(v); }
-void CommandExecutor::visit(ResetDynamicColor const& v) { screen_(v); }
-void CommandExecutor::visit(ResizeWindow const& v) { screen_(v); }
-void CommandExecutor::visit(RestoreCursor const& v) { screen_(v); }
-void CommandExecutor::visit(RestoreWindowTitle const& v) { screen_(v); }
-void CommandExecutor::visit(ReverseIndex const& v) { screen_(v); }
-void CommandExecutor::visit(SaveCursor const& v) { screen_(v); }
-void CommandExecutor::visit(SaveWindowTitle const& v) { screen_(v); }
-void CommandExecutor::visit(ScreenAlignmentPattern const& v) { screen_(v); }
-void CommandExecutor::visit(ScrollDown const& v) { screen_(v); }
-void CommandExecutor::visit(ScrollUp const& v) { screen_(v); }
-void CommandExecutor::visit(SelectConformanceLevel const& v) { screen_(v); }
-void CommandExecutor::visit(SendDeviceAttributes const& v) { screen_(v); }
-void CommandExecutor::visit(SendMouseEvents const& v) { screen_(v); }
-void CommandExecutor::visit(SendTerminalId const& v) { screen_(v); }
-void CommandExecutor::visit(SetBackgroundColor const& v) { screen_(v); }
-void CommandExecutor::visit(SetCursorStyle const& v) { screen_(v); }
-void CommandExecutor::visit(SetDynamicColor const& v) { screen_(v); }
-void CommandExecutor::visit(SetForegroundColor const& v) { screen_(v); }
-void CommandExecutor::visit(SetGraphicsRendition const& v) { screen_(v); }
-void CommandExecutor::visit(SetLeftRightMargin const& v) { screen_(v); }
-void CommandExecutor::visit(SetMark const& v) { screen_(v); }
-void CommandExecutor::visit(SetMode const& v) { screen_(v); }
-void CommandExecutor::visit(SetTopBottomMargin const& v) { screen_(v); }
-void CommandExecutor::visit(SetUnderlineColor const& v) { screen_(v); }
-void CommandExecutor::visit(SingleShiftSelect const& v) { screen_(v); }
-void CommandExecutor::visit(SoftTerminalReset const& v) { screen_(v); }
-void CommandExecutor::visit(UnknownCommand const& v) { screen_(v); }
+// {{{ DirectExecutor
+void DirectExecutor::visit(AppendChar const& v) { screen_(v); }
+void DirectExecutor::visit(ApplicationKeypadMode const& v) { screen_(v); }
+void DirectExecutor::visit(BackIndex const& v) { screen_(v); }
+void DirectExecutor::visit(Backspace const& v) { screen_(v); }
+void DirectExecutor::visit(Bell const& v) { screen_(v); }
+void DirectExecutor::visit(ChangeIconTitle const& v) { screen_(v); }
+void DirectExecutor::visit(ChangeWindowTitle const& v) { screen_(v); }
+void DirectExecutor::visit(ClearLine const& v) { screen_(v); }
+void DirectExecutor::visit(ClearScreen const& v) { screen_(v); }
+void DirectExecutor::visit(ClearScrollbackBuffer const& v) { screen_(v); }
+void DirectExecutor::visit(ClearToBeginOfLine const& v) { screen_(v); }
+void DirectExecutor::visit(ClearToBeginOfScreen const& v) { screen_(v); }
+void DirectExecutor::visit(ClearToEndOfLine const& v) { screen_(v); }
+void DirectExecutor::visit(ClearToEndOfScreen const& v) { screen_(v); }
+void DirectExecutor::visit(CopyToClipboard const& v) { screen_(v); }
+void DirectExecutor::visit(CursorBackwardTab const& v) { screen_(v); }
+void DirectExecutor::visit(CursorNextLine const& v) { screen_(v); }
+void DirectExecutor::visit(CursorPreviousLine const& v) { screen_(v); }
+void DirectExecutor::visit(DeleteCharacters const& v) { screen_(v); }
+void DirectExecutor::visit(DeleteColumns const& v) { screen_(v); }
+void DirectExecutor::visit(DeleteLines const& v) { screen_(v); }
+void DirectExecutor::visit(DesignateCharset const& v) { screen_(v); }
+void DirectExecutor::visit(DeviceStatusReport const& v) { screen_(v); }
+void DirectExecutor::visit(DumpState const& v) { screen_(v); }
+void DirectExecutor::visit(EraseCharacters const& v) { screen_(v); }
+void DirectExecutor::visit(ForwardIndex const& v) { screen_(v); }
+void DirectExecutor::visit(FullReset const& v) { screen_(v); }
+void DirectExecutor::visit(HorizontalPositionAbsolute const& v) { screen_(v); }
+void DirectExecutor::visit(HorizontalPositionRelative const& v) { screen_(v); }
+void DirectExecutor::visit(HorizontalTabClear const& v) { screen_(v); }
+void DirectExecutor::visit(HorizontalTabSet const& v) { screen_(v); }
+void DirectExecutor::visit(Hyperlink const& v) { screen_(v); }
+void DirectExecutor::visit(Index const& v) { screen_(v); }
+void DirectExecutor::visit(InsertCharacters const& v) { screen_(v); }
+void DirectExecutor::visit(InsertColumns const& v) { screen_(v); }
+void DirectExecutor::visit(InsertLines const& v) { screen_(v); }
+void DirectExecutor::visit(Linefeed const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorBackward const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorDown const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorForward const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorTo const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorToBeginOfLine const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorToColumn const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorToLine const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorToNextTab const& v) { screen_(v); }
+void DirectExecutor::visit(MoveCursorUp const& v) { screen_(v); }
+void DirectExecutor::visit(Notify const& v) { screen_(v); }
+void DirectExecutor::visit(ReportCursorPosition const& v) { screen_(v); }
+void DirectExecutor::visit(ReportExtendedCursorPosition const& v) { screen_(v); }
+void DirectExecutor::visit(RequestDynamicColor const& v) { screen_(v); }
+void DirectExecutor::visit(RequestMode const& v) { screen_(v); }
+void DirectExecutor::visit(RequestStatusString const& v) { screen_(v); }
+void DirectExecutor::visit(RequestTabStops const& v) { screen_(v); }
+void DirectExecutor::visit(ResetDynamicColor const& v) { screen_(v); }
+void DirectExecutor::visit(ResizeWindow const& v) { screen_(v); }
+void DirectExecutor::visit(RestoreCursor const& v) { screen_(v); }
+void DirectExecutor::visit(RestoreWindowTitle const& v) { screen_(v); }
+void DirectExecutor::visit(ReverseIndex const& v) { screen_(v); }
+void DirectExecutor::visit(SaveCursor const& v) { screen_(v); }
+void DirectExecutor::visit(SaveWindowTitle const& v) { screen_(v); }
+void DirectExecutor::visit(ScreenAlignmentPattern const& v) { screen_(v); }
+void DirectExecutor::visit(ScrollDown const& v) { screen_(v); }
+void DirectExecutor::visit(ScrollUp const& v) { screen_(v); }
+void DirectExecutor::visit(SelectConformanceLevel const& v) { screen_(v); }
+void DirectExecutor::visit(SendDeviceAttributes const& v) { screen_(v); }
+void DirectExecutor::visit(SendMouseEvents const& v) { screen_(v); }
+void DirectExecutor::visit(SendTerminalId const& v) { screen_(v); }
+void DirectExecutor::visit(SetBackgroundColor const& v) { screen_(v); }
+void DirectExecutor::visit(SetCursorStyle const& v) { screen_(v); }
+void DirectExecutor::visit(SetDynamicColor const& v) { screen_(v); }
+void DirectExecutor::visit(SetForegroundColor const& v) { screen_(v); }
+void DirectExecutor::visit(SetGraphicsRendition const& v) { screen_(v); }
+void DirectExecutor::visit(SetLeftRightMargin const& v) { screen_(v); }
+void DirectExecutor::visit(SetMark const& v) { screen_(v); }
+void DirectExecutor::visit(SetMode const& v) { screen_(v); }
+void DirectExecutor::visit(SetTopBottomMargin const& v) { screen_(v); }
+void DirectExecutor::visit(SetUnderlineColor const& v) { screen_(v); }
+void DirectExecutor::visit(SingleShiftSelect const& v) { screen_(v); }
+void DirectExecutor::visit(SoftTerminalReset const& v) { screen_(v); }
+void DirectExecutor::visit(UnknownCommand const& v) { screen_(v); }
 // }}}
 
-// {{{ SynchronizedCommandExecutor
-void SynchronizedCommandExecutor::flush()
+// {{{ SynchronizedExecutor
+void SynchronizedExecutor::flush()
 {
     for (Command const& cmd : queuedCommands_)
         screen_.write(cmd);

@@ -54,12 +54,12 @@ class Screen;
 class Debugger;
 
 /// VT Sequence Executor for directly executing the VT sequences as they arive.
-class CommandExecutor : public CommandVisitor {
+class DirectExecutor : public CommandVisitor {
   protected:
     Screen& screen_;
 
   public:
-    explicit CommandExecutor(Screen& _screen) :
+    explicit DirectExecutor(Screen& _screen) :
         screen_{ _screen }
     {}
 
@@ -147,13 +147,13 @@ class CommandExecutor : public CommandVisitor {
 
 /// Batches any drawing related command until synchronization point, or
 /// executes the command directly otherwise.
-class SynchronizedCommandExecutor : public CommandExecutor {
+class SynchronizedExecutor : public DirectExecutor {
   private:
     CommandList queuedCommands_;
 
   public:
-    explicit SynchronizedCommandExecutor(Screen& _screen)
-        : CommandExecutor{_screen}
+    explicit SynchronizedExecutor(Screen& _screen)
+        : DirectExecutor{_screen}
     {}
 
     // applies all queued commands.
@@ -565,8 +565,8 @@ class Screen {
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
-    CommandExecutor directExecutor_;
-    SynchronizedCommandExecutor synchronizedExecutor_;
+    DirectExecutor directExecutor_;
+    SynchronizedExecutor synchronizedExecutor_;
     std::unique_ptr<CommandVisitor> debugExecutor_;
     CommandVisitor* commandExecutor_ = nullptr;
 
