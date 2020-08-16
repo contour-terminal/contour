@@ -222,10 +222,10 @@ void Renderer::renderSelection(Terminal const& _terminal)
         for (Selector::Range const& range : selection) // _terminal.screen().selection())
         {
             // TODO: see if we can extract and then unit-test this display rendering of selection
-            auto const relativeLineNr = range.line - _terminal.historyLineCount() - _terminal.scrollOffset();
+            auto const relativeLineNr = range.line - _terminal.historyLineCount();// - _terminal.scrollOffset();
             if (_terminal.isLineVisible(relativeLineNr))
             {
-                auto const pos = Coordinate{relativeLineNr, range.fromColumn};
+                auto const pos = Coordinate{relativeLineNr + _terminal.scrollOffset(), range.fromColumn};
                 auto const count = 1 + range.toColumn - range.fromColumn;
                 backgroundRenderer_.renderOnce(pos, colorProfile_.selection, count);
                 ++metrics_.cellBackgroundRenderCount;
