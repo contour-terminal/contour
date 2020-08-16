@@ -235,7 +235,8 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
 {
     wrapPending = false;
 
-    if (realCursorPosition().row == margin_.vertical.to)
+    if (realCursorPosition().row == margin_.vertical.to ||
+        realCursorPosition().row == size_.rows)
     {
         scrollUp(1);
         moveCursorTo({cursorPosition().row, _newColumn});

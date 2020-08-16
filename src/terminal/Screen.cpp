@@ -653,7 +653,13 @@ void Screen::moveCursorUp(int _n)
 
 void Screen::moveCursorDown(int _n)
 {
-    auto const n = min(_n, size_.rows - cursorPosition().row);
+    auto const currentLineNumber = cursorPosition().row;
+    auto const n = min(
+        _n,
+        currentLineNumber <= buffer_->margin_.vertical.to
+            ? buffer_->margin_.vertical.to - currentLineNumber
+            : size_.rows - currentLineNumber
+    );
     // auto const n =
     //     v.n > buffer_->margin_.vertical.to
     //         ? min(v.n, size_.rows - cursorPosition().row)
