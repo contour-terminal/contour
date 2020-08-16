@@ -101,11 +101,11 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
 {
 #if defined(__unix__) || defined(__APPLE__)
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-    assert(_windowSize.rows <= numeric_limits<unsigned short>::max());
-    assert(_windowSize.columns <= numeric_limits<unsigned short>::max());
+    assert(_windowSize.height <= numeric_limits<unsigned short>::max());
+    assert(_windowSize.width <= numeric_limits<unsigned short>::max());
     winsize const ws{
-        static_cast<unsigned short>(_windowSize.rows),
-        static_cast<unsigned short>(_windowSize.columns),
+        static_cast<unsigned short>(_windowSize.height),
+        static_cast<unsigned short>(_windowSize.width),
         0,
         0
     };
@@ -138,7 +138,7 @@ PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
     HRESULT hr = CreatePseudoConsole(
-        { static_cast<SHORT>(_windowSize.columns), static_cast<SHORT>(_windowSize.rows) },
+        { static_cast<SHORT>(_windowSize.width), static_cast<SHORT>(_windowSize.height) },
         hPipePTYIn,
         hPipePTYOut,
         0,
@@ -262,15 +262,15 @@ void PseudoTerminal::resizeScreen(WindowSize const& _newWindowSize)
 {
 #if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
-    w.ws_col = _newWindowSize.columns;
-    w.ws_row = _newWindowSize.rows;
+    w.ws_col = _newWindowSize.width;
+    w.ws_row = _newWindowSize.height;
 
     if (ioctl(master_, TIOCSWINSZ, &w) == -1)
         throw runtime_error{strerror(errno)};
 #elif defined(_MSC_VER)
     COORD coords;
-    coords.X = _newWindowSize.columns;
-    coords.Y = _newWindowSize.rows;
+    coords.X = _newWindowSize.width;
+    coords.Y = _newWindowSize.height;
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)
         throw runtime_error{ GetLastErrorAsString() };

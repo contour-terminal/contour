@@ -108,7 +108,7 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
-    if (_charEvent.value <= 0x7F && isprint(_charEvent.value))
+    if (_charEvent.value <= 0x7F && isprint(static_cast<int>(_charEvent.value)))
         logger_(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier)) });
     else
         logger_(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier)) });
@@ -358,7 +358,7 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
 Cell const* Terminal::at(Coordinate const& _coord) const
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    if (-screen_.historyLineCount() < _coord.row && _coord.row <= screen_.size().rows)
+    if (-screen_.historyLineCount() < _coord.row && _coord.row <= screen_.size().height)
         return &screen_.at(_coord);
     else
         return nullptr;

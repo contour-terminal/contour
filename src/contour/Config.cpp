@@ -707,8 +707,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
     if (auto terminalSize = _node["terminal_size"]; terminalSize)
     {
-        softLoadValue(terminalSize, "columns", profile.terminalSize.columns);
-        softLoadValue(terminalSize, "lines", profile.terminalSize.rows);
+        softLoadValue(terminalSize, "columns", profile.terminalSize.width);
+        softLoadValue(terminalSize, "lines", profile.terminalSize.height);
     }
 
     softLoadValue(_node, "font_size", profile.fontSize);

@@ -27,7 +27,7 @@ namespace
         else
             UNSCOPED_INFO(headline + ":");
 
-        for (cursor_pos_t row = 1; row <= screen.size().rows; ++row)
+        for (cursor_pos_t row = 1; row <= screen.size().height; ++row)
             UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
     }
 
@@ -1021,13 +1021,13 @@ TEST_CASE("MoveCursorForward", "[screen]")
     }
 
     SECTION("CUF-3 (to right border)") {
-        screen.write(MoveCursorForward{screen.size().columns});
-        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+        screen.write(MoveCursorForward{screen.size().width});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().width});
     }
 
     SECTION("CUF-overflow") {
-        screen.write(MoveCursorForward{screen.size().columns + 1});
-        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+        screen.write(MoveCursorForward{screen.size().width + 1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().width});
     }
 }
 
@@ -1086,13 +1086,13 @@ TEST_CASE("HorizontalPositionRelative", "[screen]")
     }
 
     SECTION("HPR-3 (to right border)") {
-        screen.write(HorizontalPositionRelative{screen.size().columns});
-        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+        screen.write(HorizontalPositionRelative{screen.size().width});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().width});
     }
 
     SECTION("HPR-overflow") {
-        screen.write(HorizontalPositionRelative{screen.size().columns + 1});
-        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().columns});
+        screen.write(HorizontalPositionRelative{screen.size().width + 1});
+        REQUIRE(screen.cursorPosition() == Coordinate{1, screen.size().width});
     }
 }
 
@@ -2116,7 +2116,7 @@ TEST_CASE("findMarkerBackward", "[screen]")
 
         REQUIRE(screen.historyLineCount() == 3);
 
-        auto mark = screen.findMarkerBackward(screen.size().rows);
+        auto mark = screen.findMarkerBackward(screen.size().height);
         REQUIRE_FALSE(mark.has_value());
 
         // test one line beyond history line count

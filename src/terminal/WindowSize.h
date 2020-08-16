@@ -18,13 +18,13 @@
 namespace terminal {
 
 struct [[nodiscard]] WindowSize {
-    int columns;
-	int rows;
+    int width;
+	int height;
 };
 
 constexpr bool operator==(WindowSize const& _a, WindowSize const& _b) noexcept
 {
-    return _a.columns == _b.columns && _a.rows == _b.rows;
+    return _a.width == _b.width && _a.height == _b.height;
 }
 
 constexpr bool operator!=(WindowSize const& _a, WindowSize const& _b) noexcept
@@ -46,7 +46,7 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::WindowSize& value, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}, {})", value.columns, value.rows);
+            return format_to(ctx.out(), "({}, {})", value.width, value.height);
         }
     };
 }

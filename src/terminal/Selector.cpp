@@ -61,14 +61,14 @@ Selector::Selector(Mode _mode,
             assert(_pos.row >= 0 && "must be absolute coordinate");
             auto const& buffer = screen.get();
             auto const row = _pos.row - buffer.historyLineCount(); // translate to coordinate relative to the screen's home position
-            if (row <= buffer.size().rows)
+            if (row <= buffer.size().height)
                 return &buffer.at({row, _pos.column});
             else
                 return nullptr;
         },
         _wordDelimiters,
-        _screen.size().rows + static_cast<cursor_pos_t>(_screen.historyLineCount()),
-        _screen.size().columns,
+        _screen.size().height + static_cast<cursor_pos_t>(_screen.historyLineCount()),
+        _screen.size().width,
         _from
     }
 {

@@ -63,8 +63,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     logger_{ move(_logger) },
     fonts_{ _fonts },
     size_{
-        static_cast<int>(_winSize.columns * _fonts.regular.first.get().maxAdvance()),
-        static_cast<int>(_winSize.rows * _fonts.regular.first.get().lineHeight())
+        static_cast<int>(_winSize.width * _fonts.regular.first.get().maxAdvance()),
+        static_cast<int>(_winSize.height * _fonts.regular.first.get().lineHeight())
     },
     renderer_{
         logger_,
@@ -170,7 +170,7 @@ TerminalView::WindowMargin TerminalView::computeMargin(WindowSize const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
-    auto const usedHeight = static_cast<int>(ws.rows * fonts_.regular.first.get().lineHeight());
+    auto const usedHeight = static_cast<int>(ws.height * fonts_.regular.first.get().lineHeight());
     auto const freeHeight = static_cast<int>(_height - usedHeight);
     auto const bottomMargin = freeHeight;
 
@@ -210,7 +210,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
     std::cout << fmt::format(
         "Resized to pixelSize: {}x{}, screenSize: {}x{}, margin: {}x{}, cellSize: {}x{}\n",
         _width, _height,
-        newScreenSize.columns, newScreenSize.rows,
+        newScreenSize.width, newScreenSize.height,
         windowMargin_.left, windowMargin_.bottom,
         renderer_.cellWidth(), renderer_.cellHeight()
     );

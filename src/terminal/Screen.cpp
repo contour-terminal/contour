@@ -169,7 +169,7 @@ string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
 {
     assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->historyLineCount());
     string line;
-    line.reserve(size_.columns);
+    line.reserve(size_.width);
     auto const lineIter = next(buffer_->savedLines.rbegin(), _lineNumberIntoHistory - 1);
     for (Cell const& cell : *lineIter)
         if (cell.codepointCount())
@@ -197,7 +197,7 @@ vector<Selector::Range> Screen::selection() const
 // {{{ viewport management
 bool Screen::isLineVisible(cursor_pos_t _row) const noexcept
 {
-    return crispy::ascending(1 - scrollOffset_, _row, size_.rows - scrollOffset_);
+    return crispy::ascending(1 - scrollOffset_, _row, size_.height - scrollOffset_);
 }
 
 bool Screen::scrollUp(int _numLines)
@@ -304,8 +304,8 @@ void Screen::resetSoft()
     setMode(Mode::AutoWrap, false); // DECAWM
     setMode(Mode::Insert, false); // IRM
     setMode(Mode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
-    setTopBottomMargin(1, size().rows); // DECSTBM
-    setLeftRightMargin(1, size().columns); // DECRLM
+    setTopBottomMargin(1, size().height); // DECSTBM
+    setLeftRightMargin(1, size().width); // DECRLM
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -488,7 +488,7 @@ void Screen::clearScreen()
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
-    buffer_->scrollUp(size().rows);
+    buffer_->scrollUp(size().height);
 }
 
 void Screen::clearScrollbackBuffer()
@@ -504,7 +504,7 @@ void Screen::eraseCharacters(int _n)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(buffer_->size_.columns - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
+    size_t const n = min(buffer_->size_.width - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
     fill_n(buffer_->currentColumn, n, Cell{{}, buffer_->cursor.graphicsRendition});
 }
 
@@ -658,11 +658,11 @@ void Screen::moveCursorDown(int _n)
         _n,
         currentLineNumber <= buffer_->margin_.vertical.to
             ? buffer_->margin_.vertical.to - currentLineNumber
-            : size_.rows - currentLineNumber
+            : size_.height - currentLineNumber
     );
     // auto const n =
     //     v.n > buffer_->margin_.vertical.to
-    //         ? min(v.n, size_.rows - cursorPosition().row)
+    //         ? min(v.n, size_.height - cursorPosition().row)
     //         : min(v.n, buffer_->margin_.vertical.to - cursorPosition().row);
 
     buffer_->cursor.position.row += n;
@@ -732,7 +732,7 @@ void Screen::moveCursorToNextTab()
         {
             auto const n = min(
                 buffer_->tabWidth - (buffer_->cursor.position.column - 1) % buffer_->tabWidth,
-                size_.columns - cursorPosition().column
+                size_.width - cursorPosition().column
             );
             moveCursorForward(n);
         }
@@ -971,12 +971,12 @@ void Screen::setMode(Mode _mode, bool _enable)
             {
                 // TODO: Well, should we also actually set column width to 132 or 80?
                 clearScreen();
-                setTopBottomMargin(1, size().rows);    // DECSTBM
-                setLeftRightMargin(1, size().columns); // DECRLM
+                setTopBottomMargin(1, size().height);    // DECSTBM
+                setLeftRightMargin(1, size().width); // DECRLM
             }
 
             cursor_pos_t const columns = _enable ? 132 : 80;
-            cursor_pos_t const rows = size().rows;
+            cursor_pos_t const rows = size().height;
             bool const unitInPixels = false;
 
             // Pre-resize in case the event callback right after is not actually resizing the window
@@ -1069,8 +1069,8 @@ void Screen::requestMode(Mode _mode)
 void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
 {
 	auto const bottom = _bottom.has_value()
-		? min(_bottom.value(), size_.rows)
-		: size_.rows;
+		? min(_bottom.value(), size_.height)
+		: size_.height;
 
 	auto const top = _top.value_or(1);
 
@@ -1087,8 +1087,8 @@ void Screen::setLeftRightMargin(optional<int> _left, optional<int> _right)
     if (isModeEnabled(Mode::LeftRightMargin))
     {
 		auto const right = _right.has_value()
-			? min(_right.value(), size_.columns)
-			: size_.columns;
+			? min(_right.value(), size_.width)
+			: size_.width;
 		auto const left = _left.value_or(1);
 		if (left + 1 < right)
         {
@@ -1103,9 +1103,9 @@ void Screen::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
     buffer_->margin_.vertical.from = 1;
-    buffer_->margin_.vertical.to = size_.rows;
+    buffer_->margin_.vertical.to = size_.height;
     buffer_->margin_.horizontal.from = 1;
-    buffer_->margin_.horizontal.to = size_.columns;
+    buffer_->margin_.horizontal.to = size_.width;
 
     // and moves the cursor to the home position
     moveCursorTo({1, 1});
@@ -1240,7 +1240,7 @@ void Screen::requestTabStops()
     else if (buffer_->tabWidth != 0)
     {
         dcs << buffer_->tabWidth + 1;
-        for (int column = 2 * buffer_->tabWidth + 1; column <= size().columns; column += buffer_->tabWidth)
+        for (int column = 2 * buffer_->tabWidth + 1; column <= size().width; column += buffer_->tabWidth)
             dcs << '/' << column;
     }
     dcs << '\x5c'; // ST

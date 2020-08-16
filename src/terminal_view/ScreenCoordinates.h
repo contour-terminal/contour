@@ -32,7 +32,7 @@ struct ScreenCoordinates {
         return QPoint{
             static_cast<int>(leftMargin + (_pos.column - 1) * cellWidth),
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
-            static_cast<int>(bottomMargin + (screenSize.rows - _pos.row) * cellHeight)
+            static_cast<int>(bottomMargin + (screenSize.height - _pos.row) * cellHeight)
 #else
             static_cast<int>((_pos.row - 1) * cellHeight)
 #endif
@@ -42,7 +42,7 @@ struct ScreenCoordinates {
 
 inline std::ostream& operator<<(std::ostream& os, terminal::view::ScreenCoordinates const& _coords)
 {
-    os << "screen: " << _coords.screenSize.columns<< 'x' << _coords.screenSize.rows
+    os << "screen: " << _coords.screenSize.width<< 'x' << _coords.screenSize.height
        << ", cell:" << _coords.cellWidth << 'x' << _coords.cellHeight
        << ", base: " << _coords.textBaseline
        << ", margin: " << _coords.leftMargin << 'x' << _coords.bottomMargin;

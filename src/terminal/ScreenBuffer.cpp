@@ -55,7 +55,7 @@ std::optional<int> ScreenBuffer::findMarkerBackward(int _currentCursorLine) cons
 {
     // TODO: unit- tests for all cases.
 
-    if (_currentCursorLine > size().rows || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
+    if (_currentCursorLine > size().height || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
         return nullopt;
 
     // we start looking in the main screen area only if @p _currentCursorLine is at least 2,
@@ -89,7 +89,7 @@ std::optional<int> ScreenBuffer::findMarkerForward(int _currentCursorLine) const
         if (int const ri = historyLineCount() + i - 1; savedLines.at(ri).marked)
             return {i};
 
-    for (int i = max(_currentCursorLine + 1, 1); i <= size_.rows; ++i)
+    for (int i = max(_currentCursorLine + 1, 1); i <= size_.height; ++i)
         if (Line const& line = lines.at(i - 1); line.marked)
             return {i};
 
@@ -98,17 +98,17 @@ std::optional<int> ScreenBuffer::findMarkerForward(int _currentCursorLine) const
 
 void ScreenBuffer::resize(WindowSize const& _newSize)
 {
-    if (_newSize.rows > size_.rows)
+    if (_newSize.height > size_.height)
     {
         // Grow line count by splicing available lines from history back into buffer, if available,
-        // or create new ones until size_.rows == _newSize.rows.
-        auto const extendCount = _newSize.rows - size_.rows;
+        // or create new ones until size_.height == _newSize.height.
+        auto const extendCount = _newSize.height - size_.height;
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<int>(std::size(savedLines)));
 
         for_each(
             crispy::times(rowsToTakeFromSavedLines),
             [&](auto) {
-                savedLines.back().resize(_newSize.columns);
+                savedLines.back().resize(_newSize.width);
                 lines.emplace_front(std::move(savedLines.back()));
                 savedLines.pop_back();
             }
@@ -120,19 +120,19 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         generate_n(
             back_inserter(lines),
             fillLineCount,
-            [=]() { return Line{static_cast<size_t>(_newSize.columns), Cell{}}; });
+            [=]() { return Line{static_cast<size_t>(_newSize.width), Cell{}}; });
     }
-    else if (_newSize.rows < size_.rows)
+    else if (_newSize.height < size_.height)
     {
-        // Shrink existing line count to _newSize.rows
+        // Shrink existing line count to _newSize.height
         // by splicing the number of lines to be shrinked by into savedLines bottom.
-        if (cursor.position.row == size_.rows)
+        if (cursor.position.row == size_.height)
         {
-            auto const n = size_.rows - _newSize.rows;
+            auto const n = size_.height - _newSize.height;
             for_each(
                 crispy::times(n),
                 [&](auto) {
-                    lines.front().resize(_newSize.columns);
+                    lines.front().resize(_newSize.width);
                     savedLines.emplace_back(std::move(lines.front()));
                     lines.pop_front();
                 }
@@ -141,39 +141,39 @@ void ScreenBuffer::resize(WindowSize const& _newSize)
         }
         else
             // Hard-cut below cursor by the number of lines to shrink.
-            lines.resize(_newSize.rows);
+            lines.resize(_newSize.height);
 
-        assert(lines.size() == static_cast<size_t>(_newSize.rows));
+        assert(lines.size() == static_cast<size_t>(_newSize.height));
     }
 
-    if (_newSize.columns > size_.columns)
+    if (_newSize.width > size_.width)
     {
-        // Grow existing columns to _newSize.columns.
+        // Grow existing columns to _newSize.width.
         std::for_each(
             begin(lines),
             end(lines),
-            [=](auto& line) { line.resize(_newSize.columns); }
+            [=](auto& line) { line.resize(_newSize.width); }
         );
         if (wrapPending)
             cursor.position.column++;
         wrapPending = false;
     }
-    else if (_newSize.columns < size_.columns)
+    else if (_newSize.width < size_.width)
     {
-        // Shrink existing columns to _newSize.columns.
+        // Shrink existing columns to _newSize.width.
         // Nothing should be done, I think, as we preserve prior (now exceeding) content.
-        if (cursor.position.column == size_.columns)
+        if (cursor.position.column == size_.width)
             wrapPending = true;
 
         // truncating tabs
-        while (!tabs.empty() && tabs.back() > _newSize.columns)
+        while (!tabs.empty() && tabs.back() > _newSize.width)
             tabs.pop_back();
     }
 
     // Reset margin to their default.
     margin_ = Margin{
-		Margin::Range{1, _newSize.rows},
-        Margin::Range{1, _newSize.columns}
+		Margin::Range{1, _newSize.height},
+        Margin::Range{1, _newSize.width}
     };
     // TODO: find out what to do with DECOM mode. Reset it to?
 
@@ -200,7 +200,7 @@ void ScreenBuffer::setMode(Mode _mode, bool _enable)
         case Mode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!_enable)
-                margin_.horizontal = {1, size_.columns};
+                margin_.horizontal = {1, size_.width};
             break;
         case Mode::Origin:
             cursor.originMode = _enable;
@@ -222,8 +222,8 @@ void ScreenBuffer::moveCursorTo(Coordinate to)
 
 Cell& ScreenBuffer::at(Coordinate const& _pos) noexcept
 {
-    assert(crispy::ascending(1 - historyLineCount(), _pos.row, size_.rows));
-    assert(crispy::ascending(1, _pos.column, size_.columns));
+    assert(crispy::ascending(1 - historyLineCount(), _pos.row, size_.height));
+    assert(crispy::ascending(1, _pos.column, size_.width));
 
     if (_pos.row > 0)
         return (*next(begin(lines), _pos.row - 1))[_pos.column - 1];
@@ -236,7 +236,7 @@ void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
     wrapPending = false;
 
     if (realCursorPosition().row == margin_.vertical.to ||
-        realCursorPosition().row == size_.rows)
+        realCursorPosition().row == size_.height)
     {
         scrollUp(1);
         moveCursorTo({cursorPosition().row, _newColumn});
@@ -314,7 +314,7 @@ void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t _character)
 
     bool const cursorInsideMargin = isModeEnabled(Mode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor.position.column
-                                                   : size_.columns - cursor.position.column;
+                                                   : size_.width - cursor.position.column;
 
     auto const n = min(cell.width(), cellsAvailable);
 
@@ -343,7 +343,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n)
 
 void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
 {
-    if (margin.horizontal != Margin::Range{1, size_.columns})
+    if (margin.horizontal != Margin::Range{1, size_.width})
     {
         // a full "inside" scroll-up
         auto const marginHeight = margin.vertical.length();
@@ -380,10 +380,10 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             }
         );
     }
-    else if (margin.vertical == Margin::Range{1, size_.rows})
+    else if (margin.vertical == Margin::Range{1, size_.height})
     {
         // full-screen scroll-up
-        auto const n = min(v_n, size_.rows);
+        auto const n = min(v_n, size_.height);
 
         if (n > 0)
         {
@@ -400,7 +400,7 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
             generate_n(
                 back_inserter(lines),
                 n,
-                [this]() { return Line{static_cast<size_t>(size_.columns), Cell{{}, cursor.graphicsRendition}}; }
+                [this]() { return Line{static_cast<size_t>(size_.width), Cell{{}, cursor.graphicsRendition}}; }
             );
         }
     }
@@ -441,7 +441,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
 
-    if (_margin.horizontal != Margin::Range{1, size_.columns})
+    if (_margin.horizontal != Margin::Range{1, size_.width})
     {
         // full "inside" scroll-down
         if (n < marginHeight)
@@ -495,7 +495,7 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
             );
         }
     }
-    else if (_margin.vertical == Margin::Range{1, size_.rows})
+    else if (_margin.vertical == Margin::Range{1, size_.height})
     {
         rotate(
             begin(lines),
@@ -595,7 +595,7 @@ void ScreenBuffer::insertColumns(cursor_pos_t _n)
 void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
 {
     auto const col = cursor.originMode ? margin_.horizontal.from + _n - 1 : _n;
-    auto const clampedCol = min(col, size_.columns);
+    auto const clampedCol = min(col, size_.width);
     cursor.position.column = clampedCol;
     updateColumnIterator();
 
@@ -628,7 +628,7 @@ void ScreenBuffer::clearTabUnderCursor()
 {
     // populate tabs vector in case of default tabWidth is used (until now).
     if (tabs.empty() && tabWidth != 0)
-        for (cursor_pos_t column = tabWidth; column <= size().columns; column += tabWidth)
+        for (cursor_pos_t column = tabWidth; column <= size().width; column += tabWidth)
             tabs.emplace_back(column);
 
     // erase the specific tab underneath
@@ -648,16 +648,16 @@ void ScreenBuffer::verifyState() const
     auto const lrmm = isModeEnabled(Mode::LeftRightMargin);
     if (wrapPending &&
             ((lrmm && cursor.position.column != margin_.horizontal.to)
-            || (!lrmm && cursor.position.column != size_.columns)))
+            || (!lrmm && cursor.position.column != size_.width)))
     {
         fail(fmt::format(
             "Wrap is pending but cursor's column ({}) is not at right side of margin ({}) or screen ({}).",
-            cursor.position.column, margin_.horizontal.to, size_.columns
+            cursor.position.column, margin_.horizontal.to, size_.width
         ));
     }
 
-    if (static_cast<size_t>(size_.rows) != lines.size())
-        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines.size(), size_.rows));
+    if (static_cast<size_t>(size_.height) != lines.size())
+        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines.size(), size_.height));
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursorPos = clampToScreen(cursor.position);
@@ -674,7 +674,7 @@ void ScreenBuffer::verifyState() const
     else if (col != currentColumn)
         fail(fmt::format("Calculated current column does not match."));
 
-    if (wrapPending && cursor.position.column != size_.columns && cursor.position.column != margin_.horizontal.to)
+    if (wrapPending && cursor.position.column != size_.width && cursor.position.column != margin_.horizontal.to)
         fail(fmt::format("wrapPending flag set when cursor is not in last column."));
 #endif
 }
@@ -682,7 +682,7 @@ void ScreenBuffer::verifyState() const
 void ScreenBuffer::dumpState(std::string const& _message) const
 {
     auto const hline = [&]() {
-        for_each(crispy::times(size_.columns), [](auto) { cerr << '='; });
+        for_each(crispy::times(size_.width), [](auto) { cerr << '='; });
         cerr << endl;
     };
 
@@ -721,8 +721,8 @@ void ScreenBuffer::fail(std::string const& _message) const
 string ScreenBuffer::renderTextLine(cursor_pos_t row) const
 {
     string line;
-    line.reserve(size_.columns);
-    for (cursor_pos_t col = 1; col <= size_.columns; ++col)
+    line.reserve(size_.width);
+    for (cursor_pos_t col = 1; col <= size_.width; ++col)
         if (auto const& cell = at({row, col}); cell.codepointCount())
             line += cell.toUtf8();
         else
@@ -734,9 +734,9 @@ string ScreenBuffer::renderTextLine(cursor_pos_t row) const
 string ScreenBuffer::renderText() const
 {
     string text;
-    text.reserve(size_.rows * (size_.columns + 1));
+    text.reserve(size_.height * (size_.width + 1));
 
-    for (cursor_pos_t row = 1; row <= size_.rows; ++row)
+    for (cursor_pos_t row = 1; row <= size_.height; ++row)
     {
         text += renderTextLine(row);
         text += '\n';
@@ -750,9 +750,9 @@ std::string ScreenBuffer::screenshot() const
     auto result = std::stringstream{};
     auto generator = OutputGenerator{ result };
 
-    for (cursor_pos_t const row : crispy::times(1, size_.rows))
+    for (cursor_pos_t const row : crispy::times(1, size_.height))
     {
-        for (cursor_pos_t const col : crispy::times(1, size_.columns))
+        for (cursor_pos_t const col : crispy::times(1, size_.width))
         {
             Cell const& cell = at({row, col});
 

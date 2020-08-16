@@ -328,7 +328,7 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     updateTimer_(this)
 {
     // qDebug() << "TerminalWindow:"
-    //     << QString::fromUtf8(fmt::format("{}x{}", config_.terminalSize.columns, config_.terminalSize.rows).c_str())
+    //     << QString::fromUtf8(fmt::format("{}x{}", config_.terminalSize.width, config_.terminalSize.height).c_str())
     //     << "fontSize:" << profile().fontSize
     //     << "contentScale:" << contentScale();
 
@@ -350,8 +350,8 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
         cerr << "Regular font is not a fixed-width font." << endl;
 
     resize(
-        static_cast<int>(profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance()),
-        static_cast<int>(profile().terminalSize.rows * fonts_.regular.first.get().lineHeight())
+        static_cast<int>(profile().terminalSize.width * fonts_.regular.first.get().maxAdvance()),
+        static_cast<int>(profile().terminalSize.height * fonts_.regular.first.get().lineHeight())
     );
 }
 
@@ -997,10 +997,10 @@ bool TerminalWindow::executeAction(Action const& _action)
             return terminalView_->terminal().scrollDown(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollPageUp) -> Result {
-            return terminalView_->terminal().scrollUp(profile().terminalSize.rows / 2) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().scrollUp(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollPageDown) -> Result {
-            return terminalView_->terminal().scrollDown(profile().terminalSize.rows / 2) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().scrollDown(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollMarkUp) -> Result {
             return terminalView_->terminal().scrollMarkUp() ? Result::Dirty : Result::Nothing;
@@ -1238,12 +1238,12 @@ string TerminalWindow::extractLastMarkRange()
     auto const _l = std::lock_guard{terminalView_->terminal()};
 
     auto const& screen = terminalView_->terminal().screen();
-    auto const colCount = screen.size().columns;
+    auto const colCount = screen.size().width;
     auto const bottomLine = screen.cursor().position.row + 1;
 
     auto const marker1 =
-        screen.cursor().position.row == screen.size().rows
-            ? optional{screen.size().rows - 1}
+        screen.cursor().position.row == screen.size().height
+            ? optional{screen.size().height - 1}
             : screen.findMarkerBackward(bottomLine);
     if (!marker1.has_value())
         return {};
@@ -1462,8 +1462,8 @@ void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPix
             if (!_height)
                 _height = screenSize.height();
         }
-        profile().terminalSize.columns = _width / fonts_.regular.first.get().maxAdvance();
-        profile().terminalSize.rows = _height / fonts_.regular.first.get().lineHeight();
+        profile().terminalSize.width = _width / fonts_.regular.first.get().maxAdvance();
+        profile().terminalSize.height = _height / fonts_.regular.first.get().lineHeight();
         resizePending = true;
     }
     else
@@ -1473,13 +1473,13 @@ void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPix
         else
         {
             if (!_width)
-                _width = profile().terminalSize.columns;
+                _width = profile().terminalSize.width;
 
             if (!_height)
-                _height = profile().terminalSize.rows;
+                _height = profile().terminalSize.height;
 
-            profile().terminalSize.columns = _width;
-            profile().terminalSize.rows = _height;
+            profile().terminalSize.width = _width;
+            profile().terminalSize.height = _height;
             resizePending = true;
         }
     }
@@ -1488,8 +1488,8 @@ void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPix
     {
         post([this]() {
             terminalView_->setTerminalSize(profile().terminalSize);
-            auto const width = profile().terminalSize.columns * fonts_.regular.first.get().maxAdvance();
-            auto const height = profile().terminalSize.rows * fonts_.regular.first.get().lineHeight();
+            auto const width = profile().terminalSize.width * fonts_.regular.first.get().maxAdvance();
+            auto const height = profile().terminalSize.height * fonts_.regular.first.get().lineHeight();
             resize(width, height);
             setScreenDirty();
             update();

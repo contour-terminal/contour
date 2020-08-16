@@ -410,8 +410,8 @@ class Screen {
     // Tests if given coordinate is within the visible screen area.
     constexpr bool contains(Coordinate const& _coord) const noexcept
     {
-        return 1 <= _coord.row && _coord.row <= size_.rows
-            && 1 <= _coord.column && _coord.column <= size_.columns;
+        return 1 <= _coord.row && _coord.row <= size_.height
+            && 1 <= _coord.column && _coord.column <= size_.width;
     }
 
     Cell const& currentCell() const noexcept
@@ -587,7 +587,7 @@ void Screen::render(RendererT _render, int _scrollOffset) const
     if (!_scrollOffset)
     {
         crispy::for_each(
-            crispy::times(1, size_.rows) * crispy::times(1, size_.columns),
+            crispy::times(1, size_.height) * crispy::times(1, size_.width),
             [&](auto const& _pos) {
                 auto const [row, col] = _pos;
                 auto const pos = Coordinate{row, col};
@@ -598,19 +598,19 @@ void Screen::render(RendererT _render, int _scrollOffset) const
     else
     {
         _scrollOffset = std::min(_scrollOffset, buffer_->historyLineCount());
-        auto const historyLineCount = std::min(size_.rows, static_cast<int>(_scrollOffset));
-        auto const mainLineCount = size_.rows - historyLineCount;
+        auto const historyLineCount = std::min(size_.height, static_cast<int>(_scrollOffset));
+        auto const mainLineCount = size_.height - historyLineCount;
 
         cursor_pos_t rowNumber = 1;
 
         // render first part from history
         for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
         {
-            if (static_cast<int>(line->size()) < size_.columns)
-                line->resize(size_.columns);
+            if (static_cast<int>(line->size()) < size_.width)
+                line->resize(size_.width);
 
             auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
                 _render({rowNumber, colNumber}, *column);
         }
 
@@ -618,7 +618,7 @@ void Screen::render(RendererT _render, int _scrollOffset) const
         for (auto line = begin(buffer_->lines); line != next(begin(buffer_->lines), mainLineCount); ++line, ++rowNumber)
         {
             auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.columns; ++colNumber, ++column)
+            for (cursor_pos_t colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
                 _render({rowNumber, colNumber}, *column);
         }
     }

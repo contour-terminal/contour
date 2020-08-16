@@ -386,10 +386,10 @@ struct ScreenBuffer {
           modes_{ _modes },
           maxHistoryLineCount_{ _maxHistoryLineCount },
 		  margin_{
-			  {1, _size.rows},
-			  {1, _size.columns}
+			  {1, _size.height},
+			  {1, _size.width}
 		  },
-		  lines{ static_cast<size_t>(_size.rows), Line{static_cast<size_t>(_size.columns), Cell{}} }
+		  lines{ static_cast<size_t>(_size.height), Line{static_cast<size_t>(_size.width), Cell{}} }
 	{
 		verifyState();
 	}
@@ -572,8 +572,8 @@ struct ScreenBuffer {
 	Coordinate clampToScreen(Coordinate const& coord) const noexcept
 	{
         return {
-            std::clamp(coord.row, cursor_pos_t{ 1 }, size_.rows),
-            std::clamp(coord.column, cursor_pos_t{ 1 }, size_.columns)
+            std::clamp(coord.row, cursor_pos_t{ 1 }, size_.height),
+            std::clamp(coord.column, cursor_pos_t{ 1 }, size_.width)
         };
 	}
 
