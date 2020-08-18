@@ -285,10 +285,9 @@ void Screen::restoreCursor()
 {
     if (!savedCursors_.empty())
     {
-        auto const& saved = savedCursors_.top();
-        moveCursorTo(saved.position);
-        setMode(Mode::AutoWrap, saved.autoWrap);
-        setMode(Mode::Origin, saved.originMode);
+        buffer_->setCursor(savedCursors_.top());
+        setMode(Mode::AutoWrap, savedCursors_.top().autoWrap);
+        setMode(Mode::Origin, savedCursors_.top().originMode);
         savedCursors_.pop();
     }
 }

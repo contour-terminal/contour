@@ -579,6 +579,8 @@ struct ScreenBuffer {
 
 	void moveCursorTo(Coordinate to);
 
+    void setCursor(Cursor const& _cursor);
+
     bool isCursorInsideMargins() const noexcept
     {
         bool const insideVerticalMargin = margin_.vertical.contains(cursor.position.row);

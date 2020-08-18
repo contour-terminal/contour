@@ -220,6 +220,13 @@ void ScreenBuffer::moveCursorTo(Coordinate to)
     updateCursorIterators();
 }
 
+void ScreenBuffer::setCursor(Cursor const& _cursor)
+{
+    wrapPending = false;
+    cursor = _cursor;
+    updateCursorIterators();
+}
+
 Cell& ScreenBuffer::at(Coordinate const& _pos) noexcept
 {
     assert(crispy::ascending(1 - historyLineCount(), _pos.row, size_.height));
