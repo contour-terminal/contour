@@ -154,6 +154,10 @@ string to_string(Mode m)
             return "BracketedPaste";
         case Mode::FocusTracking:
             return "FocusTracking";
+        case Mode::SixelScrolling:
+            return "SixelScrolling";
+        case Mode::UsePrivateColorRegisters:
+            return "UsePrivateColorRegisters";
         case Mode::MouseExtended:
             return "MouseExtended";
         case Mode::MouseSGR:
@@ -431,6 +435,9 @@ class MnemonicBuilder {
     void operator()(SetDynamicColor const& v) {
         build("SETDYNCOLOR", fmt::format("{} {}", v.name, to_string(v.color)));
     }
+    void operator()(SixelImage const& /*v*/) {
+        build("DECSIXEL"); // would be too much data as parameter to be helpful in displaying
+    }
     void operator()(ResetDynamicColor v) {
         build("RSTDYNCOLOR", fmt::format("{}", v.name));
     }
@@ -449,6 +456,9 @@ class MnemonicBuilder {
     void operator()(InvalidCommand  const& v) {
         build("INVALID", fmt::format("{} ({})", v.sequence, v.reason));
     }
+    void operator()(XtSmGraphics const& /*v*/) {
+        build("XTSMGRAPHICS");
+    };
 
   private:
     bool withParameters_;

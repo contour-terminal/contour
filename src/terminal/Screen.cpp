@@ -16,6 +16,7 @@
 #include <terminal/VTType.h>
 #include <terminal/Logger.h>
 #include <terminal/Debugger.h>
+#include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -48,18 +49,32 @@ Screen::Screen(Size const& _size,
                Logger const& _logger,
                bool _logRaw,
                bool _logTrace,
-               optional<size_t> _maxHistoryLineCount
+               optional<size_t> _maxHistoryLineCount,
+               Size _maxImageSize,
+               int _maxImageColorRegisters,
+               bool _sixelCursorConformance
 ) :
     eventListener_{ _eventListener },
     logger_{ _logger },
     logRaw_{ _logRaw },
     logTrace_{ _logTrace },
-    commandBuilder_{ _logger },
+    modes_{},
+    maxImageColorRegisters_{ _maxImageColorRegisters },
+    imageColorPalette_(make_shared<ColorPalette>(16, maxImageColorRegisters_)),
+    imagePool_{
+        [this](Image const* _image) { eventListener_.discardImage(*_image); },
+        1
+    },
+    commandBuilder_{
+        _logger,
+        _maxImageSize,
+        RGBAColor{}, // TODO
+        imageColorPalette_
+    },
     parser_{
         ref(commandBuilder_),
         [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
     },
-    modes_{},
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, modes_, _maxHistoryLineCount },
     alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, modes_, nullopt },
     buffer_{ &primaryBuffer_ },
@@ -68,7 +83,8 @@ Screen::Screen(Size const& _size,
     directExecutor_{ *this, _logger },
     synchronizedExecutor_{ *this, _logger },
     debugExecutor_{},
-    commandExecutor_ { &directExecutor_ }
+    commandExecutor_ {&directExecutor_},
+    sixelCursorConformance_{_sixelCursorConformance}
 {
     setMode(Mode::AutoWrap, true);
 }
@@ -439,7 +455,7 @@ void Screen::sendDeviceAttributes()
         //TODO: DeviceAttributes::NationalReplacementCharacterSets |
         //TODO: DeviceAttributes::RectangularEditing |
         //TODO: DeviceAttributes::SelectiveErase |
-        //TODO: DeviceAttributes::SixelGraphics |
+        DeviceAttributes::SixelGraphics |
         //TODO: DeviceAttributes::TechnicalCharacters |
         DeviceAttributes::UserDefinedKeys
     );
@@ -1074,6 +1090,9 @@ void Screen::setMode(Mode _mode, bool _enable)
         case Mode::FocusTracking:
             eventListener_.setGenerateFocusEvents(_enable);
             break;
+        case Mode::UsePrivateColorRegisters:
+            commandBuilder_.setUsePrivateColorRegisters(_enable);
+            break;
         default:
             break;
     }
@@ -1183,6 +1202,75 @@ void Screen::singleShiftSelect(CharsetTable _table)
 {
     // TODO: unit test SS2, SS3
     buffer_->cursor.charsets.singleShift(_table);
+}
+
+void Screen::sixelImage(Size _size, vector<uint8_t> const& _data)
+{
+    auto const imageRef = imagePool_.create(_data, _size);
+    auto const columnCount = int(ceil(float(imageRef->width()) / float(cellPixelSize_.width)));
+    auto const rowCount = int(ceil(float(imageRef->height()) / float(cellPixelSize_.height)));
+    auto const extent = Size{columnCount, rowCount};
+    auto const sizelScrolling = isModeEnabled(Mode::SixelScrolling);
+    auto const topLeft = sizelScrolling ? cursorPosition() : Coordinate{1, 1};
+    auto const linesAvailable = 1 + size_.height - topLeft.row;
+    auto const linesToBeRendered = min(extent.height, linesAvailable);
+    auto const columnsToBeRendered = min(extent.width, size_.width - topLeft.column - 1);
+    auto const gapColor = RGBAColor{0, 0, 0, 0}; // transarent
+
+    auto const rasterizedImage = imagePool_.rasterize(
+        imageRef,
+        ImageAlignment::TopStart,
+        ImageResize::NoResize,
+        gapColor,
+        extent,
+        cellPixelSize_
+    );
+
+    if (linesToBeRendered)
+    {
+        crispy::for_each(
+            LIBTERMINAL_EXECUTION_COMMA(par)
+            Size{columnsToBeRendered, linesToBeRendered},
+            [&](Coordinate const& offset) {
+                at(topLeft + offset).setImage(
+                    ImageFragment{rasterizedImage, offset},
+                    currentBuffer().currentHyperlink
+                );
+            }
+        );
+        moveCursorTo(Coordinate{topLeft.row + linesToBeRendered - 1, topLeft.column});
+    }
+
+    // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
+    // AND iff sixel sizelScrolling is enabled, then scroll as much as needed to render the remaining lines.
+    if (linesToBeRendered != extent.height && sizelScrolling)
+    {
+        auto const remainingLineCount = extent.height - linesToBeRendered;
+        for (auto const lineOffset : crispy::times(remainingLineCount))
+        {
+            linefeed();
+            moveCursorForward(topLeft.column);
+            crispy::for_each(
+                LIBTERMINAL_EXECUTION_COMMA(par)
+                crispy::times(columnsToBeRendered),
+                [&](int columnOffset) {
+                    at(Coordinate{size_.height, columnOffset + 1}).setImage(
+                        ImageFragment{rasterizedImage, Coordinate{linesToBeRendered + lineOffset, columnOffset}},
+                        currentBuffer().currentHyperlink
+                    );
+                }
+            );
+        }
+    }
+
+    // move ansi text cursor to position of the sixel cursor
+    if (sixelCursorConformance_)
+        moveCursorToColumn(topLeft.column + extent.width);
+    else
+    {
+        moveCursorTo(Coordinate{topLeft.row + extent.height - 1, 1});
+        linefeed();
+    }
 }
 
 void Screen::setWindowTitle(std::string const& _title)
@@ -1315,6 +1403,60 @@ void Screen::dumpState()
 {
     eventListener_.dumpState();
 }
+
+void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value)
+{
+    using Item = XtSmGraphics::Item;
+    using Action = XtSmGraphics::Action;
+
+    switch (_item)
+    {
+        case Item::NumberOfColorRegisters:
+            switch (_action)
+            {
+                case Action::Read:
+                {
+                    auto const value = imageColorPalette_->size();
+                    reply("\033[?{};{};{}S", 1, 0, value);
+                    break;
+                }
+                case Action::ReadLimit:
+                {
+                    auto const value = imageColorPalette_->maxSize();
+                    reply("\033[?{};{};{}S", 1, 0, value);
+                    break;
+                }
+                case Action::ResetToDefault:
+                {
+                    auto const value = 256; // TODO: read the configuration's default here
+                    imageColorPalette_->setSize(value);
+                    reply("\033[?{};{};{}S", 1, 0, value);
+                    break;
+                }
+                case Action::SetToValue:
+                {
+                    visit(overloaded{
+                        [&](int _number) {
+                            imageColorPalette_->setSize(_number);
+                            reply("\033[?{};{};{}S", 1, 0, _number);
+                        },
+                        [&](Size) {
+                            reply("\033[?{};{};{}S", 1, 3, 0);
+                        },
+                        [&](monostate) {
+                            reply("\033[?{};{};{}S", 1, 3, 0);
+                        },
+                    }, _value);
+                    break;
+                }
+            }
+            break;
+
+        case Item::SixelGraphicsGeometry: // XXX Do we want/need to implement you?
+        case Item::ReGISGraphicsGeometry: // Surely, we don't do ReGIS just yet. :-)
+            break;
+    }
+}
 // }}}
 
 // {{{ DirectExecutor
@@ -1397,10 +1539,12 @@ void DirectExecutor::visit(SetMode const& v) { screen_.setMode(v.mode, v.enable)
 void DirectExecutor::visit(SetTopBottomMargin const& v) { screen_.setTopBottomMargin(v.top, v.bottom); }
 void DirectExecutor::visit(SetUnderlineColor const& v) { screen_.setUnderlineColor(v.color); }
 void DirectExecutor::visit(SingleShiftSelect const& v) { screen_.singleShiftSelect(v.table); }
+void DirectExecutor::visit(SixelImage const& v) { screen_.sixelImage(v.size, v.rgba); }
 void DirectExecutor::visit(SoftTerminalReset const&) { screen_.resetSoft(); }
 void DirectExecutor::visit(InvalidCommand const& v) { if (logger_) logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"}); }
 void DirectExecutor::visit(SaveMode const& v) { screen_.saveModes(v.modes); }
 void DirectExecutor::visit(RestoreMode const& v) { screen_.restoreModes(v.modes); }
+void DirectExecutor::visit(XtSmGraphics const& v) { screen_.smGraphics(v.item, v.action, v.value); }
 // }}}
 
 // {{{ SynchronizedExecutor

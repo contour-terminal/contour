@@ -5,6 +5,22 @@ word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 
 default_profile: main
 
+# Inline image related default configuration and limits
+# -----------------------------------------------------
+#
+images:
+    # Enable or disable sixel scrolling (SM/RM ?80 default)
+    sixel_scrolling: true
+    # Configures the maximum number of color registers available when rendering Sixel graphics.
+    sixel_register_count: 256
+    # If enabled, the ANSI text cursor is placed at the position of the sixel graphics cursor after
+    # image rendering, otherwise (if disabled) the cursor is placed underneath the image.
+    sixel_cursor_conformance: true
+    # maximum width in pixels of an image to be accepted
+    max_width: 800
+    # maximum height in pixels of an image to be accepted
+    max_height: 600
+
 # Terminal Profiles
 # -----------------
 #

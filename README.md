@@ -31,6 +31,7 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 - ✅ Synchronized rendering (via `DECSM 2026` / `DECRM 2026`)
 - ✅ Clickable hyperlinks via OSC 8
 - ✅ Clipboard setting via OSC 52
+- ✅ Sixel inline images
 
 ## CLI - Command Line Interface
 

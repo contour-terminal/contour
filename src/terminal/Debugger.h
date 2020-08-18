@@ -129,10 +129,12 @@ class Debugger : public CommandVisitor {
     void visit(SetTopBottomMargin const& v) override { enqueue(v); };
     void visit(SetUnderlineColor const& v) override { enqueue(v); };
     void visit(SingleShiftSelect const& v) override { enqueue(v); };
+    void visit(SixelImage const& v) override { enqueue(v); }
     void visit(SoftTerminalReset const& v) override { enqueue(v); };
     void visit(InvalidCommand const& v) override { enqueue(v); };
     void visit(SaveMode const& v) override { enqueue(v); }
     void visit(RestoreMode const& v) override { enqueue(v); }
+    void visit(XtSmGraphics const& v) override { enqueue(v); }
     // }}}
 
   private:

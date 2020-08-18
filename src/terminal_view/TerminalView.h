@@ -142,6 +142,7 @@ class TerminalView : private Terminal::Events {
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setDynamicColor(DynamicColorName, RGBColor const&) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
+    void discardImage(Image const& /*_image*/) override;
 
   private:
     Events& events_;

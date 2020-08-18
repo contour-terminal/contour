@@ -33,6 +33,7 @@ add_library(terminal_view STATIC
     BackgroundRenderer.cpp BackgroundRenderer.h
     CursorRenderer.cpp CursorRenderer.h
     DecorationRenderer.cpp DecorationRenderer.h
+    ImageRenderer.cpp ImageRenderer.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     Renderer.cpp Renderer.h
     ShaderConfig.cpp ShaderConfig.h

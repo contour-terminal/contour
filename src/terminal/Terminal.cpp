@@ -33,7 +33,10 @@ Terminal::Terminal(Size _winSize,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
                    Logger _logger,
-                   string const& _wordDelimiters
+                   string const& _wordDelimiters,
+                   Size _maxImageSize,
+                   int _maxImageColorRegisters,
+                   bool _sixelCursorConformance
 ) :
     changes_{ 0 },
     eventListener_{ _eventListener },
@@ -53,7 +56,10 @@ Terminal::Terminal(Size _winSize,
         logger_,
         true, // logs raw output by default?
         true, // logs trace output by default?
-        _maxHistoryLineCount
+        _maxHistoryLineCount,
+        _maxImageSize,
+        _maxImageColorRegisters,
+        _sixelCursorConformance
     },
     screenUpdateThread_{ [this]() { screenUpdateThread(); } }
 {
@@ -492,6 +498,11 @@ void Terminal::useApplicationCursorKeys(bool _enable)
 {
     auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
     inputGenerator_.setCursorKeysMode(keyMode);
+}
+
+void Terminal::discardImage(Image const& _image)
+{
+    eventListener_.discardImage(_image);
 }
 // }}}
 

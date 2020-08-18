@@ -138,6 +138,11 @@ struct Config {
 
     ShaderConfig backgroundShader = terminal::view::defaultShaderConfig(ShaderClass::Background);
     ShaderConfig textShader = terminal::view::defaultShaderConfig(ShaderClass::Text);
+
+    bool sixelScrolling = false;
+    bool sixelCursorConformance = true;
+    terminal::Size maxImageSize = {2000, 2000};
+    int maxImageColorRegisters = 256;
 };
 
 std::optional<std::string> readConfigFile(std::string const& _filename);

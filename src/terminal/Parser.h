@@ -703,6 +703,8 @@ constexpr ParserTable ParserTable::get() // {{{
     return t;
 } // }}}
 
+class ParserExtension;
+
 /**
  * Terminal Parser.
  *

@@ -532,6 +532,13 @@ void TerminalWindow::initializeGL()
     terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
     terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
     terminalView_->terminal().setTabWidth(profile().tabWidth);
+
+    // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
+    // hot reloading, because this value may have changed manually by an application already.
+    terminalView_->terminal().screen().setMode(terminal::Mode::SixelScrolling, config_.sixelScrolling);
+    terminalView_->terminal().screen().setMaxImageSize(config_.maxImageSize);
+    terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
+    terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
 }
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
@@ -671,6 +678,10 @@ bool TerminalWindow::reloadConfigValues(config::Config _newConfig, string const&
         _newConfig.logFilePath
             ? LoggingSink{_newConfig.loggingMask, _newConfig.logFilePath->string()}
             : LoggingSink{_newConfig.loggingMask, &cout};
+
+    terminalView_->terminal().screen().setMaxImageSize(_newConfig.maxImageSize);
+    terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
+    terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
 
     terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
 

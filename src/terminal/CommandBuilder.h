@@ -15,9 +15,12 @@
 
 #include <terminal/Logger.h>
 #include <terminal/Parser.h>
+#include <terminal/ParserExtension.h>
 #include <terminal/Functions.h>
 #include <terminal/Commands.h>
+#include <terminal/SixelParser.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,13 +51,24 @@ class CommandBuilder {
     using Action = parser::Action;
 
     /// Constructs the sequencer stage.
-    ///
-    /// @param _logger the logging object to be used when logging is needed.
-    /// @param _commandBuilder the next stage in the pipeline to feed the Sequence objects to.
-    explicit CommandBuilder(Logger _logger);
+    CommandBuilder(Logger _logger,
+                   Size _maxImageSize,
+                   RGBAColor _backgroundColor,
+                   std::shared_ptr<ColorPalette> _imageColorPalette);
+
+    /// Constructs a very primitive CommandBuilder, SHOULD be used for testing only.
+    explicit CommandBuilder(Logger _logger)
+        : CommandBuilder(std::move(_logger),
+                         Size{800, 600},
+                         RGBAColor{},
+                         std::make_shared<ColorPalette>()) {}
 
     CommandList const& commands() const noexcept { return commands_; }
     CommandList& commands() noexcept { return commands_; }
+
+    void setMaxImageSize(Size _value) { maxImageSize_ = _value; }
+    void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
+    void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
     void clear() { commands_.clear(); }
 
@@ -75,6 +89,9 @@ class CommandBuilder {
     void dispatchOSC();
     void emitSequence();
 
+    void hookSixel(Sequence const& _ctx);
+    void hookDECRQSS(Sequence const& _ctx);
+
     template <typename Event, typename... Args>
     void log(Args&&... args) const
     {
@@ -94,6 +111,14 @@ class CommandBuilder {
     Sequence sequence_{};
     CommandList commands_{};
     Logger const logger_;
+
+    std::unique_ptr<ParserExtension> hookedParser_;
+    std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
+    std::shared_ptr<ColorPalette> imageColorPalette_;
+    bool usePrivateColorRegisters_ = false;
+    Size maxImageSize_;
+    int maxImageRegisterCount_;
+    RGBAColor backgroundColor_;
 };
 
 }  // namespace terminal

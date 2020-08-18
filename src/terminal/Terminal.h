@@ -58,6 +58,7 @@ class Terminal : public ScreenEvents {
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+        virtual void discardImage(Image const&) {}
     };
 
     Terminal(Size _winSize,
@@ -66,7 +67,10 @@ class Terminal : public ScreenEvents {
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              Logger _logger = {},
-             std::string const& _wordDelimiters = "");
+             std::string const& _wordDelimiters = "",
+             Size _maxImageSize = Size{800, 600},
+             int _maxImageColorRegisters = 256,
+             bool _sixelCursorConformance = true);
     ~Terminal();
 
     /// Retrieves the time point this terminal instance has been spawned.
@@ -241,6 +245,7 @@ class Terminal : public ScreenEvents {
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode) override;
     void setWindowTitle(std::string_view const& _title) override;
     void useApplicationCursorKeys(bool _enabled) override;
+    void discardImage(Image const&) override;
 
   private:
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.

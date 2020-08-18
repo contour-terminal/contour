@@ -18,6 +18,7 @@
 
 using std::scoped_lock;
 using std::chrono::steady_clock;
+using std::optional;
 
 namespace terminal::view {
 
@@ -54,6 +55,11 @@ Renderer::Renderer(Logger _logger,
         _colorProfile,
         renderTarget_
     },
+    imageRenderer_{
+        renderTarget_,
+        renderTarget_.coloredAtlasAllocator(),
+        cellSize()
+    },
     textRenderer_{
         metrics_,
         renderTarget_,
@@ -85,12 +91,21 @@ Renderer::Renderer(Logger _logger,
 {
 }
 
+void Renderer::discardImage(Image const& _image)
+{
+    imageRenderer_.discardImage(_image);
+}
+
 void Renderer::clearCache()
 {
     renderTarget_.clearCache();
+
+    // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
+    // either that, or only the render target is allowed to clear the actual atlas caches.
     decorationRenderer_.clearCache();
     cursorRenderer_.clearCache();
     textRenderer_.clearCache();
+    imageRenderer_.clearCache();
 }
 
 void Renderer::setFont(FontConfig const& _fonts)
@@ -115,6 +130,7 @@ bool Renderer::setFontSize(int _fontSize)
     screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
 
     textRenderer_.setCellSize(cellSize());
+    imageRenderer_.setCellSize(cellSize());
 
     clearCache();
 
@@ -246,6 +262,8 @@ void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell)
     backgroundRenderer_.renderCell(_pos, _cell);
     decorationRenderer_.renderCell(_pos, _cell);
     textRenderer_.schedule(_pos, _cell);
+    if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
+        imageRenderer_.renderImage(screenCoordinates_.map(_pos), fragment.value());
 }
 
 void Renderer::dumpState(std::ostream& _textOutput) const

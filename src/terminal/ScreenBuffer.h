@@ -17,6 +17,7 @@
 #include <terminal/Color.h>
 #include <terminal/Commands.h>              // Coordinate, cursor_pos_t, Mode
 #include <terminal/Hyperlink.h>
+#include <terminal/Image.h>
 #include <terminal/Logger.h>
 #include <terminal/Size.h>
 
@@ -230,6 +231,7 @@ class Cell {
         codepointCount_ = 0;
         width_ = 1;
         hyperlink_ = nullptr;
+        imageFragment_.reset();
     }
 
     void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
@@ -238,11 +240,12 @@ class Cell {
         codepointCount_ = 0;
         width_ = 1;
         hyperlink_ = _hyperlink;
+        imageFragment_.reset();
     }
 
-    Cell(Cell const&) noexcept = default;
+    Cell(Cell const&) = default;
     Cell(Cell&&) noexcept = default;
-    Cell& operator=(Cell const&) noexcept = default;
+    Cell& operator=(Cell const&) = default;
     Cell& operator=(Cell&&) noexcept = default;
 
     constexpr std::u32string_view codepoints() const noexcept
@@ -260,8 +263,19 @@ class Cell {
     constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
     constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
 
+    std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
+
+    void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
+    {
+        imageFragment_.emplace(std::move(_imageFragment));
+        hyperlink_ = std::move(_hyperlink);
+        width_ = 1;
+        codepointCount_ = 0;
+    }
+
     void setCharacter(char32_t _codepoint) noexcept
     {
+        imageFragment_.reset();
         codepoints_[0] = _codepoint;
         if (_codepoint)
         {
@@ -282,6 +296,7 @@ class Cell {
 
     int appendCharacter(char32_t _codepoint) noexcept
     {
+        imageFragment_.reset();
         if (codepointCount_ < MaxCodepoints)
         {
             codepoints_[codepointCount_] = _codepoint;
@@ -330,6 +345,9 @@ class Cell {
     uint8_t codepointCount_;
 
     HyperlinkRef hyperlink_ = nullptr;
+
+    /// Image fragment to be rendered in this cell.
+    std::optional<ImageFragment> imageFragment_;
 };
 
 /**

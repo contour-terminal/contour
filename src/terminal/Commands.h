@@ -127,6 +127,8 @@ enum class Mode {
     UseAlternateScreen,
     BracketedPaste,
     FocusTracking, // 1004
+    SixelScrolling, // ?80
+    UsePrivateColorRegisters, // ?1070
     // }}}
     // {{{ Mouse related flags
     /// extend mouse protocl encoding
@@ -174,6 +176,8 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::LeftRightMargin:
         case Mode::BracketedPaste:
         case Mode::FocusTracking:
+        case Mode::SixelScrolling:
+        case Mode::UsePrivateColorRegisters:
         case Mode::MouseExtended:
         case Mode::MouseSGR:
         case Mode::MouseURXVT:
@@ -225,6 +229,8 @@ constexpr std::string_view to_code(Mode m)
         case Mode::ExtendedAltScreen: return "?1049";
         case Mode::BracketedPaste: return "?2004";
         case Mode::FocusTracking: return "?1004";
+        case Mode::SixelScrolling: return "?80";
+        case Mode::UsePrivateColorRegisters: return "?1070";
         case Mode::MouseExtended: return "?1005";
         case Mode::MouseSGR: return "?1006";
         case Mode::MouseURXVT: return "?1015";
@@ -837,6 +843,30 @@ struct DumpState {};
 // OSC 52 ; c ; Base64EncodedData ST
 struct CopyToClipboard { std::string data; };
 
+// XTSMGRAPHICS (xterm extension)
+// CSI ? Pi ; Pa ; Pv S
+struct XtSmGraphics
+{
+    enum class Item {
+        NumberOfColorRegisters = 1,
+        SixelGraphicsGeometry = 2,
+        ReGISGraphicsGeometry = 3,
+    };
+
+    enum class Action {
+        Read = 1,
+        ResetToDefault = 2,
+        SetToValue = 3,
+        ReadLimit = 4
+    };
+
+    using Value = std::variant<std::monostate, int, Size>;
+
+    Item item;
+    Action action;
+    Value value;
+};
+
 // {{{ config commands
 /// OSC color-setting related commands that can be grouped into one
 enum class DynamicColorName {
@@ -912,6 +942,14 @@ struct RequestStatusString {
     };
 
     Value value;
+};
+
+/// DECSIXEL - Sixel Graphics Image.
+struct SixelImage {
+    /// Size in pixels for this image
+    Size size;
+    /// RGBA buffer of the image to be rendered
+    std::vector<uint8_t> rgba;
 };
 
 /// DECTABSR - Tab Stop Report
@@ -1057,7 +1095,9 @@ using Command = std::variant<
     SetTopBottomMargin,
     SetUnderlineColor,
     SingleShiftSelect,
-    SoftTerminalReset
+    SixelImage,
+    SoftTerminalReset,
+    XtSmGraphics
 >;
 
 using CommandList = std::vector<Command>;
@@ -1150,10 +1190,12 @@ class CommandVisitor {
     virtual void visit(SetTopBottomMargin const& v) = 0;
     virtual void visit(SetUnderlineColor const& v) = 0;
     virtual void visit(SingleShiftSelect const& v) = 0;
+    virtual void visit(SixelImage const& v) = 0;
     virtual void visit(SoftTerminalReset const& v) = 0;
     virtual void visit(InvalidCommand const& v) = 0;
     virtual void visit(SaveMode const& v) = 0;
     virtual void visit(RestoreMode const& v) = 0;
+    virtual void visit(XtSmGraphics const& v) = 0;
 
     // {{{ Secret std::visit() workaround
     void operator()(AppendChar const& v) { visit(v); }
@@ -1235,10 +1277,12 @@ class CommandVisitor {
     void operator()(SetTopBottomMargin const& v) { visit(v); }
     void operator()(SetUnderlineColor const& v) { visit(v); }
     void operator()(SingleShiftSelect const& v) { visit(v); }
+    void operator()(SixelImage const& v) { visit(v); }
     void operator()(SoftTerminalReset const& v) { visit(v); }
     void operator()(InvalidCommand const& v) { visit(v); }
     void operator()(SaveMode const& v) { visit(v); }
     void operator()(RestoreMode const& v) { visit(v); }
+    void operator()(XtSmGraphics const& v) { visit(v); }
     // }}}
 };
 

@@ -785,6 +785,15 @@ void loadConfigFromFile(Config& _config,
 
     softLoadValue(doc, "word_delimiters", _config.wordDelimiters);
 
+    if (auto images = doc["images"]; images)
+    {
+        softLoadValue(images, "sixel_scrolling", _config.sixelScrolling);
+        softLoadValue(images, "sixel_cursor_conformance", _config.sixelCursorConformance);
+        softLoadValue(images, "sixel_register_count", _config.maxImageColorRegisters);
+        softLoadValue(images, "max_width", _config.maxImageSize.width);
+        softLoadValue(images, "max_height", _config.maxImageSize.height);
+    }
+
     if (auto profiles = doc["color_schemes"]; profiles)
     {
         for (auto i = profiles.begin(); i != profiles.end(); ++i)

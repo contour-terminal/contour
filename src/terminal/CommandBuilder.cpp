@@ -15,6 +15,7 @@
 
 #include <terminal/Commands.h>
 #include <terminal/Functions.h>
+#include <terminal/SixelParser.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -26,6 +27,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <cassert>
 #include <cstdlib>
 #include <numeric>
 #include <optional>
@@ -33,6 +35,9 @@
 #include <vector>
 
 using std::array;
+using std::make_unique;
+using std::make_shared;
+using std::min;
 using std::nullopt;
 using std::optional;
 using std::pair;
@@ -665,10 +670,65 @@ namespace impl // {{{ some command generator helpers
         else
             return ApplyResult::Unsupported;
     }
+
+    ApplyResult XTSMGRAPHICS(Sequence const& _ctx, CommandList& _output)
+    {
+        auto const Pi = _ctx.param(0);
+        auto const Pa = _ctx.param(1);
+        auto const Pv = _ctx.param_or(2, 0);
+        auto const Pu = _ctx.param_or(3, 0);
+
+        auto const item = [&]() -> optional<XtSmGraphics::Item> {
+            switch (Pi) {
+                case 1: return XtSmGraphics::Item::NumberOfColorRegisters;
+                case 2: return XtSmGraphics::Item::SixelGraphicsGeometry;
+                case 3: return XtSmGraphics::Item::ReGISGraphicsGeometry;
+                default: return nullopt;
+            }
+        }();
+        if (!item.has_value())
+            return ApplyResult::Invalid;
+
+        auto const action = [&]() -> optional<XtSmGraphics::Action> {
+            switch (Pa) {
+                case 1: return XtSmGraphics::Action::Read;
+                case 2: return XtSmGraphics::Action::ResetToDefault;
+                case 3: return XtSmGraphics::Action::SetToValue;
+                case 4: return XtSmGraphics::Action::ReadLimit;
+                default: return nullopt;
+            }
+        }();
+        if (!action.has_value())
+            return ApplyResult::Invalid;
+
+        auto const value = [&]() -> XtSmGraphics::Value {
+            using Action = XtSmGraphics::Action;
+            switch (*action) {
+                case Action::Read:
+                case Action::ResetToDefault:
+                case Action::ReadLimit:
+                    return std::monostate{};
+                case Action::SetToValue:
+                    return *item == XtSmGraphics::Item::NumberOfColorRegisters
+                        ? XtSmGraphics::Value{Pv}
+                        : XtSmGraphics::Value{Size{Pv, Pu}};
+            }
+            return std::monostate{};
+        }();
+
+        emitCommand<XtSmGraphics>(_output, *item, *action, value);
+        return ApplyResult::Ok;
+    }
 } // }}}
 
-CommandBuilder::CommandBuilder(Logger _logger) :
-    logger_{ std::move(_logger) }
+CommandBuilder::CommandBuilder(Logger _logger,
+                               Size _maxImageSize,
+                               RGBAColor _backgroundColor,
+                               std::shared_ptr<ColorPalette> _imageColorPalette) :
+    logger_{ std::move(_logger) },
+    imageColorPalette_{ std::move(_imageColorPalette) },
+    maxImageSize_{ _maxImageSize },
+    backgroundColor_{ _backgroundColor }
 {
 }
 
@@ -745,22 +805,112 @@ void CommandBuilder::handleAction(ActionClass _actionClass, Action _action, char
         case Action::Hook: // this is actually state DCS_PassThrough
             sequence_.setCategory(FunctionCategory::DCS);
             sequence_.setFinalChar(static_cast<char>(_currentChar));
-            break;
-        case Action::Put: // DCS_PassThrough: DCS data string
+            if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
             {
-                uint8_t u8[4];
-                size_t const count = unicode::to_utf8(_currentChar, u8);
-                for (size_t i = 0; i < count; ++i)
-                    sequence_.dataString().push_back(u8[i]);
+                if (*funcSpec == DECSIXEL)
+                    hookSixel(sequence_);
+                else if (*funcSpec == DECRQSS)
+                    hookDECRQSS(sequence_);
             }
             break;
+        case Action::Put: // DCS_PassThrough: DCS data string
+            if (hookedParser_)
+                hookedParser_->pass(_currentChar);
+            break;
         case Action::Unhook: // DCS_PassThrough: DCS data string complete
-            emitSequence();
+            if (hookedParser_)
+            {
+                hookedParser_->finalize();
+                hookedParser_.reset();
+            }
             break;
         case Action::Ignore:
         case Action::Undefined:
             return;
     }
+}
+
+void CommandBuilder::hookSixel(Sequence const& _ctx)
+{
+    auto const Pa = _ctx.param_or(0, 1);
+    auto const Pb = _ctx.param_or(1, 2);
+
+    auto const aspectVertical = [](int Pa) {
+        switch (Pa) {
+            case 9:
+            case 8:
+            case 7:
+                return 1;
+            case 6:
+            case 5:
+                return 2;
+            case 4:
+            case 3:
+                return 3;
+            case 2:
+                return 5;
+            case 1:
+            case 0:
+            default:
+                return 2;
+        }
+    }(Pa);
+
+    auto const aspectHorizontal = 1;
+    auto const transparentBackground = Pb != 1;
+
+    sixelImageBuilder_ = make_unique<SixelImageBuilder>(
+        maxImageSize_,
+        aspectVertical,
+        aspectHorizontal,
+        transparentBackground
+            ? RGBAColor{0, 0, 0, 0}
+            : backgroundColor_,
+        usePrivateColorRegisters_
+            ? make_shared<ColorPalette>(maxImageRegisterCount_, min(maxImageRegisterCount_, 4096))
+            : imageColorPalette_
+    );
+
+    hookedParser_ = make_unique<SixelParser>(
+        *sixelImageBuilder_,
+        [this]() {
+            emitCommand<SixelImage>(
+                sixelImageBuilder_->size(),
+                sixelImageBuilder_->data()
+            );
+        }
+    );
+
+    hookedParser_->start();
+}
+
+void CommandBuilder::hookDECRQSS(Sequence const& /*_ctx*/)
+{
+    hookedParser_ = make_unique<SimpleStringCollector>(
+        [this](std::u32string const& _data) {
+            auto const s = [](std::u32string const& _dataString) -> optional<RequestStatusString::Value> {
+                auto const mappings = std::array<std::pair<std::u32string_view, RequestStatusString::Value>, 9>{
+                    pair{U"m",   RequestStatusString::Value::SGR},
+                    pair{U"\"p", RequestStatusString::Value::DECSCL},
+                    pair{U" q",  RequestStatusString::Value::DECSCUSR},
+                    pair{U"\"q", RequestStatusString::Value::DECSCA},
+                    pair{U"r",   RequestStatusString::Value::DECSTBM},
+                    pair{U"s",   RequestStatusString::Value::DECSLRM},
+                    pair{U"t",   RequestStatusString::Value::DECSLPP},
+                    pair{U"$|",  RequestStatusString::Value::DECSCPP},
+                    pair{U"*|",  RequestStatusString::Value::DECSNLS}
+                };
+                for (auto const& mapping : mappings)
+                    if (_dataString == mapping.first)
+                        return mapping.second;
+                return nullopt;
+            }(_data);
+
+            if (s.has_value())
+                emitCommand<RequestStatusString>(s.value());
+        }
+    );
+    hookedParser_->start();
 }
 
 void CommandBuilder::executeControlFunction(char _c0)
@@ -953,9 +1103,7 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
         case DECMODERESTORE: return impl::restoreDECModes(_ctx, _output);
         case DECMODESAVE: return impl::saveDECModes(_ctx, _output);
-
-        // DCS
-        case DECRQSS: return impl::DECRQSS(_ctx, _output);
+        case XTSMGRAPHICS: return impl::XTSMGRAPHICS(_ctx, _output);
 
         // OSC
         case SETTITLE:

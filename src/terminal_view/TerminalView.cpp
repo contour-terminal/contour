@@ -355,4 +355,9 @@ void TerminalView::setWindowTitle(std::string_view const& _title)
     events_.setWindowTitle(_title);
 }
 
+void TerminalView::discardImage(Image const& _image)
+{
+    renderer_.discardImage(_image);
+}
+
 } // namespace terminal::view

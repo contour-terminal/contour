@@ -17,6 +17,7 @@
 #include <terminal/CommandBuilder.h>
 #include <terminal/Commands.h>
 #include <terminal/Hyperlink.h>
+#include <terminal/Image.h>
 #include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/Logger.h>
 #include <terminal/Parser.h>
@@ -145,10 +146,12 @@ class DirectExecutor : public CommandVisitor {
     void visit(SetTopBottomMargin const& v) override;
     void visit(SetUnderlineColor const& v) override;
     void visit(SingleShiftSelect const& v) override;
+    void visit(SixelImage const& v) override;
     void visit(SoftTerminalReset const& v) override;
     void visit(InvalidCommand const& v) override;
     void visit(SaveMode const& v) override;
     void visit(RestoreMode const& v) override;
+    void visit(XtSmGraphics const& v) override;
 };
 
 /// Batches any drawing related command until synchronization point, or
@@ -227,9 +230,11 @@ class SynchronizedExecutor : public DirectExecutor {
     void visit(SetTopBottomMargin const& v) override { enqueue(v); }
     void visit(SetUnderlineColor const& v) override { enqueue(v); }
     void visit(SingleShiftSelect const& v) override { enqueue(v); }
+    void visit(SixelImage const& v) override { enqueue(v); }
     void visit(InvalidCommand const& v) override { enqueue(v); }
     void visit(SaveMode const& v) override { enqueue(v); }
     void visit(RestoreMode const& v) override { enqueue(v); }
+    void visit(XtSmGraphics const& v) override { enqueue(v); }
 };
 
 /**
@@ -259,12 +264,19 @@ class Screen {
            Logger const& _logger = Logger{},
            bool _logRaw = false,
            bool _logTrace = false,
-           std::optional<size_t> _maxHistoryLineCount = std::nullopt);
+           std::optional<size_t> _maxHistoryLineCount = std::nullopt,
+           Size _maxImageSize = Size{800, 600},
+           int _maxImageColorRegisters = 256,
+           bool _sixelCursorConformance = true
+    );
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
+
+    void setMaxImageColorRegisters(int _value) noexcept { commandBuilder_.setMaxImageColorRegisters(_value); }
+    void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
     constexpr Size cellPixelSize() const noexcept { return cellPixelSize_; }
 
@@ -385,11 +397,13 @@ class Screen {
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
     void requestPixelSize(RequestPixelSize::Area _area);
+    void sixelImage(Size _pixelSize, std::vector<uint8_t> const& _rgba);
     void requestStatusString(RequestStatusString::Value _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
     void setDynamicColor(DynamicColorName _name, RGBColor const& _color);
     void dumpState();
+    void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
     // reset screen
@@ -557,6 +571,8 @@ class Screen {
     void saveWindowTitle();
     void restoreWindowTitle();
 
+    void setMaxImageSize(Size _size) noexcept { commandBuilder_.setMaxImageSize(_size); }
+
   private:
     void setBuffer(ScreenBuffer::Type _type);
 
@@ -584,12 +600,16 @@ class Screen {
 
     VTType terminalId_ = VTType::VT525;
 
+    Modes modes_;
+    std::map<Mode, std::vector<bool>> savedModes_; //!< saved DEC modes
+
+    int maxImageColorRegisters_;
+    std::shared_ptr<ColorPalette> imageColorPalette_;
+    ImagePool imagePool_;
+
     CommandBuilder commandBuilder_;
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
-
-    Modes modes_;
-    std::map<Mode, std::vector<bool>> savedModes_; //!< saved DEC modes
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;
@@ -606,6 +626,7 @@ class Screen {
     CommandVisitor* commandExecutor_ = nullptr;
 
     std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    bool sixelCursorConformance_ = true;
 
     std::unique_ptr<Selector> selector_;
 };
