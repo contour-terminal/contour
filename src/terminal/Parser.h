@@ -16,6 +16,7 @@
 #include <terminal/ControlCode.h>
 
 #include <crispy/overloaded.h>
+#include <crispy/range.h>
 
 #include <unicode/utf8.h>
 
@@ -723,12 +724,7 @@ class Parser {
     {
     }
 
-    void parseFragment(iterator begin, iterator end)
-    {
-        begin_ = begin;
-        end_ = end;
-        parse();
-    }
+    void parseFragment(iterator _begin, iterator _end);
 
     void parseFragment(char const* s, size_t n)
     {
@@ -741,36 +737,21 @@ class Parser {
     }
 
   private:
-    void parse();
-    void processInput();
-
-    void invokeAction(ActionClass _actionClass, Action _action)
-    {
-        actionHandler_(_actionClass, _action, currentChar());
-    }
-
-    bool dataAvailable() const noexcept { return begin_ != end_; }
-    void advance() noexcept { ++begin_; }
-    uint8_t currentByte() const noexcept { return *begin_; }
-    char32_t currentChar() const noexcept { return currentChar_; }
+    void processInput(char32_t _ch);
 
   private:
     State state_ = State::Ground;
     unicode::utf8_decoder_state utf8DecoderState_{};
 
-    char32_t currentChar_{};
-    iterator begin_ = nullptr;
-    iterator end_ = nullptr;
-
     ActionHandler actionHandler_;
     ParseError const parseError_;
 };
 
-inline void Parser::parse()
+inline void Parser::parseFragment(iterator _begin, iterator _end)
 {
     static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-    while (dataAvailable())
+    for (auto const current : crispy::range(_begin, _end))
     {
         std::visit(
             overloaded{
@@ -778,39 +759,36 @@ inline void Parser::parse()
                 [&](unicode::Invalid) {
                     if (parseError_)
                         parseError_("Invalid UTF-8 byte sequence received.");
-                    currentChar_ = ReplacementCharacter;
-                    processInput();
+                    processInput(ReplacementCharacter);
                 },
                 [&](unicode::Success const& success) {
-                    currentChar_ = success.value;
-                    // std::cout << fmt::format("VTParser.parse: ch = {:04X}\n", static_cast<unsigned>(currentChar_));
-                    processInput();
+                    // std::cout << fmt::format("VTParser.parse: ch = {:04X}\n", static_cast<unsigned>(success.value));
+                    processInput(success.value);
                 },
             },
-            unicode::from_utf8(utf8DecoderState_, currentByte())
+            unicode::from_utf8(utf8DecoderState_, current)
         );
-
-        advance();
     }
 }
 
-inline void Parser::processInput()
+inline void Parser::processInput(char32_t _ch)
 {
     auto const s = static_cast<size_t>(state_);
 
     ParserTable static constexpr table = ParserTable::get();
 
-    auto const ch = currentChar() < 0xFF ? currentChar() : static_cast<char32_t>(ParserTable::UnicodeCodepoint::Value);
+    auto const ch = _ch < 0xFF ? _ch : static_cast<char32_t>(ParserTable::UnicodeCodepoint::Value);
 
     if (auto const t = table.transitions[s][ch]; t != State::Undefined)
     {
-        invokeAction(ActionClass::Leave, table.exitEvents[s]);
-        invokeAction(ActionClass::Transition, table.events[s][ch]);
+        // actionHandler_(_actionClass, _action, currentChar());
+        actionHandler_(ActionClass::Leave, table.exitEvents[s], _ch);
+        actionHandler_(ActionClass::Transition, table.events[s][ch], _ch);
         state_ = t;
-        invokeAction(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)]);
+        actionHandler_(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], _ch);
     }
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
-        invokeAction(ActionClass::Event, a);
+        actionHandler_(ActionClass::Event, a, _ch);
     else if (parseError_)
         parseError_(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
 }
