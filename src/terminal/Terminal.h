@@ -60,7 +60,7 @@ class Terminal : public ScreenEvents {
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     };
 
-    Terminal(WindowSize _winSize,
+    Terminal(Size _winSize,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
@@ -75,8 +75,8 @@ class Terminal : public ScreenEvents {
     /// Retrieves reference to the underlying PTY device.
     PseudoTerminal& device() noexcept { return pty_; }
 
-    WindowSize screenSize() const noexcept { return pty_.screenSize(); }
-    void resizeScreen(WindowSize const& _newWindowSize);
+    Size screenSize() const noexcept { return pty_.screenSize(); }
+    void resizeScreen(Size const& _newSize);
 
     // {{{ input proxy
     // Sends given input event to connected slave.

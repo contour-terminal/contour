@@ -32,7 +32,7 @@ set(terminal_HEADERS
     Terminal.h
     TerminalProcess.h
     VTType.h
-    WindowSize.h
+    Size.h
 )
 
 set(terminal_SOURCES

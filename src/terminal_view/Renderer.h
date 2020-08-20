@@ -53,7 +53,7 @@ class Renderer {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     Renderer(Logger _logger,
-             WindowSize const& _screenSize,
+             Size const& _screenSize,
              FontConfig const& _fonts,
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,
@@ -78,7 +78,7 @@ class Renderer {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    constexpr void setScreenSize(WindowSize const& _screenSize) noexcept
+    constexpr void setScreenSize(Size const& _screenSize) noexcept
     {
         screenCoordinates_.screenSize = _screenSize;
     }

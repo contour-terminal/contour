@@ -11,7 +11,7 @@
 namespace terminal::view {
 
 struct ScreenCoordinates {
-    WindowSize screenSize;
+    Size screenSize;
     int cellWidth;
     int cellHeight;
     int textBaseline;

@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/WindowSize.h>
+#include <terminal/Size.h>
 
 #include <map>
 #include <string>
@@ -31,7 +31,7 @@
 
 namespace terminal {
 
-WindowSize currentWindowSize();
+Size currentWindowSize();
 
 class PseudoTerminal {
 public:
@@ -49,7 +49,7 @@ public:
 	 *
 	 * @see Process.
 	 */
-	explicit PseudoTerminal(WindowSize const& windowSize);
+	explicit PseudoTerminal(Size const& windowSize);
 	virtual ~PseudoTerminal();
 
 	/// Releases this PTY early.
@@ -74,10 +74,10 @@ public:
 	auto write(char const* buf, size_t size) -> ssize_t;
 
     /// @returns current underlying window size in characters width and height.
-    WindowSize screenSize() const noexcept;
+    Size screenSize() const noexcept;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(WindowSize const& _newWindowSize);
+    virtual void resizeScreen(Size const& _newSize);
 
 	/// @returns The native master PTY handle.
 	PtyHandle master() const noexcept { return master_; }
@@ -89,7 +89,7 @@ public:
 
 private:
 	PtyHandle master_;
-    WindowSize size_;
+    Size size_;
 
 #if defined(__unix__) || defined(__APPLE__)
 	PtyHandle slave_;

@@ -19,7 +19,7 @@
 #include <terminal/Color.h>
 #include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/Process.h>
-#include <terminal/WindowSize.h>
+#include <terminal/Size.h>
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/DecorationRenderer.h> // Decorator
 
@@ -78,7 +78,7 @@ inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;
 
-    terminal::WindowSize terminalSize;
+    terminal::Size terminalSize;
 
     std::optional<int> maxHistoryLineCount;
     int historyScrollMultiplier;

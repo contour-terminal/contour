@@ -23,7 +23,7 @@ class TerminalProcess : public Terminal, public Process {
   public:
     TerminalProcess(
         Process::ExecInfo const& _shell,
-        WindowSize _winSize,
+        Size _winSize,
         Terminal::Events& _eventListener,
         std::optional<size_t> _maxHistoryLineCount,
         std::chrono::milliseconds _cursorBlinkInterval,

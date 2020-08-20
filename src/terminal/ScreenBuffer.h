@@ -18,7 +18,7 @@
 #include <terminal/Commands.h>              // Coordinate, cursor_pos_t, Mode
 #include <terminal/Hyperlink.h>
 #include <terminal/Logger.h>
-#include <terminal/WindowSize.h>
+#include <terminal/Size.h>
 
 #include <unicode/width.h>
 
@@ -380,7 +380,7 @@ struct ScreenBuffer {
 
     using Renderer = std::function<void(Coordinate const&, Cell const&)>;
 
-	ScreenBuffer(Type _type, WindowSize const& _size, Modes& _modes, std::optional<size_t> _maxHistoryLineCount)
+	ScreenBuffer(Type _type, Size const& _size, Modes& _modes, std::optional<size_t> _maxHistoryLineCount)
 		: type_{ _type },
           size_{ _size },
           modes_{ _modes },
@@ -415,7 +415,7 @@ struct ScreenBuffer {
     std::optional<int> findMarkerForward(int _currentCursorLine) const;
 
     Type type_;
-	WindowSize size_;
+	Size size_;
     std::reference_wrapper<Modes> modes_;
     std::optional<size_t> maxHistoryLineCount_;
 	Margin margin_;
@@ -443,8 +443,8 @@ struct ScreenBuffer {
 	// Applies LF but also moves cursor to given column @p _column.
 	void linefeed(cursor_pos_t _column);
 
-	void resize(WindowSize const& _winSize);
-	WindowSize const& size() const noexcept { return size_; }
+	void resize(Size const& _winSize);
+	Size const& size() const noexcept { return size_; }
 
 	void scrollUp(cursor_pos_t n);
 	void scrollUp(cursor_pos_t n, Margin const& margin);

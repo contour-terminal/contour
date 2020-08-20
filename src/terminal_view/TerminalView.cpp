@@ -42,7 +42,7 @@ inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _op
 }
 
 TerminalView::TerminalView(steady_clock::time_point _now,
-                           WindowSize const& _winSize,
+                           Size const& _winSize,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
@@ -134,7 +134,7 @@ void TerminalView::setFont(FontConfig const& _fonts)
     fonts_ = _fonts;
     renderer_.setFont(_fonts);
 
-    auto const newScreenSize = terminal::WindowSize{
+    auto const newScreenSize = terminal::Size{
         static_cast<unsigned short>(size_.width() / renderer_.cellWidth()),
         static_cast<unsigned short>(size_.height() / renderer_.cellHeight())
     };
@@ -166,7 +166,7 @@ bool TerminalView::setFontSize(int _fontSize)
     return true;
 }
 
-TerminalView::WindowMargin TerminalView::computeMargin(WindowSize const& ws,
+TerminalView::WindowMargin TerminalView::computeMargin(Size const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
@@ -188,7 +188,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
         static_cast<int>(_height)
     };
 
-    auto const newScreenSize = terminal::WindowSize{
+    auto const newScreenSize = terminal::Size{
         static_cast<unsigned short>(_width / renderer_.cellWidth()),
         static_cast<unsigned short>(_height / renderer_.cellHeight())
     };
@@ -222,7 +222,7 @@ void TerminalView::setCursorShape(CursorShape _shape)
     terminal().setCursorShape(_shape);
 }
 
-bool TerminalView::setTerminalSize(terminal::WindowSize const& _newSize)
+bool TerminalView::setTerminalSize(terminal::Size const& _newSize)
 {
     if (process_.terminal().screenSize() == _newSize)
         return false;

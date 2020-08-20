@@ -1177,7 +1177,7 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
     else
         setFontSize(newProfile.fontSize);
 
-    auto const newScreenSize = terminal::WindowSize{
+    auto const newScreenSize = terminal::Size{
         size().width() / fonts_.regular.first.get().maxAdvance(),
         size().height() / fonts_.regular.first.get().lineHeight()
     };

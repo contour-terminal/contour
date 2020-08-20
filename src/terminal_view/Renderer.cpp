@@ -22,7 +22,7 @@ using std::chrono::steady_clock;
 namespace terminal::view {
 
 Renderer::Renderer(Logger _logger,
-                   WindowSize const& _screenSize,
+                   Size const& _screenSize,
                    FontConfig const& _fonts,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,

@@ -17,17 +17,27 @@
 
 namespace terminal {
 
-struct [[nodiscard]] WindowSize {
+struct [[nodiscard]] Size {
     int width;
 	int height;
 };
 
-constexpr bool operator==(WindowSize const& _a, WindowSize const& _b) noexcept
+constexpr int area(Size size) noexcept
+{
+    return size.width * size.height;
+}
+
+constexpr bool operator<(Size a, Size b) noexcept
+{
+    return area(a) < area(b);
+}
+
+constexpr bool operator==(Size const& _a, Size const& _b) noexcept
 {
     return _a.width == _b.width && _a.height == _b.height;
 }
 
-constexpr bool operator!=(WindowSize const& _a, WindowSize const& _b) noexcept
+constexpr bool operator!=(Size const& _a, Size const& _b) noexcept
 {
     return !(_a == _b);
 }
@@ -36,7 +46,7 @@ constexpr bool operator!=(WindowSize const& _a, WindowSize const& _b) noexcept
 
 namespace fmt {
     template <>
-    struct formatter<terminal::WindowSize> {
+    struct formatter<terminal::Size> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
         {
@@ -44,9 +54,9 @@ namespace fmt {
         }
 
         template <typename FormatContext>
-        auto format(const terminal::WindowSize& value, FormatContext& ctx)
+        auto format(const terminal::Size& value, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}, {})", value.width, value.height);
+            return format_to(ctx.out(), "{}x{}", value.width, value.height);
         }
     };
 }

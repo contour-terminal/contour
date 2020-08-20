@@ -74,7 +74,7 @@ namespace {
 
 namespace terminal {
 
-WindowSize currentWindowSize()
+Size currentWindowSize()
 {
 #if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
@@ -82,12 +82,12 @@ WindowSize currentWindowSize()
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1)
         throw runtime_error{strerror(errno)};
 
-    return WindowSize{w.ws_col, w.ws_row};
+    return Size{w.ws_col, w.ws_row};
 #else
     CONSOLE_SCREEN_BUFFER_INFO csbi{};
     HANDLE hConsole{ GetStdHandle(STD_OUTPUT_HANDLE) };
     if (GetConsoleScreenBufferInfo(hConsole, &csbi))
-        return WindowSize{
+        return Size{
             static_cast<unsigned short>(csbi.srWindow.Right - csbi.srWindow.Left + 1),
             static_cast<unsigned short>(csbi.srWindow.Bottom - csbi.srWindow.Top + 1)
     };
@@ -96,7 +96,7 @@ WindowSize currentWindowSize()
 #endif
 }
 
-PseudoTerminal::PseudoTerminal(WindowSize const& _windowSize) :
+PseudoTerminal::PseudoTerminal(Size const& _windowSize) :
     size_{ _windowSize }
 {
 #if defined(__unix__) || defined(__APPLE__)
@@ -253,29 +253,29 @@ auto PseudoTerminal::write(char const* buf, size_t size) -> ssize_t
 #endif
 }
 
-WindowSize PseudoTerminal::screenSize() const noexcept
+Size PseudoTerminal::screenSize() const noexcept
 {
     return size_;
 }
 
-void PseudoTerminal::resizeScreen(WindowSize const& _newWindowSize)
+void PseudoTerminal::resizeScreen(Size const& _newSize)
 {
 #if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
-    w.ws_col = _newWindowSize.width;
-    w.ws_row = _newWindowSize.height;
+    w.ws_col = _newSize.width;
+    w.ws_row = _newSize.height;
 
     if (ioctl(master_, TIOCSWINSZ, &w) == -1)
         throw runtime_error{strerror(errno)};
 #elif defined(_MSC_VER)
     COORD coords;
-    coords.X = _newWindowSize.width;
-    coords.Y = _newWindowSize.height;
+    coords.X = _newSize.width;
+    coords.Y = _newSize.height;
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)
         throw runtime_error{ GetLastErrorAsString() };
 #endif
-    size_ = _newWindowSize;
+    size_ = _newSize;
 }
 
 }  // namespace terminal

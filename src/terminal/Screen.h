@@ -24,7 +24,7 @@
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
 #include <terminal/VTType.h>
-#include <terminal/WindowSize.h>
+#include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
@@ -248,7 +248,7 @@ class Screen {
      * @param _logTrace whether or not to log VT sequences in trace mode.
      * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
-    Screen(WindowSize const& _size,
+    Screen(Size const& _size,
            ScreenEvents& _eventListener,
            Logger const& _logger = Logger{},
            bool _logRaw = false,
@@ -387,8 +387,8 @@ class Screen {
     void saveCursor();
     void restoreCursor();
 
-    WindowSize const& size() const noexcept { return size_; }
-    void resize(WindowSize const& _newSize);
+    Size const& size() const noexcept { return size_; }
+    void resize(Size const& _newSize);
 
     /// {{{ viewport management API
     int scrollOffset() const noexcept { return scrollOffset_; }
@@ -565,7 +565,7 @@ class Screen {
     ScreenBuffer alternateBuffer_;
     ScreenBuffer* buffer_;
 
-    WindowSize size_;
+    Size size_;
     std::optional<size_t> maxHistoryLineCount_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};

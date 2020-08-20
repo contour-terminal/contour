@@ -96,7 +96,7 @@ std::optional<int> ScreenBuffer::findMarkerForward(int _currentCursorLine) const
     return nullopt;
 }
 
-void ScreenBuffer::resize(WindowSize const& _newSize)
+void ScreenBuffer::resize(Size const& _newSize)
 {
     if (_newSize.height > size_.height)
     {

@@ -34,7 +34,7 @@ namespace
     class MockScreen : public MockScreenEvents,
                        public Screen {
       public:
-        explicit MockScreen(WindowSize const& _size) :
+        explicit MockScreen(Size const& _size) :
             Screen{
                 _size,
                 *this,
@@ -52,7 +52,7 @@ namespace
 
 TEST_CASE("Screen.isLineVisible", "[screen]")
 {
-    auto screen = MockScreen{WindowSize{2, 1}};
+    auto screen = MockScreen{Size{2, 1}};
     screen.write("10203040");
     REQUIRE("40" == screen.renderTextLine(1));
     REQUIRE("30" == screen.renderTextLine(0));

@@ -19,7 +19,7 @@
 #include <terminal/Color.h>
 #include <terminal/TerminalProcess.h>
 #include <terminal/Logger.h>
-#include <terminal/WindowSize.h>
+#include <terminal/Size.h>
 
 #include <crispy/text/Font.h>
 
@@ -55,7 +55,7 @@ class TerminalView : private Terminal::Events {
     };
 
     TerminalView(std::chrono::steady_clock::time_point _now,
-                 terminal::WindowSize const& _winSize,
+                 terminal::Size const& _winSize,
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
@@ -91,7 +91,7 @@ class TerminalView : private Terminal::Events {
 
     void setFont(FontConfig const& _fonts);
     bool setFontSize(int _fontSize);
-    bool setTerminalSize(WindowSize const& _newSize);
+    bool setTerminalSize(Size const& _newSize);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
@@ -122,7 +122,7 @@ class TerminalView : private Terminal::Events {
         int bottom;
     };
 
-    WindowMargin computeMargin(WindowSize const& ws, unsigned _width, unsigned _height) const noexcept;
+    WindowMargin computeMargin(Size const& ws, unsigned _width, unsigned _height) const noexcept;
 
     constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
 

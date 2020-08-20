@@ -28,7 +28,7 @@ using namespace std::placeholders;
 
 namespace terminal {
 
-Terminal::Terminal(WindowSize _winSize,
+Terminal::Terminal(Size _winSize,
                    Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
@@ -364,11 +364,11 @@ Cell const* Terminal::at(Coordinate const& _coord) const
         return nullptr;
 }
 
-void Terminal::resizeScreen(WindowSize const& _newWindowSize)
+void Terminal::resizeScreen(Size const& _newSize)
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    screen_.resize(_newWindowSize);
-    pty_.resizeScreen(_newWindowSize);
+    screen_.resize(_newSize);
+    pty_.resizeScreen(_newSize);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)

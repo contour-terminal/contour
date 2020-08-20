@@ -43,7 +43,7 @@ using namespace crispy;
 
 namespace terminal {
 
-Screen::Screen(WindowSize const& _size,
+Screen::Screen(Size const& _size,
                ScreenEvents& _eventListener,
                Logger const& _logger,
                bool _logRaw,
@@ -88,7 +88,7 @@ void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
     // Alternate buffer does not have a history usually (and for now we keep it that way).
 }
 
-void Screen::resize(WindowSize const& _newSize)
+void Screen::resize(Size const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
     primaryBuffer_.resize(_newSize);
@@ -981,7 +981,7 @@ void Screen::setMode(Mode _mode, bool _enable)
 
             // Pre-resize in case the event callback right after is not actually resizing the window
             // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
-            resize(WindowSize{columns, rows});
+            resize(Size{columns, rows});
 
             eventListener_.resizeWindow(columns, rows, unitInPixels);
 
