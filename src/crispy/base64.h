@@ -147,7 +147,7 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 
     // count input bytes (excluding any trailing pad bytes)
     Iterator input = begin;
-    while (index(input) <= 63)
+    while (input != end && index(input) <= 63)
         input++;
     size_t nprbytes = std::distance(begin, input);
     size_t decodedCount = ((nprbytes + 3) / 4) * 3;
