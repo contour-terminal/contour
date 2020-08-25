@@ -236,40 +236,43 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
 
 GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
 {
-    FontStyle textStyle = FontStyle::Regular;
+    if ((attributes_.styles & CharacterStyleMask::Hidden))
+        return {};
 
-    if (attributes_.styles & CharacterStyleMask::Bold)
-        textStyle |= FontStyle::Bold;
-
-    if (attributes_.styles & CharacterStyleMask::Italic)
-        textStyle |= FontStyle::Italic;
+    FontStyle const textStyle = [](CharacterStyleMask _styles) -> FontStyle {
+        auto const bold = _styles & CharacterStyleMask::Bold
+            ? FontStyle::Bold
+            : FontStyle::Regular;
+        auto const italic = _styles & CharacterStyleMask::Italic
+            ? FontStyle::Italic
+            : FontStyle::Regular;
+        return FontStyle::Regular | bold | italic;
+    }(attributes_.styles);
 
     if (attributes_.styles & CharacterStyleMask::Blinking)
     {
         // TODO: update textshaper's shader to blink (requires current clock knowledge)
     }
 
-    if ((attributes_.styles & CharacterStyleMask::Hidden))
-        return {};
+    bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
-    auto& textFont = [&](FontStyle _style) -> FontList& {
+    FontList& font = [](FontConfig& _fonts, FontStyle _style, bool _isEmoji) -> FontList& {
+        if (_isEmoji)
+            return _fonts.emoji;
+
         switch (_style)
         {
             case FontStyle::Bold:
-                return fonts_.bold;
+                return _fonts.bold;
             case FontStyle::Italic:
-                return fonts_.italic;
+                return _fonts.italic;
             case FontStyle::BoldItalic:
-                return fonts_.boldItalic;
+                return _fonts.boldItalic;
             case FontStyle::Regular:
-                return fonts_.regular;
+                return _fonts.regular;
         }
-        return fonts_.regular;
-    }(textStyle);
-
-    bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-    FontList& font = isEmojiPresentation ? fonts_.emoji
-                                         : textFont;
+        return _fonts.regular;
+    }(fonts_, textStyle, isEmojiPresentation);
 
     auto const advanceX = fonts_.regular.first.get().maxAdvance();
 
