@@ -15,7 +15,7 @@
 
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
-#include <terminal_view/TextRenderer.h> // FIXME CellSize lol
+#include <terminal/Size.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -37,14 +37,14 @@ class OpenGLRenderer :
                    QMatrix4x4 const& _projectionMatrix,
                    int _leftMargin,
                    int _bottomMargin,
-                   CellSize const& _cellSize);
+                   Size const& _cellSize);
 
     ~OpenGLRenderer();
 
     void clearCache();
 
     constexpr void setMargin(int _left, int _bottom) noexcept { leftMargin_ = _left; bottomMargin_ = _bottom; }
-    constexpr void setCellSize(CellSize const& _cellSize) noexcept { cellSize_ = _cellSize; }
+    constexpr void setCellSize(Size const& _cellSize) noexcept { cellSize_ = _cellSize; }
     constexpr void setProjection(QMatrix4x4 const& _projectionMatrix) noexcept { projectionMatrix_ = _projectionMatrix; }
 
     void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
@@ -69,7 +69,7 @@ class OpenGLRenderer :
 
     int leftMargin_ = 0;
     int bottomMargin_ = 0;
-    CellSize cellSize_;
+    Size cellSize_;
 
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;

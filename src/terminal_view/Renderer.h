@@ -65,7 +65,7 @@ class Renderer {
 
     int cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
     int cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
-    CellSize cellSize() const noexcept { return CellSize{cellWidth(), cellHeight()}; }
+    Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);

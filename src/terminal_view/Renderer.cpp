@@ -61,7 +61,8 @@ Renderer::Renderer(Logger _logger,
         renderTarget_.coloredAtlasAllocator(),
         screenCoordinates_,
         _colorProfile,
-        _fonts
+        _fonts,
+        cellSize()
     },
     decorationRenderer_{
         renderTarget_,
@@ -82,7 +83,6 @@ Renderer::Renderer(Logger _logger,
         canonicalColor(_colorProfile.cursor)
     }
 {
-    textRenderer_.setCellSize(cellSize());
 }
 
 void Renderer::clearCache()

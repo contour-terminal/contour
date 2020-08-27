@@ -52,11 +52,13 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                            ScreenCoordinates const& _screenCoordinates,
                            ColorProfile const& _colorProfile,
-                           FontConfig const& _fonts) :
+                           FontConfig const& _fonts,
+                           Size const& _cellSize) :
     renderMetrics_{ _renderMetrics },
     screenCoordinates_{ _screenCoordinates },
     colorProfile_{ _colorProfile },
     fonts_{ _fonts },
+    cellSize_{ _cellSize },
     textShaper_{},
     commandListener_{ _commandListener },
     monochromeAtlas_{ _monochromeAtlasAllocator },
@@ -78,7 +80,7 @@ void TextRenderer::clearCache()
 #endif
 }
 
-void TextRenderer::setCellSize(CellSize const& _cellSize)
+void TextRenderer::setCellSize(Size const& _cellSize)
 {
     cellSize_ = _cellSize;
 }

@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/OpenGLRenderer.h>
+#include <terminal_view/TextRenderer.h>
 
 #include <crispy/algorithm.h>
 
@@ -30,7 +31,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                QMatrix4x4 const& _projectionMatrix,
                                int _leftMargin,
                                int _bottomMargin,
-                               CellSize const& _cellSize) :
+                               Size const& _cellSize) :
     projectionMatrix_{ _projectionMatrix },
     leftMargin_{ _leftMargin },
     bottomMargin_{ _bottomMargin },

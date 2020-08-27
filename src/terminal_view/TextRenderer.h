@@ -105,14 +105,6 @@ namespace std
 
 namespace terminal::view {
 
-struct CellSize {
-    int width;
-    int height;
-};
-constexpr bool operator==(CellSize const& a, CellSize const& b) noexcept { return a.width == b.width && a.height == b.height; }
-constexpr bool operator!=(CellSize const& a, CellSize const& b) noexcept { return !(a == b); }
-// TODO: fmt::formatter<CellSize>
-
 struct RenderMetrics;
 
 /// Text Rendering Pipeline
@@ -124,11 +116,12 @@ class TextRenderer {
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                  ScreenCoordinates const& _screenCoordinates,
                  ColorProfile const& _colorProfile,
-                 FontConfig const& _fonts);
+                 FontConfig const& _fonts,
+                 Size const& _cellSize);
 
     void setFont(FontConfig const& _fonts);
 
-    void setCellSize(CellSize const& _cellSize);
+    void setCellSize(Size const& _cellSize);
     void setColorProfile(ColorProfile const& _colorProfile);
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
@@ -216,7 +209,7 @@ class TextRenderer {
 
     // target surface rendering
     //
-    CellSize cellSize_;
+    Size cellSize_;
     crispy::text::TextShaper textShaper_;
     crispy::atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;
