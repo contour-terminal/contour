@@ -144,18 +144,19 @@ uint64_t Renderer::render(Terminal& _terminal,
                           terminal::Coordinate const& _currentMousePosition,
                           bool _pressure)
 {
+    auto const pressure = _pressure && _terminal.screenBufferType() == ScreenBuffer::Type::Main;
     metrics_.clear();
-    textRenderer_.setPressure(_pressure);
+    textRenderer_.setPressure(pressure);
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
-    if (!_pressure)
+    if (!pressure)
         renderCursor(_terminal);
 
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
-        if (!_pressure && _terminal.screen().contains(_currentMousePosition))
+        if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
             auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
             if (cellAtMouse.hyperlink())
