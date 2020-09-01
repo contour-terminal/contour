@@ -115,10 +115,10 @@ constexpr CharsetMap createDutchCharset()
     return result;
 }
 
-/// Finish:
+/// Finnish:
 ///     ESC ( C
 ///     ESC ( 5
-constexpr CharsetMap createFinishCharset()
+constexpr CharsetMap createFinnishCharset()
 {
     auto result = usasciiCharset();
 
@@ -260,7 +260,7 @@ CharsetMap const* charsetMap(CharsetId _id) noexcept
 {
     static auto const british = createBritishCharset();
     static auto const dutch = createDutchCharset();
-    static auto const finish = createFinishCharset();
+    static auto const finish = createFinnishCharset();
     static auto const french = createFrenchCharset();
     static auto const frenchCanadian = createFrenchCanadianCharset();
     static auto const german = createGermanCharset();
@@ -275,7 +275,7 @@ CharsetMap const* charsetMap(CharsetId _id) noexcept
     {
         case CharsetId::British: return &british;
         case CharsetId::Dutch: return &dutch;
-        case CharsetId::Finish: return &finish;
+        case CharsetId::Finnish: return &finish;
         case CharsetId::French: return &french;
         case CharsetId::FrenchCanadian: return &frenchCanadian;
         case CharsetId::German: return &german;

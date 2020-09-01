@@ -190,7 +190,7 @@ string to_string(CharsetId charset)
     {
         case CharsetId::British: return "British";
         case CharsetId::Dutch: return "Dutch";
-        case CharsetId::Finish: return "Finish";
+        case CharsetId::Finnish: return "Finnish";
         case CharsetId::French: return "French";
         case CharsetId::FrenchCanadian: return "FrenchCanadian";
         case CharsetId::German: return "German";

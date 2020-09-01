@@ -273,7 +273,7 @@ enum class CharsetId {
 
     British,
     Dutch,
-    Finish,
+    Finnish,
     French,
     FrenchCanadian,
     German,
