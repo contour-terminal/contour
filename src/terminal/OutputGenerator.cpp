@@ -225,6 +225,16 @@ void OutputGenerator::operator()(Command const& command)
         [&](SaveCursor) { write("\0337"); },
         [&](RestoreCursor) { write("\0338"); },
         [&](RequestDynamicColor const& v) { write("\033];?\x07", setDynamicColorCommand(v.name)); },
+        [&](RequestPixelSize const& v) {
+            auto const s = [&](auto value) -> string_view {
+                switch (value) {
+                    case RequestPixelSize::Area::TextArea: return "";
+                    case RequestPixelSize::Area::WindowArea: return ";2";
+                }
+                return "";
+            }(v.area);
+            write("\033[14{}t", s);
+        },
         [&](RequestStatusString const& v) {
             auto const s = [&](auto value) -> string_view {
                 switch (value) {

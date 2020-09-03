@@ -899,6 +899,17 @@ constexpr DynamicColorName getResetDynamicColorCommand(int value)
     }
 }
 
+///  Input: CSI 14 t (for text area size)
+///  Input: CSI 14; 2 t (for full window size)
+/// Output: CSI 14 ; width ; height ; t
+struct RequestPixelSize {
+    enum class Area {
+        TextArea,
+        WindowArea, // or: View
+    };
+    Area area;
+};
+
 /// Requests the current color value of a DynamicColorName.
 struct RequestDynamicColor {
     DynamicColorName name;
@@ -1034,6 +1045,7 @@ using Command = std::variant<
     ReportExtendedCursorPosition,
     RequestDynamicColor,
     RequestMode,
+    RequestPixelSize,
     RequestStatusString,
     RequestTabStops,
     ResetDynamicColor,
@@ -1126,6 +1138,7 @@ class CommandVisitor {
     virtual void visit(ReportExtendedCursorPosition const& v) = 0;
     virtual void visit(RequestDynamicColor const& v) = 0;
     virtual void visit(RequestMode const& v) = 0;
+    virtual void visit(RequestPixelSize const& v) = 0;
     virtual void visit(RequestStatusString const& v) = 0;
     virtual void visit(RequestTabStops const& v) = 0;
     virtual void visit(ResetDynamicColor const& v) = 0;
@@ -1208,6 +1221,7 @@ class CommandVisitor {
     void operator()(ReportExtendedCursorPosition const& v) { visit(v); }
     void operator()(RequestDynamicColor const& v) { visit(v); }
     void operator()(RequestMode const& v) { visit(v); }
+    void operator()(RequestPixelSize const& v) { visit(v); }
     void operator()(RequestStatusString const& v) { visit(v); }
     void operator()(RequestTabStops const& v) { visit(v); }
     void operator()(ResetDynamicColor const& v) { visit(v); }

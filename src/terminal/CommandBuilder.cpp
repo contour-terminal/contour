@@ -619,6 +619,7 @@ namespace impl // {{{ some command generator helpers
             {
                 case 4: return emitCommand<ResizeWindow>(_output, 0, 0, ResizeWindow::Unit::Pixels); // this means, resize to full display size
                 case 8: return emitCommand<ResizeWindow>(_output, 0, 0, ResizeWindow::Unit::Characters); // i.e. full display size
+                case 14: return emitCommand<RequestPixelSize>(_output);
                 default: return ApplyResult::Unsupported;
             }
         }

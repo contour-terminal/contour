@@ -93,6 +93,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}
 {
+    terminal().screen().setCellPixelSize(renderer_.cellSize());
 }
 
 optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
@@ -160,6 +161,8 @@ bool TerminalView::setFontSize(int _fontSize)
 {
     if (!renderer_.setFontSize(_fontSize))
         return false;
+
+    terminal().screen().setCellPixelSize(renderer_.cellSize());
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
     resize(size_.width(), size_.height());

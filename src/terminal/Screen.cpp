@@ -1181,6 +1181,23 @@ void Screen::requestDynamicColor(DynamicColorName _name)
     }
 }
 
+void Screen::requestPixelSize(RequestPixelSize::Area _area)
+{
+    switch (_area)
+    {
+        case RequestPixelSize::Area::WindowArea:
+            [[fallthrough]]; // TODO
+        case RequestPixelSize::Area::TextArea:
+            // Result is CSI  4 ;  height ;  width t
+            reply(
+                "\033[4;{};{}t",
+                cellPixelSize_.height * size_.height,
+                cellPixelSize_.width * size_.width
+            );
+            break;
+    }
+}
+
 void Screen::requestStatusString(RequestStatusString::Value _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
@@ -1315,6 +1332,7 @@ void DirectExecutor::visit(ReportCursorPosition const&) { screen_.reportCursorPo
 void DirectExecutor::visit(ReportExtendedCursorPosition const&) { screen_.reportExtendedCursorPosition(); }
 void DirectExecutor::visit(RequestDynamicColor const& v) { screen_.requestDynamicColor(v.name); }
 void DirectExecutor::visit(RequestMode const& v) { screen_.requestMode(v.mode); }
+void DirectExecutor::visit(RequestPixelSize const& v) { screen_.requestPixelSize(v.area); }
 void DirectExecutor::visit(RequestStatusString const& v) { screen_.requestStatusString(v.value); }
 void DirectExecutor::visit(RequestTabStops const&) { screen_.requestTabStops(); }
 void DirectExecutor::visit(ResetDynamicColor const& v) { screen_.resetDynamicColor(v.name); }

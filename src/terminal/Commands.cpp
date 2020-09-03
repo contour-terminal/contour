@@ -401,6 +401,9 @@ class MnemonicBuilder {
     void operator()(RequestDynamicColor v) {
         build("REQDYNCOLOR", fmt::format("{}", v.name));
     }
+    void operator()(RequestPixelSize v) {
+        build("WINMANIP_REQPIXELS", fmt::format("{}", v.area == RequestPixelSize::Area::TextArea ? "text" : "window"));
+    }
     void operator()(RequestStatusString) {
         build("DECRQSS");
     }

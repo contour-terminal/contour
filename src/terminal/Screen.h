@@ -116,6 +116,7 @@ class DirectExecutor : public CommandVisitor {
     void visit(ReportExtendedCursorPosition const& v) override;
     void visit(RequestDynamicColor const& v) override;
     void visit(RequestMode const& v) override;
+    void visit(RequestPixelSize const& v) override;
     void visit(RequestStatusString const& v) override;
     void visit(RequestTabStops const& v) override;
     void visit(ResetDynamicColor const& v) override;
@@ -260,6 +261,13 @@ class Screen {
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
 
+    constexpr Size cellPixelSize() const noexcept { return cellPixelSize_; }
+
+    constexpr void setCellPixelSize(Size _cellPixelSize)
+    {
+        cellPixelSize_ = _cellPixelSize;
+    }
+
     void setTerminalId(VTType _id) noexcept
     {
         terminalId_ = _id;
@@ -371,6 +379,7 @@ class Screen {
     void applicationKeypadMode(bool _enable);
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
+    void requestPixelSize(RequestPixelSize::Area _area);
     void requestStatusString(RequestStatusString::Value _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
@@ -552,6 +561,8 @@ class Screen {
     bool logRaw_ = false;
     bool logTrace_ = false;
     bool focused_ = true;
+
+    Size cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
 
     CommandBuilder commandBuilder_;
     parser::Parser parser_;
