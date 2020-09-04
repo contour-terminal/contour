@@ -42,7 +42,39 @@ constexpr bool operator!=(Size const& _a, Size const& _b) noexcept
     return !(_a == _b);
 }
 
+constexpr Size operator+(Size _a, Size _b) noexcept
+{
+    return Size{
+        _a.width + _b.width,
+        _a.height + _b.height
+    };
 }
+
+constexpr Size operator-(Size _a, Size _b) noexcept
+{
+    return Size{
+        _a.width - _b.width,
+        _a.height - _b.height
+    };
+}
+
+constexpr Size operator*(Size _a, Size _b) noexcept
+{
+    return Size{
+        _a.width * _b.width,
+        _a.height * _b.height
+    };
+}
+
+constexpr Size operator/(Size _a, Size _b) noexcept
+{
+    return Size{
+        _a.width / _b.width,
+        _a.height / _b.height
+    };
+}
+
+} // end namespace terminal
 
 namespace fmt {
     template <>
