@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
+#include <terminal/Size.h>
 #include <terminal/VTType.h>
 #include <terminal/Functions.h>
 
@@ -34,6 +35,16 @@ struct Coordinate {
     cursor_pos_t row = 1;
     cursor_pos_t column = 1;
 };
+
+constexpr Coordinate operator+(Coordinate a, Coordinate b) noexcept
+{
+    return Coordinate{a.row + b.row, a.column + b.column};
+}
+
+constexpr Coordinate operator+(Coordinate a, Size b) noexcept
+{
+    return Coordinate{a.row + b.height, a.column + b.width};
+}
 
 constexpr void swap(Coordinate& a, Coordinate& b) noexcept
 {
