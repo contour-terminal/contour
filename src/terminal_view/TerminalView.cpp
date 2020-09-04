@@ -135,12 +135,12 @@ void TerminalView::setFont(FontConfig const& _fonts)
     fonts_ = _fonts;
     renderer_.setFont(_fonts);
 
-    auto const newScreenSize = terminal::Size{
-        static_cast<unsigned short>(size_.width() / renderer_.cellWidth()),
-        static_cast<unsigned short>(size_.height() / renderer_.cellHeight())
+    auto const newScreenSize = Size{
+        size_.width / renderer_.cellWidth(),
+        size_.height / renderer_.cellHeight()
     };
 
-    auto const newMargin = computeMargin(newScreenSize, size_.width(), size_.height());
+    auto const newMargin = computeMargin(newScreenSize, size_.width, size_.height);
 
 #if 0 // !defined(NDEBUG)
     cout << fmt::format(
@@ -154,7 +154,7 @@ void TerminalView::setFont(FontConfig const& _fonts)
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_.width(), size_.height());
+    resize(size_.width, size_.height);
 }
 
 bool TerminalView::setFontSize(int _fontSize)
@@ -162,10 +162,8 @@ bool TerminalView::setFontSize(int _fontSize)
     if (!renderer_.setFontSize(_fontSize))
         return false;
 
-    terminal().screen().setCellPixelSize(renderer_.cellSize());
-
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_.width(), size_.height());
+    resize(size_.width, size_.height);
     return true;
 }
 
@@ -184,16 +182,13 @@ TerminalView::WindowMargin TerminalView::computeMargin(Size const& ws,
     return {leftMargin, bottomMargin};
 };
 
-void TerminalView::resize(unsigned _width, unsigned _height)
+void TerminalView::resize(int _width, int _height)
 {
-    size_ = QSize{
-        static_cast<int>(_width),
-        static_cast<int>(_height)
-    };
+    size_ = Size{_width, _height};
 
-    auto const newScreenSize = terminal::Size{
-        static_cast<unsigned short>(_width / renderer_.cellWidth()),
-        static_cast<unsigned short>(_height / renderer_.cellHeight())
+    auto const newScreenSize = Size{
+        _width / renderer_.cellWidth(),
+        _height / renderer_.cellHeight()
     };
 
     windowMargin_ = computeMargin(newScreenSize, _width, _height);
@@ -204,7 +199,7 @@ void TerminalView::resize(unsigned _width, unsigned _height)
 
     if (newScreenSize != process_.screenSize())
     {
-        process_.resizeScreen(newScreenSize);
+        process_.resizeScreen(newScreenSize, newScreenSize * cellSize());
 
         terminal().clearSelection();
     }
@@ -225,17 +220,17 @@ void TerminalView::setCursorShape(CursorShape _shape)
     terminal().setCursorShape(_shape);
 }
 
-bool TerminalView::setTerminalSize(terminal::Size const& _newSize)
+bool TerminalView::setTerminalSize(Size _cells)
 {
-    if (process_.terminal().screenSize() == _newSize)
+    if (process_.terminal().screenSize() == _cells)
         return false;
 
 #if !defined(NDEBUG)
-    std::cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _newSize);
+    std::cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _cells);
 #endif
 
-    renderer_.setScreenSize(_newSize);
-    process_.terminal().resizeScreen(_newSize);
+    renderer_.setScreenSize(_cells);
+    process_.terminal().resizeScreen(_cells, _cells * cellSize());
 
     return true;
 }
@@ -323,7 +318,7 @@ void TerminalView::resetDynamicColor(DynamicColorName _name)
     }
 }
 
-void TerminalView::resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels)
+void TerminalView::resizeWindow(int _width, int _height, bool _unitInPixels)
 {
     events_.resizeWindow(_width, _height, _unitInPixels);
 }

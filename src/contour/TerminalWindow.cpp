@@ -1436,7 +1436,7 @@ void TerminalWindow::commands(terminal::CommandList const& _commands)
         QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 }
 
-void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPixels)
+void TerminalWindow::resizeWindow(int _width, int _height, bool _inPixels)
 {
     // cerr << fmt::format("Application request to resize window: {}x{} {}\n",
     //                     _width, _height, _inPixels ? "px" : "cells");
@@ -1469,7 +1469,7 @@ void TerminalWindow::resizeWindow(unsigned _width, unsigned _height, bool _inPix
     else
     {
         if (_width == 0 && _height == 0)
-            resize(static_cast<int>(_width), static_cast<int>(_height));
+            resize(_width, _height);
         else
         {
             if (!_width)

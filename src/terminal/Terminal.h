@@ -55,7 +55,7 @@ class Terminal : public ScreenEvents {
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
         virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
-        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     };
@@ -76,7 +76,7 @@ class Terminal : public ScreenEvents {
     PseudoTerminal& device() noexcept { return pty_; }
 
     Size screenSize() const noexcept { return pty_.screenSize(); }
-    void resizeScreen(Size const& _newSize);
+    void resizeScreen(Size _cells, std::optional<Size> _pixels);
 
     // {{{ input proxy
     // Sends given input event to connected slave.
@@ -229,7 +229,7 @@ class Terminal : public ScreenEvents {
     void notify(std::string_view const& _title, std::string_view const& _body) override;
     void reply(std::string_view const& _response) override;
     void resetDynamicColor(DynamicColorName _name) override;
-    void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) override;
+    void resizeWindow(int _width, int _height, bool _unitInPixels) override;
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
     void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;

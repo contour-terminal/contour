@@ -118,7 +118,7 @@ class TerminalWindow :
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
     void onClosed() override;
     void onSelectionComplete() override;
-    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
+    void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
 
   signals:

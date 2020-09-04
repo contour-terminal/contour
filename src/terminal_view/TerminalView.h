@@ -50,7 +50,7 @@ class TerminalView : private Terminal::Events {
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
-        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     };
 
@@ -81,17 +81,18 @@ class TerminalView : private Terminal::Events {
 
     int cellHeight() const noexcept { return renderer_.cellHeight(); }
     int cellWidth() const noexcept { return renderer_.cellWidth(); }
+    Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
 
     /// Resizes the terminal view to the given number of pixels.
     ///
     /// It also computes the appropricate number of text lines and character columns
     /// and resizes the internal screen buffer as well as informs the connected
     /// PTY slave about the window resize event.
-    void resize(unsigned _width, unsigned _height);
+    void resize(int _width, int _height);
 
     void setFont(FontConfig const& _fonts);
     bool setFontSize(int _fontSize);
-    bool setTerminalSize(Size const& _newSize);
+    bool setTerminalSize(Size _cells);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
@@ -137,7 +138,7 @@ class TerminalView : private Terminal::Events {
     void onClosed() override;
     void onSelectionComplete() override;
     void resetDynamicColor(DynamicColorName /*_name*/) override;
-    void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) override;
+    void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setDynamicColor(DynamicColorName, RGBColor const&) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
 
@@ -145,7 +146,7 @@ class TerminalView : private Terminal::Events {
     Events& events_;
     Logger logger_;
     FontConfig fonts_;
-    QSize size_;
+    Size size_;
     WindowMargin windowMargin_;
 
     Renderer renderer_;

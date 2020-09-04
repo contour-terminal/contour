@@ -364,11 +364,14 @@ Cell const* Terminal::at(Coordinate const& _coord) const
         return nullptr;
 }
 
-void Terminal::resizeScreen(Size const& _newSize)
+void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
 {
     lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    screen_.resize(_newSize);
-    pty_.resizeScreen(_newSize);
+    screen_.resize(_cells);
+    if (_pixels)
+        screen_.setCellPixelSize(*_pixels / _cells);
+
+    pty_.resizeScreen(_cells, _pixels);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
@@ -435,7 +438,7 @@ void Terminal::resetDynamicColor(DynamicColorName _name)
     eventListener_.resetDynamicColor(_name);
 }
 
-void Terminal::resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels)
+void Terminal::resizeWindow(int _width, int _height, bool _unitInPixels)
 {
     eventListener_.resizeWindow(_width, _height, _unitInPixels);
 }

@@ -16,6 +16,7 @@
 #include <terminal/Size.h>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -77,7 +78,7 @@ public:
     Size screenSize() const noexcept;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(Size const& _newSize);
+    virtual void resizeScreen(Size _cells, std::optional<Size> _pixels = std::nullopt);
 
 	/// @returns The native master PTY handle.
 	PtyHandle master() const noexcept { return master_; }

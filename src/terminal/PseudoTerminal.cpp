@@ -258,24 +258,30 @@ Size PseudoTerminal::screenSize() const noexcept
     return size_;
 }
 
-void PseudoTerminal::resizeScreen(Size const& _newSize)
+void PseudoTerminal::resizeScreen(Size _cells, std::optional<Size> _pixels)
 {
 #if defined(__unix__) || defined(__APPLE__)
     auto w = winsize{};
-    w.ws_col = _newSize.width;
-    w.ws_row = _newSize.height;
+    w.ws_col = _cells.width;
+    w.ws_row = _cells.height;
+
+    if (_pixels.has_value())
+    {
+        w.ws_xpixel = _pixels.value().width;
+        w.ws_ypixel = _pixels.value().height;
+    }
 
     if (ioctl(master_, TIOCSWINSZ, &w) == -1)
         throw runtime_error{strerror(errno)};
 #elif defined(_MSC_VER)
     COORD coords;
-    coords.X = _newSize.width;
-    coords.Y = _newSize.height;
+    coords.X = _cells.width;
+    coords.Y = _cells.height;
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)
         throw runtime_error{ GetLastErrorAsString() };
 #endif
-    size_ = _newSize;
+    size_ = _cells;
 }
 
 }  // namespace terminal

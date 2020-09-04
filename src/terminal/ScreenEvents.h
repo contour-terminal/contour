@@ -23,7 +23,7 @@ class ScreenEvents {
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
     virtual void reply(std::string_view const& /*_response*/) {}
     virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
-    virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
+    virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
     virtual void setApplicationkeypadMode(bool /*_enabled*/) {}
     virtual void setBracketedPaste(bool /*_enabled*/) {}
     virtual void setCursorStyle(CursorDisplay, CursorShape) {}
