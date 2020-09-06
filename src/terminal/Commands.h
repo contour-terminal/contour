@@ -30,65 +30,6 @@ namespace terminal {
 
 using cursor_pos_t = int;
 
-/// Screen coordinates between 1..n including.
-struct Coordinate {
-    cursor_pos_t row = 1;
-    cursor_pos_t column = 1;
-};
-
-constexpr Coordinate operator+(Coordinate a, Coordinate b) noexcept
-{
-    return Coordinate{a.row + b.row, a.column + b.column};
-}
-
-constexpr Coordinate operator+(Coordinate a, Size b) noexcept
-{
-    return Coordinate{a.row + b.height, a.column + b.width};
-}
-
-constexpr void swap(Coordinate& a, Coordinate& b) noexcept
-{
-    Coordinate const c = a;
-    a = b;
-    b = c;
-}
-
-// Prints Coordinate as human readable text to given stream (used for debugging & unit testing).
-inline std::ostream& operator<<(std::ostream& _os, Coordinate const& _coord)
-{
-    return _os << "{" << _coord.row << ", " << _coord.column << "}";
-}
-
-constexpr inline bool operator<(Coordinate const& a, Coordinate const& b) noexcept
-{
-    if (a.row < b.row)
-        return true;
-    else if (a.row == b.row)
-        return a.column < b.column;
-    else
-        return false;
-}
-
-constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
-{
-    return a.row == b.row && a.column == b.column;
-}
-
-constexpr inline bool operator!=(Coordinate const& a, Coordinate const& b) noexcept
-{
-    return !(a == b);
-}
-
-constexpr inline bool operator>(Coordinate const& a, Coordinate const& b) noexcept
-{
-    if (a.row > b.row)
-        return true;
-    if (a.row == b.row)
-        return a.column > b.column;
-    else
-        return false;
-}
-
 enum class GraphicsRendition {
     Reset = 0,              //!< Reset any rendition (style as well as foreground / background coloring).
 

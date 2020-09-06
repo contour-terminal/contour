@@ -14,12 +14,118 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <ostream>
 
 namespace terminal {
+
+/// Screen coordinates between 1..n including.
+struct Coordinate {
+    int row = 1;
+    int column = 1;
+};
+
+constexpr Coordinate operator+(Coordinate a, Coordinate b) noexcept
+{
+    return Coordinate{a.row + b.row, a.column + b.column};
+}
+
+constexpr void swap(Coordinate& a, Coordinate& b) noexcept
+{
+    Coordinate const c = a;
+    a = b;
+    b = c;
+}
+
+// Prints Coordinate as human readable text to given stream (used for debugging & unit testing).
+inline std::ostream& operator<<(std::ostream& _os, Coordinate const& _coord)
+{
+    return _os << "{" << _coord.row << ", " << _coord.column << "}";
+}
+
+constexpr inline bool operator<(Coordinate const& a, Coordinate const& b) noexcept
+{
+    if (a.row < b.row)
+        return true;
+    else if (a.row == b.row)
+        return a.column < b.column;
+    else
+        return false;
+}
+
+constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
+{
+    return a.row == b.row && a.column == b.column;
+}
+
+constexpr inline bool operator!=(Coordinate const& a, Coordinate const& b) noexcept
+{
+    return !(a == b);
+}
+
+constexpr inline bool operator>(Coordinate const& a, Coordinate const& b) noexcept
+{
+    if (a.row > b.row)
+        return true;
+    if (a.row == b.row)
+        return a.column > b.column;
+    else
+        return false;
+}
 
 struct [[nodiscard]] Size {
     int width;
 	int height;
+
+    /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
+    struct iterator {
+      private:
+        int width;
+        int next;
+        Coordinate coord{0, 0};
+
+        constexpr Coordinate makeCoordinate(int offset) noexcept
+        {
+            return Coordinate{
+                offset / width,
+                offset % width
+            };
+        }
+
+      public:
+        constexpr iterator(int _width, int _next) noexcept :
+            width{ _width },
+            next{ _next },
+            coord{ makeCoordinate(_next) }
+        {
+        }
+
+        constexpr Coordinate operator*() const noexcept { return coord; }
+
+        constexpr iterator& operator++() noexcept
+        {
+            coord = makeCoordinate(next++);
+            return *this;
+        }
+
+        constexpr iterator& operator++(int) noexcept
+        {
+            ++*this;
+            return *this;
+        }
+
+        constexpr bool operator==(iterator const& other) const noexcept { return next == other.next; }
+        constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
+    };
+
+    constexpr iterator begin() const noexcept
+    {
+        return iterator{width, 0};
+    }
+
+    constexpr iterator end() const noexcept
+    {
+        return iterator{width, width * height + 1};
+    }
 };
 
 constexpr int area(Size size) noexcept
@@ -72,6 +178,11 @@ constexpr Size operator/(Size _a, Size _b) noexcept
         _a.width / _b.width,
         _a.height / _b.height
     };
+}
+
+constexpr Coordinate operator+(Coordinate a, Size b) noexcept
+{
+    return Coordinate{a.row + b.height, a.column + b.width};
 }
 
 } // end namespace terminal
