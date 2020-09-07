@@ -1,9 +1,18 @@
+include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/FilesystemResolver.cmake")
+
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
 add_library(crispy-core INTERFACE)
 add_library(crispy::core ALIAS crispy-core)
-target_link_libraries(crispy-core INTERFACE fmt::fmt-header-only unicode::core)
+
+set(CRISPY_CORE_LIBS fmt::fmt-header-only unicode::core)
+if(${USING_BOOST_FILESYSTEM})
+    target_compile_definitions(crispy-core INTERFACE USING_BOOST_FILESYSTEM=1)
+    list(APPEND CRISPY_CORE_LIBS Boost::filesystem)
+endif()
+
+target_link_libraries(crispy-core INTERFACE ${CRISPY_CORE_LIBS})
 target_compile_features(crispy-core INTERFACE cxx_std_17)
 target_include_directories(crispy-core INTERFACE
     $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>

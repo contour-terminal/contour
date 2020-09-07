@@ -19,7 +19,11 @@
 #include <iostream>
 #include <utility>
 
-#if (!defined(__has_include) || __has_include(<filesystem>)) && !defined(__APPLE__)
+#if defined(USING_BOOST_FILESYSTEM) && (USING_BOOST_FILESYSTEM)
+    #include <boost/filesystem.hpp>
+    namespace FileSystem = boost::filesystem;
+    typedef boost::system::error_code FileSystemError;
+#elif (!defined(__has_include) || __has_include(<filesystem>)) && !defined(__APPLE__)
     #include <filesystem>
     #include <system_error>
     namespace FileSystem = std::filesystem;

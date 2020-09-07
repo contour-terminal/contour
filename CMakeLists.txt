@@ -4,11 +4,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 project(contour VERSION "0.0.1" LANGUAGES CXX)
 
-set(MASTER_PROJECT OFF)
-if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
-    set(MASTER_PROJECT ON)
-endif()
-
 # setting defaults
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,18 +17,26 @@ elseif(DEFINED MSVC)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
+option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
+
+if("${OpenGL_GL_PREFERENCE}" STREQUAL "")
+    # possible values are: GLVND, LEGACY
+    set(OpenGL_GL_PREFERENCE "GLVND")
+endif()
+
 include(EnableCcache)
 include(ClangTidy)
 include(CIncludeMe)
 find_package(Threads)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ${MASTER_PROJECT})
-option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(CONTOUR_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(CONTOUR_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ${MASTER_PROJECT}" ${MASTER_PROJECT})
-option(CONTOUR_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
-option(CONTOUR_CLIENT "Enables building of OpenGL terminal view. [default: ${MASTER_PROJECT}]" ${MASTER_PROJECT})
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ON" ON)
+option(CONTOUR_EMBEDDED_FMTLIB "Uses embedded fmtlib [default: ON]" ON)
+option(CONTOUR_EMBEDDED_YAML_CPP "Uses embedded yaml-cpp [default: ON]" ON)
+option(CONTOUR_EMBEDDED_CATCH2 "Uses embedded catch2 for testing [default: ON]" ON)
+option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ON]" ON)
+option(CONTOUR_CLIENT "Enables building of OpenGL terminal view. [default: ON]" ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
 
@@ -43,9 +46,9 @@ option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" O
 if(CONTOUR_COVERAGE AND NOT MSVC)
     add_compile_options(-g --coverage)
     set(CMAKE_EXE_LINKER_FLAGS "--coverage ${CMAKE_EXE_LINKER_FLAGS}")
-    message("-- [code coverage] Enabled.")
+    set(CONTOUR_CODE_COVERAGE_ENABLED ON)
 else()
-    message("-- [code coverage] Disabled.")
+    set(CONTOUR_CODE_COVERAGE_ENABLED OFF)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -85,3 +88,33 @@ endif()
 if(CONTOUR_EXAMPLES)
     add_subdirectory(examples)
 endif()
+
+# ----------------------------------------------------------------------------
+# Summary
+
+if(${USING_BOOST_FILESYSTEM})
+    set(USING_FILESYSTEM_API_STRING "boost::filesystem")
+else()
+    set(USING_FILESYSTEM_API_STRING "C++fs")
+endif()
+
+if("${CCACHE}" STREQUAL "")
+    set(USING_CCACHE_STRING "OFF")
+else()
+    set(USING_CCACHE_STRING "${CCACHE}")
+endif()
+
+message(STATUS "------------------------------------------------------------------------------")
+message(STATUS "    Contour (version ${contour_VERSION})")
+message(STATUS "------------------------------------------------------------------------------")
+message(STATUS "Build type:                  ${CMAKE_BUILD_TYPE}")
+message(STATUS "Build with sanitizer:        ${CONTOUR_SANITIZE}")
+message(STATUS "Build unit tests:            ${CONTOUR_TESTING}")
+message(STATUS "Build contour client:        ${CONTOUR_CLIENT}")
+message(STATUS "Enable blur effect on KWin:  ${CONTOUR_BLUR_PLATFORM_KWIN}")
+message(STATUS "Enable performance metrics:  ${CONTOUR_PERF_STATS}")
+message(STATUS "Enable with code coverage:   ${CONTOUR_CODE_COVERAGE_ENABLED}")
+message(STATUS "OpenGL preference:           ${OpenGL_GL_PREFERENCE}")
+message(STATUS "Using filesystem API:        ${USING_FILESYSTEM_API_STRING}")
+message(STATUS "Using ccache:                ${USING_CCACHE_STRING}")
+message(STATUS "------------------------------------------------------------------------------")
