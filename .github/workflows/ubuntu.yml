@@ -68,6 +68,44 @@ jobs:
             -DYAML_CPP_INSTALL=OFF
       - name: "build"
         run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+
+  build_ubuntu1804:
+    name: build on Ubuntu 18.04
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: "initialize sub modules"
+        run: git submodule update --init --recursive
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt -q update
+          sudo apt install -y "g++-8" libboost-all-dev cmake \
+                  libfreetype6-dev \
+                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                  libfontconfig1-dev libharfbuzz-dev \
+                  debhelper dpkg-dev
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          cd build && cmake .. \
+            -DUSE_BOOST_FILESYSTEM=ON \
+            -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-8 \
+            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+            -DYAML_CPP_INSTALL=OFF
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
 
