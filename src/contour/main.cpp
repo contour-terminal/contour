@@ -66,7 +66,11 @@ int main(int argc, char* argv[])
         QCoreApplication::setApplicationName("contour");
         QCoreApplication::setOrganizationName("contour");
         QCoreApplication::setApplicationVersion(QString::fromStdString(fmt::format(
-            "{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH
+            "{}.{}.{}{}",
+            CONTOUR_VERSION_MAJOR,
+            CONTOUR_VERSION_MINOR,
+            CONTOUR_VERSION_PATCH,
+            CONTOUR_VERSION_SUFFIX
         )));
         QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
         QApplication app(argc, argv);

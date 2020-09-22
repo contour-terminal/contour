@@ -2,7 +2,17 @@ cmake_minimum_required(VERSION 3.10)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-project(contour VERSION "0.0.1" LANGUAGES CXX)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(COMMAND git describe --always --tags --dirty=-modified
+        OUTPUT_VARIABLE CONTOUR_VERSION_SUFFIX
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(CONTOUR_VERSION_SUFFIX "-${CONTOUR_VERSION_SUFFIX}")
+else()
+    set(CONTOUR_VERSION_SUFFIX "")
+endif()
+
+project(contour VERSION "0.0.1${CMAKE_VERSION_SUFFIX}" LANGUAGES CXX)
 
 # setting defaults
 set(CMAKE_CXX_STANDARD 17)
@@ -105,7 +115,7 @@ else()
 endif()
 
 message(STATUS "------------------------------------------------------------------------------")
-message(STATUS "    Contour (version ${contour_VERSION})")
+message(STATUS "    Contour (version ${contour_VERSION}${CONTOUR_VERSION_SUFFIX})")
 message(STATUS "------------------------------------------------------------------------------")
 message(STATUS "Build type:                  ${CMAKE_BUILD_TYPE}")
 message(STATUS "Build with sanitizer:        ${CONTOUR_SANITIZE}")
