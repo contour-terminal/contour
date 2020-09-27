@@ -27,16 +27,16 @@ jobs:
       - name: "create build directory"
         run: mkdir build
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
       - name: "Build"
-        run: cmake --build build/ --config Release
+        run: cmake --build build/ --config RelWithDebInfo
       - name: inspect
         run: Get-ChildItem -Recurse
       - name: "Uploading to artifact store"
         uses: actions/upload-artifact@v2
         with:
           name: contour-x64.exe
-          path: .\build\src\contour\Release\contour.exe
+          path: .\build\src\contour\RelWithDebInfo\contour.exe
 
   build_ubuntu1804:
     name: build on Ubuntu 18.04
