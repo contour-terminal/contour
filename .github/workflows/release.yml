@@ -246,6 +246,7 @@ jobs:
           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
           RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+
           echo "::set-output name=version::${VERSION}"
           echo "::set-output name=tag_suffix::${TAG_SUFFIX}"
           echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
@@ -253,6 +254,15 @@ jobs:
           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
           echo "::set-env name=body::${RELEASEBODY}"
+
+          # some debug prints
+          echo "output name=version::${VERSION}"
+          echo "output name=tag_suffix::${TAG_SUFFIX}"
+          echo "output name=RUN_ID::${GITHUB_RUN_NUMBER}"
+          echo "output name=IS_PRERELEASE::${IS_PRE}"
+          echo "output name=RELEASENAME_SUFFIX::${SUFFIX}"
+          echo "output name=RELEASEBODY::${RELEASEBODY}"
+          echo "env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
 
@@ -269,33 +279,33 @@ jobs:
           draft: true
           prerelease: ${{ steps.set_env_var.outputs.IS_PRERELEASE }}
 
-      - name: fetch ubuntu 18.04 .deb
-        uses: actions/download-artifact@v1
-        with:
-          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-      - name: fetch ubuntu 18.04 .ddeb
-        uses: actions/download-artifact@v1
-        with:
-          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+      #   - name: fetch ubuntu 18.04 .deb
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+      #   - name: fetch ubuntu 18.04 .ddeb
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
 
-      - name: fetch ubuntu 20.04 .deb
-        uses: actions/download-artifact@v1
-        with:
-          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
-      - name: fetch ubuntu 20.04 .ddeb
-        uses: actions/download-artifact@v1
-        with:
-          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+      #   - name: fetch ubuntu 20.04 .deb
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+      #   - name: fetch ubuntu 20.04 .ddeb
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
 
-      - name: fetch windows contour.exe
-        uses: actions/download-artifact@v1
-        with:
-          name: contour-x64.exe
+      #   - name: fetch windows contour.exe
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour-x64.exe
 
-      - name: fetch OS/X package
-        uses: actions/download-artifact@v1
-        with:
-          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+      #   - name: fetch OS/X package
+      #     uses: actions/download-artifact@v1
+      #     with:
+      #       name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
 
       # -------------------------------------------------------------
       - name: Upload Ubuntu 18.04 package (.deb)
@@ -305,8 +315,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-          asset_name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_path: ./contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_name: ./contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 18.04 debug package (.ddeb)
