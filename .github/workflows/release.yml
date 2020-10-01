@@ -11,6 +11,8 @@ name: Create Release
 
 # TODO:
 # [ ] run tests on each build (as last check before creating release)
+# [ ] label package files with "prerelease" if they're not a release
+# [ ] cache qt installation
 
 jobs:
   build_windows:
@@ -20,30 +22,64 @@ jobs:
       - uses: actions/checkout@v1
       - name: "Initialize sub modules"
         run: git submodule update --init --recursive
+      - name: setup environment
+        shell: powershell
+        id: set_env_var
+        run: |
+          $VERSION = Select-String -Path .\Changelog.md -Pattern '^### ([^ ]+)' | % { "$($_.matches.groups[1])" }
+          # $SUFFIX = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^ ]+)\)' | % { "$($_.matches.groups[1])" }
+          if ($Env:REPOSITORY -eq "master") { $IS_PRE = 'true'; } else { $IS_PRE = 'false'; }
+          if ($Env:REPOSITORY -eq "master") { $SUFFIX = ''; }     else { $SUFFIX = 'prerelease'; }
+          Write-Output "::set-output name=version::$VERSION"
+          Write-Output "::set-output name=RUN_ID::$Env:GITHUB_RUN_NUMBER"
+          Write-Output "::set-output name=IS_PRERELEASE::$IS_PRE"
+          Write-Output "::set-output name=RELEASENAME_SUFFIX::$SUFFIX"
+          # debug prints
+          Write-Output "set-output name=version::$VERSION"
+          Write-Output "set-output name=RUN_ID::$Env:GITHUB_RUN_NUMBER"
+          Write-Output "set-output name=IS_PRERELEASE::$IS_PRE"
+          Write-Output "set-output name=RELEASENAME_SUFFIX::$SUFFIX"
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "vcpkg: Install dependencies"
+        uses: lukka/run-vcpkg@v2
+        id: runvcpkg
+        with:
+          vcpkgArguments: freetype fontconfig harfbuzz
+          vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
+          vcpkgGitCommitId: acd2f59e931172f46706ef8ac2fc9b21f71fba85
+          vcpkgTriplet: x64-windows
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v1
+        with:
+          path: ../Qt
+          key: ${{ runner.os }}-QtCache
       - name: Install Qt
         uses: jurplel/install-qt-action@v2
-      - name: "Install dependencies"
-        run: vcpkg install freetype fontconfig harfbuzz --triplet x64-windows
+        with:
+          cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: "create build directory"
         run: mkdir build
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
       - name: "Build"
-        run: cmake --build build/ --config RelWithDebInfo
-      - name: "Create Package"
+        run: cmake --build build/ --config Release
+      - name: "Create Package(s)"
         run: cd build ; cpack
       - name: inspect
         run: Get-ChildItem -Recurse
-      - name: "Uploading to artifact store"
+      - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          name: contour-0.0.1-win64.msi
-          path: .\build\contour-0.0.1-win64.msi
+          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
+          path: .\build\Contour-${{ steps.set_env_var.outputs.version }}-win64.msi
       - name: "Uploading ZIP to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          name: contour-0.0.1-win64.zip
-          path: .\build\contour-0.0.1-win64.zip
+          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip
+          path: .\build\Contour-${{ steps.set_env_var.outputs.version }}-win64.zip
+    # TODO: replace hard-coded "0.0.1" with proper version plus suffix
 
   build_ubuntu1804:
     name: build on Ubuntu 18.04
@@ -95,12 +131,12 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          #name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
           path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          #name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
           path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
 
   build_ubuntu_2004:
@@ -153,12 +189,12 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+          #name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
           path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+          #name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
           path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
 
   build_osx:
@@ -221,7 +257,7 @@ jobs:
       - name: upload to artifact store
         uses: actions/upload-artifact@v2
         with:
-          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
           path: build/src/contour/contour-osx.zip
 
   do_release:
@@ -254,19 +290,47 @@ jobs:
           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
           echo "::set-env name=body::${RELEASEBODY}"
-
-          # some debug prints
-          echo "output name=version::${VERSION}"
-          echo "output name=tag_suffix::${TAG_SUFFIX}"
-          echo "output name=RUN_ID::${GITHUB_RUN_NUMBER}"
-          echo "output name=IS_PRERELEASE::${IS_PRE}"
-          echo "output name=RELEASENAME_SUFFIX::${SUFFIX}"
-          echo "output name=RELEASEBODY::${RELEASEBODY}"
-          echo "env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
 
-      - name: create release page
+      - name: fetch ubuntu 18.04 .deb
+        uses: actions/download-artifact@v2
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+      - name: fetch ubuntu 18.04 .ddeb
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+      - name: "inspect #1"
+        run: ls -lisahF
+
+      - name: fetch ubuntu 20.04 .deb
+        uses: actions/download-artifact@v2
+        with:
+          name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+      - name: fetch ubuntu 20.04 .ddeb
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+      - name: "inspect #2"
+        run: ls -lisahF
+
+      - name: fetch windows MSI package
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
+      - name: fetch windows ZIP package
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+      - name: "inspect #3"
+        run: ls -lisahF
+
+      - name: inspect recurse
+        run: pwd; ls -hlaR
+
+      # -------------------------------------------------------------
+      - name: Create Github release page
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -279,34 +343,6 @@ jobs:
           draft: true
           prerelease: ${{ steps.set_env_var.outputs.IS_PRERELEASE }}
 
-      #   - name: fetch ubuntu 18.04 .deb
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-      #   - name: fetch ubuntu 18.04 .ddeb
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
-
-      #   - name: fetch ubuntu 20.04 .deb
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
-      #   - name: fetch ubuntu 20.04 .ddeb
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
-
-      #   - name: fetch windows contour.exe
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour-x64.exe
-
-      #   - name: fetch OS/X package
-      #     uses: actions/download-artifact@v1
-      #     with:
-      #       name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
-
       # -------------------------------------------------------------
       - name: Upload Ubuntu 18.04 package (.deb)
         id: upload-release-asset-deb
@@ -316,7 +352,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-          asset_name: ./contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 18.04 debug package (.ddeb)
@@ -326,7 +362,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_path: ./contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
           asset_name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
 
@@ -338,7 +374,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_path: ./contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
           asset_name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
@@ -349,21 +385,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_path: ./contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
           asset_name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
 
       # -------------------------------------------------------------
-      - name: Upload Windows package
-        id: upload-release-asset-winx64
+      - name: Upload Windows MSI package
+        id: upload-release-msi-asset-winx64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-x64.exe
-          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-x64.exe
-          asset_content_type: application/x-msdos-program
+          asset_path: ./contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
+          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
+          asset_content_type: application/octet-stream
+
+      # -------------------------------------------------------------
+      - name: Upload Windows ZIP package
+        id: upload-release-zip-asset-winx64
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip
+          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip
+          asset_content_type: application/zip
 
       # -------------------------------------------------------------
       - name: Upload OS/X package
