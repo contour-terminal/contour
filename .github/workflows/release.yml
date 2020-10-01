@@ -30,13 +30,20 @@ jobs:
         run: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
       - name: "Build"
         run: cmake --build build/ --config RelWithDebInfo
+      - name: "Create Package"
+        run: cd build ; cpack
       - name: inspect
         run: Get-ChildItem -Recurse
       - name: "Uploading to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          name: contour-x64.exe
-          path: .\build\src\contour\RelWithDebInfo\contour.exe
+          name: contour-0.0.1-win64.msi
+          path: .\build\contour-0.0.1-win64.msi
+      - name: "Uploading ZIP to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-0.0.1-win64.zip
+          path: .\build\contour-0.0.1-win64.zip
 
   build_ubuntu1804:
     name: build on Ubuntu 18.04
