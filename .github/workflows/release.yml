@@ -69,17 +69,20 @@ jobs:
         run: cd build ; cpack
       - name: inspect
         run: Get-ChildItem -Recurse
+      - name: "Rename packages"
+        run: |
+          mv "build\Contour-${{ steps.set_env_var.outputs.version }}-win64.msi" "contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi"
+          mv "build\Contour-${{ steps.set_env_var.outputs.version }}-win64.zip" "contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip"
+      - name: "Inspect again"
+        run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
-          path: .\build\Contour-${{ steps.set_env_var.outputs.version }}-win64.msi
+          path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.msi
       - name: "Uploading ZIP to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip
-          path: .\build\Contour-${{ steps.set_env_var.outputs.version }}-win64.zip
-    # TODO: replace hard-coded "0.0.1" with proper version plus suffix
+          path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-win64.zip
 
   build_ubuntu1804:
     name: build on Ubuntu 18.04
@@ -128,16 +131,18 @@ jobs:
           dpkg-buildpackage -uc -us
           mkdir target
           mv ../contour*.* target/
+      - name: "Rename files"
+        run: |
+          mv -v "target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb" "contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-          path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
+          path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
-          path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
+          path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
 
   build_ubuntu_2004:
     name: build on Ubuntu 20.04
@@ -186,16 +191,18 @@ jobs:
           dpkg-buildpackage -uc -us
           mkdir target
           mv ../contour*.* target/
+      - name: "Rename files"
+        run: |
+          mv -v "target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb" "contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
-          path: target/contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.deb
+          path: contour_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          #name: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
-          path: target/contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}_amd64.ddeb
+          path: contour-dbgsym_${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
 
   build_osx:
     name: build on OS/X
@@ -251,14 +258,15 @@ jobs:
           echo "TODO: upload to artifact store"
       - name: package
         run: |
-          set -ex
+          set -e
           cd build/src/contour/
-          zip -r contour-osx.zip contour.app
+          zip -r ../../../contour-osx.zip contour.app
+          cd ../../..
+          mv -v "contour-osx.zip" "contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip"
       - name: upload to artifact store
         uses: actions/upload-artifact@v2
         with:
-          #name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
-          path: build/src/contour/contour-osx.zip
+          path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
 
   do_release:
     name: release
