@@ -105,21 +105,21 @@ if(WIN32)
     include(DeployQt)
     windeployqt(contour)
 
-    # if(IS_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
-    #     set(_d "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
-    # else()
-    #     set(_d "${CMAKE_CURRENT_BINARY_DIR}")
-    # endif()
-    # install(
-    #     DIRECTORY "${_d}"
-    #     DESTINATION "bin"
-    #     USE_SOURCE_PERMISSIONS
-    #     FILES_MATCHING
-    #         PATTERN "*.dll"
-    #         PATTERN "CMakeFiles" EXCLUDE
-    #         PATTERN "*_autogen" EXCLUDE
-    #         PATTERN "*.h" EXCLUDE
-    # )
+    if(IS_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+        set(_d "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    else()
+        set(_d "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    install(
+        DIRECTORY "${_d}"
+        TYPE BIN
+        USE_SOURCE_PERMISSIONS
+        FILES_MATCHING
+            PATTERN "*.dll"
+            PATTERN "CMakeFiles" EXCLUDE
+            PATTERN "*_autogen" EXCLUDE
+            PATTERN "*.h" EXCLUDE
+    )
 endif()
 
 # ====================================================================================
