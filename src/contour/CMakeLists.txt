@@ -102,15 +102,24 @@ endif()
 install(TARGETS contour DESTINATION bin)
 
 if(WIN32)
-    install(
-        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/"
-        DESTINATION "bin"
-        USE_SOURCE_PERMISSIONS
-        PATTERN "CMakeFiles" EXCLUDE
-        PATTERN "*_autogen" EXCLUDE
-        PATTERN "*.h" EXCLUDE
-        PATTERN "*.dll"
-    )
+    include(DeployQt)
+    windeployqt(contour)
+
+    # if(IS_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    #     set(_d "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}")
+    # else()
+    #     set(_d "${CMAKE_CURRENT_BINARY_DIR}")
+    # endif()
+    # install(
+    #     DIRECTORY "${_d}"
+    #     DESTINATION "bin"
+    #     USE_SOURCE_PERMISSIONS
+    #     FILES_MATCHING
+    #         PATTERN "*.dll"
+    #         PATTERN "CMakeFiles" EXCLUDE
+    #         PATTERN "*_autogen" EXCLUDE
+    #         PATTERN "*.h" EXCLUDE
+    # )
 endif()
 
 # ====================================================================================
