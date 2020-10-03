@@ -49,6 +49,7 @@ function(windeployqt target)
             env PATH="${_qt_bin_dir}" "${WINDEPLOYQT_EXECUTABLE}"
                 --no-compiler-runtime
                 --no-translations
+                --no-svg
                 \"$<TARGET_FILE:${target}>\"
         COMMENT "Deploying Qt for target $<TARGET_FILE:${target}> ..."
     )
@@ -62,16 +63,17 @@ function(windeployqt target)
         message(WARNING "Deploying with MSVC 2015+ requires CMake 3.6+")
     endif()
 
-    set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
-    include(InstallRequiredSystemLibraries)
-    foreach(lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
-        get_filename_component(filename "${lib}" NAME)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND "${CMAKE_COMMAND}" -E
-                copy_if_different "${lib}" \"$<TARGET_FILE_DIR:${target}>\"
-            COMMENT "Copying ${filename}..."
-        )
-    endforeach()
+    #set(CMAKE_INSTALL_UCRT_LIBRARIES TRUE)
+    set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+    # include(InstallRequiredSystemLibraries)
+    # foreach(lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+    #     get_filename_component(filename "${lib}" NAME)
+    #     add_custom_command(TARGET ${target} POST_BUILD
+    #         COMMAND "${CMAKE_COMMAND}" -E
+    #             copy_if_different "${lib}" \"$<TARGET_FILE_DIR:${target}>\"
+    #         COMMENT "DeployQt: Copying ${filename}..."
+    #     )
+    # endforeach()
 endfunction()
 
 # Add commands that copy the required Qt files to the application bundle
