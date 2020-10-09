@@ -394,12 +394,10 @@ class InputGenerator {
                        cursor_pos_t _column,
                        MouseEventType _eventType);
 
-    inline bool append(std::string _sequence);
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);
     inline bool append(uint8_t _byte);
     inline bool append(unsigned int _asciiChar);
-    template <typename T, size_t N> inline bool append(T (&_sequence)[N]);
 
   private:
     KeyMode cursorKeysMode_ = KeyMode::Normal;

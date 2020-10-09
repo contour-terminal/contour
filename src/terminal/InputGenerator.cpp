@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -406,12 +407,6 @@ void InputGenerator::swap(Sequence& _other)
     std::swap(pendingSequence_, _other);
 }
 
-inline bool InputGenerator::append(std::string _sequence)
-{
-    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
-    return true;
-}
-
 inline bool InputGenerator::append(std::string_view _sequence)
 {
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
@@ -426,24 +421,15 @@ inline bool InputGenerator::append(char _asciiChar)
 
 inline bool InputGenerator::append(uint8_t _byte)
 {
-    pendingSequence_.push_back(_byte);
+    pendingSequence_.push_back(static_cast<char>(_byte));
     return true;
 }
 
 inline bool InputGenerator::append(unsigned int _number)
 {
     char buf[16];
-    snprintf(buf, sizeof(buf), "%u", _number);
-    for (char const* i = &buf[0]; *i; ++i)
-        pendingSequence_.push_back(*i);
-    return true;
-}
-
-template <typename T, size_t N>
-inline bool InputGenerator::append(T(&_sequence)[N])
-{
-    pendingSequence_.insert(end(pendingSequence_), begin(_sequence), prev(end(_sequence)));
-    return true;
+    int n = snprintf(buf, sizeof(buf), "%u", _number);
+    return append(string_view(buf, n));
 }
 
 // {{{ mouse handling
