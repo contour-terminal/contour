@@ -117,16 +117,15 @@ struct [[nodiscard]] Size {
         constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
     };
 
-    constexpr iterator begin() const noexcept
-    {
-        return iterator{width, 0};
-    }
+    constexpr iterator begin() const noexcept { return iterator{width, 0}; }
+    constexpr iterator end() const noexcept { return iterator{width, width * height}; }
 
-    constexpr iterator end() const noexcept
-    {
-        return iterator{width, width * height};
-    }
+    constexpr iterator begin() noexcept { return iterator{width, 0}; }
+    constexpr iterator end() noexcept { return iterator{width, width * height}; }
 };
+
+constexpr Size::iterator begin(Size const& s) noexcept { return s.begin(); }
+constexpr Size::iterator end(Size const& s) noexcept { return s.end(); }
 
 constexpr int area(Size size) noexcept
 {
