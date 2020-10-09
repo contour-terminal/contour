@@ -89,6 +89,7 @@ if(LIBTERMINAL_TESTING)
         Functions_test.cpp
         Parser_test.cpp
         Screen_test.cpp
+        Size_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)

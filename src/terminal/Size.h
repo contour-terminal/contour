@@ -103,7 +103,7 @@ struct [[nodiscard]] Size {
 
         constexpr iterator& operator++() noexcept
         {
-            coord = makeCoordinate(next++);
+            coord = makeCoordinate(++next);
             return *this;
         }
 
@@ -124,7 +124,7 @@ struct [[nodiscard]] Size {
 
     constexpr iterator end() const noexcept
     {
-        return iterator{width, width * height + 1};
+        return iterator{width, width * height};
     }
 };
 
