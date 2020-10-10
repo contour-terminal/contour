@@ -75,7 +75,7 @@ namespace mappings {
     #define SS3 "\x1BO"
 
     // the modifier parameter is going to be replaced via fmt::format()
-    auto constexpr functionKeysWithModifiers = array{
+    array<KeyMapping, 30> functionKeysWithModifiers{
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
         KeyMapping{Key::F1, CSI "1;{}P"},
         KeyMapping{Key::F2, CSI "1;{}Q"},
@@ -113,7 +113,7 @@ namespace mappings {
         KeyMapping{Key::PageDown, CSI "6;{}~"},
     };
 
-    auto constexpr standard = array{
+    array<KeyMapping, 22> standard{
         // cursor keys
         KeyMapping{Key::UpArrow, CSI "A"},
         KeyMapping{Key::DownArrow, CSI "B"},
@@ -144,7 +144,7 @@ namespace mappings {
     };
 
     /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
-    auto constexpr applicationCursorKeys = array{
+    array<KeyMapping, 6> applicationCursorKeys{
         KeyMapping{Key::UpArrow, SS3 "A"},
         KeyMapping{Key::DownArrow, SS3 "B"},
         KeyMapping{Key::RightArrow, SS3 "C"},
@@ -153,7 +153,7 @@ namespace mappings {
         KeyMapping{Key::End, SS3 "F"},
     };
 
-    auto constexpr applicationKeypad = array{
+    array<KeyMapping, 21> applicationKeypad{
         KeyMapping{Key::Numpad_NumLock, SS3 "P"},
         KeyMapping{Key::Numpad_Divide, SS3 "Q"},
         KeyMapping{Key::Numpad_Multiply, SS3 "Q"},
