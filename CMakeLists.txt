@@ -12,7 +12,7 @@ else()
     set(CONTOUR_VERSION_SUFFIX "")
 endif()
 
-project(contour VERSION "0.0.1${CMAKE_VERSION_SUFFIX}" LANGUAGES CXX)
+project(contour VERSION "0.1.0${CMAKE_VERSION_SUFFIX}" LANGUAGES CXX)
 
 # setting defaults
 set(CMAKE_CXX_STANDARD 17)

@@ -102,14 +102,17 @@ endif()
 install(TARGETS contour DESTINATION bin)
 
 if(WIN32)
+    include(DeployQt)
+    windeployqt(contour)
     install(
-        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/"
+        DIRECTORY "$<TARGET_FILE_DIR:contour>/"
         DESTINATION "bin"
         USE_SOURCE_PERMISSIONS
-        PATTERN "CMakeFiles" EXCLUDE
-        PATTERN "*_autogen" EXCLUDE
-        PATTERN "*.h" EXCLUDE
-        PATTERN "*.dll"
+        FILES_MATCHING
+            PATTERN "CMakeFiles" EXCLUDE
+            PATTERN "*_autogen" EXCLUDE
+            PATTERN "*.h" EXCLUDE
+            PATTERN "*.dll"
     )
 endif()
 

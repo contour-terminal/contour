@@ -52,35 +52,36 @@ void LoggingSink::keyPress(char32_t _char, Modifier _modifier)
         log(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_char), to_string(_modifier)) });
 }
 
-void LoggingSink::log(LogEvent const& _event)
+LogMask getLogMask(LogEvent const& _event)
 {
+    #if 0 // The code below causes an internal compiler error on MSVC (16.7)
     LogMask const m = visit(overloaded{
-            [&](ParserErrorEvent const&) {
-                return LogMask::ParserError;
-            },
-            [&](RawInputEvent const&) {
-                return LogMask::RawInput;
-            },
-            [&](RawOutputEvent const&) {
-                return LogMask::RawOutput;
-            },
-            [&](InvalidOutputEvent const&) {
-                return LogMask::InvalidOutput;
-            },
-            [&](UnsupportedOutputEvent const&) {
-                return LogMask::UnsupportedOutput;
-            },
-            [&](TraceInputEvent const&) {
-                return LogMask::TraceInput;
-            },
-            [&](TraceOutputEvent const&) {
-                return LogMask::TraceOutput;
-            },
+            [&](ParserErrorEvent const&) { return LogMask::ParserError; },
+            [&](RawInputEvent const&) { return LogMask::RawInput; },
+            [&](RawOutputEvent const&) { return LogMask::RawOutput; },
+            [&](InvalidOutputEvent const&) { return LogMask::InvalidOutput; },
+            [&](UnsupportedOutputEvent const&) { return LogMask::UnsupportedOutput; },
+            [&](TraceInputEvent const&) { return LogMask::TraceInput; },
+            [&](TraceOutputEvent const&) { return LogMask::TraceOutput; },
         },
         _event
     );
+    return m;
+    #else
+    if (holds_alternative<ParserErrorEvent>(_event)) return LogMask::ParserError;
+    else if (holds_alternative<RawInputEvent>(_event)) return LogMask::RawInput;
+    else if (holds_alternative<RawOutputEvent>(_event)) return LogMask::RawOutput;
+    else if (holds_alternative<InvalidOutputEvent>(_event)) return LogMask::InvalidOutput;
+    else if (holds_alternative<UnsupportedOutputEvent>(_event)) return LogMask::UnsupportedOutput;
+    else if (holds_alternative<TraceInputEvent>(_event)) return LogMask::TraceInput;
+    else if (holds_alternative<TraceOutputEvent>(_event)) return LogMask::TraceOutput;
+    else return LogMask::ParserError; // should never be reached
+    #endif
+}
 
-    if ((logMask_ & m) != LogMask::None)
+void LoggingSink::log(LogEvent const& _event)
+{
+    if ((logMask_ & getLogMask(_event)) != LogMask::None)
         *sink_ << fmt::format("{}\n", _event);
 }
 

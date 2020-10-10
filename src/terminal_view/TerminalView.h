@@ -29,6 +29,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace terminal::view {
@@ -107,7 +108,7 @@ class TerminalView : private Terminal::Events {
     /// Waits until the PTY slave has terminated, and then closes the underlying terminal.
     ///
     /// The alive() test will fail after this call.
-    void wait();
+    void waitForProcessExit();
 
     Process const& process() const noexcept { return process_; }
     Process& process() noexcept { return process_; }
@@ -151,6 +152,7 @@ class TerminalView : private Terminal::Events {
 
     Renderer renderer_;
     TerminalProcess process_;
+    std::thread processExitWatcher_;
     ColorProfile colorProfile_;
     ColorProfile defaultColorProfile_;
 };
