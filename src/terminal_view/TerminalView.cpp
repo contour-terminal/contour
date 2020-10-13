@@ -90,7 +90,10 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _cursorShape,
         [this](terminal::LogEvent const& _event) { logger_(_event); }
     },
-    processExitWatcher_{ [this]() { waitForProcessExit(); } },
+    processExitWatcher_{ [this]() {
+        (void) process_.wait();
+        process_.terminal().device().close();
+    } },
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}
 {
@@ -241,15 +244,11 @@ uint64_t TerminalView::render(steady_clock::time_point const& _now, bool _pressu
     return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition(), _pressure);
 }
 
-void TerminalView::waitForProcessExit()
+Process::ExitStatus TerminalView::waitForProcessExit()
 {
-    if (!process_.alive())
-        return;
-
-    (void) process_.wait();
-    process_.terminal().device().close();
+    processExitWatcher_.join();
+    return process_.checkStatus().value();
 }
-
 
 void TerminalView::bell()
 {

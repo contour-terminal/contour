@@ -13,6 +13,10 @@
  */
 #pragma once
 
+#include <crispy/overloaded.h>
+
+#include <fmt/format.h>
+
 #include <map>
 #include <optional>
 #include <string>
@@ -107,3 +111,24 @@ private:
 };
 
 }  // namespace terminal
+
+namespace fmt
+{
+    template <>
+    struct formatter<terminal::Process::ExitStatus> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Process::ExitStatus const& _status, FormatContext& _ctx)
+        {
+            return std::visit(overloaded{
+                [&](terminal::Process::NormalExit _exit) {
+                    return format_to(_ctx.out(), "NormalExit:{}", _exit.exitCode);
+                },
+                [&](terminal::Process::SignalExit _exit) {
+                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, strerror(_exit.signum));
+                }
+            }, _status);
+        }
+    };
+}

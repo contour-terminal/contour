@@ -43,12 +43,4 @@ TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
 
 TerminalProcess::~TerminalProcess()
 {
-    // Closing the terminal I/O.
-    // Maybe the process is still alive, but we need to disconnect from the PTY,
-    // so that the Process will be notified via SIGHUP.
-    // NB: We MUST close the PTY device before waiting for the process to terminate.
-    terminal().device().close();
-
-    // Wait until the process is actually terminated.
-    (void) Process::wait();
 }

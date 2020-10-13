@@ -108,7 +108,7 @@ class TerminalView : private Terminal::Events {
     /// Waits until the PTY slave has terminated, and then closes the underlying terminal.
     ///
     /// The alive() test will fail after this call.
-    void waitForProcessExit();
+    Process::ExitStatus waitForProcessExit();
 
     Process const& process() const noexcept { return process_; }
     Process& process() noexcept { return process_; }

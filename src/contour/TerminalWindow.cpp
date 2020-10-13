@@ -1504,7 +1504,8 @@ void TerminalWindow::onClosed()
     // TODO: silently quit instantly when window/terminal has been spawned already since N seconds.
     // This message should only be printed for "fast" terminal terminations.
 
-    terminal::Process::ExitStatus const ec = terminalView_->process().wait();
+    terminalView_->waitForProcessExit();
+    terminal::Process::ExitStatus const ec = *terminalView_->process().checkStatus();
     if (holds_alternative<Process::SignalExit>(ec))
         terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with signal {} ({}).",
                                                             get<Process::SignalExit>(ec).signum,

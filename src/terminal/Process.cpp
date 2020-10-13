@@ -378,7 +378,7 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
 
     if (rv < 0)
         throw runtime_error{ "waitpid: "s + getLastErrorAsString() };
-    else if (rv == 0)
+    else if (rv == 0 && !_waitForExit)
         return nullopt;
     else
     {
