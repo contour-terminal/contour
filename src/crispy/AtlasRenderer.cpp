@@ -204,6 +204,11 @@ bool Renderer::empty() const noexcept
 /// Executes all scheduled commands in proper order.
 void Renderer::execute()
 {
+    // std::cout << fmt::format("atlas::Renderer.execute() upload={} render={}\n",
+    //     scheduler_->uploadTextures.size(),
+    //     scheduler_->renderTextures.size()
+    // );
+
     // potentially create new atlases
     for (CreateAtlas const& params : scheduler_->createAtlases)
         createAtlas(params);
@@ -272,13 +277,13 @@ void Renderer::uploadTexture(UploadTexture const& _upload)
     auto const& texture = _upload.texture.get();
     auto const key = AtlasKey{_upload.texture.get().atlasName, _upload.texture.get().atlas};
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
-    assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");;
+    assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
     auto const textureId = atlasMap_[key];
     auto const x0 = texture.x;
     auto const y0 = texture.y;
     auto const z0 = texture.z;
 
-    //cout << "Renderer.uploadTexture(tid:" << textureId << "): " << _upload << endl;
+    // cout << fmt::format("atlas::Renderer.uploadTexture({}): {}\n", textureId, _upload);
 
     auto constexpr target = GL_TEXTURE_2D_ARRAY;
     auto constexpr levelOfDetail = 0;
@@ -299,7 +304,7 @@ void Renderer::renderTexture(RenderTexture const& _render)
         GLuint const textureUnit = _render.texture.get().atlas;
         GLuint const textureId = it->second;
 
-        //cout << "Renderer.renderTexture(" << textureUnit << '/' << textureId << "): " << _render << endl;
+        // cout << fmt::format("atlas::Renderer.renderTexture({}/{}): {}\n", textureUnit, textureId, _render);
 
         selectTextureUnit(textureUnit);
         bindTexture2DArray(textureId);
