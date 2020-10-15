@@ -1,14 +1,16 @@
 
 ### random
 
+- [ ] normal-mode cursor (that can be used for selection, basic vim movements)
 - [ ] make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
 
-### vttest
+### Bugs found via vttest
 
 - [ ] SGR underline not visible when inverse is set
 
 ### Known Bugs
 
+- `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
 - Do not do pressure-performance optimization when in alt-buffer
 - charset SCS/SS not well tested (i.e.: write unit tests)
 - hot reloading of font family does not work
@@ -19,10 +21,6 @@
 	https://www.unicode.org/reports/tr11/tr11-36.html#Recommendations
 	Chapter 5 (Recommendations), last bullet point!
 	- provide a config option? (compile/run time?)
-
-- [Windows] exit-watcher: quit the view/window when terminal app exits but report and wait for key press
-      enter|escape if terminal app did exit too quickly (configurable: 5 seconds default)
-      e.g. `alert_on_quick_termination: 5 seconds`
 
 ### Usability Improvements
 
@@ -100,3 +98,4 @@
 - INVESTIGATE: is VT color setting for CMY and CMYK supported by other VTEs (other than mintty?)? What apps use that?
 - create own terminfo file (ideally auto-generated from source code's knowledge)
 - "Option-Click moves cursor" from https://www.iterm2.com/documentation-preferences-pointer.html
+- TMUX control mode: https://github.com/tmux/tmux/wiki/Control-Mode
