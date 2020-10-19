@@ -101,6 +101,40 @@ constexpr bool operator!=(RGBColor const& a, RGBColor const& b) noexcept
     return !(a == b);
 }
 
+struct RGBAColor {
+    uint32_t value;
+
+    constexpr uint8_t red() const noexcept   { return static_cast<uint8_t>((value >> 24) & 0xFF); }
+    constexpr uint8_t green() const noexcept { return static_cast<uint8_t>((value >> 16) & 0xFF); }
+    constexpr uint8_t blue() const noexcept  { return static_cast<uint8_t>((value >> 8) & 0xFF); }
+    constexpr uint8_t alpha() const noexcept { return static_cast<uint8_t>(value & 0xFF); }
+
+    constexpr RGBAColor() : value{0} {}
+    constexpr RGBAColor(uint32_t _value) : value{_value} {}
+
+    constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) :
+        value{ (static_cast<uint32_t>(r) << 24) |
+               (static_cast<uint32_t>(g) << 16) |
+               (static_cast<uint32_t>(b) << 8)  |
+               (a) } {}
+
+    constexpr RGBAColor(RGBColor _color) : RGBAColor{_color.red, _color.green, _color.blue, 0xFF} {}
+
+    constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
+
+    RGBAColor& operator=(std::string const& _hexCode);
+};
+
+constexpr bool operator==(RGBAColor const& a, RGBAColor const& b) noexcept
+{
+    return a.value == b.value;
+}
+
+constexpr bool operator!=(RGBAColor const& a, RGBAColor const& b) noexcept
+{
+    return !(a == b);
+}
+
 using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
 
 struct ColorProfile {
@@ -227,6 +261,7 @@ constexpr bool operator==(Color const& a, Color const& b) noexcept
 std::string to_string(IndexedColor color);
 std::string to_string(BrightColor color);
 std::string to_string(RGBColor c);
+std::string to_string(RGBAColor c);
 std::string to_string(Color const& c);
 
 constexpr bool isUndefined(Color const& color) noexcept
@@ -264,6 +299,11 @@ inline std::ostream& operator<<(std::ostream& os, terminal::RGBColor value)
     return os << to_string(value);
 }
 
+inline std::ostream& operator<<(std::ostream& os, terminal::RGBAColor value)
+{
+    return os << to_string(value);
+}
+
 inline std::ostream& operator<<(std::ostream& os, terminal::Color value)
 {
     return os << to_string(value);
@@ -294,6 +334,14 @@ namespace fmt {
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
         auto format(terminal::RGBColor const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+    };
+
+    template <>
+    struct formatter<terminal::RGBAColor> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::RGBAColor const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
     };
 
     template <>

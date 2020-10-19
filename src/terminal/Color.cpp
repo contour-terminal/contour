@@ -88,10 +88,29 @@ RGBColor& RGBColor::operator=(string const& _hexCode)
     return *this;
 }
 
+RGBAColor& RGBAColor::operator=(string const& _hexCode)
+{
+    if (_hexCode.size() == 9 && _hexCode[0] == '#')
+    {
+        char* eptr = nullptr;
+        uint32_t const value = strtoul(_hexCode.c_str() + 1, &eptr, 16);
+        if (eptr && *eptr == '\0')
+            *this = RGBAColor{value};
+    }
+    return *this;
+}
+
 string to_string(RGBColor const c)
 {
     char buf[8];
     auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", c.red, c.green, c.blue);
+    return string(buf, n);
+}
+
+string to_string(RGBAColor const c)
+{
+    char buf[10];
+    auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X%02X", c.red(), c.green(), c.blue(), c.alpha());
     return string(buf, n);
 }
 
