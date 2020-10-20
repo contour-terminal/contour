@@ -569,7 +569,9 @@ namespace impl // {{{ some command generator helpers
             return ApplyResult::Ok;
         }
         else
-            return ApplyResult::Invalid;
+            emitCommand<Hyperlink>(_output, string{}, string{});
+
+        return ApplyResult::Ok;
     }
 
     ApplyResult DECRQSS(Sequence const& _ctx, CommandList& _output)
