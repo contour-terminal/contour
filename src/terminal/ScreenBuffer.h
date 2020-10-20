@@ -420,6 +420,7 @@ struct ScreenBuffer {
     std::optional<size_t> maxHistoryLineCount_;
 	Margin margin_;
 	Cursor cursor{};
+    Cursor savedCursor{};
 	Lines lines;
 	Lines savedLines{};
 	bool wrapPending{false};

@@ -277,19 +277,15 @@ bool Screen::scrollToBottom()
 void Screen::saveCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECSC.html
-
-    savedCursors_.emplace(currentBuffer().cursor);
+    currentBuffer().savedCursor = currentBuffer().cursor;
 }
 
 void Screen::restoreCursor()
 {
-    if (!savedCursors_.empty())
-    {
-        buffer_->setCursor(savedCursors_.top());
-        setMode(Mode::AutoWrap, savedCursors_.top().autoWrap);
-        setMode(Mode::Origin, savedCursors_.top().originMode);
-        savedCursors_.pop();
-    }
+    // https://vt100.net/docs/vt510-rm/DECRC.html
+    buffer_->setCursor(currentBuffer().savedCursor);
+    setMode(Mode::AutoWrap, currentBuffer().savedCursor.autoWrap);
+    setMode(Mode::Origin, currentBuffer().savedCursor.originMode);
 }
 
 void Screen::resetSoft()

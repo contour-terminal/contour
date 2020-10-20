@@ -555,8 +555,6 @@ class Screen {
   private:
     ScreenEvents& eventListener_;
 
-    std::stack<Cursor> savedCursors_{};
-
     Logger const logger_;
     bool logRaw_ = false;
     bool logTrace_ = false;
