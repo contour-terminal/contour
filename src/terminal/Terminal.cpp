@@ -14,7 +14,6 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/Terminal.h>
 
-#include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
 
 #include <crispy/escape.h>

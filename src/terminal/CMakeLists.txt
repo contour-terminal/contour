@@ -22,7 +22,6 @@ set(terminal_HEADERS
     Debugger.h
     Functions.h
     InputGenerator.h
-    OutputGenerator.h
     Parser.h
     Process.h
     PseudoTerminal.h
@@ -43,7 +42,6 @@ set(terminal_SOURCES
     Debugger.cpp
     Functions.cpp
     InputGenerator.cpp
-    OutputGenerator.cpp
     Parser.cpp
     Process.cpp
     PseudoTerminal.cpp

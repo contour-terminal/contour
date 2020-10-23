@@ -12,7 +12,8 @@
  * limitations under the License.
  */
 #include <terminal/ScreenBuffer.h>
-#include <terminal/OutputGenerator.h>
+
+#include <terminal/InputGenerator.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/utf8.h>
@@ -22,9 +23,12 @@
 #include <crispy/utils.h>
 
 #include <algorithm>
-#include <stdexcept>
 #include <iostream>
+#include <numeric>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <vector>
 
 #if defined(LIBTERMINAL_EXECUTION_PAR)
 #include <execution>
@@ -33,14 +37,18 @@
 #define LIBTERMINAL_EXECUTION_COMMA(par) /*!*/
 #endif
 
+using std::accumulate;
 using std::cerr;
 using std::endl;
-using std::min;
+using std::get;
+using std::holds_alternative;
 using std::max;
+using std::min;
 using std::next;
 using std::nullopt;
 using std::optional;
 using std::string;
+using std::vector;
 
 using crispy::for_each;
 
@@ -752,10 +760,171 @@ string ScreenBuffer::renderText() const
     return text;
 }
 
+class VTWriter // {{{
+{
+  public:
+    using Writer = std::function<void(char const*, size_t)>;
+
+    explicit VTWriter(Writer writer) : writer_{std::move(writer)} {}
+    explicit VTWriter(std::ostream& output) : VTWriter{[&](auto d, auto n) { output.write(d, n); }} {}
+    explicit VTWriter(std::vector<char>& output) : VTWriter{[&](auto d, auto n) { output.insert(output.end(), d, d + n); }} {}
+
+    void setCursorKeysMode(KeyMode _mode) noexcept { cursorKeysMode_ = _mode; }
+    bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
+    bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
+
+    void write(char32_t v)
+    {
+        write(unicode::to_utf8(v));
+    }
+
+    void write(std::string_view const& _s)
+    {
+        flush();
+        writer_(_s.data(), _s.size());
+    }
+
+    template <typename... Args>
+    void write(std::string_view const& _s, Args&&... _args)
+    {
+        write(fmt::format(_s, std::forward<Args>(_args)...));
+    }
+
+    void flush()
+    {
+        if (!sgr_.empty())
+        {
+            auto const f = flush(sgr_);
+            sgr_.clear();
+            writer_(f.data(), f.size());
+        }
+    }
+
+    string flush(vector<unsigned> const& _sgr)
+    {
+        if (_sgr.empty())
+            return "";
+
+        auto const params =
+            _sgr.size() != 1 || _sgr[0] != 0
+                ? accumulate(begin(_sgr), end(_sgr), string{},
+                             [](auto a, auto b) {
+                                 return a.empty() ? fmt::format("{}", b) : fmt::format("{};{}", a, b);
+                             })
+                : string();
+
+        return fmt::format("\033[{}m", params);
+    }
+
+    void sgr_add(unsigned n)
+    {
+        if (n == 0)
+        {
+            sgr_.clear();
+            sgr_.push_back(n);
+            currentForegroundColor_ = DefaultColor{};
+            currentBackgroundColor_ = DefaultColor{};
+            currentUnderlineColor_ = DefaultColor{};
+        }
+        else
+        {
+            if (sgr_.empty() || sgr_.back() != n)
+                sgr_.push_back(n);
+
+            if (sgr_.size() == 16)
+            {
+                write(flush(sgr_));
+                sgr_.clear();
+            }
+        }
+    }
+
+    void sgr_add(GraphicsRendition m)
+    {
+        sgr_add(static_cast<unsigned>(m));
+    }
+
+    void setForegroundColor(Color const& _color)
+    {
+        if (true) // _color != currentForegroundColor_)
+        {
+            currentForegroundColor_ = _color;
+            if (holds_alternative<IndexedColor>(_color))
+            {
+                auto const colorValue = get<IndexedColor>(_color);
+                if (static_cast<unsigned>(colorValue) < 8)
+                    sgr_add(30 + static_cast<unsigned>(colorValue));
+                else
+                {
+                    sgr_add(38);
+                    sgr_add(5);
+                    sgr_add(static_cast<unsigned>(colorValue));
+                }
+            }
+            else if (holds_alternative<DefaultColor>(_color))
+                sgr_add(39);
+            else if (holds_alternative<BrightColor>(_color))
+                sgr_add(90 + static_cast<unsigned>(get<BrightColor>(_color)));
+            else if (holds_alternative<RGBColor>(_color))
+            {
+                auto const& rgb = get<RGBColor>(_color);
+                sgr_add(38);
+                sgr_add(2);
+                sgr_add(static_cast<unsigned>(rgb.red));
+                sgr_add(static_cast<unsigned>(rgb.green));
+                sgr_add(static_cast<unsigned>(rgb.blue));
+            }
+        }
+    }
+
+    void setBackgroundColor(Color const& _color)
+    {
+        if (true)//_color != currentBackgroundColor_)
+        {
+            currentBackgroundColor_ = _color;
+            if (holds_alternative<IndexedColor>(_color))
+            {
+                auto const colorValue = get<IndexedColor>(_color);
+                if (static_cast<unsigned>(colorValue) < 8)
+                    sgr_add(40 + static_cast<unsigned>(colorValue));
+                else
+                {
+                    sgr_add(48);
+                    sgr_add(5);
+                    sgr_add(static_cast<unsigned>(colorValue));
+                }
+            }
+            else if (holds_alternative<DefaultColor>(_color))
+                sgr_add(49);
+            else if (holds_alternative<BrightColor>(_color))
+                sgr_add(100 + static_cast<unsigned>(get<BrightColor>(_color)));
+            else if (holds_alternative<RGBColor>(_color))
+            {
+                auto const& rgb = get<RGBColor>(_color);
+                sgr_add(48);
+                sgr_add(2);
+                sgr_add(static_cast<unsigned>(rgb.red));
+                sgr_add(static_cast<unsigned>(rgb.green));
+                sgr_add(static_cast<unsigned>(rgb.blue));
+            }
+        }
+    }
+
+  private:
+    Writer writer_;
+    std::vector<unsigned> sgr_;
+    std::stringstream sstr;
+    Color currentForegroundColor_ = DefaultColor{};
+    Color currentUnderlineColor_ = DefaultColor{};
+    Color currentBackgroundColor_ = DefaultColor{};
+    KeyMode cursorKeysMode_ = KeyMode::Normal;
+};
+// }}}
+
 std::string ScreenBuffer::screenshot() const
 {
     auto result = std::stringstream{};
-    auto generator = OutputGenerator{ result };
+    auto writer = VTWriter(result);
 
     for (cursor_pos_t const row : crispy::times(1, size_.height))
     {
@@ -763,24 +932,25 @@ std::string ScreenBuffer::screenshot() const
         {
             Cell const& cell = at({row, col});
 
-            //TODO: some kind of: generator(SetGraphicsRendition{ cell.attributes().styles });
             if (cell.attributes().styles & CharacterStyleMask::Bold)
-                generator(SetGraphicsRendition{GraphicsRendition::Bold});
+                writer.sgr_add(GraphicsRendition::Bold);
             else
-                generator(SetGraphicsRendition{GraphicsRendition::Normal});
+                writer.sgr_add(GraphicsRendition::Normal);
 
-            generator(SetForegroundColor{ cell.attributes().foregroundColor });
-            generator(SetBackgroundColor{ cell.attributes().backgroundColor });
+            // TODO: other styles (such as underline, ...)?
+
+            writer.setForegroundColor(cell.attributes().foregroundColor);
+            writer.setBackgroundColor(cell.attributes().backgroundColor);
 
             if (!cell.codepointCount())
-                generator(AppendChar{ U' ' });
+                writer.write(U' ');
             else
                 for (char32_t const ch : cell.codepoints())
-                    generator(AppendChar{ ch });
+                    writer.write(ch);
         }
-        generator(SetGraphicsRendition{GraphicsRendition::Reset});
-        generator(MoveCursorToBeginOfLine{});
-        generator(Linefeed{});
+        writer.sgr_add(GraphicsRendition::Reset);
+        writer.write('\r');
+        writer.write('\n');
     }
 
     return result.str();

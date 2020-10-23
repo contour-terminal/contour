@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal/InputGenerator.h>
-#include <terminal/OutputGenerator.h>
 #include <terminal/ControlCode.h>
 
 #include <unicode/utf8.h>
