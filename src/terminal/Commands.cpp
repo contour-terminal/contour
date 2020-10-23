@@ -164,6 +164,20 @@ string to_string(Mode m)
             return "MouseAlternateScroll";
         case Mode::BatchedRendering:
             return "BatchedRendering";
+        case Mode::MouseProtocolNormalTracking:
+            return "MouseProtocolNormalTracking";
+        case Mode::MouseProtocolHighlightTracking:
+            return "MouseProtocolHighlightTracking";
+        case Mode::MouseProtocolButtonTracking:
+            return "MouseProtocolButtonTracking";
+        case Mode::MouseProtocolAnyEventTracking:
+            return "MouseProtocolAnyEventTracking";
+        case Mode::MouseProtocolX10:
+            return "MouseProtocolX10";
+        case Mode::SaveCursor:
+            return "SaveCursor";
+        case Mode::ExtendedAltScreen:
+            return "ExtendedAltScreen";
     }
     return "?";
 }
@@ -216,6 +230,8 @@ string to_string(MouseProtocol protocol)
     {
         case MouseProtocol::X10:
             return "X10";
+        case MouseProtocol::HighlightTracking:
+            return "HighlightTracking";
         case MouseProtocol::NormalTracking:
             return "NormalTracking";
         case MouseProtocol::ButtonTracking:
@@ -335,6 +351,26 @@ class MnemonicBuilder {
             build("SM", fmt::format("Set mode {}", to_string(v.mode)), to_code(v.mode));
         else
             build("RM", fmt::format("Reset mode {}", to_string(v.mode)), to_code(v.mode));
+    }
+    void operator()(SaveMode const& v) {
+        string s;
+        for (auto const m : v.modes)
+        {
+            if (!s.empty())
+                s += ", ";
+            s += fmt::format("{}", m);
+        }
+        build("DECMODESAVE", fmt::format("Save modes: {}", s));
+    }
+    void operator()(RestoreMode const& v) {
+        string s;
+        for (auto const m : v.modes)
+        {
+            if (!s.empty())
+                s += ", ";
+            s += fmt::format("{}", m);
+        }
+        build("DECMODERESTORE", fmt::format("Restore modes: {}", s));
     }
     void operator()(RequestMode const& v) {
         build("DECRQM", fmt::format("Reuqest mode {}", to_string(v.mode)), static_cast<unsigned>(v.mode));

@@ -2231,6 +2231,20 @@ TEST_CASE("DECTABSR", "[screen]")
     }
 }
 
+TEST_CASE("save_restore_DEC_modes", "[screen]")
+{
+    auto screen = MockScreen{{2, 2}};
+
+    screen.setMode(Mode::MouseProtocolHighlightTracking, false);
+    screen.write(SaveMode{vector{Mode::MouseProtocolHighlightTracking}});
+
+    screen.setMode(Mode::MouseProtocolHighlightTracking, true);
+    CHECK(screen.isModeEnabled(Mode::MouseProtocolHighlightTracking));
+
+    screen.write(RestoreMode{vector{Mode::MouseProtocolHighlightTracking}});
+    CHECK_FALSE(screen.isModeEnabled(Mode::MouseProtocolHighlightTracking));
+}
+
 TEST_CASE("resize", "[screen]")
 {
     auto screen = MockScreen{{2, 2}};

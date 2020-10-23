@@ -956,6 +956,29 @@ void Screen::setDebugging(bool _enabled)
     }
 }
 
+void Screen::saveModes(std::vector<Mode> const& _modes)
+{
+    for (Mode const mode : _modes)
+        if (!isAnsiMode(mode))
+            savedModes_[mode].push_back(isModeEnabled(mode));
+}
+
+void Screen::restoreModes(std::vector<Mode> const& _modes)
+{
+    for (Mode const mode : _modes)
+    {
+        if (auto i = savedModes_.find(mode); i != savedModes_.end())
+        {
+            vector<bool>& saved = i->second;
+            if (!saved.empty())
+            {
+                setMode(mode, saved.back());
+                saved.pop_back();
+            }
+        }
+    }
+}
+
 void Screen::setMode(Mode _mode, bool _enable)
 {
     switch (_mode)
@@ -1358,6 +1381,8 @@ void DirectExecutor::visit(SetUnderlineColor const& v) { screen_.setUnderlineCol
 void DirectExecutor::visit(SingleShiftSelect const& v) { screen_.singleShiftSelect(v.table); }
 void DirectExecutor::visit(SoftTerminalReset const&) { screen_.resetSoft(); }
 void DirectExecutor::visit(InvalidCommand const& v) { if (logger_) logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"}); }
+void DirectExecutor::visit(SaveMode const& v) { screen_.saveModes(v.modes); }
+void DirectExecutor::visit(RestoreMode const& v) { screen_.restoreModes(v.modes); }
 // }}}
 
 // {{{ SynchronizedExecutor

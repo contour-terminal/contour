@@ -131,6 +131,8 @@ class Debugger : public CommandVisitor {
     void visit(SingleShiftSelect const& v) override { enqueue(v); };
     void visit(SoftTerminalReset const& v) override { enqueue(v); };
     void visit(InvalidCommand const& v) override { enqueue(v); };
+    void visit(SaveMode const& v) override { enqueue(v); }
+    void visit(RestoreMode const& v) override { enqueue(v); }
     // }}}
 
   private:

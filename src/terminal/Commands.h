@@ -75,6 +75,16 @@ enum class Mode {
     Columns132,
     SmoothScroll,
     ReverseVideo,
+
+    MouseProtocolX10,
+    MouseProtocolNormalTracking,
+    MouseProtocolHighlightTracking,
+    MouseProtocolButtonTracking,
+    MouseProtocolAnyEventTracking,
+
+    SaveCursor,
+    ExtendedAltScreen,
+
     /**
      * DECOM - Origin Mode.
      *
@@ -170,6 +180,14 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::MouseAlternateScroll:
         case Mode::BatchedRendering:
             return false;
+        case Mode::SaveCursor:
+        case Mode::ExtendedAltScreen:
+        case Mode::MouseProtocolAnyEventTracking:
+        case Mode::MouseProtocolButtonTracking:
+        case Mode::MouseProtocolHighlightTracking:
+        case Mode::MouseProtocolNormalTracking:
+        case Mode::MouseProtocolX10:
+            return false;
     }
     return false; // Should never be reached.
 }
@@ -191,6 +209,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::ReverseVideo: return "?5";
         case Mode::Origin: return "?6";
         case Mode::AutoWrap: return "?7";
+        case Mode::MouseProtocolX10: return "?9";
         case Mode::ShowToolbar: return "?10";
         case Mode::BlinkingCursor: return "?12";
         case Mode::PrinterExtend: return "?19";
@@ -198,6 +217,12 @@ constexpr std::string_view to_code(Mode m)
         case Mode::ShowScrollbar: return "?30";
         case Mode::UseAlternateScreen: return "?47";
         case Mode::LeftRightMargin: return "?69";
+        case Mode::MouseProtocolNormalTracking: return "?1000";
+        case Mode::MouseProtocolHighlightTracking: return "?1001";
+        case Mode::MouseProtocolButtonTracking: return "?1002";
+        case Mode::MouseProtocolAnyEventTracking: return "?1003";
+        case Mode::SaveCursor: return "?1048";
+        case Mode::ExtendedAltScreen: return "?1049";
         case Mode::BracketedPaste: return "?2004";
         case Mode::FocusTracking: return "?1004";
         case Mode::MouseExtended: return "?1005";
@@ -575,6 +600,9 @@ struct AppendChar { char32_t ch; };
 
 struct SetMode { Mode mode; bool enable; };
 
+struct SaveMode { std::vector<Mode> modes; };
+struct RestoreMode { std::vector<Mode> modes; };
+
 /// DECRQM - Request Mode
 ///
 /// The host sends this control function to find out if a particular mode is set or reset. The terminal responds with a report mode function (DECRPM—Report Mode - Terminal To Host).
@@ -629,6 +657,8 @@ enum class MouseProtocol {
     X10 = 9,
     /// Normal tracking mode, that's X10 with mouse release events and modifiers
     NormalTracking = 1000,
+    /// Highlight mouse tracking
+    HighlightTracking = 1001,
     /// Button-event tracking protocol.
     ButtonTracking = 1002,
     /// Like ButtonTracking plus motion events.
@@ -1003,9 +1033,11 @@ using Command = std::variant<
     ResetDynamicColor,
     ResizeWindow,
     RestoreCursor,
+    RestoreMode,
     RestoreWindowTitle,
     ReverseIndex,
     SaveCursor,
+    SaveMode,
     SaveWindowTitle,
     ScreenAlignmentPattern,
     ScrollDown,
@@ -1120,6 +1152,8 @@ class CommandVisitor {
     virtual void visit(SingleShiftSelect const& v) = 0;
     virtual void visit(SoftTerminalReset const& v) = 0;
     virtual void visit(InvalidCommand const& v) = 0;
+    virtual void visit(SaveMode const& v) = 0;
+    virtual void visit(RestoreMode const& v) = 0;
 
     // {{{ Secret std::visit() workaround
     void operator()(AppendChar const& v) { visit(v); }
@@ -1203,6 +1237,8 @@ class CommandVisitor {
     void operator()(SingleShiftSelect const& v) { visit(v); }
     void operator()(SoftTerminalReset const& v) { visit(v); }
     void operator()(InvalidCommand const& v) { visit(v); }
+    void operator()(SaveMode const& v) { visit(v); }
+    void operator()(RestoreMode const& v) { visit(v); }
     // }}}
 };
 
@@ -1239,6 +1275,8 @@ namespace fmt {
             {
                 case terminal::MouseProtocol::X10:
                     return format_to(ctx.out(), "X10");
+                case terminal::MouseProtocol::HighlightTracking:
+                    return format_to(ctx.out(), "HighlightTracking");
                 case terminal::MouseProtocol::ButtonTracking:
                     return format_to(ctx.out(), "ButtonTracking");
                 case terminal::MouseProtocol::NormalTracking:

@@ -30,12 +30,14 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <vector>
 
 using std::array;
 using std::nullopt;
 using std::optional;
 using std::pair;
 using std::string;
+using std::vector;
 
 namespace terminal {
 
@@ -114,60 +116,77 @@ namespace impl // {{{ some command generator helpers
 		}
 	}
 
+    optional<Mode> toDECMode(int _value)
+    {
+        switch (_value)
+        {
+            case 1: return Mode::UseApplicationCursorKeys;
+            case 2: return Mode::DesignateCharsetUSASCII;
+            case 3: return Mode::Columns132;
+            case 4: return Mode::SmoothScroll;
+            case 5: return Mode::ReverseVideo;
+            case 6: return Mode::Origin;
+            case 7: return Mode::AutoWrap;
+            case 9: return Mode::MouseProtocolX10;
+            case 10: return Mode::ShowToolbar;
+            case 12: return Mode::BlinkingCursor;
+            case 19: return Mode::PrinterExtend;
+            case 25: return Mode::VisibleCursor;
+            case 30: return Mode::ShowScrollbar;
+            case 47: return Mode::UseAlternateScreen;
+            case 69: return Mode::LeftRightMargin;
+            case 1000: return Mode::MouseProtocolNormalTracking;
+            case 1001: return Mode::MouseProtocolHighlightTracking;
+            case 1002: return Mode::MouseProtocolButtonTracking;
+            case 1003: return Mode::MouseProtocolAnyEventTracking;
+            case 1004: return Mode::FocusTracking;
+            case 1005: return Mode::MouseExtended;
+            case 1006: return Mode::MouseSGR;
+            case 1007: return Mode::MouseAlternateScroll;
+            case 1015: return Mode::MouseURXVT;
+            case 1047: return Mode::UseAlternateScreen;
+            case 1048: return Mode::SaveCursor;
+            case 1049: return Mode::ExtendedAltScreen;
+            case 2004: return Mode::BracketedPaste;
+            case 2026: return Mode::BatchedRendering;
+        }
+        return nullopt;
+    }
+
 	ApplyResult setModeDEC(Sequence const& _ctx, size_t _modeIndex, bool _enable, CommandList& _output)
 	{
-		switch (_ctx.param(_modeIndex))
-		{
-			case 1: return emitCommand<SetMode>(_output, Mode::UseApplicationCursorKeys, _enable);
-			case 2: return emitCommand<SetMode>(_output, Mode::DesignateCharsetUSASCII, _enable);
-			case 3: return emitCommand<SetMode>(_output, Mode::Columns132, _enable);
-			case 4: return emitCommand<SetMode>(_output, Mode::SmoothScroll, _enable);
-			case 5: return emitCommand<SetMode>(_output, Mode::ReverseVideo, _enable);
-			case 6: return emitCommand<SetMode>(_output, Mode::Origin, _enable);
-			case 7: return emitCommand<SetMode>(_output, Mode::AutoWrap, _enable);
-			case 9: return emitCommand<SendMouseEvents>(_output, MouseProtocol::X10, _enable);
-			case 10: return emitCommand<SetMode>(_output, Mode::ShowToolbar, _enable);
-			case 12: return emitCommand<SetMode>(_output, Mode::BlinkingCursor, _enable);
-			case 19: return emitCommand<SetMode>(_output, Mode::PrinterExtend, _enable);
-			case 25: return emitCommand<SetMode>(_output, Mode::VisibleCursor, _enable);
-			case 30: return emitCommand<SetMode>(_output, Mode::ShowScrollbar, _enable);
-			case 47: return emitCommand<SetMode>(_output, Mode::UseAlternateScreen, _enable);
-			case 69: return emitCommand<SetMode>(_output, Mode::LeftRightMargin, _enable);
-			case 1000: return emitCommand<SendMouseEvents>(_output, MouseProtocol::NormalTracking, _enable);
-			// case 1001: // TODO return emitCommand<SendMouseEvents>(_output, MouseProtocol::HighlightTracking, _enable);
-			case 1002: return emitCommand<SendMouseEvents>(_output, MouseProtocol::ButtonTracking, _enable);
-			case 1003: return emitCommand<SendMouseEvents>(_output, MouseProtocol::AnyEventTracking, _enable);
-			case 1004: return emitCommand<SetMode>(_output, Mode::FocusTracking, _enable);
-			case 1005: return emitCommand<SetMode>(_output, Mode::MouseExtended, _enable);
-			case 1006: return emitCommand<SetMode>(_output, Mode::MouseSGR, _enable);
-			case 1007: return emitCommand<SetMode>(_output, Mode::MouseAlternateScroll, _enable);
-			case 1015: return emitCommand<SetMode>(_output, Mode::MouseURXVT, _enable);
-			case 1047: return emitCommand<SetMode>(_output, Mode::UseAlternateScreen, _enable);
-			case 1048:
-				if (_enable)
-					return emitCommand<SaveCursor>(_output);
-				else
-					return emitCommand<RestoreCursor>(_output);
-			case 1049:
-				if (_enable)
-				{
-					emitCommand<SaveCursor>(_output);
-					emitCommand<SetMode>(_output, Mode::UseAlternateScreen, true);
-					emitCommand<ClearScreen>(_output);
-				}
-				else
-				{
-					emitCommand<SetMode>(_output, Mode::UseAlternateScreen, false);
-					emitCommand<RestoreCursor>(_output);
-				}
-				return ApplyResult::Ok;
-			case 2004:
-				return emitCommand<SetMode>(_output, Mode::BracketedPaste, _enable);
-            case 2026:
-                return emitCommand<SetMode>(_output, Mode::BatchedRendering, _enable);
-			default:
-				return ApplyResult::Unsupported;
-		}
+        if (auto const modeOpt = toDECMode(_ctx.param(_modeIndex)); modeOpt.has_value())
+        {
+            switch (modeOpt.value())
+            {
+                case Mode::MouseProtocolX10: return emitCommand<SendMouseEvents>(_output, MouseProtocol::X10, _enable);
+                case Mode::MouseProtocolNormalTracking: return emitCommand<SendMouseEvents>(_output, MouseProtocol::NormalTracking, _enable);
+                case Mode::MouseProtocolHighlightTracking: return emitCommand<SendMouseEvents>(_output, MouseProtocol::HighlightTracking, _enable);
+                case Mode::MouseProtocolButtonTracking: return emitCommand<SendMouseEvents>(_output, MouseProtocol::ButtonTracking, _enable);
+                case Mode::MouseProtocolAnyEventTracking: return emitCommand<SendMouseEvents>(_output, MouseProtocol::AnyEventTracking, _enable);
+                case Mode::SaveCursor:
+                    if (_enable)
+                        return emitCommand<SaveCursor>(_output);
+                    else
+                        return emitCommand<RestoreCursor>(_output);
+                case Mode::ExtendedAltScreen:
+                    if (_enable)
+                    {
+                        emitCommand<SaveCursor>(_output);
+                        emitCommand<SetMode>(_output, Mode::UseAlternateScreen, true);
+                        emitCommand<ClearScreen>(_output);
+                    }
+                    else
+                    {
+                        emitCommand<SetMode>(_output, Mode::UseAlternateScreen, false);
+                        emitCommand<RestoreCursor>(_output);
+                    }
+                    return ApplyResult::Ok;
+                default:
+                    return emitCommand<SetMode>(_output, modeOpt.value(), _enable);
+            }
+        }
+        return ApplyResult::Invalid;
 	}
 
     pair<size_t, Color> parseColor(Sequence const& _ctx, size_t i)
@@ -602,6 +621,24 @@ namespace impl // {{{ some command generator helpers
         return ApplyResult::Unsupported;
     }
 
+    ApplyResult saveDECModes(Sequence const& _ctx, CommandList& _output)
+    {
+        vector<Mode> modes;
+        for (size_t i = 0; i < _ctx.parameterCount(); ++i)
+            if (optional<Mode> mode = toDECMode(_ctx.param(i)); mode.has_value())
+                modes.push_back(mode.value());
+        return emitCommand<SaveMode>(_output, modes);
+    }
+
+    ApplyResult restoreDECModes(Sequence const& _ctx, CommandList& _output)
+    {
+        vector<Mode> modes;
+        for (size_t i = 0; i < _ctx.parameterCount(); ++i)
+            if (optional<Mode> mode = toDECMode(_ctx.param(i)); mode.has_value())
+                modes.push_back(mode.value());
+        return emitCommand<RestoreMode>(_output, modes);
+    }
+
     ApplyResult WINDOWMANIP(Sequence const& _ctx, CommandList& _output)
     {
         if (_ctx.parameterCount() == 3)
@@ -914,6 +951,8 @@ ApplyResult apply(FunctionDefinition const& _function, Sequence const& _ctx, Com
         case TBC: return impl::TBC(_ctx, _output);
         case VPA: return emitCommand<MoveCursorToLine>(_output, _ctx.param_or(0, Sequence::Parameter{1}));
         case WINMANIP: return impl::WINDOWMANIP(_ctx, _output);
+        case DECMODERESTORE: return impl::restoreDECModes(_ctx, _output);
+        case DECMODESAVE: return impl::saveDECModes(_ctx, _output);
 
         // DCS
         case DECRQSS: return impl::DECRQSS(_ctx, _output);

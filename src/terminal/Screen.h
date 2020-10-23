@@ -39,6 +39,7 @@
 #include <deque>
 #include <functional>
 #include <list>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -146,6 +147,8 @@ class DirectExecutor : public CommandVisitor {
     void visit(SingleShiftSelect const& v) override;
     void visit(SoftTerminalReset const& v) override;
     void visit(InvalidCommand const& v) override;
+    void visit(SaveMode const& v) override;
+    void visit(RestoreMode const& v) override;
 };
 
 /// Batches any drawing related command until synchronization point, or
@@ -225,6 +228,8 @@ class SynchronizedExecutor : public DirectExecutor {
     void visit(SetUnderlineColor const& v) override { enqueue(v); }
     void visit(SingleShiftSelect const& v) override { enqueue(v); }
     void visit(InvalidCommand const& v) override { enqueue(v); }
+    void visit(SaveMode const& v) override { enqueue(v); }
+    void visit(RestoreMode const& v) override { enqueue(v); }
 };
 
 /**
@@ -395,6 +400,8 @@ class Screen {
     void setMode(Mode _mode, bool _enabled);
     void saveCursor();
     void restoreCursor();
+    void saveModes(std::vector<Mode> const& _modes);
+    void restoreModes(std::vector<Mode> const& _modes);
 
     Size const& size() const noexcept { return size_; }
     void resize(Size const& _newSize);
@@ -562,13 +569,14 @@ class Screen {
 
     Size cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
 
+    VTType terminalId_ = VTType::VT525;
+
     CommandBuilder commandBuilder_;
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
 
-    VTType terminalId_ = VTType::VT525;
-
     Modes modes_;
+    std::map<Mode, std::vector<bool>> savedModes_; //!< saved DEC modes
 
     ScreenBuffer primaryBuffer_;
     ScreenBuffer alternateBuffer_;
