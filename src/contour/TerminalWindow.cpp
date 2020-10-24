@@ -778,10 +778,11 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
     try
     {
         auto const mouseButton = makeMouseButton(_event->button());
-        executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
+        auto const handled = executeInput(terminal::MousePressEvent{mouseButton, makeModifier(_event->modifiers())});
 
-        // Force redraw of the scene in case a selection was just created.
-        if (terminalView_->terminal().screen().isSelectionAvailable())
+        // Force redraw if the event was handled.
+        // This includes selection intiiation as well as selection clearing actions.
+        if (handled)
         {
             setScreenDirty();
             update();
@@ -798,7 +799,11 @@ void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
     try
     {
         auto const mouseButton = makeMouseButton(_mouseRelease->button());
-        executeInput(terminal::MouseReleaseEvent{mouseButton});
+        if (executeInput(terminal::MouseReleaseEvent{mouseButton}))
+        {
+            setScreenDirty();
+            update();
+        }
     }
     catch (std::exception const& e)
     {
