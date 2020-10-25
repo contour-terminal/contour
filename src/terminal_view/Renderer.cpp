@@ -168,7 +168,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             changes = _terminal.preRender(_now);
 
             _terminal.screen().render([this](Coordinate const& _pos, Cell const& _cell) { renderCell(_pos, _cell); },
-                                      _terminal.screen().scrollOffset());
+                                      _terminal.screen().absoluteScrollOffset());
 
             if (cellAtMouse.hyperlink())
                 cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
@@ -177,7 +177,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         {
             changes = _terminal.preRender(_now);
             _terminal.screen().render([this](Coordinate const& pos, Cell const& _cell) { renderCell(pos, _cell); },
-                                      _terminal.screen().scrollOffset());
+                                      _terminal.screen().absoluteScrollOffset());
         }
     }
 
@@ -207,7 +207,10 @@ void Renderer::renderCursor(Terminal const& _terminal)
         cursorRenderer_.setShape(cursorShape);
 
         cursorRenderer_.render(
-            screenCoordinates_.map(_terminal.cursor().position.column, _terminal.cursor().position.row + _terminal.scrollOffset()),
+            screenCoordinates_.map(
+                _terminal.cursor().position.column,
+                _terminal.cursor().position.row + _terminal.screen().relativeScrollOffset()
+            ),
             cursorCell.width()
         );
     }
@@ -227,7 +230,7 @@ void Renderer::renderSelection(Terminal const& _terminal)
             auto const relativeLineNr = range.line - _terminal.historyLineCount();// - _terminal.scrollOffset();
             if (_terminal.isLineVisible(relativeLineNr))
             {
-                auto const pos = Coordinate{relativeLineNr + _terminal.scrollOffset(), range.fromColumn};
+                auto const pos = Coordinate{relativeLineNr + _terminal.screen().relativeScrollOffset(), range.fromColumn};
                 auto const count = 1 + range.toColumn - range.fromColumn;
                 backgroundRenderer_.renderOnce(pos, colorProfile_.selection, count);
                 ++metrics_.cellBackgroundRenderCount;

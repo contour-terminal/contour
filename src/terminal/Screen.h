@@ -295,7 +295,7 @@ class Screen {
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
-    void render(RendererT _renderer, int _scrollOffset = 0) const;
+    void render(RendererT _renderer, std::optional<int> _scrollOffset = std::nullopt) const;
 
     /// Renders a single text line.
     std::string renderTextLine(cursor_pos_t _row) const { return buffer_->renderTextLine(_row); }
@@ -407,7 +407,20 @@ class Screen {
     void resize(Size const& _newSize);
 
     /// {{{ viewport management API
-    int scrollOffset() const noexcept { return scrollOffset_; }
+    /// @returns scroll offset relative to the main screen buffer
+    int relativeScrollOffset() const noexcept
+    {
+        return scrollOffset_.has_value()
+            ? historyLineCount() - scrollOffset_.value()
+            : 0;
+    }
+
+    /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
+    std::optional<int> absoluteScrollOffset() const noexcept
+    {
+        return scrollOffset_;
+    }
+
     bool isLineVisible(cursor_pos_t _row) const noexcept;
     bool scrollUp(int _numLines);
     bool scrollDown(int _numLines);
@@ -592,16 +605,16 @@ class Screen {
     std::unique_ptr<CommandVisitor> debugExecutor_;
     CommandVisitor* commandExecutor_ = nullptr;
 
-    int scrollOffset_ = 0;
+    std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
 
     std::unique_ptr<Selector> selector_;
 };
 
 // {{{ template functions
 template <typename RendererT>
-void Screen::render(RendererT _render, int _scrollOffset) const
+void Screen::render(RendererT _render, std::optional<int> _scrollOffset) const
 {
-    if (!_scrollOffset)
+    if (!_scrollOffset.has_value())
     {
         crispy::for_each(
             crispy::times(1, size_.height) * crispy::times(1, size_.width),
@@ -614,14 +627,14 @@ void Screen::render(RendererT _render, int _scrollOffset) const
     }
     else
     {
-        _scrollOffset = std::min(_scrollOffset, buffer_->historyLineCount());
-        auto const historyLineCount = std::min(size_.height, static_cast<int>(_scrollOffset));
-        auto const mainLineCount = size_.height - historyLineCount;
+        _scrollOffset = std::clamp(*_scrollOffset, 0, buffer_->historyLineCount());
 
         cursor_pos_t rowNumber = 1;
 
         // render first part from history
-        for (auto line = prev(end(buffer_->savedLines), _scrollOffset); rowNumber <= historyLineCount; ++line, ++rowNumber)
+        for (auto line = next(begin(buffer_->savedLines), *_scrollOffset);
+                line != end(buffer_->savedLines) && rowNumber <= size_.height;
+                ++line, ++rowNumber)
         {
             if (static_cast<int>(line->size()) < size_.width)
                 line->resize(size_.width);
@@ -632,7 +645,7 @@ void Screen::render(RendererT _render, int _scrollOffset) const
         }
 
         // render second part from main screen buffer
-        for (auto line = begin(buffer_->lines); line != next(begin(buffer_->lines), mainLineCount); ++line, ++rowNumber)
+        for (auto line = begin(buffer_->lines); rowNumber <= size_.height; ++line, ++rowNumber)
         {
             auto column = begin(*line);
             for (cursor_pos_t colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)

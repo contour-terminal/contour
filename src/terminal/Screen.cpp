@@ -197,7 +197,7 @@ vector<Selector::Range> Screen::selection() const
 // {{{ viewport management
 bool Screen::isLineVisible(cursor_pos_t _row) const noexcept
 {
-    return crispy::ascending(1 - scrollOffset_, _row, size_.height - scrollOffset_);
+    return crispy::ascending(1 - relativeScrollOffset(), _row, size_.height - relativeScrollOffset());
 }
 
 bool Screen::scrollUp(int _numLines)
@@ -205,9 +205,12 @@ bool Screen::scrollUp(int _numLines)
     if (isAlternateScreen()) // TODO: make configurable
         return false;
 
-    if (auto const newOffset = min(scrollOffset_ + _numLines, historyLineCount()); newOffset != scrollOffset_)
+    if (_numLines <= 0)
+        return false;
+
+    if (auto const newOffset = max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0); newOffset != absoluteScrollOffset())
     {
-        scrollOffset_ = newOffset;
+        scrollOffset_.emplace(newOffset);
         return true;
     }
     else
@@ -219,9 +222,18 @@ bool Screen::scrollDown(int _numLines)
     if (isAlternateScreen()) // TODO: make configurable
         return false;
 
-    if (auto const newOffset = scrollOffset_ >= _numLines ? scrollOffset_ - _numLines : 0; newOffset != scrollOffset_)
+    if (_numLines <= 0)
+        return false;
+
+    auto const newOffset = absoluteScrollOffset().value_or(historyLineCount()) + _numLines;
+    if (newOffset < historyLineCount())
     {
-        scrollOffset_ = newOffset;
+        scrollOffset_.emplace(newOffset);
+        return true;
+    }
+    else if (newOffset == historyLineCount() || scrollOffset_.has_value())
+    {
+        scrollOffset_.reset();
         return true;
     }
     else
@@ -230,9 +242,10 @@ bool Screen::scrollDown(int _numLines)
 
 bool Screen::scrollMarkUp()
 {
-    if (auto const newScrollOffset = buffer_->findMarkerBackward(-scrollOffset_); newScrollOffset.has_value())
+    auto const newScrollOffset = buffer_->findMarkerBackward(absoluteScrollOffset().value_or(historyLineCount()));
+    if (newScrollOffset.has_value())
     {
-        scrollOffset_ = 1 - newScrollOffset.value();
+        scrollOffset_.emplace(newScrollOffset.value());
         return true;
     }
 
@@ -241,20 +254,24 @@ bool Screen::scrollMarkUp()
 
 bool Screen::scrollMarkDown()
 {
-    if (auto const newScrollOffset = buffer_->findMarkerForward(1 - scrollOffset_); newScrollOffset.has_value())
-    {
-        scrollOffset_ = *newScrollOffset < 0 ? 1 - newScrollOffset.value() : 0;
-        return true;
-    }
+    auto const newScrollOffset = buffer_->findMarkerForward(absoluteScrollOffset().value_or(historyLineCount()));
 
-    return false;
+    if (!newScrollOffset.has_value())
+        return false;
+
+    if (*newScrollOffset < historyLineCount())
+        scrollOffset_.emplace(*newScrollOffset);
+    else
+        scrollOffset_.reset();
+
+    return true;
 }
 
 bool Screen::scrollToTop()
 {
-    if (auto top = historyLineCount(); top != scrollOffset_)
+    if (absoluteScrollOffset() != 0)
     {
-        scrollOffset_ = top;
+        scrollOffset_.emplace(0);
         return true;
     }
     else
@@ -263,9 +280,9 @@ bool Screen::scrollToTop()
 
 bool Screen::scrollToBottom()
 {
-    if (scrollOffset_ != 0)
+    if (scrollOffset_.has_value())
     {
-        scrollOffset_ = 0;
+        scrollOffset_.reset();
         return true;
     }
     else
@@ -329,6 +346,9 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
 {
     if (bufferType() != _type)
     {
+        if (selector_)
+            selector_.reset();
+
         switch (_type)
         {
             case ScreenBuffer::Type::Main:
@@ -336,6 +356,7 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
                 buffer_ = &primaryBuffer_;
                 break;
             case ScreenBuffer::Type::Alternate:
+                scrollToBottom();
                 if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
@@ -343,9 +364,6 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
                 buffer_ = &alternateBuffer_;
                 break;
         }
-
-        if (selector_)
-            selector_.reset();
 
         eventListener_.bufferChanged(_type);
     }

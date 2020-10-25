@@ -1266,21 +1266,17 @@ string TerminalWindow::extractLastMarkRange()
 
     auto const& screen = terminalView_->terminal().screen();
     auto const colCount = screen.size().width;
-    auto const bottomLine = screen.cursor().position.row + 1;
+    auto const bottomLine = screen.historyLineCount() + screen.cursor().position.row - 1;
 
-    auto const marker1 =
-        screen.cursor().position.row == screen.size().height
-            ? optional{screen.size().height - 1}
-            : screen.findMarkerBackward(bottomLine);
-    if (!marker1.has_value())
-        return {};
+    auto const marker1 = optional{bottomLine};
 
     auto const marker0 = screen.findMarkerBackward(marker1.value());
     if (!marker0.has_value())
         return {};
 
-    auto const firstLine = *marker0 + 1;
-    auto const lastLine = *marker1 - 1;
+    // +1 each for offset change from 0 to 1 and because we only want to start at the line *after* the mark.
+    auto const firstLine = *marker0 - screen.historyLineCount() + 2;
+    auto const lastLine = *marker1 - screen.historyLineCount();
 
     string text;
 
@@ -1456,7 +1452,7 @@ void TerminalWindow::commands(terminal::CommandList const& _commands)
     (void) _commands;
 #endif
 
-    if (profile().autoScrollOnUpdate && terminalView_->terminal().scrollOffset())
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().screen().relativeScrollOffset())
         terminalView_->terminal().scrollToBottom();
 
     if (setScreenDirty())

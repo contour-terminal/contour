@@ -61,45 +61,37 @@ std::string Cell::toUtf8() const
 
 std::optional<int> ScreenBuffer::findMarkerBackward(int _currentCursorLine) const
 {
-    // TODO: unit- tests for all cases.
-
-    if (_currentCursorLine > size().height || (_currentCursorLine < 0 && -_currentCursorLine >= historyLineCount()))
+    if (_currentCursorLine < 0)
         return nullopt;
 
-    // we start looking in the main screen area only if @p _currentCursorLine is at least 2,
-    // i.e. when there is at least one line to check.
-    if (_currentCursorLine >= 2) // main screen area
-    {
-        int row = _currentCursorLine - 1;
-        while (row > 0)
-        {
-            auto const currentLine = next(begin(lines), row - 1);
-            if (currentLine->marked)
-                return {row};
+    _currentCursorLine = min(_currentCursorLine, historyLineCount() + size_.height);
 
-            --row;
-        }
-    }
+    // main lines
+    for (int i = _currentCursorLine - historyLineCount() - 1; i >= 0; --i)
+        if (lines.at(i).marked)
+            return {historyLineCount() + i};
 
-    // saved-lines area
-    auto const scrollOffset = _currentCursorLine <= 0 ? -_currentCursorLine + 1 : 0;
-
-    for (int i = scrollOffset; i < historyLineCount(); ++i)
-        if (Line const& line = savedLines.at(historyLineCount() - i - 1); line.marked)
-            return -i;
+    // saved lines
+    for (int i = min(_currentCursorLine, historyLineCount()) - 1; i >= 0; --i)
+        if (savedLines.at(i).marked)
+            return {i};
 
     return nullopt;
 }
 
 std::optional<int> ScreenBuffer::findMarkerForward(int _currentCursorLine) const
 {
-    for (int i = _currentCursorLine + 1; i <= 0; ++i)
-        if (int const ri = historyLineCount() + i - 1; savedLines.at(ri).marked)
+    if (_currentCursorLine < 0)
+        return nullopt;
+
+    for (int i = _currentCursorLine + 1; i < historyLineCount(); ++i)
+        if (savedLines.at(i).marked)
             return {i};
 
-    for (int i = max(_currentCursorLine + 1, 1); i <= size_.height; ++i)
-        if (Line const& line = lines.at(i - 1); line.marked)
-            return {i};
+    for (int i = _currentCursorLine < historyLineCount()
+            ? 0 : _currentCursorLine - historyLineCount() + 1; i < size_.height; ++i)
+        if (lines.at(i).marked)
+            return {historyLineCount() + i};
 
     return nullopt;
 }

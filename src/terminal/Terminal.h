@@ -117,7 +117,9 @@ class Terminal : public ScreenEvents {
     Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
     {
         // TODO: unit test case me BEFORE merge, yo !
-        auto const row = screen_.historyLineCount() - std::min(screen_.scrollOffset(), screen_.historyLineCount()) + _pos.row;
+        auto const row = screen_.historyLineCount()
+                       - screen_.relativeScrollOffset()
+                       + _pos.row;
         auto const col = _pos.column;
         return Coordinate{row, col};
     }
@@ -129,7 +131,6 @@ class Terminal : public ScreenEvents {
 
     // viewport management
     bool isLineVisible(cursor_pos_t _row) const noexcept { return screen_.isLineVisible(_row); }
-    int scrollOffset() const noexcept { return screen_.scrollOffset(); }
     bool scrollUp(int _numLines) { return screen_.scrollUp(_numLines); }
     bool scrollDown(int  _numLines) { return screen_.scrollDown(_numLines); }
     bool scrollToTop() { return screen_.scrollToTop(); }
@@ -213,7 +214,7 @@ class Terminal : public ScreenEvents {
     template <typename... RemainingPasses>
     void renderPass(Screen::Renderer const& pass, RemainingPasses... remainingPasses) const
     {
-        screen_.render(pass, screen_.scrollOffset());
+        screen_.render(pass, screen_.absoluteScrollOffset());
 
         if constexpr (sizeof...(RemainingPasses) != 0)
             renderPass(std::forward<RemainingPasses>(remainingPasses)...);
