@@ -82,8 +82,10 @@ class TerminalWindow :
   private:
     terminal::view::FontConfig loadFonts(config::TerminalProfile const& _profile);
     bool executeAction(actions::Action const& _action);
+    bool executeAllActions(std::vector<actions::Action> const& _actions);
     bool executeInput(terminal::MouseEvent const& event);
     void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
+    void scrollToBottomAndRedraw();
 
     bool fullscreen() const;
     void toggleFullScreen();

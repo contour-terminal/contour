@@ -702,12 +702,17 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
 {
     try
     {
-        auto const keySeq = QKeySequence(isModifier(static_cast<Qt::Key>(_keyEvent->key()))
-                                            ? _keyEvent->modifiers()
-                                            : _keyEvent->modifiers() | _keyEvent->key());
+        auto const keySeq = QKeySequence(
+            isModifier(static_cast<Qt::Key>(_keyEvent->key()))
+                ? _keyEvent->modifiers()
+                : _keyEvent->modifiers() | _keyEvent->key()
+        );
 
         // if (!_keyEvent->text().isEmpty())
-        //     qDebug() << "keyPress:" << "text:" << _keyEvent->text() << "seq:" << keySeq
+        //     qDebug() << "keyPress:"
+        //         << "text:" << _keyEvent->text()
+        //         << "seq:" << keySeq
+        //         << "seq.empty?" << keySeq.isEmpty()
         //         << "key:" << static_cast<Qt::Key>(_keyEvent->key())
         //         << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
 
@@ -716,13 +721,12 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
 
         if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
         {
-            auto const& actions = i->second;
-            for (auto const& action : actions)
-                executeAction(action);
+            executeAllActions(i->second);
         }
         else if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
         {
             terminalView_->terminal().send(*inputEvent, now_);
+            scrollToBottomAndRedraw();
         }
         else if (!_keyEvent->text().isEmpty())
         {
@@ -732,6 +736,7 @@ void TerminalWindow::keyPressEvent(QKeyEvent* _keyEvent)
                 auto const inputEvent = terminal::InputEvent{terminal::CharInputEvent{ch, modifiers}};
                 terminalView_->terminal().send(inputEvent, now_);
             }
+            scrollToBottomAndRedraw();
         }
     }
     catch (exception const& e)
@@ -759,15 +764,12 @@ bool TerminalWindow::executeInput(terminal::MouseEvent const& _mouseEvent)
 {
     now_ = chrono::steady_clock::now();
 
-    bool handled = false;
     if (auto mapping = config_.mouseMappings.find(_mouseEvent); mapping != config_.mouseMappings.end())
     {
-        for (auto const& action : mapping->second)
-            handled = executeAction(action) || handled;
+        bool const handled = executeAllActions(mapping->second);
+        if (handled)
+            return true;
     }
-
-    if (handled)
-        return true;
 
     // No input mapping found, forward event.
     return terminalView_->terminal().send(_mouseEvent, now_);
@@ -869,6 +871,16 @@ void TerminalWindow::setDefaultCursor()
     }
 }
 
+void TerminalWindow::scrollToBottomAndRedraw()
+{
+    auto const dirty = terminalView_->terminal().scrollToBottom();
+    if (dirty)
+    {
+        setScreenDirty();
+        update();
+    }
+}
+
 void TerminalWindow::focusInEvent(QFocusEvent* _event) // TODO: paint with "normal" colors
 {
     try
@@ -945,6 +957,16 @@ bool TerminalWindow::setFontSize(int _fontSize)
     profile().fontSize = static_cast<short>(_fontSize);
 
     return true;
+}
+
+bool TerminalWindow::executeAllActions(std::vector<actions::Action> const& _actions)
+{
+    auto handled = false;
+
+    for (actions::Action const& action : _actions)
+        handled = executeAction(action) || handled;
+
+    return handled;
 }
 
 bool TerminalWindow::executeAction(Action const& _action)
