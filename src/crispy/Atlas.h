@@ -49,6 +49,11 @@ struct DestroyAtlas {
 };
 
 struct TextureInfo {
+    TextureInfo(TextureInfo &&) = default;
+    TextureInfo& operator=(TextureInfo &&) = default;
+    TextureInfo(TextureInfo const&) = delete;
+    TextureInfo& operator=(TextureInfo const&) = delete;
+
     unsigned atlas;                 // for example 0 for GL_TEXTURE0
     std::reference_wrapper<std::string const> atlasName;
     unsigned x;                     // target x-coordinate into the 3D texture
@@ -109,6 +114,17 @@ class CommandListener {
  * @param Metadata some optionally accessible metadata that is attached with each texture.
  */
 class TextureAtlasAllocator {
+  private:
+    struct Size {
+        unsigned width, height;
+
+        bool operator==(Size rhs) const noexcept { return width == rhs.width && height == rhs.height; };
+        bool operator!=(Size rhs) const noexcept { return !(*this == rhs); };
+        bool operator<(Size rhs) const noexcept { return width < rhs.width || (width == rhs.width && height < rhs.height); };
+    };
+
+    struct Offset { unsigned i, x, y, z; };
+
   public:
     /**
      * Constructs a texture atlas with given limits.
@@ -181,9 +197,9 @@ class TextureAtlasAllocator {
         currentX_ = 0;
         currentY_ = 0;
         maxTextureHeightInCurrentRow_ = 0;
+        discarded_.clear();
     }
 
-    TextureInfo& get(size_t _index) { return *std::next(std::begin(textureInfos_), _index); }
     TextureInfo const& get(size_t _index) const { return *std::next(std::begin(textureInfos_), _index); }
 
     /// Inserts a new texture into the atlas.
@@ -204,6 +220,30 @@ class TextureAtlasAllocator {
                               Buffer&& _data,
                               unsigned _user = 0)
     {
+        // check free-map first
+        if (auto i = discarded_.find(Size{_width, _height}); i != end(discarded_))
+        {
+            std::vector<Offset>& discardsForGivenSize = i->second;
+            if (!discardsForGivenSize.empty())
+            {
+                TextureInfo const& info = appendTextureInfo(_width, _height, _targetWidth, _targetHeight,
+                                                            discardsForGivenSize.back(),
+                                                            _user);
+
+                discardsForGivenSize.pop_back();
+                if (discardsForGivenSize.empty())
+                    discarded_.erase(i);
+
+                commandListener_.uploadTexture(UploadTexture{
+                    std::ref(info),
+                    std::move(_data),
+                    _format
+                });
+
+                return &info;
+            }
+        }
+
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
         if (_height > height_ || _width > width_)
             return nullptr;
@@ -216,29 +256,14 @@ class TextureAtlasAllocator {
         if (currentY_ + _height > height_ && !advanceZ())
             return nullptr;
 
-        textureInfos_.emplace_back(TextureInfo{
-            currentInstanceId_,
-            name_,
-            currentX_,
-            currentY_,
-            currentZ_,
-            _width,
-            _height,
-            _targetWidth,
-            _targetHeight,
-            static_cast<float>(currentX_) / static_cast<float>(width_),
-            static_cast<float>(currentY_) / static_cast<float>(height_),
-            static_cast<float>(_width) / static_cast<float>(width_),
-            static_cast<float>(_height) / static_cast<float>(height_),
-            _user
-        });
+        TextureInfo const& info = appendTextureInfo(_width, _height, _targetWidth, _targetHeight,
+                                                    Offset{currentInstanceId_, currentX_, currentY_, currentZ_},
+                                                    _user);
 
         currentX_ += _width;
 
         if (_height > maxTextureHeightInCurrentRow_)
             maxTextureHeightInCurrentRow_ = _height;
-
-        TextureInfo const& info = textureInfos_.back();
 
         commandListener_.uploadTexture(UploadTexture{
             std::ref(info),
@@ -247,6 +272,22 @@ class TextureAtlasAllocator {
         });
 
         return &info;
+    }
+
+    void release(TextureInfo const& _info)
+    {
+        auto i = std::find_if(begin(textureInfos_),
+                              end(textureInfos_),
+                              [&](TextureInfo const& ti) -> bool {
+                                  return &ti == &_info;
+                              });
+
+        if (i != end(textureInfos_))
+        {
+            std::vector<Offset>& discardsForGivenSize = discarded_[Size{_info.width, _info.height}];
+            discardsForGivenSize.emplace_back(Offset{_info.atlas, _info.x, _info.y, _info.z});
+            textureInfos_.erase(i);
+        }
     }
 
   private:
@@ -306,6 +347,31 @@ class TextureAtlasAllocator {
         });
     }
 
+    TextureInfo const& appendTextureInfo(unsigned _width, unsigned _height,
+                                         unsigned _targetWidth, unsigned _targetHeight,
+                                         Offset _offset,
+                                         unsigned _user)
+    {
+        textureInfos_.emplace_back(TextureInfo{
+            _offset.i,
+            name_,
+            _offset.x,
+            _offset.y,
+            _offset.z,
+            _width,
+            _height,
+            _targetWidth,
+            _targetHeight,
+            static_cast<float>(_offset.x) / static_cast<float>(width_),
+            static_cast<float>(_offset.y) / static_cast<float>(height_),
+            static_cast<float>(_width) / static_cast<float>(width_),
+            static_cast<float>(_height) / static_cast<float>(height_),
+            _user
+        });
+
+        return textureInfos_.back();
+    }
+
   private:
     unsigned const instanceBaseId_;    // default value to assign to first instance, and incrementing from that point for further instances.
     unsigned const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
@@ -322,6 +388,8 @@ class TextureAtlasAllocator {
     unsigned currentX_ = 0;             // current X-offset to start drawing to
     unsigned currentY_ = 0;             // current Y-offset to start drawing to
     unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
+
+    std::map<Size, std::vector<Offset>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
 
     std::list<TextureInfo> textureInfos_;
 };
@@ -400,7 +468,7 @@ class MetadataTextureAtlas {
         if (!textureInfo)
             return std::nullopt;
 
-        allocations_.emplace(std::pair{_id, std::ref(*textureInfo)});
+        allocations_.emplace(_id, textureInfo);
 
         if constexpr (!std::is_same_v<Metadata, void>)
             metadata_.emplace(std::pair{_id, std::move(_metadata)});
@@ -412,15 +480,29 @@ class MetadataTextureAtlas {
     [[nodiscard]] std::optional<DataRef> get(Key const& _id) const
     {
         if (auto const i = allocations_.find(_id); i != allocations_.end())
-            return DataRef{std::ref(i->second), std::ref(metadata_.at(_id))};
+            return DataRef{*i->second, metadata_.at(_id)};
         else
             return std::nullopt;
+    }
+
+    void release(Key const& _id)
+    {
+        if (auto k = metadata_.find(_id); k != metadata_.end())
+            metadata_.erase(k);
+
+        if (auto const i = allocations_.find(_id); i != allocations_.end())
+        {
+            TextureInfo const& ti = *i->second;
+            atlas_.release(ti);
+
+            allocations_.erase(i);
+        }
     }
 
   private:
     TextureAtlasAllocator& atlas_;
 
-    std::map<Key, TextureInfo> allocations_ = {};
+    std::map<Key, TextureInfo const*> allocations_ = {};
 
     // conditionally transform void to int as I can't conditionally enable/disable this member var.
     std::map<
