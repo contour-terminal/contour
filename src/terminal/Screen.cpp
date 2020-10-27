@@ -65,14 +65,16 @@ Screen::Screen(Size const& _size,
         [this](Image const* _image) { eventListener_.discardImage(*_image); },
         1
     },
-    commandBuilder_{
+    sequencer_{
+        *this,
         _logger,
         _maxImageSize,
         RGBAColor{}, // TODO
         imageColorPalette_
     },
+    commandBuilder_{ _logger, _maxImageSize, RGBAColor{}, imageColorPalette_ },
     parser_{
-        ref(commandBuilder_),
+        ref(sequencer_), //ref(commandBuilder_),
         [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
     },
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, modes_, _maxHistoryLineCount },

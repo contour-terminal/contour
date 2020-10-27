@@ -29,6 +29,7 @@ set(terminal_HEADERS
     Screen.h
     ScreenBuffer.h
     Selector.h
+    Sequencer.h
     SixelParser.h
     Terminal.h
     TerminalProcess.h
@@ -50,6 +51,7 @@ set(terminal_SOURCES
     PseudoTerminal.cpp
     Screen.cpp
     ScreenBuffer.cpp
+    Sequencer.cpp
     Selector.cpp
     SixelParser.cpp
     Terminal.cpp

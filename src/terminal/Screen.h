@@ -23,6 +23,7 @@
 #include <terminal/Parser.h>
 #include <terminal/ScreenBuffer.h>
 #include <terminal/ScreenEvents.h>
+#include <terminal/Sequencer.h>
 #include <terminal/Selector.h>
 #include <terminal/VTType.h>
 #include <terminal/Size.h>
@@ -607,6 +608,7 @@ class Screen {
     std::shared_ptr<ColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 
+    Sequencer sequencer_;
     CommandBuilder commandBuilder_;
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
