@@ -14,7 +14,6 @@
 #pragma once
 
 #include <contour/Config.h>
-#include <contour/DebuggerService.h>
 
 #include <QtCore/QThread>
 #include <QtWidgets/QSystemTrayIcon>
@@ -44,8 +43,6 @@ class Controller : public QThread {
 
   private:
     static void onSigInt(int _signum);
-    void runDebugger();
-    void debuggerMain();
 
   private:
     static Controller* self_;
@@ -55,7 +52,6 @@ class Controller : public QThread {
     std::string profileName_;
 
     std::list<TerminalWindow*> terminalWindows_;
-    std::unique_ptr<DebuggerService> debuggerService_;
 
     QSystemTrayIcon* systrayIcon_ = nullptr;
 };

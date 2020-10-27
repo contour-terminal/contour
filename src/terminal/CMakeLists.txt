@@ -19,7 +19,6 @@ set(terminal_HEADERS
     Color.h
     CommandBuilder.h
     Commands.h
-    Debugger.h
     Functions.h
     Image.h
     InputGenerator.h
@@ -29,6 +28,7 @@ set(terminal_HEADERS
     Screen.h
     ScreenBuffer.h
     Selector.h
+    Sequencer.h
     SixelParser.h
     Terminal.h
     TerminalProcess.h
@@ -41,7 +41,6 @@ set(terminal_SOURCES
     Color.cpp
     CommandBuilder.cpp
     Commands.cpp
-    Debugger.cpp
     Functions.cpp
     Image.cpp
     InputGenerator.cpp
@@ -50,6 +49,7 @@ set(terminal_SOURCES
     PseudoTerminal.cpp
     Screen.cpp
     ScreenBuffer.cpp
+    Sequencer.cpp
     Selector.cpp
     SixelParser.cpp
     Terminal.cpp

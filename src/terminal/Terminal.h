@@ -48,7 +48,7 @@ class Terminal : public ScreenEvents {
         virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
         virtual void bell() {}
         virtual void bufferChanged(ScreenBuffer::Type) {}
-        virtual void commands(CommandList const& /*_commands*/) {}
+        virtual void commands() {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
@@ -212,7 +212,7 @@ class Terminal : public ScreenEvents {
     void flushInput();
     void screenUpdateThread();
     void onScreenReply(std::string_view const& reply);
-    void onScreenCommands(std::vector<Command> const& commands);
+    void onScreenCommands();
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
 
     template <typename... RemainingPasses>
@@ -228,7 +228,7 @@ class Terminal : public ScreenEvents {
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenBuffer::Type) override;
-    void commands(std::vector<Command> const& _commands) override;
+    void commands() override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& _title, std::string_view const& _body) override;

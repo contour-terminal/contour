@@ -260,9 +260,9 @@ void TerminalView::bufferChanged(ScreenBuffer::Type _type)
     events_.bufferChanged(_type);
 }
 
-void TerminalView::commands(CommandList const& _commands)
+void TerminalView::commands()
 {
-    events_.commands(_commands);
+    events_.commands();
 }
 
 void TerminalView::copyToClipboard(std::string_view const& _data)

@@ -114,7 +114,7 @@ class TerminalWindow :
   private:
     void bell() override;
     void bufferChanged(terminal::ScreenBuffer::Type) override;
-    void commands(terminal::CommandList const& /*_commands*/) override;
+    void commands() override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;

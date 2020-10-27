@@ -1454,13 +1454,12 @@ void TerminalWindow::bufferChanged(terminal::ScreenBuffer::Type _type)
     }
 }
 
-void TerminalWindow::commands(terminal::CommandList const& _commands)
+void TerminalWindow::commands()
 {
 #if defined(CONTOUR_VT_METRICS)
-    for (auto const& command : _commands)
-        terminalMetrics_(command);
-#else
-    (void) _commands;
+    // TODO
+    // for (auto const& command : _commands)
+    //     terminalMetrics_(command);
 #endif
 
     if (profile().autoScrollOnUpdate && terminalView_->terminal().screen().relativeScrollOffset())

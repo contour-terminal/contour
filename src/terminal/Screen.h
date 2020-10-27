@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/CommandBuilder.h>
 #include <terminal/Commands.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
@@ -23,6 +22,7 @@
 #include <terminal/Parser.h>
 #include <terminal/ScreenBuffer.h>
 #include <terminal/ScreenEvents.h>
+#include <terminal/Sequencer.h>
 #include <terminal/Selector.h>
 #include <terminal/VTType.h>
 #include <terminal/Size.h>
@@ -53,194 +53,11 @@
 namespace terminal {
 
 class Screen;
-class Debugger;
-
-/// VT Sequence Executor for directly executing the VT sequences as they arive.
-class DirectExecutor : public CommandVisitor {
-  protected:
-    Screen& screen_;
-    Logger const logger_;
-
-  public:
-    explicit DirectExecutor(Screen& _screen, Logger _logger = Logger{}) :
-        screen_{ _screen },
-        logger_{ std::move(_logger) }
-    {}
-
-    void visit(AppendChar const& v) override;
-    void visit(ApplicationKeypadMode const& v) override;
-    void visit(BackIndex const& v) override;
-    void visit(Backspace const& v) override;
-    void visit(Bell const& v) override;
-    void visit(ChangeIconTitle const& v) override;
-    void visit(ChangeWindowTitle const& v) override;
-    void visit(ClearLine const& v) override;
-    void visit(ClearScreen const& v) override;
-    void visit(ClearScrollbackBuffer const& v) override;
-    void visit(ClearToBeginOfLine const& v) override;
-    void visit(ClearToBeginOfScreen const& v) override;
-    void visit(ClearToEndOfLine const& v) override;
-    void visit(ClearToEndOfScreen const& v) override;
-    void visit(CopyToClipboard const& v) override;
-    void visit(CursorBackwardTab const& v) override;
-    void visit(CursorNextLine const& v) override;
-    void visit(CursorPreviousLine const& v) override;
-    void visit(DeleteCharacters const& v) override;
-    void visit(DeleteColumns const& v) override;
-    void visit(DeleteLines const& v) override;
-    void visit(DesignateCharset const& v) override;
-    void visit(DeviceStatusReport const& v) override;
-    void visit(DumpState const& v) override;
-    void visit(EraseCharacters const& v) override;
-    void visit(ForwardIndex const& v) override;
-    void visit(FullReset const& v) override;
-    void visit(HorizontalPositionAbsolute const& v) override;
-    void visit(HorizontalPositionRelative const& v) override;
-    void visit(HorizontalTabClear const& v) override;
-    void visit(HorizontalTabSet const& v) override;
-    void visit(Hyperlink const& v) override;
-    void visit(Index const& v) override;
-    void visit(InsertCharacters const& v) override;
-    void visit(InsertColumns const& v) override;
-    void visit(InsertLines const& v) override;
-    void visit(Linefeed const& v) override;
-    void visit(MoveCursorBackward const& v) override;
-    void visit(MoveCursorDown const& v) override;
-    void visit(MoveCursorForward const& v) override;
-    void visit(MoveCursorTo const& v) override;
-    void visit(MoveCursorToBeginOfLine const& v) override;
-    void visit(MoveCursorToColumn const& v) override;
-    void visit(MoveCursorToLine const& v) override;
-    void visit(MoveCursorToNextTab const& v) override;
-    void visit(MoveCursorUp const& v) override;
-    void visit(Notify const& v) override;
-    void visit(ReportCursorPosition const& v) override;
-    void visit(ReportExtendedCursorPosition const& v) override;
-    void visit(RequestDynamicColor const& v) override;
-    void visit(RequestMode const& v) override;
-    void visit(RequestPixelSize const& v) override;
-    void visit(RequestStatusString const& v) override;
-    void visit(RequestTabStops const& v) override;
-    void visit(ResetDynamicColor const& v) override;
-    void visit(ResizeWindow const& v) override;
-    void visit(RestoreCursor const& v) override;
-    void visit(RestoreWindowTitle const& v) override;
-    void visit(ReverseIndex const& v) override;
-    void visit(SaveCursor const& v) override;
-    void visit(SaveWindowTitle const& v) override;
-    void visit(ScreenAlignmentPattern const& v) override;
-    void visit(ScrollDown const& v) override;
-    void visit(ScrollUp const& v) override;
-    void visit(SelectConformanceLevel const& v) override;
-    void visit(SendDeviceAttributes const& v) override;
-    void visit(SendMouseEvents const& v) override;
-    void visit(SendTerminalId const& v) override;
-    void visit(SetBackgroundColor const& v) override;
-    void visit(SetCursorStyle const& v) override;
-    void visit(SetDynamicColor const& v) override;
-    void visit(SetForegroundColor const& v) override;
-    void visit(SetGraphicsRendition const& v) override;
-    void visit(SetLeftRightMargin const& v) override;
-    void visit(SetMark const& v) override;
-    void visit(SetMode const& v) override;
-    void visit(SetTopBottomMargin const& v) override;
-    void visit(SetUnderlineColor const& v) override;
-    void visit(SingleShiftSelect const& v) override;
-    void visit(SixelImage const& v) override;
-    void visit(SoftTerminalReset const& v) override;
-    void visit(InvalidCommand const& v) override;
-    void visit(SaveMode const& v) override;
-    void visit(RestoreMode const& v) override;
-    void visit(XtSmGraphics const& v) override;
-};
-
-/// Batches any drawing related command until synchronization point, or
-/// executes the command directly otherwise.
-class SynchronizedExecutor : public DirectExecutor {
-  private:
-    CommandList queuedCommands_;
-
-  public:
-    explicit SynchronizedExecutor(Screen& _screen, Logger _logger = Logger{})
-        : DirectExecutor{_screen, std::move(_logger)}
-    {}
-
-    // applies all queued commands.
-    void flush();
-
-    void enqueue(Command&& _cmd)
-    {
-        queuedCommands_.emplace_back(std::move(_cmd));
-    }
-
-    void visit(AppendChar const& v) override { enqueue(v); }
-    void visit(BackIndex const& v) override { enqueue(v); }
-    void visit(Backspace const& v) override { enqueue(v); }
-    void visit(ClearLine const& v) override { enqueue(v); }
-    void visit(ClearScreen const& v) override { enqueue(v); }
-    void visit(ClearScrollbackBuffer const& v) override { enqueue(v); }
-    void visit(ClearToBeginOfLine const& v) override { enqueue(v); }
-    void visit(ClearToBeginOfScreen const& v) override { enqueue(v); }
-    void visit(ClearToEndOfLine const& v) override { enqueue(v); }
-    void visit(ClearToEndOfScreen const& v) override { enqueue(v); }
-    void visit(CursorBackwardTab const& v) override { enqueue(v); }
-    void visit(CursorNextLine const& v) override { enqueue(v); }
-    void visit(CursorPreviousLine const& v) override { enqueue(v); }
-    void visit(DeleteCharacters const& v) override { enqueue(v); }
-    void visit(DeleteColumns const& v) override { enqueue(v); }
-    void visit(DeleteLines const& v) override { enqueue(v); }
-    void visit(DesignateCharset const& v) override { enqueue(v); }
-    void visit(EraseCharacters const& v) override { enqueue(v); }
-    void visit(ForwardIndex const& v) override { enqueue(v); }
-    void visit(FullReset const& v) override { enqueue(v); }
-    void visit(HorizontalPositionAbsolute const& v) override { enqueue(v); }
-    void visit(HorizontalPositionRelative const& v) override { enqueue(v); }
-    void visit(HorizontalTabClear const& v) override { enqueue(v); }
-    void visit(HorizontalTabSet const& v) override { enqueue(v); }
-    void visit(Hyperlink const& v) override { enqueue(v); }
-    void visit(Index const& v) override { enqueue(v); }
-    void visit(InsertCharacters const& v) override { enqueue(v); }
-    void visit(InsertColumns const& v) override { enqueue(v); }
-    void visit(InsertLines const& v) override { enqueue(v); }
-    void visit(Linefeed const& v) override { enqueue(v); }
-    void visit(MoveCursorBackward const& v) override { enqueue(v); }
-    void visit(MoveCursorDown const& v) override { enqueue(v); }
-    void visit(MoveCursorForward const& v) override { enqueue(v); }
-    void visit(MoveCursorTo const& v) override { enqueue(v); }
-    void visit(MoveCursorToBeginOfLine const& v) override { enqueue(v); }
-    void visit(MoveCursorToColumn const& v) override { enqueue(v); }
-    void visit(MoveCursorToLine const& v) override { enqueue(v); }
-    void visit(MoveCursorToNextTab const& v) override { enqueue(v); }
-    void visit(MoveCursorUp const& v) override { enqueue(v); }
-    void visit(ResetDynamicColor const& v) override { enqueue(v); }
-    void visit(ResizeWindow const& v) override { enqueue(v); }
-    void visit(RestoreCursor const& v) override { enqueue(v); }
-    void visit(ReverseIndex const& v) override { enqueue(v); }
-    void visit(SaveCursor const& v) override { enqueue(v); }
-    void visit(ScreenAlignmentPattern const& v) override { enqueue(v); }
-    void visit(ScrollDown const& v) override { enqueue(v); }
-    void visit(ScrollUp const& v) override { enqueue(v); }
-    void visit(SetBackgroundColor const& v) override { enqueue(v); }
-    void visit(SetCursorStyle const& v) override { enqueue(v); }
-    void visit(SetDynamicColor const& v) override { enqueue(v); }
-    void visit(SetForegroundColor const& v) override { enqueue(v); }
-    void visit(SetGraphicsRendition const& v) override { enqueue(v); }
-    void visit(SetLeftRightMargin const& v) override { enqueue(v); }
-    void visit(SetMark const& v) override { enqueue(v); }
-    void visit(SetTopBottomMargin const& v) override { enqueue(v); }
-    void visit(SetUnderlineColor const& v) override { enqueue(v); }
-    void visit(SingleShiftSelect const& v) override { enqueue(v); }
-    void visit(SixelImage const& v) override { enqueue(v); }
-    void visit(InvalidCommand const& v) override { enqueue(v); }
-    void visit(SaveMode const& v) override { enqueue(v); }
-    void visit(RestoreMode const& v) override { enqueue(v); }
-    void visit(XtSmGraphics const& v) override { enqueue(v); }
-};
 
 /**
  * Terminal Screen.
  *
- * Implements the all Command types and applies all instruction
+ * Implements the all VT command types and applies all instruction
  * to an internal screen buffer, maintaining width, height, and history,
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
@@ -275,7 +92,7 @@ class Screen {
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
 
-    void setMaxImageColorRegisters(int _value) noexcept { commandBuilder_.setMaxImageColorRegisters(_value); }
+    void setMaxImageColorRegisters(int _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
     void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
     constexpr Size cellPixelSize() const noexcept { return cellPixelSize_; }
@@ -295,8 +112,6 @@ class Screen {
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
-
-    void write(Command const& _command);
 
     /// Writes given data into the screen.
     void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
@@ -555,13 +370,6 @@ class Screen {
     /// Renders only the selected area.
     void renderSelection(Renderer const& _render) const;
 
-    /// @returns true when currently in debugging mode and false otherwise.
-    bool debugging() const noexcept { return debugExecutor_.get(); }
-    void setDebugging(bool _enabled);
-
-    /// @returns pointer to DebugExecutor if debugging, nullptr otherwise.
-    Debugger* debugger() noexcept;
-
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
     ScreenEvents& eventListener() noexcept { return eventListener_; }
@@ -571,7 +379,7 @@ class Screen {
     void saveWindowTitle();
     void restoreWindowTitle();
 
-    void setMaxImageSize(Size _size) noexcept { commandBuilder_.setMaxImageSize(_size); }
+    void setMaxImageSize(Size _size) noexcept { sequencer_.setMaxImageSize(_size); }
 
   private:
     void setBuffer(ScreenBuffer::Type _type);
@@ -607,7 +415,7 @@ class Screen {
     std::shared_ptr<ColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 
-    CommandBuilder commandBuilder_;
+    Sequencer sequencer_;
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
 
@@ -619,11 +427,6 @@ class Screen {
     std::optional<size_t> maxHistoryLineCount_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
-
-    DirectExecutor directExecutor_;
-    SynchronizedExecutor synchronizedExecutor_;
-    std::unique_ptr<CommandVisitor> debugExecutor_;
-    CommandVisitor* commandExecutor_ = nullptr;
 
     std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     bool sixelCursorConformance_ = true;

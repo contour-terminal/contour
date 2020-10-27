@@ -13,14 +13,8 @@
  */
 #include <contour/Controller.h>
 #include <contour/TerminalWindow.h>
-#include <contour/DebuggerService.h>
 
 #include <QtCore/QProcess>
-
-#if defined(__linux__) // debugger
-#include <csignal>
-#include <unistd.h>
-#endif
 
 using namespace std;
 
@@ -43,8 +37,6 @@ Controller::Controller(std::string _programPath,
     connect(this, &Controller::started, this, [this]() { newWindow(); });
 
     self_ = this;
-
-    debuggerService_ = make_unique<DebuggerService>(this);
 }
 
 Controller::~Controller()

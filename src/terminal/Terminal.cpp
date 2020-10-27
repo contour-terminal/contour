@@ -410,12 +410,12 @@ void Terminal::bufferChanged(ScreenBuffer::Type _type)
     eventListener_.bufferChanged(_type);
 }
 
-void Terminal::commands(vector<Command> const& _commands)
+void Terminal::commands()
 {
     changes_++;
 
     // Screen output commands be here - anything this terminal is interested in?
-    eventListener_.commands(_commands);
+    eventListener_.commands();
 }
 
 void Terminal::copyToClipboard(std::string_view const& _data)
