@@ -26,7 +26,6 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
-#include <cstring>
 #include <unordered_map>
 
 #if !defined(_WIN32)
@@ -230,19 +229,10 @@ Process::Process(string const& _path,
                 argv[i + 1] = const_cast<char*>(_args[i].c_str());
 			argv[_args.size() + 1] = nullptr;
 
-            char** envp = new char* [_env.size() + 1];
-            size_t i = 0;
-            for (auto const& [key, value] : _env)
-            {
-                auto const len = key.size() + 1 + value.size() + 1;
-                char* kv = new char [len];
-                snprintf(kv, len, "%s=%s", key.c_str(), value.c_str());
-                envp[i] = kv;
-                i++;
-            }
-            envp[i] = nullptr;
+            for (auto&& [name, value] : _env)
+                setenv(name.c_str(), value.c_str(), true);
 
-            ::execvpe(_path.c_str(), argv, envp);
+            ::execvp(_path.c_str(), argv);
             ::_exit(EXIT_FAILURE);
             break;
         }
