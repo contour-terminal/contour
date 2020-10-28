@@ -136,19 +136,9 @@ void Screen::write(char const * _data, size_t _size)
         logger_(RawOutputEvent{ escape(_data, _data + _size) });
 #endif
 
-    commandBuilder_.commands().clear();
     parser_.parseFragment(_data, _size);
 
     buffer_->verifyState();
-
-    // #if defined(LIBTERMINAL_LOG_TRACE)
-    // if (logTrace_ && logger_)
-    // {
-    //     auto const traces = to_mnemonic(commandBuilder_.commands(), true, true);
-    //     for (auto const& trace : traces)
-    //         logger_(TraceOutputEvent{trace});
-    // }
-    // #endif
 
     for_each(
         commandBuilder_.commands(),
@@ -179,8 +169,9 @@ void Screen::write(std::u32string_view const& _text)
 
 void Screen::writeText(char32_t _char)
 {
-    buffer_->appendChar(_char, instructionCounter_ == 1);
-    instructionCounter_ = 0;
+    bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
+    buffer_->appendChar(_char, consecutiveTextWrite);
+    sequencer_.resetInstructionCounter();
 }
 
 string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const

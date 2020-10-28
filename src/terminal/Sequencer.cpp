@@ -45,6 +45,8 @@ using std::shared_ptr;
 using std::string;
 using std::vector;
 
+#define CONTOUR_SYNCHRONIZED_OUTPUT 1
+
 namespace terminal {
 
 namespace // {{{ helpers
@@ -836,6 +838,7 @@ void Sequencer::handleAction(ActionClass _actionClass, Action _action, char32_t 
             break;
         }
         case Action::Hook: // this is actually state DCS_PassThrough
+            instructionCounter_++;
             sequence_.setCategory(FunctionCategory::DCS);
             sequence_.setFinalChar(static_cast<char>(_currentChar));
             if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
@@ -907,10 +910,22 @@ void Sequencer::hookSixel(Sequence const& _seq)
     hookedParser_ = make_unique<SixelParser>(
         *sixelImageBuilder_,
         [this]() {
-            screen_.sixelImage(
-                sixelImageBuilder_->size(),
-                sixelImageBuilder_->data()
-            );
+#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
+            if (batching_)
+            {
+                batchedSequences_.emplace_back(SixelImage{
+                    sixelImageBuilder_->size(),
+                    sixelImageBuilder_->data()
+                });
+            }
+            else
+#endif
+            {
+                screen_.sixelImage(
+                    sixelImageBuilder_->size(),
+                    sixelImageBuilder_->data()
+                );
+            }
         }
     );
 
@@ -941,6 +956,8 @@ void Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 
             if (s.has_value())
                 screen_.requestStatusString(s.value());
+
+            // TODO: handle batching
         }
     );
     hookedParser_->start();
@@ -948,13 +965,18 @@ void Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 
 void Sequencer::executeControlFunction(char _c0)
 {
-    // TODO use handleSequence? at least if batching
-#if 0
-    sequence_.clear();
-    sequence_.setCategory(FunctionCategory::C0);
-    sequence_.setFinalChar(_c0);
-    handleSequence();
-#else
+#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
+    if (batching_)
+    {
+        sequence_.clear();
+        sequence_.setCategory(FunctionCategory::C0);
+        sequence_.setFinalChar(_c0);
+        handleSequence();
+        return;
+    }
+#endif
+
+    instructionCounter_++;
     switch (_c0)
     {
         case 0x07: // BEL
@@ -989,7 +1011,6 @@ void Sequencer::executeControlFunction(char _c0)
             log<UnsupportedOutputEvent>(crispy::escape(_c0));
             break;
     }
-#endif
 }
 
 void Sequencer::dispatchESC(char _finalChar)
@@ -1008,8 +1029,32 @@ void Sequencer::dispatchCSI(char _finalChar)
 
 void Sequencer::handleSequence()
 {
+    instructionCounter_++;
     if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
-        apply(*funcSpec, sequence_);
+    {
+#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
+        if (*funcSpec == DECSM && sequence_.containsParameter(2026))
+        {
+            batching_ = true;
+            // TODO: apply other modes
+        }
+        else if (*funcSpec == DECRM && sequence_.containsParameter(2026))
+        {
+            batching_ = false;
+            // TODO: apply other modes
+            for (auto const& batched : batchedSequences_)
+            {
+                (void) batched; // TODO: apply() batched sequence or DCS (SixelImage, DECRQSS)
+            }
+        }
+        else if (batching_)
+            // TODO: Not all functions should be batched...
+            //       like: if (!tryBatch(*funcSpec, sequence_)) { apply(*funcSpec, sequence_); }
+            batchedSequences_.emplace_back(sequence_);
+        else
+#endif
+            apply(*funcSpec, sequence_);
+    }
     else
         std::cerr << fmt::format("Unknown VT sequence: {}\n", sequence_);
 }
@@ -1017,6 +1062,7 @@ void Sequencer::handleSequence()
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
 ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const& _seq)
 {
+    batchedSequences_.emplace_back(sequence_);
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionDefinition
     switch (_function)

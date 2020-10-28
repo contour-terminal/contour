@@ -60,6 +60,9 @@ class Sequencer {
     void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
+    int64_t instructionCounter() const noexcept { return instructionCounter_; }
+    void resetInstructionCounter() noexcept { instructionCounter_ = 0; }
+
   private:
     // helper methods
     //
@@ -87,7 +90,11 @@ class Sequencer {
   private:
     Sequence sequence_{};
     Screen& screen_;
-    std::vector<Sequence> batchedSequences_;
+    bool batching_ = false;
+    int64_t instructionCounter_ = 0;
+    using Batchable = std::variant<Sequence, SixelImage>;
+    std::vector<Batchable> batchedSequences_;
+
     Logger const logger_;
 
     std::unique_ptr<ParserExtension> hookedParser_;

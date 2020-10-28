@@ -243,6 +243,14 @@ class Sequence {
         assert(_subIndex + 1 < parameters_[_index].size());
         return parameters_[_index][_subIndex + 1];
     }
+
+    bool containsParameter(int _value) const noexcept
+    {
+        for (size_t i = 0; i < parameterCount(); ++i)
+            if (param(i) == _value)
+                return true;
+        return false;
+    }
 };
 
 namespace detail // {{{
