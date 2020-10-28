@@ -1029,6 +1029,10 @@ void Sequencer::dispatchCSI(char _finalChar)
 
 void Sequencer::handleSequence()
 {
+#if defined(LIBTERMINAL_LOG_TRACE)
+    logger_(TraceOutputEvent{fmt::format("{}", sequence_)});
+#endif
+
     instructionCounter_++;
     if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
     {
@@ -1184,6 +1188,72 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
     }
     return ApplyResult::Ok;
 }
+
+// TODO: this is the list of batchable seqs
+#if 0
+    AppendChar
+    BackIndex
+    Backspace
+    ClearLine
+    ClearScreen
+    ClearScrollbackBuffer
+    ClearToBeginOfLine
+    ClearToBeginOfScreen
+    ClearToEndOfLine
+    ClearToEndOfScreen
+    CursorBackwardTab
+    CursorNextLine
+    CursorPreviousLine
+    DeleteCharacters
+    DeleteColumns
+    DeleteLines
+    DesignateCharset
+    EraseCharacters
+    ForwardIndex
+    FullReset
+    HorizontalPositionAbsolute
+    HorizontalPositionRelative
+    HorizontalTabClear
+    HorizontalTabSet
+    Hyperlink
+    Index
+    InsertCharacters
+    InsertColumns
+    InsertLines
+    InvalidCommand
+    Linefeed
+    MoveCursorBackward
+    MoveCursorDown
+    MoveCursorForward
+    MoveCursorTo
+    MoveCursorToBeginOfLine
+    MoveCursorToColumn
+    MoveCursorToLine
+    MoveCursorToNextTab
+    MoveCursorUp
+    ResetDynamicColor
+    ResizeWindow
+    RestoreCursor
+    RestoreMode
+    ReverseIndex
+    SaveCursor
+    SaveMode
+    ScreenAlignmentPattern
+    ScrollDown
+    ScrollUp
+    SetBackgroundColor
+    SetCursorStyle
+    SetDynamicColor
+    SetForegroundColor
+    SetGraphicsRendition
+    SetLeftRightMargin
+    SetMark
+    SetTopBottomMargin
+    SetUnderlineColor
+    SingleShiftSelect
+    SixelImage
+    XtSmGraphics
+#endif
 
 std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
 {

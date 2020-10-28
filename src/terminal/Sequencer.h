@@ -31,6 +31,10 @@ namespace terminal {
 
 class Screen;
 
+/// Sequencer - The semantic VT analyzer layer.
+///
+/// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
+/// that can be matched against actions to perform on the target Screen.
 class Sequencer {
   public:
     using ActionClass = parser::ActionClass;

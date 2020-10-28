@@ -15,7 +15,6 @@
 #include <terminal/Commands.h>
 #include <terminal/VTType.h>
 #include <terminal/Logger.h>
-#include <terminal/Debugger.h>
 #include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
@@ -82,18 +81,9 @@ Screen::Screen(Size const& _size,
     buffer_{ &primaryBuffer_ },
     size_{ _size },
     maxHistoryLineCount_{ _maxHistoryLineCount },
-    directExecutor_{ *this, _logger },
-    synchronizedExecutor_{ *this, _logger },
-    debugExecutor_{},
-    commandExecutor_ {&directExecutor_},
     sixelCursorConformance_{_sixelCursorConformance}
 {
     setMode(Mode::AutoWrap, true);
-}
-
-Debugger* Screen::debugger() noexcept
-{
-    return static_cast<Debugger*>(debugExecutor_.get());
 }
 
 void Screen::setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount)
@@ -114,20 +104,6 @@ void Screen::resize(Size const& _newSize)
     size_ = _newSize;
 }
 
-void Screen::write(Command const& _command)
-{
-    buffer_->verifyState();
-
-    if (debugging())
-        visit(directExecutor_, _command);
-    else
-        visit(*commandExecutor_, _command);
-
-    buffer_->verifyState();
-    instructionCounter_++;
-
-    eventListener_.commands({_command});
-}
 
 void Screen::write(char const * _data, size_t _size)
 {
@@ -139,20 +115,6 @@ void Screen::write(char const * _data, size_t _size)
     parser_.parseFragment(_data, _size);
 
     buffer_->verifyState();
-
-    for_each(
-        commandBuilder_.commands(),
-        [&](Command const& _command) {
-            buffer_->verifyState();
-#if defined(LIBTERMINAL_LOG_TRACE)
-            auto const trace = to_mnemonic(_command, true, true);
-            logger_(TraceOutputEvent{trace});
-#endif
-            visit(*commandExecutor_, _command);
-            instructionCounter_++;
-            buffer_->verifyState();
-        }
-    );
 
     eventListener_.commands(commandBuilder_.commands());
 }
@@ -965,24 +927,6 @@ void Screen::setMark()
     buffer_->currentLine->marked = true;
 }
 
-void Screen::setDebugging(bool _enabled)
-{
-    if (_enabled == debugging())
-        return;
-
-    if (_enabled)
-    {
-        debugExecutor_ = make_unique<Debugger>(*this);
-        commandExecutor_ = debugExecutor_.get();
-    }
-    else
-    {
-        commandExecutor_ = &directExecutor_;
-        debugger()->flush();
-        debugExecutor_.reset();
-    }
-}
-
 void Screen::saveModes(std::vector<Mode> const& _modes)
 {
     for (Mode const mode : _modes)
@@ -1035,16 +979,7 @@ void Screen::setMode(Mode _mode, bool _enable)
         }
         case Mode::BatchedRendering:
             // Only perform batched rendering when NOT in debugging mode.
-            if (!debugging())
-            {
-                if (_enable)
-                    commandExecutor_ = &synchronizedExecutor_;
-                else
-                {
-                    commandExecutor_ = &directExecutor_;
-                    synchronizedExecutor_.flush();
-                }
-            }
+            // TODO: also, do I still need this here?
             break;
         case Mode::UseAlternateScreen:
             if (_enable)
@@ -1451,103 +1386,5 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
     }
 }
 // }}}
-
-// {{{ DirectExecutor
-void DirectExecutor::visit(AppendChar const& v) { screen_.writeText(v.ch); }
-void DirectExecutor::visit(ApplicationKeypadMode const& v) { screen_.applicationKeypadMode(v.enable); }
-void DirectExecutor::visit(BackIndex const&) { screen_.backIndex(); }
-void DirectExecutor::visit(Backspace const&) { screen_.backspace(); }
-void DirectExecutor::visit(Bell const&) { screen_.eventListener().bell(); }
-void DirectExecutor::visit(ChangeIconTitle const& v) { (void) v; /*ignored*/ }
-void DirectExecutor::visit(ChangeWindowTitle const& v) { screen_.setWindowTitle(v.title); }
-void DirectExecutor::visit(ClearLine const&) { screen_.clearLine(); }
-void DirectExecutor::visit(ClearScreen const&) { screen_.clearScreen(); }
-void DirectExecutor::visit(ClearScrollbackBuffer const&) { screen_.clearScrollbackBuffer(); }
-void DirectExecutor::visit(ClearToBeginOfLine const&) { screen_.clearToBeginOfLine(); }
-void DirectExecutor::visit(ClearToBeginOfScreen const&) { screen_.clearToBeginOfScreen(); }
-void DirectExecutor::visit(ClearToEndOfLine const&) { screen_.clearToEndOfLine(); }
-void DirectExecutor::visit(ClearToEndOfScreen const&) { screen_.clearToEndOfScreen(); }
-void DirectExecutor::visit(CopyToClipboard const& v) { screen_.eventListener().copyToClipboard(v.data); }
-void DirectExecutor::visit(CursorBackwardTab const& v) { screen_.cursorBackwardTab(v.count); }
-void DirectExecutor::visit(CursorNextLine const& v) { screen_.moveCursorToNextLine(v.n); }
-void DirectExecutor::visit(CursorPreviousLine const& v) { screen_.moveCursorToPrevLine(v.n); }
-void DirectExecutor::visit(DeleteCharacters const& v) { screen_.deleteCharacters(v.n); }
-void DirectExecutor::visit(DeleteColumns const& v) { screen_.deleteColumns(v.n); }
-void DirectExecutor::visit(DeleteLines const& v) { screen_.deleteLines(v.n); }
-void DirectExecutor::visit(DesignateCharset const& v) { screen_.designateCharset(v.table, v.charset); }
-void DirectExecutor::visit(DeviceStatusReport const&) { screen_.deviceStatusReport(); }
-void DirectExecutor::visit(DumpState const&) { screen_.dumpState(); }
-void DirectExecutor::visit(EraseCharacters const& v) { screen_.eraseCharacters(v.n); }
-void DirectExecutor::visit(ForwardIndex const&) { screen_.forwardIndex(); }
-void DirectExecutor::visit(FullReset const&) { screen_.resetHard(); }
-void DirectExecutor::visit(HorizontalPositionAbsolute const& v) { screen_.moveCursorToColumn(v.n); }
-void DirectExecutor::visit(HorizontalPositionRelative const& v) { screen_.moveCursorForward(v.n); /* HPR: We only care about column-mode (not pixel/inches) for now. */ }
-void DirectExecutor::visit(HorizontalTabClear const& v) { screen_.horizontalTabClear(v.which); }
-void DirectExecutor::visit(HorizontalTabSet const&) { screen_.horizontalTabSet(); }
-void DirectExecutor::visit(Hyperlink const& v) { screen_.hyperlink(v.id, v.uri); }
-void DirectExecutor::visit(Index const&) { screen_.index(); }
-void DirectExecutor::visit(InsertCharacters const& v) { screen_.insertCharacters(v.n); }
-void DirectExecutor::visit(InsertColumns const& v) { screen_.insertColumns(v.n); }
-void DirectExecutor::visit(InsertLines const& v) { screen_.insertLines(v.n); }
-void DirectExecutor::visit(Linefeed const&) { screen_.linefeed(); }
-void DirectExecutor::visit(MoveCursorBackward const& v) { screen_.moveCursorBackward(v.n); }
-void DirectExecutor::visit(MoveCursorDown const& v) { screen_.moveCursorDown(v.n); }
-void DirectExecutor::visit(MoveCursorForward const& v) { screen_.moveCursorForward(v.n); }
-void DirectExecutor::visit(MoveCursorTo const& v) { screen_.moveCursorTo(Coordinate{v.row, v.column}); }
-void DirectExecutor::visit(MoveCursorToBeginOfLine const&) { screen_.moveCursorToBeginOfLine(); }
-void DirectExecutor::visit(MoveCursorToColumn const& v) { screen_.moveCursorToColumn(v.column); }
-void DirectExecutor::visit(MoveCursorToLine const& v) { screen_.moveCursorToLine(v.row); }
-void DirectExecutor::visit(MoveCursorToNextTab const&) { screen_.moveCursorToNextTab(); }
-void DirectExecutor::visit(MoveCursorUp const& v) { screen_.moveCursorUp(v.n); }
-void DirectExecutor::visit(Notify const& v) { screen_.notify(v.title, v.content); }
-void DirectExecutor::visit(ReportCursorPosition const&) { screen_.reportCursorPosition(); }
-void DirectExecutor::visit(ReportExtendedCursorPosition const&) { screen_.reportExtendedCursorPosition(); }
-void DirectExecutor::visit(RequestDynamicColor const& v) { screen_.requestDynamicColor(v.name); }
-void DirectExecutor::visit(RequestMode const& v) { screen_.requestMode(v.mode); }
-void DirectExecutor::visit(RequestPixelSize const& v) { screen_.requestPixelSize(v.area); }
-void DirectExecutor::visit(RequestStatusString const& v) { screen_.requestStatusString(v.value); }
-void DirectExecutor::visit(RequestTabStops const&) { screen_.requestTabStops(); }
-void DirectExecutor::visit(ResetDynamicColor const& v) { screen_.resetDynamicColor(v.name); }
-void DirectExecutor::visit(ResizeWindow const& v) { screen_.eventListener().resizeWindow(v.width, v.height, v.unit == ResizeWindow::Unit::Pixels); }
-void DirectExecutor::visit(RestoreCursor const&) { screen_.restoreCursor(); }
-void DirectExecutor::visit(RestoreWindowTitle const&) { screen_.restoreWindowTitle(); }
-void DirectExecutor::visit(ReverseIndex const&) { screen_.reverseIndex(); }
-void DirectExecutor::visit(SaveCursor const&) { screen_.saveCursor(); }
-void DirectExecutor::visit(SaveWindowTitle const&) { screen_.saveWindowTitle(); }
-void DirectExecutor::visit(ScreenAlignmentPattern const&) { screen_.screenAlignmentPattern(); }
-void DirectExecutor::visit(ScrollDown const& v) { screen_.currentBuffer().scrollDown(v.n); }
-void DirectExecutor::visit(ScrollUp const& v) { screen_.currentBuffer().scrollUp(v.n); }
-void DirectExecutor::visit(SelectConformanceLevel const& v) { screen_.selectConformanceLevel(v.level /*TODO:, v.c1t*/); }
-void DirectExecutor::visit(SendDeviceAttributes const&) { screen_.sendDeviceAttributes(); }
-void DirectExecutor::visit(SendMouseEvents const& v) { screen_.sendMouseEvents(v.protocol, v.enable); }
-void DirectExecutor::visit(SendTerminalId const&) { screen_.sendTerminalId(); }
-void DirectExecutor::visit(SetBackgroundColor const& v) { screen_.setBackgroundColor(v.color); }
-void DirectExecutor::visit(SetCursorStyle const& v) { screen_.setCursorStyle(v.display, v.shape); }
-void DirectExecutor::visit(SetDynamicColor const& v) { screen_.setDynamicColor(v.name, v.color); }
-void DirectExecutor::visit(SetForegroundColor const& v) { screen_.setForegroundColor(v.color); }
-void DirectExecutor::visit(SetGraphicsRendition const& v) { screen_.setGraphicsRendition(v.rendition); }
-void DirectExecutor::visit(SetLeftRightMargin const& v) { screen_.setLeftRightMargin(v.left, v.right); }
-void DirectExecutor::visit(SetMark const&) { screen_.setMark(); }
-void DirectExecutor::visit(SetMode const& v) { screen_.setMode(v.mode, v.enable); }
-void DirectExecutor::visit(SetTopBottomMargin const& v) { screen_.setTopBottomMargin(v.top, v.bottom); }
-void DirectExecutor::visit(SetUnderlineColor const& v) { screen_.setUnderlineColor(v.color); }
-void DirectExecutor::visit(SingleShiftSelect const& v) { screen_.singleShiftSelect(v.table); }
-void DirectExecutor::visit(SixelImage const& v) { screen_.sixelImage(v.size, v.rgba); }
-void DirectExecutor::visit(SoftTerminalReset const&) { screen_.resetSoft(); }
-void DirectExecutor::visit(InvalidCommand const& v) { if (logger_) logger_(InvalidOutputEvent{v.sequence.text(), "Unknown command"}); }
-void DirectExecutor::visit(SaveMode const& v) { screen_.saveModes(v.modes); }
-void DirectExecutor::visit(RestoreMode const& v) { screen_.restoreModes(v.modes); }
-void DirectExecutor::visit(XtSmGraphics const& v) { screen_.smGraphics(v.item, v.action, v.value); }
-// }}}
-
-// {{{ SynchronizedExecutor
-void SynchronizedExecutor::flush()
-{
-    for (Command const& cmd : queuedCommands_)
-        screen_.write(cmd);
-
-    queuedCommands_.clear();
-}
-/// }}}
 
 } // namespace terminal

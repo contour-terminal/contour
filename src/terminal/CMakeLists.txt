@@ -19,7 +19,6 @@ set(terminal_HEADERS
     Color.h
     CommandBuilder.h
     Commands.h
-    Debugger.h
     Functions.h
     Image.h
     InputGenerator.h
@@ -42,7 +41,6 @@ set(terminal_SOURCES
     Color.cpp
     CommandBuilder.cpp
     Commands.cpp
-    Debugger.cpp
     Functions.cpp
     Image.cpp
     InputGenerator.cpp
