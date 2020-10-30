@@ -373,7 +373,7 @@ optional<terminal::Key> parseKey(string const& _name)
 
     auto const name = toLower(_name);
 
-    for (auto const mapping: mappings)
+    for (auto const& mapping: mappings)
         if (name == toLower(mapping.first))
             return mapping.second;
 
