@@ -255,17 +255,22 @@ jobs:
         run: |
           find build/ -print
           echo "TODO: upload to artifact store"
-      - name: package
+      - name: "Create Package(s)"
         run: |
-          set -e
-          cd build/src/contour/
-          zip -r ../../../contour-osx.zip contour.app
-          cd ../../..
-          mv -v "contour-osx.zip" "contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip"
-      - name: upload to artifact store
+          set -ex
+          cd build
+          sudo cpack
+          BASENAME="contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx"
+          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.zip" "../${BASENAME}.zip"
+          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.dmg" "../${BASENAME}.dmg"
+      - name: upload to artifact store (ZIP)
         uses: actions/upload-artifact@v2
         with:
           path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
+      - name: upload to artifact store (DMG)
+        uses: actions/upload-artifact@v2
+        with:
+          path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.dmg
 
   do_release:
     name: Create Github release
@@ -395,8 +400,8 @@ jobs:
           asset_content_type: application/zip
 
       # -------------------------------------------------------------
-      - name: Upload OS/X package
-        id: upload-release-asset-osx
+      - name: Upload OS/X ZIP package
+        id: upload-release-asset-osx-zip
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -405,4 +410,16 @@ jobs:
           asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
           asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.zip
           asset_content_type: application/zip
+
+      # -------------------------------------------------------------
+      - name: Upload OS/X DMG package
+        id: upload-release-asset-osx-dmg
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.dmg
+          asset_name: contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx.dmg
+          asset_content_type: application/x-apple-diskimage
 
