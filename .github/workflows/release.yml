@@ -259,10 +259,10 @@ jobs:
         run: |
           set -ex
           cd build
-          cpack
+          sudo cpack
           BASENAME="contour-${{ steps.set_env_var.outputs.version }}-${{ steps.set_env_var.outputs.RUN_ID }}-osx"
-          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.zip" "${BASENAME}.zip"
-          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.dmg" "${BASENAME}.dmg"
+          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.zip" "../${BASENAME}.zip"
+          mv -vf "Contour-${{ steps.set_env_var.outputs.version }}-Darwin.dmg" "../${BASENAME}.dmg"
       - name: upload to artifact store (ZIP)
         uses: actions/upload-artifact@v2
         with:
@@ -401,7 +401,7 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload OS/X ZIP package
-        id: upload-release-asset-osx
+        id: upload-release-asset-osx-zip
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -413,7 +413,7 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload OS/X DMG package
-        id: upload-release-asset-osx
+        id: upload-release-asset-osx-dmg
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
