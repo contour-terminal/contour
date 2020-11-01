@@ -200,6 +200,7 @@ static termios constructTerminalSettings(int fd)
 
 Process::Process(string const& _path,
                  vector<string> const& _args,
+                 FileSystem::path const& _cwd,
                  Environment const& _env,
                  PseudoTerminal& _pty)
 {
@@ -222,6 +223,13 @@ Process::Process(string const& _path,
 
             if (login_tty(_pty.slave()) < 0)
                 _exit(EXIT_FAILURE);
+
+            auto const cwd = _cwd.generic_string();
+            if (!_cwd.empty() && chdir(cwd.c_str()) < 0)
+            {
+                printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
+                exit(EXIT_FAILURE);
+            }
 
             char** argv = new char* [_args.size() + 2];
             argv[0] = const_cast<char*>(_path.c_str());
@@ -252,6 +260,9 @@ Process::Process(string const& _path,
 
 	auto const envScope = InheritingEnvBlock{_env};
 
+    auto const cwd = _cwd.generic_string();
+    auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
+
     BOOL success = CreateProcess(
         nullptr,                            // No module name - use Command Line
         const_cast<LPSTR>(cmd.c_str()),     // Command Line
@@ -260,7 +271,7 @@ Process::Process(string const& _path,
         FALSE,                              // Inherit handles
         EXTENDED_STARTUPINFO_PRESENT,       // Creation flags
         nullptr,                            // Use parent's environment block
-        nullptr,                            // Use parent's starting directory
+        const_cast<LPSTR>(cwdPtr),          // Use parent's starting directory
         &startupInfo_.StartupInfo,          // Pointer to STARTUPINFO
         &processInfo_);                     // Pointer to PROCESS_INFORMATION
     if (!success)
@@ -271,8 +282,8 @@ Process::Process(string const& _path,
 Process::Process(
     string const& _path,
     vector<string> const& _args,
+    FileSystem::path const& _cwd,
     Environment const& _env,
-	std::string const& _cwd,
 	bool _detached)
 {
 	detached_ = _detached;
@@ -290,9 +301,10 @@ Process::Process(
 			if (_detached)
 				setsid();
 
-			if (chdir(_cwd.c_str()) < 0)
+            auto const cwd = _cwd.generic_string();
+            if (!_cwd.empty() && chdir(cwd.c_str()) < 0)
 			{
-				printf("Failed to chdir to \"%s\". %s\n", _cwd.c_str(), strerror(errno));
+				printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
 				exit(EXIT_FAILURE);
 			}
 
@@ -324,6 +336,9 @@ Process::Process(
 
 	auto const envScope = InheritingEnvBlock{_env};
 
+    auto const cwd = _cwd.generic_string();
+    auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
+
     BOOL success = CreateProcess(
         nullptr,                            // No module name - use Command Line
         const_cast<LPSTR>(cmd.c_str()),     // Command Line
@@ -332,7 +347,7 @@ Process::Process(
         FALSE,                              // Inherit handles
         EXTENDED_STARTUPINFO_PRESENT,       // Creation flags
         nullptr,                            // Use parent's environment block
-        _cwd.c_str(),                       // Use parent's starting directory
+        const_cast<LPSTR>(cwdPtr),          // Use parent's starting directory
         &startupInfo_.StartupInfo,          // Pointer to STARTUPINFO
         &processInfo_);                     // Pointer to PROCESS_INFORMATION
     if (!success)
@@ -435,6 +450,18 @@ std::string Process::loginShell()
         return pw->pw_shell;
     else
         return "/bin/sh"s;
+#endif
+}
+
+FileSystem::path Process::homeDirectory()
+{
+#if defined(_WIN32)
+    return FileSystem::path("/"); // TODO
+#else
+    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
+        return FileSystem::path(pw->pw_dir);
+    else
+        return FileSystem::path("/");
 #endif
 }
 

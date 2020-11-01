@@ -34,6 +34,11 @@ profiles:
         # shell: "/bin/bash"
         # arguments: ["some", "optional", "arguments", "for", "the", "shell"]
 
+        # Sets initial working directory when spawning a new terminal.
+        # A leading ~ is expanded to the user's home directory.
+        # Default value is the user's home directory.
+        initial_working_directory: "~"
+
         # Environment variables to be passed to the shell.
         environment:
             TERM: xterm-256color
