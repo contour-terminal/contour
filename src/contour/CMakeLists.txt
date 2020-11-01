@@ -98,9 +98,37 @@ if(CONTOUR_SANITIZE AND NOT MSVC)
     target_link_libraries(contour ubsan)
 endif()
 
-install(TARGETS contour DESTINATION bin)
+# ====================================================================================
+# INSTALLER
+# ====================================================================================
+
+if(NOT(CPACK_GENERATOR))
+    if(APPLE)
+        set(CPACK_GENERATOR DragNDrop ZIP)
+    elseif(WIN32)
+        set(CPACK_GENERATOR WIX ZIP)
+    endif()
+endif()
+
+set(CPACK_PACKAGE_NAME "Contour")
+set(CPACK_PACKAGE_VENDOR "https://github.com/christianparpart/contour/")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
+#TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
+
+#TODO? set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
+#TODO: set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
+#TODO: set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
+
+set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
+set(CPACK_CREATE_DESKTOP_LINKS contour)
 
 if(WIN32)
+    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
+    set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
+    set(CPACK_WIX_PRODUCT_GUID "DC04A0C6-AAC4-4E1C-835E-8D4223FC5092")
+
     include(DeployQt)
     windeployqt(contour)
     install(
@@ -113,35 +141,74 @@ if(WIN32)
             PATTERN "*.h" EXCLUDE
             PATTERN "*.dll"
     )
-endif()
+elseif(APPLE)
+    set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
 
-# ====================================================================================
-# INSTALLER
-# ====================================================================================
+    # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
+    set(APP_NAME contour)
+    set(App_Contents "${APP_NAME}.app/Contents")
+    set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
+    set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-if(NOT(CPACK_GENERATOR))
-    if(APPLE)
-        set(CPACK_GENERATOR Bundle)
-    elseif(WIN32)
-        set(CPACK_GENERATOR WIX ZIP)
+    # based on code from CMake's QtDialog/CMakeLists.txt
+    macro(install_qt5_plugin _qt_plugin_name _qt_plugins_var _prefix)
+        get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
+        if(EXISTS "${_qt_plugin_path}")
+            get_filename_component(_qt_plugin_file "${_qt_plugin_path}" NAME)
+            get_filename_component(_qt_plugin_type "${_qt_plugin_path}" PATH)
+            get_filename_component(_qt_plugin_type "${_qt_plugin_type}" NAME)
+            set(_qt_plugin_dest "${_prefix}/PlugIns/${_qt_plugin_type}")
+            install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}")
+            set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DEST_DIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
+        else()
+            message(FATAL_ERROR "QT plugin ${_qt_plugin_name} not found")
+        endif()
+    endmacro()
+
+    install_qt5_plugin("Qt5::QCocoaIntegrationPlugin" QT_PLUGINS ${App_Contents})
+
+    # ${_qt_plugin_dir} seems empty anyways, but the target bundle/dmg works.
+    # file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = ${_qt_plugin_dir}\n")
+    # install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
+
+    # Install application icon
+    install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
+
+    #add_custom_target(Docs SOURCES README.md LICENSE.txt)
+    #TODO: install(TARGETS Docs ...)
+
+    # Destination paths below are relative to ${CMAKE_INSTALL_PREFIX}
+    install(TARGETS ${APP_NAME}
+        BUNDLE DESTINATION . COMPONENT Runtime
+        RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
+    )
+
+    set(APPS "\${CMAKE_INSTALL_PREFIX}/${APP_NAME}.app")    # Note Mac specific extension .app
+    set(DIRS ${CMAKE_BINARY_DIR})                           # Directories to look for dependencies
+
+    # Path used for searching by FIND_XXX(), with appropriate suffixes added
+    if(CMAKE_PREFIX_PATH)
+        foreach(dir ${CMAKE_PREFIX_PATH})
+            list(APPEND DIRS "${dir}/bin" "${dir}/lib")
+        endforeach()
     endif()
+
+    # Append Qt's lib folder which is two levels above Qt5Widgets_DIR
+    list(APPEND DIRS "${Qt5Widgets_DIR}/../..")
+
+    include(InstallRequiredSystemLibraries)
+
+    message(STATUS "APPS: ${APPS}")
+    message(STATUS "DIRS: ${DIRS}")
+    message(STATUS "QT_PLUGINS: ${QT_PLUGINS}")
+
+    install(CODE "
+        include(BundleUtilities)
+        fixup_bundle(\"${APPS}\" \"${QT_PLUGINS}\" \"${DIRS}\")
+    ")
+else()
+    # any other Unix
+    install(TARGETS contour DESTINATION bin)
 endif()
-
-set(CPACK_PACKAGE_NAME "Contour")
-set(CPACK_PACKAGE_VENDOR "https://github.com/christianparpart/contour/")
-set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
-#TODO: set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_SOURCE_DIR}/README.md")
-set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
-
-set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
-set(CPACK_WIX_PRODUCT_GUID "DC04A0C6-AAC4-4E1C-835E-8D4223FC5092")
-#TODO? set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
-#TODO: set(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
-#TODO: set(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo-256.png")
-
-set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
-set(CPACK_CREATE_DESKTOP_LINKS contour)
 
 include(CPack)
