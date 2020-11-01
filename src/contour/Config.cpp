@@ -689,6 +689,19 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());
 
+    if (auto wd = _node["initial_working_directory"]; wd && wd.IsScalar())
+    {
+        string const& value = wd.Scalar();
+        if (value.empty())
+            profile.shell.workingDirectory = terminal::Process::homeDirectory();
+        else if (value[0] == '~')
+            profile.shell.workingDirectory = terminal::Process::homeDirectory() / FileSystem::path(value.substr(1));
+        else
+            profile.shell.workingDirectory = FileSystem::path(value);
+    }
+    else
+        profile.shell.workingDirectory = terminal::Process::homeDirectory();
+
     if (auto env = _node["environment"]; env)
     {
         for (auto i = env.begin(); i != env.end(); ++i)

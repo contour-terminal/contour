@@ -208,7 +208,10 @@ elseif(APPLE)
     ")
 else()
     # any other Unix
+    include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
+    install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+    install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATADIR}/pixmaps" RENAME "contour.png")
 endif()
 
 include(CPack)

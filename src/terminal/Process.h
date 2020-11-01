@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include <crispy/stdfs.h>
+
 #include <map>
 #include <optional>
 #include <string>
@@ -55,20 +57,24 @@ class [[nodiscard]] Process {
     struct ExecInfo {
         std::string program;
         std::vector<std::string> arguments;
+        FileSystem::path workingDirectory;
         Environment env;
     };
 
     //! Returns login shell of current user.
     static std::string loginShell();
 
+    static FileSystem::path homeDirectory();
+
     Process(ExecInfo const& _exe, PseudoTerminal& _pty) :
-        Process(_exe.program, _exe.arguments, _exe.env, _pty)
+        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, _pty)
     {
     }
 
     Process(
 		const std::string& path,
 		std::vector<std::string> const& args,
+        FileSystem::path const& _cwd,
 		Environment const& env,
 		PseudoTerminal& pty
 	);
@@ -76,8 +82,8 @@ class [[nodiscard]] Process {
     Process(
 		const std::string& _path,
 		std::vector<std::string> const& _args,
+        FileSystem::path const& _cwd,
 		Environment const& _env,
-		std::string const& _cwd,
 		bool _detached
 	);
 

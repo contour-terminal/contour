@@ -114,7 +114,7 @@ int main()
 
 		terminal::PseudoTerminal pty{terminal::currentWindowSize()};
 		thread pipeListenerThread {[&]() { pipeListener(pty); }};
-		terminal::Process proc {args[0], args, {}, pty};
+		terminal::Process proc {args[0], args, {}, {}, pty};
 
         for (bool waiting = true; waiting; )
         {
