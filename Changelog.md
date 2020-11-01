@@ -1,5 +1,11 @@
 ### 0.1.0 (unreleased)
 
+#### Changes since last prerelease
+
+- `initial_working_directory` config option added
+
+#### General Features
+
 - Available on all 3 major platforms, Linux, OS/X, Windows.
 - Emoji support (-: 🌈 💝 😛 👪 :-)
 - Font ligatures support (such as in Fira Code).
@@ -13,4 +19,5 @@
 - Color Schemes
 - Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 - Clickable hyperlinks via OSC 8
+- Sixel inline images
 
