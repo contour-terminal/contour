@@ -42,14 +42,32 @@ inline std::ostream& operator<<(std::ostream& _os, Coordinate const& _coord)
     return _os << "{" << _coord.row << ", " << _coord.column << "}";
 }
 
+constexpr inline int compare(Coordinate const& a, Coordinate const& b) noexcept
+{
+    if (auto const dr = a.row - b.row; dr != 0)
+        return dr;
+    else
+        return a.column - b.column;
+}
+
 constexpr inline bool operator<(Coordinate const& a, Coordinate const& b) noexcept
 {
-    if (a.row < b.row)
-        return true;
-    else if (a.row == b.row)
-        return a.column < b.column;
-    else
-        return false;
+    return compare(a, b) < 0;
+}
+
+constexpr inline bool operator<=(Coordinate const& a, Coordinate const& b) noexcept
+{
+    return compare(a, b) <= 0;
+}
+
+constexpr inline bool operator>(Coordinate const& a, Coordinate const& b) noexcept
+{
+    return compare(a, b) > 0;
+}
+
+constexpr inline bool operator>=(Coordinate const& a, Coordinate const& b) noexcept
+{
+    return compare(a, b) >= 0;
 }
 
 constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexcept
@@ -60,16 +78,6 @@ constexpr inline bool operator==(Coordinate const& a, Coordinate const& b) noexc
 constexpr inline bool operator!=(Coordinate const& a, Coordinate const& b) noexcept
 {
     return !(a == b);
-}
-
-constexpr inline bool operator>(Coordinate const& a, Coordinate const& b) noexcept
-{
-    if (a.row > b.row)
-        return true;
-    if (a.row == b.row)
-        return a.column > b.column;
-    else
-        return false;
 }
 
 struct [[nodiscard]] Size {
