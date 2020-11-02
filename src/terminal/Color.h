@@ -74,6 +74,8 @@ struct RGBColor {
         blue{static_cast<uint8_t>(rgb & 0xFF)}
     {}
 
+    explicit RGBColor(std::string const& _hexCode);
+
     RGBColor& operator=(std::string const& _hexCode);
 };
 

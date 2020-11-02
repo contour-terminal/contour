@@ -69,6 +69,11 @@ string to_string(BrightColor color)
     return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
 }
 
+RGBColor::RGBColor(std::string const& _hexCode) : RGBColor()
+{
+    *this = _hexCode;
+}
+
 RGBColor& RGBColor::operator=(string const& _hexCode)
 {
     if (_hexCode.size() == 7 && _hexCode[0] == '#')
