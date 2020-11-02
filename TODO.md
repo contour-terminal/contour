@@ -1,9 +1,9 @@
 
 ### random
 
+- [ ] selection rendering improved
 - [ ] normal-mode cursor (that can be used for selection, basic vim movements)
 - [ ] make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
-- [ ] `initial_working_directory` (chdir) for win32
 
 ### Bugs found via vttest
 
