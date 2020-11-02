@@ -3,6 +3,7 @@
 #### Changes since last prerelease
 
 - `initial_working_directory` config option added
+- `selection.foreground` and `selection.background` config options added to color profile
 
 #### General Features
 

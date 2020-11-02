@@ -17,6 +17,8 @@
 #include <terminal/ScreenBuffer.h>
 #include <terminal/Commands.h>          // Coordinate
 
+#include <crispy/utils.h>
+
 #include <fmt/format.h>
 
 #include <functional>
@@ -102,6 +104,25 @@ class Selector {
 
     constexpr Coordinate const& from() const noexcept { return from_; }
     constexpr Coordinate const& to() const noexcept { return to_; }
+
+    /// @returns boolean indicating whether or not given absolute coordinate is within the range of the selection.
+    constexpr bool contains(Coordinate _coord) const noexcept
+    {
+        switch (mode_)
+        {
+            case Mode::FullLine:
+                return crispy::ascending(from_.row, _coord.row, to_.row)
+                    || crispy::ascending(to_.row, _coord.row, from_.row);
+            case Mode::Linear:
+            case Mode::LinearWordWise:
+                return crispy::ascending(from_, _coord, to_)
+                    || crispy::ascending(to_, _coord, from_);
+            case Mode::Rectangular:
+                return crispy::ascending(from_.row, _coord.row, to_.row)
+                    && crispy::ascending(from_.column, _coord.column, to_.column);
+        }
+        return false;
+    }
 
     /// Tests whether selection is upwards.
     constexpr bool negativeSelection() const noexcept { return to_ < from_; }

@@ -19,6 +19,7 @@
 using std::scoped_lock;
 using std::chrono::steady_clock;
 using std::optional;
+using std::tuple;
 
 namespace terminal::view {
 
@@ -172,6 +173,8 @@ uint64_t Renderer::render(Terminal& _terminal,
     {
         auto _l = scoped_lock{_terminal};
         auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
+        auto const baseLine = _terminal.screen().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
+
         if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
             auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
@@ -181,8 +184,10 @@ uint64_t Renderer::render(Terminal& _terminal,
             changes = _terminal.preRender(_now);
 
             _terminal.screen().render(
-                [this, reverseVideo](Coordinate const& _pos, Cell const& _cell) {
-                    renderCell(_pos, _cell, reverseVideo);
+                [&](Coordinate const& _pos, Cell const& _cell) {
+                    auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
+                    auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
+                    renderCell(_pos, _cell, reverseVideo, selected);
                 },
                 _terminal.screen().absoluteScrollOffset()
             );
@@ -194,8 +199,10 @@ uint64_t Renderer::render(Terminal& _terminal,
         {
             changes = _terminal.preRender(_now);
             _terminal.screen().render(
-                [this, reverseVideo](Coordinate const& pos, Cell const& _cell) {
-                    renderCell(pos, _cell, reverseVideo);
+                [&](Coordinate const& _pos, Cell const& _cell) {
+                    auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
+                    auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
+                    renderCell(_pos, _cell, reverseVideo, selected);
                 },
                 _terminal.screen().absoluteScrollOffset());
         }
@@ -203,8 +210,6 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     backgroundRenderer_.renderPendingCells();
     backgroundRenderer_.finish();
-
-    renderSelection(_terminal);
 
     textRenderer_.flushPendingSegments();
     textRenderer_.finish();
@@ -236,34 +241,20 @@ void Renderer::renderCursor(Terminal const& _terminal)
     }
 }
 
-void Renderer::renderSelection(Terminal const& _terminal)
+tuple<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    if (_terminal.screen().isSelectionAvailable())
-    {
-        // TODO: don't abouse BackgroundRenderer here, maybe invent RectRenderer?
-        backgroundRenderer_.setOpacity(colorProfile_.selectionOpacity);
-        Screen const& screen = _terminal.screen();
-        auto const selection = screen.selection();
-        for (Selector::Range const& range : selection) // _terminal.screen().selection())
-        {
-            // TODO: see if we can extract and then unit-test this display rendering of selection
-            auto const relativeLineNr = range.line - _terminal.historyLineCount();// - _terminal.scrollOffset();
-            if (_terminal.isLineVisible(relativeLineNr))
-            {
-                auto const pos = Coordinate{relativeLineNr + _terminal.screen().relativeScrollOffset(), range.fromColumn};
-                auto const count = 1 + range.toColumn - range.fromColumn;
-                backgroundRenderer_.renderOnce(pos, colorProfile_.selection, count);
-                ++metrics_.cellBackgroundRenderCount;
-            }
-        }
-        backgroundRenderer_.renderPendingCells();
-        backgroundRenderer_.setOpacity(1.0f);
-    }
+    auto const [fg, bg] = _cell.attributes().makeColors(_colorProfile, _reverseVideo);
+    if (!_selected)
+        return tuple{fg, bg};
+
+    auto const a = _colorProfile.selectionForeground.value_or(bg);
+    auto const b = _colorProfile.selectionBackground.value_or(fg);
+    return tuple{a, b};
 }
 
-void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo)
+void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = _cell.attributes().makeColors(colorProfile_, _reverseVideo);
+    auto const [fg, bg] = makeColors(colorProfile_, _cell, _reverseVideo, _selected);
 
     backgroundRenderer_.renderCell(_pos, bg);
     decorationRenderer_.renderCell(_pos, _cell);

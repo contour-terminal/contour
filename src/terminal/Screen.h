@@ -355,6 +355,12 @@ class Screen {
     /// Returns list of ranges that have been selected.
     std::vector<Selector::Range> selection() const;
 
+    /// Tests whether given absolute coordinate is covered by a current selection.
+    bool isSelectedAbsolute(Coordinate _coord) const noexcept
+    {
+        return selector_ && selector_->contains(_coord);
+    }
+
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
 

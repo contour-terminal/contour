@@ -600,11 +600,18 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
             colors.defaultBackground = bg.as<string>();
     }
 
-    if (auto selection = _node["selection"]; selection && selection.IsScalar() && !selection.as<string>().empty())
-        colors.selection = selection.as<string>();
+    if (auto def = _node["selection"]; def && def.IsMap())
+    {
+        if (auto fg = def["foreground"]; fg && fg.IsScalar())
+            colors.selectionForeground.emplace(fg.as<string>());
+        else
+            colors.selectionForeground.reset();
 
-    if (auto const selectionOpacity = _node["selection_opacity"]; selectionOpacity && selectionOpacity.IsScalar())
-        colors.selectionOpacity = std::clamp(selectionOpacity.as<float>(), 0.0f, 1.0f);
+        if (auto bg = def["background"]; bg && bg.IsScalar())
+            colors.selectionBackground.emplace(bg.as<string>());
+        else
+            colors.selectionBackground.reset();
+    }
 
     if (auto cursor = _node["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
         colors.cursor = cursor.as<string>();

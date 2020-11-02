@@ -121,9 +121,8 @@ class Renderer {
     void dumpState(std::ostream& _textOutput) const;
 
   private:
-    void renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo);
+    void renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected);
     void renderCursor(Terminal const& _terminal);
-    void renderSelection(Terminal const& _terminal);
 
   private:
     RenderMetrics metrics_;

@@ -106,22 +106,23 @@ profiles:
 # For example 0x102030 is equal to '#102030'.
 color_schemes:
     default:
-        # Mandates the color of the cursor.
-        cursor: '#b0b030'
-        # The text selection color can be customized here.
-        selection: '#30c0c0'
-        # Opacity to draw the selection color over the existing screen cell(s).
-        selection_opacity: 0.3
-        # color to pick for hyperlinks decoration, when hovering
-        hyperlink_decoration:
-            normal: '#f0f000'
-            hover: '#ff0000'
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).
             background: '#1d1f21'
             # Default foreground text color.
             foreground: '#d5d8d6'
+        # Mandates the color of the cursor.
+        cursor: '#b0b030'
+        # color to pick for hyperlinks decoration, when hovering
+        hyperlink_decoration:
+            normal: '#f0f000'
+            hover: '#ff0000'
+        # The text selection color can be customized here.
+        # Leaving a value empty will default to the inverse of the content's color values.
+        selection:
+            foreground: '#c0c0c0'
+            background: '#a000a0'
         # Normal colors
         normal:
             black:   '#1d1f21'

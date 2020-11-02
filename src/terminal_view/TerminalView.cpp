@@ -115,9 +115,15 @@ optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
         case DynamicColorName::MouseBackgroundColor:
             return colorProfile_.mouseBackground;
         case DynamicColorName::HighlightForegroundColor:
-            return RGBColor{}; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
+            if (colorProfile_.selectionForeground.has_value())
+                return colorProfile_.selectionForeground.value();
+            else
+                return nullopt;
         case DynamicColorName::HighlightBackgroundColor:
-            return colorProfile_.selection;
+            if (colorProfile_.selectionBackground.has_value())
+                return colorProfile_.selectionBackground.value();
+            else
+                return nullopt;
     }
     return nullopt; // should never happen
 }
@@ -310,10 +316,10 @@ void TerminalView::resetDynamicColor(DynamicColorName _name)
             colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
             break;
         case DynamicColorName::HighlightForegroundColor:
-            // not needed (for now)
+            colorProfile_.selectionForeground = defaultColorProfile_.selectionForeground;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selection = defaultColorProfile_.selection;
+            colorProfile_.selectionBackground = defaultColorProfile_.selectionBackground;
             break;
     }
 }
@@ -343,9 +349,10 @@ void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _valu
             colorProfile_.mouseBackground = _value;
             break;
         case DynamicColorName::HighlightForegroundColor:
-            break; // TODO: implement (or in other words: Do we need this? Is this meaningful nowadays?)
+            colorProfile_.selectionForeground = _value;
+            break;
         case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selection = _value;
+            colorProfile_.selectionBackground = _value;
             break;
     }
 }
