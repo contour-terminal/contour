@@ -100,10 +100,6 @@ class Selector {
     /// Marks the selection as completed.
     void stop();
 
-    /// When screen lines are sliced into or out of the saved lines buffer, this call will update
-    /// the selection accordingly.
-    void slice(int _offset);
-
     constexpr Coordinate const& from() const noexcept { return from_; }
     constexpr Coordinate const& to() const noexcept { return to_; }
 
