@@ -32,3 +32,5 @@
 
 # Linux/KDE
 .directory
+
+/debian/files
