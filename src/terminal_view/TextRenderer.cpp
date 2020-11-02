@@ -51,12 +51,10 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                            ScreenCoordinates const& _screenCoordinates,
-                           ColorProfile const& _colorProfile,
                            FontConfig const& _fonts,
                            Size const& _cellSize) :
     renderMetrics_{ _renderMetrics },
     screenCoordinates_{ _screenCoordinates },
-    colorProfile_{ _colorProfile },
     fonts_{ _fonts },
     cellSize_{ _cellSize },
     textShaper_{},
@@ -85,23 +83,19 @@ void TextRenderer::setCellSize(Size const& _cellSize)
     cellSize_ = _cellSize;
 }
 
-void TextRenderer::setColorProfile(ColorProfile const& _colorProfile)
-{
-    colorProfile_ = _colorProfile;
-}
-
 void TextRenderer::setFont(FontConfig const& _fonts)
 {
     fonts_ = _fonts;
     clearCache();
 }
 
-void TextRenderer::reset(Coordinate const& _pos, GraphicsAttributes const& _attr)
+void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color)
 {
-    //std::cout << fmt::format("TextRenderer.reset(): attr:{}\n", _attr.styles);
+    //std::cout << fmt::format("TextRenderer.reset(): styles:{}, color:{}\n", _styles, _color);
     row_ = _pos.row;
     startColumn_ = _pos.column;
-    attributes_ = _attr;
+    characterStyleMask_ = _styles;
+    color_ = _color;
     codepoints_.clear();
     clusters_.clear();
     clusterOffset_ = 0;
@@ -117,7 +111,7 @@ void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] cursor_pos_t _colu
     ++clusterOffset_;
 }
 
-void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
+void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color)
 {
     constexpr char32_t SP = 0x20;
 
@@ -127,7 +121,7 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
             if (!_cell.empty() && _cell.codepoint(0) != SP)
             {
                 state_ = State::Filling;
-                reset(_pos, _cell.attributes());
+                reset(_pos, _cell.attributes().styles, _color);
                 extend(_cell, _pos.column);
             }
             break;
@@ -135,7 +129,7 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
         {
             //if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
             bool const sameLine = _pos.row == row_;
-            bool const sameSGR = _cell.attributes() == attributes_;
+            bool const sameSGR = _cell.attributes().styles == characterStyleMask_ && _color == color_;
             bool const nonspace = !_cell.empty() && _cell.codepoint(0) != SP;
 
             // Do not perform multi-column text shaping when under rendering pressure.
@@ -154,7 +148,7 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell)
                     state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
-                    reset(_pos, _cell.attributes());
+                    reset(_pos, _cell.attributes().styles, _color);
                     extend(_cell, _pos.column);
                 }
             }
@@ -168,8 +162,6 @@ void TextRenderer::flushPendingSegments()
     if (codepoints_.empty())
         return;
 
-    auto const [fgColor, bgColor] = attributes_.makeColors(colorProfile_, reverseVideo_);
-
     render(
         #if 1
         screenCoordinates_.map(startColumn_, row_),
@@ -178,9 +170,9 @@ void TextRenderer::flushPendingSegments()
         #endif
         cachedGlyphPositions(),
         QVector4D(
-            static_cast<float>(fgColor.red) / 255.0f,
-            static_cast<float>(fgColor.green) / 255.0f,
-            static_cast<float>(fgColor.blue) / 255.0f,
+            static_cast<float>(color_.red) / 255.0f,
+            static_cast<float>(color_.green) / 255.0f,
+            static_cast<float>(color_.blue) / 255.0f,
             1.0f
         )
     );
@@ -189,7 +181,7 @@ void TextRenderer::flushPendingSegments()
 GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    if (auto const cached = cache_.find(CacheKey{codepoints, attributes_.styles}); cached != cache_.end())
+    if (auto const cached = cache_.find(CacheKey{codepoints, characterStyleMask_}); cached != cache_.end())
     {
         METRIC_INCREMENT(cachedText);
 #if !defined(NDEBUG)
@@ -207,7 +199,7 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 
         auto const cacheKeyFromStorage = CacheKey{
             cacheKeyStorage_.back(),
-            attributes_.styles
+            characterStyleMask_
         };
 
 #if !defined(NDEBUG)
@@ -220,8 +212,8 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 
 GlyphPositionList TextRenderer::requestGlyphPositions()
 {
-    // if (attributes_.styles.mask() != 0)
-    //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", attributes_.styles);
+    // if (characterStyleMask_.mask() != 0)
+    //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", characterStyleMask_);
     GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
@@ -236,10 +228,10 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
 
 GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
 {
-    if ((attributes_.styles & CharacterStyleMask::Hidden))
+    if ((characterStyleMask_ & CharacterStyleMask::Hidden))
         return {};
 
-    FontStyle const textStyle = [](CharacterStyleMask _styles) -> FontStyle {
+    FontStyle const textStyle = [](CharacterStyleMask const& _styles) -> FontStyle {
         auto const bold = _styles & CharacterStyleMask::Bold
             ? FontStyle::Bold
             : FontStyle::Regular;
@@ -247,9 +239,9 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
             ? FontStyle::Italic
             : FontStyle::Regular;
         return FontStyle::Regular | bold | italic;
-    }(attributes_.styles);
+    }(characterStyleMask_);
 
-    if (attributes_.styles & CharacterStyleMask::Blinking)
+    if (characterStyleMask_ & CharacterStyleMask::Blinking)
     {
         // TODO: update textshaper's shader to blink (requires current clock knowledge)
     }

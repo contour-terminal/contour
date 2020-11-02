@@ -52,7 +52,7 @@ Renderer::Renderer(Logger _logger,
     },
     backgroundRenderer_{
         screenCoordinates_,
-        _colorProfile,
+        _colorProfile.defaultBackground,
         renderTarget_
     },
     imageRenderer_{
@@ -66,7 +66,6 @@ Renderer::Renderer(Logger _logger,
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
         screenCoordinates_,
-        _colorProfile,
         _fonts,
         cellSize()
     },
@@ -150,7 +149,7 @@ void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
 void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
 {
     colorProfile_ = _colors;
-    textRenderer_.setColorProfile(_colors);
+    backgroundRenderer_.setDefaultColor(_colors.defaultBackground);
     decorationRenderer_.setColorProfile(_colors);
     cursorRenderer_.setColor(canonicalColor(colorProfile_.cursor));
 }
@@ -172,19 +171,21 @@ uint64_t Renderer::render(Terminal& _terminal,
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
-        textRenderer_.setReverseVideo(_terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo));
+        auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
         if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
             auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
             if (cellAtMouse.hyperlink())
-            {
                 cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-            }
 
             changes = _terminal.preRender(_now);
 
-            _terminal.screen().render([this](Coordinate const& _pos, Cell const& _cell) { renderCell(_pos, _cell); },
-                                      _terminal.screen().absoluteScrollOffset());
+            _terminal.screen().render(
+                [this, reverseVideo](Coordinate const& _pos, Cell const& _cell) {
+                    renderCell(_pos, _cell, reverseVideo);
+                },
+                _terminal.screen().absoluteScrollOffset()
+            );
 
             if (cellAtMouse.hyperlink())
                 cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
@@ -192,8 +193,11 @@ uint64_t Renderer::render(Terminal& _terminal,
         else
         {
             changes = _terminal.preRender(_now);
-            _terminal.screen().render([this](Coordinate const& pos, Cell const& _cell) { renderCell(pos, _cell); },
-                                      _terminal.screen().absoluteScrollOffset());
+            _terminal.screen().render(
+                [this, reverseVideo](Coordinate const& pos, Cell const& _cell) {
+                    renderCell(pos, _cell, reverseVideo);
+                },
+                _terminal.screen().absoluteScrollOffset());
         }
     }
 
@@ -257,11 +261,13 @@ void Renderer::renderSelection(Terminal const& _terminal)
     }
 }
 
-void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell)
+void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo)
 {
-    backgroundRenderer_.renderCell(_pos, _cell);
+    auto const [fg, bg] = _cell.attributes().makeColors(colorProfile_, _reverseVideo);
+
+    backgroundRenderer_.renderCell(_pos, bg);
     decorationRenderer_.renderCell(_pos, _cell);
-    textRenderer_.schedule(_pos, _cell);
+    textRenderer_.schedule(_pos, _cell, fg);
     if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
         imageRenderer_.renderImage(screenCoordinates_.map(_pos), fragment.value());
 }

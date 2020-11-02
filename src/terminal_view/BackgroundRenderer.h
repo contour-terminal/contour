@@ -29,19 +29,20 @@ class BackgroundRenderer {
     /// Constructs the decoration renderer.
     ///
     /// @param _screenCoordinates
-    /// @param _projectionMatrix
-    /// @param _shaderConfig
+    /// @param _defaultColor
+    /// @param _renderTarget
     BackgroundRenderer(ScreenCoordinates const& _screenCoordinates,
-                       ColorProfile const& _colorProfile,
+                       RGBColor const& _defaultColor,
                        OpenGLRenderer& _renderTarget);
 
-    void setColorProfile(ColorProfile const& _colorProfile);
+    void setDefaultColor(RGBColor const& _color) noexcept { defaultColor_ = _color; }
+
+    constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
 
     // TODO: pass background color directly (instead of whole grid cell),
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(Coordinate const& _pos, Cell const& _cell);
     void renderCell(Coordinate const& _pos, RGBColor const& _color);
 
     void renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count);
@@ -49,14 +50,12 @@ class BackgroundRenderer {
     void renderPendingCells();
     void finish();
 
-    constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
-
   private:
     void renderCellRange();
 
   private:
     ScreenCoordinates const& screenCoordinates_;
-    ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
+    RGBColor defaultColor_;
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
 
     // input state

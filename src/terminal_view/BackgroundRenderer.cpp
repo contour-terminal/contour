@@ -23,18 +23,12 @@
 namespace terminal::view {
 
 BackgroundRenderer::BackgroundRenderer(ScreenCoordinates const& _screenCoordinates,
-                                       ColorProfile const& _colorProfile,
+                                       RGBColor const& _defaultColor,
                                        OpenGLRenderer& _renderTarget) :
     screenCoordinates_{ _screenCoordinates },
-    colorProfile_{ _colorProfile },
+    defaultColor_{ _defaultColor },
     renderTarget_{ _renderTarget }
 {
-}
-
-void BackgroundRenderer::renderCell(Coordinate const& _pos, Cell const& _cell)
-{
-    RGBColor const color = _cell.attributes().makeColors(colorProfile_, false).second;
-    renderCell(_pos, color);
 }
 
 void BackgroundRenderer::renderCell(Coordinate const& _pos, RGBColor const& _color)
@@ -66,7 +60,7 @@ void BackgroundRenderer::renderOnce(Coordinate const& _pos, RGBColor const& _col
 
 void BackgroundRenderer::renderCellRange()
 {
-    if (color_ == colorProfile_.defaultBackground)
+    if (color_ == defaultColor_)
         return;
 
     auto const pos = QPoint{screenCoordinates_.map(startColumn_, row_)};

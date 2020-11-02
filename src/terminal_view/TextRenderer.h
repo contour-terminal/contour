@@ -115,20 +115,16 @@ class TextRenderer {
                  crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                  ScreenCoordinates const& _screenCoordinates,
-                 ColorProfile const& _colorProfile,
                  FontConfig const& _fonts,
                  Size const& _cellSize);
 
     void setFont(FontConfig const& _fonts);
 
     void setCellSize(Size const& _cellSize);
-    void setColorProfile(ColorProfile const& _colorProfile);
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
-    void setReverseVideo(bool _reverse) noexcept { reverseVideo_ = _reverse; }
-
-    void schedule(Coordinate const& _pos, Cell const& _cell);
+    void schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color);
     void flushPendingSegments();
     void finish();
 
@@ -136,7 +132,7 @@ class TextRenderer {
     void clearCache();
 
   private:
-    void reset(Coordinate const& _pos, GraphicsAttributes const& _attr);
+    void reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color);
     void extend(Cell const& _cell, cursor_pos_t _column);
     crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
 
@@ -180,8 +176,6 @@ class TextRenderer {
     //
     RenderMetrics& renderMetrics_;
     ScreenCoordinates const& screenCoordinates_;
-    ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
-    bool reverseVideo_ = false;
     FontConfig fonts_;
 
     // text run segmentation
@@ -190,7 +184,8 @@ class TextRenderer {
     State state_ = State::Empty;
     cursor_pos_t row_ = 1;
     cursor_pos_t startColumn_ = 1;
-    GraphicsAttributes attributes_ = {};
+    CharacterStyleMask characterStyleMask_ = {};
+    RGBColor color_{};
     std::vector<char32_t> codepoints_{};
     std::vector<int> clusters_{};
     unsigned clusterOffset_ = 0;
