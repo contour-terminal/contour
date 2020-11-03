@@ -17,8 +17,6 @@ endif()
 set(terminal_HEADERS
     Charset.h
     Color.h
-    CommandBuilder.h
-    Commands.h
     Functions.h
     Image.h
     InputGenerator.h
@@ -39,8 +37,6 @@ set(terminal_HEADERS
 set(terminal_SOURCES
     Charset.cpp
     Color.cpp
-    CommandBuilder.cpp
-    Commands.cpp
     Functions.cpp
     Image.cpp
     InputGenerator.cpp
@@ -87,7 +83,6 @@ if(LIBTERMINAL_TESTING)
     add_executable(terminal_test
         test_main.cpp
 		Selector_test.cpp
-        CommandBuilder_test.cpp
         Functions_test.cpp
         Parser_test.cpp
         Screen_test.cpp

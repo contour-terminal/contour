@@ -15,7 +15,7 @@
 
 #include <terminal/InputGenerator.h>
 #include <terminal/ScreenBuffer.h>
-#include <terminal/Commands.h>          // Coordinate
+#include <terminal/Size.h>          // Coordinate
 
 #include <crispy/utils.h>
 
@@ -64,11 +64,11 @@ class Selector {
     };
 
     struct Range {
-        cursor_pos_t line;
-        cursor_pos_t fromColumn;
-        cursor_pos_t toColumn;
+        int line;
+        int fromColumn;
+        int toColumn;
 
-        constexpr cursor_pos_t length() const noexcept { return toColumn - fromColumn + 1; }
+        constexpr int length() const noexcept { return toColumn - fromColumn + 1; }
     };
 
 
@@ -79,8 +79,8 @@ class Selector {
     Selector(Mode _mode,
 			 GetCellAt _at,
 			 std::u32string const& _wordDelimiters,
-			 cursor_pos_t _totalRowCount,
-             cursor_pos_t _columnCount,
+			 int _totalRowCount,
+             int _columnCount,
 			 Coordinate const& _from);
 
 	/// Convenience constructor when access to Screen is available.
@@ -191,8 +191,8 @@ class Selector {
 	Mode mode_;
 	GetCellAt getCellAt_;
 	std::u32string wordDelimiters_;
-	cursor_pos_t totalRowCount_;
-    cursor_pos_t columnCount_;
+	int totalRowCount_;
+    int columnCount_;
     Coordinate start_{};
     Coordinate from_{};
     Coordinate to_{};

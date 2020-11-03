@@ -238,7 +238,7 @@ Cell& ScreenBuffer::at(Coordinate const& _pos) noexcept
         return (*next(rbegin(savedLines), -_pos.row))[_pos.column - 1];
 }
 
-void ScreenBuffer::linefeed(cursor_pos_t _newColumn)
+void ScreenBuffer::linefeed(int _newColumn)
 {
     wrapPending = false;
 
@@ -343,12 +343,12 @@ void ScreenBuffer::writeCharToCurrentAndAdvance(char32_t _character)
         verifyState();
 }
 
-void ScreenBuffer::scrollUp(cursor_pos_t v_n)
+void ScreenBuffer::scrollUp(int v_n)
 {
     scrollUp(v_n, margin_);
 }
 
-void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
+void ScreenBuffer::scrollUp(int v_n, Margin const& margin)
 {
     if (margin.horizontal != Margin::Range{1, size_.width})
     {
@@ -438,12 +438,12 @@ void ScreenBuffer::scrollUp(cursor_pos_t v_n, Margin const& margin)
     updateCursorIterators();
 }
 
-void ScreenBuffer::scrollDown(cursor_pos_t v_n)
+void ScreenBuffer::scrollDown(int v_n)
 {
     scrollDown(v_n, margin_);
 }
 
-void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
+void ScreenBuffer::scrollDown(int v_n, Margin const& _margin)
 {
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
@@ -547,12 +547,12 @@ void ScreenBuffer::scrollDown(cursor_pos_t v_n, Margin const& _margin)
     updateCursorIterators();
 }
 
-void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
+void ScreenBuffer::deleteChars(int _lineNo, int _n)
 {
     auto line = next(begin(lines), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
     auto rightMargin = next(begin(*line), margin_.horizontal.to);
-    auto const n = min(_n, static_cast<cursor_pos_t>(distance(column, rightMargin)));
+    auto const n = min(_n, static_cast<int>(distance(column, rightMargin)));
     rotate(
         column,
         next(column, n),
@@ -568,7 +568,7 @@ void ScreenBuffer::deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n)
 }
 
 /// Inserts @p _n characters at given line @p _lineNo.
-void ScreenBuffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
+void ScreenBuffer::insertChars(int _lineNo, int _n)
 {
     auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
 
@@ -593,13 +593,13 @@ void ScreenBuffer::insertChars(cursor_pos_t _lineNo, cursor_pos_t _n)
     );
 }
 
-void ScreenBuffer::insertColumns(cursor_pos_t _n)
+void ScreenBuffer::insertColumns(int _n)
 {
-    for (cursor_pos_t lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
+    for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
         insertChars(lineNo, _n);
 }
 
-void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
+void ScreenBuffer::setCurrentColumn(int _n)
 {
     auto const col = cursor.originMode ? margin_.horizontal.from + _n - 1 : _n;
     auto const clampedCol = min(col, size_.width);
@@ -609,7 +609,7 @@ void ScreenBuffer::setCurrentColumn(cursor_pos_t _n)
     verifyState();
 }
 
-bool ScreenBuffer::incrementCursorColumn(cursor_pos_t _n)
+bool ScreenBuffer::incrementCursorColumn(int _n)
 {
     auto const n = min(_n,  margin_.horizontal.length() - cursor.position.column);
     cursor.position.column += n;
@@ -635,7 +635,7 @@ void ScreenBuffer::clearTabUnderCursor()
 {
     // populate tabs vector in case of default tabWidth is used (until now).
     if (tabs.empty() && tabWidth != 0)
-        for (cursor_pos_t column = tabWidth; column <= size().width; column += tabWidth)
+        for (int column = tabWidth; column <= size().width; column += tabWidth)
             tabs.emplace_back(column);
 
     // erase the specific tab underneath
@@ -725,11 +725,11 @@ void ScreenBuffer::fail(std::string const& _message) const
     assert(false);
 }
 
-string ScreenBuffer::renderTextLine(cursor_pos_t row) const
+string ScreenBuffer::renderTextLine(int row) const
 {
     string line;
     line.reserve(size_.width);
-    for (cursor_pos_t col = 1; col <= size_.width; ++col)
+    for (int col = 1; col <= size_.width; ++col)
         if (auto const& cell = at({row, col}); cell.codepointCount())
             line += cell.toUtf8();
         else
@@ -743,7 +743,7 @@ string ScreenBuffer::renderText() const
     string text;
     text.reserve(size_.height * (size_.width + 1));
 
-    for (cursor_pos_t row = 1; row <= size_.height; ++row)
+    for (int row = 1; row <= size_.height; ++row)
     {
         text += renderTextLine(row);
         text += '\n';
@@ -918,9 +918,9 @@ std::string ScreenBuffer::screenshot() const
     auto result = std::stringstream{};
     auto writer = VTWriter(result);
 
-    for (cursor_pos_t const row : crispy::times(1, size_.height))
+    for (int const row : crispy::times(1, size_.height))
     {
-        for (cursor_pos_t const col : crispy::times(1, size_.width))
+        for (int const col : crispy::times(1, size_.width))
         {
             Cell const& cell = at({row, col});
 

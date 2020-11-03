@@ -29,48 +29,6 @@ using std::string;
 
 namespace terminal::view {
 
-CursorShape makeCursorShape(string const& _name)
-{
-    auto static const toLower = [](string const& _value) -> string {
-        string result;
-        result.reserve(_value.size());
-        transform(begin(_value), end(_value), back_inserter(result), [](auto ch) { return tolower(ch); });
-        return result;
-    };
-
-    auto const name = toLower(_name);
-
-    if (name == "block")
-        return CursorShape::Block;
-
-    if (name == "rectangle")
-        return CursorShape::Rectangle;
-
-    if (name == "underscore")
-        return CursorShape::Underscore;
-
-    if (name == "bar")
-        return CursorShape::Bar;
-
-    throw runtime_error("Invalid cursor shape. Use one of block, underscore, beam.");
-}
-
-string to_string(CursorShape _value)
-{
-    switch (_value)
-    {
-        case CursorShape::Block:
-            return "block";
-        case CursorShape::Rectangle:
-            return "rectangle";
-        case CursorShape::Underscore:
-            return "underscore";
-        case CursorShape::Bar:
-            return "bar";
-    }
-    return "block";
-}
-
 CursorRenderer::CursorRenderer(crispy::atlas::CommandListener& _commandListener,
                                crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                                ScreenCoordinates const& _screenCoordinates,

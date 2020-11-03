@@ -133,7 +133,7 @@ class TextRenderer {
 
   private:
     void reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color);
-    void extend(Cell const& _cell, cursor_pos_t _column);
+    void extend(Cell const& _cell, int _column);
     crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
 
     crispy::text::GlyphPositionList const& cachedGlyphPositions();
@@ -182,8 +182,8 @@ class TextRenderer {
     //
     enum class State { Empty, Filling };
     State state_ = State::Empty;
-    cursor_pos_t row_ = 1;
-    cursor_pos_t startColumn_ = 1;
+    int row_ = 1;
+    int startColumn_ = 1;
     CharacterStyleMask characterStyleMask_ = {};
     RGBColor color_{};
     std::vector<char32_t> codepoints_{};

@@ -17,8 +17,8 @@
 #include "LoggingSink.h"
 
 #include <terminal/Color.h>
-#include <terminal/Commands.h>          // CursorDisplay
 #include <terminal/Process.h>
+#include <terminal/Sequencer.h>               // CursorDisplay
 #include <terminal/Size.h>
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/DecorationRenderer.h> // Decorator

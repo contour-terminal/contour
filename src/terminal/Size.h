@@ -209,4 +209,20 @@ namespace fmt {
             return format_to(ctx.out(), "{}x{}", value.width, value.height);
         }
     };
+
+    template <>
+    struct formatter<terminal::Coordinate> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        template <typename FormatContext>
+        auto format(terminal::Coordinate coord, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({}:{})", coord.row, coord.column);
+        }
+    };
+
 }

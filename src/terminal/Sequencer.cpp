@@ -27,6 +27,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <iostream>             // error logging
 #include <cassert>
 #include <cstdlib>
 #include <numeric>
@@ -41,6 +42,7 @@ using std::min;
 using std::nullopt;
 using std::optional;
 using std::pair;
+using std::runtime_error;
 using std::shared_ptr;
 using std::string;
 using std::vector;
@@ -569,7 +571,7 @@ namespace simpl // {{{ some command generator helpers
         auto const& value = _seq.intermediateCharacters();
         if (value == "?")
             _screen.requestDynamicColor(_name);
-        else if (auto color = CommandBuilder::parseColor(value); color.has_value())
+        else if (auto color = Sequencer::parseColor(value); color.has_value())
             _screen.setDynamicColor(_name, color.value());
         else
             return ApplyResult::Invalid;
@@ -1177,7 +1179,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case COLORMOUSEFG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseBackgroundColor);
         case CLIPBOARD: return simpl::clipboard(_seq, screen_);
-        //case COLORSPECIAL: return simpl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
+        // TODO: case COLORSPECIAL: return simpl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: screen_.resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
         case RCOLORBG: screen_.resetDynamicColor(DynamicColorName::DefaultBackgroundColor); break;
         case RCOLORCURSOR: screen_.resetDynamicColor(DynamicColorName::TextCursorColor); break;
@@ -1283,6 +1285,28 @@ std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
         return std::nullopt;
     }
 }
+
+// {{{ free function helpers
+CursorShape makeCursorShape(string const& _name)
+{
+    string const name = [](string const& _input) {
+        string output;
+        transform(begin(_input), end(_input), back_inserter(output), [](auto ch) { return tolower(ch); });
+        return output;
+    }(_name);
+
+    if (name == "block")
+        return CursorShape::Block;
+    else if (name == "rectangle")
+        return CursorShape::Rectangle;
+    else if (name == "underscore")
+        return CursorShape::Underscore;
+    else if (name == "bar")
+        return CursorShape::Bar;
+    else
+        throw runtime_error{"Invalid cursor shape."};
+}
+// }}}
 
 }  // namespace terminal
 

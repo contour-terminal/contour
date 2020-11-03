@@ -24,7 +24,7 @@ struct ScreenCoordinates {
     /// @param row screen coordinate's line (between 1 and number of screen lines)
     ///
     /// @return 2D point into drawing coordinate system
-    constexpr QPoint map(cursor_pos_t col, cursor_pos_t row) const noexcept {
+    constexpr QPoint map(int col, int row) const noexcept {
         return map(Coordinate{row, col});
     }
 

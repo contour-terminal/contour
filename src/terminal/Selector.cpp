@@ -24,8 +24,8 @@ namespace terminal {
 Selector::Selector(Mode _mode,
 				   GetCellAt _getCellAt,
 				   std::u32string const& _wordDelimiters,
-				   cursor_pos_t _totalRowCount,
-				   cursor_pos_t _columnCount,
+				   int _totalRowCount,
+				   int _columnCount,
 				   Coordinate const& _from) :
 	mode_{_mode},
 	getCellAt_{move(_getCellAt)},
@@ -67,7 +67,7 @@ Selector::Selector(Mode _mode,
                 return nullptr;
         },
         _wordDelimiters,
-        _screen.size().height + static_cast<cursor_pos_t>(_screen.historyLineCount()),
+        _screen.size().height + static_cast<int>(_screen.historyLineCount()),
         _screen.size().width,
         _from
     }
@@ -258,7 +258,7 @@ vector<Selector::Range> Selector::linear() const
 
             // Render inner full.
             for (size_t n = 1; n < result.size(); ++n)
-                result[n] = Range{from.row + static_cast<cursor_pos_t>(n), 1, columnCount_};
+                result[n] = Range{from.row + static_cast<int>(n), 1, columnCount_};
 
             // Render last (second) line partial from beginning to last selected column.
             result[result.size() - 1] = Range{to.row, 1, to.column};
@@ -272,7 +272,7 @@ vector<Selector::Range> Selector::lines() const
 {
     auto [result, from, to] = prepare(*this);
 
-    for (cursor_pos_t row = 0; row < static_cast<int>(result.size()); ++row)
+    for (int row = 0; row < static_cast<int>(result.size()); ++row)
     {
         result[row] = Range{
             from.row + row,
@@ -288,7 +288,7 @@ vector<Selector::Range> Selector::rectangular() const
 {
     auto [result, from, to] = prepare(*this);
 
-    for (cursor_pos_t row = 0; row < static_cast<int>(result.size()); ++row)
+    for (int row = 0; row < static_cast<int>(result.size()); ++row)
     {
         result[row] = Range{
             from.row + row,

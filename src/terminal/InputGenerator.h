@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
+#include <terminal/Sequencer.h> // MouseProtocol
 
 #include <crispy/overloaded.h>
 
@@ -200,16 +200,16 @@ std::string to_string(MouseButton _button);
 struct MousePressEvent {
     MouseButton button;
     Modifier modifier{};
-    cursor_pos_t row = 1;
-    cursor_pos_t column = 1;
+    int row = 1;
+    int column = 1;
 };
 
 struct MouseMoveEvent {
     /// Row number in screen coordinates [1..rows]
-    cursor_pos_t row;
+    int row;
 
     /// Column number in screen coordinates [1..cols]
-    cursor_pos_t column;
+    int column;
 
     Modifier modifier{};
 
@@ -221,8 +221,8 @@ struct MouseMoveEvent {
 struct MouseReleaseEvent {
     MouseButton button;
     Modifier modifier{};
-    cursor_pos_t row = 1;
-    cursor_pos_t column = 1;
+    int row = 1;
+    int column = 1;
 };
 
 struct FocusInEvent {};
@@ -390,8 +390,8 @@ class InputGenerator {
   private:
     bool generateMouse(MouseButton _button,
                        Modifier _modifier,
-                       cursor_pos_t _row,
-                       cursor_pos_t _column,
+                       int _row,
+                       int _column,
                        MouseEventType _eventType);
 
     inline bool append(std::string_view _sequence);

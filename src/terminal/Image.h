@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
+#include <terminal/Color.h>
 #include <terminal/Size.h>
 
 #include <fmt/format.h>

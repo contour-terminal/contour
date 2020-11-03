@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
+#include <terminal/Sequencer.h> // Sequence
 
 #include <algorithm>
 #include <map>
@@ -26,10 +26,9 @@ struct Metrics {
     // XXX Too bad the key is a string.
     std::map<std::string, uint64_t> sequences;
 
-    void operator()(Command const& _command)
+    void operator()(Sequence const& _seq)
     {
-        auto const key = to_mnemonic(_command, false, false);
-        sequences[key]++;
+        sequences[_seq.text()]++;
     }
 
     /// @returns an ordered list of collected metrics, with highest frequencey first.

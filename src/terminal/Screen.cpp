@@ -12,10 +12,10 @@
  * limitations under the License.
  */
 #include <terminal/Screen.h>
-#include <terminal/Commands.h>
-#include <terminal/VTType.h>
+
 #include <terminal/Logger.h>
 #include <terminal/Size.h>
+#include <terminal/VTType.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -28,6 +28,7 @@
 #include <unicode/utf8.h>
 
 #include <algorithm>
+#include <iostream>
 #include <iterator>
 #include <sstream>
 
@@ -38,8 +39,21 @@
 #define LIBTERMINAL_EXECUTION_COMMA(par) /*!*/
 #endif
 
-using namespace std;
 using namespace crispy;
+
+using std::cout; // XXX for debugging only
+
+using std::make_shared;
+using std::max;
+using std::min;
+using std::monostate;
+using std::nullopt;
+using std::optional;
+using std::ostringstream;
+using std::ref;
+using std::string;
+using std::string_view;
+using std::vector;
 
 namespace terminal {
 
@@ -135,7 +149,7 @@ void Screen::writeText(char32_t _char)
     sequencer_.resetInstructionCounter();
 }
 
-string Screen::renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const
+string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
 {
     assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= buffer_->historyLineCount());
     string line;
@@ -165,7 +179,7 @@ vector<Selector::Range> Screen::selection() const
 }
 
 // {{{ viewport management
-bool Screen::isLineVisible(cursor_pos_t _row) const noexcept
+bool Screen::isLineVisible(int _row) const noexcept
 {
     return crispy::ascending(1 - relativeScrollOffset(), _row, size_.height - relativeScrollOffset());
 }
@@ -578,7 +592,7 @@ void Screen::deleteCharacters(int _n)
 void Screen::deleteColumns(int _n)
 {
     if (isCursorInsideMargins())
-        for (cursor_pos_t lineNo = buffer_->margin_.vertical.from; lineNo <= buffer_->margin_.vertical.to; ++lineNo)
+        for (int lineNo = buffer_->margin_.vertical.from; lineNo <= buffer_->margin_.vertical.to; ++lineNo)
             buffer_->deleteChars(lineNo, _n);
 }
 
@@ -963,8 +977,8 @@ void Screen::setMode(Mode _mode, bool _enable)
                 setLeftRightMargin(1, size().width); // DECRLM
             }
 
-            cursor_pos_t const columns = _enable ? 132 : 80;
-            cursor_pos_t const rows = size().height;
+            int const columns = _enable ? 132 : 80;
+            int const rows = size().height;
             bool const unitInPixels = false;
 
             // Pre-resize in case the event callback right after is not actually resizing the window

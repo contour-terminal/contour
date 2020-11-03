@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
 #include <terminal/Logger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/PseudoTerminal.h>
@@ -134,7 +133,7 @@ class Terminal : public ScreenEvents {
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
 
     // viewport management
-    bool isLineVisible(cursor_pos_t _row) const noexcept { return screen_.isLineVisible(_row); }
+    bool isLineVisible(int _row) const noexcept { return screen_.isLineVisible(_row); }
     bool scrollUp(int _numLines) { return screen_.scrollUp(_numLines); }
     bool scrollDown(int  _numLines) { return screen_.scrollDown(_numLines); }
     bool scrollToTop() { return screen_.scrollToTop(); }

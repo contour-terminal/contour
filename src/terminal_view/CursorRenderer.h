@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
 #include <terminal_view/ScreenCoordinates.h>
 
 #include <crispy/Atlas.h>

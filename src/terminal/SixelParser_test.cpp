@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/SixelParser.h>
+#include <crispy/times.h>
 #include <catch2/catch.hpp>
 #include <string_view>
 #include <array>

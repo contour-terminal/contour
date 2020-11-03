@@ -1248,7 +1248,7 @@ void TerminalWindow::setProfile(config::TerminalProfile newProfile)
 string TerminalWindow::extractSelectionText()
 {
     using namespace terminal;
-    cursor_pos_t lastColumn = 0;
+    int lastColumn = 0;
     string text;
     string currentLine;
 
@@ -1270,7 +1270,6 @@ string TerminalWindow::extractSelectionText()
 string TerminalWindow::extractLastMarkRange()
 {
     using terminal::Coordinate;
-    using terminal::cursor_pos_t;
     using terminal::Cell;
 
     auto const _l = std::lock_guard{terminalView_->terminal()};

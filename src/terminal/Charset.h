@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Commands.h>
+#include <terminal/Sequencer.h>
 
 #include <array>
 #include <fmt/format.h>

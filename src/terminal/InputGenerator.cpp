@@ -486,8 +486,8 @@ void InputGenerator::setMouseWheelMode(MouseWheelMode _mode) noexcept
 
 bool InputGenerator::generateMouse(MouseButton _button,
                                    Modifier _modifier,
-                                   cursor_pos_t _row,
-                                   cursor_pos_t _column,
+                                   int _row,
+                                   int _column,
                                    MouseEventType _eventType
 )
 {

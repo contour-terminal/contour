@@ -40,7 +40,7 @@ namespace
         }
 
       private:
-        cursor_pos_t lastColumn_ = 0;
+        int lastColumn_ = 0;
     };
 }
 

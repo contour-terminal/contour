@@ -14,8 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Commands.h> // Coordinate
-#include <terminal/Size.h>
+#include <terminal/Size.h>                  // Size, Coordinate
 #include <terminal/ParserExtension.h>
 
 #include <crispy/range.h>

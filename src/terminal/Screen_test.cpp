@@ -27,7 +27,7 @@ namespace
         else
             UNSCOPED_INFO(headline + ":");
 
-        for (cursor_pos_t row = 1; row <= screen.size().height; ++row)
+        for (int row = 1; row <= screen.size().height; ++row)
             UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, screen.renderTextLine(row)));
     }
 

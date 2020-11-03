@@ -101,7 +101,7 @@ void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styl
     clusterOffset_ = 0;
 }
 
-void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] cursor_pos_t _column)
+void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] int _column)
 {
     for (size_t const i: times(_cell.codepointCount()))
     {

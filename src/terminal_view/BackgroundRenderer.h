@@ -60,8 +60,8 @@ class BackgroundRenderer {
 
     // input state
     RGBColor color_{};
-    cursor_pos_t row_ = 0;
-    cursor_pos_t startColumn_ = 0;
+    int row_ = 0;
+    int startColumn_ = 0;
     unsigned columnCount_ = 0;
 
     // rendering

@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Commands.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
 #include <terminal/InputGenerator.h> // MouseTransport
@@ -125,7 +124,7 @@ class Screen {
     void render(RendererT _renderer, std::optional<int> _scrollOffset = std::nullopt) const;
 
     /// Renders a single text line.
-    std::string renderTextLine(cursor_pos_t _row) const { return buffer_->renderTextLine(_row); }
+    std::string renderTextLine(int _row) const { return buffer_->renderTextLine(_row); }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
     std::string renderText() const { return buffer_->renderText(); }
@@ -250,7 +249,7 @@ class Screen {
         return scrollOffset_;
     }
 
-    bool isLineVisible(cursor_pos_t _row) const noexcept;
+    bool isLineVisible(int _row) const noexcept;
     bool scrollUp(int _numLines);
     bool scrollDown(int _numLines);
     bool scrollToTop();
@@ -333,7 +332,7 @@ class Screen {
      *
      * @returns the textual representation of the n'th line into the history.
      */
-    std::string renderHistoryTextLine(cursor_pos_t _lineNumberIntoHistory) const;
+    std::string renderHistoryTextLine(int _lineNumberIntoHistory) const;
 
     std::string const& windowTitle() const noexcept { return windowTitle_; }
 
@@ -459,7 +458,7 @@ void Screen::render(RendererT _render, std::optional<int> _scrollOffset) const
     {
         _scrollOffset = std::clamp(*_scrollOffset, 0, buffer_->historyLineCount());
 
-        cursor_pos_t rowNumber = 1;
+        int rowNumber = 1;
 
         // render first part from history
         for (auto line = next(begin(buffer_->savedLines), *_scrollOffset);
@@ -470,7 +469,7 @@ void Screen::render(RendererT _render, std::optional<int> _scrollOffset) const
                 line->resize(size_.width);
 
             auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
+            for (int colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
                 _render({rowNumber, colNumber}, *column);
         }
 
@@ -478,7 +477,7 @@ void Screen::render(RendererT _render, std::optional<int> _scrollOffset) const
         for (auto line = begin(buffer_->lines); rowNumber <= size_.height; ++line, ++rowNumber)
         {
             auto column = begin(*line);
-            for (cursor_pos_t colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
+            for (int colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
                 _render({rowNumber, colNumber}, *column);
         }
     }

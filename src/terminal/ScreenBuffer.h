@@ -15,11 +15,11 @@
 
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
-#include <terminal/Commands.h>              // Coordinate, cursor_pos_t, Mode
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
 #include <terminal/Logger.h>
-#include <terminal/Size.h>
+#include <terminal/Sequencer.h>         // Mode
+#include <terminal/Size.h>              // Size, Coordinate
 
 #include <unicode/width.h>
 
@@ -443,7 +443,7 @@ struct ScreenBuffer {
 	Lines savedLines{};
 	bool wrapPending{false};
 	int tabWidth{8};
-    std::vector<cursor_pos_t> tabs;
+    std::vector<int> tabs;
 
 	LineIterator currentLine{std::begin(lines)};
 	ColumnIterator currentColumn{currentLine->begin()};
@@ -460,42 +460,42 @@ struct ScreenBuffer {
     void clearAndAdvance(int _offset);
 
 	// Applies LF but also moves cursor to given column @p _column.
-	void linefeed(cursor_pos_t _column);
+	void linefeed(int _column);
 
 	void resize(Size const& _winSize);
 	Size const& size() const noexcept { return size_; }
 
-	void scrollUp(cursor_pos_t n);
-	void scrollUp(cursor_pos_t n, Margin const& margin);
-	void scrollDown(cursor_pos_t n);
-	void scrollDown(cursor_pos_t n, Margin const& margin);
-	void deleteChars(cursor_pos_t _lineNo, cursor_pos_t _n);
-	void insertChars(cursor_pos_t _lineNo, cursor_pos_t _n);
-	void insertColumns(cursor_pos_t _n);
+	void scrollUp(int n);
+	void scrollUp(int n, Margin const& margin);
+	void scrollDown(int n);
+	void scrollDown(int n, Margin const& margin);
+	void deleteChars(int _lineNo, int _n);
+	void insertChars(int _lineNo, int _n);
+	void insertColumns(int _n);
 
     /// Sets the current column to given logical column number.
-    void setCurrentColumn(cursor_pos_t _n);
+    void setCurrentColumn(int _n);
 
     /// Increments current column number by @p _n.
     ///
     /// @retval true fully incremented by @p _n columns.
     /// @retval false Truncated, as it couldn't be fully incremented as not enough columns to the right were available.
-    bool incrementCursorColumn(cursor_pos_t _n);
+    bool incrementCursorColumn(int _n);
 
     /// @returns an iterator to @p _n columns after column @p _begin.
-    ColumnIterator columnIteratorAt(ColumnIterator _begin, cursor_pos_t _n)
+    ColumnIterator columnIteratorAt(ColumnIterator _begin, int _n)
     {
         return next(_begin, _n - 1);
     }
 
     /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(cursor_pos_t _n)
+    ColumnIterator columnIteratorAt(int _n)
     {
         return columnIteratorAt(std::begin(*currentLine), _n);
     }
 
     /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(cursor_pos_t _n) const
+    ColumnIterator columnIteratorAt(int _n) const
     {
         return const_cast<ScreenBuffer*>(this)->columnIteratorAt(_n);
     }
@@ -528,7 +528,7 @@ struct ScreenBuffer {
     void setTabUnderCursor();
 
     /// Renders a single text line.
-    std::string renderTextLine(cursor_pos_t _row) const;
+    std::string renderTextLine(int _row) const;
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
     std::string renderText() const;
@@ -583,16 +583,16 @@ struct ScreenBuffer {
 	Coordinate clampToOrigin(Coordinate const& coord) const noexcept
 	{
         return {
-            std::clamp(coord.row, cursor_pos_t{0}, margin_.vertical.length()),
-            std::clamp(coord.column, cursor_pos_t{0}, margin_.horizontal.length())
+            std::clamp(coord.row, int{0}, margin_.vertical.length()),
+            std::clamp(coord.column, int{0}, margin_.horizontal.length())
         };
 	}
 
 	Coordinate clampToScreen(Coordinate const& coord) const noexcept
 	{
         return {
-            std::clamp(coord.row, cursor_pos_t{ 1 }, size_.height),
-            std::clamp(coord.column, cursor_pos_t{ 1 }, size_.width)
+            std::clamp(coord.row, int{ 1 }, size_.height),
+            std::clamp(coord.column, int{ 1 }, size_.width)
         };
 	}
 
