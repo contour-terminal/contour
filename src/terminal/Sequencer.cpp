@@ -774,98 +774,111 @@ Sequencer::Sequencer(Screen& _screen,
 {
 }
 
-void Sequencer::handleAction(ActionClass _actionClass, Action _action, char32_t _currentChar)
+void Sequencer::error(std::string_view const& _errorString)
 {
-    (void) _actionClass;
-    // std::cout << fmt::format("Sequencer.onAction: class:{}, action:{}, ch:{}\n", _actionClass, _action, crispy::escape(unicode::to_utf8(_currentChar)));
+    logger_(ParserErrorEvent{string(_errorString)});
+}
 
-    switch (_action)
+void Sequencer::print(char32_t _char)
+{
+    instructionCounter_++;
+    screen_.writeText(_char);
+}
+
+void Sequencer::execute(char _controlCode)
+{
+    executeControlFunction(_controlCode);
+}
+
+void Sequencer::clear()
+{
+    sequence_.clear();
+}
+
+void Sequencer::collect(char _char)
+{
+    sequence_.intermediateCharacters().push_back(_char);
+}
+
+void Sequencer::collectLeader(char _leader)
+{
+    sequence_.setLeader(_leader);
+}
+
+void Sequencer::param(char _char)
+{
+    if (sequence_.parameters().empty())
+        sequence_.parameters().push_back({0});
+    if (_char == ';')
+        sequence_.parameters().push_back({0});
+    else if (_char == ':')
+        sequence_.parameters().back().push_back({0});
+    else
+        sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_char - U'0');
+}
+
+void Sequencer::dispatchESC(char _finalChar)
+{
+    sequence_.setCategory(FunctionCategory::ESC);
+    sequence_.setFinalChar(_finalChar);
+    handleSequence();
+}
+
+void Sequencer::dispatchCSI(char _finalChar)
+{
+    sequence_.setCategory(FunctionCategory::CSI);
+    sequence_.setFinalChar(_finalChar);
+    handleSequence();
+}
+
+void Sequencer::startOSC()
+{
+    sequence_.setCategory(FunctionCategory::OSC);
+}
+
+void Sequencer::putOSC(char32_t _char)
+{
+    uint8_t u8[4];
+    size_t const count = unicode::to_utf8(_char, u8);
+    for (size_t i = 0; i < count; ++i)
+        sequence_.intermediateCharacters().push_back(u8[i]);
+}
+
+void Sequencer::dispatchOSC()
+{
+    auto const [code, skipCount] = parseOSC(sequence_.intermediateCharacters());
+    sequence_.parameters().push_back({static_cast<Sequence::Parameter>(code)});
+    sequence_.intermediateCharacters().erase(0, skipCount);
+    handleSequence();
+    sequence_.clear();
+}
+
+void Sequencer::hook(char _finalChar)
+{
+    instructionCounter_++;
+    sequence_.setCategory(FunctionCategory::DCS);
+    sequence_.setFinalChar(_finalChar);
+    if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
     {
-        case Action::Clear:
-            sequence_.clear();
-            return;
-		case Action::CollectLeader:
-			sequence_.setLeader(static_cast<char>(_currentChar));
-			return;
-        case Action::Collect:
-            {
-                uint8_t u8[4];
-                size_t const count = unicode::to_utf8(_currentChar, u8);
-                for (size_t i = 0; i < count; ++i)
-                    sequence_.intermediateCharacters().push_back(u8[i]);
-            }
-            return;
-        case Action::Print:
-            instructionCounter_++;
-            screen_.writeText(_currentChar);
-            return;
-        case Action::Param:
-            if (sequence_.parameters().empty())
-                sequence_.parameters().push_back({0});
-            if (_currentChar == ';')
-                sequence_.parameters().push_back({0});
-            else if (_currentChar == ':')
-                sequence_.parameters().back().push_back({0});
-            else
-                sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_currentChar - U'0');
-            return;
-        case Action::CSI_Dispatch:
-            sequence_.setCategory(FunctionCategory::CSI);
-            sequence_.setFinalChar(static_cast<char>(_currentChar));
-            handleSequence();
-            return;
-        case Action::Execute:
-            executeControlFunction(static_cast<char>(_currentChar));
-            return;
-        case Action::ESC_Dispatch:
-            dispatchESC(static_cast<char>(_currentChar));
-            return;
-        case Action::OSC_Start:
-            sequence_.setCategory(FunctionCategory::OSC);
-            break;
-        case Action::OSC_Put:
-        {
-            uint8_t u8[4];
-            size_t const count = unicode::to_utf8(_currentChar, u8);
-            for (size_t i = 0; i < count; ++i)
-                sequence_.intermediateCharacters().push_back(u8[i]);
-            break;
-        }
-        case Action::OSC_End:
-        {
-            auto const [code, skipCount] = parseOSC(sequence_.intermediateCharacters());
-            sequence_.parameters().push_back({static_cast<Sequence::Parameter>(code)});
-            sequence_.intermediateCharacters().erase(0, skipCount);
-            handleSequence();
-            sequence_.clear();
-            break;
-        }
-        case Action::Hook: // this is actually state DCS_PassThrough
-            instructionCounter_++;
-            sequence_.setCategory(FunctionCategory::DCS);
-            sequence_.setFinalChar(static_cast<char>(_currentChar));
-            if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
-            {
-                if (*funcSpec == DECSIXEL)
-                    hookSixel(sequence_);
-                else if (*funcSpec == DECRQSS)
-                    hookDECRQSS(sequence_);
-            }
-            break;
-        case Action::Put: // DCS_PassThrough: DCS data string
-            if (hookedParser_)
-                hookedParser_->pass(_currentChar);
-            break;
-        case Action::Unhook: // DCS_PassThrough: DCS data string complete
-            if (hookedParser_)
-            {
-                hookedParser_->finalize();
-                hookedParser_.reset();
-            }
-            break;
-        case Action::Ignore:
-        case Action::Undefined:
-            return;
+        if (*funcSpec == DECSIXEL)
+            hookSixel(sequence_);
+        else if (*funcSpec == DECRQSS)
+            hookDECRQSS(sequence_);
+    }
+}
+
+void Sequencer::put(char32_t _char)
+{
+    if (hookedParser_)
+        hookedParser_->pass(_char);
+}
+
+void Sequencer::unhook()
+{
+    if (hookedParser_)
+    {
+        hookedParser_->finalize();
+        hookedParser_.reset();
     }
 }
 
@@ -1014,20 +1027,6 @@ void Sequencer::executeControlFunction(char _c0)
             log<UnsupportedOutputEvent>(crispy::escape(_c0));
             break;
     }
-}
-
-void Sequencer::dispatchESC(char _finalChar)
-{
-    sequence_.setCategory(FunctionCategory::ESC);
-    sequence_.setFinalChar(_finalChar);
-    handleSequence();
-}
-
-void Sequencer::dispatchCSI(char _finalChar)
-{
-    sequence_.setCategory(FunctionCategory::CSI);
-    sequence_.setFinalChar(_finalChar);
-    handleSequence();
 }
 
 void Sequencer::handleSequence()

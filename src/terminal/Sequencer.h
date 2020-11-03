@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/Logger.h>
-#include <terminal/Parser.h>
+#include <terminal/ParserEvents.h>
 #include <terminal/ParserExtension.h>
 #include <terminal/Functions.h>
 #include <terminal/SixelParser.h>
@@ -437,11 +437,8 @@ enum class ApplyResult {
 ///
 /// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
 /// that can be matched against actions to perform on the target Screen.
-class Sequencer {
+class Sequencer : public ParserEvents {
   public:
-    using ActionClass = parser::ActionClass;
-    using Action = parser::Action;
-
     /// Constructs the sequencer stage.
     Sequencer(Screen& _screen,
               Logger _logger,
@@ -457,11 +454,6 @@ class Sequencer {
                     RGBAColor{},
                     std::make_shared<ColorPalette>()) {}
 
-    void operator()(ActionClass _actionClass, Action _action, char32_t _finalChar)
-    {
-        return handleAction(_actionClass, _action, _finalChar);
-    }
-
     void setMaxImageSize(Size _value) { maxImageSize_ = _value; }
     void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
@@ -473,12 +465,26 @@ class Sequencer {
     //
     static std::optional<RGBColor> parseColor(std::string_view const& _value);
 
+    // ParserEvents
+    //
+    void error(std::string_view const& _errorString) override;
+    void print(char32_t _text) override;
+    void execute(char _controlCode) override;
+    void clear() override;
+    void collect(char _char) override;
+    void collectLeader(char _leader) override;
+    void param(char _char) override;
+    void dispatchESC(char _function) override;
+    void dispatchCSI(char _function) override;
+    void startOSC() override;
+    void putOSC(char32_t _char) override;
+    void dispatchOSC() override;
+    void hook(char _function) override;
+    void put(char32_t _char) override;
+    void unhook() override;
+
   private:
-    void handleAction(ActionClass _actionClass, Action _action, char32_t _finalChar);
     void executeControlFunction(char _c0);
-    void dispatchESC(char _finalChar);
-    void dispatchCSI(char _finalChar);
-    void dispatchOSC();
     void handleSequence();
 
     void hookSixel(Sequence const& _ctx);

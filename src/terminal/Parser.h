@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/ControlCode.h>
+#include <terminal/ParserEvents.h>
 
 #include <crispy/overloaded.h>
 #include <crispy/range.h>
@@ -703,8 +704,6 @@ constexpr ParserTable ParserTable::get() // {{{
     return t;
 } // }}}
 
-class ParserExtension;
-
 /**
  * Terminal Parser.
  *
@@ -716,13 +715,11 @@ class ParserExtension;
  */
 class Parser {
   public:
-    using ActionHandler = std::function<void(ActionClass, Action, char32_t)>;
     using ParseError = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
 
-    Parser(ActionHandler _actionHandler, ParseError _parseError = {}) :
-        actionHandler_{std::move(_actionHandler)},
-        parseError_{ std::move(_parseError) }
+    explicit Parser(ParserEvents& _listener) :
+        eventListener_{ _listener }
     {
     }
 
@@ -740,13 +737,13 @@ class Parser {
 
   private:
     void processInput(char32_t _ch);
+    void handle(ActionClass _actionClass, Action _action, char32_t _char);
 
   private:
     State state_ = State::Ground;
     unicode::utf8_decoder_state utf8DecoderState_{};
 
-    ActionHandler actionHandler_;
-    ParseError const parseError_;
+    ParserEvents& eventListener_;
 };
 
 inline void Parser::parseFragment(iterator _begin, iterator _end)
@@ -759,8 +756,7 @@ inline void Parser::parseFragment(iterator _begin, iterator _end)
             overloaded{
                 [&](unicode::Incomplete) {},
                 [&](unicode::Invalid) {
-                    if (parseError_)
-                        parseError_("Invalid UTF-8 byte sequence received.");
+                    eventListener_.error("Invalid UTF-8 byte sequence received.");
                     processInput(ReplacementCharacter);
                 },
                 [&](unicode::Success const& success) {
@@ -783,16 +779,70 @@ inline void Parser::processInput(char32_t _ch)
 
     if (auto const t = table.transitions[s][ch]; t != State::Undefined)
     {
-        // actionHandler_(_actionClass, _action, currentChar());
-        actionHandler_(ActionClass::Leave, table.exitEvents[s], _ch);
-        actionHandler_(ActionClass::Transition, table.events[s][ch], _ch);
+        // handle(_actionClass, _action, currentChar());
+        handle(ActionClass::Leave, table.exitEvents[s], _ch);
+        handle(ActionClass::Transition, table.events[s][ch], _ch);
         state_ = t;
-        actionHandler_(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], _ch);
+        handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], _ch);
     }
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
-        actionHandler_(ActionClass::Event, a, _ch);
-    else if (parseError_)
-        parseError_(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
+        handle(ActionClass::Event, a, _ch);
+    else
+        eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
+}
+
+inline void Parser::handle(ActionClass _actionClass, Action _action, char32_t _char)
+{
+    (void) _actionClass;
+
+    switch (_action)
+    {
+        case Action::Clear:
+            eventListener_.clear();
+            break;
+        case Action::CollectLeader:
+            eventListener_.collectLeader(static_cast<char>(_char));
+            break;
+        case Action::Collect:
+            eventListener_.collect(static_cast<char>(_char));
+            break;
+        case Action::Param:
+            eventListener_.param(static_cast<char>(_char));
+            break;
+        case Action::Execute:
+            eventListener_.execute(static_cast<char>(_char));
+            break;
+        case Action::ESC_Dispatch:
+            eventListener_.dispatchESC(static_cast<char>(_char));
+            break;
+        case Action::CSI_Dispatch:
+            eventListener_.dispatchCSI(static_cast<char>(_char));
+            break;
+        case Action::Print:
+            eventListener_.print(_char);
+            break;
+        case Action::OSC_Start:
+            eventListener_.startOSC();
+            break;
+        case Action::OSC_Put:
+            eventListener_.putOSC(_char);
+            break;
+        case Action::OSC_End:
+            eventListener_.dispatchOSC();
+            break;
+        case Action::Hook:
+            eventListener_.hook(static_cast<char>(_char));
+            break;
+        case Action::Put:
+            eventListener_.put(_char);
+            break;
+        case Action::Unhook:
+            eventListener_.unhook();
+            break;
+        case Action::Ignore:
+        case Action::Undefined:
+            break;
+    }
 }
 
 void dot(std::ostream& _os, ParserTable const& _table);

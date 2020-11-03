@@ -85,10 +85,7 @@ Screen::Screen(Size const& _size,
         RGBAColor{}, // TODO
         imageColorPalette_
     },
-    parser_{
-        ref(sequencer_),
-        [this](string const& _msg) { logger_(ParserErrorEvent{_msg}); }
-    },
+    parser_{ ref(sequencer_) },
     primaryBuffer_{ ScreenBuffer::Type::Main, _size, modes_, _maxHistoryLineCount },
     alternateBuffer_{ ScreenBuffer::Type::Alternate, _size, modes_, nullopt },
     buffer_{ &primaryBuffer_ },
