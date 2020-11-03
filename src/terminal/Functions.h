@@ -441,6 +441,8 @@ constexpr inline auto RCOLORBG      = detail::OSC(111, "RCOLORBG", "Reset VT100 
 constexpr inline auto RCOLORCURSOR  = detail::OSC(112, "RCOLORCURSOR", "Reset text cursor color.");
 constexpr inline auto RCOLORMOUSEFG = detail::OSC(113, "RCOLORMOUSEFG", "Reset mouse foreground color.");
 constexpr inline auto RCOLORMOUSEBG = detail::OSC(114, "RCOLORMOUSEBG", "Reset mouse background color.");
+constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, "RCOLORHIGHLIGHTFG", "Reset highlight foreground color.");
+constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, "RCOLORHIGHLIGHTBG", "Reset highlight background color.");
 constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
 constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
 
@@ -554,6 +556,8 @@ inline auto const& functions()
             RCOLORCURSOR,
             RCOLORMOUSEFG,
             RCOLORMOUSEBG,
+            RCOLORHIGHLIGHTFG,
+            RCOLORHIGHLIGHTBG,
             NOTIFY,
             DUMPSTATE,
         };
