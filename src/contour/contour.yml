@@ -112,17 +112,21 @@ color_schemes:
             background: '#1d1f21'
             # Default foreground text color.
             foreground: '#d5d8d6'
+
         # Mandates the color of the cursor.
         cursor: '#b0b030'
+
         # color to pick for hyperlinks decoration, when hovering
         hyperlink_decoration:
             normal: '#f0f000'
             hover: '#ff0000'
+
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
-        selection:
-            foreground: '#c0c0c0'
-            background: '#a000a0'
+        # selection:
+        #     foreground: '#c0c0c0'
+        #     background: '#a000a0'
+
         # Normal colors
         normal:
             black:   '#1d1f21'

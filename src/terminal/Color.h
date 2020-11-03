@@ -165,8 +165,8 @@ struct ColorProfile {
 
     RGBColor defaultForeground = 0xD0D0D0;
     RGBColor defaultBackground = 0x000000;
-    std::optional<RGBColor> selectionForeground = {0xb0b0b0};
-    std::optional<RGBColor> selectionBackground = {0x303030};
+    std::optional<RGBColor> selectionForeground = std::nullopt;
+    std::optional<RGBColor> selectionBackground = std::nullopt;
 	RGBColor cursor = 0x707020;
 
     RGBColor mouseForeground = 0x800000;
