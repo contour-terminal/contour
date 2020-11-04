@@ -1285,6 +1285,48 @@ std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
     }
 }
 
+std::string to_string(Mode _mode)
+{
+    switch (_mode)
+    {
+        case Mode::KeyboardAction: return "KeyboardAction";
+        case Mode::Insert: return "Insert";
+        case Mode::SendReceive: return "SendReceive";
+        case Mode::AutomaticNewLine: return "AutomaticNewLine";
+        case Mode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
+        case Mode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
+        case Mode::Columns132: return "Columns132";
+        case Mode::SmoothScroll: return "SmoothScroll";
+        case Mode::ReverseVideo: return "ReverseVideo";
+        case Mode::MouseProtocolX10: return "MouseProtocolX10";
+        case Mode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
+        case Mode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
+        case Mode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
+        case Mode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
+        case Mode::SaveCursor: return "SaveCursor";
+        case Mode::ExtendedAltScreen: return "ExtendedAltScreen";
+        case Mode::Origin: return "Origin";
+        case Mode::AutoWrap: return "AutoWrap";
+        case Mode::PrinterExtend: return "PrinterExtend";
+        case Mode::LeftRightMargin: return "LeftRightMargin";
+        case Mode::ShowToolbar: return "ShowToolbar";
+        case Mode::BlinkingCursor: return "BlinkingCursor";
+        case Mode::VisibleCursor: return "VisibleCursor";
+        case Mode::ShowScrollbar: return "ShowScrollbar";
+        case Mode::UseAlternateScreen: return "UseAlternateScreen";
+        case Mode::BracketedPaste: return "BracketedPaste";
+        case Mode::FocusTracking: return "FocusTracking";
+        case Mode::SixelScrolling: return "SixelScrolling";
+        case Mode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
+        case Mode::MouseExtended: return "MouseExtended";
+        case Mode::MouseSGR: return "MouseSGR";
+        case Mode::MouseURXVT: return "MouseURXVT";
+        case Mode::MouseAlternateScroll: return "MouseAlternateScroll";
+        case Mode::BatchedRendering: return "BatchedRendering";
+    }
+    return fmt::format("({})", static_cast<unsigned>(_mode));
+};
+
 // {{{ free function helpers
 CursorShape makeCursorShape(string const& _name)
 {
