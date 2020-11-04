@@ -4,6 +4,7 @@
 
 - `initial_working_directory` config option added
 - `selection.foreground` and `selection.background` config options added to color profile
+- VT mouse protocol fixes in `vim``
 
 #### General Features
 

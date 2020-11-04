@@ -394,6 +394,11 @@ class InputGenerator {
                        int _column,
                        MouseEventType _eventType);
 
+    bool mouseTransport(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
+    bool mouseTransportX10(uint8_t _button, uint8_t _modifier, int _row, int _column);
+    bool mouseTransportSGR(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
+    bool mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
+
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);
     inline bool append(uint8_t _byte);

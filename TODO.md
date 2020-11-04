@@ -1,13 +1,40 @@
+# Terminal apps using the mouse
 
-### random
+| program | transport proto | event proto |
+| :----:  | :----:          | :----:      |
+| vim     | x10             | vt200       |
+| htop    | sgr             | vt200       |
+| nvim    | sgr             | button      |
+| mc      | sgr             | button      |
 
-- [ ] selection rendering improved
+### pre-0.1.0 release
+
+- [ ] BUG: mouse support in VIM (but not in others) broken?
+- [ ] BUG: timer for forced render not working (found out by cursor not blinking)
+- [ ] BUG: SGR underline not visible when inverse is set
+- [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
+      These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
+- [ ] CMAKE: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
+
+- [x] UX: on keyboard input, force scroll to bottom
+- [x] BUG: Change scroll offset from relative to absolute to fix bug displaying wrong viewport when
+           new lines arrive while viewport is scrolled back.
+     - if alt-buffer switch with scrollback, then scrollback is reset.
+- [ ] QA: move `string TerminalWindow::extractLastMarkRange()` into Screen and add tests
+- [ ] QA: think about additional layer between Screen & Terminal that is testable and does not
+      require a PTY. Then put viewport, selection (later vi-mode), mark jumping APIs over to it)
+    - or pack it aside and name it `ScreenViewport` or `ScreenOverlay` that only takes the Screen as cref?
+
+- [ ] UX: mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
+- [ ] FEATURE: normal-mode cursor (that can be used for selection, basic vim movements)
+- [ ] BUILD: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
+
+### Features to be added to 0.2.0 milestone
+
 - [ ] normal-mode cursor (that can be used for selection, basic vim movements)
-- [ ] make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
-
-### Bugs found via vttest
-
-- [ ] SGR underline not visible when inverse is set
+- [ ] UX: mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
+- [ ] RENDERING: respect propotion of colored (emoji) glyph (y-offset / bearing)?
+- [ ] Evaluate Shell Integration proposals from: http://per.bothner.com/blog/2019/shell-integration-proposal/
 
 ### Known Bugs
 
@@ -15,7 +42,6 @@
 - Do not do pressure-performance optimization when in alt-buffer
 - charset SCS/SS not well tested (i.e.: write unit tests)
 - hot reloading of font family does not work
-- mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
 - OpenFileManager action is missing impl, use xdg-open for that
 
 - U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
@@ -33,7 +59,6 @@
 - hyperlink-opened files in new terminal should also preserve same profile
 - double/tripple click action should heppen on ButtonPress, not on ButtonRelease.
 - reset selection upon primary/alternate screen switch
-- respect propotion of colored (emoji) glyph (y-offset / bearing)?
 
 ### QA: Refactoring:
 

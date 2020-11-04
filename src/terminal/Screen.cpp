@@ -1011,7 +1011,10 @@ void Screen::setMode(Mode _mode, bool _enable)
             eventListener_.setBracketedPaste(_enable);
             break;
         case Mode::MouseSGR:
-            eventListener_.setMouseTransport(MouseTransport::SGR);
+            if (_enable)
+                eventListener_.setMouseTransport(MouseTransport::SGR);
+            else
+                eventListener_.setMouseTransport(MouseTransport::Default);
             break;
         case Mode::MouseExtended:
             eventListener_.setMouseTransport(MouseTransport::Extended);
