@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
 
-![alt text](docs/contour-win32-acrylic-background.png "Screenshot")
+![alt text](docs/contour-screenshots-0.1.0-pre2.png "Screenshot")
 
 **IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
 
