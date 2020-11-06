@@ -42,7 +42,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "vcpkg: Install dependencies"
-        uses: lukka/run-vcpkg@v2
+        uses: lukka/run-vcpkg@v5
         id: runvcpkg
         with:
           vcpkgArguments: freetype fontconfig harfbuzz
@@ -99,7 +99,7 @@ jobs:
            SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
            if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
            if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
-           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
            RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
            RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
            RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
@@ -108,7 +108,6 @@ jobs:
            echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
            echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
            echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
-           echo "::set-env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "install dependencies"
@@ -159,7 +158,7 @@ jobs:
            SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
            if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
            if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
-           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
            RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
            RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
            RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
@@ -168,7 +167,6 @@ jobs:
            echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
            echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
            echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
-           echo "::set-env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "install dependencies"
@@ -218,7 +216,7 @@ jobs:
            SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
            if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
            if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
-           RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+           RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
            RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
            RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
            RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
@@ -227,7 +225,6 @@ jobs:
            echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
            echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
            echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
-           echo "::set-env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "Install dependencies"
@@ -291,7 +288,7 @@ jobs:
           else
             TAG_SUFFIX=""
           fi
-          RELEASEBODY=$(awk -v RS='### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+          RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
           RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
@@ -302,7 +299,6 @@ jobs:
           echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
           echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
           echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
-          echo "::set-env name=body::${RELEASEBODY}"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
 
