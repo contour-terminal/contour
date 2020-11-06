@@ -27,9 +27,17 @@ jobs:
         id: set_env_var
         run: |
           $VERSION = Select-String -Path .\Changelog.md -Pattern '^### ([^ ]+)' | % { "$($_.matches.groups[1])" }
-          # $SUFFIX = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^ ]+)\)' | % { "$($_.matches.groups[1])" }
-          if ($Env:REPOSITORY -eq "master") { $IS_PRE = 'true'; } else { $IS_PRE = 'false'; }
-          if ($Env:REPOSITORY -eq "master") { $SUFFIX = ''; }     else { $SUFFIX = 'prerelease'; }
+          $SUFFIX  = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^\)]+)\)' | % { "$($_.matches.groups[1])" }
+          if ($Env:REPOSITORY -eq "master") {
+              $IS_PRE = 'true';
+              $SUFFIX = '';
+              $DELIM = '';
+          } else {
+              $IS_PRE = 'false';
+              $SUFFIX = "prerelease-${Env::GITHUB_RUN_NUMBER}";
+              $DELIM = "-";
+          }
+          Set-Content -Path "version.txt" -Value "${VERSION}${DELIM}${SUFFIX}"
           Write-Output "::set-output name=version::$VERSION"
           Write-Output "::set-output name=RUN_ID::$Env:GITHUB_RUN_NUMBER"
           Write-Output "::set-output name=IS_PRERELEASE::$IS_PRE"
@@ -96,9 +104,17 @@ jobs:
         id: set_env_var
         run: |
            VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
-           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
-           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+           SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+           if [ $REPOSITORY = "master" ]; then
+               IS_PRE='false';
+               SUFFIX="";
+               DELIM="";
+           else
+               IS_PRE='true';
+               SUFFIX="prerelease-${GITHUB_RUN_NUMBER}";
+               DELIM="-";
+           fi
+           echo "${VERSION}${DELIM}${SUFFIX}" >version.txt
            RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
            RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
            RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
@@ -155,9 +171,17 @@ jobs:
         id: set_env_var
         run: |
            VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
-           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
-           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
+           SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
+           if [ $REPOSITORY = "master" ]; then
+               IS_PRE='false';
+               SUFFIX="";
+               DELIM="";
+           else
+               IS_PRE='true';
+               SUFFIX="prerelease-${GITHUB_RUN_NUMBER}";
+               DELIM="-";
+           fi
+           echo "${VERSION}${DELIM}${SUFFIX}" >version.txt
            RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
            RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
            RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
@@ -213,7 +237,7 @@ jobs:
         id: set_env_var
         run: |
            VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-           SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+           SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
            if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
            if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
            RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
@@ -280,7 +304,7 @@ jobs:
         id: set_env_var
         run: |
           VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-          SUFFIX=$(grep '### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+          SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
           if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
           if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
           if [ $REPOSITORY != "master" ]; then

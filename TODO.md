@@ -9,6 +9,8 @@
 
 ### pre-0.1.0 release
 
+- [ ] CI: fix version number in release binaries
+- [ ] `initial_working_directory`: "~/projects" fails chdir, due to slash?
 - [ ] BUG: mouse support in VIM (but not in others) broken?
 - [ ] BUG: timer for forced render not working (found out by cursor not blinking)
 - [ ] BUG: SGR underline not visible when inverse is set

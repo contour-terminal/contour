@@ -1,1 +1,4 @@
 tar-ignore = "build"
+tar-ignore = "release"
+tar-ignore = "sandbox"
+tar-ignore = ".git"
