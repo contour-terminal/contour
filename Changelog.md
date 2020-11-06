@@ -3,8 +3,10 @@
 #### Changes since last prerelease
 
 - `initial_working_directory` config option added
-- `selection.foreground` and `selection.background` config options added to color profile
-- VT mouse protocol fixes in `vim``
+- Selection improved, and `selection.foreground` and `selection.background` config options added to color profile
+- VT mouse protocol fixes in `vim`
+- Debian packages now contain application image and `.desktop` file
+- Implements `OSC 117` and `OSC 119` (resetting selection text/background color to application defaults).
 
 #### General Features
 
