@@ -20,14 +20,17 @@
 #include <crispy/stdfs.h>
 
 #include <chrono>
+#include <utility>
 
 using namespace std;
 using namespace std::chrono;
 using namespace std::placeholders;
 
+using std::move;
+
 namespace terminal {
 
-Terminal::Terminal(Size _winSize,
+Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
@@ -41,7 +44,7 @@ Terminal::Terminal(Size _winSize,
     changes_{ 0 },
     eventListener_{ _eventListener },
     logger_{ move(_logger) },
-    pty_{ _winSize },
+    pty_{ move(_pty) },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
     cursorShape_{ CursorShape::Block }, // TODO: pass via param
     cursorBlinkInterval_{ _cursorBlinkInterval },
@@ -51,7 +54,7 @@ Terminal::Terminal(Size _winSize,
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
     inputGenerator_{},
     screen_{
-        _winSize,
+        pty_->screenSize(),
         *this,
         logger_,
         true, // logs raw output by default?
@@ -78,7 +81,7 @@ void Terminal::screenUpdateThread()
 
     for (;;)
     {
-        if (auto const n = pty_.read(buf.data(), buf.size()); n != -1)
+        if (auto const n = pty_->read(buf.data(), buf.size()); n != -1)
         {
             //log("outputThread.data: {}", crispy::escape(buf, buf + n));
             lock_guard<decltype(screenLock_)> _l{ screenLock_ };
@@ -311,7 +314,7 @@ void Terminal::sendPaste(string_view const& _text)
 void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
-    pty_.write(pendingInput_.data(), pendingInput_.size());
+    pty_->write(pendingInput_.data(), pendingInput_.size());
     logger_(RawInputEvent{crispy::escape(begin(pendingInput_), end(pendingInput_))});
     pendingInput_.clear();
 }
@@ -376,7 +379,7 @@ void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
     if (_pixels)
         screen_.setCellPixelSize(*_pixels / _cells);
 
-    pty_.resizeScreen(_cells, _pixels);
+    pty_->resizeScreen(_cells, _pixels);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
@@ -435,7 +438,7 @@ void Terminal::notify(std::string_view const& _title, std::string_view const& _b
 
 void Terminal::reply(string_view const& reply)
 {
-    pty_.write(reply.data(), reply.size());
+    pty_->write(reply.data(), reply.size());
 }
 
 void Terminal::resetDynamicColor(DynamicColorName _name)

@@ -15,7 +15,7 @@
 
 #include <terminal/Logger.h>
 #include <terminal/InputGenerator.h>
-#include <terminal/PseudoTerminal.h>
+#include <terminal/pty/Pty.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Screen.h>
 
@@ -60,7 +60,7 @@ class Terminal : public ScreenEvents {
         virtual void discardImage(Image const&) {}
     };
 
-    Terminal(Size _winSize,
+    Terminal(std::unique_ptr<Pty> _ptr,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
@@ -76,9 +76,9 @@ class Terminal : public ScreenEvents {
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
 
     /// Retrieves reference to the underlying PTY device.
-    PseudoTerminal& device() noexcept { return pty_; }
+    Pty& device() noexcept { return *pty_; }
 
-    Size screenSize() const noexcept { return pty_.screenSize(); }
+    Size screenSize() const noexcept { return pty_->screenSize(); }
     void resizeScreen(Size _cells, std::optional<Size> _pixels);
 
     // {{{ input proxy
@@ -253,7 +253,7 @@ class Terminal : public ScreenEvents {
     Events& eventListener_;
 
     Logger logger_;
-    PseudoTerminal pty_;
+    std::unique_ptr<Pty> pty_;
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;

@@ -17,7 +17,7 @@ using namespace terminal;
 using namespace std;
 
 TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
-                                 Size _winSize,
+                                 std::unique_ptr<Pty> _pty,
                                  Terminal::Events& _eventListener,
                                  optional<size_t> _maxHistoryLineCount,
                                  chrono::milliseconds _cursorBlinkInterval,
@@ -27,7 +27,7 @@ TerminalProcess::TerminalProcess(Process::ExecInfo const& _shell,
                                  CursorShape _cursorShape,
                                  Logger _logger) :
     Terminal(
-        _winSize,
+        std::move(_pty),
         _eventListener,
         _maxHistoryLineCount,
         _cursorBlinkInterval,

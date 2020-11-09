@@ -22,7 +22,9 @@ set(terminal_HEADERS
     InputGenerator.h
     Parser.h
     Process.h
-    PseudoTerminal.h
+    pty/Pty.h
+    pty/UnixPty.h
+    pty/ConPty.h
     Screen.h
     ScreenBuffer.h
     Selector.h
@@ -42,7 +44,6 @@ set(terminal_SOURCES
     InputGenerator.cpp
     Parser.cpp
     Process.cpp
-    PseudoTerminal.cpp
     Screen.cpp
     ScreenBuffer.cpp
     Sequencer.cpp
@@ -56,6 +57,10 @@ set(terminal_SOURCES
 set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only Threads::Threads)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
+    list(APPEND terminal_SOURCES pty/UnixPty.cpp)
+else()
+    list(APPEND terminal_SOURCES pty/ConPty.cpp)
+    #TODO: list(APPEND terminal_SOURCES pty/WinPty.cpp)
 endif()
 if(LIBTERMINAL_EXECUTION_PAR)
     add_definitions(-DLIBTERMINAL_EXECUTION_PAR=1)

@@ -56,7 +56,6 @@ class TerminalView : private Terminal::Events {
     };
 
     TerminalView(std::chrono::steady_clock::time_point _now,
-                 terminal::Size const& _winSize,
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
@@ -68,6 +67,7 @@ class TerminalView : private Terminal::Events {
                  terminal::Opacity _backgroundOpacity,
                  Decorator _hyperlinkNormal,
                  Decorator _hyperlinkHover,
+                 std::unique_ptr<Pty> _pty,
                  Process::ExecInfo const& _shell,
                  QMatrix4x4 const& _projectionMatrix,
                  ShaderConfig const& _backgroundShaderConfig,

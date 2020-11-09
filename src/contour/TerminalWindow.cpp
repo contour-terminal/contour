@@ -15,6 +15,14 @@
 #include <contour/Actions.h>
 #include <terminal/Metrics.h>
 
+#include <terminal/pty/Pty.h>
+
+#if defined(_MSC_VER)
+#include <terminal/pty/ConPty.h>
+#else
+#include <terminal/pty/UnixPty.h>
+#endif
+
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
@@ -474,6 +482,7 @@ void TerminalWindow::initializeGL()
                         logicalDpiX(), logicalDpiY());
     cout << fmt::format("OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
     cout << fmt::format("OpenGL renderer : {}\n", glGetString(GL_RENDERER));
+    cout << fmt::format("Qt platform     : {}\n", QGuiApplication::platformName().toStdString());
 
     GLint versionMajor{};
     GLint versionMinor{};
@@ -510,7 +519,6 @@ void TerminalWindow::initializeGL()
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
-        profile().terminalSize,
         *this,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
@@ -522,6 +530,11 @@ void TerminalWindow::initializeGL()
         profile().backgroundOpacity,
         profile().hyperlinkDecoration.normal,
         profile().hyperlinkDecoration.hover,
+#if defined(_MSC_VER)
+        make_unique<terminal::ConPty>(profile().terminalSize),
+#else
+        make_unique<terminal::UnixPty>(profile().terminalSize),
+#endif
         profile().shell,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
@@ -1100,8 +1113,9 @@ bool TerminalWindow::executeAction(Action const& _action)
             return Result::Silently;
         },
         [this](actions::Quit) -> Result {
-            // XXX: later warn here when more then one terminal view is open
+            //TODO: later warn here when more then one terminal view is open
             terminalView_->terminal().device().close();
+            exit(EXIT_SUCCESS);
             return Result::Silently;
         },
         [this](actions::ResetFontSize) -> Result {

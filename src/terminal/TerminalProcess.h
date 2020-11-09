@@ -13,7 +13,10 @@
  */
 #include <terminal/Terminal.h>
 #include <terminal/Process.h>
+#include <terminal/pty/Pty.h>
+
 #include <functional>
+#include <memory>
 #include <thread>
 
 namespace terminal {
@@ -23,7 +26,7 @@ class TerminalProcess : public Terminal, public Process {
   public:
     TerminalProcess(
         Process::ExecInfo const& _shell,
-        Size _winSize,
+        std::unique_ptr<Pty> _pty,
         Terminal::Events& _eventListener,
         std::optional<size_t> _maxHistoryLineCount,
         std::chrono::milliseconds _cursorBlinkInterval,

@@ -28,6 +28,7 @@ using std::chrono::steady_clock;
 using std::nullopt;
 using std::optional;
 using std::string;
+using std::unique_ptr;
 
 namespace terminal::view {
 
@@ -42,7 +43,6 @@ inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _op
 }
 
 TerminalView::TerminalView(steady_clock::time_point _now,
-                           Size const& _winSize,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
@@ -54,6 +54,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            terminal::Opacity _backgroundOpacity,
                            Decorator _hyperlinkNormal,
                            Decorator _hyperlinkHover,
+                           unique_ptr<Pty> _pty,
                            Process::ExecInfo const& _shell,
                            QMatrix4x4 const& _projectionMatrix,
                            ShaderConfig const& _backgroundShaderConfig,
@@ -63,12 +64,12 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     logger_{ move(_logger) },
     fonts_{ _fonts },
     size_{
-        static_cast<int>(_winSize.width * _fonts.regular.first.get().maxAdvance()),
-        static_cast<int>(_winSize.height * _fonts.regular.first.get().lineHeight())
+        static_cast<int>(_pty->screenSize().width * _fonts.regular.first.get().maxAdvance()),
+        static_cast<int>(_pty->screenSize().height * _fonts.regular.first.get().lineHeight())
     },
     renderer_{
         logger_,
-        _winSize,
+        _pty->screenSize(),
         _fonts,
         _colorProfile,
         _backgroundOpacity,
@@ -80,7 +81,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     },
     process_{
         _shell,
-        _winSize,
+        move(_pty),
         *this,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
