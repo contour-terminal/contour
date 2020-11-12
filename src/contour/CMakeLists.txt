@@ -131,6 +131,7 @@ if(WIN32)
 
     include(DeployQt)
     windeployqt(contour)
+    install(TARGETS contour DESTINATION bin)
     install(
         DIRECTORY "$<TARGET_FILE_DIR:contour>/"
         DESTINATION "bin"
