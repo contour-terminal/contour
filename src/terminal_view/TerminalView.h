@@ -17,9 +17,10 @@
 #include <terminal_view/FontConfig.h>
 
 #include <terminal/Color.h>
-#include <terminal/TerminalProcess.h>
 #include <terminal/Logger.h>
+#include <terminal/Process.h>
 #include <terminal/Size.h>
+#include <terminal/Terminal.h>
 
 #include <crispy/text/Font.h>
 
@@ -67,7 +68,7 @@ class TerminalView : private Terminal::Events {
                  terminal::Opacity _backgroundOpacity,
                  Decorator _hyperlinkNormal,
                  Decorator _hyperlinkHover,
-                 std::unique_ptr<Pty> _pty,
+                 std::unique_ptr<Pty> _client,
                  Process::ExecInfo const& _shell,
                  QMatrix4x4 const& _projectionMatrix,
                  ShaderConfig const& _backgroundShaderConfig,
@@ -112,8 +113,8 @@ class TerminalView : private Terminal::Events {
 
     Process const& process() const noexcept { return process_; }
     Process& process() noexcept { return process_; }
-    Terminal const& terminal() const noexcept { return process_.terminal(); }
-    Terminal& terminal() noexcept { return process_.terminal(); }
+    Terminal const& terminal() const noexcept { return terminal_; }
+    Terminal& terminal() noexcept { return terminal_; }
 
     Renderer const& renderer() const { return renderer_; }
 
@@ -152,8 +153,11 @@ class TerminalView : private Terminal::Events {
     WindowMargin windowMargin_;
 
     Renderer renderer_;
-    TerminalProcess process_;
+
+    Terminal terminal_;
+    Process process_;
     std::thread processExitWatcher_;
+
     ColorProfile colorProfile_;
     ColorProfile defaultColorProfile_;
 };

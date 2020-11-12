@@ -79,26 +79,26 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _textShaderConfig,
         _projectionMatrix
     },
-    process_{
-        _shell,
-        move(_pty),
+    terminal_(
+        std::move(_pty),
         *this,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
         _now,
-        _wordDelimiters,
-        _cursorDisplay,
-        _cursorShape,
-        [this](terminal::LogEvent const& _event) { logger_(_event); }
-    },
+        logger_,
+        _wordDelimiters
+    ),
+    process_{ _shell, terminal_.device() },
     processExitWatcher_{ [this]() {
         (void) process_.wait();
-        process_.terminal().device().close();
+        terminal_.device().close();
     } },
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}
 {
-    terminal().screen().setCellPixelSize(renderer_.cellSize());
+    terminal_.setCursorDisplay(_cursorDisplay);
+    terminal_.setCursorShape(_cursorShape);
+    terminal_.screen().setCellPixelSize(renderer_.cellSize());
 }
 
 optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
@@ -208,11 +208,10 @@ void TerminalView::resize(int _width, int _height)
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
     //renderer_.clearCache();
 
-    if (newScreenSize != process_.screenSize())
+    if (newScreenSize != terminal_.screenSize())
     {
-        process_.resizeScreen(newScreenSize, newScreenSize * cellSize());
-
-        terminal().clearSelection();
+        terminal_.resizeScreen(newScreenSize, newScreenSize * cellSize());
+        terminal_.clearSelection();
     }
 
 #if !defined(NDEBUG)
@@ -233,22 +232,22 @@ void TerminalView::setCursorShape(CursorShape _shape)
 
 bool TerminalView::setTerminalSize(Size _cells)
 {
-    if (process_.terminal().screenSize() == _cells)
+    if (terminal_.screenSize() == _cells)
         return false;
 
 #if !defined(NDEBUG)
-    std::cout << fmt::format("Setting terminal size from {} to {}\n", process_.terminal().screenSize(), _cells);
+    std::cout << fmt::format("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
 #endif
 
     renderer_.setScreenSize(_cells);
-    process_.terminal().resizeScreen(_cells, _cells * cellSize());
+    terminal_.resizeScreen(_cells, _cells * cellSize());
 
     return true;
 }
 
 uint64_t TerminalView::render(steady_clock::time_point const& _now, bool _pressure)
 {
-    return renderer_.render(process_.terminal(), _now, terminal().currentMousePosition(), _pressure);
+    return renderer_.render(terminal_, _now, terminal().currentMousePosition(), _pressure);
 }
 
 Process::ExitStatus TerminalView::waitForProcessExit()

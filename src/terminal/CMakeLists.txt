@@ -31,7 +31,6 @@ set(terminal_HEADERS
     Sequencer.h
     SixelParser.h
     Terminal.h
-    TerminalProcess.h
     VTType.h
     Size.h
 )
@@ -50,7 +49,6 @@ set(terminal_SOURCES
     Selector.cpp
     SixelParser.cpp
     Terminal.cpp
-    TerminalProcess.cpp
     VTType.cpp
 )
 
