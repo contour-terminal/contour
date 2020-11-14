@@ -357,7 +357,9 @@ class Screen {
     /// Tests whether given absolute coordinate is covered by a current selection.
     bool isSelectedAbsolute(Coordinate _coord) const noexcept
     {
-        return selector_ && selector_->contains(_coord);
+        return selector_
+            && selector_->state() != Selector::State::Waiting
+            && selector_->contains(_coord);
     }
 
     /// Sets or resets to a new selection.

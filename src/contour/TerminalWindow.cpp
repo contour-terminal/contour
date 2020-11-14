@@ -820,12 +820,14 @@ void TerminalWindow::mousePressEvent(QMouseEvent* _event)
     }
 }
 
-void TerminalWindow::mouseReleaseEvent(QMouseEvent* _mouseRelease)
+void TerminalWindow::mouseReleaseEvent(QMouseEvent* _event)
 {
     try
     {
-        auto const mouseButton = makeMouseButton(_mouseRelease->button());
-        if (executeInput(terminal::MouseReleaseEvent{mouseButton}))
+        auto const mouseButton = makeMouseButton(_event->button());
+        auto const handled = executeInput(terminal::MouseReleaseEvent{mouseButton});
+
+        if (handled)
         {
             setScreenDirty();
             update();

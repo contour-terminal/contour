@@ -22,6 +22,8 @@
 #include <chrono>
 #include <utility>
 
+#include <iostream>
+
 using namespace std;
 using namespace std::chrono;
 using namespace std::placeholders;
@@ -198,7 +200,7 @@ void Terminal::clearSelection()
 
 bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
 {
-    auto const newPosition = terminal::Coordinate{_mouseMove.row, _mouseMove.column};
+    auto const newPosition = _mouseMove.coordinates();
 
     currentMousePosition_ = newPosition;
 
@@ -247,12 +249,21 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     if (_mouseRelease.button == MouseButton::Left)
     {
         leftMouseButtonPressed_ = false;
-        if (screen_.selectionAvailable() && screen_.selector()->state() == Selector::State::InProgress)
+        if (screen_.selectionAvailable())
         {
-            screen_.selector()->stop();
-
-            if (onSelectionComplete_)
-                onSelectionComplete_();
+            switch (screen_.selector()->state())
+            {
+                case Selector::State::Waiting:
+                    screen_.clearSelection();
+                    break;
+                case Selector::State::InProgress:
+                    screen_.selector()->stop();
+                    if (onSelectionComplete_)
+                        onSelectionComplete_();
+                    break;
+                case Selector::State::Complete:
+                    break;
+            }
         }
     }
 
