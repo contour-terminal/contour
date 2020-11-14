@@ -523,6 +523,56 @@ namespace fmt { // {{{
             return format_to(_ctx.out(), "<{}>", unsigned(_value));
         }
     };
+
+    template <>
+    struct formatter<terminal::MousePressEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MousePressEvent ev, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(),
+                "(press={}, mod={}, at={}:{})",
+                ev.button,
+                ev.modifier,
+                ev.row,
+                ev.column
+            );
+        }
+    };
+
+    template <>
+    struct formatter<terminal::MouseMoveEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MouseMoveEvent ev, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(),
+                "(mod={}, at={}:{})",
+                ev.modifier,
+                ev.row,
+                ev.column
+            );
+        }
+    };
+
+    template <>
+    struct formatter<terminal::MouseReleaseEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MouseReleaseEvent ev, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(),
+                "(release={}, mod={}, at={}:{})",
+                ev.button,
+                ev.modifier,
+                ev.row,
+                ev.column
+            );
+        }
+    };
 } // }}}
 
 namespace std { // {{{
