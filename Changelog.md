@@ -1,6 +1,14 @@
 ### 0.1.0 (unreleased)
 
-#### Changes since last prerelease
+#### prerelease 4
+
+- Fixes Single-click into the window accidentally starting a selection.
+
+#### prerelease 3
+
+- Fixes missing .exe files in windows installer
+
+#### prerelease 2
 
 - `initial_working_directory` config option added
 - Selection improved, and `selection.foreground` and `selection.background` config options added to color profile
