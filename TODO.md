@@ -1,9 +1,16 @@
 # Terminal apps using the mouse
 
+#### Terminal API cleanup
+
+- [ ] remove screen proxy API functions
+- [ ] move viewport API over from Screen into Terminal
+- [ ] move selection API over from Screen into Terminal
+
 ### pre-0.1.0 release
 
 - [ ] BUG: timer for forced render not working (found out by cursor not blinking)
 - [ ] BUG: SGR underline not visible when inverse is set
+- [ ] Revive Synchronized Output
 - [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
       These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
 - [ ] CMAKE: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)

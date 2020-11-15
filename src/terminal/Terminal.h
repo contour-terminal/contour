@@ -60,7 +60,7 @@ class Terminal : public ScreenEvents {
         virtual void discardImage(Image const&) {}
     };
 
-    Terminal(std::unique_ptr<Pty> _ptr,
+    Terminal(std::unique_ptr<Pty> _pty,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
