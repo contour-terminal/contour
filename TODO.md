@@ -2,7 +2,6 @@
 
 ### pre-0.1.0 release
 
-- [ ] `initial_working_directory`: "~/projects" fails chdir, due to slash?
 - [ ] BUG: timer for forced render not working (found out by cursor not blinking)
 - [ ] BUG: SGR underline not visible when inverse is set
 - [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;

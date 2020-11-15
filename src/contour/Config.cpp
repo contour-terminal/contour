@@ -701,10 +701,14 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         string const& value = wd.Scalar();
         if (value.empty())
             profile.shell.workingDirectory = terminal::Process::homeDirectory();
-        else if (value[0] == '~')
-            profile.shell.workingDirectory = terminal::Process::homeDirectory() / FileSystem::path(value.substr(1));
-        else
+        else if (value[0] != '~')
             profile.shell.workingDirectory = FileSystem::path(value);
+        else
+        {
+            bool const delim = value.size() >= 2 && (value[1] == '/' || value[1] == '\\');
+            auto const subPath = FileSystem::path(value.substr(delim ? 2 : 1));
+            profile.shell.workingDirectory = terminal::Process::homeDirectory() / subPath;
+        }
     }
     else
         profile.shell.workingDirectory = terminal::Process::homeDirectory();
