@@ -81,9 +81,17 @@ class TerminalView : private Terminal::Events {
     TerminalView& operator=(TerminalView&&) = delete;
     ~TerminalView() = default;
 
-    int cellHeight() const noexcept { return renderer_.cellHeight(); }
-    int cellWidth() const noexcept { return renderer_.cellWidth(); }
+    int cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
+    int cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
     Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
+
+    Size screenSize() const noexcept
+    {
+        return Size{
+            size_.width / fonts_.regular.first.get().maxAdvance(),
+            size_.height / fonts_.regular.first.get().lineHeight()
+        };
+    }
 
     /// Resizes the terminal view to the given number of pixels.
     ///

@@ -3,6 +3,7 @@
 #### prerelease 4
 
 - Fixes Single-click into the window accidentally starting a selection.
+- Fixes font family change in live config reload.
 
 #### prerelease 3
 

@@ -110,7 +110,19 @@ void Renderer::clearCache()
 
 void Renderer::setFont(FontConfig const& _fonts)
 {
+    fonts_ = _fonts;
+
+    screenCoordinates_.cellSize = Size{
+        fonts_.regular.first.get().maxAdvance(),
+        fonts_.regular.first.get().lineHeight()
+    };
+    screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
+
     textRenderer_.setFont(_fonts);
+    textRenderer_.setCellSize(cellSize());
+    imageRenderer_.setCellSize(cellSize());
+
+    clearCache();
 }
 
 bool Renderer::setFontSize(int _fontSize)

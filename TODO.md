@@ -43,7 +43,6 @@
 - `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
 - Do not do pressure-performance optimization when in alt-buffer
 - charset SCS/SS not well tested (i.e.: write unit tests)
-- hot reloading of font family does not work
 - OpenFileManager action is missing impl, use xdg-open for that
 
 - U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
