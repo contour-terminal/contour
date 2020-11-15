@@ -73,8 +73,8 @@ void BackgroundRenderer::renderCellRange()
     renderTarget_.renderRectangle(
         static_cast<unsigned>(pos.x()),
         static_cast<unsigned>(pos.y()),
-        screenCoordinates_.cellWidth * columnCount_,
-        screenCoordinates_.cellHeight,
+        screenCoordinates_.cellSize.width * columnCount_,
+        screenCoordinates_.cellSize.height,
         color
     );
 

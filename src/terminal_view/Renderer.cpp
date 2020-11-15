@@ -125,8 +125,10 @@ bool Renderer::setFontSize(int _fontSize)
             fallback.get().setFontSize(_fontSize);
     }
 
-    screenCoordinates_.cellWidth = cellWidth();
-    screenCoordinates_.cellHeight = cellHeight();
+    screenCoordinates_.cellSize = Size{
+        fonts_.regular.first.get().maxAdvance(),
+        fonts_.regular.first.get().lineHeight()
+    };
     screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
 
     textRenderer_.setCellSize(cellSize());

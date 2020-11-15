@@ -88,7 +88,7 @@ void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
 
 void DecorationRenderer::rebuild()
 {
-    auto const width = screenCoordinates_.cellWidth;
+    auto const width = screenCoordinates_.cellSize.width;
     auto const baseline = screenCoordinates_.textBaseline;
 
     { // {{{ underline
@@ -194,7 +194,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ framed
-        auto const cellHeight = screenCoordinates_.cellHeight;
+        auto const cellHeight = screenCoordinates_.cellSize.height;
         auto const thickness = max(lineThickness_ * width / 20, 1);
         auto image = atlas::Buffer(width * cellHeight, 0u);
         auto const gap = thickness;
@@ -224,7 +224,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ overline
-        auto const cellHeight = screenCoordinates_.cellHeight;
+        auto const cellHeight = screenCoordinates_.cellSize.height;
         auto const thickness = max(lineThickness_ * baseline / 3, 1);
         auto image = atlas::Buffer(width * cellHeight, 0);
 
@@ -241,7 +241,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ crossed-out
-        auto const middleCell = screenCoordinates_.cellHeight / 2;
+        auto const middleCell = screenCoordinates_.cellSize.height / 2;
         auto const thickness = max(lineThickness_ * baseline / 3, 1);
         auto image = atlas::Buffer(width * middleCell, 0u);
 
@@ -332,7 +332,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
         auto const y = pos.y();
 #else
-        auto const y = pos.y() + screenCoordinates_.cellHeight;
+        auto const y = pos.y() + screenCoordinates_.cellSize.height;
 #endif
         auto const z = 0;
         auto const color = QVector4D(
@@ -342,7 +342,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
             1.0f
         );
         atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
-        auto const advanceX = static_cast<int>(screenCoordinates_.cellWidth);
+        auto const advanceX = static_cast<int>(screenCoordinates_.cellSize.width);
         for (int i = 0; i < static_cast<int>(_columnCount); ++i)
         {
 #if 0 // !defined(NDEBUG)

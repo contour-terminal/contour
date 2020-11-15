@@ -66,12 +66,12 @@ void CursorRenderer::rebuild()
 {
     clearCache();
 
-    auto const width = screenCoordinates_.cellWidth * columnWidth_;
+    auto const width = screenCoordinates_.cellSize.width * columnWidth_;
     auto const baseline = screenCoordinates_.textBaseline;
     auto constexpr LineThickness = 1;
 
     { // {{{ CursorShape::Block
-        auto const height = screenCoordinates_.cellHeight;
+        auto const height = screenCoordinates_.cellSize.height;
         auto image = crispy::atlas::Buffer(width * height, 0xFFu);
 
         textureAtlas_.insert(
@@ -102,7 +102,7 @@ void CursorRenderer::rebuild()
     } // }}}
     { // {{{ CursorShape::Bar
         auto const thickness = max(LineThickness * baseline / 3, 1);
-        auto const height = screenCoordinates_.cellHeight;
+        auto const height = screenCoordinates_.cellSize.height;
         //auto const base_y = max((height - thickness) / 2, 0);
         auto image = crispy::atlas::Buffer(width * height, 0);
 
@@ -119,7 +119,7 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Rectangle
-        auto const height = screenCoordinates_.cellHeight;
+        auto const height = screenCoordinates_.cellSize.height;
         auto image = crispy::atlas::Buffer(width * height, 0xFFu);
         auto const thickness = max(width / 12, 1);
 
