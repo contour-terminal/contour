@@ -1,23 +1,13 @@
 # Terminal apps using the mouse
 
-| program | transport proto | event proto |
-| :----:  | :----:          | :----:      |
-| vim     | x10             | vt200       |
-| htop    | sgr             | vt200       |
-| nvim    | sgr             | button      |
-| mc      | sgr             | button      |
-
 ### pre-0.1.0 release
 
-- [ ] CI: fix version number in release binaries
 - [ ] `initial_working_directory`: "~/projects" fails chdir, due to slash?
-- [ ] BUG: mouse support in VIM (but not in others) broken?
 - [ ] BUG: timer for forced render not working (found out by cursor not blinking)
 - [ ] BUG: SGR underline not visible when inverse is set
 - [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
       These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
 - [ ] CMAKE: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
-
 - [x] UX: on keyboard input, force scroll to bottom
 - [x] BUG: Change scroll offset from relative to absolute to fix bug displaying wrong viewport when
            new lines arrive while viewport is scrolled back.
@@ -29,7 +19,6 @@
 
 - [ ] UX: mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
 - [ ] FEATURE: normal-mode cursor (that can be used for selection, basic vim movements)
-- [ ] BUILD: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
 
 ### Features to be added to 0.2.0 milestone
 
