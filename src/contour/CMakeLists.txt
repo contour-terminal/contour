@@ -28,6 +28,7 @@ set(contour_SRCS
     FileChangeWatcher.cpp FileChangeWatcher.h
     LoggingSink.cpp LoggingSink.h
     TerminalWindow.cpp TerminalWindow.h
+    TerminalWidget.cpp TerminalWidget.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )

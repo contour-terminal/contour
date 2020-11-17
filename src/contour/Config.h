@@ -36,6 +36,13 @@
 
 namespace contour::config {
 
+enum class ScrollBarPosition
+{
+    Hidden,
+    Left,
+    Right
+};
+
 struct FontSpec
 {
     std::string pattern;
@@ -143,6 +150,9 @@ struct Config {
     bool sixelCursorConformance = true;
     terminal::Size maxImageSize = {2000, 2000};
     int maxImageColorRegisters = 256;
+
+    ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
+    bool hideScrollbarInAltScreen = true;
 };
 
 std::optional<std::string> readConfigFile(std::string const& _filename);

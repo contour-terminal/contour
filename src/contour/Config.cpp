@@ -818,6 +818,25 @@ void loadConfigFromFile(Config& _config,
         softLoadValue(images, "max_height", _config.maxImageSize.height);
     }
 
+    if (auto scrollbar = doc["scrollbar"]; scrollbar)
+    {
+        if (auto value = scrollbar["position"]; value)
+        {
+            auto const literal = toLower(value.as<string>());
+            if (literal == "left")
+                _config.scrollbarPosition = ScrollBarPosition::Left;
+            else if (literal == "right")
+                _config.scrollbarPosition = ScrollBarPosition::Right;
+            else if (literal == "hidden")
+                _config.scrollbarPosition = ScrollBarPosition::Hidden;
+            else
+                throw std::runtime_error("Invalid value in scrollbar_position. Should be one of: left, right, hidden.");
+        }
+
+        if (auto value = scrollbar["hide_in_alt_screen"]; value)
+            _config.hideScrollbarInAltScreen = value.as<bool>();
+    }
+
     if (auto profiles = doc["color_schemes"]; profiles)
     {
         for (auto i = profiles.begin(); i != profiles.end(); ++i)

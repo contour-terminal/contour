@@ -269,6 +269,14 @@ bool Screen::scrollToBottom()
     else
         return false;
 }
+
+void Screen::scrollToAbsolute(int _absoluteScrollOffset)
+{
+    if (_absoluteScrollOffset >= 0 && _absoluteScrollOffset < historyLineCount())
+        scrollOffset_.emplace(_absoluteScrollOffset);
+    else if (_absoluteScrollOffset >= historyLineCount())
+        scrollOffset_.reset();
+}
 // }}}
 
 // {{{ others
