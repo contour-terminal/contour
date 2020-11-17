@@ -5,6 +5,13 @@ word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 
 default_profile: main
 
+# visual scrollbar support
+scrollbar:
+    # scroll bar position: Left, Right, Hidden (ignore-case)
+    position: right
+    # whether or not to hide the scrollbar when in alt-screen.
+    hide_in_alt_screen: true
+
 # Inline image related default configuration and limits
 # -----------------------------------------------------
 #

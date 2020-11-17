@@ -254,6 +254,7 @@ class Screen {
     bool scrollDown(int _numLines);
     bool scrollToTop();
     bool scrollToBottom();
+    void scrollToAbsolute(int _absoluteScrollOffset);
     bool scrollMarkUp();
     bool scrollMarkDown();
     //}}}

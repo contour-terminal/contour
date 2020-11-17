@@ -137,6 +137,7 @@ namespace simpl // {{{ some command generator helpers
             case 30: return Mode::ShowScrollbar;
             case 47: return Mode::UseAlternateScreen;
             case 69: return Mode::LeftRightMargin;
+            case 80: return Mode::SixelScrolling;
             case 1000: return Mode::MouseProtocolNormalTracking;
             case 1001: return Mode::MouseProtocolHighlightTracking;
             case 1002: return Mode::MouseProtocolButtonTracking;

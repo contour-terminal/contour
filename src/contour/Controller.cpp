@@ -15,6 +15,7 @@
 #include <contour/TerminalWindow.h>
 
 #include <QtCore/QProcess>
+#include <QtGui/QGuiApplication>
 
 using namespace std;
 
@@ -55,8 +56,8 @@ void Controller::newWindow()
     terminalWindows_.push_back(mainWindow);
     // TODO: Remove window from list when destroyed.
 
-    QObject::connect(mainWindow, &TerminalWindow::showNotification,
-                     this, &Controller::showNotification);
+    // QObject::connect(mainWindow, &TerminalWindow::showNotification,
+    //                  this, &Controller::showNotification);
 
 }
 
