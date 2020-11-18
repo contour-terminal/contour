@@ -7,10 +7,10 @@
 
 ![alt text](docs/contour-screenshots-0.1.0-pre2.png "Screenshot")
 
-**IMPORANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
+**IMPORTANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
 
-`contour` is a modern terminal emulator, for everyday use. It is fully seperating emulation from
-graphical representation for clear seperation of concerns but also for special features to come
+`contour` is a modern terminal emulator, for everyday use. It is fully separating emulation from
+graphical representation for clear separation of concerns but also for special features to come
 before version 1.0 is released (headless terminal server with GUI & TUI frontends).
 
 ## Features
