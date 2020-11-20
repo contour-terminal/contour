@@ -116,7 +116,7 @@ void TerminalWindow::onTabChanged(int _index)
 void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
 {
     int index = indexOf(_terminalWidget);
-    std::cout << "TerminalWindow.onTerminalClosed(" << index << "): " << _terminalWidget->view()->terminal().windowTitle() << '\n';
+    std::cout << "TerminalWindow.onTerminalClosed(" << index << "): " << _terminalWidget->view()->terminal().screen().windowTitle() << '\n';
     if (index != -1)
         removeTab(index);
 

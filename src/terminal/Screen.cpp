@@ -1042,6 +1042,9 @@ void Screen::setMode(Mode _mode, bool _enable)
         case Mode::UsePrivateColorRegisters:
             sequencer_.setUsePrivateColorRegisters(_enable);
             break;
+        case Mode::VisibleCursor:
+            eventListener_.setCursorVisibility(_enable);
+            break;
         default:
             break;
     }

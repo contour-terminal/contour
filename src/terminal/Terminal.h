@@ -99,23 +99,6 @@ class Terminal : public ScreenEvents {
     // }}}
 
     // {{{ screen proxy
-    void setLogTraceOutput(bool _enabled) { screen_.setLogTrace(_enabled); }
-    void setLogRawOutput(bool _enabled) { screen_.setLogRaw(_enabled); }
-    void setTabWidth(int _tabWidth) { screen_.setTabWidth(_tabWidth); }
-    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount) { screen_.setMaxHistoryLineCount(_maxHistoryLineCount); }
-    int historyLineCount() const noexcept { return screen_.historyLineCount(); }
-    std::string const& windowTitle() const noexcept { return screen_.windowTitle(); }
-    ScreenBuffer::Type screenBufferType() const noexcept { return screen_.bufferType(); }
-
-    /// @returns a screenshot, that is, a VT-sequence reproducing the current screen buffer.
-    std::string screenshot() const;
-
-    /// @returns the current Cursor state.
-    Cursor cursor() const;
-
-    /// @returns a reference to the cell at the given coordinate.
-    Cell const* at(Coordinate const& _coord) const;
-
     /// @returns absolute coordinate of @p _pos with scroll offset and applied.
     Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
     {
@@ -179,14 +162,15 @@ class Terminal : public ScreenEvents {
     Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
 
     // {{{ cursor management
+    CursorDisplay cursorDisplay() const noexcept { return cursorDisplay_; }
     void setCursorDisplay(CursorDisplay _value);
-    void setCursorShape(CursorShape _value);
-    CursorShape cursorShape() const noexcept { return cursorShape_; }
 
-    bool shouldDisplayCursor() const noexcept
-    {
-        return cursor().visible && (cursorDisplay_ != CursorDisplay::Blink || cursorBlinkState_);
-    }
+    CursorShape cursorShape() const noexcept { return cursorShape_; }
+    void setCursorShape(CursorShape _value);
+
+    bool cursorVisibility() const noexcept { return cursorVisibility_; }
+
+    bool cursorBlinkActive() const noexcept { return cursorBlinkState_; }
 
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept
     {
@@ -237,6 +221,7 @@ class Terminal : public ScreenEvents {
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
     void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;
+    void setCursorVisibility(bool _visible) override;
     void setDynamicColor(DynamicColorName _name, RGBColor const& _value) override;
     void setGenerateFocusEvents(bool _enabled) override;
     void setMouseProtocol(MouseProtocol _protocol, bool _enabled) override;
@@ -257,6 +242,7 @@ class Terminal : public ScreenEvents {
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
+    bool cursorVisibility_ = true;
     std::chrono::milliseconds cursorBlinkInterval_;
 	mutable unsigned cursorBlinkState_;
 	mutable std::chrono::steady_clock::time_point lastCursorBlink_;

@@ -40,6 +40,7 @@ class ScreenEvents {
     virtual void setApplicationkeypadMode(bool /*_enabled*/) {}
     virtual void setBracketedPaste(bool /*_enabled*/) {}
     virtual void setCursorStyle(CursorDisplay, CursorShape) {}
+    virtual void setCursorVisibility(bool /*_visible*/) {}
     virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
     virtual void setGenerateFocusEvents(bool /*_enabled*/) {}
     virtual void setMouseProtocol(MouseProtocol, bool) {}
