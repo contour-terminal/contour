@@ -22,12 +22,12 @@
 #include <terminal/ScreenBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Sequencer.h>
-#include <terminal/Selector.h>
 #include <terminal/VTType.h>
 #include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
+#include <crispy/utils.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/width.h>
@@ -324,35 +324,6 @@ class Screen {
 
     ScreenBuffer::Type bufferType() const noexcept { return buffer_->type_; }
 
-    /// Tests whether some area has been selected.
-    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
-
-    /// Returns list of ranges that have been selected.
-    std::vector<Selector::Range> selection() const;
-
-    /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelectedAbsolute(Coordinate _coord) const noexcept
-    {
-        return selector_
-            && selector_->state() != Selector::State::Waiting
-            && selector_->contains(_coord);
-    }
-
-    /// Sets or resets to a new selection.
-    void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
-
-    /// Tests whether or not some grid cells are selected.
-    bool selectionAvailable() const noexcept { return !!selector_; }
-
-    Selector const* selector() const noexcept { return selector_.get(); }
-    Selector* selector() noexcept { return selector_.get(); }
-
-    /// Clears current selection, if any currently present.
-    void clearSelection() { selector_.reset(); }
-
-    /// Renders only the selected area.
-    void renderSelection(Renderer const& _render) const;
-
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
     ScreenEvents& eventListener() noexcept { return eventListener_; }
@@ -412,8 +383,6 @@ class Screen {
     std::stack<std::string> savedWindowTitles_{};
 
     bool sixelCursorConformance_ = true;
-
-    std::unique_ptr<Selector> selector_;
 };
 
 class Viewport {

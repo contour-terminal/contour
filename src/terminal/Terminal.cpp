@@ -170,11 +170,11 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
             }(speedClicks_, _mousePress.modifier);
 
             changes_++;
-            if (!screen_.selectionAvailable()
-                || screen_.selector()->state() == Selector::State::Waiting
+            if (!selectionAvailable()
+                || selector()->state() == Selector::State::Waiting
                 || speedClicks_ >= 2)
             {
-                screen_.setSelector(make_unique<Selector>(
+                setSelector(make_unique<Selector>(
                     selectionMode,
                     wordDelimiters_,
                     screen_,
@@ -182,9 +182,9 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
                 ));
 
                 if (selectionMode != Selector::Mode::Linear)
-                    screen_.selector()->extend(absoluteCoordinate(currentMousePosition_));
+                    selector()->extend(absoluteCoordinate(currentMousePosition_));
             }
-            else if (screen_.selector()->state() == Selector::State::Complete)
+            else if (selector()->state() == Selector::State::Complete)
                 clearSelection();
 
             return true;
@@ -195,9 +195,10 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
 
 void Terminal::clearSelection()
 {
-    screen_.clearSelection();
+    selector_.reset();
     changes_++;
 }
+
 
 bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
 {
@@ -213,9 +214,9 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
 
     speedClicks_ = 0;
 
-    if (leftMouseButtonPressed_ && !screen_.selectionAvailable())
+    if (leftMouseButtonPressed_ && !selectionAvailable())
     {
-        screen_.setSelector(make_unique<Selector>(
+        setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
             wordDelimiters_,
             screen_,
@@ -223,9 +224,9 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
         ));
     }
 
-    if (screen_.selectionAvailable() && screen_.selector()->state() != Selector::State::Complete)
+    if (selectionAvailable() && selector()->state() != Selector::State::Complete)
     {
-        screen_.selector()->extend(absoluteCoordinate(newPosition));
+        selector()->extend(absoluteCoordinate(newPosition));
         changes_++;
         return true;
     }
@@ -250,15 +251,15 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     if (_mouseRelease.button == MouseButton::Left)
     {
         leftMouseButtonPressed_ = false;
-        if (screen_.selectionAvailable())
+        if (selectionAvailable())
         {
-            switch (screen_.selector()->state())
+            switch (selector()->state())
             {
                 case Selector::State::Waiting:
-                    screen_.clearSelection();
+                    clearSelection();
                     break;
                 case Selector::State::InProgress:
-                    screen_.selector()->stop();
+                    selector()->stop();
                     if (onSelectionComplete_)
                         onSelectionComplete_();
                     break;
@@ -401,8 +402,16 @@ void Terminal::bell()
 
 void Terminal::bufferChanged(ScreenBuffer::Type _type)
 {
+    selector_.reset();
     viewport_.scrollToBottom();
     eventListener_.bufferChanged(_type);
+}
+
+void Terminal::scrollbackBufferCleared()
+{
+    selector_.reset();
+    viewport_.scrollToBottom();
+    changes_++;
 }
 
 void Terminal::commands()

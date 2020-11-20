@@ -151,7 +151,7 @@ class Selector {
 
     /// Renders the current selection into @p _render.
     template <typename Renderer>
-    void render(Renderer& _render) const
+    void render(Renderer&& _render) const
     {
         for (auto const& range : selection())
             for (auto const col : crispy::times(range.fromColumn, range.length()))
@@ -160,13 +160,6 @@ class Selector {
                     auto const pos = Coordinate{range.line, col};
                     _render(pos, *cell);
                 }
-    }
-
-    /// Renders the current selection into @p _render.
-    template <typename Renderer>
-    void render(Renderer const& _render) const
-    {
-        render(const_cast<Renderer&>(_render));
     }
 
   private:
