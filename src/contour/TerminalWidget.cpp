@@ -933,7 +933,7 @@ void TerminalWidget::setDefaultCursor()
 
 void TerminalWidget::scrollToBottomAndRedraw()
 {
-    auto const dirty = terminalView_->terminal().scrollToBottom();
+    auto const dirty = terminalView_->terminal().viewport().scrollToBottom();
     if (dirty)
     {
         setScreenDirty();
@@ -1143,38 +1143,38 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Silently;
         },
         [this](actions::ScrollOneUp) -> Result {
-            return terminalView_->terminal().scrollUp(1) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollUp(1) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollOneDown) -> Result {
-            return terminalView_->terminal().scrollDown(1) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollDown(1) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollUp) -> Result {
-            return terminalView_->terminal().scrollUp(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollUp(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollDown) -> Result {
-            return terminalView_->terminal().scrollDown(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollDown(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollPageUp) -> Result {
-            return terminalView_->terminal().scrollUp(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollUp(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollPageDown) -> Result {
-            return terminalView_->terminal().scrollDown(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollDown(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollMarkUp) -> Result {
-            return terminalView_->terminal().scrollMarkUp() ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollMarkUp() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollMarkDown) -> Result {
-            return terminalView_->terminal().scrollMarkDown() ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollMarkDown() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ScrollToTop) -> Result {
-            return terminalView_->terminal().scrollToTop() ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollToTop() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::CopyPreviousMarkRange) -> Result {
             copyToClipboard(extractLastMarkRange());
             return Result::Silently;
         },
         [this](actions::ScrollToBottom) -> Result {
-            return terminalView_->terminal().scrollToBottom() ? Result::Dirty : Result::Nothing;
+            return terminalView_->terminal().viewport().scrollToBottom() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::CopySelection) -> Result {
             string const text = extractSelectionText();
@@ -1512,8 +1512,8 @@ void TerminalWidget::commands()
     //     terminalMetrics_(command);
 #endif
 
-    if (profile().autoScrollOnUpdate && terminalView_->terminal().screen().relativeScrollOffset())
-        terminalView_->terminal().scrollToBottom();
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().relativeScrollOffset())
+        terminalView_->terminal().viewport().scrollToBottom();
 
     if (terminalView_->terminal().screen().isPrimaryScreen())
         scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
@@ -1527,7 +1527,7 @@ void TerminalWidget::commands()
 
 void TerminalWidget::updateScrollBarValue()
 {
-    if (auto const s = terminalView_->terminal().screen().absoluteScrollOffset(); s.has_value())
+    if (auto const s = terminalView_->terminal().viewport().absoluteScrollOffset(); s.has_value())
         scrollBar_->setValue(s.value());
     else
         scrollBar_->setValue(scrollBar_->maximum());
@@ -1535,7 +1535,7 @@ void TerminalWidget::updateScrollBarValue()
 
 void TerminalWidget::onScrollBarValueChanged()
 {
-    terminalView_->terminal().screen().scrollToAbsolute(scrollBar_->value());
+    terminalView_->terminal().viewport().scrollToAbsolute(scrollBar_->value());
     if (setScreenDirty())
         update();
 }

@@ -104,7 +104,7 @@ class Terminal : public ScreenEvents {
     {
         // TODO: unit test case me BEFORE merge, yo !
         auto const row = screen_.historyLineCount()
-                       - screen_.relativeScrollOffset()
+                       - viewport_.relativeScrollOffset()
                        + _pos.row;
         auto const col = _pos.column;
         return Coordinate{row, col};
@@ -114,15 +114,11 @@ class Terminal : public ScreenEvents {
     void writeToScreen(char const* data, size_t size);
     void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
+    // }}}
 
-    // viewport management
-    bool isLineVisible(int _row) const noexcept { return screen_.isLineVisible(_row); }
-    bool scrollUp(int _numLines) { return screen_.scrollUp(_numLines); }
-    bool scrollDown(int  _numLines) { return screen_.scrollDown(_numLines); }
-    bool scrollToTop() { return screen_.scrollToTop(); }
-    bool scrollToBottom() { return screen_.scrollToBottom(); }
-    bool scrollMarkUp() { return screen_.scrollMarkUp(); }
-    bool scrollMarkDown() { return screen_.scrollMarkDown(); }
+    // {{{ viewport management
+    Viewport& viewport() noexcept { return viewport_; }
+    Viewport const& viewport() const noexcept { return viewport_; }
     // }}}
 
     // {{{ Screen Render Proxy
@@ -201,7 +197,7 @@ class Terminal : public ScreenEvents {
     template <typename... RemainingPasses>
     void renderPass(Screen::Renderer const& pass, RemainingPasses... remainingPasses) const
     {
-        screen_.render(pass, screen_.absoluteScrollOffset());
+        screen_.render(pass, viewport_.absoluteScrollOffset());
 
         if constexpr (sizeof...(RemainingPasses) != 0)
             renderPass(std::forward<RemainingPasses>(remainingPasses)...);
@@ -264,6 +260,7 @@ class Terminal : public ScreenEvents {
     Screen screen_;
     std::recursive_mutex mutable screenLock_;
     std::thread screenUpdateThread_;
+    Viewport viewport_;
 };
 
 }  // namespace terminal

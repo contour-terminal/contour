@@ -66,7 +66,8 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
         _maxImageColorRegisters,
         _sixelCursorConformance
     },
-    screenUpdateThread_{ [this]() { screenUpdateThread(); } }
+    screenUpdateThread_{ [this]() { screenUpdateThread(); } },
+    viewport_{ screen_ }
 {
 }
 
@@ -400,6 +401,7 @@ void Terminal::bell()
 
 void Terminal::bufferChanged(ScreenBuffer::Type _type)
 {
+    viewport_.scrollToBottom();
     eventListener_.bufferChanged(_type);
 }
 

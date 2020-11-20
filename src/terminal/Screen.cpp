@@ -175,110 +175,6 @@ vector<Selector::Range> Screen::selection() const
         return {};
 }
 
-// {{{ viewport management
-bool Screen::isLineVisible(int _row) const noexcept
-{
-    return crispy::ascending(1 - relativeScrollOffset(), _row, size_.height - relativeScrollOffset());
-}
-
-bool Screen::scrollUp(int _numLines)
-{
-    if (isAlternateScreen()) // TODO: make configurable
-        return false;
-
-    if (_numLines <= 0)
-        return false;
-
-    if (auto const newOffset = max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0); newOffset != absoluteScrollOffset())
-    {
-        scrollOffset_.emplace(newOffset);
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Screen::scrollDown(int _numLines)
-{
-    if (isAlternateScreen()) // TODO: make configurable
-        return false;
-
-    if (_numLines <= 0)
-        return false;
-
-    auto const newOffset = absoluteScrollOffset().value_or(historyLineCount()) + _numLines;
-    if (newOffset < historyLineCount())
-    {
-        scrollOffset_.emplace(newOffset);
-        return true;
-    }
-    else if (newOffset == historyLineCount() || scrollOffset_.has_value())
-    {
-        scrollOffset_.reset();
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Screen::scrollMarkUp()
-{
-    auto const newScrollOffset = buffer_->findMarkerBackward(absoluteScrollOffset().value_or(historyLineCount()));
-    if (newScrollOffset.has_value())
-    {
-        scrollOffset_.emplace(newScrollOffset.value());
-        return true;
-    }
-
-    return false;
-}
-
-bool Screen::scrollMarkDown()
-{
-    auto const newScrollOffset = buffer_->findMarkerForward(absoluteScrollOffset().value_or(historyLineCount()));
-
-    if (!newScrollOffset.has_value())
-        return false;
-
-    if (*newScrollOffset < historyLineCount())
-        scrollOffset_.emplace(*newScrollOffset);
-    else
-        scrollOffset_.reset();
-
-    return true;
-}
-
-bool Screen::scrollToTop()
-{
-    if (absoluteScrollOffset() != 0)
-    {
-        scrollOffset_.emplace(0);
-        return true;
-    }
-    else
-        return false;
-}
-
-bool Screen::scrollToBottom()
-{
-    if (scrollOffset_.has_value())
-    {
-        scrollOffset_.reset();
-        return true;
-    }
-    else
-        return false;
-}
-
-void Screen::scrollToAbsolute(int _absoluteScrollOffset)
-{
-    if (_absoluteScrollOffset >= 0 && _absoluteScrollOffset < historyLineCount())
-        scrollOffset_.emplace(_absoluteScrollOffset);
-    else if (_absoluteScrollOffset >= historyLineCount())
-        scrollOffset_.reset();
-}
-// }}}
-
 // {{{ others
 void Screen::saveCursor()
 {
@@ -345,7 +241,6 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
                 buffer_ = &primaryBuffer_;
                 break;
             case ScreenBuffer::Type::Alternate:
-                scrollToBottom();
                 if (buffer_->isModeEnabled(Mode::MouseAlternateScroll))
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
