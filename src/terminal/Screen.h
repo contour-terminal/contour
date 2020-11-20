@@ -234,31 +234,6 @@ class Screen {
     Size const& size() const noexcept { return size_; }
     void resize(Size const& _newSize);
 
-    /// {{{ viewport management API
-    /// @returns scroll offset relative to the main screen buffer
-    int relativeScrollOffset() const noexcept
-    {
-        return scrollOffset_.has_value()
-            ? historyLineCount() - scrollOffset_.value()
-            : 0;
-    }
-
-    /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
-    std::optional<int> absoluteScrollOffset() const noexcept
-    {
-        return scrollOffset_;
-    }
-
-    bool isLineVisible(int _row) const noexcept;
-    bool scrollUp(int _numLines);
-    bool scrollDown(int _numLines);
-    bool scrollToTop();
-    bool scrollToBottom();
-    void scrollToAbsolute(int _absoluteScrollOffset);
-    bool scrollMarkUp();
-    bool scrollMarkDown();
-    //}}}
-
     bool isCursorInsideMargins() const noexcept { return buffer_->isCursorInsideMargins(); }
 
     Coordinate realCursorPosition() const noexcept { return buffer_->realCursorPosition(); }
@@ -436,10 +411,137 @@ class Screen {
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
-    std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     bool sixelCursorConformance_ = true;
 
     std::unique_ptr<Selector> selector_;
+};
+
+class Viewport {
+  private:
+    Screen& screen_;
+    std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+
+    int historyLineCount() const noexcept { return screen_.historyLineCount(); }
+    int screenLineCount() const noexcept { return screen_.size().height; }
+
+  public:
+    explicit Viewport(Screen& _screen) : screen_{ _screen } {}
+
+    /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
+    std::optional<int> absoluteScrollOffset() const noexcept
+    {
+        return scrollOffset_;
+    }
+
+    /// @returns scroll offset relative to the main screen buffer
+    int relativeScrollOffset() const noexcept
+    {
+        return scrollOffset_.has_value()
+            ? historyLineCount() - scrollOffset_.value()
+            : 0;
+    }
+
+    bool isLineVisible(int _row) const noexcept
+    {
+        return crispy::ascending(1 - relativeScrollOffset(), _row, screenLineCount() - relativeScrollOffset());
+    }
+
+    bool scrollUp(int _numLines)
+    {
+        if (screen_.isAlternateScreen()) // TODO: make configurable
+            return false;
+
+        if (_numLines <= 0)
+            return false;
+
+        if (auto const newOffset = std::max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0); newOffset != absoluteScrollOffset())
+        {
+            scrollOffset_.emplace(newOffset);
+            return true;
+        }
+        else
+            return false;
+    }
+
+    bool scrollDown(int _numLines)
+    {
+        if (screen_.isAlternateScreen()) // TODO: make configurable
+            return false;
+
+        if (_numLines <= 0)
+            return false;
+
+        auto const newOffset = absoluteScrollOffset().value_or(historyLineCount()) + _numLines;
+        if (newOffset < historyLineCount())
+        {
+            scrollOffset_.emplace(newOffset);
+            return true;
+        }
+        else if (newOffset == historyLineCount() || scrollOffset_.has_value())
+        {
+            scrollOffset_.reset();
+            return true;
+        }
+        else
+            return false;
+    }
+
+    bool scrollToTop()
+    {
+        if (absoluteScrollOffset() != 0)
+        {
+            scrollOffset_.emplace(0);
+            return true;
+        }
+        else
+            return false;
+    }
+
+    bool scrollToBottom()
+    {
+        if (scrollOffset_.has_value())
+        {
+            scrollOffset_.reset();
+            return true;
+        }
+        else
+            return false;
+    }
+
+    void scrollToAbsolute(int _absoluteScrollOffset)
+    {
+        if (_absoluteScrollOffset >= 0 && _absoluteScrollOffset < historyLineCount())
+            scrollOffset_.emplace(_absoluteScrollOffset);
+        else if (_absoluteScrollOffset >= historyLineCount())
+            scrollOffset_.reset();
+    }
+
+    bool scrollMarkUp()
+    {
+        auto const newScrollOffset = screen_.currentBuffer().findMarkerBackward(absoluteScrollOffset().value_or(historyLineCount()));
+        if (newScrollOffset.has_value())
+        {
+            scrollOffset_.emplace(newScrollOffset.value());
+            return true;
+        }
+
+        return false;
+    }
+
+    bool scrollMarkDown()
+    {
+        auto const newScrollOffset = screen_.currentBuffer().findMarkerForward(absoluteScrollOffset().value_or(historyLineCount()));
+
+        if (!newScrollOffset.has_value())
+            return false;
+
+        if (*newScrollOffset < historyLineCount())
+            scrollOffset_.emplace(*newScrollOffset);
+        else
+            scrollOffset_.reset();
+
+        return true;
+    }
 };
 
 // {{{ template functions

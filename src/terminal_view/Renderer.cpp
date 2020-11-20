@@ -184,7 +184,7 @@ uint64_t Renderer::render(Terminal& _terminal,
     {
         auto _l = scoped_lock{_terminal};
         auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
-        auto const baseLine = _terminal.screen().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
+        auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
 
         if (!pressure)
             renderCursor(_terminal);
@@ -203,7 +203,7 @@ uint64_t Renderer::render(Terminal& _terminal,
                     auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
                     renderCell(_pos, _cell, reverseVideo, selected);
                 },
-                _terminal.screen().absoluteScrollOffset()
+                _terminal.viewport().absoluteScrollOffset()
             );
 
             if (cellAtMouse.hyperlink())
@@ -218,7 +218,7 @@ uint64_t Renderer::render(Terminal& _terminal,
                     auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
                     renderCell(_pos, _cell, reverseVideo, selected);
                 },
-                _terminal.screen().absoluteScrollOffset());
+                _terminal.viewport().absoluteScrollOffset());
         }
     }
 
@@ -239,7 +239,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
         && (_terminal.cursorDisplay() == CursorDisplay::Steady || _terminal.cursorBlinkActive());
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
-    if (shouldDisplayCursor && _terminal.isLineVisible(_terminal.screen().cursor().position.row))
+    if (shouldDisplayCursor && _terminal.viewport().isLineVisible(_terminal.screen().cursor().position.row))
     {
         Cell const& cursorCell = _terminal.screen().at(_terminal.screen().cursor().position);
 
@@ -251,7 +251,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
         cursorRenderer_.render(
             screenCoordinates_.map(
                 _terminal.screen().cursor().position.column,
-                _terminal.screen().cursor().position.row + _terminal.screen().relativeScrollOffset()
+                _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset()
             ),
             cursorCell.width()
         );

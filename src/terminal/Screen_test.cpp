@@ -53,35 +53,37 @@ namespace
 TEST_CASE("Screen.isLineVisible", "[screen]")
 {
     auto screen = MockScreen{Size{2, 1}};
+    auto viewport = terminal::Viewport{screen};
+
     screen.write("10203040");
     REQUIRE("40" == screen.renderTextLine(1));
     REQUIRE("30" == screen.renderTextLine(0));
     REQUIRE("20" == screen.renderTextLine(-1));
     REQUIRE("10" == screen.renderTextLine(-2));
 
-    CHECK(screen.isLineVisible(1));
-    CHECK_FALSE(screen.isLineVisible(0));
-    CHECK_FALSE(screen.isLineVisible(-1));
-    CHECK_FALSE(screen.isLineVisible(-2));
-    CHECK_FALSE(screen.isLineVisible(-3)); // minimal out-of-bounds
+    CHECK(viewport.isLineVisible(1));
+    CHECK_FALSE(viewport.isLineVisible(0));
+    CHECK_FALSE(viewport.isLineVisible(-1));
+    CHECK_FALSE(viewport.isLineVisible(-2));
+    CHECK_FALSE(viewport.isLineVisible(-3)); // minimal out-of-bounds
 
-    screen.scrollUp(1);
-    CHECK_FALSE(screen.isLineVisible(1));
-    CHECK(screen.isLineVisible(0));
-    CHECK_FALSE(screen.isLineVisible(-1));
-    CHECK_FALSE(screen.isLineVisible(-2));
+    viewport.scrollUp(1);
+    CHECK_FALSE(viewport.isLineVisible(1));
+    CHECK(viewport.isLineVisible(0));
+    CHECK_FALSE(viewport.isLineVisible(-1));
+    CHECK_FALSE(viewport.isLineVisible(-2));
 
-    screen.scrollUp(1);
-    CHECK_FALSE(screen.isLineVisible(1));
-    CHECK_FALSE(screen.isLineVisible(0));
-    CHECK(screen.isLineVisible(-1));
-    CHECK_FALSE(screen.isLineVisible(-2));
+    viewport.scrollUp(1);
+    CHECK_FALSE(viewport.isLineVisible(1));
+    CHECK_FALSE(viewport.isLineVisible(0));
+    CHECK(viewport.isLineVisible(-1));
+    CHECK_FALSE(viewport.isLineVisible(-2));
 
-    screen.scrollUp(1);
-    CHECK_FALSE(screen.isLineVisible(1));
-    CHECK_FALSE(screen.isLineVisible(0));
-    CHECK_FALSE(screen.isLineVisible(-1));
-    CHECK(screen.isLineVisible(-2));
+    viewport.scrollUp(1);
+    CHECK_FALSE(viewport.isLineVisible(1));
+    CHECK_FALSE(viewport.isLineVisible(0));
+    CHECK_FALSE(viewport.isLineVisible(-1));
+    CHECK(viewport.isLineVisible(-2));
 }
 
 TEST_CASE("AppendChar", "[screen]")
