@@ -18,6 +18,7 @@
 #include <terminal/pty/Pty.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Screen.h>
+#include <terminal/Selector.h>
 
 #include <fmt/format.h>
 
@@ -116,10 +117,9 @@ class Terminal : public ScreenEvents {
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
     // }}}
 
-    // {{{ viewport management
+    // viewport management
     Viewport& viewport() noexcept { return viewport_; }
     Viewport const& viewport() const noexcept { return viewport_; }
-    // }}}
 
     // {{{ Screen Render Proxy
     /// Checks if a render() method should be called by checking the dirty bit,
@@ -184,7 +184,34 @@ class Terminal : public ScreenEvents {
     void setWordDelimiters(std::string const& _wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
 
+    Selector const* selector() const noexcept { return selector_.get(); }
+    Selector* selector() noexcept { return selector_.get(); }
+
+    template <typename RenderTarget>
+    void renderSelection(RenderTarget _renderTarget) const
+    {
+        if (selector_)
+            selector_->render(std::forward<RenderTarget>(_renderTarget));
+    }
+
     void clearSelection();
+
+    /// Tests whether some area has been selected.
+    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
+
+    /// Tests whether given absolute coordinate is covered by a current selection.
+    bool isSelectedAbsolute(Coordinate _coord) const noexcept
+    {
+        return selector_
+            && selector_->state() != Selector::State::Waiting
+            && selector_->contains(_coord);
+    }
+
+    /// Sets or resets to a new selection.
+    void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
+
+    /// Tests whether or not some grid cells are selected.
+    bool selectionAvailable() const noexcept { return !!selector_; }
     // }}}
 
   private:
@@ -207,6 +234,7 @@ class Terminal : public ScreenEvents {
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenBuffer::Type) override;
+    void scrollbackBufferCleared() override;
     void commands() override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
@@ -261,6 +289,7 @@ class Terminal : public ScreenEvents {
     std::recursive_mutex mutable screenLock_;
     std::thread screenUpdateThread_;
     Viewport viewport_;
+    std::unique_ptr<Selector> selector_;
 };
 
 }  // namespace terminal

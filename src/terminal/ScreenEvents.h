@@ -30,6 +30,7 @@ class ScreenEvents {
     virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
     virtual void bell() {}
     virtual void bufferChanged(ScreenBuffer::Type) {}
+    virtual void scrollbackBufferCleared() {}
     virtual void commands() {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}
     virtual void dumpState() {}

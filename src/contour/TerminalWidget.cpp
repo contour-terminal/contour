@@ -910,7 +910,7 @@ void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
     // hyperlink whose number eventually updates upon every cell write.
     bool constexpr hyperlinkVisible = true;
 
-    if (hyperlinkVisible || handled || terminalView_->terminal().screen().isSelectionAvailable()) // && only if selection has changed!
+    if (hyperlinkVisible || handled || terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
     {
         setScreenDirty();
         update();
@@ -1375,7 +1375,7 @@ string TerminalWidget::extractSelectionText()
     string text;
     string currentLine;
 
-    terminalView_->terminal().screen().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
+    terminalView_->terminal().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
         if (_pos.column <= lastColumn)
         {
             text += currentLine;

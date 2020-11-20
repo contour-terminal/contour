@@ -200,7 +200,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             _terminal.screen().render(
                 [&](Coordinate const& _pos, Cell const& _cell) {
                     auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
-                    auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
+                    auto const selected = _terminal.isSelectedAbsolute(absolutePos);
                     renderCell(_pos, _cell, reverseVideo, selected);
                 },
                 _terminal.viewport().absoluteScrollOffset()
@@ -215,7 +215,7 @@ uint64_t Renderer::render(Terminal& _terminal,
             _terminal.screen().render(
                 [&](Coordinate const& _pos, Cell const& _cell) {
                     auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
-                    auto const selected = _terminal.screen().isSelectedAbsolute(absolutePos);
+                    auto const selected = _terminal.isSelectedAbsolute(absolutePos);
                     renderCell(_pos, _cell, reverseVideo, selected);
                 },
                 _terminal.viewport().absoluteScrollOffset());

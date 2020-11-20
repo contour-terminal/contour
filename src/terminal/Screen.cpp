@@ -161,20 +161,6 @@ string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
     return line;
 }
 
-void Screen::renderSelection(terminal::Screen::Renderer const& _render) const
-{
-    if (selector_)
-        selector_->render(_render);
-}
-
-vector<Selector::Range> Screen::selection() const
-{
-    if (selector_)
-        return selector_->selection();
-    else
-        return {};
-}
-
 // {{{ others
 void Screen::saveCursor()
 {
@@ -231,9 +217,6 @@ void Screen::setBuffer(ScreenBuffer::Type _type)
 {
     if (bufferType() != _type)
     {
-        if (selector_)
-            selector_.reset();
-
         switch (_type)
         {
             case ScreenBuffer::Type::Main:
@@ -390,10 +373,8 @@ void Screen::clearScreen()
 
 void Screen::clearScrollbackBuffer()
 {
-    if (selector_)
-        selector_.reset();
-
     buffer_->savedLines.clear();
+    eventListener_.scrollbackBufferCleared();
 }
 
 void Screen::eraseCharacters(int _n)
