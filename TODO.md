@@ -1,39 +1,38 @@
 # Terminal apps using the mouse
 
-#### Terminal API cleanup
-
-- [ ] remove screen proxy API functions
-- [ ] move viewport API over from Screen into Terminal
-- [ ] move selection API over from Screen into Terminal
-
 ### pre-0.1.0 release
 
-- [ ] BUG: timer for forced render not working (found out by cursor not blinking)
+- [ ] rework screen resize
+- [ ] implement DECSCPP: https://www.vt100.net/docs/vt510-rm/DECSCPP.html
+- [ ] QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.
+- [ ] BUG: screen resize events broken. it should still resize something without breaking the GUI.
+- [ ] BUG: "The impossible happened" in TerminalWidget
 - [ ] BUG: SGR underline not visible when inverse is set
-- [ ] Revive Synchronized Output
-- [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
-      These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
+- [ ] CRASH: animated gif redirected to file (img2sixel), then cat, will cause a crash after a few iterations
+- [ ] REVIVE: Synchronized Output
 - [ ] CMAKE: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
-- [x] UX: on keyboard input, force scroll to bottom
-- [x] BUG: Change scroll offset from relative to absolute to fix bug displaying wrong viewport when
-           new lines arrive while viewport is scrolled back.
-     - if alt-buffer switch with scrollback, then scrollback is reset.
+- [ ] QA: Images: copy action should uxe U+FFFC (object replacement) on grid cells that contain an image for text-based clipboard action
+- [ ] QA: Images: Selecting grid cells that contain an image should colorize/tint this cell.
+- [ ] QA: Split Screen's Mode to Mode and DECMode
 - [ ] QA: move `string TerminalWindow::extractLastMarkRange()` into Screen and add tests
-- [ ] QA: think about additional layer between Screen & Terminal that is testable and does not
-      require a PTY. Then put viewport, selection (later vi-mode), mark jumping APIs over to it)
-    - or pack it aside and name it `ScreenViewport` or `ScreenOverlay` that only takes the Screen as cref?
-
+- [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
+          These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
 - [ ] UX: mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
-- [ ] FEATURE: normal-mode cursor (that can be used for selection, basic vim movements)
+- [ ] BUG: Text shaping on emoji presentation modifiers seem to sometimes get it wrong.
 
 ### Features to be added to 0.2.0 milestone
 
+- [ ] FEATURE: normal-mode cursor (that can be used for selection, basic vim movements)
+- [ ] contour: provide `--mono` (or alike) CLI flag to "just" provide a QOpenGLWindow for best performance,
+      lacking UI features as compromise.
+- [ ] Rethink an easily adaptable keyboard input protocol (CSI based)
+    - should support any key with modifier information (ctrl,alt,meta,SHIFT)
 - [ ] normal-mode cursor (that can be used for selection, basic vim movements)
 - [ ] UX: mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
 - [ ] RENDERING: respect propotion of colored (emoji) glyph (y-offset / bearing)?
 - [ ] Evaluate Shell Integration proposals from: http://per.bothner.com/blog/2019/shell-integration-proposal/
 
-### Known Bugs
+### Known Bugs / Odds
 
 - `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
 - Do not do pressure-performance optimization when in alt-buffer
