@@ -354,7 +354,9 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
             return append("\x08");
     }
 
-    if (_characterEvent < 32 || (!_modifier.control() && _characterEvent <= 0x7F))
+    if (_modifier == Modifier::Shift && _characterEvent == 0x09)
+        return append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
+    else if (_characterEvent < 32 || (!_modifier.control() && _characterEvent <= 0x7F))
         return append(chr); // raw C0 code
     else if (_modifier == Modifier::Control && _characterEvent == L' ')
         return append("\x00");

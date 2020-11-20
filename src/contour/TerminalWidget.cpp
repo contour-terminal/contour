@@ -185,10 +185,11 @@ namespace // {{{
             // pair{Qt::Key_Equal, Key::Numpad_Equal},
         };
 
-        auto const modifiers = makeModifier(_mods);
-
         if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key; }); i != end(mapping))
-            return { InputEvent{KeyInputEvent{i->second, modifiers}} };
+            return { InputEvent{KeyInputEvent{i->second, makeModifier(_mods)}} };
+
+        if (_key == Qt::Key_Backtab)
+            return { InputEvent{CharInputEvent{'\t', makeModifier(_mods | Qt::ShiftModifier)}} };
 
         return nullopt;
     }
