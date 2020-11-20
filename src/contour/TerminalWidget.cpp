@@ -510,7 +510,7 @@ void TerminalWidget::onFrameSwapped()
                 renderingPressure_ = false;
                 STATS_ZERO(consecutiveRenderCount);
                 if (profile().cursorDisplay == terminal::CursorDisplay::Blink
-                        && this->terminalView_->terminal().cursor().visible)
+                        && terminalView_->terminal().cursorVisibility())
                     updateTimer_.start(terminalView_->terminal().nextRender(steady_clock::now()));
                 return;
         }
@@ -593,9 +593,9 @@ void TerminalWidget::initializeGL()
         ref(logger_)
     );
 
-    terminalView_->terminal().setLogRawOutput((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
-    terminalView_->terminal().setLogTraceOutput((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
-    terminalView_->terminal().setTabWidth(profile().tabWidth);
+    terminalView_->terminal().screen().setLogRaw((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
+    terminalView_->terminal().screen().setLogTrace((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
+    terminalView_->terminal().screen().setTabWidth(profile().tabWidth);
 
     // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
     // hot reloading, because this value may have changed manually by an application already.
@@ -761,14 +761,14 @@ bool TerminalWidget::reloadConfigValues(config::Config _newConfig, string const&
             ? LoggingSink{_newConfig.loggingMask, _newConfig.logFilePath->string()}
             : LoggingSink{_newConfig.loggingMask, &cout};
 
+    terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
+
     terminalView_->terminal().screen().setMaxImageSize(_newConfig.maxImageSize);
     terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
 
-    terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
-
-    terminalView_->terminal().setLogRawOutput((_newConfig.loggingMask & LogMask::RawOutput) != LogMask::None);
-    terminalView_->terminal().setLogTraceOutput((_newConfig.loggingMask & LogMask::TraceOutput) != LogMask::None);
+    terminalView_->terminal().screen().setLogRaw((_newConfig.loggingMask & LogMask::RawOutput) != LogMask::None);
+    terminalView_->terminal().screen().setLogTrace((_newConfig.loggingMask & LogMask::TraceOutput) != LogMask::None);
 
     config_ = std::move(_newConfig);
     if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
@@ -920,7 +920,7 @@ void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
 void TerminalWidget::setDefaultCursor()
 {
     using Type = terminal::ScreenBuffer::Type;
-    switch (terminalView_->terminal().screenBufferType())
+    switch (terminalView_->terminal().screen().bufferType())
     {
         case Type::Main:
             setCursor(Qt::IBeamCursor);
@@ -947,7 +947,10 @@ void TerminalWidget::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
 
     // as per Qt-documentation, some platform implementations reset the cursor when leaving the
     // window, so we have to re-apply our desired cursor in focusInEvent().
-    setDefaultCursor();
+    if (cursor().shape() != Qt::CursorShape::BlankCursor)
+        setDefaultCursor();
+    else
+        setCursor(Qt::CursorShape::BlankCursor);
 
     terminalView_->terminal().screen().setFocus(true);
     terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
@@ -1128,7 +1131,8 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Nothing;
         },
         [&](actions::ScreenshotVT) -> Result {
-            auto const screenshot = terminalView_->terminal().screenshot();
+            auto _l = lock_guard{ terminalView_->terminal() };
+            auto const screenshot = terminalView_->terminal().screen().screenshot();
             ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
             ofs << screenshot;
             return Result::Silently;
@@ -1340,7 +1344,7 @@ void TerminalWidget::setProfile(config::TerminalProfile newProfile)
     if (newScreenSize != terminalView_->terminal().screenSize())
         terminalView_->setTerminalSize(newScreenSize);
         // TODO: maybe update margin after this call?
-    terminalView_->terminal().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
+    terminalView_->terminal().screen().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
 
     terminalView_->setColorProfile(newProfile.colors);
 
@@ -1357,7 +1361,7 @@ void TerminalWidget::setProfile(config::TerminalProfile newProfile)
         emit setBackgroundBlur(newProfile.backgroundBlur);
 
     if (newProfile.tabWidth != profile().tabWidth)
-        terminalView_->terminal().setTabWidth(newProfile.tabWidth);
+        terminalView_->terminal().screen().setTabWidth(newProfile.tabWidth);
 
     updateScrollBarPosition();
 
@@ -1512,7 +1516,7 @@ void TerminalWidget::commands()
         terminalView_->terminal().scrollToBottom();
 
     if (terminalView_->terminal().screen().isPrimaryScreen())
-        scrollBar_->setMaximum(terminalView_->terminal().historyLineCount());
+        scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
     else
         scrollBar_->setMaximum(0);
     updateScrollBarValue();
@@ -1538,7 +1542,7 @@ void TerminalWidget::onScrollBarValueChanged()
 
 void TerminalWidget::updateScrollBarPosition()
 {
-    if (view()->terminal().screenBufferType() == terminal::ScreenBuffer::Type::Alternate)
+    if (view()->terminal().screen().isAlternateScreen())
     {
         if (config_.hideScrollbarInAltScreen)
             scrollBar_->hide();

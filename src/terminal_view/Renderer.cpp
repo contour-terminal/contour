@@ -174,20 +174,20 @@ uint64_t Renderer::render(Terminal& _terminal,
                           terminal::Coordinate const& _currentMousePosition,
                           bool _pressure)
 {
-    auto const pressure = _pressure && _terminal.screenBufferType() == ScreenBuffer::Type::Main;
+    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
     metrics_.clear();
     textRenderer_.setPressure(pressure);
 
     screenCoordinates_.screenSize = _terminal.screenSize();
-
-    if (!pressure)
-        renderCursor(_terminal);
 
     uint64_t changes = 0;
     {
         auto _l = scoped_lock{_terminal};
         auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
         auto const baseLine = _terminal.screen().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
+
+        if (!pressure)
+            renderCursor(_terminal);
 
         if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
@@ -235,10 +235,13 @@ uint64_t Renderer::render(Terminal& _terminal,
 
 void Renderer::renderCursor(Terminal const& _terminal)
 {
+    bool const shouldDisplayCursor = _terminal.screen().cursor().visible
+        && (_terminal.cursorDisplay() == CursorDisplay::Steady || _terminal.cursorBlinkActive());
+
     // TODO: check if CursorStyle has changed, and update render context accordingly.
-    if (_terminal.shouldDisplayCursor() && _terminal.isLineVisible(_terminal.cursor().position.row))
+    if (shouldDisplayCursor && _terminal.isLineVisible(_terminal.screen().cursor().position.row))
     {
-        Cell const& cursorCell = *_terminal.at(_terminal.cursor().position);
+        Cell const& cursorCell = _terminal.screen().at(_terminal.screen().cursor().position);
 
         auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
                                                               : CursorShape::Rectangle;
@@ -247,8 +250,8 @@ void Renderer::renderCursor(Terminal const& _terminal)
 
         cursorRenderer_.render(
             screenCoordinates_.map(
-                _terminal.cursor().position.column,
-                _terminal.cursor().position.row + _terminal.screen().relativeScrollOffset()
+                _terminal.screen().cursor().position.column,
+                _terminal.screen().cursor().position.row + _terminal.screen().relativeScrollOffset()
             ),
             cursorCell.width()
         );

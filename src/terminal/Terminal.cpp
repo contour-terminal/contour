@@ -336,18 +336,6 @@ void Terminal::writeToScreen(char const* data, size_t size)
     screen_.write(data, size);
 }
 
-Cursor Terminal::cursor() const
-{
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    return screen_.cursor();
-}
-
-string Terminal::screenshot() const
-{
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    return screen_.screenshot();
-}
-
 bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
 {
     return changes_.load() || (
@@ -372,15 +360,6 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
         return {diff};
     else
         return chrono::milliseconds::min();
-}
-
-Cell const* Terminal::at(Coordinate const& _coord) const
-{
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
-    if (-screen_.historyLineCount() < _coord.row && _coord.row <= screen_.size().height)
-        return &screen_.at(_coord);
-    else
-        return nullptr;
 }
 
 void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
@@ -476,6 +455,11 @@ void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 {
     setCursorDisplay(_display);
     cursorShape_ = _shape;
+}
+
+void Terminal::setCursorVisibility(bool _visible)
+{
+    cursorVisibility_ = _visible;
 }
 
 void Terminal::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
