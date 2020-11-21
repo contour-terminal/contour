@@ -62,6 +62,7 @@ using std::max;
 using std::move;
 using std::nullopt;
 using std::optional;
+using std::pair;
 using std::ref;
 using std::runtime_error;
 using std::ofstream;
@@ -919,7 +920,7 @@ void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
 
 void TerminalWidget::setDefaultCursor()
 {
-    using Type = terminal::ScreenBuffer::Type;
+    using Type = terminal::ScreenType;
     switch (terminalView_->terminal().screen().bufferType())
     {
         case Type::Main:
@@ -1496,7 +1497,7 @@ void TerminalWidget::onSelectionComplete()
     }
 }
 
-void TerminalWidget::bufferChanged(terminal::ScreenBuffer::Type)
+void TerminalWidget::bufferChanged(terminal::ScreenType)
 {
     setDefaultCursor();
 
@@ -1658,7 +1659,7 @@ void TerminalWidget::copyToClipboard(std::string_view const& _text)
 
 void TerminalWidget::dumpState()
 {
-    terminalView_->terminal().screen().currentBuffer().dumpState("Dump screen state.");
+    terminalView_->terminal().screen().dumpState("Dump screen state.");
     terminalView_->renderer().dumpState(std::cout);
 }
 // }}}

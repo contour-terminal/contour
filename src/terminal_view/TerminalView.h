@@ -45,7 +45,7 @@ class TerminalView : private Terminal::Events {
         virtual ~Events() = default;
 
         virtual void bell() {}
-        virtual void bufferChanged(ScreenBuffer::Type) {}
+        virtual void bufferChanged(ScreenType) {}
         virtual void commands() {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
@@ -140,7 +140,7 @@ class TerminalView : private Terminal::Events {
   private:
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
-    void bufferChanged(ScreenBuffer::Type) override;
+    void bufferChanged(ScreenType) override;
     void commands() override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;

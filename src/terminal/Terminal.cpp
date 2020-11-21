@@ -400,7 +400,7 @@ void Terminal::bell()
     eventListener_.bell();
 }
 
-void Terminal::bufferChanged(ScreenBuffer::Type _type)
+void Terminal::bufferChanged(ScreenType _type)
 {
     selector_.reset();
     viewport_.scrollToBottom();

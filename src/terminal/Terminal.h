@@ -47,7 +47,7 @@ class Terminal : public ScreenEvents {
 
         virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
         virtual void bell() {}
-        virtual void bufferChanged(ScreenBuffer::Type) {}
+        virtual void bufferChanged(ScreenType) {}
         virtual void commands() {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
@@ -129,8 +129,8 @@ class Terminal : public ScreenEvents {
     std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
 
     /// Thread-safe access to screen data for rendering.
-    template <typename... RenderPasses>
-    uint64_t render(std::chrono::steady_clock::time_point _now, Screen::Renderer const& pass, RenderPasses... passes) const
+    template <typename Renderer, typename... RenderPasses>
+    uint64_t render(std::chrono::steady_clock::time_point _now, Renderer const& pass, RenderPasses... passes) const
     {
         auto _l = std::lock_guard{*this};
         auto const changes = preRender(_now);
@@ -221,8 +221,8 @@ class Terminal : public ScreenEvents {
     void onScreenCommands();
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
 
-    template <typename... RemainingPasses>
-    void renderPass(Screen::Renderer const& pass, RemainingPasses... remainingPasses) const
+    template <typename Renderer, typename... RemainingPasses>
+    void renderPass(Renderer const& pass, RemainingPasses... remainingPasses) const
     {
         screen_.render(pass, viewport_.absoluteScrollOffset());
 
@@ -233,7 +233,7 @@ class Terminal : public ScreenEvents {
   private:
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
-    void bufferChanged(ScreenBuffer::Type) override;
+    void bufferChanged(ScreenType) override;
     void scrollbackBufferCleared() override;
     void commands() override;
     void copyToClipboard(std::string_view const& _data) override;

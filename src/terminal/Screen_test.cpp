@@ -106,7 +106,11 @@ TEST_CASE("AppendChar", "[screen]")
     REQUIRE("ABD" == screen.renderTextLine(1));
 
     screen.setMode(Mode::AutoWrap, true);
-    screen.write("EF");
+
+    screen.write("E");
+    REQUIRE("ABE" == screen.renderTextLine(1));
+
+    screen.write("F");
     REQUIRE("F  " == screen.renderTextLine(1));
 }
 
@@ -791,28 +795,28 @@ TEST_CASE("ScrollUp", "[screen]")
 
     SECTION("no-op") {
         INFO("begin:");
-        screen.currentBuffer().scrollUp(0);
+        screen.scrollUp(0);
         INFO("end:");
         REQUIRE("ABC\nDEF\nGHI\n" == screen.renderText());
     }
 
     SECTION("by-1") {
-        screen.currentBuffer().scrollUp(1);
+        screen.scrollUp(1);
         REQUIRE("DEF\nGHI\n   \n" == screen.renderText());
     }
 
     SECTION("by-2") {
-        screen.currentBuffer().scrollUp(2);
+        screen.scrollUp(2);
         REQUIRE("GHI\n   \n   \n" == screen.renderText());
     }
 
     SECTION("by-3") {
-        screen.currentBuffer().scrollUp(3);
+        screen.scrollUp(3);
         REQUIRE("   \n   \n   \n" == screen.renderText());
     }
 
     SECTION("clamped") {
-        screen.currentBuffer().scrollUp(4);
+        screen.scrollUp(4);
         REQUIRE("   \n   \n   \n" == screen.renderText());
     }
 }
@@ -830,12 +834,12 @@ TEST_CASE("ScrollDown", "[screen]")
         screen.setMode(Mode::Origin, true);
 
         SECTION("SD 1") {
-            screen.currentBuffer().scrollDown(1);
+            screen.scrollDown(1);
             CHECK("12345\n6   0\nA789E\nFBCDJ\nKLMNO\n" == screen.renderText());
         }
 
         SECTION("SD 2") {
-            screen.currentBuffer().scrollDown(2);
+            screen.scrollDown(2);
             CHECK(
                 "12345\n"
                 "6   0\n"
@@ -845,7 +849,7 @@ TEST_CASE("ScrollDown", "[screen]")
         }
 
         SECTION("SD 3") {
-            screen.currentBuffer().scrollDown(3);
+            screen.scrollDown(3);
             CHECK(
                 "12345\n"
                 "6   0\n"
@@ -858,7 +862,7 @@ TEST_CASE("ScrollDown", "[screen]")
     SECTION("vertical margins") {
         screen.setTopBottomMargin(2, 4);
         SECTION("SD 0") {
-            screen.currentBuffer().scrollDown(0);
+            screen.scrollDown(0);
             REQUIRE(
                 "12345\n"
                 "67890\n"
@@ -868,7 +872,7 @@ TEST_CASE("ScrollDown", "[screen]")
         }
 
         SECTION("SD 1") {
-            screen.currentBuffer().scrollDown(1);
+            screen.scrollDown(1);
             REQUIRE(
                 "12345\n"
                 "     \n"
@@ -878,7 +882,7 @@ TEST_CASE("ScrollDown", "[screen]")
         }
 
         SECTION("SD 3") {
-            screen.currentBuffer().scrollDown(5);
+            screen.scrollDown(5);
             REQUIRE(
                 "12345\n"
                 "     \n"
@@ -888,7 +892,7 @@ TEST_CASE("ScrollDown", "[screen]")
         }
 
         SECTION("SD 4 clamped") {
-            screen.currentBuffer().scrollDown(4);
+            screen.scrollDown(4);
             REQUIRE(
                 "12345\n"
                 "     \n"
@@ -900,7 +904,7 @@ TEST_CASE("ScrollDown", "[screen]")
 
     SECTION("no custom margins") {
         SECTION("SD 0") {
-            screen.currentBuffer().scrollDown(0);
+            screen.scrollDown(0);
             REQUIRE(
                 "12345\n"
                 "67890\n"
@@ -909,7 +913,7 @@ TEST_CASE("ScrollDown", "[screen]")
                 "KLMNO\n" == screen.renderText());
         }
         SECTION("SD 1") {
-            screen.currentBuffer().scrollDown(1);
+            screen.scrollDown(1);
             REQUIRE(
                 "     \n"
                 "12345\n"
@@ -919,7 +923,7 @@ TEST_CASE("ScrollDown", "[screen]")
                 == screen.renderText());
         }
         SECTION("SD 5") {
-            screen.currentBuffer().scrollDown(5);
+            screen.scrollDown(5);
             REQUIRE(
                 "     \n"
                 "     \n"
@@ -929,7 +933,7 @@ TEST_CASE("ScrollDown", "[screen]")
                 == screen.renderText());
         }
         SECTION("SD 6 clamped") {
-            screen.currentBuffer().scrollDown(6);
+            screen.scrollDown(6);
             REQUIRE(
                 "     \n"
                 "     \n"
@@ -2257,7 +2261,7 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
 TEST_CASE("resize", "[screen]")
 {
     auto screen = MockScreen{{2, 2}};
-    screen.write("AB\r\nCD");
+    screen.write("ABCD");
     REQUIRE("AB\nCD\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
@@ -2271,7 +2275,12 @@ TEST_CASE("resize", "[screen]")
         REQUIRE("AB\nCD\n  \n" == screen.renderText());
         REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
 
-        screen.write("EF");
+        screen.write("\r\n");
+        screen.write("E");
+        REQUIRE("AB\nCD\nE \n" == screen.renderText());
+        REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
+
+        screen.write("F");
         REQUIRE("AB\nCD\nEF\n" == screen.renderText());
         REQUIRE(screen.cursorPosition() == Coordinate{3, 2});
     }

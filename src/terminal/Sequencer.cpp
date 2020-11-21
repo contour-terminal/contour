@@ -1064,6 +1064,8 @@ void Sequencer::handleSequence()
     }
     else
         std::cerr << fmt::format("Unknown VT sequence: {}\n", sequence_);
+
+    screen_.verifyState();
 }
 
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
@@ -1150,11 +1152,11 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             });
             break;
         case SCOSC: screen_.saveCursor(); break;
-        case SD: screen_.currentBuffer().scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case SETMARK: screen_.setMark(); break;
         case SGR: return simpl::dispatchSGR(_seq, screen_);
         case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { simpl::setMode(_seq, i, true, screen_); }); break;
-        case SU: screen_.currentBuffer().scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
         case TBC: return simpl::TBC(_seq, screen_);
         case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;
         case WINMANIP: return simpl::WINDOWMANIP(_seq, screen_);

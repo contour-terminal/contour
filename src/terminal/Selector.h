@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/ScreenBuffer.h>
+#include <terminal/Screen.h>
 #include <terminal/Size.h>          // Coordinate
 
 #include <crispy/utils.h>
@@ -72,7 +72,6 @@ class Selector {
     };
 
 
-    using Renderer = ScreenBuffer::Renderer;
     enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
 	using GetCellAt = std::function<Cell const*(Coordinate const&)>;
 
