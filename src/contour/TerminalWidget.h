@@ -110,7 +110,7 @@ class TerminalWidget :
     std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);
 
-    void onScreenBufferChanged(terminal::ScreenBuffer::Type _type);
+    void onScreenBufferChanged(terminal::ScreenType _type);
 
     float contentScale() const;
 
@@ -130,7 +130,7 @@ class TerminalWidget :
     void createScrollBar();
 
     void bell() override;
-    void bufferChanged(terminal::ScreenBuffer::Type) override;
+    void bufferChanged(terminal::ScreenType) override;
     void commands() override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;

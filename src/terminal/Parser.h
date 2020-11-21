@@ -752,6 +752,7 @@ inline void Parser::parseFragment(iterator _begin, iterator _end)
 
     for (auto const current : crispy::range(_begin, _end))
     {
+#if 0
         std::visit(
             overloaded{
                 [&](unicode::Incomplete) {},
@@ -766,6 +767,13 @@ inline void Parser::parseFragment(iterator _begin, iterator _end)
             },
             unicode::from_utf8(utf8DecoderState_, current)
         );
+#else
+        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
+        if (std::holds_alternative<unicode::Success>(r))
+            processInput(std::get<unicode::Success>(r).value);
+        else if (std::holds_alternative<unicode::Invalid>(r))
+            processInput(ReplacementCharacter);
+#endif
     }
 }
 

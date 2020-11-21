@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/ScreenBuffer.h> // ScreenBuffer::Type
 #include <terminal/Sequencer.h>
 
 #include <optional>
@@ -23,13 +22,20 @@
 
 namespace terminal {
 
+class Image;
+
+enum class ScreenType {
+    Main = 0,
+    Alternate = 1
+};
+
 class ScreenEvents {
   public:
     virtual ~ScreenEvents() = default;
 
     virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
     virtual void bell() {}
-    virtual void bufferChanged(ScreenBuffer::Type) {}
+    virtual void bufferChanged(ScreenType) {}
     virtual void scrollbackBufferCleared() {}
     virtual void commands() {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}

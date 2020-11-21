@@ -256,7 +256,7 @@ void TerminalView::bell()
     events_.bell();
 }
 
-void TerminalView::bufferChanged(ScreenBuffer::Type _type)
+void TerminalView::bufferChanged(ScreenType _type)
 {
     events_.bufferChanged(_type);
 }

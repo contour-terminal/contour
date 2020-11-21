@@ -26,7 +26,6 @@ set(terminal_HEADERS
     pty/UnixPty.h
     pty/ConPty.h
     Screen.h
-    ScreenBuffer.h
     Selector.h
     Sequencer.h
     SixelParser.h
@@ -44,7 +43,6 @@ set(terminal_SOURCES
     Parser.cpp
     Process.cpp
     Screen.cpp
-    ScreenBuffer.cpp
     Sequencer.cpp
     Selector.cpp
     SixelParser.cpp
