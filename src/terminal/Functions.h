@@ -327,7 +327,7 @@ constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, "RCOLORHIGHLIGHTBG", 
 constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
 constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
 
-inline auto const& functions()
+inline auto const& functions() noexcept
 {
     static auto const funcs = []() constexpr { // {{{
         auto f = std::array{
@@ -458,7 +458,7 @@ inline auto const& functions()
 /// Selects a FunctionDefinition based on a FunctionSelector.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-FunctionDefinition const* select(FunctionSelector const& _selector);
+FunctionDefinition const* select(FunctionSelector const& _selector) noexcept;
 
 /// Selects a FunctionDefinition based on given input Escape sequence fields.
 ///
@@ -498,6 +498,86 @@ inline FunctionDefinition const* selectControl(char _leader, int _argc, char _in
 inline FunctionDefinition const* selectOSCommand(int _id)
 {
     return select({FunctionCategory::OSC, 0, _id, 0, 0});
+}
+
+/// Tests if given function can be batched with regards to synchronized output (SM/RM ?2026).
+constexpr bool isBatchable(FunctionDefinition const& _function)
+{
+    switch (_function)
+    {
+        // C0
+        case BS:
+        case TAB:
+        case LF:
+        case VT:
+        case FF:
+        case CR:
+
+        // ESC
+        case SCS_G0_SPECIAL:
+        case SCS_G0_USASCII:
+        case SCS_G1_SPECIAL:
+        case SCS_G1_USASCII:
+        case DECALN:
+        case DECBI:
+        case DECFI:
+        case DECRS:
+        case DECSC:
+        case HTS:
+        case IND:
+        case NEL:
+        case RI:
+        case SS2:
+        case SS3:
+
+        // CSI
+        case ANSISYSSC:
+        case CBT:
+        case CHA:
+        case CHT:
+        case CNL:
+        case CPL:
+        case CUB:
+        case CUD:
+        case CUF:
+        case CUP:
+        case CUU:
+        case DCH:
+        case DECDC:
+        case DECIC:
+        case DECSCUSR:
+        case DECSLRM:
+        case DECSTBM:
+        case DL:
+        case ECH:
+        case ED:
+        case EL:
+        case HPA:
+        case HPR:
+        case HVP:
+        case ICH:
+        case IL:
+        case SCOSC:
+        case SD:
+        case SETMARK:
+        case SGR:
+        case SU:
+        case TBC:
+        case VPA:
+
+        // OSC
+        case HYPERLINK:
+        case RCOLORFG:
+        case RCOLORBG:
+        case RCOLORCURSOR:
+        case RCOLORMOUSEFG:
+        case RCOLORMOUSEBG:
+        case RCOLORHIGHLIGHTFG:
+        case RCOLORHIGHLIGHTBG:
+            return true;
+        default:
+            return false;
+    }
 }
 
 } // end namespace

@@ -43,7 +43,7 @@ using std::stringstream;
 
 namespace terminal {
 
-FunctionDefinition const* select(FunctionSelector const& _selector)
+FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
 {
     auto static const& funcs = functions();
 
