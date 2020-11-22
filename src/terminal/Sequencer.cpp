@@ -101,7 +101,7 @@ namespace // {{{ helpers
     // }
 } // }}}
 
-namespace simpl // {{{ some command generator helpers
+namespace impl // {{{ some command generator helpers
 {
     ApplyResult setMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen& _screen)
 	{
@@ -1204,7 +1204,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case CHT: screen_.cursorForwardTab(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CNL: screen_.moveCursorToNextLine(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CPL: screen_.moveCursorToPrevLine(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CPR: return simpl::CPR(_seq, screen_);
+        case CPR: return impl::CPR(_seq, screen_);
         case CUB: screen_.moveCursorBackward(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CUD: screen_.moveCursorDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CUF: screen_.moveCursorForward(_seq.param_or(0, Sequence::Parameter{1})); break;
@@ -1218,22 +1218,22 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECRM:
             for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-                simpl::setModeDEC(_seq, i, false, screen_);
+                impl::setModeDEC(_seq, i, false, screen_);
             });
             break;
-        case DECRQM: return simpl::requestModeDEC(_seq, _seq.param(0));
-        case DECRQM_ANSI: return simpl::requestMode(_seq, _seq.param(0));
-        case DECRQPSR: return simpl::DECRQPSR(_seq, screen_);
-        case DECSCUSR: return simpl::DECSCUSR(_seq, screen_);
+        case DECRQM: return impl::requestModeDEC(_seq, _seq.param(0));
+        case DECRQM_ANSI: return impl::requestMode(_seq, _seq.param(0));
+        case DECRQPSR: return impl::DECRQPSR(_seq, screen_);
+        case DECSCUSR: return impl::DECSCUSR(_seq, screen_);
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
-        case DECSM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { simpl::setModeDEC(_seq, i, true, screen_); }); break;
+        case DECSM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSTR: screen_.resetSoft(); break;
         case DECXCPR: screen_.reportExtendedCursorPosition(); break;
         case DL: screen_.deleteLines(_seq.param_or(0, Sequence::Parameter{1})); break;
         case ECH: screen_.eraseCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case ED: return simpl::ED(_seq, screen_);
-        case EL: return simpl::EL(_seq, screen_);
+        case ED: return impl::ED(_seq, screen_);
+        case EL: return impl::EL(_seq, screen_);
         case HPA: screen_.moveCursorToColumn(_seq.param(0)); break;
         case HPR: screen_.moveCursorForward(_seq.param(0)); break;
         case HVP: screen_.moveCursorTo(Coordinate{_seq.param_or(0, Sequence::Parameter{1}), _seq.param_or(1, Sequence::Parameter{1})}); break; // YES, it's like a CUP!
@@ -1241,21 +1241,21 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
         case RM:
             for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-                simpl::setMode(_seq, i, false, screen_);
+                impl::setMode(_seq, i, false, screen_);
             });
             break;
         case SCOSC: screen_.saveCursor(); break;
         case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case SETMARK: screen_.setMark(); break;
-        case SGR: return simpl::dispatchSGR(_seq, screen_);
-        case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { simpl::setMode(_seq, i, true, screen_); }); break;
+        case SGR: return impl::dispatchSGR(_seq, screen_);
+        case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setMode(_seq, i, true, screen_); }); break;
         case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case TBC: return simpl::TBC(_seq, screen_);
+        case TBC: return impl::TBC(_seq, screen_);
         case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case WINMANIP: return simpl::WINDOWMANIP(_seq, screen_);
-        case DECMODERESTORE: return simpl::restoreDECModes(_seq, screen_);
-        case DECMODESAVE: return simpl::saveDECModes(_seq, screen_);
-        case XTSMGRAPHICS: return simpl::XTSMGRAPHICS(_seq, screen_);
+        case WINMANIP: return impl::WINDOWMANIP(_seq, screen_);
+        case DECMODERESTORE: return impl::restoreDECModes(_seq, screen_);
+        case DECMODESAVE: return impl::saveDECModes(_seq, screen_);
+        case XTSMGRAPHICS: return impl::XTSMGRAPHICS(_seq, screen_);
 
         // OSC
         case SETTITLE:
@@ -1267,14 +1267,14 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             return ApplyResult::Unsupported;
         case SETWINTITLE: screen_.setWindowTitle(_seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
-        case HYPERLINK: return simpl::HYPERLINK(_seq, screen_);
-        case COLORFG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultForegroundColor);
-        case COLORBG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultBackgroundColor);
-        case COLORCURSOR: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::TextCursorColor);
-        case COLORMOUSEFG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseForegroundColor);
-        case COLORMOUSEBG: return simpl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseBackgroundColor);
-        case CLIPBOARD: return simpl::clipboard(_seq, screen_);
-        // TODO: case COLORSPECIAL: return simpl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
+        case HYPERLINK: return impl::HYPERLINK(_seq, screen_);
+        case COLORFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultForegroundColor);
+        case COLORBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultBackgroundColor);
+        case COLORCURSOR: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::TextCursorColor);
+        case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseForegroundColor);
+        case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseBackgroundColor);
+        case CLIPBOARD: return impl::clipboard(_seq, screen_);
+        // TODO: case COLORSPECIAL: return impl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: screen_.resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
         case RCOLORBG: screen_.resetDynamicColor(DynamicColorName::DefaultBackgroundColor); break;
         case RCOLORCURSOR: screen_.resetDynamicColor(DynamicColorName::TextCursorColor); break;
@@ -1282,7 +1282,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case RCOLORMOUSEBG: screen_.resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
         case RCOLORHIGHLIGHTFG: screen_.resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
         case RCOLORHIGHLIGHTBG: screen_.resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
-        case NOTIFY: return simpl::NOTIFY(_seq, screen_);
+        case NOTIFY: return impl::NOTIFY(_seq, screen_);
         case DUMPSTATE: screen_.dumpState(); break;
         default: return ApplyResult::Unsupported;
     }
