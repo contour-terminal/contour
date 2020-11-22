@@ -433,6 +433,126 @@ enum class ApplyResult {
 };
 // }}}
 
+/// Helps constructing VT functions as they're being parsed by the VT parser.
+class Sequence {
+  public:
+    using Parameter = int;
+    using ParameterList = std::vector<std::vector<Parameter>>;
+    using Intermediaries = std::string;
+    using DataString = std::string;
+
+  private:
+    FunctionCategory category_;
+    char leaderSymbol_ = 0;
+    ParameterList parameters_;
+    Intermediaries intermediateCharacters_;
+    char finalChar_ = 0;
+    DataString dataString_;
+
+  public:
+    size_t constexpr static MaxParameters = 16;
+    size_t constexpr static MaxSubParameters = 8;
+
+    Sequence()
+    {
+        parameters_.resize(MaxParameters);
+        for (auto& param : parameters_)
+            param.reserve(MaxSubParameters);
+        parameters_.clear();
+    }
+
+    // mutators
+    //
+    void clear()
+    {
+        category_ = FunctionCategory::C0;
+        leaderSymbol_ = 0;
+        intermediateCharacters_.clear();
+        parameters_.clear();
+        finalChar_ = 0;
+        dataString_.clear();
+    }
+
+    void setCategory(FunctionCategory _cat) noexcept { category_ = _cat; }
+    void setLeader(char _ch) noexcept { leaderSymbol_ = _ch; }
+    ParameterList& parameters() noexcept { return parameters_; }
+    Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
+    void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
+
+    DataString const& dataString() const noexcept { return dataString_; }
+    DataString& dataString() noexcept { return dataString_; }
+
+    /// @returns this VT-sequence into a human readable string form.
+    std::string text() const;
+
+    /// @returns the raw VT-sequence string.
+    std::string raw() const;
+
+    /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding FunctionDefinition.
+    FunctionSelector selector() const noexcept
+    {
+        switch (category_)
+        {
+            case FunctionCategory::OSC:
+                return FunctionSelector{category_, 0, parameters_[0][0], 0, 0};
+            default:
+            {
+                // Only support CSI sequences with 0 or 1 intermediate characters.
+                char const intermediate = intermediateCharacters_.size() == 1
+                    ? static_cast<char>(intermediateCharacters_[0])
+                    : char{};
+
+                return FunctionSelector{category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_};
+            }
+        }
+    }
+
+    // accessors
+    //
+    FunctionCategory category() const noexcept { return category_; }
+    Intermediaries const& intermediateCharacters() const noexcept { return intermediateCharacters_; }
+    char finalChar() const noexcept { return finalChar_; }
+
+    ParameterList const& parameters() const noexcept { return parameters_; }
+    size_t parameterCount() const noexcept { return parameters_.size(); }
+    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
+
+    std::optional<Parameter> param_opt(size_t _index) const noexcept
+    {
+        if (_index < parameters_.size() && parameters_[_index][0])
+            return {parameters_[_index][0]};
+        else
+            return std::nullopt;
+    }
+
+    Parameter param_or(size_t _index, Parameter _defaultValue) const noexcept
+    {
+        return param_opt(_index).value_or(_defaultValue);
+    }
+
+    int param(size_t _index) const noexcept
+    {
+        assert(_index < parameters_.size());
+        assert(0 < parameters_[_index].size());
+        return parameters_[_index][0];
+    }
+
+    int subparam(size_t _index, size_t _subIndex) const noexcept
+    {
+        assert(_index < parameters_.size());
+        assert(_subIndex + 1 < parameters_[_index].size());
+        return parameters_[_index][_subIndex + 1];
+    }
+
+    bool containsParameter(int _value) const noexcept
+    {
+        for (size_t i = 0; i < parameterCount(); ++i)
+            if (param(i) == _value)
+                return true;
+        return false;
+    }
+};
+
 /// Sequencer - The semantic VT analyzer layer.
 ///
 /// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
@@ -520,7 +640,7 @@ class Sequencer : public ParserEvents {
 
 }  // namespace terminal
 
-namespace fmt {
+namespace fmt { // {{{
     template <>
     struct formatter<terminal::Mode> {
         template <typename ParseContext>
@@ -596,4 +716,15 @@ namespace fmt {
             return format_to(ctx.out(), "({})", static_cast<int>(name));
         }
     };
-}
+
+    template <>
+    struct formatter<terminal::Sequence> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Sequence const& seq, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}", seq.text());
+        }
+    };
+} // }}}
