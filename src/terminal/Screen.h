@@ -569,6 +569,7 @@ class Screen {
     void moveCursorUp(int _n);            // CUU
 
     void cursorBackwardTab(int _n);       // CBT
+    void cursorForwardTab(int _n);        // CHT
     void backspace();                     // BS
     void horizontalTabClear(HorizontalTabClear::Which _which); // TBC
     void horizontalTabSet();              // HTS
