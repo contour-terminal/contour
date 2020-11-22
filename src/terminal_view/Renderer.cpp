@@ -186,8 +186,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
         auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
 
-        if (!pressure)
-            renderCursor(_terminal);
+        renderCursor(_terminal);
 
         if (!pressure && _terminal.screen().contains(_currentMousePosition))
         {
