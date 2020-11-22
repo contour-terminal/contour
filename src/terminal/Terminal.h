@@ -286,7 +286,7 @@ class Terminal : public ScreenEvents {
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
     Screen screen_;
-    std::recursive_mutex mutable screenLock_;
+    std::mutex mutable screenLock_;
     std::thread screenUpdateThread_;
     Viewport viewport_;
     std::unique_ptr<Selector> selector_;
