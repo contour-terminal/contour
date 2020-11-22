@@ -490,8 +490,10 @@ void TerminalWidget::onFrameSwapped()
         {
             case State::DirtyIdle:
                 //assert(!"The impossible happened, painting but painting. Shakesbeer.");
-                printf("The impossible happened, painting but painting. Shakesbeer.\n");
-                [[fallthrough]];
+                qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
+                renderingPressure_ = false;
+                update();
+                return;
             case State::DirtyPainting:
                 // FIXME: Qt/Wayland!
                 // QCoreApplication::postEvent() works on both, but horrorble performance
