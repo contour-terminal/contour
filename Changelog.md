@@ -5,7 +5,10 @@
 - Fixes Single-click into the window accidentally starting a selection.
 - Fixes font family change in live config reload.
 - Fixes config `initial_working_directory`'s' ~ (tilde) expansion failing to chdir, if followed by a `/`.
+- Refactoring various internal parts to improve code quality.
 - Adds scrollbar and configuration for scrollbar.
+- Adds input mapping for `Shift+Tab` (`CSI Z`)
+- Adds VT sequence `CHT`.
 
 #### prerelease 3
 
