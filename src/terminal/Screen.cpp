@@ -1505,6 +1505,13 @@ void Screen::notify(string const& _title, string const& _content)
     eventListener_.notify(_title, _content);
 }
 
+void Screen::cursorForwardTab(int _count)
+{
+    printf("CHT: %d\n", _count);
+    for (int i = 0; i < _count; ++i)
+        moveCursorToNextTab();
+}
+
 void Screen::cursorBackwardTab(int _count)
 {
     if (_count == 0)

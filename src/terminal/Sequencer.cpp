@@ -1109,6 +1109,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case ANSISYSSC: screen_.restoreCursor(); break;
         case CBT: screen_.cursorBackwardTab(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CHA: screen_.moveCursorToColumn(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case CHT: screen_.cursorForwardTab(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CNL: screen_.moveCursorToNextLine(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CPL: screen_.moveCursorToPrevLine(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CPR: return simpl::CPR(_seq, screen_);
