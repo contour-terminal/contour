@@ -304,7 +304,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::MouseSGR: return "?1006";
         case Mode::MouseURXVT: return "?1015";
         case Mode::MouseAlternateScroll: return "?1007";
-        case Mode::BatchedRendering: return "2026";
+        case Mode::BatchedRendering: return "?2026";
     }
     return "0";
 }
@@ -488,6 +488,11 @@ class Sequence {
     /// @returns the raw VT-sequence string.
     std::string raw() const;
 
+    FunctionDefinition const* functionDefinition() const noexcept
+    {
+        return select(selector());
+    }
+
     /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding FunctionDefinition.
     FunctionSelector selector() const noexcept
     {
@@ -610,6 +615,8 @@ class Sequencer : public ParserEvents {
     void hookSixel(Sequence const& _ctx);
     void hookDECRQSS(Sequence const& _ctx);
 
+    void flushBatchedSequences();
+
     ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
     template <typename Event, typename... Args>
@@ -624,7 +631,7 @@ class Sequencer : public ParserEvents {
     Screen& screen_;
     bool batching_ = false;
     int64_t instructionCounter_ = 0;
-    using Batchable = std::variant<Sequence, SixelImage>;
+    using Batchable = std::variant<char32_t, Sequence, SixelImage>;
     std::vector<Batchable> batchedSequences_;
 
     Logger const logger_;

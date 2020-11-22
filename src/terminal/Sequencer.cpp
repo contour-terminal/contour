@@ -36,6 +36,8 @@
 #include <vector>
 
 using std::array;
+using std::get;
+using std::holds_alternative;
 using std::make_shared;
 using std::make_unique;
 using std::min;
@@ -874,8 +876,13 @@ void Sequencer::error(std::string_view const& _errorString)
 
 void Sequencer::print(char32_t _char)
 {
-    instructionCounter_++;
-    screen_.writeText(_char);
+    if (batching_)
+        batchedSequences_.emplace_back(_char);
+    else
+    {
+        instructionCounter_++;
+        screen_.writeText(_char);
+    }
 }
 
 void Sequencer::execute(char _controlCode)
@@ -951,7 +958,7 @@ void Sequencer::hook(char _finalChar)
     instructionCounter_++;
     sequence_.setCategory(FunctionCategory::DCS);
     sequence_.setFinalChar(_finalChar);
-    if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
+    if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
         if (*funcSpec == DECSIXEL)
             hookSixel(sequence_);
@@ -1129,27 +1136,24 @@ void Sequencer::handleSequence()
 #endif
 
     instructionCounter_++;
-    if (FunctionDefinition const* funcSpec = select(sequence_.selector()); funcSpec != nullptr)
+    if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
 #if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
         if (*funcSpec == DECSM && sequence_.containsParameter(2026))
         {
             batching_ = true;
-            // TODO: apply other modes
+            apply(*funcSpec, sequence_);
         }
         else if (*funcSpec == DECRM && sequence_.containsParameter(2026))
         {
             batching_ = false;
-            // TODO: apply other modes
-            for (auto const& batched : batchedSequences_)
-            {
-                (void) batched; // TODO: apply() batched sequence or DCS (SixelImage, DECRQSS)
-            }
+            flushBatchedSequences();
+            apply(*funcSpec, sequence_);
         }
-        else if (batching_)
-            // TODO: Not all functions should be batched...
-            //       like: if (!tryBatch(*funcSpec, sequence_)) { apply(*funcSpec, sequence_); }
+        else if (batching_ && isBatchable(*funcSpec))
+        {
             batchedSequences_.emplace_back(sequence_);
+        }
         else
 #endif
             apply(*funcSpec, sequence_);
@@ -1160,10 +1164,38 @@ void Sequencer::handleSequence()
     screen_.verifyState();
 }
 
+void Sequencer::flushBatchedSequences()
+{
+    for (auto const& batchable : batchedSequences_)
+    {
+        if (holds_alternative<char32_t>(batchable))
+            print(get<char32_t>(batchable));
+        else if (holds_alternative<Sequence>(batchable))
+        {
+            auto const& seq = get<Sequence>(batchable);
+            if (FunctionDefinition const* spec = seq.functionDefinition(); spec != nullptr)
+                apply(*spec, seq);
+        }
+        else if (holds_alternative<SixelImage>(batchable))
+        {
+            auto const& si = get<SixelImage>(batchable);
+            screen_.sixelImage(si.size, si.rgba);
+        }
+    }
+    batchedSequences_.clear();
+}
+
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
 ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const& _seq)
 {
-    batchedSequences_.emplace_back(sequence_);
+#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
+    if (batching_ && isBatchable(_function))
+    {
+        batchedSequences_.emplace_back(_seq);
+        return ApplyResult::Ok;
+    }
+#endif
+
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionDefinition
     switch (_function)
@@ -1288,72 +1320,6 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
     }
     return ApplyResult::Ok;
 }
-
-// TODO: this is the list of batchable seqs
-#if 0
-    AppendChar
-    BackIndex
-    Backspace
-    ClearLine
-    ClearScreen
-    ClearScrollbackBuffer
-    ClearToBeginOfLine
-    ClearToBeginOfScreen
-    ClearToEndOfLine
-    ClearToEndOfScreen
-    CursorBackwardTab
-    CursorNextLine
-    CursorPreviousLine
-    DeleteCharacters
-    DeleteColumns
-    DeleteLines
-    DesignateCharset
-    EraseCharacters
-    ForwardIndex
-    FullReset
-    HorizontalPositionAbsolute
-    HorizontalPositionRelative
-    HorizontalTabClear
-    HorizontalTabSet
-    Hyperlink
-    Index
-    InsertCharacters
-    InsertColumns
-    InsertLines
-    InvalidCommand
-    Linefeed
-    MoveCursorBackward
-    MoveCursorDown
-    MoveCursorForward
-    MoveCursorTo
-    MoveCursorToBeginOfLine
-    MoveCursorToColumn
-    MoveCursorToLine
-    MoveCursorToNextTab
-    MoveCursorUp
-    ResetDynamicColor
-    ResizeWindow
-    RestoreCursor
-    RestoreMode
-    ReverseIndex
-    SaveCursor
-    SaveMode
-    ScreenAlignmentPattern
-    ScrollDown
-    ScrollUp
-    SetBackgroundColor
-    SetCursorStyle
-    SetDynamicColor
-    SetForegroundColor
-    SetGraphicsRendition
-    SetLeftRightMargin
-    SetMark
-    SetTopBottomMargin
-    SetUnderlineColor
-    SingleShiftSelect
-    SixelImage
-    XtSmGraphics
-#endif
 
 std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
 {
