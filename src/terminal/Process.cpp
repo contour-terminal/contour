@@ -415,7 +415,11 @@ std::string Process::loginShell()
 FileSystem::path Process::homeDirectory()
 {
 #if defined(_WIN32)
-    return FileSystem::path("/"); // TODO
+
+    if (char const* p = getenv("USERPROFILE"); p && *p)
+        return FileSystem::path(p);
+
+    return FileSystem::path("/");
 #else
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
         return FileSystem::path(pw->pw_dir);
