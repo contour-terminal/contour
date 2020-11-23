@@ -1073,6 +1073,11 @@ class Viewport { // {{{
         if (scrollingDisabled())
             return false;
 
+        return forceScrollToBottom();
+    }
+
+    bool forceScrollToBottom()
+    {
         if (scrollOffset_.has_value())
         {
             scrollOffset_.reset();
