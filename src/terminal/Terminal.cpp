@@ -403,7 +403,7 @@ void Terminal::bell()
 void Terminal::bufferChanged(ScreenType _type)
 {
     selector_.reset();
-    viewport_.scrollToBottom();
+    viewport_.forceScrollToBottom();
     eventListener_.bufferChanged(_type);
 }
 
