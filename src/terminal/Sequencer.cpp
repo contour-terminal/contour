@@ -142,6 +142,7 @@ namespace impl // {{{ some command generator helpers
             // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
             // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
             // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
+            case 40: return Mode::AllowColumns80to132;
             // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
             // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
             // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
@@ -1347,6 +1348,7 @@ std::string to_string(Mode _mode)
         case Mode::BlinkingCursor: return "BlinkingCursor";
         case Mode::VisibleCursor: return "VisibleCursor";
         case Mode::ShowScrollbar: return "ShowScrollbar";
+        case Mode::AllowColumns80to132: return "AllowColumns80to132";
         case Mode::UseAlternateScreen: return "UseAlternateScreen";
         case Mode::BracketedPaste: return "BracketedPaste";
         case Mode::FocusTracking: return "FocusTracking";

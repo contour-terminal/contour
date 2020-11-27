@@ -1737,28 +1737,25 @@ void Screen::setMode(Mode _mode, bool _enable)
             cursor_.originMode = _enable;
             break;
         case Mode::Columns132:
-        {
-            if (_enable != isModeEnabled(Mode::Columns132))
+            if (!_enable || isModeEnabled(Mode::AllowColumns80to132))
             {
-                // TODO: Well, should we also actually set column width to 132 or 80?
                 clearScreen();
                 setTopBottomMargin(1, size().height);    // DECSTBM
                 setLeftRightMargin(1, size().width); // DECRLM
+
+                int const columns = _enable ? 132 : 80;
+                int const rows = size_.height;
+                bool constexpr unitInPixels = false;
+
+                // Pre-resize in case the event callback right after is not actually resizing the window
+                // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
+                resize(Size{columns, rows});
+
+                eventListener_.resizeWindow(columns, rows, unitInPixels);
+
+                setMode(Mode::LeftRightMargin, false);
             }
-
-            int const columns = _enable ? 132 : 80;
-            int const rows = size().height;
-            bool const unitInPixels = false;
-
-            // Pre-resize in case the event callback right after is not actually resizing the window
-            // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
-            resize(Size{columns, rows});
-
-            eventListener_.resizeWindow(columns, rows, unitInPixels);
-
-            setMode(Mode::LeftRightMargin, false);
             break;
-        }
         case Mode::BatchedRendering:
             // Only perform batched rendering when NOT in debugging mode.
             // TODO: also, do I still need this here?
