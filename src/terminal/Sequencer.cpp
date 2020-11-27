@@ -105,7 +105,7 @@ namespace // {{{ helpers
 
 namespace impl // {{{ some command generator helpers
 {
-    ApplyResult setMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen& _screen)
+    ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen& _screen)
 	{
 		switch (_seq.param(_modeIndex))
 		{
@@ -132,13 +132,23 @@ namespace impl // {{{ some command generator helpers
             case 5: return Mode::ReverseVideo;
             case 6: return Mode::Origin;
             case 7: return Mode::AutoWrap;
+            // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
             case 9: return Mode::MouseProtocolX10;
             case 10: return Mode::ShowToolbar;
             case 12: return Mode::BlinkingCursor;
             case 19: return Mode::PrinterExtend;
             case 25: return Mode::VisibleCursor;
             case 30: return Mode::ShowScrollbar;
+            // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
+            // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
+            // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
+            // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
+            // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
+            // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
+            // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
             case 47: return Mode::UseAlternateScreen;
+            // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
+            // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the backarrowKey resource to "true".
             case 69: return Mode::LeftRightMargin;
             case 80: return Mode::SixelScrolling;
             case 1000: return Mode::MouseProtocolNormalTracking;
@@ -163,46 +173,8 @@ namespace impl // {{{ some command generator helpers
 	{
         if (auto const modeOpt = toDECMode(_seq.param(_modeIndex)); modeOpt.has_value())
         {
-            switch (modeOpt.value())
-            {
-                case Mode::MouseProtocolX10:
-                    _screen.sendMouseEvents(MouseProtocol::X10, _enable);
-                    return ApplyResult::Ok;
-                case Mode::MouseProtocolNormalTracking:
-                    _screen.sendMouseEvents(MouseProtocol::NormalTracking, _enable);
-                    return ApplyResult::Ok;
-                case Mode::MouseProtocolHighlightTracking:
-                    _screen.sendMouseEvents(MouseProtocol::HighlightTracking, _enable);
-                    return ApplyResult::Ok;
-                case Mode::MouseProtocolButtonTracking:
-                    _screen.sendMouseEvents(MouseProtocol::ButtonTracking, _enable);
-                    return ApplyResult::Ok;
-                case Mode::MouseProtocolAnyEventTracking:
-                    _screen.sendMouseEvents(MouseProtocol::AnyEventTracking, _enable);
-                    return ApplyResult::Ok;
-                case Mode::SaveCursor:
-                    if (_enable)
-                        _screen.saveCursor();
-                    else
-                        _screen.restoreCursor();
-                    return ApplyResult::Ok;
-                case Mode::ExtendedAltScreen:
-                    if (_enable)
-                    {
-                        _screen.saveCursor();
-                        _screen.setMode(Mode::UseAlternateScreen, true);
-                        _screen.clearScreen();
-                    }
-                    else
-                    {
-                        _screen.setMode(Mode::UseAlternateScreen, false);
-                        _screen.restoreCursor();
-                    }
-                    return ApplyResult::Ok;
-                default:
-                    _screen.setMode(modeOpt.value(), _enable);
-                    return ApplyResult::Ok;
-            }
+            _screen.setMode(modeOpt.value(), _enable);
+            return ApplyResult::Ok;
         }
         return ApplyResult::Invalid;
 	}
@@ -1273,14 +1245,14 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
         case RM:
             for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-                impl::setMode(_seq, i, false, screen_);
+                impl::setAnsiMode(_seq, i, false, screen_);
             });
             break;
         case SCOSC: screen_.saveCursor(); break;
         case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case SETMARK: screen_.setMark(); break;
         case SGR: return impl::dispatchSGR(_seq, screen_);
-        case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setMode(_seq, i, true, screen_); }); break;
+        case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setAnsiMode(_seq, i, true, screen_); }); break;
         case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
         case TBC: return impl::TBC(_seq, screen_);
         case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;

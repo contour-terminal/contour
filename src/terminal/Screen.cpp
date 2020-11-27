@@ -1810,6 +1810,40 @@ void Screen::setMode(Mode _mode, bool _enable)
             cursor_.visible = _enable;
             eventListener_.setCursorVisibility(_enable);
             break;
+        case Mode::MouseProtocolX10:
+            sendMouseEvents(MouseProtocol::X10, _enable);
+            break;
+        case Mode::MouseProtocolNormalTracking:
+            sendMouseEvents(MouseProtocol::NormalTracking, _enable);
+            break;
+        case Mode::MouseProtocolHighlightTracking:
+            sendMouseEvents(MouseProtocol::HighlightTracking, _enable);
+            break;
+        case Mode::MouseProtocolButtonTracking:
+            sendMouseEvents(MouseProtocol::ButtonTracking, _enable);
+            break;
+        case Mode::MouseProtocolAnyEventTracking:
+            sendMouseEvents(MouseProtocol::AnyEventTracking, _enable);
+            break;
+        case Mode::SaveCursor:
+            if (_enable)
+                saveCursor();
+            else
+                restoreCursor();
+            break;
+        case Mode::ExtendedAltScreen:
+            if (_enable)
+            {
+                saveCursor();
+                setMode(Mode::UseAlternateScreen, true);
+                clearScreen();
+            }
+            else
+            {
+                setMode(Mode::UseAlternateScreen, false);
+                restoreCursor();
+            }
+            break;
         default:
             break;
     }
