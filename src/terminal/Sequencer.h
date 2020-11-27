@@ -152,6 +152,7 @@ enum class Mode {
     BlinkingCursor,
     VisibleCursor, // DECTCEM
     ShowScrollbar,
+    AllowColumns80to132, // ?40
     UseAlternateScreen,
     BracketedPaste,
     FocusTracking, // 1004
@@ -241,6 +242,7 @@ constexpr bool isAnsiMode(Mode m) noexcept
         case Mode::PrinterExtend:
         case Mode::VisibleCursor:
         case Mode::ShowScrollbar:
+        case Mode::AllowColumns80to132:
         case Mode::UseAlternateScreen:
         case Mode::LeftRightMargin:
         case Mode::BracketedPaste:
@@ -288,6 +290,7 @@ constexpr std::string_view to_code(Mode m)
         case Mode::PrinterExtend: return "?19";
         case Mode::VisibleCursor: return "?25";
         case Mode::ShowScrollbar: return "?30";
+        case Mode::AllowColumns80to132: return "?40";
         case Mode::UseAlternateScreen: return "?47";
         case Mode::LeftRightMargin: return "?69";
         case Mode::MouseProtocolNormalTracking: return "?1000";
