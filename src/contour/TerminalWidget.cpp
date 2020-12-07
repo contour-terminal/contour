@@ -13,8 +13,8 @@
  */
 #include <contour/TerminalWidget.h>
 #include <contour/Actions.h>
-#include <terminal/Metrics.h>
 
+#include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
 
 #if defined(_MSC_VER)
@@ -27,12 +27,12 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
 #include <QtCore/QTimer>
+#include <QtNetwork/QHostInfo>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QKeyEvent>
-#include <QtGui/QOpenGLWindow>
 #include <QtGui/QScreen>
-#include <QtNetwork/QHostInfo>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QScrollBar>
 
@@ -359,12 +359,10 @@ namespace // {{{
     }
 } // }}}
 
-TerminalWidget::TerminalWidget(QWidget* _parent,
-                               config::Config _config,
+TerminalWidget::TerminalWidget(config::Config _config,
                                string _profileName,
                                string _programPath) :
-    QOpenGLWidget{ nullptr, 0 },
-    window_{ _parent },
+    QOpenGLWidget(),
     now_{ steady_clock::now() },
     config_{ std::move(_config) },
     profileName_{ std::move(_profileName) },
@@ -403,6 +401,7 @@ TerminalWidget::TerminalWidget(QWidget* _parent,
 
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
+
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
 
@@ -1085,16 +1084,18 @@ bool TerminalWidget::event(QEvent* _event)
 
 bool TerminalWidget::fullscreen() const
 {
-    return false; // TODO: window_->visibility() == QWindow::FullScreen;
+    return windowHandle() && windowHandle()->visibility() == QWindow::FullScreen;
 }
 
 void TerminalWidget::toggleFullScreen()
 {
-    // TODO:
-    // if (window_->visibility() == QWindow::FullScreen)
-    //     window_->setVisibility(QWindow::Windowed);
-    // else
-    //     window_->setVisibility(QWindow::FullScreen);
+    if (!windowHandle())
+        return;
+
+    if (windowHandle()->visibility() == QWindow::FullScreen)
+        windowHandle()->setVisibility(QWindow::Windowed);
+    else
+        windowHandle()->setVisibility(QWindow::FullScreen);
 }
 
 bool TerminalWidget::setFontSize(int _fontSize)
@@ -1519,7 +1520,8 @@ void TerminalWidget::setWindowTitle(std::string_view const& _title)
         auto const title = terminalTitle.empty()
             ? "contour"s
             : fmt::format("{} - contour", terminalTitle);
-        window_->setWindowTitle(QString::fromUtf8(title.c_str()));
+        if (windowHandle())
+            windowHandle()->setTitle(QString::fromUtf8(title.c_str()));
     });
 }
 
@@ -1674,14 +1676,17 @@ QSize TerminalWidget::sizeHint() const
 
 void TerminalWidget::setSize(terminal::Size _size)
 {
+#if !defined(NDEBUG)
     cout << fmt::format("----> setSize! {}\n", _size);
+#endif
 
     profile().terminalSize = _size;
     terminalView_->setTerminalSize(profile().terminalSize);
 
     updateGeometry();
 
-    setScreenDirty();
+    if (setScreenDirty())
+        update();
 }
 
 void TerminalWidget::onClosed()
