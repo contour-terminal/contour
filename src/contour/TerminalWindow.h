@@ -45,7 +45,7 @@ class TerminalWidget;
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
 class TerminalWindow :
-    public QTabWidget, //QMainWindow,
+    public QMainWindow, // QTabWidget
     public terminal::view::TerminalView::Events
 {
     Q_OBJECT
@@ -54,20 +54,26 @@ class TerminalWindow :
     TerminalWindow(config::Config _config, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
-    bool event(QEvent* _event) override;
-    bool focusNextPrevChild(bool) override;
+    //bool event(QEvent* _event) override;
+    //bool focusNextPrevChild(bool) override;
 
   public Q_SLOTS:
     void onTerminalClosed(TerminalWidget* _terminalWidget);
+    void setBackgroundBlur(bool _enable);
+
+#if 0 // XXX if parent is QTabWidget
     void onTabChanged(int _index);
     TerminalWidget* newTab();
+#endif
 
-    void setBackgroundBlur(bool _enable);
+  private:
+    TerminalWidget* createTerminalWidget();
 
   private:
     config::Config config_;
     std::string profileName_;
     std::string programPath_;
+    TerminalWidget* terminalWidget_;
 };
 
 } // namespace contour

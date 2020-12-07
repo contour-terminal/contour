@@ -25,7 +25,6 @@
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
-#include <QtGui/QOpenGLWindow>
 #include <QtGui/QVector4D>
 #include <QtWidgets/QOpenGLWidget>
 #include <QtWidgets/QMainWindow>
@@ -48,8 +47,7 @@ class TerminalWidget :
     Q_OBJECT
 
   public:
-    TerminalWidget(QWidget* _parent,
-                   config::Config _config,
+    TerminalWidget(config::Config _config,
                    std::string _profileName,
                    std::string _programPath);
 
@@ -207,7 +205,6 @@ class TerminalWidget :
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
 
-    QWidget* window_;
     std::chrono::steady_clock::time_point now_;
     config::Config config_;
     std::string profileName_;
