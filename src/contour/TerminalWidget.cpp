@@ -218,7 +218,7 @@ namespace // {{{
     }
 #endif
 
-#if !defined(NDEBUG)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
     void glMessageCallback(
         GLenum _source,
         GLenum _type,
@@ -314,18 +314,37 @@ namespace // {{{
             }
         }();
         auto const tag = []([[maybe_unused]] GLint _type) {
-#if defined(GL_DEBUG_TYPE_ERROR)
-            return  _type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "";
-#else
-            return "";
-#endif
+            switch (_type)
+            {
+            #ifdef GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR
+                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
+            #endif
+            #ifdef GL_DEBUG_TYPE_MARKER
+                case GL_DEBUG_TYPE_MARKER: return "MARKER";
+            #endif
+            #ifdef GL_DEBUG_TYPE_OTHER
+                case GL_DEBUG_TYPE_OTHER: return "OTHER";
+            #endif
+            #ifdef GL_DEBUG_TYPE_PORTABILITY
+                case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
+            #endif
+            #ifdef GL_DEBUG_TYPE_PERFORMANCE
+                case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
+            #endif
+            #ifdef GL_DEBUG_TYPE_ERROR
+                case GL_DEBUG_TYPE_ERROR: return "ERROR";
+            #endif
+                default:
+                    return "UNKNOWN";
+            }
         }(_type);
-        fprintf(
-            stderr,
-            "GL CALLBACK: %s type = %s, source = %s, severity = %s, message = %s\n",
-            tag,
-            typeName.c_str(), sourceName.c_str(), debugSeverity.c_str(), _message
+
+        std::cout << fmt::format(
+            "[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
+            tag, typeName, sourceName, debugSeverity, _message
         );
+        if (_message && _message[strlen(_message) - 1] != '\n')
+            cout << endl;
     }
 #endif
 
@@ -365,10 +384,12 @@ TerminalWidget::TerminalWidget(QWidget* _parent,
     },
     updateTimer_(this)
 {
-    // qDebug() << "TerminalWidget:"
+    // qDebug() << "TerminalWidget.ctor:"
     //     << QString::fromUtf8(fmt::format("{}", config_.profile(config_.defaultProfileName)->terminalSize).c_str())
     //     << "fontSize:" << profile().fontSize
-    //     << "contentScale:" << contentScale();
+    //     << "contentScale:" << contentScale()
+    //     << "geometry:" << geometry()
+    //     ;
 
     setMouseTracking(true);
 
@@ -385,20 +406,14 @@ TerminalWidget::TerminalWidget(QWidget* _parent,
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
 
+    createScrollBar();
+
     updateTimer_.setSingleShot(true);
     connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWidget::blinkingCursorUpdate));
 
-    //TODO: connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
-    createScrollBar();
-
-    // XXX later on, do this only for the first window.
-    QSize const size(
-        static_cast<int>(profile().terminalSize.width * fonts_.regular.first.get().maxAdvance()),
-        static_cast<int>(profile().terminalSize.height * fonts_.regular.first.get().lineHeight())
-    );
-    window_->resize(size);
+    //TODO: connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 }
 
 TerminalWidget::~TerminalWidget()
@@ -530,40 +545,46 @@ void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
-    // {{{ some stats
-    cout << fmt::format("DPI             : {}x{} physical; {}x{} logical\n",
-                        physicalDpiX(), physicalDpiY(),
-                        logicalDpiX(), logicalDpiY());
-    cout << fmt::format("OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
-    cout << fmt::format("OpenGL renderer : {}\n", glGetString(GL_RENDERER));
-    cout << fmt::format("Qt platform     : {}\n", QGuiApplication::platformName().toStdString());
-
-    GLint versionMajor{};
-    GLint versionMinor{};
-    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
-    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-    cout << fmt::format("OpenGL version  : {}.{}\n", versionMajor, versionMinor);
-    cout << fmt::format("GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
-
-    // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
-    // TODO: also take window monitor switches into account
-
-    GLint glslNumShaderVersions{};
-#if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-    glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
-#endif
-    if (glslNumShaderVersions > 0)
+    // {{{ some info
+    static bool infoPrinted = false;
+    if (!infoPrinted)
     {
-        cout << " (";
-        for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
-            if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
-            {
-                cout << (l ? ", " : "") << str;
-                l++;
-            }
-        cout << ')';
+        infoPrinted = true;
+
+        cout << fmt::format("[FYI] DPI             : {}x{} physical; {}x{} logical\n",
+                            physicalDpiX(), physicalDpiY(),
+                            logicalDpiX(), logicalDpiY());
+        cout << fmt::format("[FYI] OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+        cout << fmt::format("[FYI] OpenGL renderer : {}\n", glGetString(GL_RENDERER));
+        cout << fmt::format("[FYI] Qt platform     : {}\n", QGuiApplication::platformName().toStdString());
+
+        GLint versionMajor{};
+        GLint versionMinor{};
+        QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
+        QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
+        cout << fmt::format("[FYI] OpenGL version  : {}.{}\n", versionMajor, versionMinor);
+        cout << fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
+
+        // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
+        // TODO: also take window monitor switches into account
+
+        GLint glslNumShaderVersions{};
+#if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
+        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+#endif
+        if (glslNumShaderVersions > 0)
+        {
+            cout << " (";
+            for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
+                if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
+                {
+                    cout << (l ? ", " : "") << str;
+                    l++;
+                }
+            cout << ')';
+        }
+        cout << "\n";
     }
-    cout << "\n\n";
     // }}}
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
@@ -596,21 +617,32 @@ void TerminalWidget::initializeGL()
         ref(logger_)
     );
 
-    terminalView_->terminal().screen().setLogRaw((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
-    terminalView_->terminal().screen().setLogTrace((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
-    terminalView_->terminal().screen().setTabWidth(profile().tabWidth);
+    terminal::Screen& screen = terminalView_->terminal().screen();
+
+    screen.setLogRaw((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
+    screen.setLogTrace((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
+    screen.setTabWidth(profile().tabWidth);
 
     // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
     // hot reloading, because this value may have changed manually by an application already.
-    terminalView_->terminal().screen().setMode(terminal::Mode::SixelScrolling, config_.sixelScrolling);
-    terminalView_->terminal().screen().setMaxImageSize(config_.maxImageSize);
-    terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
+    screen.setMode(terminal::Mode::SixelScrolling, config_.sixelScrolling);
+    screen.setMaxImageSize(config_.maxImageSize);
+    screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
+    screen.setSixelCursorConformance(config_.sixelCursorConformance);
 }
 
-void TerminalWidget::resizeEvent(QResizeEvent* _event)
+void TerminalWidget::resizeGL(int _width, int _height)
 {
-    QOpenGLWidget::resizeEvent(_event);
+#if !defined(NDEBUG)
+    cout << fmt::format(
+        "resizeGL: {}x{}, geometry: {}/{}\n",
+        _width, _height,
+        terminal::Size{geometry().top(), geometry().left()},
+        terminal::Size{geometry().width(), geometry().height()});
+#endif
+
+    if (_width == 0 || _height == 0)
+        return;
 
     scrollBar_->resize(scrollBar_->sizeHint().width(), contentsRect().height());
     switch (config_.scrollbarPosition)
@@ -625,22 +657,23 @@ void TerminalWidget::resizeEvent(QResizeEvent* _event)
             break;
     }
 
-    if (width() != 0 && height() != 0)
-    {
-        terminalView_->resize(width(), height());
-        terminalView_->setProjection(
-            ortho(
-                0.0f, static_cast<float>(width()),      // left, right
+    auto const viewWidth = width() - scrollBar_->sizeHint().width();
+    auto const viewHeight = height();
+
+    terminalView_->resize(viewWidth, viewHeight);
+    terminalView_->setProjection(
+        ortho(
+            0.0f, static_cast<float>(viewWidth),      // left, right
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS)
-                0.0f, static_cast<float>(height())      // bottom, top
+            0.0f, static_cast<float>(viewHeight)      // bottom, top
 #else
-                static_cast<float>(height()), 0.0f      // bottom, top
+            static_cast<float>(viewHeight), 0.0f      // bottom, top
 #endif
-            )
-        );
-        if (setScreenDirty())
-            update();
-    }
+        )
+    );
+
+    // if (setScreenDirty())
+    //     update();
 }
 
 void TerminalWidget::paintGL()
@@ -1033,7 +1066,7 @@ bool TerminalWidget::event(QEvent* _event)
 {
     try
     {
-        // qDebug() << "TerminalWidget.event:" << _event;
+        // qDebug() << "TerminalWidget.event():" << _event;
         if (_event->type() == QEvent::Close)
         {
             terminalView_->process().terminate(terminal::Process::TerminationHint::Hangup);
@@ -1522,10 +1555,15 @@ void TerminalWidget::commands()
         scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
     else
         scrollBar_->setMaximum(0);
-    updateScrollBarValue();
 
-    if (setScreenDirty())
-        update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+    //post([this]()
+    {
+        updateScrollBarValue();
+
+        if (setScreenDirty())
+            update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+    }
+    //);
 }
 
 void TerminalWidget::updateScrollBarValue()
@@ -1569,15 +1607,15 @@ void TerminalWidget::updateScrollBarPosition()
                 break;
         }
     }
-
 }
 
 void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
 {
-    // cerr << fmt::format("Application request to resize window: {}x{} {}\n",
-    //                     _width, _height, _inPixels ? "px" : "cells");
+#if 1 // !defined(NDEBUG)
+    cerr << fmt::format("Application request to resize window: {}x{} {}\n",
+                        _width, _height, _inPixels ? "px" : "cells");
+#endif
 
-    bool resizePending = false;
     if (fullscreen())
     {
         cerr << "Application request to resize window in full screen mode denied." << endl;
@@ -1585,52 +1623,65 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
     else if (_inPixels)
     {
         auto const screenSize = size();
-        if (_width == 0 && _height == 0)
-        {
-            _width = screenSize.width();
-            _height = screenSize.height();
-        }
-        else
-        {
-            if (!_width)
-                _width = screenSize.width();
 
-            if (!_height)
-                _height = screenSize.height();
-        }
-        profile().terminalSize.width = _width / fonts_.regular.first.get().maxAdvance();
-        profile().terminalSize.height = _height / fonts_.regular.first.get().lineHeight();
-        resizePending = true;
+        if (!_width)
+            _width = screenSize.width();
+
+        if (!_height)
+            _height = screenSize.height();
+
+        auto const width = _width / fonts_.regular.first.get().maxAdvance();
+        auto const height = _height / fonts_.regular.first.get().lineHeight();
+        auto const newScreenSize = terminal::Size{width, height};
+        post([this, newScreenSize]() { setSize(newScreenSize); });
     }
     else
     {
-        if (_width == 0 && _height == 0)
-            resize(_width, _height);
-        else
-        {
-            if (!_width)
-                _width = profile().terminalSize.width;
+        if (!_width)
+            _width = profile().terminalSize.width;
 
-            if (!_height)
-                _height = profile().terminalSize.height;
+        if (!_height)
+            _height = profile().terminalSize.height;
 
-            profile().terminalSize.width = _width;
-            profile().terminalSize.height = _height;
-            resizePending = true;
-        }
+        auto const newScreenSize = terminal::Size{_width, _height};
+        post([this, newScreenSize]() { setSize(newScreenSize); });
     }
+}
 
-    if (resizePending)
-    {
-        post([this]() {
-            terminalView_->setTerminalSize(profile().terminalSize);
-            auto const width = profile().terminalSize.width * fonts_.regular.first.get().maxAdvance();
-            auto const height = profile().terminalSize.height * fonts_.regular.first.get().lineHeight();
-            resize(width, height);
-            setScreenDirty();
-            update();
-        });
-    }
+QSize TerminalWidget::minimumSizeHint() const
+{
+    auto constexpr MinimumScreenSize = terminal::Size{1, 1};
+
+    auto const w = MinimumScreenSize.width * fonts_.regular.first.get().maxAdvance();
+    auto const h = MinimumScreenSize.height * fonts_.regular.first.get().lineHeight();
+
+    return QSize(w, h);
+}
+
+QSize TerminalWidget::sizeHint() const
+{
+    auto const scrollbarWidth = scrollBar_->isHidden() ? 0 : scrollBar_->sizeHint().width();
+    auto const viewWidth = profile().terminalSize.width * fonts_.regular.first.get().maxAdvance();
+    auto const viewHeight = profile().terminalSize.height * fonts_.regular.first.get().lineHeight();
+
+    cout << fmt::format("sizeHint: {}, SBW: {}, terminalSize: {}\n",
+                        terminal::Size{viewWidth + scrollbarWidth, viewHeight},
+                        scrollbarWidth,
+                        profile().terminalSize);
+
+    return QSize(viewWidth + scrollbarWidth, viewHeight);
+}
+
+void TerminalWidget::setSize(terminal::Size _size)
+{
+    cout << fmt::format("----> setSize! {}\n", _size);
+
+    profile().terminalSize = _size;
+    terminalView_->setTerminalSize(profile().terminalSize);
+
+    updateGeometry();
+
+    setScreenDirty();
 }
 
 void TerminalWidget::onClosed()

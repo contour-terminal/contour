@@ -58,7 +58,6 @@ void Controller::newWindow()
 
     // QObject::connect(mainWindow, &TerminalWindow::showNotification,
     //                  this, &Controller::showNotification);
-
 }
 
 void Controller::showNotification(QString const& _title, QString const& _content)
