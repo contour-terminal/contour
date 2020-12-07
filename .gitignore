@@ -11,6 +11,7 @@
 # VIM: code completion / IntelliSense
 /.clangd/
 /compile_commands.json
+/.vimspector.json
 
 # CMake (CTest)
 /Testing/
