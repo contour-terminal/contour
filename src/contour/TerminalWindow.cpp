@@ -25,6 +25,7 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
+#include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMainWindow>
@@ -46,7 +47,6 @@ using namespace std::placeholders;
 #endif
 
 #include <QStatusBar>
-#include <QScrollBar>
 
 namespace contour {
 
@@ -69,21 +69,20 @@ TerminalWindow::TerminalWindow(config::Config _config, string _profileName, stri
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
 
-    setContentsMargins(0, 0, 0, 0);
-
     setTabBarAutoHide(true);
     connect(this, SIGNAL(currentChanged(int)), this, SLOT(onTabChanged(int)));
 
-    newTab();
-
-    //statusBar()->showMessage("blurb");
     // QVBoxLayout* verticalLayout = new QVBoxLayout(this);
-    // verticalLayout->addWidget(terminalWidget_);
     // setLayout(verticalLayout);
     // verticalLayout->setContentsMargins(0, 0, 0, 0);
+
+    TerminalWidget* terminalWidget = newTab();
+    (void) terminalWidget;
+
+    //statusBar()->showMessage("blurb");
 }
 
-void TerminalWindow::newTab()
+TerminalWidget* TerminalWindow::newTab()
 {
     auto const title = fmt::format("terminal {}", count() + 1);
     auto terminalWidget = new TerminalWidget(this, config_, profileName_, programPath_);
@@ -92,11 +91,14 @@ void TerminalWindow::newTab()
         insertTab(currentIndex() + 1, terminalWidget, title.c_str());
     else
         addTab(terminalWidget, title.c_str());
+    //terminalWidget->setParent(this);
 
     connect(terminalWidget, SIGNAL(terminated(TerminalWidget*)), this, SLOT(onTerminalClosed(TerminalWidget*)));
     connect(terminalWidget, SIGNAL(setBackgroundBlur(bool)), this, SLOT(setBackgroundBlur(bool)));
 
     setCurrentWidget(terminalWidget);
+
+    return terminalWidget;
 }
 
 TerminalWindow::~TerminalWindow()
@@ -190,6 +192,12 @@ void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
 #else
    // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
 #endif
+}
+
+bool TerminalWindow::event(QEvent* _event)
+{
+    //qDebug() << "TerminalWindow.event:" << _event->type();
+    return QTabWidget::event(_event);
 }
 
 // void TerminalWindow::statsSummary()

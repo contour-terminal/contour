@@ -54,12 +54,13 @@ class TerminalWindow :
     TerminalWindow(config::Config _config, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
+    bool event(QEvent* _event) override;
     bool focusNextPrevChild(bool) override;
 
   public Q_SLOTS:
     void onTerminalClosed(TerminalWidget* _terminalWidget);
     void onTabChanged(int _index);
-    void newTab();
+    TerminalWidget* newTab();
 
     void setBackgroundBlur(bool _enable);
 

@@ -58,9 +58,11 @@ class TerminalWidget :
     static QSurfaceFormat surfaceFormat();
 
     void initializeGL() override;
+    void resizeGL(int _width, int _height) override;
     void paintGL() override;
 
-    void resizeEvent(QResizeEvent* _event) override;
+    QSize minimumSizeHint() const override;
+    QSize sizeHint() const override;
 
     void keyPressEvent(QKeyEvent* _keyEvent) override;
     void wheelEvent(QWheelEvent* _wheelEvent) override;
@@ -199,6 +201,8 @@ class TerminalWidget :
     }
 
     void statsSummary();
+    void doResize(terminal::Size _size);
+    void setSize(terminal::Size _size);
 
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
