@@ -30,6 +30,7 @@ set(terminal_HEADERS
     Sequencer.h
     SixelParser.h
     Terminal.h
+    Viewport.h
     VTType.h
     Size.h
 )

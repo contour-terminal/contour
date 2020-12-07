@@ -1550,7 +1550,7 @@ void TerminalWidget::commands()
     //     terminalMetrics_(command);
 #endif
 
-    if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().relativeScrollOffset())
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
         terminalView_->terminal().viewport().scrollToBottom();
 
     if (terminalView_->terminal().screen().isPrimaryScreen())
