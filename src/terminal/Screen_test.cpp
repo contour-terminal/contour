@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Screen.h>
+#include <terminal/Viewport.h>
 #include <catch2/catch.hpp>
 #include <string_view>
 
