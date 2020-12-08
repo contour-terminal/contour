@@ -1230,6 +1230,14 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECRQM_ANSI: return impl::requestMode(_seq, _seq.param(0));
         case DECRQPSR: return impl::DECRQPSR(_seq, screen_);
         case DECSCUSR: return impl::DECSCUSR(_seq, screen_);
+        case DECSCPP:
+            if (auto const columnCount = _seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
+            {
+                screen_.resizeColumns(columnCount, false);
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;

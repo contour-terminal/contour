@@ -628,6 +628,9 @@ class Screen {
     Size const& size() const noexcept { return size_; }
     void resize(Size const& _newSize);
 
+    /// Implements semantics for  DECCOLM / DECSCPP.
+    void resizeColumns(int _newColumnCount, bool _clear);
+
     bool isCursorInsideMargins() const noexcept
     {
         bool const insideVerticalMargin = margin_.vertical.contains(cursor_.position.row);
