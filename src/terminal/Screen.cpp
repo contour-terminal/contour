@@ -307,6 +307,31 @@ void Screen::clampSavedLines(Lines& _savedLines) const
             _savedLines.pop_front();
 }
 
+void Screen::resizeColumns(int _newColumnCount, bool _clear)
+{
+    // DECCOLM / DECSCPP
+    if (_clear)
+    {
+        // Sets the left, right, top and bottom scrolling margins to their default positions.
+        setTopBottomMargin(1, size().height);   // DECSTBM
+        setLeftRightMargin(1, size().width);    // DECRLM
+
+        // Erases all data in page memory
+        clearScreen();
+    }
+
+    // resets vertical split screen mode (DECLRMM) to unavailable
+    setMode(Mode::LeftRightMargin, false); // DECSLRM
+
+    // Pre-resize in case the event callback right after is not actually resizing the window
+    // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
+    auto const newSize = Size{_newColumnCount, size().height};
+    resize(newSize);
+
+    bool constexpr unitInPixels = false;
+    eventListener_.resizeWindow(newSize.width, newSize.height, unitInPixels);
+}
+
 void Screen::resize(Size const& _newSize)
 {
     // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
@@ -1739,31 +1764,13 @@ void Screen::setMode(Mode _mode, bool _enable)
         case Mode::Columns132:
             if (!_enable || isModeEnabled(Mode::AllowColumns80to132))
             {
-                if (_enable != isModeEnabled(_mode))
-                {
-                    // Sets the left, right, top and bottom scrolling margins to their default positions.
-                    setTopBottomMargin(1, size().height);   // DECSTBM
-                    setLeftRightMargin(1, size().width);    // DECRLM
-
-                    // Erases all data in page memory
-                    clearScreen();
-                }
-
-                // resets vertical split screen mode (DECLRMM) to unavailable
-                setMode(Mode::LeftRightMargin, false); // DECSLRM
+                auto const clear = _enable != isModeEnabled(_mode);
 
                 // sets the number of columns on the page to 80 or 132 and selects the
                 // corresponding 80- or 132-column font
-                int const columns = _enable ? 132 : 80;
-                int const rows = size_.height;
+                auto const columns = _enable ? 132 : 80;
 
-                // Pre-resize in case the event callback right after is not actually resizing the window
-                // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
-                resize(Size{columns, rows});
-
-                bool constexpr unitInPixels = false;
-                eventListener_.resizeWindow(columns, rows, unitInPixels);
-
+                resizeColumns(columns, clear);
             }
             break;
         case Mode::BatchedRendering:
