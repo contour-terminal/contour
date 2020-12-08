@@ -474,7 +474,7 @@ void Screen::write(char const * _data, size_t _size)
 
     verifyState();
 
-    eventListener_.commands();
+    eventListener_.screenUpdated();
 }
 
 void Screen::write(std::u32string_view const& _text)

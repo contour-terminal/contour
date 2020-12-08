@@ -414,12 +414,12 @@ void Terminal::scrollbackBufferCleared()
     changes_++;
 }
 
-void Terminal::commands()
+void Terminal::screenUpdated()
 {
     changes_++;
 
     // Screen output commands be here - anything this terminal is interested in?
-    eventListener_.commands();
+    eventListener_.screenUpdated();
 }
 
 void Terminal::copyToClipboard(std::string_view const& _data)

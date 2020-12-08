@@ -1542,7 +1542,7 @@ void TerminalWidget::bufferChanged(terminal::ScreenType)
     updateScrollBarValue();
 }
 
-void TerminalWidget::commands()
+void TerminalWidget::screenUpdated()
 {
 #if defined(CONTOUR_VT_METRICS)
     // TODO
