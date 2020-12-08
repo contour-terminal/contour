@@ -37,7 +37,7 @@ class ScreenEvents {
     virtual void bell() {}
     virtual void bufferChanged(ScreenType) {}
     virtual void scrollbackBufferCleared() {}
-    virtual void commands() {}
+    virtual void screenUpdated() {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}
     virtual void dumpState() {}
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
