@@ -1121,6 +1121,12 @@ bool TerminalWidget::executeAction(Action const& _action)
 {
     enum class Result { Nothing, Silently, Dirty };
 
+    auto const postScroll = [this](bool _dirty) -> Result {
+        if (_dirty)
+            updateScrollBarValue();
+        return _dirty ? Result::Dirty : Result::Nothing;
+    };
+
     Result const result = visit(overloaded{
         [&](actions::WriteScreen const& _write) -> Result {
             terminalView_->terminal().writeToScreen(_write.chars);
@@ -1168,39 +1174,39 @@ bool TerminalWidget::executeAction(Action const& _action)
                 terminalView_->terminal().send(terminal::CharInputEvent{static_cast<char32_t>(ch), terminal::Modifier::None}, now_);
             return Result::Silently;
         },
-        [this](actions::ScrollOneUp) -> Result {
-            return terminalView_->terminal().viewport().scrollUp(1) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollOneUp) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollUp(1));
         },
-        [this](actions::ScrollOneDown) -> Result {
-            return terminalView_->terminal().viewport().scrollDown(1) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollOneDown) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollDown(1));
         },
-        [this](actions::ScrollUp) -> Result {
-            return terminalView_->terminal().viewport().scrollUp(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollUp) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollUp(profile().historyScrollMultiplier));
         },
-        [this](actions::ScrollDown) -> Result {
-            return terminalView_->terminal().viewport().scrollDown(profile().historyScrollMultiplier) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollDown) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollDown(profile().historyScrollMultiplier));
         },
-        [this](actions::ScrollPageUp) -> Result {
-            return terminalView_->terminal().viewport().scrollUp(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollPageUp) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollUp(profile().terminalSize.height / 2));
         },
-        [this](actions::ScrollPageDown) -> Result {
-            return terminalView_->terminal().viewport().scrollDown(profile().terminalSize.height / 2) ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollPageDown) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollDown(profile().terminalSize.height / 2));
         },
-        [this](actions::ScrollMarkUp) -> Result {
-            return terminalView_->terminal().viewport().scrollMarkUp() ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollMarkUp) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollMarkUp());
         },
-        [this](actions::ScrollMarkDown) -> Result {
-            return terminalView_->terminal().viewport().scrollMarkDown() ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollMarkDown) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollMarkDown());
         },
-        [this](actions::ScrollToTop) -> Result {
-            return terminalView_->terminal().viewport().scrollToTop() ? Result::Dirty : Result::Nothing;
+        [this, postScroll](actions::ScrollToTop) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollToTop());
+        },
+        [this, postScroll](actions::ScrollToBottom) -> Result {
+            return postScroll(terminalView_->terminal().viewport().scrollToBottom());
         },
         [this](actions::CopyPreviousMarkRange) -> Result {
             copyToClipboard(extractLastMarkRange());
             return Result::Silently;
-        },
-        [this](actions::ScrollToBottom) -> Result {
-            return terminalView_->terminal().viewport().scrollToBottom() ? Result::Dirty : Result::Nothing;
         },
         [this](actions::CopySelection) -> Result {
             string const text = extractSelectionText();
@@ -1296,14 +1302,14 @@ bool TerminalWidget::executeAction(Action const& _action)
 
     switch (result)
     {
-        case Result::Nothing:
-            break;
-        case Result::Silently:
-            return true;
         case Result::Dirty:
             setScreenDirty();
             update();
             return true;
+        case Result::Silently:
+            return true;
+        case Result::Nothing:
+            break;
     }
     return false;
 }
