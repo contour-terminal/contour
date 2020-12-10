@@ -691,9 +691,6 @@ void TerminalWidget::paintGL()
         state_.store(State::CleanPainting);
         now_ = steady_clock::now();
 
-        // It may be that this repaint was triggered by a viewport scrolling action.
-        updateScrollBarValue();
-
         invokeQueuedCalls();
 
         bool const reverseVideo =
