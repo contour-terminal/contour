@@ -694,14 +694,7 @@ void TerminalWidget::paintGL()
         // It may be that this repaint was triggered by a viewport scrolling action.
         updateScrollBarValue();
 
-        {
-            auto calls = decltype(queuedCalls_){};
-            {
-                auto lg = lock_guard{queuedCallsLock_};
-                swap(queuedCalls_, calls);
-            }
-            for_each(begin(calls), end(calls), [](auto& _call) { _call(); });
-        }
+        invokeQueuedCalls();
 
         bool const reverseVideo =
             terminalView_->terminal().screen().isModeEnabled(terminal::Mode::ReverseVideo);
@@ -727,6 +720,16 @@ void TerminalWidget::paintGL()
     {
         reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
+}
+
+void TerminalWidget::invokeQueuedCalls()
+{
+    {
+        auto lg = lock_guard{queuedCallsLock_};
+        swap(activatedCalls_, queuedCalls_);
+    }
+    crispy::for_each(activatedCalls_, [](auto& _call) { _call(); });
+    activatedCalls_.clear();
 }
 
 bool TerminalWidget::reloadConfigValues()
