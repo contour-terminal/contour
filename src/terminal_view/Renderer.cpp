@@ -174,52 +174,11 @@ uint64_t Renderer::render(Terminal& _terminal,
                           terminal::Coordinate const& _currentMousePosition,
                           bool _pressure)
 {
-    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
     metrics_.clear();
-    textRenderer_.setPressure(pressure);
 
     screenCoordinates_.screenSize = _terminal.screenSize();
 
-    uint64_t changes = 0;
-    {
-        auto _l = scoped_lock{_terminal};
-        auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
-        auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
-
-        renderCursor(_terminal);
-
-        if (!pressure && _terminal.screen().contains(_currentMousePosition))
-        {
-            auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
-            if (cellAtMouse.hyperlink())
-                cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-
-            changes = _terminal.preRender(_now);
-
-            _terminal.screen().render(
-                [&](Coordinate const& _pos, Cell const& _cell) {
-                    auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
-                    auto const selected = _terminal.isSelectedAbsolute(absolutePos);
-                    renderCell(_pos, _cell, reverseVideo, selected);
-                },
-                _terminal.viewport().absoluteScrollOffset()
-            );
-
-            if (cellAtMouse.hyperlink())
-                cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
-        }
-        else
-        {
-            changes = _terminal.preRender(_now);
-            _terminal.screen().render(
-                [&](Coordinate const& _pos, Cell const& _cell) {
-                    auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
-                    auto const selected = _terminal.isSelectedAbsolute(absolutePos);
-                    renderCell(_pos, _cell, reverseVideo, selected);
-                },
-                _terminal.viewport().absoluteScrollOffset());
-        }
-    }
+    uint64_t const changes = renderInternalNoFlush(_terminal, _now, _currentMousePosition, _pressure);
 
     backgroundRenderer_.renderPendingCells();
     backgroundRenderer_.finish();
@@ -228,6 +187,50 @@ uint64_t Renderer::render(Terminal& _terminal,
     textRenderer_.finish();
 
     renderTarget_.execute();
+
+    return changes;
+}
+
+uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
+                                         steady_clock::time_point _now,
+                                         terminal::Coordinate const& _currentMousePosition,
+                                         bool _pressure)
+{
+    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
+    textRenderer_.setPressure(pressure);
+
+    auto _l = scoped_lock{_terminal};
+    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
+    auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
+
+    renderCursor(_terminal);
+
+    auto const renderHyperlinks = !pressure && _terminal.screen().contains(_currentMousePosition);
+
+    if (renderHyperlinks)
+    {
+        auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
+        if (cellAtMouse.hyperlink())
+            cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+    }
+
+    auto const changes = _terminal.preRender(_now);
+
+    _terminal.screen().render(
+        [&](Coordinate const& _pos, Cell const& _cell) {
+            auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
+            auto const selected = _terminal.isSelectedAbsolute(absolutePos);
+            renderCell(_pos, _cell, reverseVideo, selected);
+        },
+        _terminal.viewport().absoluteScrollOffset()
+    );
+
+    if (renderHyperlinks)
+    {
+        auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
+        if (cellAtMouse.hyperlink())
+            cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
+    }
 
     return changes;
 }

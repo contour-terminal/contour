@@ -121,6 +121,12 @@ class Renderer {
     void dumpState(std::ostream& _textOutput) const;
 
   private:
+    /// Invoked internally by render() function.
+    uint64_t renderInternalNoFlush(Terminal& _terminal,
+                                   std::chrono::steady_clock::time_point _now,
+                                   terminal::Coordinate const& _currentMousePosition,
+                                   bool _pressure);
+
     void renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected);
     void renderCursor(Terminal const& _terminal);
 
