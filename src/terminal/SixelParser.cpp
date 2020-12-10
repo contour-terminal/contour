@@ -40,9 +40,9 @@ namespace
         return _value >= 63 && _value <= 126;
     }
 
-    constexpr char32_t toSixel(char32_t _value) noexcept
+    constexpr int8_t toSixel(char32_t _value) noexcept
     {
-        return static_cast<char32_t>(static_cast<int>(_value) - 63);
+        return static_cast<int8_t>(static_cast<int>(_value) - 63);
     }
 
     constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)

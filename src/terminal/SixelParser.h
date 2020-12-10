@@ -198,7 +198,7 @@ class SixelImageBuilder : public SixelParser::Events
     Size size_;
     Buffer buffer_; /// RGBA buffer
     Coordinate sixelCursor_;
-    size_t currentColor_;
+    int currentColor_;
     struct {
         int nominator;
         int denominator;
