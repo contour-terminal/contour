@@ -232,7 +232,6 @@ class TerminalWidget :
     // render state cache
     struct {
         QVector4D backgroundColor{};
-        QPoint viewport{};
     } renderStateCache_;
 
     QScrollBar* scrollBar_ = nullptr;

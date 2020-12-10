@@ -694,17 +694,6 @@ void TerminalWidget::paintGL()
         // It may be that this repaint was triggered by a viewport scrolling action.
         updateScrollBarValue();
 
-        QPoint const viewport{
-            static_cast<int>(static_cast<float>(width()) * contentScale()),
-            static_cast<int>(static_cast<float>(height()) * contentScale())
-        };
-
-        if (viewport != renderStateCache_.viewport)
-        {
-            glViewport(0, 0, static_cast<GLsizei>(viewport.x()), static_cast<GLsizei>(viewport.y()));
-            renderStateCache_.viewport = viewport;
-        }
-
         {
             auto calls = decltype(queuedCalls_){};
             {
