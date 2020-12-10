@@ -9,6 +9,8 @@
 - Adds scrollbar and configuration for scrollbar.
 - Adds input mapping for `Shift+Tab` (`CSI Z`)
 - Adds VT sequence `CHT`.
+- Adds VT sequence `SM/RM ?40` (Allow 80 -> 132 Mode).
+- Adds VT sequence `DECSCPP`
 
 #### prerelease 3
 
