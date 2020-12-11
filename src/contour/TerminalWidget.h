@@ -208,6 +208,7 @@ class TerminalWidget :
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
 
+  private:
     std::chrono::steady_clock::time_point now_;
     config::Config config_;
     std::string profileName_;

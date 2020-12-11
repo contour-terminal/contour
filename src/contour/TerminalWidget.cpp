@@ -1073,18 +1073,26 @@ bool TerminalWidget::event(QEvent* _event)
 
 bool TerminalWidget::fullscreen() const
 {
-    return windowHandle() && windowHandle()->visibility() == QWindow::FullScreen;
+    return window()->isFullScreen();
+    // return window_.isFullScreen();
 }
 
 void TerminalWidget::toggleFullScreen()
 {
-    if (!windowHandle())
-        return;
+    // if (window_.isFullScreen())
+    //     window_.showNormal();
+    // else
+    //     window_.showFullScreen();
 
-    if (windowHandle()->visibility() == QWindow::FullScreen)
-        windowHandle()->setVisibility(QWindow::Windowed);
+    if (window()->isFullScreen())
+        window()->showNormal();
     else
-        windowHandle()->setVisibility(QWindow::FullScreen);
+        window()->showFullScreen();
+
+    // if (window_.visibility() == QWindow::FullScreen)
+    //     window_.setVisibility(QWindow::Windowed);
+    // else
+    //     window_.setVisibility(QWindow::FullScreen);
 }
 
 bool TerminalWidget::setFontSize(int _fontSize)
@@ -1468,10 +1476,10 @@ void TerminalWidget::spawnNewTerminal(std::string const& _profileName)
 
 float TerminalWidget::contentScale() const
 {
-    if (!windowHandle())
+    if (!window()->windowHandle())
         return 1.0f;
 
-    return windowHandle()->screen()->devicePixelRatio();
+    return window()->windowHandle()->screen()->devicePixelRatio();
 }
 
 void TerminalWidget::onConfigReload(FileChangeWatcher::Event /*_event*/)
@@ -1515,8 +1523,8 @@ void TerminalWidget::setWindowTitle(std::string_view const& _title)
         auto const title = terminalTitle.empty()
             ? "contour"s
             : fmt::format("{} - contour", terminalTitle);
-        if (windowHandle())
-            windowHandle()->setTitle(QString::fromUtf8(title.c_str()));
+        if (window()->windowHandle())
+            window()->windowHandle()->setTitle(QString::fromUtf8(title.c_str()));
     });
 }
 
