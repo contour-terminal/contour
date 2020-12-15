@@ -186,7 +186,7 @@ bool TextShaper::shape(int _size,
     }
 #endif
 
-    return !any_of(_result.get(), glyphMissing);
+    return !crispy::any_of(_result.get(), glyphMissing);
 }
 
 void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)
