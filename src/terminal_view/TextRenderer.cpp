@@ -389,9 +389,11 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                                  Glyph const& _glyph,
                                  crispy::text::GlyphPosition const& _gpos)
 {
+    auto const baseline = fonts_.regular.first.get().baseline();
+
 #if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
     auto const x = _pos.x() + _gpos.x + _glyph.bearing.x();
-    auto const y = _pos.y() + _gpos.y + _gpos.font.get().baseline() - _glyph.descender;
+    auto const y = _pos.y() + _gpos.y + baseline - _glyph.descender;
 #else
     auto const x = _pos.x()
                  + _gpos.x
