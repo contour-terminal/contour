@@ -115,10 +115,12 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
 {
     constexpr char32_t SP = 0x20;
 
+    bool const emptyCell = _cell.empty() || _cell.codepoint(0) == SP;
+
     switch (state_)
     {
         case State::Empty:
-            if (!_cell.empty() && _cell.codepoint(0) != SP)
+            if (!emptyCell)
             {
                 state_ = State::Filling;
                 reset(_pos, _cell.attributes().styles, _color);
@@ -130,7 +132,6 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
             //if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
             bool const sameLine = _pos.row == row_;
             bool const sameSGR = _cell.attributes().styles == characterStyleMask_ && _color == color_;
-            bool const nonspace = !_cell.empty() && _cell.codepoint(0) != SP;
 
             // Do not perform multi-column text shaping when under rendering pressure.
             // This usually only happens in bandwidth heavy commands (such as cat), where
@@ -139,12 +140,12 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
             // filled up needlessly with half printed words. We mitigate that by shaping cell-wise
             // in such cases.
 
-            if (!pressure_ && nonspace && sameLine && sameSGR)
+            if (!pressure_ && !emptyCell && sameLine && sameSGR)
                 extend(_cell, _pos.column);
             else
             {
                 flushPendingSegments();
-                if (_cell.empty() || _cell.codepoint(0) == SP)
+                if (emptyCell)
                     state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {

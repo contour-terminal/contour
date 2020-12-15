@@ -70,7 +70,7 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
 
 #if !defined(NDEBUG)
     string joinedCodes;
-    for (char32_t codepoint : span(_codepoints, _codepoints + _size))
+    for (char32_t codepoint : crispy::span(_codepoints, _codepoints + _size))
     {
         if (!joinedCodes.empty())
             joinedCodes += " ";
