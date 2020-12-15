@@ -214,6 +214,7 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
 {
     // if (characterStyleMask_.mask() != 0)
     //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", characterStyleMask_);
+
     GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
@@ -268,15 +269,14 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
 
     auto const advanceX = fonts_.regular.first.get().maxAdvance();
 
-#if 0 // {{{ debug print
-    cout << fmt::format("GLRenderer.renderText({}:{}={}) [{}..{}) {}",
-                        _lineNumber, _startColumn,
-                        _startColumn + _clusters[_offset],
-                        _offset, _offsetEnd,
-                        isEmojiPresentation ? "E" : "T");
-    for (size_t i = _offset; i < _offsetEnd; ++i)
-        cout << fmt::format(" {}:{}", (unsigned) _codepoints[i], _clusters[i]);
-    cout << endl;
+#if 0 // !defined(NDEBUG) )// {{{ debug print
+    std::cout << fmt::format("GLRenderer.renderText() cluster:{} [{}..{}) {}",
+                              clusters_[_run.start],
+                              _run.start, _run.end,
+                              isEmojiPresentation ? "E" : "T");
+    for (size_t i = _run.start; i < _run.end; ++i)
+        std::cout << fmt::format(" {}:{}", (unsigned) codepoints_[i], clusters_[i]);
+    std::cout << '\n';
 #endif // }}}
 
     auto gpos = textShaper_.shape(
@@ -359,15 +359,17 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     metadata.height = static_cast<unsigned>(font->height) >> 6;
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
-#if 0
-    if (_id.font.get().hasColor())
+#if 0 // !defined(NDEBUG)
+    //if (_id.font.get().hasColor())
     {
-        cout << "TextRenderer.insert: colored glyph "
-             << _id.glyphIndex
-             << ", advance:" << metadata.advance
-             << ", descender:" << metadata.descender
-             << ", height:" << metadata.height
-             << " @ " << _id.font.get().filePath() << endl;
+        std::cout
+            << "TextRenderer.insert: glyph "
+            << _id.glyphIndex
+            << ", advance:" << metadata.advance
+            << ", descender:" << metadata.descender
+            << ", height:" << metadata.height
+            << " @ " << _id.font.get().filePath()
+            << '\n';
     }
 #endif
 
@@ -401,16 +403,18 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                  ;
 #endif
 
-    // cout << fmt::format(
-    //     "Text.render: xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}\n",
-    //     x, y,
-    //     _pos.x(), _pos.y(),
-    //     _gpos.x, _gpos.y,
-    //     _gpos.font.get().baseline(),
-    //     _gpos.font.get().lineHeight(),
-    //     _gpos.font.get().bitmapHeight(),
-    //     _glyph.descender
-    // );
+#if 0 // !defined(NDEBUG)
+    std::cout << fmt::format(
+        "Text.render: xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}\n",
+        x, y,
+        _pos.x(), _pos.y(),
+        _gpos.x, _gpos.y,
+        _gpos.font.get().baseline(),
+        _gpos.font.get().lineHeight(),
+        _gpos.font.get().bitmapHeight(),
+        _glyph.descender
+    );
+#endif
 
     renderTexture(QPoint(x, y), _color, _textureInfo);
 
