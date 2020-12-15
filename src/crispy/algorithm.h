@@ -25,6 +25,12 @@ bool any_of(Container && _container, Fn && _fn)
     return std::any_of(begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
+template <typename Container, typename Fn>
+bool none_of(Container && _container, Fn && _fn)
+{
+    return std::none_of(begin(_container), end(_container), std::forward<Fn>(_fn));
+}
+
 template <typename ExecutionPolicy, typename Container, typename Fn>
 bool any_of(ExecutionPolicy _ep, Container && _container, Fn && _fn)
 {
