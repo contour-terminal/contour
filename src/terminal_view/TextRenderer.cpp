@@ -355,8 +355,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     auto metadata = Glyph{};
     metadata.advance = _id.font.get()->glyph->advance.x >> 6;
     metadata.bearing = QPoint(font->glyph->bitmap_left * ratioX, font->glyph->bitmap_top * ratioY);
-    metadata.descender = (font->glyph->metrics.height >> 6) - font->glyph->bitmap_top;
-    metadata.height = static_cast<unsigned>(font->height) >> 6;
+    metadata.descender = static_cast<int>(font->glyph->metrics.height >> 6) - font->glyph->bitmap_top;
+    metadata.height = static_cast<int>(static_cast<unsigned>(font->height) >> 6);
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
 #if 0 // !defined(NDEBUG)
