@@ -16,6 +16,8 @@
 #include <crispy/times.h>
 #include <crispy/span.h>
 
+#include <unicode/utf8.h>
+
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
 
@@ -164,6 +166,25 @@ bool TextShaper::shape(int _size,
             static_cast<int>(info[i].cluster)
         });
     }
+
+#if 0 // !defined(NDEBUG))
+    if (crispy::none_of(_result.get(), glyphMissing))
+    {
+        std::cout << "Shaping: " << unicode::to_utf8(_codepoints, _size);
+
+        // for (size_t const i : times(_size))
+        //     std::cout << fmt::format(" {:04X}", static_cast<uint32_t>(_codepoints[i]));
+
+        for (auto const i : times(glyphCount))
+            std::cout << fmt::format(
+                " (cp:{} x:{}, y:{})",
+                info[i].codepoint,
+                pos[i].x_offset,// >> 6,
+                pos[i].y_offset // >> 6
+            );
+        std::cout << '\n';
+    }
+#endif
 
     return !any_of(_result.get(), glyphMissing);
 }
