@@ -343,11 +343,12 @@ void Screen::resize(Size const& _newSize)
 
     // update wrap-pending
     if (_newSize.width > size_.width)
-        wrapPending_ = false;
+        wrapPending_ = 0;
     else if (cursor_.position.column == size_.width && _newSize.width < size_.width)
         // Shrink existing columns to _newSize.width.
         // Nothing should be done, I think, as we preserve prior (now exceeding) content.
-        wrapPending_ = true;
+        if (!wrapPending_)
+            wrapPending_ = 1;
 
     // Reset margin to their default.
     margin_ = Margin{
@@ -438,8 +439,7 @@ Coordinate Screen::resizeBuffer(Size const& _newSize,
             end(_lines),
             [=](auto& line) { line.resize(_newSize.width); }
         );
-        if (wrapPending_)
-            newPosition.column++;
+        newPosition.column += wrapPending_;
     }
 
     return newPosition;
@@ -450,8 +450,8 @@ void Screen::verifyState() const
 #if !defined(NDEBUG)
     auto const lrmm = isModeEnabled(Mode::LeftRightMargin);
     if (wrapPending_ &&
-            ((lrmm && cursor_.position.column != margin_.horizontal.to)
-            || (!lrmm && cursor_.position.column != size_.width)))
+            ((lrmm && (cursor_.position.column + wrapPending_ - 1) != margin_.horizontal.to)
+            || (!lrmm && (cursor_.position.column + wrapPending_ - 1) != size_.width)))
     {
         fail(fmt::format(
             "Wrap is pending but cursor's column ({}) is not at right side of margin ({}) or screen ({}).",
@@ -477,7 +477,7 @@ void Screen::verifyState() const
     else if (col != currentColumn_)
         fail(fmt::format("Calculated current column does not match."));
 
-    if (wrapPending_ && cursor_.position.column != size_.width && cursor_.position.column != margin_.horizontal.to)
+    if (wrapPending_ && (cursor_.position.column + wrapPending_ - 1) != size_.width && cursor_.position.column != margin_.horizontal.to)
         fail(fmt::format("wrapPending flag set when cursor is not in last column."));
 #endif
 }
@@ -568,7 +568,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
             (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
     }
     else if (cursor_.autoWrap)
-        wrapPending_ = true;
+        wrapPending_ = 1;
 
     verifyState();
 }
@@ -590,7 +590,7 @@ void Screen::clearAndAdvance(int _offset)
     }
     else if (cursor_.autoWrap)
     {
-        wrapPending_ = true;
+        wrapPending_ = 1;
     }
 }
 
@@ -717,7 +717,7 @@ void Screen::saveCursor()
 void Screen::restoreCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECRC.html
-    wrapPending_ = false;
+    wrapPending_ = 0;
     cursor_ = savedCursor_;
     updateCursorIterators();
 
@@ -775,7 +775,7 @@ void Screen::resetHard()
 
 void Screen::moveCursorTo(Coordinate to)
 {
-    wrapPending_ = false;
+    wrapPending_ = 0;
     cursor_.position = clampToScreen(toRealCoordinate(to));
     updateCursorIterators();
 }
@@ -806,7 +806,7 @@ void Screen::setBuffer(ScreenType _type)
 
 void Screen::linefeed(int _newColumn)
 {
-    wrapPending_ = false;
+    wrapPending_ = 0;
 
     if (realCursorPosition().row == margin_.vertical.to ||
         realCursorPosition().row == size_.height)
@@ -1447,13 +1447,12 @@ void Screen::moveCursorForward(int _n)
     auto const n = min(_n,  margin_.horizontal.length() - cursor_.position.column);
     cursor_.position.column += n;
     updateColumnIterator();
-    verifyState();
 }
 
 void Screen::moveCursorBackward(int _n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
-    wrapPending_ = false;
+    wrapPending_ = 0;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
     auto const n = min(_n, cursor_.position.column - 1);
@@ -1462,13 +1461,13 @@ void Screen::moveCursorBackward(int _n)
 
 void Screen::moveCursorToColumn(int _column)
 {
-    wrapPending_ = false;
+    wrapPending_ = 0;
     setCurrentColumn(_column);
 }
 
 void Screen::moveCursorToBeginOfLine()
 {
-    wrapPending_ = false;
+    wrapPending_ = 0;
     setCurrentColumn(1);
 }
 

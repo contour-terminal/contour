@@ -910,7 +910,7 @@ class Screen {
 
     // XXX moved from ScreenBuffer
     Margin margin_;
-    bool wrapPending_{false};
+    int wrapPending_ = 0;
     int tabWidth_{8};
     std::vector<int> tabs_;
 
