@@ -516,7 +516,7 @@ void TerminalWidget::onFrameSwapped()
 
                 //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
                 //requestUpdate();
-                renderingPressure_ = true;
+                // TODO(don't do pressure-optimizations right now) renderingPressure_ = true;
                 update();
                 return;
             case State::CleanPainting:
