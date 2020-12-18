@@ -2095,6 +2095,14 @@ void Screen::requestPixelSize(RequestPixelSize::Area _area)
                 cellPixelSize_.width * size_.width
             );
             break;
+        case RequestPixelSize::Area::CellArea:
+            // Result is CSI  6 ;  height ;  width t
+            reply(
+                "\033[6;{};{}t",
+                cellPixelSize_.height,
+                cellPixelSize_.width
+            );
+            break;
     }
 }
 

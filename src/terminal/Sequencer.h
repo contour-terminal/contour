@@ -385,11 +385,15 @@ struct HorizontalTabClear {
     };
     Which which = AllTabs;
 };
+
+/// Input: CSI 16 t
+///
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
 struct RequestPixelSize {
     enum class Area {
+        CellArea,
         TextArea,
         WindowArea, // or: View
     };

@@ -1,5 +1,9 @@
 ### 0.1.0 (unreleased)
 
+#### prerelease 5
+
+- Adds VT sequence `CSI 16 t` for retrieving cell dimension in pixels.
+
 #### prerelease 4
 
 - Fixes vertical position of text from fallback fonts with different baseline.

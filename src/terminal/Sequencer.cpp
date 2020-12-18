@@ -677,10 +677,23 @@ namespace impl // {{{ some command generator helpers
         {
             switch (_seq.param(0))
             {
-                case 4: _screen.eventListener().resizeWindow(0, 0, true); break; // this means, resize to full display size
-                case 8: _screen.eventListener().resizeWindow(0, 0, false); break; // i.e. full display size
-                case 14: _screen.requestPixelSize(RequestPixelSize::Area::TextArea); break;
-                default: return ApplyResult::Unsupported;
+                case 4: // this means, resize to full display size
+                    _screen.eventListener().resizeWindow(0, 0, true);
+                    break;
+                case 8: // i.e. full display size
+                    _screen.eventListener().resizeWindow(0, 0, false);
+                    break;
+                case 14:
+                    if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
+                        _screen.requestPixelSize(RequestPixelSize::Area::WindowArea);   // CSI 14 ; 2 t
+                    else
+                        _screen.requestPixelSize(RequestPixelSize::Area::TextArea);     // CSI 14 t
+                    break;
+                case 16:
+                    _screen.requestPixelSize(RequestPixelSize::Area::CellArea);
+                    break;
+                default:
+                    return ApplyResult::Unsupported;
             }
             return ApplyResult::Ok;
         }
