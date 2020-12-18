@@ -826,6 +826,18 @@ class Screen {
 
     void verifyState() const;
 
+    // interactive replies
+    void reply(std::string const& message)
+    {
+        eventListener_.reply(message);
+    }
+
+    template <typename... Args>
+    void reply(std::string const& fmt, Args&&... args)
+    {
+        reply(fmt::format(fmt, std::forward<Args>(args)...));
+    }
+
   private:
     void setBuffer(ScreenType _type);
 
@@ -879,18 +891,6 @@ class Screen {
     ColumnIterator columnIteratorAt(int _n) const
     {
         return const_cast<Screen*>(this)->columnIteratorAt(_n);
-    }
-
-    // interactive replies
-    void reply(std::string const& message)
-    {
-        eventListener_.reply(message);
-    }
-
-    template <typename... Args>
-    void reply(std::string const& fmt, Args&&... args)
-    {
-        reply(fmt::format(fmt, std::forward<Args>(args)...));
     }
 
     void scrollUp(int n, Margin const& margin);
