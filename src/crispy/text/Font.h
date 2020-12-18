@@ -15,6 +15,8 @@
 
 #include <crispy/reference.h>
 
+#include <cmath>
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ERRORS_H
@@ -183,9 +185,14 @@ class Font {
 
     int bitmapWidth() const noexcept { return bitmapWidth_; }
     int bitmapHeight() const noexcept { return bitmapHeight_; }
-    int lineHeight() const noexcept { return face_->size->metrics.height >> 6; }
+
+    int lineHeight() const noexcept
+    {
+        return static_cast<int>(std::ceil(static_cast<double>(FT_MulFix(face_->height, face_->size->metrics.y_scale)) / 64.0));
+    }
+
     int maxAdvance() const noexcept { return maxAdvance_; }
-    int baseline() const noexcept { return abs(face_->size->metrics.descender) >> 6; }
+    int baseline() const noexcept { return static_cast<int>(abs(face_->size->metrics.descender) >> 6); }
 
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
