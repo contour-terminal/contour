@@ -616,8 +616,8 @@ class Sequencer : public ParserEvents {
     void executeControlFunction(char _c0);
     void handleSequence();
 
-    void hookSixel(Sequence const& _ctx);
-    void hookDECRQSS(Sequence const& _ctx);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& _ctx);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
 
     void flushBatchedSequences();
 

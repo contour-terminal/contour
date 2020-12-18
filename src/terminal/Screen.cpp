@@ -1955,25 +1955,55 @@ void Screen::singleShiftSelect(CharsetTable _table)
     cursor_.charsets.singleShift(_table);
 }
 
-void Screen::sixelImage(Size _size, vector<uint8_t> const& _data)
+void Screen::sixelImage(Size _pixelSize, Image::Data&& _data)
 {
-    auto const imageRef = imagePool_.create(_data, _size);
-    auto const columnCount = int(ceil(float(imageRef->width()) / float(cellPixelSize_.width)));
-    auto const rowCount = int(ceil(float(imageRef->height()) / float(cellPixelSize_.height)));
+    auto const columnCount = int(ceilf(float(_pixelSize.width) / float(cellPixelSize_.width)));
+    auto const rowCount = int(ceilf(float(_pixelSize.height) / float(cellPixelSize_.height)));
     auto const extent = Size{columnCount, rowCount};
-    auto const sizelScrolling = isModeEnabled(Mode::SixelScrolling);
-    auto const topLeft = sizelScrolling ? cursorPosition() : Coordinate{1, 1};
-    auto const linesAvailable = 1 + size_.height - topLeft.row;
-    auto const linesToBeRendered = min(extent.height, linesAvailable);
-    auto const columnsToBeRendered = min(extent.width, size_.width - topLeft.column - 1);
-    auto const gapColor = RGBAColor{0, 0, 0, 0}; // transarent
+    auto const sixelScrolling = isModeEnabled(Mode::SixelScrolling);
+    auto const topLeft = sixelScrolling ? cursorPosition() : Coordinate{1, 1};
 
+    auto const alignmentPolicy = ImageAlignment::TopStart;
+    auto const resizePolicy = ImageResize::NoResize;
+
+    auto const imageOffset = Coordinate{0, 0};
+
+    if (auto const imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data)); imageRef)
+        renderImage(imageRef, topLeft, extent,
+                    imageOffset, _pixelSize,
+                    alignmentPolicy, resizePolicy,
+                    sixelScrolling);
+
+    if (!sixelCursorConformance_)
+        linefeed(topLeft.column);
+}
+
+std::shared_ptr<Image const> Screen::uploadImage(ImageFormat _format, Size _imageSize, Image::Data&& _pixmap)
+{
+    return imagePool_.create(_format, _imageSize, move(_pixmap));
+}
+
+void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
+                         Coordinate _topLeft, Size _gridSize,
+                         Coordinate _imageOffset, Size _imageSize,
+                         ImageAlignment _alignmentPolicy,
+                         ImageResize _resizePolicy,
+                         bool _autoScroll)
+{
+    // TODO: make use of THIS function in sixelImage, too!
+
+    auto const linesAvailable = 1 + size_.height - _topLeft.row;
+    auto const linesToBeRendered = min(_gridSize.height, linesAvailable);
+    auto const columnsToBeRendered = min(_gridSize.width, size_.width - _topLeft.column - 1);
+    auto const gapColor = RGBAColor{}; // TODO: cursor_.graphicsRendition.backgroundColor;
+
+    // TODO: make use of _imageOffset and _imageSize
     auto const rasterizedImage = imagePool_.rasterize(
-        imageRef,
-        ImageAlignment::TopStart,
-        ImageResize::NoResize,
+        _imageRef,
+        _alignmentPolicy,
+        _resizePolicy,
         gapColor,
-        extent,
+        _gridSize,
         cellPixelSize_
     );
 
@@ -1983,24 +2013,24 @@ void Screen::sixelImage(Size _size, vector<uint8_t> const& _data)
             LIBTERMINAL_EXECUTION_COMMA(par)
             Size{columnsToBeRendered, linesToBeRendered},
             [&](Coordinate const& offset) {
-                at(topLeft + offset).setImage(
+                at(_topLeft + offset).setImage(
                     ImageFragment{rasterizedImage, offset},
                     currentHyperlink_
                 );
             }
         );
-        moveCursorTo(Coordinate{topLeft.row + linesToBeRendered - 1, topLeft.column});
+        moveCursorTo(Coordinate{_topLeft.row + linesToBeRendered - 1, _topLeft.column});
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
-    // AND iff sixel sizelScrolling is enabled, then scroll as much as needed to render the remaining lines.
-    if (linesToBeRendered != extent.height && sizelScrolling)
+    // AND iff sixel sixelScrolling  is enabled, then scroll as much as needed to render the remaining lines.
+    if (linesToBeRendered != _gridSize.height && _autoScroll)
     {
-        auto const remainingLineCount = extent.height - linesToBeRendered;
+        auto const remainingLineCount = _gridSize.height - linesToBeRendered;
         for (auto const lineOffset : crispy::times(remainingLineCount))
         {
             linefeed();
-            moveCursorForward(topLeft.column);
+            moveCursorForward(_topLeft.column);
             crispy::for_each(
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 crispy::times(columnsToBeRendered),
@@ -2015,13 +2045,7 @@ void Screen::sixelImage(Size _size, vector<uint8_t> const& _data)
     }
 
     // move ansi text cursor to position of the sixel cursor
-    if (sixelCursorConformance_)
-        moveCursorToColumn(topLeft.column + extent.width);
-    else
-    {
-        moveCursorTo(Coordinate{topLeft.row + extent.height - 1, 1});
-        linefeed();
-    }
+    moveCursorToColumn(_topLeft.column + _gridSize.width);
 }
 
 void Screen::setWindowTitle(std::string const& _title)

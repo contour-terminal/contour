@@ -33,6 +33,12 @@ namespace terminal {
 // Or do we want to deal with Image slices right away and just keep those?
 // The latter doesn't require reference counting.
 
+enum class ImageFormat {
+    RGB,
+    RGBA,
+    PNG,
+};
+
 /**
  * Represents an image that can be displayed in the terminal by being placed into the grid cells
  */
@@ -45,8 +51,9 @@ class Image {
     ///
     /// @param _data      RGBA buffer data
     /// @param _pixelSize image dimensionss in pixels
-    Image(Id _id, Data _data, Size _pixelSize) :
+    Image(Id _id, ImageFormat _format, Data _data, Size _pixelSize) :
         id_{ _id },
+        format_{ _format },
         data_{ move(_data) },
         size_{ _pixelSize }
     {}
@@ -57,6 +64,7 @@ class Image {
     Image& operator=(Image&&) = delete;
 
     constexpr Id id() const noexcept { return id_; }
+    constexpr ImageFormat format() const noexcept { return format_; }
     Data const& data() const noexcept { return data_; }
     constexpr Size size() const noexcept { return size_; }
     constexpr int width() const noexcept { return size_.width; }
@@ -64,6 +72,7 @@ class Image {
 
   private:
     Id const id_;
+    ImageFormat const format_;
     Data const data_;
     Size const size_;
 };
@@ -197,7 +206,7 @@ class ImagePool {
     ImagePool() : ImagePool([](auto) {}, 1) {}
 
     /// Creates an RGBA image of given size in pixels.
-    std::shared_ptr<Image const> create(Image::Data _data, Size _size);
+    std::shared_ptr<Image const> create(ImageFormat _format, Size _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
     std::shared_ptr<RasterizedImage const> rasterize(std::shared_ptr<Image const> _image,
@@ -209,9 +218,9 @@ class ImagePool {
 
     // named image access
     //
-    void createNamedImage(std::string_view _name, Image const& _image); // TODO: also pass TTL?
-    Image const* findNamedImage(std::string_view _name);
-    void removeNamedImage(std::string_view _name);
+    void link(std::string const& _name, std::shared_ptr<Image const> _imageRef);
+    std::shared_ptr<Image const> findImageByName(std::string const& _name) const;
+    void unlink(std::string const& _name);
 
     size_t imageCount() const noexcept { return images_.size(); }
     size_t rasterizedImageCount() const noexcept { return rasterizedImages_.size(); }

@@ -48,6 +48,7 @@ using std::runtime_error;
 using std::shared_ptr;
 using std::string;
 using std::stringstream;
+using std::unique_ptr;
 using std::vector;
 
 #define CONTOUR_SYNCHRONIZED_OUTPUT 1
@@ -952,10 +953,18 @@ void Sequencer::hook(char _finalChar)
     sequence_.setFinalChar(_finalChar);
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
-        if (*funcSpec == DECSIXEL)
-            hookSixel(sequence_);
-        else if (*funcSpec == DECRQSS)
-            hookDECRQSS(sequence_);
+        switch (funcSpec->id())
+        {
+            case DECSIXEL:
+                hookedParser_ = hookSixel(sequence_);
+                break;
+            case DECRQSS:
+                hookedParser_ = hookDECRQSS(sequence_);
+                break;
+        }
+
+        if (hookedParser_)
+            hookedParser_->start();
     }
 }
 
@@ -974,7 +983,7 @@ void Sequencer::unhook()
     }
 }
 
-void Sequencer::hookSixel(Sequence const& _seq)
+unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
 {
     auto const Pa = _seq.param_or(0, 1);
     auto const Pb = _seq.param_or(1, 2);
@@ -1015,7 +1024,7 @@ void Sequencer::hookSixel(Sequence const& _seq)
             : imageColorPalette_
     );
 
-    hookedParser_ = make_unique<SixelParser>(
+    return make_unique<SixelParser>(
         *sixelImageBuilder_,
         [this]() {
 #if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
@@ -1031,18 +1040,16 @@ void Sequencer::hookSixel(Sequence const& _seq)
             {
                 screen_.sixelImage(
                     sixelImageBuilder_->size(),
-                    sixelImageBuilder_->data()
+                    move(sixelImageBuilder_->data())
                 );
             }
         }
     );
-
-    hookedParser_->start();
 }
 
-void Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
+unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 {
-    hookedParser_ = make_unique<SimpleStringCollector>(
+    return make_unique<SimpleStringCollector>(
         [this](std::u32string const& _data) {
             auto const s = [](std::u32string const& _dataString) -> optional<RequestStatusString::Value> {
                 auto const mappings = std::array<std::pair<std::u32string_view, RequestStatusString::Value>, 9>{
@@ -1068,7 +1075,6 @@ void Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
             // TODO: handle batching
         }
     );
-    hookedParser_->start();
 }
 
 void Sequencer::executeControlFunction(char _c0)
@@ -1171,7 +1177,7 @@ void Sequencer::flushBatchedSequences()
         else if (holds_alternative<SixelImage>(batchable))
         {
             auto const& si = get<SixelImage>(batchable);
-            screen_.sixelImage(si.size, si.rgba);
+            screen_.sixelImage(si.size, Image::Data(si.rgba));
         }
     }
     batchedSequences_.clear();

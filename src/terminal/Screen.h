@@ -603,7 +603,7 @@ class Screen {
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
     void requestPixelSize(RequestPixelSize::Area _area);
-    void sixelImage(Size _pixelSize, std::vector<uint8_t> const& _rgba);
+    void sixelImage(Size _pixelSize, Image::Data&& _rgba);
     void requestStatusString(RequestStatusString::Value _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
@@ -611,6 +611,29 @@ class Screen {
     void dumpState();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
+
+    std::shared_ptr<Image const> uploadImage(ImageFormat _format, Size _imageSize, Image::Data&& _pixmap);
+
+    /**
+     * Renders an image onto the screen.
+     *
+     * @p _imageRef Reference to the image to be rendered.
+     * @p _topLeft Screen coordinate to start rendering the top/left corner of the image.
+     * @p _gridSize Screen grid size to span the image into.
+     * @p _imageOffset Offset into the image in screen grid coordinate to start rendering from.
+     * @p _imageSize Size of the full image in Screen grid coordinates.
+     * @p _alignmentPolicy render the image using the given image alignment policy.
+     * @p _resizePolicy render the image using the given image resize policy.
+     * @p _autoScroll Boolean indicating whether or not the screen should scroll if the image cannot be fully displayed otherwise.
+     */
+    void renderImage(std::shared_ptr<Image const> const& _imageRef,
+                     Coordinate _topLeft,
+                     Size _gridSize,
+                     Coordinate _imageOffset,
+                     Size _imageSize,
+                     ImageAlignment _alignmentPolicy,
+                     ImageResize _resizePolicy,
+                     bool _autoScroll);
 
     void dumpState(std::string const& _message) const;
 

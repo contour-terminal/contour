@@ -56,6 +56,8 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     //             availableHeight,
     //             *this);
 
+    // TODO: if input format is (RGB | PNG), transform to RGBA
+
     auto target = &fragData[0];
     for (int y = 0; y < availableHeight; ++y)
     {
@@ -85,10 +87,10 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(Image::Data _data, Size _size)
+shared_ptr<Image const> ImagePool::create(ImageFormat _format, Size _size, Image::Data&& _data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a reference to that.
-    images_.emplace_back(nextImageId_++, move(_data), _size);
+    images_.emplace_back(nextImageId_++, _format, move(_data), _size);
     return shared_ptr<Image>(&images_.back(),
                              [this](Image* _image) { removeImage(_image); });
 }
@@ -122,6 +124,24 @@ void ImagePool::removeRasterizedImage(RasterizedImage* _image)
                          rasterizedImages_.end(),
                          [&](RasterizedImage const& p) { return &p == _image; }); i != rasterizedImages_.end())
         rasterizedImages_.erase(i);
+}
+
+void ImagePool::link(std::string const& _name, std::shared_ptr<Image const> _imageRef)
+{
+    namedImages_[_name] = std::move(_imageRef);
+}
+
+std::shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) const
+{
+    if (auto const i = namedImages_.find(_name); i != namedImages_.end())
+        return i->second;
+
+    return {};
+}
+
+void ImagePool::unlink(std::string const& _name)
+{
+    namedImages_.erase(_name);
 }
 
 } // end namespace
