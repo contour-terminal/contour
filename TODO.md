@@ -2,15 +2,9 @@
 
 ### pre-0.1.0 release
 
-- [ ] rework screen resize
-- [ ] implement DECSCPP: https://www.vt100.net/docs/vt510-rm/DECSCPP.html
 - [ ] QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.
-- [ ] BUG: screen resize events broken. it should still resize something without breaking the GUI.
 - [ ] BUG: "The impossible happened" in TerminalWidget
 - [ ] BUG: SGR underline not visible when inverse is set
-- [ ] CRASH: animated gif redirected to file (img2sixel), then cat, will cause a crash after a few iterations
-- [ ] REVIVE: Synchronized Output
-- [ ] CMAKE: make sure boost-filesystem can be optionally also used on non-apple (Ubuntu 18.04)
 - [ ] QA: Images: copy action should uxe U+FFFC (object replacement) on grid cells that contain an image for text-based clipboard action
 - [ ] QA: Images: Selecting grid cells that contain an image should colorize/tint this cell.
 - [ ] QA: Split Screen's Mode to Mode and DECMode
