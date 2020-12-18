@@ -882,12 +882,30 @@ void Sequencer::param(char _char)
 {
     if (sequence_.parameters().empty())
         sequence_.parameters().push_back({0});
-    if (_char == ';')
-        sequence_.parameters().push_back({0});
-    else if (_char == ':')
-        sequence_.parameters().back().push_back({0});
-    else
-        sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_char - U'0');
+
+    switch (_char)
+    {
+        case ';':
+            if (sequence_.parameters().size() < Sequence::MaxParameters)
+                sequence_.parameters().push_back({0});
+            break;
+        case ':':
+            if (sequence_.parameters().back().size() < Sequence::MaxParameters)
+                sequence_.parameters().back().push_back({0});
+            break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_char - U'0');
+            break;
+    }
 }
 
 void Sequencer::dispatchESC(char _finalChar)
@@ -913,8 +931,9 @@ void Sequencer::putOSC(char32_t _char)
 {
     uint8_t u8[4];
     size_t const count = unicode::to_utf8(_char, u8);
-    for (size_t i = 0; i < count; ++i)
-        sequence_.intermediateCharacters().push_back(u8[i]);
+    if (sequence_.intermediateCharacters().size() + count < Sequence::MaxOscLength)
+        for (size_t i = 0; i < count; ++i)
+            sequence_.intermediateCharacters().push_back(u8[i]);
 }
 
 void Sequencer::dispatchOSC()
@@ -1130,11 +1149,11 @@ void Sequencer::handleSequence()
         else
 #endif
             apply(*funcSpec, sequence_);
+
+        screen_.verifyState();
     }
     else
         std::cerr << fmt::format("Unknown VT sequence: {}\n", sequence_);
-
-    screen_.verifyState();
 }
 
 void Sequencer::flushBatchedSequences()

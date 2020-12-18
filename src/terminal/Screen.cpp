@@ -497,8 +497,6 @@ void Screen::write(char const * _data, size_t _size)
 
     parser_.parseFragment(_data, _size);
 
-    verifyState();
-
     eventListener_.screenUpdated();
 }
 
@@ -515,8 +513,6 @@ void Screen::write(std::u32string_view const& _text)
 void Screen::writeText(char32_t _char)
 {
     bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
-
-    verifyState();
 
     if (wrapPending_ && cursor_.autoWrap)
         linefeed(margin_.horizontal.from);
@@ -569,8 +565,6 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     }
     else if (cursor_.autoWrap)
         wrapPending_ = 1;
-
-    verifyState();
 }
 
 void Screen::clearAndAdvance(int _offset)
@@ -824,7 +818,6 @@ void Screen::linefeed(int _newColumn)
         currentLine_++;
         updateColumnIterator();
     }
-    verifyState();
 }
 
 void Screen::scrollUp(int v_n, Margin const& margin)
@@ -1047,8 +1040,6 @@ void Screen::setCurrentColumn(int _n)
     auto const clampedCol = min(col, size_.width);
     cursor_.position.column = clampedCol;
     updateColumnIterator();
-
-    verifyState();
 }
 
 string Screen::renderTextLine(int row) const
@@ -1418,7 +1409,6 @@ void Screen::moveCursorUp(int _n)
     cursor_.position.row -= n;
     currentLine_ = prev(currentLine_, n);
     setCurrentColumn(cursorPosition().column);
-    verifyState();
 }
 
 void Screen::moveCursorDown(int _n)
@@ -1438,8 +1428,6 @@ void Screen::moveCursorDown(int _n)
     cursor_.position.row += n;
     currentLine_ = next(currentLine_, n);
     setCurrentColumn(cursorPosition().column);
-
-    verifyState();
 }
 
 void Screen::moveCursorForward(int _n)

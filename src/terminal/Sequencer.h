@@ -455,6 +455,7 @@ class Sequence {
   public:
     size_t constexpr static MaxParameters = 16;
     size_t constexpr static MaxSubParameters = 8;
+    size_t constexpr static MaxOscLength = 512;
 
     Sequence()
     {
