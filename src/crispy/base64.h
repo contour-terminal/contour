@@ -14,6 +14,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 
 namespace crispy::base64 {
 
@@ -115,13 +116,15 @@ size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 {
     Iterator pos = begin;
 
-    while (pos != end && index[static_cast<size_t>(*pos)] <= 63)
+    auto const indexSize = std::size(index);
+
+    while (pos != end && index[static_cast<size_t>(*pos)] < indexSize)
         pos++;
 
-    int nprbytes = std::distance(begin, pos) - 1;
-    int nbytesdecoded = ((nprbytes + 3) / 4) * 3;
+    int const nprbytes = std::distance(begin, pos) - 1;
+    int const nbytesdecoded = ((nprbytes + 3) / 4) * 3;
 
-    return nbytesdecoded + 1;
+    return nbytesdecoded;
 }
 
 template <typename Iterator>
