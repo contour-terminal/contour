@@ -43,7 +43,7 @@ Options:
   -h, --help            Displays this help.
   -v, --version         Displays version information.
   -c, --config <PATH>   Path to configuration file to load at startup
-                        [~/.config/contour/conour.yml].
+                        [~/.config/contour/contour.yml].
   -p, --profile <NAME>  Terminal Profile to load.
 ```
 
