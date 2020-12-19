@@ -50,25 +50,25 @@ using std::cerr;
 using std::cout;
 
 using std::array;
-using std::string_view;
-using std::ios;
 using std::chrono::steady_clock;
 using std::endl;
 using std::exception;
 using std::get;
+using std::holds_alternative;
+using std::ios;
 using std::lock_guard;
 using std::make_unique;
 using std::max;
 using std::move;
 using std::nullopt;
+using std::ofstream;
 using std::optional;
 using std::pair;
 using std::ref;
 using std::runtime_error;
-using std::ofstream;
-using std::string;
 using std::scoped_lock;
-using std::holds_alternative;
+using std::string;
+using std::string_view;
 
 #if defined(CONTOUR_PERF_STATS)
 #define STATS_INC(name)   ++(stats_. name)
