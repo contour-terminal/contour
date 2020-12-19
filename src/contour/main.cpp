@@ -13,12 +13,14 @@
  */
 #include <contour/Config.h>
 #include <contour/Controller.h>
+#include <contour/TerminalWidget.h>
 
 #include <terminal/Parser.h>
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QThread>
 #include <QtWidgets/QApplication>
+#include <QSurfaceFormat>
 
 #include <iostream>
 
@@ -67,6 +69,9 @@ int main(int argc, char* argv[])
         QCoreApplication::setOrganizationName("contour");
         QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
         QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+
+        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
+
         QApplication app(argc, argv);
 
         auto cli = contour::CLI{};
