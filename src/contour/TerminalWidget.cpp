@@ -834,6 +834,7 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
     auto const mod = [&](int _qtMod) -> int {
         int res = 0;
         if (_qtMod & Qt::AltModifier) res += Qt::ALT;
+        if (_qtMod & Qt::ShiftModifier) res += Qt::SHIFT;
 #if defined(__APPLE__)
         // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
         //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
