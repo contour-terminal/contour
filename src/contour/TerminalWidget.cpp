@@ -112,10 +112,20 @@ namespace // {{{
             mods |= Modifier::Alt;
         if (_mods & Qt::ShiftModifier)
             mods |= Modifier::Shift;
+#if defined(__APPLE__)
+        // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
+        //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
+        //      and the MetaModifier value corresponds to the Control keys."
+        if (_mods & Qt::MetaModifier)
+            mods |= Modifier::Control;
+        if (_mods & Qt::ControlModifier)
+            mods |= Modifier::Meta;
+#else
         if (_mods & Qt::ControlModifier)
             mods |= Modifier::Control;
         if (_mods & Qt::MetaModifier)
             mods |= Modifier::Meta;
+#endif
 
         return mods;
     }
@@ -135,6 +145,7 @@ namespace // {{{
         }
     }
 
+    /// Maps Qt KeyInputEvent to VT input event for special keys and key presses with modifiers.
     optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardModifiers _mods)
     {
         using terminal::Key;
@@ -191,6 +202,9 @@ namespace // {{{
 
         if (_key == Qt::Key_Backtab)
             return { InputEvent{CharInputEvent{'\t', makeModifier(_mods | Qt::ShiftModifier)}} };
+
+        if (_mods && _key >= 'A' && _key <= 'Z')
+            return { InputEvent{CharInputEvent{(char32_t)_key, makeModifier(_mods)}} };
 
         return nullopt;
     }
@@ -817,22 +831,36 @@ constexpr inline bool isModifier(Qt::Key _key)
 
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
-    auto const keySeq = QKeySequence(
-        isModifier(static_cast<Qt::Key>(_keyEvent->key()))
-            ? _keyEvent->modifiers()
-            : _keyEvent->modifiers() | _keyEvent->key()
-    );
+    auto const mod = [&](int _qtMod) -> int {
+        int res = 0;
+        if (_qtMod & Qt::AltModifier) res += Qt::ALT;
+#if defined(__APPLE__)
+        // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
+        //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
+        //      and the MetaModifier value corresponds to the Control keys."
+        if (_qtMod & Qt::ControlModifier) res += Qt::META;
+        if (_qtMod & Qt::MetaModifier) res += Qt::CTRL;
+#else
+        if (_qtMod & Qt::ControlModifier) res += Qt::CTRL;
+        if (_qtMod & Qt::MetaModifier) res += Qt::META;
+#endif
+        return res;
+    }(_keyEvent->modifiers());
 
-    // if (!_keyEvent->text().isEmpty())
-    //     qDebug() << "keyPress:"
-    //         << "text:" << _keyEvent->text()
-    //         << "seq:" << keySeq
-    //         << "seq.empty?" << keySeq.isEmpty()
-    //         << "key:" << static_cast<Qt::Key>(_keyEvent->key())
-    //         << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
+    auto const keySeq =
+        _keyEvent->text().isEmpty()
+            ? QKeySequence(_keyEvent->key() + mod)
+            : QKeySequence(isModifier(static_cast<Qt::Key>(_keyEvent->key()))
+                            ? _keyEvent->modifiers()
+                            : _keyEvent->modifiers() | _keyEvent->key());
 
-    if (!_keyEvent->text().isEmpty() && cursor().shape() != Qt::CursorShape::BlankCursor)
-        setCursor(Qt::CursorShape::BlankCursor);
+    // qDebug() << "keyPress:"
+    //     << "text:" << _keyEvent->text()
+    //     << "seq:" << keySeq
+    //     << "seq.empty?" << keySeq.isEmpty()
+    //     << "key:" << static_cast<Qt::Key>(_keyEvent->key())
+    //     << "mod:" << _keyEvent->modifiers()
+    //     << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
 
     if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
@@ -845,6 +873,9 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
     }
     else if (!_keyEvent->text().isEmpty())
     {
+        if (cursor().shape() != Qt::CursorShape::BlankCursor)
+            setCursor(Qt::CursorShape::BlankCursor);
+
         for (auto const ch : _keyEvent->text().toUcs4())
         {
             auto const modifiers = makeModifier(_keyEvent->modifiers());
