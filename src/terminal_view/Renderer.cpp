@@ -35,8 +35,10 @@ Renderer::Renderer(Logger _logger,
                    QMatrix4x4 const& _projectionMatrix) :
     screenCoordinates_{
         _screenSize,
-        _fonts.regular.first.get().maxAdvance(), // cell width
-        _fonts.regular.first.get().lineHeight(), // cell height
+        Size{
+            _fonts.regular.first.get().maxAdvance(), // cell width
+            _fonts.regular.first.get().lineHeight()  // cell height
+        },
         _fonts.regular.first.get().baseline()
     },
     logger_{ move(_logger) },
