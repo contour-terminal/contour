@@ -1,8 +1,11 @@
 ### 0.1.0 (unreleased)
 
-#### prerelease 5
+#### prerelease 6
 
 - Fixes MacOS/X handling of modifiers (and startup).
+
+#### prerelease 5
+
 - Adds VT sequence `CSI 16 t` for retrieving cell dimension in pixels.
 
 #### prerelease 4
