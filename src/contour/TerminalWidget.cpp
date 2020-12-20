@@ -145,7 +145,7 @@ namespace // {{{
         }
     }
 
-    /// Maps Qt KeyInputEvent to VT input event for special keys and key presses with modifiers.
+    /// Maps Qt KeyInputEvent to VT input event for special keys.
     optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardModifiers _mods)
     {
         using terminal::Key;
@@ -202,9 +202,6 @@ namespace // {{{
 
         if (_key == Qt::Key_Backtab)
             return { InputEvent{CharInputEvent{'\t', makeModifier(_mods | Qt::ShiftModifier)}} };
-
-        if (_mods && _key >= 'A' && _key <= 'Z')
-            return { InputEvent{CharInputEvent{(char32_t)_key, makeModifier(_mods)}} };
 
         return nullopt;
     }
@@ -829,9 +826,22 @@ constexpr inline bool isModifier(Qt::Key _key)
     }
 }
 
-void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
+char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
 {
-    auto const mod = [&](int _qtMod) -> int {
+    auto const value = static_cast<int>(_key);
+    if (value >= 'A' && value <= 'Z')
+    {
+        if (_mods & Qt::ShiftModifier)
+            return value;
+        else
+            return std::tolower(value);
+    }
+    return 0;
+}
+
+QKeySequence toKeySequence(QKeyEvent *_keyEvent)
+{
+    auto const mod = [](int _qtMod) constexpr -> int {
         int res = 0;
         if (_qtMod & Qt::AltModifier) res += Qt::ALT;
         if (_qtMod & Qt::ShiftModifier) res += Qt::SHIFT;
@@ -848,12 +858,20 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
         return res;
     }(_keyEvent->modifiers());
 
-    auto const keySeq =
-        _keyEvent->text().isEmpty()
-            ? QKeySequence(_keyEvent->key() + mod)
-            : QKeySequence(isModifier(static_cast<Qt::Key>(_keyEvent->key()))
-                            ? _keyEvent->modifiers()
-                            : _keyEvent->modifiers() | _keyEvent->key());
+    // only modifier but no key press?
+    if (isModifier(static_cast<Qt::Key>(_keyEvent->key())))
+        return QKeySequence();
+
+    // modifier AND key press?
+    if (_keyEvent->key() && mod)
+        return QKeySequence(int(_keyEvent->modifiers() | _keyEvent->key()));
+
+    return QKeySequence();
+}
+
+void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
+{
+    auto const keySeq = toKeySequence(_keyEvent);
 
     // qDebug() << "keyPress:"
     //     << "text:" << _keyEvent->text()
@@ -863,26 +881,44 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
     //     << "mod:" << _keyEvent->modifiers()
     //     << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
 
-    if (auto i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
+    if (auto const i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
         executeAllActions(i->second);
+        return;
     }
-    else if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
+
+    if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
     {
         terminalView_->terminal().send(*inputEvent, now_);
         scrollToBottomAndRedraw();
+        return;
     }
-    else if (!_keyEvent->text().isEmpty())
-    {
-        if (cursor().shape() != Qt::CursorShape::BlankCursor)
-            setCursor(Qt::CursorShape::BlankCursor);
 
-        for (auto const ch : _keyEvent->text().toUcs4())
+    if (cursor().shape() != Qt::CursorShape::BlankCursor)
+        setCursor(Qt::CursorShape::BlankCursor);
+
+    auto const modifiers = makeModifier(_keyEvent->modifiers());
+
+    if (_keyEvent->key() && modifiers.any() && !modifiers.shift())
+    {
+        if (_keyEvent->key() >= 'A' && _keyEvent->key() <= 'Z')
         {
-            auto const modifiers = makeModifier(_keyEvent->modifiers());
-            auto const inputEvent = terminal::InputEvent{terminal::CharInputEvent{ch, modifiers}};
-            terminalView_->terminal().send(inputEvent, now_);
+            terminalView_->terminal().send(
+                terminal::CharInputEvent{
+                    static_cast<char32_t>(tolower(_keyEvent->key())),
+                    modifiers
+                },
+                now_
+            );
+            return;
         }
+    }
+
+    if (!_keyEvent->text().isEmpty())
+    {
+        for (auto const ch : _keyEvent->text().toUcs4())
+            terminalView_->terminal().send(terminal::CharInputEvent{ch, modifiers}, now_);
+
         scrollToBottomAndRedraw();
     }
 }
