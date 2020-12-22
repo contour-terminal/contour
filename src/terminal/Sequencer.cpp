@@ -612,17 +612,17 @@ namespace impl // {{{ some command generator helpers
 
     ApplyResult DECRQSS(Sequence const& _seq, Screen& _screen)
     {
-        auto const s = [](std::string const& _dataString) -> optional<RequestStatusString::Value> {
-            auto const mappings = std::array<std::pair<std::string_view, RequestStatusString::Value>, 9>{
-                pair{"m",   RequestStatusString::Value::SGR},
-                pair{"\"p", RequestStatusString::Value::DECSCL},
-                pair{" q",  RequestStatusString::Value::DECSCUSR},
-                pair{"\"q", RequestStatusString::Value::DECSCA},
-                pair{"r",   RequestStatusString::Value::DECSTBM},
-                pair{"s",   RequestStatusString::Value::DECSLRM},
-                pair{"t",   RequestStatusString::Value::DECSLPP},
-                pair{"$|",  RequestStatusString::Value::DECSCPP},
-                pair{"*|",  RequestStatusString::Value::DECSNLS}
+        auto const s = [](std::string const& _dataString) -> optional<RequestStatusString> {
+            auto const mappings = std::array<std::pair<std::string_view, RequestStatusString>, 9>{
+                pair{"m",   RequestStatusString::SGR},
+                pair{"\"p", RequestStatusString::DECSCL},
+                pair{" q",  RequestStatusString::DECSCUSR},
+                pair{"\"q", RequestStatusString::DECSCA},
+                pair{"r",   RequestStatusString::DECSTBM},
+                pair{"s",   RequestStatusString::DECSLRM},
+                pair{"t",   RequestStatusString::DECSLPP},
+                pair{"$|",  RequestStatusString::DECSCPP},
+                pair{"*|",  RequestStatusString::DECSNLS}
             };
             for (auto const& mapping : mappings)
                 if (_dataString == mapping.first)
@@ -685,12 +685,12 @@ namespace impl // {{{ some command generator helpers
                     break;
                 case 14:
                     if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
-                        _screen.requestPixelSize(RequestPixelSize::Area::WindowArea);   // CSI 14 ; 2 t
+                        _screen.requestPixelSize(RequestPixelSize::WindowArea);   // CSI 14 ; 2 t
                     else
-                        _screen.requestPixelSize(RequestPixelSize::Area::TextArea);     // CSI 14 t
+                        _screen.requestPixelSize(RequestPixelSize::TextArea);     // CSI 14 t
                     break;
                 case 16:
-                    _screen.requestPixelSize(RequestPixelSize::Area::CellArea);
+                    _screen.requestPixelSize(RequestPixelSize::CellArea);
                     break;
                 default:
                     return ApplyResult::Unsupported;
@@ -1064,17 +1064,17 @@ unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>(
         [this](std::u32string const& _data) {
-            auto const s = [](std::u32string const& _dataString) -> optional<RequestStatusString::Value> {
-                auto const mappings = std::array<std::pair<std::u32string_view, RequestStatusString::Value>, 9>{
-                    pair{U"m",   RequestStatusString::Value::SGR},
-                    pair{U"\"p", RequestStatusString::Value::DECSCL},
-                    pair{U" q",  RequestStatusString::Value::DECSCUSR},
-                    pair{U"\"q", RequestStatusString::Value::DECSCA},
-                    pair{U"r",   RequestStatusString::Value::DECSTBM},
-                    pair{U"s",   RequestStatusString::Value::DECSLRM},
-                    pair{U"t",   RequestStatusString::Value::DECSLPP},
-                    pair{U"$|",  RequestStatusString::Value::DECSCPP},
-                    pair{U"*|",  RequestStatusString::Value::DECSNLS}
+            auto const s = [](std::u32string const& _dataString) -> optional<RequestStatusString> {
+                auto const mappings = std::array<std::pair<std::u32string_view, RequestStatusString>, 9>{
+                    pair{U"m",   RequestStatusString::SGR},
+                    pair{U"\"p", RequestStatusString::DECSCL},
+                    pair{U" q",  RequestStatusString::DECSCUSR},
+                    pair{U"\"q", RequestStatusString::DECSCA},
+                    pair{U"r",   RequestStatusString::DECSTBM},
+                    pair{U"s",   RequestStatusString::DECSLRM},
+                    pair{U"t",   RequestStatusString::DECSLPP},
+                    pair{U"$|",  RequestStatusString::DECSCPP},
+                    pair{U"*|",  RequestStatusString::DECSNLS}
                 };
                 for (auto const& mapping : mappings)
                     if (_dataString == mapping.first)

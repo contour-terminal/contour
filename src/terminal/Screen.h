@@ -599,7 +599,7 @@ class Screen {
     void cursorBackwardTab(int _n);       // CBT
     void cursorForwardTab(int _n);        // CHT
     void backspace();                     // BS
-    void horizontalTabClear(HorizontalTabClear::Which _which); // TBC
+    void horizontalTabClear(HorizontalTabClear _which); // TBC
     void horizontalTabSet();              // HTS
 
     void index(); // IND
@@ -630,9 +630,9 @@ class Screen {
     void applicationKeypadMode(bool _enable);
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
-    void requestPixelSize(RequestPixelSize::Area _area);
+    void requestPixelSize(RequestPixelSize _area);
     void sixelImage(Size _pixelSize, Image::Data&& _rgba);
-    void requestStatusString(RequestStatusString::Value _value);
+    void requestStatusString(RequestStatusString _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
     void setDynamicColor(DynamicColorName _name, RGBColor const& _color);

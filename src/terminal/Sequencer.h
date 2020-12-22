@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Logger.h>
+#include <terminal/Image.h>
 #include <terminal/ParserEvents.h>
 #include <terminal/ParserExtension.h>
 #include <terminal/Functions.h>
@@ -309,7 +310,7 @@ constexpr int setDynamicColorCommand(DynamicColorName name)
 // {{{ TODO: refactor me
 // XTSMGRAPHICS (xterm extension)
 // CSI ? Pi ; Pa ; Pv S
-struct XtSmGraphics
+namespace XtSmGraphics
 {
     enum class Item {
         NumberOfColorRegisters = 1,
@@ -325,24 +326,17 @@ struct XtSmGraphics
     };
 
     using Value = std::variant<std::monostate, int, Size>;
-
-    Item item;
-    Action action;
-    Value value;
 };
 
 /// TBC - Tab Clear
 ///
 /// This control function clears tab stops.
-struct HorizontalTabClear {
-    enum Which {
-        /// Ps = 0 (default)
-        AllTabs,
+enum class HorizontalTabClear {
+    /// Ps = 0 (default)
+    AllTabs,
 
-        /// Ps = 3
-        UnderCursor,
-    };
-    Which which = AllTabs;
+    /// Ps = 3
+    UnderCursor,
 };
 
 /// Input: CSI 16 t
@@ -350,38 +344,32 @@ struct HorizontalTabClear {
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
-struct RequestPixelSize {
-    enum class Area {
-        CellArea,
-        TextArea,
-        WindowArea, // or: View
-    };
-    Area area;
+enum class RequestPixelSize {
+    CellArea,
+    TextArea,
+    WindowArea,
 };
 
 /// DECRQSS - Request Status String
-struct RequestStatusString {
-    enum class Value {
-        SGR,
-        DECSCL,
-        DECSCUSR,
-        DECSCA,
-        DECSTBM,
-        DECSLRM,
-        DECSLPP,
-        DECSCPP,
-        DECSNLS
-    };
-
-    Value value;
+enum class RequestStatusString {
+    SGR,
+    DECSCL,
+    DECSCUSR,
+    DECSCA,
+    DECSTBM,
+    DECSLRM,
+    DECSLPP,
+    DECSCPP,
+    DECSNLS
 };
 
 /// DECSIXEL - Sixel Graphics Image.
 struct SixelImage { // TODO: this struct is only used internally in Sequencer, make it private
     /// Size in pixels for this image
     Size size;
+
     /// RGBA buffer of the image to be rendered
-    std::vector<uint8_t> rgba;
+    Image::Data rgba;
 };
 
 inline std::string setDynamicColorValue(RGBColor const& color) // TODO: yet another helper. maybe SemanticsUtils static class?

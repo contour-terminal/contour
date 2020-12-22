@@ -1360,7 +1360,7 @@ void Screen::deleteColumns(int _n)
             deleteChars(lineNo, _n);
 }
 
-void Screen::horizontalTabClear(HorizontalTabClear::Which _which)
+void Screen::horizontalTabClear(HorizontalTabClear _which)
 {
     switch (_which)
     {
@@ -2073,13 +2073,13 @@ void Screen::requestDynamicColor(DynamicColorName _name)
     }
 }
 
-void Screen::requestPixelSize(RequestPixelSize::Area _area)
+void Screen::requestPixelSize(RequestPixelSize _area)
 {
     switch (_area)
     {
-        case RequestPixelSize::Area::WindowArea:
+        case RequestPixelSize::WindowArea:
             [[fallthrough]]; // TODO
-        case RequestPixelSize::Area::TextArea:
+        case RequestPixelSize::TextArea:
             // Result is CSI  4 ;  height ;  width t
             reply(
                 "\033[4;{};{}t",
@@ -2087,7 +2087,7 @@ void Screen::requestPixelSize(RequestPixelSize::Area _area)
                 cellPixelSize_.width * size_.width
             );
             break;
-        case RequestPixelSize::Area::CellArea:
+        case RequestPixelSize::CellArea:
             // Result is CSI  6 ;  height ;  width t
             reply(
                 "\033[6;{};{}t",
@@ -2098,14 +2098,14 @@ void Screen::requestPixelSize(RequestPixelSize::Area _area)
     }
 }
 
-void Screen::requestStatusString(RequestStatusString::Value _value)
+void Screen::requestStatusString(RequestStatusString _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
     // or DCS 0 $ r Pt ST for invalid requests.
-    auto const [status, response] = [&](RequestStatusString::Value _value) -> pair<bool, string> {
+    auto const [status, response] = [&](RequestStatusString _value) -> pair<bool, string> {
         switch (_value)
         {
-            case RequestStatusString::Value::DECSCL:
+            case RequestStatusString::DECSCL:
             {
                 auto level = 61;
                 switch (terminalId_) {
