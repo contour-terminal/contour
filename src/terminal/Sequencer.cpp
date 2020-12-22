@@ -113,7 +113,7 @@ namespace impl // {{{ some command generator helpers
 			case 2:  // (AM) Keyboard Action Mode
 				return ApplyResult::Unsupported;
 			case 4:  // (IRM) Insert Mode
-                _screen.setMode(Mode::Insert, _enable);
+                _screen.setMode(AnsiMode::Insert, _enable);
                 return ApplyResult::Ok;
 			case 12:  // (SRM) Send/Receive Mode
 			case 20:  // (LNM) Automatic Newline
@@ -122,51 +122,51 @@ namespace impl // {{{ some command generator helpers
 		}
 	}
 
-    optional<Mode> toDECMode(int _value)
+    optional<DECMode> toDECMode(int _value)
     {
         switch (_value)
         {
-            case 1: return Mode::UseApplicationCursorKeys;
-            case 2: return Mode::DesignateCharsetUSASCII;
-            case 3: return Mode::Columns132;
-            case 4: return Mode::SmoothScroll;
-            case 5: return Mode::ReverseVideo;
-            case 6: return Mode::Origin;
-            case 7: return Mode::AutoWrap;
+            case 1: return DECMode::UseApplicationCursorKeys;
+            case 2: return DECMode::DesignateCharsetUSASCII;
+            case 3: return DECMode::Columns132;
+            case 4: return DECMode::SmoothScroll;
+            case 5: return DECMode::ReverseVideo;
+            case 6: return DECMode::Origin;
+            case 7: return DECMode::AutoWrap;
             // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
-            case 9: return Mode::MouseProtocolX10;
-            case 10: return Mode::ShowToolbar;
-            case 12: return Mode::BlinkingCursor;
-            case 19: return Mode::PrinterExtend;
-            case 25: return Mode::VisibleCursor;
-            case 30: return Mode::ShowScrollbar;
+            case 9: return DECMode::MouseProtocolX10;
+            case 10: return DECMode::ShowToolbar;
+            case 12: return DECMode::BlinkingCursor;
+            case 19: return DECMode::PrinterExtend;
+            case 25: return DECMode::VisibleCursor;
+            case 30: return DECMode::ShowScrollbar;
             // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
             // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
             // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
-            case 40: return Mode::AllowColumns80to132;
+            case 40: return DECMode::AllowColumns80to132;
             // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
             // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
             // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
             // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-            case 47: return Mode::UseAlternateScreen;
+            case 47: return DECMode::UseAlternateScreen;
             // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
             // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the backarrowKey resource to "true".
-            case 69: return Mode::LeftRightMargin;
-            case 80: return Mode::SixelScrolling;
-            case 1000: return Mode::MouseProtocolNormalTracking;
-            case 1001: return Mode::MouseProtocolHighlightTracking;
-            case 1002: return Mode::MouseProtocolButtonTracking;
-            case 1003: return Mode::MouseProtocolAnyEventTracking;
-            case 1004: return Mode::FocusTracking;
-            case 1005: return Mode::MouseExtended;
-            case 1006: return Mode::MouseSGR;
-            case 1007: return Mode::MouseAlternateScroll;
-            case 1015: return Mode::MouseURXVT;
-            case 1047: return Mode::UseAlternateScreen;
-            case 1048: return Mode::SaveCursor;
-            case 1049: return Mode::ExtendedAltScreen;
-            case 2004: return Mode::BracketedPaste;
-            case 2026: return Mode::BatchedRendering;
+            case 69: return DECMode::LeftRightMargin;
+            case 80: return DECMode::SixelScrolling;
+            case 1000: return DECMode::MouseProtocolNormalTracking;
+            case 1001: return DECMode::MouseProtocolHighlightTracking;
+            case 1002: return DECMode::MouseProtocolButtonTracking;
+            case 1003: return DECMode::MouseProtocolAnyEventTracking;
+            case 1004: return DECMode::FocusTracking;
+            case 1005: return DECMode::MouseExtended;
+            case 1006: return DECMode::MouseSGR;
+            case 1007: return DECMode::MouseAlternateScroll;
+            case 1015: return DECMode::MouseURXVT;
+            case 1047: return DECMode::UseAlternateScreen;
+            case 1048: return DECMode::SaveCursor;
+            case 1049: return DECMode::ExtendedAltScreen;
+            case 2004: return DECMode::BracketedPaste;
+            case 2026: return DECMode::BatchedRendering;
         }
         return nullopt;
     }
@@ -641,9 +641,9 @@ namespace impl // {{{ some command generator helpers
 
     ApplyResult saveDECModes(Sequence const& _seq, Screen& _screen)
     {
-        vector<Mode> modes;
+        vector<DECMode> modes;
         for (size_t i = 0; i < _seq.parameterCount(); ++i)
-            if (optional<Mode> mode = toDECMode(_seq.param(i)); mode.has_value())
+            if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
                 modes.push_back(mode.value());
         _screen.saveModes(modes);
         return ApplyResult::Ok;
@@ -651,9 +651,9 @@ namespace impl // {{{ some command generator helpers
 
     ApplyResult restoreDECModes(Sequence const& _seq, Screen& _screen)
     {
-        vector<Mode> modes;
+        vector<DECMode> modes;
         for (size_t i = 0; i < _seq.parameterCount(); ++i)
-            if (optional<Mode> mode = toDECMode(_seq.param(i)); mode.has_value())
+            if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
                 modes.push_back(mode.value());
         _screen.restoreModes(modes);
         return ApplyResult::Ok;
@@ -1366,45 +1366,54 @@ std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
     }
 }
 
-std::string to_string(Mode _mode)
+std::string to_string(AnsiMode _mode)
 {
     switch (_mode)
     {
-        case Mode::KeyboardAction: return "KeyboardAction";
-        case Mode::Insert: return "Insert";
-        case Mode::SendReceive: return "SendReceive";
-        case Mode::AutomaticNewLine: return "AutomaticNewLine";
-        case Mode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
-        case Mode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
-        case Mode::Columns132: return "Columns132";
-        case Mode::SmoothScroll: return "SmoothScroll";
-        case Mode::ReverseVideo: return "ReverseVideo";
-        case Mode::MouseProtocolX10: return "MouseProtocolX10";
-        case Mode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
-        case Mode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
-        case Mode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
-        case Mode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
-        case Mode::SaveCursor: return "SaveCursor";
-        case Mode::ExtendedAltScreen: return "ExtendedAltScreen";
-        case Mode::Origin: return "Origin";
-        case Mode::AutoWrap: return "AutoWrap";
-        case Mode::PrinterExtend: return "PrinterExtend";
-        case Mode::LeftRightMargin: return "LeftRightMargin";
-        case Mode::ShowToolbar: return "ShowToolbar";
-        case Mode::BlinkingCursor: return "BlinkingCursor";
-        case Mode::VisibleCursor: return "VisibleCursor";
-        case Mode::ShowScrollbar: return "ShowScrollbar";
-        case Mode::AllowColumns80to132: return "AllowColumns80to132";
-        case Mode::UseAlternateScreen: return "UseAlternateScreen";
-        case Mode::BracketedPaste: return "BracketedPaste";
-        case Mode::FocusTracking: return "FocusTracking";
-        case Mode::SixelScrolling: return "SixelScrolling";
-        case Mode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
-        case Mode::MouseExtended: return "MouseExtended";
-        case Mode::MouseSGR: return "MouseSGR";
-        case Mode::MouseURXVT: return "MouseURXVT";
-        case Mode::MouseAlternateScroll: return "MouseAlternateScroll";
-        case Mode::BatchedRendering: return "BatchedRendering";
+        case AnsiMode::KeyboardAction: return "KeyboardAction";
+        case AnsiMode::Insert: return "Insert";
+        case AnsiMode::SendReceive: return "SendReceive";
+        case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
+    }
+
+    return fmt::format("({})", static_cast<unsigned>(_mode));
+}
+
+std::string to_string(DECMode _mode)
+{
+    switch (_mode)
+    {
+        case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
+        case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
+        case DECMode::Columns132: return "Columns132";
+        case DECMode::SmoothScroll: return "SmoothScroll";
+        case DECMode::ReverseVideo: return "ReverseVideo";
+        case DECMode::MouseProtocolX10: return "MouseProtocolX10";
+        case DECMode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
+        case DECMode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
+        case DECMode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
+        case DECMode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
+        case DECMode::SaveCursor: return "SaveCursor";
+        case DECMode::ExtendedAltScreen: return "ExtendedAltScreen";
+        case DECMode::Origin: return "Origin";
+        case DECMode::AutoWrap: return "AutoWrap";
+        case DECMode::PrinterExtend: return "PrinterExtend";
+        case DECMode::LeftRightMargin: return "LeftRightMargin";
+        case DECMode::ShowToolbar: return "ShowToolbar";
+        case DECMode::BlinkingCursor: return "BlinkingCursor";
+        case DECMode::VisibleCursor: return "VisibleCursor";
+        case DECMode::ShowScrollbar: return "ShowScrollbar";
+        case DECMode::AllowColumns80to132: return "AllowColumns80to132";
+        case DECMode::UseAlternateScreen: return "UseAlternateScreen";
+        case DECMode::BracketedPaste: return "BracketedPaste";
+        case DECMode::FocusTracking: return "FocusTracking";
+        case DECMode::SixelScrolling: return "SixelScrolling";
+        case DECMode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
+        case DECMode::MouseExtended: return "MouseExtended";
+        case DECMode::MouseSGR: return "MouseSGR";
+        case DECMode::MouseURXVT: return "MouseURXVT";
+        case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
+        case DECMode::BatchedRendering: return "BatchedRendering";
     }
     return fmt::format("({})", static_cast<unsigned>(_mode));
 };

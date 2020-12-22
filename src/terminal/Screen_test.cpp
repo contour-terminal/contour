@@ -92,7 +92,7 @@ TEST_CASE("AppendChar", "[screen]")
     auto screen = MockScreen{{3, 1}};
     REQUIRE("   " == screen.renderTextLine(1));
 
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
 
     screen.write("A");
     REQUIRE("A  " == screen.renderTextLine(1));
@@ -106,7 +106,7 @@ TEST_CASE("AppendChar", "[screen]")
     screen.write("D");
     REQUIRE("ABD" == screen.renderTextLine(1));
 
-    screen.setMode(Mode::AutoWrap, true);
+    screen.setMode(DECMode::AutoWrap, true);
 
     screen.write("E");
     REQUIRE("ABE" == screen.renderTextLine(1));
@@ -120,7 +120,7 @@ TEST_CASE("AppendChar_CR_LF", "[screen]")
     auto screen = MockScreen{{3, 2}};
     REQUIRE("   " == screen.renderTextLine(1));
 
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
 
     screen.write("ABC");
     REQUIRE("ABC" == screen.renderTextLine(1));
@@ -241,7 +241,7 @@ TEST_CASE("AppendChar.emoji_zwj1", "[screen]")
 {
     auto screen = MockScreen{{5, 1}};
 
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
 
     // https://emojipedia.org/man-facepalming-medium-light-skin-tone/
     auto const emoji = u32string_view{U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F"};
@@ -291,7 +291,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
 TEST_CASE("AppendChar_WideChar", "[screen]")
 {
     auto screen = MockScreen{{3, 2}};
-    screen.setMode(Mode::AutoWrap, true);
+    screen.setMode(DECMode::AutoWrap, true);
     screen.write(U"\U0001F600");
     CHECK(screen.cursorPosition() == Coordinate{1, 3});
 }
@@ -299,7 +299,7 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
 {
     auto screen = MockScreen{{3, 2}};
-    screen.setMode(Mode::AutoWrap, true);
+    screen.setMode(DECMode::AutoWrap, true);
 
     screen.write("ABC");
     REQUIRE("ABC" == screen.renderTextLine(1));
@@ -322,7 +322,7 @@ TEST_CASE("AppendChar_AutoWrap", "[screen]")
 TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
 {
     auto screen = MockScreen{{3, 2}};
-    screen.setMode(Mode::AutoWrap, true);
+    screen.setMode(DECMode::AutoWrap, true);
 
     INFO("write ABC");
     screen.write("ABC");
@@ -455,7 +455,7 @@ TEST_CASE("ClearToEndOfLine", "[screen]")
 TEST_CASE("ClearToBeginOfLine", "[screen]")
 {
     auto screen = MockScreen{{3, 1}};
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
     screen.write("ABC");
     REQUIRE("ABC" == screen.renderTextLine(1));
 
@@ -467,7 +467,7 @@ TEST_CASE("ClearToBeginOfLine", "[screen]")
 TEST_CASE("ClearLine", "[screen]")
 {
     auto screen = MockScreen{{3, 1}};
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
     screen.write("ABC");
     REQUIRE("ABC" == screen.renderTextLine(1));
 
@@ -481,7 +481,7 @@ TEST_CASE("InsertColumns", "[screen]")
     auto screen = MockScreen{{5, 5}};
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
-    screen.setMode(Mode::LeftRightMargin, true);
+    screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(2, 4);
     screen.setTopBottomMargin(2, 4);
 
@@ -538,7 +538,7 @@ TEST_CASE("InsertCharacters", "[screen]")
 {
     auto screen = MockScreen{{5, 2}};
     screen.write("12345\r\n67890");
-    screen.setMode(Mode::LeftRightMargin, true);
+    screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(2, 4);
     REQUIRE("12345\n67890\n" == screen.renderText());
 
@@ -650,7 +650,7 @@ TEST_CASE("DeleteColumns", "[screen]")
 {
     auto screen = MockScreen{{5, 5}};
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
-    screen.setMode(Mode::LeftRightMargin, true);
+    screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(2, 4);
     screen.setTopBottomMargin(2, 4);
 
@@ -693,7 +693,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
 
     SECTION("outside margin") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(2, 4);
         screen.moveCursorTo({ 1, 1 });
         screen.deleteCharacters(1);
@@ -723,7 +723,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
         }
     }
     SECTION("with horizontal margin") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(1, 4 );
         screen.moveCursorTo({ 1, 2 });
         REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
@@ -829,10 +829,10 @@ TEST_CASE("ScrollDown", "[screen]")
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
     SECTION("scroll fully inside margins") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(2, 4);
         screen.setTopBottomMargin(2, 4);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
 
         SECTION("SD 1") {
             screen.scrollDown(1);
@@ -1193,10 +1193,10 @@ TEST_CASE("MoveCursorTo", "[screen]")
         constexpr auto BottomMargin = 4;
         constexpr auto LeftMargin = 2;
         constexpr auto RightMargin = 4;
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(LeftMargin, RightMargin);
         screen.setTopBottomMargin(TopMargin, BottomMargin);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
 
         SECTION("move to origin") {
             screen.moveCursorTo({1, 1});
@@ -1229,7 +1229,7 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
     screen.moveCursorToNextTab();
     REQUIRE(screen.cursorPosition() == Coordinate{1, 20});
 
-    screen.setMode(Mode::AutoWrap, true);
+    screen.setMode(DECMode::AutoWrap, true);
     screen.write("A"); // 'A' is being written at the right margin
     screen.write("B"); // force wrap to next line, writing 'B' at the beginning of the line
 
@@ -1243,19 +1243,19 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 {
     auto screen = MockScreen{{3, 3}};
-    screen.setMode(Mode::AutoWrap, false);
+    screen.setMode(DECMode::AutoWrap, false);
     screen.saveCursor();
 
     // mutate the cursor's position, autowrap and origin flags
     screen.moveCursorTo({3, 3});
-    screen.setMode(Mode::AutoWrap, true);
-    screen.setMode(Mode::Origin, true);
+    screen.setMode(DECMode::AutoWrap, true);
+    screen.setMode(DECMode::Origin, true);
 
     // restore cursor and see if the changes have been reverted
     screen.restoreCursor();
     CHECK(screen.cursorPosition() == Coordinate{1, 1});
-    CHECK_FALSE(screen.isModeEnabled(Mode::AutoWrap));
-    CHECK_FALSE(screen.isModeEnabled(Mode::Origin));
+    CHECK_FALSE(screen.isModeEnabled(DECMode::AutoWrap));
+    CHECK_FALSE(screen.isModeEnabled(DECMode::Origin));
 }
 
 TEST_CASE("Index_outside_margin", "[screen]")
@@ -1321,7 +1321,7 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
 
     SECTION("cursor at bottom margin and NOT full horizontal margins") {
         screen.moveCursorTo({1, 1});
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(2, 4);
         screen.setTopBottomMargin(2, 4);
         screen.moveCursorTo({4, 2}); // cursor at bottom margin
@@ -1425,7 +1425,7 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderText());
 
-    screen.setMode(Mode::LeftRightMargin, true);
+    screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(2, 4);
     screen.setTopBottomMargin(2, 4);
 
@@ -1512,10 +1512,10 @@ TEST_CASE("CursorNextLine", "[screen]")
     }
 
     SECTION("with margins") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(2, 4);
         screen.setTopBottomMargin(2, 4);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
         screen.moveCursorTo({1, 2});
         REQUIRE(screen.currentCell().toUtf8() == "8");
 
@@ -1562,10 +1562,10 @@ TEST_CASE("CursorPreviousLine", "[screen]")
     }
 
     SECTION("with margins") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(2, 4);
         screen.setTopBottomMargin(2, 4);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
         screen.moveCursorTo({3, 3});
         REQUIRE(screen.cursorPosition() == Coordinate{3, 3});
 
@@ -1602,10 +1602,10 @@ TEST_CASE("ReportCursorPosition", "[screen]")
     }
 
     SECTION("with margins and origin mode enabled") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setTopBottomMargin(2, 4);
         screen.setLeftRightMargin(2, 4);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
         screen.moveCursorTo({3, 2});
 
         screen.reportCursorPosition();
@@ -1629,10 +1629,10 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     }
 
     SECTION("with margins and origin mode enabled") {
-        screen.setMode(Mode::LeftRightMargin, true);
+        screen.setMode(DECMode::LeftRightMargin, true);
         screen.setTopBottomMargin(2, 4);
         screen.setLeftRightMargin(2, 4);
-        screen.setMode(Mode::Origin, true);
+        screen.setMode(DECMode::Origin, true);
         screen.moveCursorTo({3, 2});
 
         screen.reportExtendedCursorPosition();
@@ -1643,7 +1643,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 TEST_CASE("SetMode", "[screen]") {
     SECTION("Auto NewLine Mode: Enabled") {
         auto screen = MockScreen{{5, 5}};
-        screen.setMode(Mode::AutomaticNewLine, true);
+        screen.setMode(AnsiMode::AutomaticNewLine, true);
         screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
         REQUIRE(screen.renderText() == "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n");
     }
@@ -1660,15 +1660,15 @@ TEST_CASE("RequestMode", "[screen]")
     auto screen = MockScreen{{5, 5}};
 
     SECTION("ANSI modes") {
-        screen.setMode(Mode::Insert, true); // IRM
-        screen.requestMode(Mode::Insert);
-        REQUIRE(screen.replyData == fmt::format("\033[{};1$y", to_code(Mode::Insert)));
+        screen.setMode(AnsiMode::Insert, true); // IRM
+        screen.requestMode(AnsiMode::Insert);
+        REQUIRE(screen.replyData == fmt::format("\033[{};1$y", to_code(AnsiMode::Insert)));
     }
 
     SECTION("DEC modes") {
-        screen.setMode(Mode::Origin, true); // DECOM
-        screen.requestMode(Mode::Origin);
-        REQUIRE(screen.replyData == fmt::format("\033[?{};1$y", to_code(Mode::Origin)));
+        screen.setMode(DECMode::Origin, true); // DECOM
+        screen.requestMode(DECMode::Origin);
+        REQUIRE(screen.replyData == fmt::format("\033[?{};1$y", to_code(DECMode::Origin)));
     }
 }
 
@@ -2249,14 +2249,14 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
 {
     auto screen = MockScreen{{2, 2}};
 
-    screen.setMode(Mode::MouseProtocolHighlightTracking, false);
-    screen.saveModes(vector{Mode::MouseProtocolHighlightTracking});
+    screen.setMode(DECMode::MouseProtocolHighlightTracking, false);
+    screen.saveModes(vector{DECMode::MouseProtocolHighlightTracking});
 
-    screen.setMode(Mode::MouseProtocolHighlightTracking, true);
-    CHECK(screen.isModeEnabled(Mode::MouseProtocolHighlightTracking));
+    screen.setMode(DECMode::MouseProtocolHighlightTracking, true);
+    CHECK(screen.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 
-    screen.restoreModes(vector{Mode::MouseProtocolHighlightTracking});
-    CHECK_FALSE(screen.isModeEnabled(Mode::MouseProtocolHighlightTracking));
+    screen.restoreModes(vector{DECMode::MouseProtocolHighlightTracking});
+    CHECK_FALSE(screen.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 }
 
 TEST_CASE("resize", "[screen]")

@@ -635,7 +635,7 @@ void TerminalWidget::initializeGL()
 
     // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
     // hot reloading, because this value may have changed manually by an application already.
-    screen.setMode(terminal::Mode::SixelScrolling, config_.sixelScrolling);
+    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
     screen.setMaxImageSize(config_.maxImageSize);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
@@ -705,7 +705,7 @@ void TerminalWidget::paintGL()
         invokeQueuedCalls();
 
         bool const reverseVideo =
-            terminalView_->terminal().screen().isModeEnabled(terminal::Mode::ReverseVideo);
+            terminalView_->terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
 
         QVector4D const bg = Renderer::canonicalColor(
             reverseVideo

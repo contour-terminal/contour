@@ -106,7 +106,7 @@ bool Terminal::send(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_p
     lastCursorBlink_ = _now;
 
     // Early exit if KAM is enabled.
-    if (screen_.isModeEnabled(Mode::KeyboardAction))
+    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
     bool const success = inputGenerator_.generate(_keyEvent);
@@ -125,7 +125,7 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
         logger_(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier)) });
 
     // Early exit if KAM is enabled.
-    if (screen_.isModeEnabled(Mode::KeyboardAction))
+    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
     bool const success = inputGenerator_.generate(_charEvent);

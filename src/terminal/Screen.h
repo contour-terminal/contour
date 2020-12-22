@@ -57,22 +57,50 @@ namespace terminal {
 /// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
 class Modes {
   public:
-    void set(Mode _mode, bool _enabled)
+    void set(AnsiMode _mode, bool _enabled)
     {
         if (_enabled)
-            enabled_.insert(_mode);
-        else if (auto i = enabled_.find(_mode); i != enabled_.end())
-            enabled_.erase(i);
+            ansi_.insert(_mode);
+        else if (auto i = ansi_.find(_mode); i != ansi_.end())
+            ansi_.erase(i);
     }
 
-    bool enabled(Mode _mode) const noexcept
+    void set(DECMode  _mode, bool _enabled)
     {
-        return enabled_.find(_mode) != enabled_.end();
+        if (_enabled)
+            dec_.insert(_mode);
+        else if (auto i = dec_.find(_mode); i != dec_.end())
+            dec_.erase(i);
+    }
+
+    bool enabled(AnsiMode _mode) const noexcept { return ansi_.find(_mode) != ansi_.end(); }
+
+    bool enabled(DECMode _mode) const noexcept { return dec_.find(_mode) != dec_.end(); }
+
+    void save(std::vector<DECMode> const& _modes)
+    {
+        for (DECMode const mode : _modes)
+            savedModes_[mode].push_back(enabled(mode));
+    }
+
+    void restore(std::vector<DECMode> const& _modes)
+    {
+        for (DECMode const mode : _modes)
+        {
+            if (auto i = savedModes_.find(mode); i != savedModes_.end() && !i->second.empty())
+            {
+                auto& saved = i->second;
+                set(mode, saved.back());
+                saved.pop_back();
+            }
+        }
     }
 
   private:
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode enum values.
-    std::set<Mode> enabled_;
+    std::set<AnsiMode> ansi_;
+    std::set<DECMode> dec_;
+    std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 };
 // }}}
 
@@ -594,7 +622,7 @@ class Screen {
     void setUnderlineColor(Color const& _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void requestMode(Mode _mode);
+    void requestMode(std::variant<AnsiMode, DECMode> _mode);
     void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
     void setLeftRightMargin(std::optional<int> _left, std::optional<int> _right);
     void screenAlignmentPattern();
@@ -642,11 +670,12 @@ class Screen {
     void resetHard();
 
     // for DECSC and DECRC
-    void setMode(Mode _mode, bool _enabled);
+    void setMode(AnsiMode _mode, bool _enabled);
+    void setMode(DECMode _mode, bool _enabled);
     void saveCursor();
     void restoreCursor();
-    void saveModes(std::vector<Mode> const& _modes);
-    void restoreModes(std::vector<Mode> const& _modes);
+    void saveModes(std::vector<DECMode> const& _modes);
+    void restoreModes(std::vector<DECMode> const& _modes);
 
     Size const& size() const noexcept { return size_; }
     void resize(Size const& _newSize);
@@ -657,7 +686,7 @@ class Screen {
     bool isCursorInsideMargins() const noexcept
     {
         bool const insideVerticalMargin = margin_.vertical.contains(cursor_.position.row);
-        bool const insideHorizontalMargin = !isModeEnabled(Mode::LeftRightMargin)
+        bool const insideHorizontalMargin = !isModeEnabled(DECMode::LeftRightMargin)
                                          || margin_.horizontal.contains(cursor_.position.column);
         return insideVerticalMargin && insideHorizontalMargin;
     }
@@ -764,13 +793,18 @@ class Screen {
     bool isPrimaryScreen() const noexcept { return activeBuffer_ == &lines_[0]; }
     bool isAlternateScreen() const noexcept { return activeBuffer_ == &lines_[1]; }
 
-    bool isModeEnabled(Mode m) const noexcept
-    {
-        return modes_.enabled(m);
+    bool isModeEnabled(AnsiMode m) const noexcept { return modes_.enabled(m); }
+    bool isModeEnabled(DECMode m) const noexcept { return modes_.enabled(m); }
+
+    bool isModeEnabled(std::variant<AnsiMode, DECMode> m) const {
+        if (std::holds_alternative<AnsiMode>(m))
+            return modes_.enabled(std::get<AnsiMode>(m));
+        else
+            return modes_.enabled(std::get<DECMode>(m));
     }
 
-    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(Mode::Origin); }
-    bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(Mode::LeftRightMargin); }
+    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::Origin); }
+    bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
     Margin const& margin() const noexcept { return margin_; }
     Lines const& scrollbackLines() const noexcept { return savedLines_; }
@@ -914,7 +948,7 @@ class Screen {
     VTType terminalId_ = VTType::VT525;
 
     Modes modes_;
-    std::map<Mode, std::vector<bool>> savedModes_; //!< saved DEC modes
+    std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 
     int maxImageColorRegisters_;
     std::shared_ptr<ColorPalette> imageColorPalette_;

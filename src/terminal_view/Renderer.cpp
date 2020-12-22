@@ -202,7 +202,7 @@ uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
     textRenderer_.setPressure(pressure);
 
     auto _l = scoped_lock{_terminal};
-    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::Mode::ReverseVideo);
+    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::DECMode::ReverseVideo);
     auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
 
     renderCursor(_terminal);

@@ -321,7 +321,7 @@ void Screen::resizeColumns(int _newColumnCount, bool _clear)
     }
 
     // resets vertical split screen mode (DECLRMM) to unavailable
-    setMode(Mode::LeftRightMargin, false); // DECSLRM
+    setMode(DECMode::LeftRightMargin, false); // DECSLRM
 
     // Pre-resize in case the event callback right after is not actually resizing the window
     // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
@@ -448,7 +448,7 @@ Coordinate Screen::resizeBuffer(Size const& _newSize,
 void Screen::verifyState() const
 {
 #if !defined(NDEBUG)
-    auto const lrmm = isModeEnabled(Mode::LeftRightMargin);
+    auto const lrmm = isModeEnabled(DECMode::LeftRightMargin);
     if (wrapPending_ &&
             ((lrmm && (cursor_.position.column + wrapPending_ - 1) != margin_.horizontal.to)
             || (!lrmm && (cursor_.position.column + wrapPending_ - 1) != size_.width)))
@@ -549,7 +549,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     lastColumn_ = currentColumn_;
     lastCursorPosition_ = cursor_.position;
 
-    bool const cursorInsideMargin = isModeEnabled(Mode::LeftRightMargin) && isCursorInsideMargins();
+    bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor_.position.column
                                                    : size_.width - cursor_.position.column;
 
@@ -715,21 +715,21 @@ void Screen::restoreCursor()
     cursor_ = savedCursor_;
     updateCursorIterators();
 
-    setMode(Mode::AutoWrap, savedCursor_.autoWrap);
-    setMode(Mode::Origin, savedCursor_.originMode);
+    setMode(DECMode::AutoWrap, savedCursor_.autoWrap);
+    setMode(DECMode::Origin, savedCursor_.originMode);
 }
 
 void Screen::resetSoft()
 {
-    setMode(Mode::BatchedRendering, false);
+    setMode(DECMode::BatchedRendering, false);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     moveCursorTo({1, 1}); // DECSC (Save cursor state)
-    setMode(Mode::VisibleCursor, true); // DECTCEM (Text cursor enable)
-    setMode(Mode::Origin, false); // DECOM
-    setMode(Mode::KeyboardAction, false); // KAM
-    setMode(Mode::AutoWrap, false); // DECAWM
-    setMode(Mode::Insert, false); // IRM
-    setMode(Mode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+    setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false); // DECOM
+    setMode(AnsiMode::KeyboardAction, false); // KAM
+    setMode(DECMode::AutoWrap, false); // DECAWM
+    setMode(AnsiMode::Insert, false); // IRM
+    setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
     setTopBottomMargin(1, size().height); // DECSTBM
     setLeftRightMargin(1, size().width); // DECRLM
 
@@ -750,7 +750,7 @@ void Screen::resetHard()
     setBuffer(ScreenType::Main);
 
     modes_ = Modes{};
-    setMode(Mode::AutoWrap, true);
+    setMode(DECMode::AutoWrap, true);
 
     lines_ = emptyBuffers(size_);
     activeBuffer_ = &primaryBuffer();
@@ -785,7 +785,7 @@ void Screen::setBuffer(ScreenType _type)
                 activeBuffer_ = &primaryBuffer();
                 break;
             case ScreenType::Alternate:
-                if (isModeEnabled(Mode::MouseAlternateScroll))
+                if (isModeEnabled(DECMode::MouseAlternateScroll))
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
@@ -1073,7 +1073,7 @@ string Screen::renderText() const
 // {{{ ops
 void Screen::linefeed()
 {
-    if (isModeEnabled(Mode::AutomaticNewLine))
+    if (isModeEnabled(AnsiMode::AutomaticNewLine))
         linefeed(margin_.horizontal.from);
     else
         linefeed(realCursorPosition().column);
@@ -1710,46 +1710,38 @@ void Screen::setMark()
     currentLine_->marked = true;
 }
 
-void Screen::saveModes(std::vector<Mode> const& _modes)
+void Screen::saveModes(std::vector<DECMode> const& _modes)
 {
-    for (Mode const mode : _modes)
-        if (!isAnsiMode(mode))
-            savedModes_[mode].push_back(isModeEnabled(mode));
+    modes_.save(_modes);
 }
 
-void Screen::restoreModes(std::vector<Mode> const& _modes)
+void Screen::restoreModes(std::vector<DECMode> const& _modes)
 {
-    for (Mode const mode : _modes)
-    {
-        if (auto i = savedModes_.find(mode); i != savedModes_.end())
-        {
-            vector<bool>& saved = i->second;
-            if (!saved.empty())
-            {
-                setMode(mode, saved.back());
-                saved.pop_back();
-            }
-        }
-    }
+    modes_.restore(_modes);
 }
 
-void Screen::setMode(Mode _mode, bool _enable)
+void Screen::setMode(AnsiMode _mode, bool _enable)
+{
+    modes_.set(_mode, _enable);
+}
+
+void Screen::setMode(DECMode _mode, bool _enable)
 {
     switch (_mode)
     {
-        case Mode::AutoWrap:
+        case DECMode::AutoWrap:
             cursor_.autoWrap = _enable;
             break;
-        case Mode::LeftRightMargin:
+        case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!_enable)
                 margin_.horizontal = {1, size_.width};
             break;
-        case Mode::Origin:
+        case DECMode::Origin:
             cursor_.originMode = _enable;
             break;
-        case Mode::Columns132:
-            if (!_enable || isModeEnabled(Mode::AllowColumns80to132))
+        case DECMode::Columns132:
+            if (!_enable || isModeEnabled(DECMode::AllowColumns80to132))
             {
                 auto const clear = _enable != isModeEnabled(_mode);
 
@@ -1760,17 +1752,17 @@ void Screen::setMode(Mode _mode, bool _enable)
                 resizeColumns(columns, clear);
             }
             break;
-        case Mode::BatchedRendering:
+        case DECMode::BatchedRendering:
             // Only perform batched rendering when NOT in debugging mode.
             // TODO: also, do I still need this here?
             break;
-        case Mode::UseAlternateScreen:
+        case DECMode::UseAlternateScreen:
             if (_enable)
                 setBuffer(ScreenType::Alternate);
             else
                 setBuffer(ScreenType::Main);
             break;
-        case Mode::UseApplicationCursorKeys:
+        case DECMode::UseApplicationCursorKeys:
             eventListener_.useApplicationCursorKeys(_enable);
             if (isAlternateScreen())
             {
@@ -1780,68 +1772,68 @@ void Screen::setMode(Mode _mode, bool _enable)
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             }
             break;
-        case Mode::BracketedPaste:
+        case DECMode::BracketedPaste:
             eventListener_.setBracketedPaste(_enable);
             break;
-        case Mode::MouseSGR:
+        case DECMode::MouseSGR:
             if (_enable)
                 eventListener_.setMouseTransport(MouseTransport::SGR);
             else
                 eventListener_.setMouseTransport(MouseTransport::Default);
             break;
-        case Mode::MouseExtended:
+        case DECMode::MouseExtended:
             eventListener_.setMouseTransport(MouseTransport::Extended);
             break;
-        case Mode::MouseURXVT:
+        case DECMode::MouseURXVT:
             eventListener_.setMouseTransport(MouseTransport::URXVT);
             break;
-        case Mode::MouseAlternateScroll:
+        case DECMode::MouseAlternateScroll:
             if (_enable)
                 eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
             else
                 eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             break;
-        case Mode::FocusTracking:
+        case DECMode::FocusTracking:
             eventListener_.setGenerateFocusEvents(_enable);
             break;
-        case Mode::UsePrivateColorRegisters:
+        case DECMode::UsePrivateColorRegisters:
             sequencer_.setUsePrivateColorRegisters(_enable);
             break;
-        case Mode::VisibleCursor:
+        case DECMode::VisibleCursor:
             cursor_.visible = _enable;
             eventListener_.setCursorVisibility(_enable);
             break;
-        case Mode::MouseProtocolX10:
+        case DECMode::MouseProtocolX10:
             sendMouseEvents(MouseProtocol::X10, _enable);
             break;
-        case Mode::MouseProtocolNormalTracking:
+        case DECMode::MouseProtocolNormalTracking:
             sendMouseEvents(MouseProtocol::NormalTracking, _enable);
             break;
-        case Mode::MouseProtocolHighlightTracking:
+        case DECMode::MouseProtocolHighlightTracking:
             sendMouseEvents(MouseProtocol::HighlightTracking, _enable);
             break;
-        case Mode::MouseProtocolButtonTracking:
+        case DECMode::MouseProtocolButtonTracking:
             sendMouseEvents(MouseProtocol::ButtonTracking, _enable);
             break;
-        case Mode::MouseProtocolAnyEventTracking:
+        case DECMode::MouseProtocolAnyEventTracking:
             sendMouseEvents(MouseProtocol::AnyEventTracking, _enable);
             break;
-        case Mode::SaveCursor:
+        case DECMode::SaveCursor:
             if (_enable)
                 saveCursor();
             else
                 restoreCursor();
             break;
-        case Mode::ExtendedAltScreen:
+        case DECMode::ExtendedAltScreen:
             if (_enable)
             {
                 saveCursor();
-                setMode(Mode::UseAlternateScreen, true);
+                setMode(DECMode::UseAlternateScreen, true);
                 clearScreen();
             }
             else
             {
-                setMode(Mode::UseAlternateScreen, false);
+                setMode(DECMode::UseAlternateScreen, false);
                 restoreCursor();
             }
             break;
@@ -1852,7 +1844,7 @@ void Screen::setMode(Mode _mode, bool _enable)
     modes_.set(_mode, _enable);
 }
 
-void Screen::requestMode(Mode _mode)
+void Screen::requestMode(std::variant<AnsiMode, DECMode> _mode)
 {
     enum class ModeResponse { // TODO: respect response 0, 3, 4.
         NotRecognized = 0,
@@ -1866,10 +1858,10 @@ void Screen::requestMode(Mode _mode)
         ? ModeResponse::Set
         : ModeResponse::Reset;
 
-    if (isAnsiMode(_mode))
-        reply("\033[{};{}$y", to_code(_mode), static_cast<unsigned>(modeResponse));
+    if (holds_alternative<AnsiMode>(_mode))
+        reply("\033[{};{}$y", to_code(get<AnsiMode>(_mode)), static_cast<unsigned>(modeResponse));
     else
-        reply("\033[?{};{}$y", to_code(_mode), static_cast<unsigned>(modeResponse));
+        reply("\033[?{};{}$y", to_code(get<DECMode>(_mode)), static_cast<unsigned>(modeResponse));
 }
 
 void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
@@ -1890,7 +1882,7 @@ void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
 
 void Screen::setLeftRightMargin(optional<int> _left, optional<int> _right)
 {
-    if (isModeEnabled(Mode::LeftRightMargin))
+    if (isModeEnabled(DECMode::LeftRightMargin))
     {
 		auto const right = _right.has_value()
 			? min(_right.value(), size_.width)
@@ -1960,7 +1952,7 @@ void Screen::sixelImage(Size _pixelSize, Image::Data&& _data)
     auto const columnCount = int(ceilf(float(_pixelSize.width) / float(cellPixelSize_.width)));
     auto const rowCount = int(ceilf(float(_pixelSize.height) / float(cellPixelSize_.height)));
     auto const extent = Size{columnCount, rowCount};
-    auto const sixelScrolling = isModeEnabled(Mode::SixelScrolling);
+    auto const sixelScrolling = isModeEnabled(DECMode::SixelScrolling);
     auto const topLeft = sixelScrolling ? cursorPosition() : Coordinate{1, 1};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;

@@ -90,14 +90,14 @@ enum class MouseProtocol {
     AnyEventTracking = 1003,
 };
 
-enum class Mode {
-    // {{{ normal modes
-    KeyboardAction,
-    Insert,
-    SendReceive,
-    AutomaticNewLine,
-    // }}}
-    // {{{ DEC modes
+enum class AnsiMode { // {{{
+    KeyboardAction = 2,         // KAM
+    Insert = 4,                 // IRM
+    SendReceive = 12,           // SRM
+    AutomaticNewLine = 20,      // LNM
+}; // }}}
+
+enum class DECMode { // {{{
     UseApplicationCursorKeys,
     DesignateCharsetUSASCII,
     Columns132,
@@ -158,7 +158,7 @@ enum class Mode {
     FocusTracking, // 1004
     SixelScrolling, // ?80
     UsePrivateColorRegisters, // ?1070
-    // }}}
+
     // {{{ Mouse related flags
     /// extend mouse protocl encoding
     MouseExtended = 1005,
@@ -178,7 +178,7 @@ enum class Mode {
     // this feature is using CSI ? 2026 h (DECSM and DECRM).
     BatchedRendering = 2026,
     // }}}
-};
+}; // }}}
 
 enum class CharsetTable {
     G0 = 0,
@@ -216,98 +216,57 @@ enum class DynamicColorName {
 // }}}
 
 // {{{ enum helper free functions
-std::string to_string(Mode m);
 std::string to_string(CharsetTable i);
 std::string to_string(CharsetId charset);
 std::string to_string(GraphicsRendition s);
 
-constexpr bool isAnsiMode(Mode m) noexcept
+constexpr std::string_view to_code(AnsiMode m)
 {
     switch (m)
     {
-        case Mode::KeyboardAction:
-        case Mode::Insert:
-        case Mode::SendReceive:
-        case Mode::AutomaticNewLine:
-            return true;
-        case Mode::UseApplicationCursorKeys:
-        case Mode::DesignateCharsetUSASCII:
-        case Mode::Columns132:
-        case Mode::SmoothScroll:
-        case Mode::ReverseVideo:
-        case Mode::Origin:
-        case Mode::AutoWrap:
-        case Mode::ShowToolbar:
-        case Mode::BlinkingCursor:
-        case Mode::PrinterExtend:
-        case Mode::VisibleCursor:
-        case Mode::ShowScrollbar:
-        case Mode::AllowColumns80to132:
-        case Mode::UseAlternateScreen:
-        case Mode::LeftRightMargin:
-        case Mode::BracketedPaste:
-        case Mode::FocusTracking:
-        case Mode::SixelScrolling:
-        case Mode::UsePrivateColorRegisters:
-        case Mode::MouseExtended:
-        case Mode::MouseSGR:
-        case Mode::MouseURXVT:
-        case Mode::MouseAlternateScroll:
-        case Mode::BatchedRendering:
-            return false;
-        case Mode::SaveCursor:
-        case Mode::ExtendedAltScreen:
-        case Mode::MouseProtocolAnyEventTracking:
-        case Mode::MouseProtocolButtonTracking:
-        case Mode::MouseProtocolHighlightTracking:
-        case Mode::MouseProtocolNormalTracking:
-        case Mode::MouseProtocolX10:
-            return false;
+        case AnsiMode::KeyboardAction: return "2";
+        case AnsiMode::Insert: return "4";
+        case AnsiMode::SendReceive: return "12";
+        case AnsiMode::AutomaticNewLine: return "20";
     }
-    return false; // Should never be reached.
+    return "";
 }
 
-constexpr std::string_view to_code(Mode m)
+constexpr std::string_view to_code(DECMode m)
 {
     switch (m)
     {
-        case Mode::KeyboardAction: return "2";
-        case Mode::Insert: return "4";
-        case Mode::SendReceive: return "12";
-        case Mode::AutomaticNewLine: return "20";
-
-        // DEC set-mode
-        case Mode::UseApplicationCursorKeys: return "?1";
-        case Mode::DesignateCharsetUSASCII: return "?2";
-        case Mode::Columns132: return "?3";
-        case Mode::SmoothScroll: return "?4";
-        case Mode::ReverseVideo: return "?5";
-        case Mode::Origin: return "?6";
-        case Mode::AutoWrap: return "?7";
-        case Mode::MouseProtocolX10: return "?9";
-        case Mode::ShowToolbar: return "?10";
-        case Mode::BlinkingCursor: return "?12";
-        case Mode::PrinterExtend: return "?19";
-        case Mode::VisibleCursor: return "?25";
-        case Mode::ShowScrollbar: return "?30";
-        case Mode::AllowColumns80to132: return "?40";
-        case Mode::UseAlternateScreen: return "?47";
-        case Mode::LeftRightMargin: return "?69";
-        case Mode::MouseProtocolNormalTracking: return "?1000";
-        case Mode::MouseProtocolHighlightTracking: return "?1001";
-        case Mode::MouseProtocolButtonTracking: return "?1002";
-        case Mode::MouseProtocolAnyEventTracking: return "?1003";
-        case Mode::SaveCursor: return "?1048";
-        case Mode::ExtendedAltScreen: return "?1049";
-        case Mode::BracketedPaste: return "?2004";
-        case Mode::FocusTracking: return "?1004";
-        case Mode::SixelScrolling: return "?80";
-        case Mode::UsePrivateColorRegisters: return "?1070";
-        case Mode::MouseExtended: return "?1005";
-        case Mode::MouseSGR: return "?1006";
-        case Mode::MouseURXVT: return "?1015";
-        case Mode::MouseAlternateScroll: return "?1007";
-        case Mode::BatchedRendering: return "?2026";
+        case DECMode::UseApplicationCursorKeys: return "?1";
+        case DECMode::DesignateCharsetUSASCII: return "?2";
+        case DECMode::Columns132: return "?3";
+        case DECMode::SmoothScroll: return "?4";
+        case DECMode::ReverseVideo: return "?5";
+        case DECMode::Origin: return "?6";
+        case DECMode::AutoWrap: return "?7";
+        case DECMode::MouseProtocolX10: return "?9";
+        case DECMode::ShowToolbar: return "?10";
+        case DECMode::BlinkingCursor: return "?12";
+        case DECMode::PrinterExtend: return "?19";
+        case DECMode::VisibleCursor: return "?25";
+        case DECMode::ShowScrollbar: return "?30";
+        case DECMode::AllowColumns80to132: return "?40";
+        case DECMode::UseAlternateScreen: return "?47";
+        case DECMode::LeftRightMargin: return "?69";
+        case DECMode::MouseProtocolNormalTracking: return "?1000";
+        case DECMode::MouseProtocolHighlightTracking: return "?1001";
+        case DECMode::MouseProtocolButtonTracking: return "?1002";
+        case DECMode::MouseProtocolAnyEventTracking: return "?1003";
+        case DECMode::SaveCursor: return "?1048";
+        case DECMode::ExtendedAltScreen: return "?1049";
+        case DECMode::BracketedPaste: return "?2004";
+        case DECMode::FocusTracking: return "?1004";
+        case DECMode::SixelScrolling: return "?80";
+        case DECMode::UsePrivateColorRegisters: return "?1070";
+        case DECMode::MouseExtended: return "?1005";
+        case DECMode::MouseSGR: return "?1006";
+        case DECMode::MouseURXVT: return "?1015";
+        case DECMode::MouseAlternateScroll: return "?1007";
+        case DECMode::BatchedRendering: return "?2026";
     }
     return "0";
 }
@@ -657,18 +616,19 @@ class Sequencer : public ParserEvents {
 
 namespace fmt { // {{{
     template <>
-    struct formatter<terminal::Mode> {
+    struct formatter<terminal::AnsiMode> {
         template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::Mode _mode, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "{}", to_string(_mode));
-        }
+        auto format(terminal::AnsiMode _mode, FormatContext& ctx) { return format_to(ctx.out(), "{}", to_string(_mode)); }
+    };
+
+    template <>
+    struct formatter<terminal::DECMode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::DECMode _mode, FormatContext& ctx) { return format_to(ctx.out(), "{}", to_string(_mode)); }
     };
 
     template <>
