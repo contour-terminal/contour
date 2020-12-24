@@ -1,5 +1,7 @@
 # Terminal apps using the mouse
 
+- [ ] BUG: quitting bpytop leaves cursor at where it was in alt screen, but should have been restored
+
 ### pre-0.1.0 release
 
 - [ ] QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.
@@ -7,7 +9,7 @@
 - [ ] BUG: SGR underline not visible when inverse is set
 - [ ] QA: Images: copy action should uxe U+FFFC (object replacement) on grid cells that contain an image for text-based clipboard action
 - [ ] QA: Images: Selecting grid cells that contain an image should colorize/tint this cell.
-- [ ] QA: Split Screen's Mode to Mode and DECMode
+- [x] QA: Split Screen's Mode to Mode and DECMode
 - [ ] QA: move `string TerminalWindow::extractLastMarkRange()` into Screen and add tests
 - [ ] UX: don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
           These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
