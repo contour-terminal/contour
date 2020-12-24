@@ -275,7 +275,7 @@ void Renderer::createAtlas(CreateAtlas const& _atlas)
 void Renderer::uploadTexture(UploadTexture const& _upload)
 {
     auto const& texture = _upload.texture.get();
-    auto const key = AtlasKey{_upload.texture.get().atlasName, _upload.texture.get().atlas};
+    auto const key = AtlasKey{texture.atlasName, texture.atlas};
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
     assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
     auto const textureId = atlasMap_[key];
