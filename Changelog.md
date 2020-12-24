@@ -1,4 +1,6 @@
-### 0.1.0 (unreleased)
+### 0.1.0 (2012-12-24)
+
+- Fixes some off-by-one access in libunicode.
 
 #### prerelease 6
 
