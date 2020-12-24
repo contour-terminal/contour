@@ -130,6 +130,8 @@ class Renderer {
     void renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected);
     void renderCursor(Terminal const& _terminal);
 
+    void executeImageDiscards();
+
   private:
     RenderMetrics metrics_;
 
@@ -140,6 +142,9 @@ class Renderer {
     Opacity backgroundOpacity_;
 
     FontConfig fonts_;
+
+    std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
+    std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
 
     OpenGLRenderer renderTarget_;
 

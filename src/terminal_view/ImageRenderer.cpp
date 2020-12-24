@@ -89,9 +89,9 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
     return handle;
 }
 
-void ImageRenderer::discardImage(Image const& _image)
+void ImageRenderer::discardImage(Image::Id _imageId)
 {
-    auto const fragmentsIterator = imageFragmentsInUse_.find(_image.id());
+    auto const fragmentsIterator = imageFragmentsInUse_.find(_imageId);
     if (fragmentsIterator != end(imageFragmentsInUse_))
     {
         auto const& fragments = fragmentsIterator->second;

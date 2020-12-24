@@ -41,7 +41,7 @@ class ImageRenderer
     void renderImage(QPoint _pos, ImageFragment const& _fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some GPU caches.
-    void discardImage(Image const& _image);
+    void discardImage(Image::Id _imageId);
 
     struct ImageFragmentKey {
         Image::Id const imageId;

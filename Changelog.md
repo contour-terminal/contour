@@ -1,3 +1,7 @@
+### 0.2.0 (unreleased)
+
+- Fixes race condition when displaying image animations (e.g. gifs via sixel).
+
 ### 0.1.0 (2012-12-24)
 
 - Fixes some off-by-one access in libunicode.

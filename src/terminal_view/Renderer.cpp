@@ -95,7 +95,20 @@ Renderer::Renderer(Logger _logger,
 
 void Renderer::discardImage(Image const& _image)
 {
-    imageRenderer_.discardImage(_image);
+    // Defer rendering into the renderer thread & render stage, as this call might have
+    // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
+    auto _l = scoped_lock{imageDiscardLock_};
+    discardImageQueue_.emplace_back(_image.id());
+}
+
+void Renderer::executeImageDiscards()
+{
+    auto _l = scoped_lock{imageDiscardLock_};
+
+    for (auto const& imageId : discardImageQueue_)
+        imageRenderer_.discardImage(imageId);
+
+    discardImageQueue_.clear();
 }
 
 void Renderer::clearCache()
@@ -179,6 +192,8 @@ uint64_t Renderer::render(Terminal& _terminal,
     metrics_.clear();
 
     screenCoordinates_.screenSize = _terminal.screenSize();
+
+    executeImageDiscards();
 
     uint64_t const changes = renderInternalNoFlush(_terminal, _now, _currentMousePosition, _pressure);
 
