@@ -1536,6 +1536,10 @@ void TerminalWidget::spawnNewTerminal(std::string const& _profileName)
     // TODO: config option to either spawn new terminal via new process (default) or just as second window.
     QString const program = QString::fromUtf8(programPath_.c_str());
     QStringList args;
+
+    if (!config_.backingFilePath.empty())
+        args << "-c" << QString::fromStdString(config_.backingFilePath.generic_string());
+
     if (!_profileName.empty())
         args << "-p" << QString::fromStdString(_profileName);
 

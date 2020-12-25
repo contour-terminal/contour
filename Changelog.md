@@ -1,6 +1,7 @@
 ### 0.2.0 (unreleased)
 
 - Fixes race condition when displaying image animations (e.g. gifs via sixel).
+- Fixes `NewTerminal` action to also inherit the active configuration file.
 - Adds VT sequence `OSC 7` (set current working directory).
 
 ### 0.1.0 (2012-12-24)
