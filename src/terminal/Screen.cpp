@@ -1378,6 +1378,11 @@ void Screen::horizontalTabSet()
     setTabUnderCursor();
 }
 
+void Screen::setCurrentWorkingDirectory(string const& _url)
+{
+    currentWorkingDirectory_ = _url;
+}
+
 void Screen::hyperlink(string const& _id, string const& _uri)
 {
     if (_uri.empty())

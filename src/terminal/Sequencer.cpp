@@ -582,6 +582,13 @@ namespace impl // {{{ some command generator helpers
             return ApplyResult::Unsupported;
     }
 
+    ApplyResult SETCWD(Sequence const& _seq, Screen& _screen)
+    {
+        string const& url = _seq.intermediateCharacters();
+        _screen.setCurrentWorkingDirectory(url);
+        return ApplyResult::Ok;
+    }
+
     ApplyResult HYPERLINK(Sequence const& _seq, Screen& _screen)
     {
         auto const& value = _seq.intermediateCharacters();
@@ -1318,6 +1325,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             return ApplyResult::Unsupported;
         case SETWINTITLE: screen_.setWindowTitle(_seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
+        case SETCWD: return impl::SETCWD(_seq, screen_);
         case HYPERLINK: return impl::HYPERLINK(_seq, screen_);
         case COLORFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultForegroundColor);
         case COLORBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultBackgroundColor);

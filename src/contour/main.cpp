@@ -34,6 +34,7 @@ namespace contour {
             addVersionOption();
             addOption(configOption);
             addOption(profileOption);
+            addOption(workingDirectoryOption);
             addOption(parserTable);
             addPositionalArgument("executable", "path to executable to execute.");
         }
@@ -58,6 +59,14 @@ namespace contour {
         };
 
         QString profileName() const { return value(profileOption); }
+
+        QCommandLineOption const workingDirectoryOption{
+            QStringList() << "w" << "working-directory",
+            QCoreApplication::translate("main", "Sets initial working directory."),
+            QCoreApplication::translate("main", "NAME")
+        };
+
+        QString workingDirectory() const { return value(workingDirectoryOption); }
     };
 }
 
@@ -122,6 +131,10 @@ int main(int argc, char* argv[])
             );
             configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
         }
+
+        if (!cli.workingDirectory().isEmpty())
+            config.profile(profileName)->shell.workingDirectory =
+                FileSystem::path(cli.workingDirectory().toUtf8().toStdString());
 
         if (configFailures)
             return EXIT_FAILURE;

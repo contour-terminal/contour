@@ -309,6 +309,7 @@ constexpr inline auto SETXPROP      = detail::OSC(3, "SETXPROP", "Set X11 proper
 // TODO: Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
 // TODO: Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
 // TODO: Ps = 7 (set current working directory)
+constexpr inline auto SETCWD        = detail::OSC(7, "SETCWD", "Set current working directory");
 constexpr inline auto HYPERLINK     = detail::OSC(8, "HYPERLINK", "Hyperlinked Text");
 constexpr inline auto COLORFG       = detail::OSC(10, "COLORFG", "Change or request text foreground color.");
 constexpr inline auto COLORBG       = detail::OSC(11, "COLORBG", "Change or request text background color.");
@@ -427,6 +428,7 @@ inline auto const& functions() noexcept
             SETTITLE,
             SETWINTITLE,
             SETXPROP,
+            SETCWD,
             HYPERLINK,
             COLORFG,
             COLORBG,

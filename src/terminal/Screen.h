@@ -614,8 +614,14 @@ class Screen {
     void sendDeviceAttributes();
     void sendTerminalId();
 
-    void hyperlink(std::string const& _id, std::string const& _uri); // OSC 8
-    void notify(std::string const& _title, std::string const& _content);
+    /// Sets the current working directory as file:// URL.
+    void setCurrentWorkingDirectory(std::string const& _url);             // OSC 7
+
+    /// @returns either an empty string or a file:// URL of the last set working directory.
+    std::string currentWorkingDirectory() const noexcept { return currentWorkingDirectory_; }
+
+    void hyperlink(std::string const& _id, std::string const& _uri);      // OSC 8
+    void notify(std::string const& _title, std::string const& _content);  // OSC 777
 
     void setForegroundColor(Color const& _color);
     void setBackgroundColor(Color const& _color);
@@ -986,6 +992,8 @@ class Screen {
     ColumnIterator currentColumn_;
     ColumnIterator lastColumn_;
     Coordinate lastCursorPosition_;
+
+    std::string currentWorkingDirectory_ = {};
 
     // Hyperlink related
     //

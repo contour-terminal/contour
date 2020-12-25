@@ -1539,6 +1539,18 @@ void TerminalWidget::spawnNewTerminal(std::string const& _profileName)
     if (!_profileName.empty())
         args << "-p" << QString::fromStdString(_profileName);
 
+    auto const wd = [&]() -> QString {
+        auto const _l = scoped_lock{terminalView_->terminal()};
+        auto const url = QUrl(QString::fromUtf8(terminalView_->terminal().screen().currentWorkingDirectory().c_str()));
+        if (url.host() == QHostInfo::localHostName())
+            return url.path();
+        else
+            return QString();
+    }();
+
+    if (!wd.isEmpty())
+        args << "-w" << wd;
+
     QProcess::startDetached(program, args);
 }
 
