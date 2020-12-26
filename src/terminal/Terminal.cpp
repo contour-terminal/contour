@@ -260,8 +260,7 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
                     break;
                 case Selector::State::InProgress:
                     selector()->stop();
-                    if (onSelectionComplete_)
-                        onSelectionComplete_();
+                    eventListener_.onSelectionComplete();
                     break;
                 case Selector::State::Complete:
                     break;

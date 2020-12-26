@@ -272,7 +272,6 @@ class Terminal : public ScreenEvents {
     std::chrono::steady_clock::time_point startTime_;
 
     std::u32string wordDelimiters_;
-    std::function<void()> onSelectionComplete_;
 
     // helpers for detecting double/tripple clicks
     std::chrono::steady_clock::time_point lastClick_{};
