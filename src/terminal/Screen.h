@@ -680,6 +680,7 @@ class Screen {
     void setMode(DECMode _mode, bool _enabled);
     void saveCursor();
     void restoreCursor();
+    void restoreCursor(Cursor const& _savedCursor);
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
 
@@ -988,6 +989,7 @@ class Screen {
     //
     Cursor cursor_;
     Cursor savedCursor_;
+    Cursor savedPrimaryCursor_; //!< saved cursor of primary-screen when switching to alt-screen.
     LineIterator currentLine_;
     ColumnIterator currentColumn_;
     ColumnIterator lastColumn_;

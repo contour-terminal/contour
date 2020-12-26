@@ -1,7 +1,5 @@
 # Terminal apps using the mouse
 
-- [ ] BUG: quitting bpytop leaves cursor at where it was in alt screen, but should have been restored
-
 ### pre-0.1.0 release
 
 - [ ] QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.

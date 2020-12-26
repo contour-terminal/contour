@@ -711,12 +711,17 @@ void Screen::saveCursor()
 void Screen::restoreCursor()
 {
     // https://vt100.net/docs/vt510-rm/DECRC.html
-    wrapPending_ = 0;
-    cursor_ = savedCursor_;
-    updateCursorIterators();
+    restoreCursor(savedCursor_);
 
     setMode(DECMode::AutoWrap, savedCursor_.autoWrap);
     setMode(DECMode::Origin, savedCursor_.originMode);
+}
+
+void Screen::restoreCursor(Cursor const& _savedCursor)
+{
+    wrapPending_ = 0;
+    cursor_.position = _savedCursor.position;
+    updateCursorIterators();
 }
 
 void Screen::resetSoft()
@@ -1832,14 +1837,16 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::ExtendedAltScreen:
             if (_enable)
             {
-                saveCursor();
+                printf("ExtendedAltScreen: enabled\n");
+                savedPrimaryCursor_ = cursor();
                 setMode(DECMode::UseAlternateScreen, true);
                 clearScreen();
             }
             else
             {
+                printf("ExtendedAltScreen: false\n");
                 setMode(DECMode::UseAlternateScreen, false);
-                restoreCursor();
+                restoreCursor(savedPrimaryCursor_);
             }
             break;
         default:
