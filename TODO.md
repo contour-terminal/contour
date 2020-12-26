@@ -1,5 +1,12 @@
 # Terminal apps using the mouse
 
+- [ ] ?? config's default-profile should also mandate defaults for other profiles. ??
+- [ ] move to profile: `word_delimiters`
+- [ ] move to profile: `scrollbar.*`
+- [ ] move to profile: `images.*`
+- [ ] `input_mapping` becomes default, `profiles.NAME.overrides.input_mapping` is used for overrides/additions
+- [ ] make sure `input_mapping` overrides can also remove mappings
+
 ### pre-0.1.0 release
 
 - [ ] QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.
