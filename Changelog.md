@@ -6,7 +6,7 @@
 - Fixes `DECSTR` resetting saved-cursor state and active cursor-position.
 - Fixes selecting text not being pushed into the selection-clipboard.
 - Adds VT sequence `OSC 7` (set current working directory).
-- adds VT sequence `DCS $ p <name> ST` to change config profile name to `<name>`.
+- Adds VT sequence `DCS $ p <name> ST` to change config profile name to `<name>`.
 
 ### 0.1.0 (2012-12-24)
 
