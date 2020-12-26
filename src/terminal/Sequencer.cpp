@@ -617,35 +617,6 @@ namespace impl // {{{ some command generator helpers
         return ApplyResult::Ok;
     }
 
-    ApplyResult DECRQSS(Sequence const& _seq, Screen& _screen)
-    {
-        auto const s = [](std::string const& _dataString) -> optional<RequestStatusString> {
-            auto const mappings = std::array<std::pair<std::string_view, RequestStatusString>, 9>{
-                pair{"m",   RequestStatusString::SGR},
-                pair{"\"p", RequestStatusString::DECSCL},
-                pair{" q",  RequestStatusString::DECSCUSR},
-                pair{"\"q", RequestStatusString::DECSCA},
-                pair{"r",   RequestStatusString::DECSTBM},
-                pair{"s",   RequestStatusString::DECSLRM},
-                pair{"t",   RequestStatusString::DECSLPP},
-                pair{"$|",  RequestStatusString::DECSCPP},
-                pair{"*|",  RequestStatusString::DECSNLS}
-            };
-            for (auto const& mapping : mappings)
-                if (_dataString == mapping.first)
-                    return mapping.second;
-            return nullopt;
-        }(_seq.dataString());
-
-        if (s.has_value())
-        {
-            _screen.requestStatusString(s.value());
-            return ApplyResult::Ok;
-        }
-        else
-            return ApplyResult::Invalid;
-    }
-
     ApplyResult saveDECModes(Sequence const& _seq, Screen& _screen)
     {
         vector<DECMode> modes;
