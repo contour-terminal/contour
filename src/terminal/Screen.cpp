@@ -726,9 +726,10 @@ void Screen::restoreCursor(Cursor const& _savedCursor)
 
 void Screen::resetSoft()
 {
+    // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
-    moveCursorTo({1, 1}); // DECSC (Save cursor state)
+    savedCursor_.position = Coordinate{1, 1}; // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
     setMode(DECMode::Origin, false); // DECOM
     setMode(AnsiMode::KeyboardAction, false); // KAM
