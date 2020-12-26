@@ -1793,7 +1793,7 @@ void TerminalWidget::onClosed()
         terminalView_->terminal().writeToScreen(fmt::format("\r\nShell has terminated with exit code {}.",
                                                             normalExit.exitCode));
     else
-        close();
+        close(); // TODO: call this only from within the GUI thread!
 }
 
 void TerminalWidget::copyToClipboard(std::string_view const& _text)
