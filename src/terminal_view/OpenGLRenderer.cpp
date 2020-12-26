@@ -195,7 +195,7 @@ void OpenGLRenderer::execute()
         glBindBuffer(GL_ARRAY_BUFFER, rectVBO_);
         glBufferData(GL_ARRAY_BUFFER, rectBuffer_.size() * sizeof(GLfloat), rectBuffer_.data(), GL_STREAM_DRAW);
 
-        glDrawArrays(GL_TRIANGLES, 0, rectBuffer_.size() / 7);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(rectBuffer_.size() / 7));
 
         rectShader_->release();
         glBindVertexArray(0);
