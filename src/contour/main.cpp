@@ -79,9 +79,9 @@ int main(int argc, char* argv[])
         QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
         QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 
-        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
-
         QApplication app(argc, argv);
+
+        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
 
         auto cli = contour::CLI{};
         cli.process(app);
