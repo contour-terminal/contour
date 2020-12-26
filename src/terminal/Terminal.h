@@ -59,6 +59,7 @@ class Terminal : public ScreenEvents {
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+        virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
     };
 
@@ -250,6 +251,7 @@ class Terminal : public ScreenEvents {
     void setMouseTransport(MouseTransport _transport) override;
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode) override;
     void setWindowTitle(std::string_view const& _title) override;
+    void setTerminalProfile(std::string const& _configProfileName) override;
     void useApplicationCursorKeys(bool _enabled) override;
     void discardImage(Image const&) override;
 

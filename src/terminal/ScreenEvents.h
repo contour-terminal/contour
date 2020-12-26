@@ -58,6 +58,9 @@ class ScreenEvents {
 
     // Invoked by screen buffer when an image is not being referenced by any grid cell anymore.
     virtual void discardImage(Image const&) {}
+
+    /// Invoked upon `DCS $ p <profile-name> ST` to change terminal's currently active profile name.
+    virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
 };
 
 class MockScreenEvents : public ScreenEvents {

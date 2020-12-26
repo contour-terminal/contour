@@ -81,6 +81,9 @@ class TerminalWidget :
     void post(std::function<void()> _fn);
 
     /// Applies given profile, potentially setting/resetting terminal configuration.
+    void setProfile(const std::string& _newProfileName);
+
+    /// Applies given profile, potentially setting/resetting terminal configuration.
     void setProfile(config::TerminalProfile _newProfile);
 
     terminal::view::TerminalView* view() const noexcept { return terminalView_.get(); }
@@ -141,6 +144,7 @@ class TerminalWidget :
     void onSelectionComplete() override;
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
+    void setTerminalProfile(std::string const& _configProfileName) override;
 
   signals:
     void showNotification(QString const& _title, QString const& _body);

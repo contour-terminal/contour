@@ -1307,11 +1307,7 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Silently;
         },
         [this](actions::ChangeProfile const& v) -> Result {
-            cerr << fmt::format("Changing profile to '{}'.", v.name) << endl;
-            if (auto newProfile = config_.profile(v.name); newProfile)
-                setProfile(*newProfile);
-            else
-                cerr << fmt::format("No such profile: '{}'.", v.name) << endl;
+            setProfile(v.name);
             return Result::Dirty;
         },
         [this](actions::NewTerminal const& v) -> Result {
@@ -1432,6 +1428,15 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
         fontLoader_.load(_profile.fonts.boldItalic.pattern, fontSize),
         fontLoader_.load("emoji", fontSize)
     };
+}
+
+void TerminalWidget::setProfile(string const& _newProfileName)
+{
+    cerr << fmt::format("Changing profile to '{}'.", _newProfileName) << endl;
+    if (auto newProfile = config_.profile(_newProfileName); newProfile)
+        setProfile(*newProfile);
+    else
+        cerr << fmt::format("No such profile: '{}'.", _newProfileName) << endl;
 }
 
 void TerminalWidget::setProfile(config::TerminalProfile newProfile)
@@ -1609,6 +1614,13 @@ void TerminalWidget::setWindowTitle(std::string_view const& _title)
             : fmt::format("{} - contour", terminalTitle);
         if (window()->windowHandle())
             window()->windowHandle()->setTitle(QString::fromUtf8(title.c_str()));
+    });
+}
+
+void TerminalWidget::setTerminalProfile(std::string const& _configProfileName)
+{
+    post([this, name = string(_configProfileName)]() {
+        setProfile(name);
     });
 }
 

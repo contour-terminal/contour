@@ -502,6 +502,11 @@ void Terminal::setWindowTitle(std::string_view const& _title)
     eventListener_.setWindowTitle(_title);
 }
 
+void Terminal::setTerminalProfile(std::string const& _configProfileName)
+{
+    eventListener_.setTerminalProfile(_configProfileName);
+}
+
 void Terminal::useApplicationCursorKeys(bool _enable)
 {
     auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;

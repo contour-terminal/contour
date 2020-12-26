@@ -978,6 +978,9 @@ void Sequencer::hook(char _finalChar)
             case DECSIXEL:
                 hookedParser_ = hookSixel(sequence_);
                 break;
+            case STP:
+                hookedParser_ = hookSTP(sequence_);
+                break;
             case DECRQSS:
                 hookedParser_ = hookDECRQSS(sequence_);
                 break;
@@ -1065,6 +1068,16 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             }
         }
     );
+}
+
+unique_ptr<ParserExtension> Sequencer::hookSTP(Sequence const& /*_seq*/)
+{
+    return make_unique<SimpleStringCollector>(
+        [this](std::u32string const& _data) {
+            screen_.eventListener().setTerminalProfile(unicode::to_utf8(_data));
+        }
+    );
+    return nullptr;
 }
 
 unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)

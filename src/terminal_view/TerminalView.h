@@ -54,6 +54,7 @@ class TerminalView : private Terminal::Events {
         virtual void onSelectionComplete() {}
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+        virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
     };
 
     TerminalView(std::chrono::steady_clock::time_point _now,
@@ -151,6 +152,7 @@ class TerminalView : private Terminal::Events {
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setDynamicColor(DynamicColorName, RGBColor const&) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
+    void setTerminalProfile(std::string const& /*_configProfileName*/) override;
     void discardImage(Image const& /*_image*/) override;
 
   private:

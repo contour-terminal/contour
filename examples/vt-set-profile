@@ -1,0 +1,14 @@
+#! /bin/bash
+
+# [EXPERIMENTAL FEATURE]
+# Sets the config profile via VT DCS sequence.
+#
+# Usage: vt-set-profile NAME
+
+vt_set_profile()
+{
+    local name="${1}"
+    echo -ne "\033P\$p${name}\033\\"
+}
+
+vt_set_profile "${1}"

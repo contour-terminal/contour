@@ -357,6 +357,11 @@ void TerminalView::setWindowTitle(std::string_view const& _title)
     events_.setWindowTitle(_title);
 }
 
+void TerminalView::setTerminalProfile(std::string const& _configProfileName)
+{
+    events_.setTerminalProfile(_configProfileName);
+}
+
 void TerminalView::discardImage(Image const& _image)
 {
     renderer_.discardImage(_image);
