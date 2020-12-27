@@ -720,7 +720,7 @@ void Screen::restoreCursor()
 void Screen::restoreCursor(Cursor const& _savedCursor)
 {
     wrapPending_ = 0;
-    cursor_.position = _savedCursor.position;
+    cursor_ = _savedCursor;
     updateCursorIterators();
 }
 
