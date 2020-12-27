@@ -647,12 +647,12 @@ optional<int> Screen::findMarkerBackward(int _currentCursorLine) const
 
     // main lines
     for (int i = _currentCursorLine - historyLineCount() - 1; i >= 0; --i)
-        if (lines().at(i).marked)
+        if (lines().at(i).marked())
             return {historyLineCount() + i};
 
     // saved lines
     for (int i = min(_currentCursorLine, historyLineCount()) - 1; i >= 0; --i)
-        if (savedLines_.at(i).marked)
+        if (savedLines_.at(i).marked())
             return {i};
 
     return nullopt;
@@ -664,12 +664,12 @@ optional<int> Screen::findMarkerForward(int _currentCursorLine) const
         return nullopt;
 
     for (int i = _currentCursorLine + 1; i < historyLineCount(); ++i)
-        if (savedLines_.at(i).marked)
+        if (savedLines_.at(i).marked())
             return {i};
 
     for (int i = _currentCursorLine < historyLineCount()
             ? 0 : _currentCursorLine - historyLineCount() + 1; i < size_.height; ++i)
-        if (lines().at(i).marked)
+        if (lines().at(i).marked())
             return {historyLineCount() + i};
 
     return nullopt;
@@ -1718,7 +1718,7 @@ void Screen::setGraphicsRendition(GraphicsRendition _rendition)
 
 void Screen::setMark()
 {
-    currentLine_->marked = true;
+    currentLine_->setMarked(true);
 }
 
 void Screen::saveModes(std::vector<DECMode> const& _modes)

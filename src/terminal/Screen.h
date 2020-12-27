@@ -429,37 +429,57 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 // }}}
 
 struct Line { // {{{
+  public:
     using LineBuffer = std::vector<Cell>;
-    LineBuffer buffer;
-    bool marked = false;
-
     using iterator = LineBuffer::iterator;
     using const_iterator = LineBuffer::const_iterator;
     using reverse_iterator = LineBuffer::reverse_iterator;
     using size_type = LineBuffer::size_type;
 
-    Line(size_t _numCols, Cell const& _defaultCell) : buffer{_numCols, _defaultCell} {}
+    Line(size_t _numCols, Cell const& _defaultCell) : buffer_{_numCols, _defaultCell} {}
     Line() = default;
     Line(Line const&) = default;
     Line(Line&&) = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) = default;
 
-    LineBuffer* operator->() noexcept { return &buffer; }
-    LineBuffer const* operator->()  const noexcept { return &buffer; }
-    auto& operator[](std::size_t _index) { return buffer[_index]; }
-    auto const& operator[](std::size_t _index) const { return buffer[_index]; }
-    auto size() const noexcept { return buffer.size(); }
-    void resize(size_type _size) { buffer.resize(_size); }
+    LineBuffer* operator->() noexcept { return &buffer_; }
+    LineBuffer const* operator->()  const noexcept { return &buffer_; }
+    auto& operator[](std::size_t _index) { return buffer_[_index]; }
+    auto const& operator[](std::size_t _index) const { return buffer_[_index]; }
+    auto size() const noexcept { return buffer_.size(); }
+    void resize(size_type _size) { buffer_.resize(_size); }
 
-    iterator begin() { return buffer.begin(); }
-    iterator end() { return buffer.end(); }
-    const_iterator begin() const { return buffer.begin(); }
-    const_iterator end() const { return buffer.end(); }
-    reverse_iterator rbegin() { return buffer.rbegin(); }
-    reverse_iterator rend() { return buffer.rend(); }
-    const_iterator cbegin() const { return buffer.cbegin(); }
-    const_iterator cend() const { return buffer.cend(); }
+    iterator begin() { return buffer_.begin(); }
+    iterator end() { return buffer_.end(); }
+    const_iterator begin() const { return buffer_.begin(); }
+    const_iterator end() const { return buffer_.end(); }
+    reverse_iterator rbegin() { return buffer_.rbegin(); }
+    reverse_iterator rend() { return buffer_.rend(); }
+    const_iterator cbegin() const { return buffer_.cbegin(); }
+    const_iterator cend() const { return buffer_.cend(); }
+
+    bool marked() const noexcept { return isFlagEnabled(Flag::Marked); }
+    void setMarked(bool _enable) { setFlag(Flag::Marked, _enable); }
+
+  private:
+    enum class Flag : uint8_t {
+        Marked  = 0x0001,
+    };
+
+    void setFlag(Flag _flag, bool _enable) noexcept
+    {
+        if (_enable)
+            flags_ |= static_cast<unsigned>(_flag);
+        else
+            flags_ &= ~static_cast<unsigned>(_flag);
+    }
+
+    bool isFlagEnabled(Flag _flag) const noexcept { return (flags_ & static_cast<unsigned>(_flag)) != 0; }
+
+  private:
+    LineBuffer buffer_;
+    unsigned flags_ = 0;
 };
 // }}}
 
