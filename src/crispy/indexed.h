@@ -6,13 +6,14 @@
 namespace crispy {
 
 namespace impl { // {{{
-    template <typename Container>
+    template <typename Container, typename Index>
     struct indexed {
         Container& container;
+        Index start = 0;
 
         struct iterator {
             typename Container::iterator iter;
-            std::size_t index = 0;
+            Index index = 0;
 
             constexpr iterator& operator++()
             {
@@ -35,7 +36,7 @@ namespace impl { // {{{
 
         struct const_iterator {
             typename Container::const_iterator iter;
-            std::size_t index = 0;
+            Index index = 0;
 
             constexpr const_iterator& operator++()
             {
@@ -59,9 +60,9 @@ namespace impl { // {{{
         constexpr auto begin() const
         {
             if constexpr (std::is_const<Container>::value)
-                return const_iterator{container.cbegin()};
+                return const_iterator{container.cbegin(), start};
             else
-                return iterator{container.begin()};
+                return iterator{container.begin(), start};
         }
 
         constexpr auto end() const
@@ -74,16 +75,16 @@ namespace impl { // {{{
     };
 } // }}}
 
-template <typename Container>
-constexpr auto indexed(Container const& c)
+template <typename Container, typename Index = std::size_t>
+constexpr auto indexed(Container const& c, Index _start = 0)
 {
-	return typename std::add_const<impl::indexed<const Container>>::type{c};
+	return typename std::add_const<impl::indexed<const Container, Index>>::type{c, _start};
 }
 
-template <typename Container>
-constexpr auto indexed(Container& c)
+template <typename Container, typename Index = std::size_t>
+constexpr auto indexed(Container& c, Index _start = 0)
 {
-	return impl::indexed<Container>{c};
+	return impl::indexed<Container, Index>{c, _start};
 }
 
 } // end namespace
