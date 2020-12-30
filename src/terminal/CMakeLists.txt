@@ -17,6 +17,7 @@ endif()
 set(terminal_HEADERS
     Charset.h
     Color.h
+    Hyperlink.h
     Functions.h
     Image.h
     InputGenerator.h
