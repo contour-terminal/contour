@@ -19,6 +19,7 @@ target_include_directories(crispy-core INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 target_sources(crispy-core INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Comparison.h
     ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
     ${CMAKE_CURRENT_SOURCE_DIR}/base64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
