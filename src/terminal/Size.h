@@ -29,6 +29,13 @@ constexpr Coordinate operator+(Coordinate a, Coordinate b) noexcept
     return Coordinate{a.row + b.row, a.column + b.column};
 }
 
+constexpr Coordinate& operator+=(Coordinate& a, Coordinate b) noexcept
+{
+    a.row += b.row;
+    a.column += b.column;
+    return a;
+}
+
 constexpr void swap(Coordinate& a, Coordinate& b) noexcept
 {
     Coordinate const c = a;
