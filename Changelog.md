@@ -1,3 +1,7 @@
+### 0.1.2 (unreleased)
+
+- ...
+
 ### 0.1.1 (2020-12-31)
 
 - Fixes race condition when displaying image animations (e.g. gifs via sixel).
