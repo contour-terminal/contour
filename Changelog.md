@@ -1,4 +1,4 @@
-### 0.1.1 (unreleased)
+### 0.1.1 (2020-12-31)
 
 - Fixes race condition when displaying image animations (e.g. gifs via sixel).
 - Fixes `NewTerminal` action to also inherit the active configuration file.
@@ -8,7 +8,7 @@
 - Adds VT sequence `OSC 7` (set current working directory).
 - Adds VT sequence `DCS $ p <name> ST` to change config profile name to `<name>`.
 
-### 0.1.0 (2012-12-24)
+### 0.1.0 (2020-12-24)
 
 - Available on all 3 major platforms, Linux, OS/X, Windows.
 - Emoji support (-: 🌈 💝 😛 👪 :-)

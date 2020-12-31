@@ -26,8 +26,8 @@ jobs:
         shell: powershell
         id: set_env_var
         run: |
-          $VERSION = Select-String -Path .\Changelog.md -Pattern '^### ([^ ]+)' | % { "$($_.matches.groups[1])" }
-          $SUFFIX  = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^\)]+)\)' | % { "$($_.matches.groups[1])" }
+          $VERSION = Select-String -Path .\Changelog.md -Pattern '^### ([^ ]+)' | % { "$($_.matches.groups[1])" } | Select-Object -First 1
+          $SUFFIX  = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^\)]+)\)' | % { "$($_.matches.groups[1])" } | Select-Object -First 1
           if ($Env:REPOSITORY -eq "master") {
               $IS_PRE = 'true';
               $SUFFIX = '';
@@ -249,6 +249,7 @@ jobs:
            echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
            echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
            echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+           echo "${VERSION}${DELIM}${SUFFIX}" >version.txt
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "Install dependencies"
