@@ -92,6 +92,7 @@ if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
         base64_test.cpp
+        indexed_test.cpp
         compose_test.cpp
         utils_test.cpp
         sort_test.cpp
