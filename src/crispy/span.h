@@ -21,6 +21,7 @@ class span {
     // constructors
     //
     constexpr span(iterator _begin, iterator _end) noexcept : begin_{_begin}, end_{_end} {}
+    constexpr span(iterator _begin, size_t _count) noexcept : begin_{_begin}, end_{std::next(_begin, _count)} {}
     constexpr span() noexcept : begin_{}, end_{} {}
     constexpr span(span<T> const&) noexcept = default;
     constexpr span(span<T>&&) noexcept = default;
@@ -48,6 +49,9 @@ class span {
     pointer_type begin_;
     pointer_type end_;
 };
+
+template <typename T>
+span(T, size_t) -> span<decltype(std::declval<T>().begin())>;
 
 template <typename T> constexpr bool operator==(span<T> const& a, span<T> const& b) noexcept
 {
