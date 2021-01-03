@@ -643,7 +643,7 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-#if !defined(NDEBUG)
+#if 0 // !defined(NDEBUG)
     cout << fmt::format(
         "resizeGL: {}x{}, geometry: {}/{}\n",
         _width, _height,

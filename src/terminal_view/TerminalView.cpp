@@ -209,7 +209,7 @@ void TerminalView::resize(int _width, int _height)
         terminal_.clearSelection();
     }
 
-#if !defined(NDEBUG)
+#if 0 // !defined(NDEBUG)
     std::cout << fmt::format(
         "Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}\n",
         size_,
