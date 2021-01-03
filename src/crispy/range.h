@@ -13,21 +13,37 @@
  */
 #pragma once
 
+#include <iterator>
+#include <utility>
+
 namespace crispy {
 
 template <typename Iter>
 struct range
 {
+    using iterator = Iter;
+    using const_iterator = Iter; // std::add_const_t<Iter>;
+
     Iter const begin_;
     Iter const end_;
 
     range(Iter _begin, Iter _end) : begin_{_begin}, end_{_end} {}
 
-    constexpr Iter begin() const { return begin_; }
-    constexpr Iter end() const { return end_; }
+    constexpr iterator begin() const { return begin_; }
+    constexpr iterator end() const { return end_; }
+    constexpr const_iterator cbegin() const { return begin_; }
+    constexpr const_iterator cend() const { return end_; }
+
+    constexpr size_t size() const noexcept { return std::distance(begin_, end_); }
 };
 
 template <typename Iter>
 range(Iter, Iter) -> range<Iter>;
+
+template <typename Container>
+auto reversed(Container && _container)
+{
+    return range(_container.rbegin(), _container.rend());
+}
 
 }
