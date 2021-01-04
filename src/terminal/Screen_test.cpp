@@ -38,15 +38,9 @@ namespace
         explicit MockScreen(Size const& _size) :
             Screen{
                 _size,
-                *this,
-                [this](LogEvent const& _logEvent) { log(_logEvent); }
+                *this
             }
         {
-        }
-
-        void log(LogEvent _logEvent)
-        {
-            INFO(fmt::format("{}", _logEvent));
         }
     };
 }

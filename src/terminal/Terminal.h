@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Logger.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/pty/Pty.h>
 #include <terminal/ScreenEvents.h>
@@ -68,7 +67,6 @@ class Terminal : public ScreenEvents {
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
-             Logger _logger = {},
              std::string const& _wordDelimiters = "",
              Size _maxImageSize = Size{800, 600},
              int _maxImageColorRegisters = 256,
@@ -261,7 +259,6 @@ class Terminal : public ScreenEvents {
 
     Events& eventListener_;
 
-    Logger logger_;
     std::unique_ptr<Pty> pty_;
 
     CursorDisplay cursorDisplay_;

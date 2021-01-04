@@ -1,5 +1,19 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <crispy/text/FontLoader.h>
 #include <crispy/text/Font.h>
+#include <crispy/logger.h>
 
 #include <fmt/format.h>
 
@@ -89,8 +103,7 @@ namespace {
     }
 }
 
-FontLoader::FontLoader(ostream* _logger) :
-    logger_{ _logger },
+FontLoader::FontLoader() :
     ft_{},
     fonts_{}
 {
@@ -117,16 +130,13 @@ FontList FontLoader::load(string const& _fontPattern, int _fontSize)
         if (auto fallbackFont = loadFromFilePath(filePaths[i], _fontSize); fallbackFont != nullptr)
             fallbackList.push_back(*fallbackFont);
 
-    if (logger_)
-        *logger_ << fmt::format(
-            "FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}\n",
-            _fontPattern,
-            primaryFont->filePath(),
-            primaryFont->baseline(),
-            primaryFont->bitmapHeight(),
-            _fontSize,
-            fallbackList.size()
-        );
+    debuglog().write("FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}",
+                     _fontPattern,
+                     primaryFont->filePath(),
+                     primaryFont->baseline(),
+                     primaryFont->bitmapHeight(),
+                     _fontSize,
+                     fallbackList.size());
 
     return {*primaryFont, fallbackList};
 }
@@ -140,8 +150,8 @@ Font* FontLoader::loadFromFilePath(std::string const& _path, int _fontSize)
         return &k->second;
     }
 
-    if (auto face = Font::loadFace(logger_, ft_, _path, _fontSize); face != nullptr)
-        return &fonts_.emplace(make_pair(_path, Font(logger_, ft_, face, _fontSize, _path))).first->second;
+    if (auto face = Font::loadFace(ft_, _path, _fontSize); face != nullptr)
+        return &fonts_.emplace(make_pair(_path, Font(ft_, face, _fontSize, _path))).first->second;
 
     return nullptr;
 }

@@ -26,6 +26,8 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
+#include <crispy/logger.h>
+
 #include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
 #include <QtWidgets/QApplication>
@@ -125,7 +127,7 @@ void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
 {
 #if 0
     int index = indexOf(_terminalWidget);
-    std::cout << "TerminalWindow.onTerminalClosed(" << index << "): " << _terminalWidget->view()->terminal().screen().windowTitle() << '\n';
+    debuglog().write("index: {}; title {}", index, _terminalWidget->view()->terminal().screen().windowTitle());
     if (index != -1)
         removeTab(index);
 
@@ -133,7 +135,7 @@ void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
         close();
 #else
     (void) _terminalWidget;
-    std::cout << "TerminalWindow.onTerminalClosed(): " << _terminalWidget->view()->terminal().screen().windowTitle() << '\n';
+    debuglog().write("title {}", _terminalWidget->view()->terminal().screen().windowTitle());
     close();
 #endif
 }
@@ -147,16 +149,6 @@ void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
 // {
 //     //qDebug() << "TerminalWindow.event:" << _event->type();
 //     return QTabWidget::event(_event);
-// }
-
-// void TerminalWindow::statsSummary()
-// {
-// #if defined(CONTOUR_VT_METRICS)
-//     std::cout << "Some small summary in VT sequences usage metrics\n";
-//     std::cout << "================================================\n\n";
-//     for (auto const& [name, freq] : terminalMetrics_.ordered())
-//         std::cout << fmt::format("{:>10}: {}\n", freq, name);
-// #endif
 // }
 
 } // namespace contour

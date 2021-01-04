@@ -16,8 +16,9 @@
 #include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/RenderMetrics.h>
 
-#include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <crispy/logger.h>
+#include <crispy/times.h>
 
 using std::get;
 using std::nullopt;
@@ -91,7 +92,8 @@ void TextRenderer::setFont(FontConfig const& _fonts)
 
 void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color)
 {
-    //std::cout << fmt::format("TextRenderer.reset(): styles:{}, color:{}\n", _styles, _color);
+    // debuglog().write("styles:{}, color:{}", _styles, _color);
+
     row_ = _pos.row;
     startColumn_ = _pos.column;
     characterStyleMask_ = _styles;
@@ -194,10 +196,6 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     {
         cacheKeyStorage_.emplace_back(u32string{codepoints});
 
-        // std::cout << fmt::format("TextRenderer.newEntry({}): {}\n",
-        //         cacheKeyStorage_.size(),
-        //         unicode::to_utf8(cacheKeyStorage_.back()).c_str());
-
         auto const cacheKeyFromStorage = CacheKey{
             cacheKeyStorage_.back(),
             characterStyleMask_
@@ -214,7 +212,7 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 GlyphPositionList TextRenderer::requestGlyphPositions()
 {
     // if (characterStyleMask_.mask() != 0)
-    //     std::cout << fmt::format("TextRenderer.requestGlyphPositions: styles=({})\n", characterStyleMask_);
+    //     debuglog().write("TextRenderer.requestGlyphPositions: styles=({})", characterStyleMask_);
 
     GlyphPositionList glyphPositions;
     unicode::run_segmenter::range run;
@@ -222,13 +220,13 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
     while (rs.consume(out(run)))
     {
         METRIC_INCREMENT(shapedText);
-        crispy::copy(prepareRun(run), std::back_inserter(glyphPositions));
+        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
     }
 
     return glyphPositions;
 }
 
-GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& _run)
+GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
 {
     if ((characterStyleMask_ & CharacterStyleMask::Hidden))
         return {};
@@ -270,17 +268,7 @@ GlyphPositionList TextRenderer::prepareRun(unicode::run_segmenter::range const& 
 
     auto const advanceX = fonts_.regular.first.get().maxAdvance();
 
-#if 0 // !defined(NDEBUG) )// {{{ debug print
-    std::cout << fmt::format("GLRenderer.renderText() cluster:{} [{}..{}) {}",
-                              clusters_[_run.start],
-                              _run.start, _run.end,
-                              isEmojiPresentation ? "E" : "T");
-    for (size_t i = _run.start; i < _run.end; ++i)
-        std::cout << fmt::format(" {}:{}", (unsigned) codepoints_[i], clusters_[i]);
-    std::cout << '\n';
-#endif // }}}
-
-    auto gpos = textShaper_.shape(
+    GlyphPositionList gpos = textShaper_.shape(
         std::get<unicode::Script>(_run.properties),
         font,
         advanceX,
@@ -360,19 +348,14 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
     metadata.height = static_cast<int>(static_cast<unsigned>(font->height) >> 6);
     metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
 
-#if 0 // !defined(NDEBUG)
-    //if (_id.font.get().hasColor())
-    {
-        std::cout
-            << "TextRenderer.insert: glyph "
-            << _id.glyphIndex
-            << ", advance:" << metadata.advance
-            << ", descender:" << metadata.descender
-            << ", height:" << metadata.height
-            << " @ " << _id.font.get().filePath()
-            << '\n';
-    }
-#endif
+    if (crispy::logging_sink::for_debug().enabled())
+        if (_id.font.get().hasColor())
+            debuglog().write("insert glyph {}, advance:{}, descender:{}, height:{}, path:{}",
+                             _id.glyphIndex,
+                             metadata.advance,
+                             metadata.descender,
+                             metadata.height,
+                             _id.font.get().filePath());
 
     auto& bmp = bitmap.value();
     return _atlas.insert(_id, bmp.width, bmp.height,
@@ -407,17 +390,16 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                  ;
 #endif
 
-#if 0 // !defined(NDEBUG)
-    std::cout << fmt::format(
-        "Text.render: xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}\n",
-        x, y,
-        _pos.x(), _pos.y(),
-        _gpos.x, _gpos.y,
-        _gpos.font.get().baseline(),
-        _gpos.font.get().lineHeight(),
-        _gpos.font.get().bitmapHeight(),
-        _glyph.descender
-    );
+#if 0
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog().write("xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}",
+                         x, y,
+                         _pos.x(), _pos.y(),
+                         _gpos.x, _gpos.y,
+                         _gpos.font.get().baseline(),
+                         _gpos.font.get().lineHeight(),
+                         _gpos.font.get().bitmapHeight(),
+                         _glyph.descender);
 #endif
 
     renderTexture(QPoint(x, y), _color, _textureInfo);

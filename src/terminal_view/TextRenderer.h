@@ -134,7 +134,7 @@ class TextRenderer {
   private:
     void reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color);
     void extend(Cell const& _cell, int _column);
-    crispy::text::GlyphPositionList prepareRun(unicode::run_segmenter::range const& _range);
+    crispy::text::GlyphPositionList shapeRun(unicode::run_segmenter::range const& _range);
 
     crispy::text::GlyphPositionList const& cachedGlyphPositions();
     crispy::text::GlyphPositionList requestGlyphPositions();

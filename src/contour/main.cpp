@@ -16,6 +16,7 @@
 #include <contour/TerminalWidget.h>
 
 #include <terminal/Parser.h>
+#include <crispy/logger.h>
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QThread>
@@ -36,6 +37,7 @@ namespace contour {
             addOption(profileOption);
             addOption(workingDirectoryOption);
             addOption(parserTable);
+            addOption(enableDebugLogging);
             addPositionalArgument("executable", "path to executable to execute.");
         }
 
@@ -58,6 +60,11 @@ namespace contour {
             QCoreApplication::translate("main", "Dumps parser table")
         };
 
+        QCommandLineOption const enableDebugLogging{
+            QStringList() << "d" << "enable-debug-logging",
+            QCoreApplication::translate("main", "Enables debug logging.")
+        };
+
         QString profileName() const { return value(profileOption); }
 
         QCommandLineOption const workingDirectoryOption{
@@ -72,6 +79,13 @@ namespace contour {
 
 int main(int argc, char* argv[])
 {
+    auto configFailures = int{0};
+    auto const configLogger = [&](string const& _msg)
+    {
+        cerr << "Configuration failure. " << _msg << '\n';
+        ++configFailures;
+    };
+
     try
     {
         QCoreApplication::setApplicationName("contour");
@@ -92,18 +106,65 @@ int main(int argc, char* argv[])
             return EXIT_SUCCESS;
         }
 
-        auto configFailures = int{0};
-        auto const configLogger = [&](string const& _msg)
+        // customize debuglog transform to shorten the file_name output a bit
+        crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
         {
-            cerr << "Configuration failure. " << _msg << '\n';
-            ++configFailures;
-        };
+            auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+            auto const fileName = srcIndex != string_view::npos
+                ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                : string(_msg.location().file_name());
+
+            // TODO: handle multiline text
+
+            auto result = string{};
+
+            // TODO: use `crispy::split(string) -> vector<string_view>` here
+            size_t a = 0;
+            size_t b = 0;
+            int i = 0;
+            while ((b = _msg.text().find('\n', a)) != string::npos)
+            {
+                if (i != 0)
+                    result += "        ";
+                else
+                    result += fmt::format("[{}:{}:{}] ",
+                                          fileName,
+                                          _msg.location().line(),
+                                          _msg.location().function_name());
+
+                result += _msg.text().substr(a, b - a);
+                result += '\n';
+
+                a = b + 1;
+                i++;
+            }
+
+            if (a < _msg.text().size())
+            {
+                if (i != 0)
+                    result += "        ";
+                else
+                {
+                    result += fmt::format("[{}:{}:{}] ",
+                                          fileName,
+                                          _msg.location().line(),
+                                          _msg.location().function_name());
+                }
+                result += _msg.text().substr(a);
+                result += '\n';
+            }
+
+            return result;
+        });
+
+        if (cli.isSet(cli.enableDebugLogging))
+            crispy::logging_sink::for_debug().enable(true);
 
         QString const configPath = cli.value(cli.configOption);
 
         auto config =
-            configPath.isEmpty() ? contour::config::loadConfig(configLogger)
-                                 : contour::config::loadConfigFromFile(configPath.toStdString(), configLogger);
+            configPath.isEmpty() ? contour::config::loadConfig()
+                                 : contour::config::loadConfigFromFile(configPath.toStdString());
 
         string const profileName = [&]() {
             if (!cli.value(cli.profileOption).isEmpty())
@@ -161,7 +222,7 @@ int main(int argc, char* argv[])
     }
     catch (exception const& e)
     {
-        cerr << "Unhandled error caught. " << e.what() << endl;
+        configLogger(fmt::format("Unhandled error caught. {}", e.what()));
         return EXIT_FAILURE;
     }
 }

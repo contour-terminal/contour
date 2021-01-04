@@ -14,13 +14,12 @@
 #include <terminal_view/TerminalView.h>
 
 #include <crispy/text/Font.h>
+#include <crispy/logger.h>
 
-#include <terminal/Logger.h>
 #include <fmt/ostream.h>
 
 #include <array>
 #include <chrono>
-#include <iostream>
 #include <utility>
 
 using std::chrono::milliseconds;
@@ -58,17 +57,14 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            Process::ExecInfo const& _shell,
                            QMatrix4x4 const& _projectionMatrix,
                            ShaderConfig const& _backgroundShaderConfig,
-                           ShaderConfig const& _textShaderConfig,
-                           Logger _logger) :
+                           ShaderConfig const& _textShaderConfig) :
     events_{ _events },
-    logger_{ move(_logger) },
     fonts_{ _fonts },
     size_{
         static_cast<int>(_pty->screenSize().width * _fonts.regular.first.get().maxAdvance()),
         static_cast<int>(_pty->screenSize().height * _fonts.regular.first.get().lineHeight())
     },
     renderer_{
-        logger_,
         _pty->screenSize(),
         _fonts,
         _colorProfile,
@@ -85,7 +81,6 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
         _now,
-        logger_,
         _wordDelimiters
     ),
     process_{ _shell, terminal_.device() },
@@ -146,13 +141,10 @@ void TerminalView::setFont(FontConfig const& _fonts)
     fonts_ = _fonts;
     auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
 
-#if 0 // !defined(NDEBUG)
-    std::cout << fmt::format(
-        "TerminalView.setFont(size={}): adjusting margin from {}x{} to {}x{}\n",
-        _fonts.regular.first.get().fontSize(),
-        windowMargin_.left, windowMargin_.bottom,
-        newMargin.left, newMargin.bottom);
-#endif
+    debuglog().write("with size={}, adjusting margin from {}x{} to {}x{}\n",
+                     _fonts.regular.first.get().fontSize(),
+                     windowMargin_.left, windowMargin_.bottom,
+                     newMargin.left, newMargin.bottom);
 
     windowMargin_ = newMargin;
     renderer_.setFont(_fonts);
@@ -209,15 +201,12 @@ void TerminalView::resize(int _width, int _height)
         terminal_.clearSelection();
     }
 
-#if 0 // !defined(NDEBUG)
-    std::cout << fmt::format(
-        "Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}\n",
+    debuglog().write("Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}",
         size_,
         newScreenSize,
         windowMargin_.left, windowMargin_.bottom,
         renderer_.cellSize()
     );
-#endif
 }
 
 void TerminalView::setCursorShape(CursorShape _shape)
@@ -227,9 +216,7 @@ void TerminalView::setCursorShape(CursorShape _shape)
 
 bool TerminalView::setTerminalSize(Size _cells)
 {
-#if !defined(NDEBUG)
-    std::cout << fmt::format("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
-#endif
+    debuglog().write("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
 
     if (terminal_.screenSize() == _cells)
         return false;

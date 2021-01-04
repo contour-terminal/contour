@@ -14,6 +14,7 @@
 #include <crispy/text/Font.h>
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <crispy/logger.h>
 
 #include <fmt/format.h>
 
@@ -69,28 +70,24 @@ namespace { // {{{ helper functions
     }
 } // }}}
 
-FT_Face Font::loadFace(ostream* _logger, FT_Library _ft, std::string const& _fontPath, int _fontSize)
+FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize)
 {
     FT_Face face{};
     if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face))
-    {
-        if (_logger)
-            *_logger << fmt::format("Failed to load font: \"{}\"\n", _fontPath);
-    }
+        debuglog().write("Failed to load font: \"{}\"", _fontPath);
 
     FT_Error ec = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
-    if (ec && _logger)
-        *_logger << fmt::format("FT_Select_Charmap failed. Ignoring; {}\n", freetypeErrorString(ec));
+    if (ec)
+        debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
 
-    if (doSetFontSize(_logger, face, _fontSize))
+    if (doSetFontSize(face, _fontSize))
         return face;
 
     FT_Done_Face(face);
     return nullptr;
 }
 
-Font::Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath) :
-    logger_{ _logger },
+Font::Font(FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath) :
     ft_{ _ft },
     face_{ _face },
     fontSize_{ _fontSize },
@@ -101,7 +98,6 @@ Font::Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, int _fontSize, 
 }
 
 Font::Font(Font&& v) noexcept :
-    logger_{ v.logger_ },
     ft_{ v.ft_ },
     face_{ v.face_ },
     fontSize_{ v.fontSize_ },
@@ -124,7 +120,6 @@ Font& Font::operator=(Font&& v) noexcept
 {
     // TODO: free current resources, if any
 
-    logger_ = v.logger_;
     ft_ = v.ft_;
     face_ = v.face_;
     fontSize_ = v.fontSize_;
@@ -134,7 +129,6 @@ Font& Font::operator=(Font&& v) noexcept
     filePath_ = move(v.filePath_);
     hashCode_ = v.hashCode_;
 
-    v.logger_ = nullptr;
     v.ft_ = nullptr;
     v.face_ = nullptr;
     v.fontSize_ = 0;
@@ -172,9 +166,9 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
 
         if (ec != FT_Err_Ok)
         {
-            if (logger_)
+            if (crispy::logging_sink::for_debug().enabled())
             {
-                *logger_ << fmt::format(
+                debuglog().write(
                     "Error loading glyph index {} for font {}; {}",
                     _glyphIndex,
                     filePath(),
@@ -246,23 +240,23 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
     }};
 }
 
-bool Font::doSetFontSize(ostream* _logger, FT_Face _face, int _fontSize)
+bool Font::doSetFontSize(FT_Face _face, int _fontSize)
 {
     if (FT_HAS_COLOR(_face))
     {
         FT_Error const ec = FT_Select_Size(_face, 0); // FIXME i think this one can be omitted?
-        if (ec != FT_Err_Ok && _logger)
+        if (ec != FT_Err_Ok)
         {
-            *_logger << fmt::format("Failed to FT_Select_Size: {}\n", freetypeErrorString(ec));
+            debuglog().write("Failed to FT_Select_Size: {}", freetypeErrorString(ec));
             return false;
         }
     }
     else
     {
         FT_Error const ec = FT_Set_Pixel_Sizes(_face, 0, static_cast<FT_UInt>(_fontSize));
-        if (ec && _logger)
+        if (ec)
         {
-            *_logger << fmt::format("Failed to FT_Set_Pixel_Sizes: {}\n", freetypeErrorString(ec));
+            debuglog().write("Failed to FT_Set_Pixel_Sizes: {}\n", freetypeErrorString(ec));
             return false;
         }
     }
@@ -271,7 +265,7 @@ bool Font::doSetFontSize(ostream* _logger, FT_Face _face, int _fontSize)
 
 void Font::setFontSize(int _fontSize)
 {
-    if (fontSize_ != _fontSize && doSetFontSize(logger_, face_, _fontSize))
+    if (fontSize_ != _fontSize && doSetFontSize(face_, _fontSize))
     {
         fontSize_ = _fontSize;
         updateBitmapDimensions();

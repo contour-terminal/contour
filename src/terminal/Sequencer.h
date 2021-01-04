@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Logger.h>
 #include <terminal/Image.h>
 #include <terminal/ParserEvents.h>
 #include <terminal/ParserExtension.h>
@@ -154,6 +153,7 @@ enum class DECMode { // {{{
     VisibleCursor, // DECTCEM
     ShowScrollbar,
     AllowColumns80to132, // ?40
+    DebugLogging, // ?46,
     UseAlternateScreen,
     BracketedPaste,
     FocusTracking, // 1004
@@ -251,6 +251,7 @@ constexpr std::string_view to_code(DECMode m)
         case DECMode::VisibleCursor: return "?25";
         case DECMode::ShowScrollbar: return "?30";
         case DECMode::AllowColumns80to132: return "?40";
+        case DECMode::DebugLogging: return "?46";
         case DECMode::UseAlternateScreen: return "?47";
         case DECMode::LeftRightMargin: return "?69";
         case DECMode::MouseProtocolNormalTracking: return "?1000";
@@ -521,15 +522,13 @@ class Sequencer : public ParserEvents {
   public:
     /// Constructs the sequencer stage.
     Sequencer(Screen& _screen,
-              Logger _logger,
               Size _maxImageSize,
               RGBAColor _backgroundColor,
               std::shared_ptr<ColorPalette> _imageColorPalette);
 
     /// Constructs a very primitive Sequencer, SHOULD be used for testing only.
-    Sequencer(Screen& _screen, Logger _logger)
+    Sequencer(Screen& _screen)
         : Sequencer(_screen,
-                    std::move(_logger),
                     Size{800, 600},
                     RGBAColor{},
                     std::make_shared<ColorPalette>()) {}
@@ -575,13 +574,6 @@ class Sequencer : public ParserEvents {
 
     ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
-    template <typename Event, typename... Args>
-    void log(Args&&... args) const
-    {
-        if (logger_)
-            logger_(Event{ std::forward<Args>(args)... });
-    }
-
   private:
     Sequence sequence_{};
     Screen& screen_;
@@ -589,8 +581,6 @@ class Sequencer : public ParserEvents {
     int64_t instructionCounter_ = 0;
     using Batchable = std::variant<char32_t, Sequence, SixelImage>;
     std::vector<Batchable> batchedSequences_;
-
-    Logger const logger_;
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;

@@ -1,5 +1,11 @@
 # REFLOW
 
+```
+// TODO: use `crispy::split(string) -> vector<string_view>` here
+* and at start of debug-logging, dump initial state once.
+* log debug-logging start/end events to the debug log, too.
+```
+
 - [ ] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
 - [ ] Fix column grow to insert spaces in unwrap.
 - [ ] handle wide characters

@@ -18,8 +18,9 @@
 #include <terminal/Screen.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/escape.h>
 #include <crispy/base64.h>
+#include <crispy/escape.h>
+#include <crispy/logger.h>
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>
@@ -148,6 +149,7 @@ namespace impl // {{{ some command generator helpers
             // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
             // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
             // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
+            case 46: return DECMode::DebugLogging;
             case 47: return DECMode::UseAlternateScreen;
             // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
             // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the backarrowKey resource to "true".
@@ -822,12 +824,10 @@ string Sequence::text() const
 // }}}
 
 Sequencer::Sequencer(Screen& _screen,
-                     Logger _logger,
                      Size _maxImageSize,
                      RGBAColor _backgroundColor,
                      shared_ptr<ColorPalette> _imageColorPalette) :
     screen_{ _screen },
-    logger_{ std::move(_logger) },
     imageColorPalette_{ std::move(_imageColorPalette) },
     maxImageSize_{ _maxImageSize },
     backgroundColor_{ _backgroundColor }
@@ -836,7 +836,7 @@ Sequencer::Sequencer(Screen& _screen,
 
 void Sequencer::error(std::string_view const& _errorString)
 {
-    logger_(ParserErrorEvent{string(_errorString)});
+    debuglog().write("Parser error: {}", _errorString);
 }
 
 void Sequencer::print(char32_t _char)
@@ -1126,15 +1126,16 @@ void Sequencer::executeControlFunction(char _c0)
             screen_.restoreCursor();
             break;
         default:
-            log<UnsupportedOutputEvent>(crispy::escape(_c0));
+            debuglog().write("Unsupported C0 sequence: {}", crispy::escape(_c0));
             break;
     }
 }
 
 void Sequencer::handleSequence()
 {
-#if defined(LIBTERMINAL_LOG_TRACE)
-    logger_(TraceOutputEvent{fmt::format("{}", sequence_)});
+#if 0 // defined(LIBTERMINAL_LOG_TRACE)
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog().write("Trace sequence: {}", sequence_);
 #endif
 
     instructionCounter_++;
@@ -1396,6 +1397,7 @@ std::string to_string(DECMode _mode)
         case DECMode::VisibleCursor: return "VisibleCursor";
         case DECMode::ShowScrollbar: return "ShowScrollbar";
         case DECMode::AllowColumns80to132: return "AllowColumns80to132";
+        case DECMode::DebugLogging: return "DebugLogging";
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";

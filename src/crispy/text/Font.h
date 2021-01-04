@@ -168,7 +168,7 @@ using GlyphPositionList = std::vector<GlyphPosition>;
  */
 class Font {
   public:
-    Font(std::ostream* _logger, FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath);
+    Font(FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
     Font(Font&&) noexcept;
@@ -203,14 +203,13 @@ class Font {
     operator FT_Face () noexcept { return face_; }
     FT_Face operator->() noexcept { return face_; }
 
-    static FT_Face loadFace(std::ostream* _logger,FT_Library _ft, std::string const& _fontPath, int _fontSize);
+    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize);
 
   private:
-    static bool doSetFontSize(std::ostream* _logger, FT_Face _face, int _fontSize);
+    static bool doSetFontSize(FT_Face _face, int _fontSize);
     void updateBitmapDimensions();
 
   private:
-    std::ostream* logger_;
     FT_Library ft_;
     FT_Face face_;
     int fontSize_ = 0;

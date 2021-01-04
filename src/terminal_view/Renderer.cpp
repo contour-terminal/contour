@@ -23,8 +23,7 @@ using std::tuple;
 
 namespace terminal::view {
 
-Renderer::Renderer(Logger _logger,
-                   Size const& _screenSize,
+Renderer::Renderer(Size const& _screenSize,
                    FontConfig const& _fonts,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,
@@ -41,7 +40,6 @@ Renderer::Renderer(Logger _logger,
         },
         _fonts.regular.first.get().baseline()
     },
-    logger_{ move(_logger) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     fonts_{ _fonts },

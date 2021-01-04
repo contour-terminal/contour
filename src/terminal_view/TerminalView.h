@@ -17,7 +17,6 @@
 #include <terminal_view/FontConfig.h>
 
 #include <terminal/Color.h>
-#include <terminal/Logger.h>
 #include <terminal/Process.h>
 #include <terminal/Size.h>
 #include <terminal/Terminal.h>
@@ -73,8 +72,7 @@ class TerminalView : private Terminal::Events {
                  Process::ExecInfo const& _shell,
                  QMatrix4x4 const& _projectionMatrix,
                  ShaderConfig const& _backgroundShaderConfig,
-                 ShaderConfig const& _textShaderConfig,
-                 Logger _logger);
+                 ShaderConfig const& _textShaderConfig);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -157,7 +155,6 @@ class TerminalView : private Terminal::Events {
 
   private:
     Events& events_;
-    Logger logger_;
     FontConfig fonts_;
     Size size_;
     WindowMargin windowMargin_;

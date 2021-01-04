@@ -15,13 +15,13 @@
 
 #include <terminal/InputGenerator.h>
 
-#include <terminal/Logger.h>
 #include <terminal/Size.h>
 #include <terminal/VTType.h>
 
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
+#include <crispy/logger.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -242,7 +242,6 @@ namespace // {{{ helper
 
 Screen::Screen(Size const& _size,
                ScreenEvents& _eventListener,
-               Logger const& _logger,
                bool _logRaw,
                bool _logTrace,
                optional<int> _maxHistoryLineCount,
@@ -251,7 +250,6 @@ Screen::Screen(Size const& _size,
                bool _sixelCursorConformance
 ) :
     eventListener_{ _eventListener },
-    logger_{ _logger },
     logRaw_{ _logRaw },
     logTrace_{ _logTrace },
     modes_{},
@@ -263,7 +261,6 @@ Screen::Screen(Size const& _size,
     },
     sequencer_{
         *this,
-        _logger,
         _maxImageSize,
         RGBAColor{}, // TODO
         imageColorPalette_
@@ -391,9 +388,9 @@ void Screen::fail(std::string const& _message) const
 
 void Screen::write(char const * _data, size_t _size)
 {
-#if defined(LIBTERMINAL_LOG_RAW)
-    if (logRaw_ && logger_)
-        logger_(RawOutputEvent{ escape(_data, _data + _size) });
+#if 0 // defined(LIBTERMINAL_LOG_RAW)
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog().write("raw: \"{}\"", escape(_data, _data + _size));
 #endif
 
     parser_.parseFragment(_data, _size);
@@ -1454,6 +1451,9 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::BatchedRendering:
             // Only perform batched rendering when NOT in debugging mode.
             // TODO: also, do I still need this here?
+            break;
+        case DECMode::DebugLogging:
+            crispy::logging_sink::for_debug().enable(_enable);
             break;
         case DECMode::UseAlternateScreen:
             if (_enable)

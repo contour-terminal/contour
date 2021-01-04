@@ -23,6 +23,8 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
+#include <crispy/logger.h>
+
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
@@ -47,7 +49,6 @@
 using namespace std::string_literals;
 
 using std::cerr;
-using std::cout;
 
 using std::array;
 using std::chrono::steady_clock;
@@ -350,12 +351,10 @@ namespace // {{{
             }
         }(_type);
 
-        std::cout << fmt::format(
+        debuglog().write(
             "[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
             tag, typeName, sourceName, debugSeverity, _message
         );
-        if (_message && _message[strlen(_message) - 1] != '\n')
-            cout << endl;
     }
 #endif
 
@@ -379,12 +378,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     profileName_{ std::move(_profileName) },
     profile_{ *config_.profile(profileName_) },
     programPath_{ std::move(_programPath) },
-    logger_{
-        config_.logFilePath
-            ? LoggingSink{config_.loggingMask, config_.logFilePath->string()}
-            : LoggingSink{config_.loggingMask, &cout}
-    },
-    fontLoader_{&cerr},
+    fontLoader_{},
     fonts_{loadFonts(profile())},
     terminalView_{},
     configFileChangeWatcher_{
@@ -393,12 +387,14 @@ TerminalWidget::TerminalWidget(config::Config _config,
     },
     updateTimer_(this)
 {
-    // qDebug() << "TerminalWidget.ctor:"
-    //     << QString::fromUtf8(fmt::format("{}", config_.profile(config_.defaultProfileName)->terminalSize).c_str())
-    //     << "fontSize:" << profile().fontSize
-    //     << "contentScale:" << contentScale()
-    //     << "geometry:" << geometry()
-    //     ;
+    debuglog().write("ctor: fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
+                     config_.profile(config_.defaultProfileName)->terminalSize,
+                     profile().fontSize,
+                     contentScale(),
+                     geometry().top(),
+                     geometry().left(),
+                     geometry().bottom(),
+                     geometry().right());
 
     setMouseTracking(true);
 
@@ -428,7 +424,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
 
 TerminalWidget::~TerminalWidget()
 {
-    std::cout << "TerminalWidget.dtor!\n";
+    debuglog().write("TerminalWidget.dtor!");
     makeCurrent(); // XXX must be called.
     statsSummary();
 }
@@ -561,19 +557,20 @@ void TerminalWidget::initializeGL()
     {
         infoPrinted = true;
 
-        cout << fmt::format("[FYI] DPI             : {}x{} physical; {}x{} logical\n",
-                            physicalDpiX(), physicalDpiY(),
-                            logicalDpiX(), logicalDpiY());
-        cout << fmt::format("[FYI] OpenGL type     : {}\n", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
-        cout << fmt::format("[FYI] OpenGL renderer : {}\n", glGetString(GL_RENDERER));
-        cout << fmt::format("[FYI] Qt platform     : {}\n", QGuiApplication::platformName().toStdString());
+        debuglog().write("[FYI] DPI             : {}x{} physical; {}x{} logical",
+                         physicalDpiX(), physicalDpiY(),
+                         logicalDpiX(), logicalDpiY());
+        debuglog().write("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+        debuglog().write("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
+        debuglog().write("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
 
         GLint versionMajor{};
         GLint versionMinor{};
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-        cout << fmt::format("[FYI] OpenGL version  : {}.{}\n", versionMajor, versionMinor);
-        cout << fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        debuglog().write("[FYI] OpenGL version  : {}.{}", versionMajor, versionMinor);
+
+        auto glslVersionMsg = fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
         // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
         // TODO: also take window monitor switches into account
@@ -584,16 +581,17 @@ void TerminalWidget::initializeGL()
 #endif
         if (glslNumShaderVersions > 0)
         {
-            cout << " (";
+            glslVersionMsg += " (";
             for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
                 if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
                 {
-                    cout << (l ? ", " : "") << str;
+                    glslVersionMsg += (l ? ", " : "");
+                    glslVersionMsg += (char const*) str;
                     l++;
                 }
-            cout << ')';
+            glslVersionMsg += ')';
         }
-        cout << "\n";
+        debuglog().write(glslVersionMsg);
     }
     // }}}
 
@@ -623,14 +621,11 @@ void TerminalWidget::initializeGL()
         profile().shell,
         ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
-        *config::Config::loadShaderConfig(config::ShaderClass::Text),
-        ref(logger_)
+        *config::Config::loadShaderConfig(config::ShaderClass::Text)
     );
 
     terminal::Screen& screen = terminalView_->terminal().screen();
 
-    screen.setLogRaw((config_.loggingMask & LogMask::RawOutput) != LogMask::None);
-    screen.setLogTrace((config_.loggingMask & LogMask::TraceOutput) != LogMask::None);
     screen.setTabWidth(profile().tabWidth);
 
     // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
@@ -643,13 +638,10 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-#if 0 // !defined(NDEBUG)
-    cout << fmt::format(
-        "resizeGL: {}x{}, geometry: {}/{}\n",
-        _width, _height,
-        terminal::Size{geometry().top(), geometry().left()},
-        terminal::Size{geometry().width(), geometry().height()});
-#endif
+    debuglog().write("{}x{}, geometry: {}/{}",
+                     _width, _height,
+                     terminal::Size{geometry().top(), geometry().left()},
+                     terminal::Size{geometry().width(), geometry().height()});
 
     if (_width == 0 || _height == 0)
         return;
@@ -760,7 +752,7 @@ bool TerminalWidget::reloadConfigValues(std::string const& _profileName)
 
     try
     {
-        loadConfigFromFile(newConfig, filePath, configLogger);
+        loadConfigFromFile(newConfig, filePath);
     }
     catch (exception const& e)
     {
@@ -788,23 +780,15 @@ bool TerminalWidget::reloadConfigValues(config::Config _newConfig)
 
 bool TerminalWidget::reloadConfigValues(config::Config _newConfig, string const& _profileName)
 {
-    cout << fmt::format("Loading configuration from {} with profile {}\n",
-                        _newConfig.backingFilePath.string(),
-                        _profileName);
-
-    logger_ =
-        _newConfig.logFilePath
-            ? LoggingSink{_newConfig.loggingMask, _newConfig.logFilePath->string()}
-            : LoggingSink{_newConfig.loggingMask, &cout};
+    debuglog().write("Loading configuration from {} with profile {}",
+                     _newConfig.backingFilePath.string(),
+                     _profileName);
 
     terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
 
     terminalView_->terminal().screen().setMaxImageSize(_newConfig.maxImageSize);
     terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
-
-    terminalView_->terminal().screen().setLogRaw((_newConfig.loggingMask & LogMask::RawOutput) != LogMask::None);
-    terminalView_->terminal().screen().setLogTrace((_newConfig.loggingMask & LogMask::TraceOutput) != LogMask::None);
 
     config_ = std::move(_newConfig);
     if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
@@ -874,13 +858,13 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
     auto const keySeq = toKeySequence(_keyEvent);
 
-    // qDebug() << "keyPress:"
-    //     << "text:" << _keyEvent->text()
-    //     << "seq:" << keySeq
-    //     << "seq.empty?" << keySeq.isEmpty()
-    //     << "key:" << static_cast<Qt::Key>(_keyEvent->key())
-    //     << "mod:" << _keyEvent->modifiers()
-    //     << QString::fromLatin1(fmt::format("0x{:x}", keySeq[0]).c_str());
+    debuglog().write("text:{}, seq:{}, seqEmpty?:{}, key:0x{:X}, mod:0x{:X}, keySeq[0]:{}",
+                     _keyEvent->text().toStdString(),
+                     keySeq.toString().toStdString(),
+                     keySeq.isEmpty(),
+                     static_cast<Qt::Key>(_keyEvent->key()),
+                     _keyEvent->modifiers(),
+                     keySeq[0]);
 
     if (auto const i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
@@ -1174,8 +1158,7 @@ bool TerminalWidget::setFontSize(int _fontSize)
 
     float const fontSize = (static_cast<float>(_fontSize) / 72.0f) * static_cast<float>(logicalDpiX());
 
-    // cout << fmt::format("TerminalWidget.setFontSize: {} -> {}; {} * {}\n",
-    //                     profile().fontSize, _fontSize, fontSize, contentScale());
+    debuglog().write("{} -> {}; {} * {}", profile().fontSize, _fontSize, fontSize, contentScale());
 
     terminalView_->setFontSize(static_cast<int>(fontSize * contentScale()));
 
@@ -1350,12 +1333,16 @@ bool TerminalWidget::executeAction(Action const& _action)
                                     ec.message());
                 return Result::Silently;
             }
-            auto const defaultConfig = config::loadConfigFromFile(
-                config_.backingFilePath,
-                [&](auto const& msg) {
-                    cerr << "Failed to load default config: " << msg << endl;
-                }
-            );
+
+            config::Config defaultConfig;
+            try
+            {
+                config::loadConfigFromFile(config_.backingFilePath);
+            }
+            catch (std::exception const& e)
+            {
+                debuglog().write("Failed to load default config: {}", e.what());
+            }
             return reloadConfigValues(defaultConfig) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::FollowHyperlink) -> Result {
@@ -1418,8 +1405,7 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 {
     int const fontSize = static_cast<int>((static_cast<float>(_profile.fontSize) / 72.0f) * static_cast<float>(logicalDpiX()));
 
-    // cout << fmt::format("TerminalWidget.loadFonts: size: {}; {} * {}\n",
-    //                     _profile.fontSize, fontSize, contentScale());
+    debuglog().write("size: {}; {} * {}", _profile.fontSize, fontSize, contentScale());
 
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
@@ -1433,11 +1419,11 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 
 void TerminalWidget::setProfile(string const& _newProfileName)
 {
-    cerr << fmt::format("Changing profile to '{}'.", _newProfileName) << endl;
+    debuglog().write("Changing profile to '{}'.", _newProfileName);
     if (auto newProfile = config_.profile(_newProfileName); newProfile)
         setProfile(*newProfile);
     else
-        cerr << fmt::format("No such profile: '{}'.", _newProfileName) << endl;
+        debuglog().write("No such profile: '{}'.", _newProfileName);
 }
 
 void TerminalWidget::setProfile(config::TerminalProfile newProfile)
@@ -1594,8 +1580,7 @@ void TerminalWidget::post(std::function<void()> _fn)
 
 void TerminalWidget::bell()
 {
-    if (logger_.sink())
-        *logger_.sink() << "TODO: Beep!\n";
+    debuglog().write("TODO: Beep!");
     QApplication::beep();
     // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
     // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
@@ -1713,10 +1698,7 @@ void TerminalWidget::updateScrollBarPosition()
 
 void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
 {
-#if 1 // !defined(NDEBUG)
-    cerr << fmt::format("Application request to resize window: {}x{} {}\n",
-                        _width, _height, _inPixels ? "px" : "cells");
-#endif
+    debuglog().write("Application request to resize window: {}x{} {}", _width, _height, _inPixels ? "px" : "cells");
 
     if (fullscreen())
     {
@@ -1766,19 +1748,17 @@ QSize TerminalWidget::sizeHint() const
     auto const viewWidth = profile().terminalSize.width * fonts_.regular.first.get().maxAdvance();
     auto const viewHeight = profile().terminalSize.height * fonts_.regular.first.get().lineHeight();
 
-    cout << fmt::format("sizeHint: {}, SBW: {}, terminalSize: {}\n",
-                        terminal::Size{viewWidth + scrollbarWidth, viewHeight},
-                        scrollbarWidth,
-                        profile().terminalSize);
+    debuglog().write("Calling sizeHint: {}, SBW: {}, terminalSize: {}",
+                     terminal::Size{viewWidth + scrollbarWidth, viewHeight},
+                     scrollbarWidth,
+                     profile().terminalSize);
 
     return QSize(viewWidth + scrollbarWidth, viewHeight);
 }
 
 void TerminalWidget::setSize(terminal::Size _size)
 {
-#if !defined(NDEBUG)
-    cout << fmt::format("----> setSize! {}\n", _size);
-#endif
+    debuglog().write("Calling setSize with {}", _size);
 
     profile().terminalSize = _size;
     terminalView_->setTerminalSize(profile().terminalSize);
@@ -1817,6 +1797,7 @@ void TerminalWidget::copyToClipboard(std::string_view const& _text)
 
 void TerminalWidget::dumpState()
 {
+    // TODO: log this to debuglog()?
     terminalView_->terminal().screen().dumpState("Dump screen state.");
     terminalView_->renderer().dumpState(std::cout);
 }

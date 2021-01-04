@@ -19,7 +19,6 @@
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
 #include <terminal/InputGenerator.h> // MouseTransport
-#include <terminal/Logger.h>
 #include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Sequencer.h>
@@ -139,14 +138,12 @@ class Screen {
      *
      * @param _size screen dimensions in number of characters per line and number of lines.
      * @param _eventListener Interface to some VT sequence related callbacks.
-     * @param _logger an optional logger for logging various events.
      * @param _logRaw whether or not to log raw VT sequences.
      * @param _logTrace whether or not to log VT sequences in trace mode.
      * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
     Screen(Size const& _size,
            ScreenEvents& _eventListener,
-           Logger const& _logger = Logger{},
            bool _logRaw = false,
            bool _logTrace = false,
            std::optional<int> _maxHistoryLineCount = std::nullopt,
@@ -598,7 +595,6 @@ class Screen {
   private:
     ScreenEvents& eventListener_;
 
-    Logger const logger_;
     bool logRaw_ = false;
     bool logTrace_ = false;
     bool focused_ = true;

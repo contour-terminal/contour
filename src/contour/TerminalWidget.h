@@ -218,7 +218,6 @@ class TerminalWidget :
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
-    LoggingSink logger_;
     crispy::text::FontLoader fontLoader_;
     terminal::view::FontConfig fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;

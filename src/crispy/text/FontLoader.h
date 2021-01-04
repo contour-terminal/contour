@@ -35,7 +35,7 @@ namespace crispy::text {
 /// API for managing multiple fonts.
 class FontLoader {
   public:
-    explicit FontLoader(std::ostream* logger = nullptr);
+    FontLoader();
     FontLoader(FontLoader&&) = delete;
     FontLoader(FontLoader const&) = delete;
     FontLoader& operator=(FontLoader&&) = delete;
@@ -48,7 +48,6 @@ class FontLoader {
     Font* loadFromFilePath(std::string const& _filePath, int _fontSize);
 
   private:
-    std::ostream* logger_;
     FT_Library ft_;
     std::unordered_map<std::string, Font> fonts_;
 };

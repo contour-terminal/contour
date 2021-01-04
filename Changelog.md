@@ -1,5 +1,6 @@
-### 0.1.2 (unreleased)
+### 0.2.0 (unreleased)
 
+- Adds VT sequence for enabling/disabling debug logging. `CSI ? 46 h` and `CSI ? 46 l` and CLI option `-d`.
 - ...
 
 ### 0.1.1 (2020-12-31)

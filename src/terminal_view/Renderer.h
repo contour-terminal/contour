@@ -25,7 +25,6 @@
 
 #include <terminal_view/OpenGLRenderer.h>
 
-#include <terminal/Logger.h>
 #include <terminal/Terminal.h>
 
 #include <crispy/text/Font.h>
@@ -48,13 +47,11 @@ class Renderer {
   public:
     /** Constructs a Renderer instances.
      *
-     * @p _logger the logging instance to use when logging is needed during rendering.
      * @p _fonts reference to the set of loaded fonts to be used for rendering text.
      * @p _colorProfile user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
-    Renderer(Logger _logger,
-             Size const& _screenSize,
+    Renderer(Size const& _screenSize,
              FontConfig const& _fonts,
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,
@@ -136,7 +133,6 @@ class Renderer {
     RenderMetrics metrics_;
 
     ScreenCoordinates screenCoordinates_;
-    Logger logger_;
 
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;

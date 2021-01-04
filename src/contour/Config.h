@@ -14,7 +14,6 @@
 #pragma once
 
 #include "Actions.h"
-#include "LoggingSink.h"
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
@@ -119,7 +118,6 @@ struct Config {
     FileSystem::path backingFilePath;
 
     std::optional<FileSystem::path> logFilePath;
-    LogMask loggingMask;
 
     bool fullscreen;
 
@@ -157,14 +155,9 @@ struct Config {
 
 std::optional<std::string> readConfigFile(std::string const& _filename);
 
-using Logger = std::function<void(std::string const&)>;
-
-void loadConfigFromFile(Config& _config,
-                        FileSystem::path const& _fileName,
-                        Logger const& _logger);
-Config loadConfigFromFile(FileSystem::path const& _fileName,
-                          Logger const& _logger);
-Config loadConfig(Logger const& _logger);
+void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
+Config loadConfigFromFile(FileSystem::path const& _fileName);
+Config loadConfig();
 
 std::error_code createDefaultConfig(FileSystem::path const& _path);
 

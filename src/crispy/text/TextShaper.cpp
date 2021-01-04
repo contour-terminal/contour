@@ -15,6 +15,8 @@
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 #include <crispy/span.h>
+#include <crispy/indexed.h>
+#include <crispy/logger.h>
 
 #include <unicode/utf8.h>
 
@@ -72,16 +74,17 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
         if (shape(_size, _codepoints, _clusters, _clusterGap, _script, fallback.get(), _advanceX, ref(glyphPositions)))
             return glyphPositions;
 
-#if !defined(NDEBUG)
-    string joinedCodes;
-    for (char32_t codepoint : crispy::span(_codepoints, _codepoints + _size))
+    if (crispy::logging_sink::for_debug().enabled())
     {
-        if (!joinedCodes.empty())
-            joinedCodes += " ";
-        joinedCodes += fmt::format("{:<6x}", static_cast<unsigned>(codepoint));
+        auto logMessage = debuglog();
+        logMessage.write("Shaping failed codepoints: ");
+        for (auto [i, codepoint] : crispy::indexed(crispy::span(_codepoints, _codepoints + _size)))
+        {
+            if (i != 0)
+                logMessage.write(" ");
+            logMessage.write("{:<6x}", static_cast<unsigned>(codepoint));
+        }
     }
-    cerr << fmt::format("Shaping failed codepoints: {}\n", joinedCodes);
-#endif
 
     // render primary font with glyph-missing hints
     shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions));
@@ -171,26 +174,32 @@ bool TextShaper::shape(int _size,
         });
     }
 
-#if 0 // !defined(NDEBUG))
-    if (crispy::none_of(_result.get(), glyphMissing))
+    if (crispy::any_of(_result.get(), glyphMissing))
+        return false;
+
+#if 1 // !defined(NDEBUG))
+    if (crispy::logging_sink::for_debug().enabled() && crispy::none_of(_result.get(), glyphMissing))
     {
-        std::cout << "Shaping: " << unicode::to_utf8(_codepoints, _size);
+        auto msg = debuglog();
+        msg.write("Shaping: {}\n", unicode::to_utf8(_codepoints, _size));
+        msg.write("via font: \"{}\"\n", _font.filePath());
 
+        msg.write("with metrics: ");
+        for (GlyphPosition const& gp : _result.get())
+        {
+            msg.write(" {}/{}/{}",
+                      gp.glyphIndex,
+                      gp.x,
+                      gp.y);
+        }
+
+        //msg.write("\n");
         // for (size_t const i : times(_size))
-        //     std::cout << fmt::format(" {:04X}", static_cast<uint32_t>(_codepoints[i]));
-
-        for (auto const i : times(glyphCount))
-            std::cout << fmt::format(
-                " (cp:{} x:{}, y:{})",
-                info[i].codepoint,
-                pos[i].x_offset,// >> 6,
-                pos[i].y_offset // >> 6
-            );
-        std::cout << '\n';
+        //     msg.write(" {:X}", static_cast<uint32_t>(_codepoints[i]));
     }
 #endif
 
-    return !crispy::any_of(_result.get(), glyphMissing);
+    return true;
 }
 
 void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)

@@ -47,7 +47,7 @@ namespace
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents{};
-    auto screen = Screen{Size{11, 3}, screenEvents, [&](auto const& msg) { INFO(fmt::format("{}", msg)); }};
+    auto screen = Screen{Size{11, 3}, screenEvents};
     screen.write(
     //   123456789AB
         "12345,67890"s +

@@ -18,6 +18,7 @@
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
+#include <crispy/logger.h>
 
 #include <chrono>
 #include <utility>
@@ -37,7 +38,6 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    optional<size_t> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
-                   Logger _logger,
                    string const& _wordDelimiters,
                    Size _maxImageSize,
                    int _maxImageColorRegisters,
@@ -45,7 +45,6 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
 ) :
     changes_{ 0 },
     eventListener_{ _eventListener },
-    logger_{ move(_logger) },
     pty_{ move(_pty) },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
     cursorShape_{ CursorShape::Block }, // TODO: pass via param
@@ -58,7 +57,6 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
     screen_{
         pty_->screenSize(),
         *this,
-        logger_,
         true, // logs raw output by default?
         true, // logs trace output by default?
         _maxHistoryLineCount,
@@ -100,7 +98,7 @@ void Terminal::screenUpdateThread()
 
 bool Terminal::send(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_point _now)
 {
-    logger_(TraceInputEvent{ fmt::format("key: {}", to_string(_keyEvent.key), to_string(_keyEvent.modifier)) });
+    debuglog().write("key: {}; keyEvent: {}", to_string(_keyEvent.key), to_string(_keyEvent.modifier));
 
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
@@ -120,9 +118,9 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
     lastCursorBlink_ = _now;
 
     if (_charEvent.value <= 0x7F && isprint(static_cast<int>(_charEvent.value)))
-        logger_(TraceInputEvent{ fmt::format("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier)) });
+        debuglog().write("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier));
     else
-        logger_(TraceInputEvent{ fmt::format("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier)) });
+        debuglog().write("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier));
 
     // Early exit if KAM is enabled.
     if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
@@ -326,9 +324,12 @@ void Terminal::sendPaste(string_view const& _text)
 void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
-    pty_->write(pendingInput_.data(), pendingInput_.size());
-    logger_(RawInputEvent{crispy::escape(begin(pendingInput_), end(pendingInput_))});
-    pendingInput_.clear();
+    if (!pendingInput_.empty())
+    {
+        pty_->write(pendingInput_.data(), pendingInput_.size());
+        debuglog().write(crispy::escape(begin(pendingInput_), end(pendingInput_)));
+        pendingInput_.clear();
+    }
 }
 
 void Terminal::writeToScreen(char const* data, size_t size)

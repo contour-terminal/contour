@@ -575,15 +575,15 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     }
 }
 
-Config loadConfig(Logger const& _logger)
+Config loadConfig()
 {
-    return loadConfigFromFile((configHome() / "contour.yml").string(), _logger);
+    return loadConfigFromFile((configHome() / "contour.yml").string());
 }
 
-Config loadConfigFromFile(FileSystem::path const& _fileName, Logger const& _logger)
+Config loadConfigFromFile(FileSystem::path const& _fileName)
 {
     Config config{};
-    loadConfigFromFile(config, _fileName, _logger);
+    loadConfigFromFile(config, _fileName);
     return config;
 }
 
@@ -671,8 +671,7 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
 }
 
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
-                                    unordered_map<string, terminal::ColorProfile> const& _colorschemes,
-                                    Logger const& _logger)
+                                    unordered_map<string, terminal::ColorProfile> const& _colorschemes)
 {
     auto profile = TerminalProfile{};
 
@@ -683,10 +682,10 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
             profile.colors = i->second;
         else
-            _logger(fmt::format("scheme '{}' not found.", colors.as<string>()));
+            cerr << fmt::format("scheme '{}' not found.", colors.as<string>()) << '\n';
     }
     else
-        _logger(fmt::format("No colors section found."));
+        cerr << fmt::format("No colors section found.") << '\n';
 
     softLoadValue(_node, "shell", profile.shell.program);
     if (profile.shell.program.empty())
@@ -798,9 +797,10 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     return profile;
 }
 
-void loadConfigFromFile(Config& _config,
-                        FileSystem::path const& _fileName,
-                        Logger const& _logger)
+/**
+ * @return success or failure of loading the config file.
+ */
+void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
@@ -851,15 +851,15 @@ void loadConfigFromFile(Config& _config,
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            _config.profiles[name] = loadTerminalProfile(i->second, _config.colorschemes, _logger);
+            _config.profiles[name] = loadTerminalProfile(i->second, _config.colorschemes);
         }
     }
 
     softLoadValue(doc, "default_profile", _config.defaultProfileName);
     if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
     {
-        _logger(fmt::format("default_profile \"{}\" not found in profiles list.",
-                            _config.defaultProfileName));
+        cerr << fmt::format("default_profile \"{}\" not found in profiles list.",
+                            _config.defaultProfileName) << '\n';
     }
 
 	if (auto mapping = doc["input_mapping"]; mapping)
@@ -867,33 +867,6 @@ void loadConfigFromFile(Config& _config,
 		if (mapping.IsSequence())
 			for (size_t i = 0; i < mapping.size(); ++i)
 				parseInputMapping(_config, mapping[i]);
-    }
-
-    if (auto logging = doc["logging"]; logging)
-    {
-        if (auto filePath = logging["file"]; filePath)
-            _config.logFilePath = {FileSystem::path{filePath.as<string>()}};
-
-        auto constexpr mappings = array{
-            pair{"parse_errors", LogMask::ParserError},
-            pair{"invalid_output", LogMask::InvalidOutput},
-            pair{"unsupported_output", LogMask::UnsupportedOutput},
-            pair{"raw_input", LogMask::RawInput},
-            pair{"raw_output", LogMask::RawOutput},
-            pair{"trace_input", LogMask::TraceInput},
-            pair{"trace_output", LogMask::TraceOutput},
-        };
-
-        for (auto const& mapping : mappings)
-        {
-            if (auto value = logging[mapping.first]; value)
-            {
-                if (value.as<bool>())
-                    _config.loggingMask |= mapping.second;
-                else
-                    _config.loggingMask &= ~mapping.second;
-            }
-        }
     }
 }
 

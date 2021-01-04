@@ -27,7 +27,6 @@ set(contour_SRCS
     Config.cpp Config.h
     Controller.cpp Controller.h
     FileChangeWatcher.cpp FileChangeWatcher.h
-    LoggingSink.cpp LoggingSink.h
     TerminalWindow.cpp TerminalWindow.h
     TerminalWidget.cpp TerminalWidget.h
     main.cpp
