@@ -1,5 +1,17 @@
-# Terminal apps using the mouse
+# REFLOW
 
+- [ ] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
+- [ ] Fix column grow to insert spaces in unwrap.
+- [ ] handle wide characters
+- [ ] handle images, maybe don't wrap lines that contain image cells?
+- [ ] selection: to honor wrapped lines in word-select
+- [ ] selection: to honor wrapped lines in line-select
+- [x] autoWrap to make use of reflow (also add test case)
+- [x] don't scroll to bottom on resize
+
+# TODO
+
+- [ ] REFACTOR: wrap row/col/width/height numbers into structs
 - [ ] writing text to stdout that triggers AutoWrap marks this line as auto-wrapped, so that
   word-selection will continue selecting on the enxt line.
   This mechanism could be used for a future text reflow functionality, too.
@@ -9,6 +21,7 @@
 - [ ] move to profile: `images.*`
 - [ ] `input_mapping` becomes default, `profiles.NAME.overrides.input_mapping` is used for overrides/additions
 - [ ] make sure `input_mapping` overrides can also remove mappings
+- [ ] move to ranges-v3 (eliminating some crispy helpers)
 
 ### Features to be added to 0.2.0 milestone
 
