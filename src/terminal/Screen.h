@@ -15,6 +15,7 @@
 
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
+#include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
 #include <terminal/InputGenerator.h> // MouseTransport
@@ -26,6 +27,7 @@
 #include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/span.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -104,148 +106,6 @@ class Modes {
 };
 // }}}
 
-// {{{ CharacterStyleMask
-class CharacterStyleMask {
-  public:
-	enum Mask : uint16_t {
-		Bold = (1 << 0),
-		Faint = (1 << 1),
-		Italic = (1 << 2),
-		Underline = (1 << 3),
-		Blinking = (1 << 4),
-		Inverse = (1 << 5),
-		Hidden = (1 << 6),
-		CrossedOut = (1 << 7),
-		DoublyUnderlined = (1 << 8),
-        CurlyUnderlined = (1 << 9),
-        DottedUnderline = (1 << 10),
-        DashedUnderline = (1 << 11),
-        Framed = (1 << 12),
-        Encircled = (1 << 13),
-        Overline = (1 << 14),
-	};
-
-	constexpr CharacterStyleMask() : mask_{} {}
-	constexpr CharacterStyleMask(Mask m) : mask_{m} {}
-	constexpr CharacterStyleMask(unsigned m) : mask_{m} {}
-	constexpr CharacterStyleMask(CharacterStyleMask const& _other) noexcept : mask_{_other.mask_} {}
-
-	constexpr CharacterStyleMask& operator=(CharacterStyleMask const& _other) noexcept
-	{
-		mask_ = _other.mask_;
-		return *this;
-	}
-
-	constexpr unsigned mask() const noexcept { return mask_; }
-
-	constexpr operator unsigned () const noexcept { return mask_; }
-
-  private:
-	unsigned mask_;
-};
-
-std::string to_string(CharacterStyleMask _mask);
-
-constexpr bool operator==(CharacterStyleMask const& a, CharacterStyleMask const& b) noexcept
-{
-	return a.mask() == b.mask();
-}
-
-constexpr CharacterStyleMask& operator|=(CharacterStyleMask& a, CharacterStyleMask const& b) noexcept
-{
-    a = a | b;
-	return a;
-}
-
-constexpr CharacterStyleMask& operator&=(CharacterStyleMask& a, CharacterStyleMask const& b) noexcept
-{
-    a = a & b;
-	return a;
-}
-
-constexpr bool operator!(CharacterStyleMask const& a) noexcept
-{
-	return a.mask() == 0;
-}
-// }}}
-
-// {{{ Margin
-struct Margin {
-	struct Range {
-		int from;
-		int to;
-
-		constexpr int length() const noexcept { return to - from + 1; }
-		constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
-		constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
-
-		constexpr bool contains(int _value) const noexcept { return from <= _value && _value <= to; }
-	};
-
-	Range vertical{}; // top-bottom
-	Range horizontal{}; // left-right
-};
-// }}}
-
-// {{{ GraphicsAttributes
-/// Character graphics rendition information.
-struct GraphicsAttributes {
-    Color foregroundColor{DefaultColor{}};
-    Color backgroundColor{DefaultColor{}};
-    Color underlineColor{DefaultColor{}};
-    CharacterStyleMask styles{};
-
-    RGBColor getUnderlineColor(ColorProfile const& _colorProfile) const noexcept
-    {
-        float const opacity = [=]() {
-            if (styles & CharacterStyleMask::Faint)
-                return 0.5f;
-            else
-                return 1.0f;
-        }();
-
-        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
-        return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
-    }
-
-    std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, bool _reverseVideo) const noexcept
-    {
-        float const opacity = [=]() { // TODO: don't make opacity dependant on Faint-attribute.
-            if (styles & CharacterStyleMask::Faint)
-                return 0.5f;
-            else
-                return 1.0f;
-        }();
-
-        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
-
-        auto const [fgColorTarget, bgColorTarget] =
-            _reverseVideo
-                ? std::pair{ ColorTarget::Background, ColorTarget::Foreground }
-                : std::pair{ ColorTarget::Foreground, ColorTarget::Background };
-
-        return (styles & CharacterStyleMask::Inverse) == 0
-            ? std::pair{ apply(_colorProfile, foregroundColor, fgColorTarget, bright) * opacity,
-                    apply(_colorProfile, backgroundColor, bgColorTarget, bright) }
-            : std::pair{ apply(_colorProfile, backgroundColor, bgColorTarget, bright) * opacity,
-                    apply(_colorProfile, foregroundColor, fgColorTarget, bright) };
-    }
-};
-
-constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
-{
-    return a.backgroundColor == b.backgroundColor
-        && a.foregroundColor == b.foregroundColor
-        && a.styles == b.styles
-        && a.underlineColor == b.underlineColor;
-}
-
-constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
-{
-    return !(a == b);
-}
-// }}}
-
 // {{{ Cursor
 /// Terminal cursor data structure.
 ///
@@ -263,236 +123,6 @@ struct Cursor
     // TODO: CharacterSet for GL and GR
 };
 // }}}
-
-// {{{ Cell
-/// Grid cell with character and graphics rendition information.
-class Cell {
-  public:
-    static size_t constexpr MaxCodepoints = 9;
-
-    Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
-        codepoints_{},
-        attributes_{std::move(_attrib)},
-        width_{1},
-        codepointCount_{0}
-    {
-        setCharacter(_ch);
-    }
-
-    constexpr Cell() noexcept :
-        codepoints_{},
-        attributes_{},
-        width_{1},
-        codepointCount_{0}
-    {}
-
-    void reset() noexcept
-    {
-        attributes_ = {};
-        codepointCount_ = 0;
-        width_ = 1;
-        hyperlink_ = nullptr;
-        imageFragment_.reset();
-    }
-
-    void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
-    {
-        attributes_ = std::move(_attribs);
-        codepointCount_ = 0;
-        width_ = 1;
-        hyperlink_ = _hyperlink;
-        imageFragment_.reset();
-    }
-
-    Cell(Cell const&) = default;
-    Cell(Cell&&) noexcept = default;
-    Cell& operator=(Cell const&) = default;
-    Cell& operator=(Cell&&) noexcept = default;
-
-    constexpr std::u32string_view codepoints() const noexcept
-    {
-        return std::u32string_view{codepoints_.data(), codepointCount_};
-    }
-
-    constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
-    constexpr int codepointCount() const noexcept { return codepointCount_; }
-
-    constexpr bool empty() const noexcept { return codepointCount_ == 0; }
-
-    constexpr int width() const noexcept { return width_; }
-
-    constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
-    constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
-
-    std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
-
-    void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
-    {
-        imageFragment_.emplace(std::move(_imageFragment));
-        hyperlink_ = std::move(_hyperlink);
-        width_ = 1;
-        codepointCount_ = 0;
-    }
-
-    void setCharacter(char32_t _codepoint) noexcept
-    {
-        imageFragment_.reset();
-        codepoints_[0] = _codepoint;
-        if (_codepoint)
-        {
-            codepointCount_ = 1;
-            width_ = std::max(unicode::width(_codepoint), 1);
-        }
-        else
-        {
-            codepointCount_ = 0;
-            width_ = 1;
-        }
-    }
-
-    void setWidth(int _width) noexcept
-    {
-        width_ = _width;
-    }
-
-    int appendCharacter(char32_t _codepoint) noexcept
-    {
-        imageFragment_.reset();
-        if (codepointCount_ < MaxCodepoints)
-        {
-            codepoints_[codepointCount_] = _codepoint;
-            codepointCount_++;
-
-            constexpr bool AllowWidthChange = false; // TODO: make configurable
-
-            auto const width = [&]() {
-                switch (_codepoint)
-                {
-                    case 0xFE0E:
-                        return 1;
-                    case 0xFE0F:
-                        return 2;
-                    default:
-                        return unicode::width(_codepoint);
-                }
-            }();
-
-            if (width != width_ && AllowWidthChange)
-            {
-                int const diff = width - width_;
-                width_ = width;
-                return diff;
-            }
-        }
-        return 0;
-    }
-
-    std::string toUtf8() const;
-
-    HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
-    void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
-
-  private:
-    /// Unicode codepoint to be displayed.
-    std::array<char32_t, MaxCodepoints> codepoints_;
-
-    /// Graphics renditions, such as foreground/background color or other grpahics attributes.
-    GraphicsAttributes attributes_;
-
-    /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
-    uint8_t width_;
-
-    /// Number of combined codepoints stored in this cell.
-    uint8_t codepointCount_;
-
-    HyperlinkRef hyperlink_ = nullptr;
-
-    /// Image fragment to be rendered in this cell.
-    std::optional<ImageFragment> imageFragment_;
-};
-
-constexpr bool operator==(Cell const& a, Cell const& b) noexcept
-{
-    if (a.codepointCount() != b.codepointCount())
-        return false;
-
-    if (!(a.attributes() == b.attributes()))
-        return false;
-
-    for (auto const i : crispy::times(a.codepointCount()))
-        if (a.codepoint(i) != b.codepoint(i))
-            return false;
-
-    return true;
-}
-
-// }}}
-
-struct Line { // {{{
-  public:
-    using LineBuffer = std::vector<Cell>;
-    using iterator = LineBuffer::iterator;
-    using const_iterator = LineBuffer::const_iterator;
-    using reverse_iterator = LineBuffer::reverse_iterator;
-    using size_type = LineBuffer::size_type;
-
-    Line(size_t _numCols, Cell const& _defaultCell) : buffer_{_numCols, _defaultCell} {}
-    Line() = default;
-    Line(Line const&) = default;
-    Line(Line&&) = default;
-    Line& operator=(Line const&) = default;
-    Line& operator=(Line&&) = default;
-
-    LineBuffer* operator->() noexcept { return &buffer_; }
-    LineBuffer const* operator->()  const noexcept { return &buffer_; }
-    auto& operator[](std::size_t _index) { return buffer_[_index]; }
-    auto const& operator[](std::size_t _index) const { return buffer_[_index]; }
-    auto size() const noexcept { return buffer_.size(); }
-    void resize(size_type _size) { buffer_.resize(_size); }
-
-    iterator begin() { return buffer_.begin(); }
-    iterator end() { return buffer_.end(); }
-    const_iterator begin() const { return buffer_.begin(); }
-    const_iterator end() const { return buffer_.end(); }
-    reverse_iterator rbegin() { return buffer_.rbegin(); }
-    reverse_iterator rend() { return buffer_.rend(); }
-    const_iterator cbegin() const { return buffer_.cbegin(); }
-    const_iterator cend() const { return buffer_.cend(); }
-
-    bool marked() const noexcept { return isFlagEnabled(Flag::Marked); }
-    void setMarked(bool _enable) { setFlag(Flag::Marked, _enable); }
-
-  private:
-    enum class Flag : uint8_t {
-        Marked  = 0x0001,
-    };
-
-    void setFlag(Flag _flag, bool _enable) noexcept
-    {
-        if (_enable)
-            flags_ |= static_cast<unsigned>(_flag);
-        else
-            flags_ &= ~static_cast<unsigned>(_flag);
-    }
-
-    bool isFlagEnabled(Flag _flag) const noexcept { return (flags_ & static_cast<unsigned>(_flag)) != 0; }
-
-  private:
-    LineBuffer buffer_;
-    unsigned flags_ = 0;
-};
-// }}}
-
-using Lines = std::deque<Line>;
-using ColumnIterator = Line::iterator;
-using LineIterator = Lines::iterator;
-
-inline auto begin(Line& _line) { return _line.begin(); }
-inline auto end(Line& _line) { return _line.end(); }
-inline auto begin(Line const& _line) { return _line.cbegin(); }
-inline auto end(Line const& _line) { return _line.cend(); }
-inline Line::const_iterator cbegin(Line const& _line) { return _line.cbegin(); }
-inline Line::const_iterator cend(Line const& _line) { return _line.cend(); }
 
 /**
  * Terminal Screen.
@@ -519,7 +149,7 @@ class Screen {
            Logger const& _logger = Logger{},
            bool _logRaw = false,
            bool _logTrace = false,
-           std::optional<size_t> _maxHistoryLineCount = std::nullopt,
+           std::optional<int> _maxHistoryLineCount = std::nullopt,
            Size _maxImageSize = Size{800, 600},
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true
@@ -545,8 +175,10 @@ class Screen {
         terminalId_ = _id;
     }
 
-    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
-    int historyLineCount() const noexcept { return static_cast<int>(savedLines_.size()); }
+    void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
+    std::optional<int> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
+
+    int historyLineCount() const noexcept { return grid().historyLineCount(); }
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -559,8 +191,11 @@ class Screen {
     void writeText(char32_t _char);
 
     /// Renders the full screen by passing every grid cell to the callback.
-    template <typename RendererT>
-    void render(RendererT _renderer, std::optional<int> _scrollOffset = std::nullopt) const;
+    template <typename Renderer>
+    void render(Renderer&& _render, std::optional<int> _scrollOffset = std::nullopt) const
+    {
+        activeGrid_->render(std::forward<Renderer>(_render), _scrollOffset);
+    }
 
     /// Renders a single text line.
     std::string renderTextLine(int _row) const;
@@ -739,6 +374,8 @@ class Screen {
 
     Cursor const& cursor() const noexcept { return cursor_; }
 
+    int wrapPending() const noexcept { return wrapPending_; }
+
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
     Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
     {
@@ -800,25 +437,13 @@ class Screen {
     void moveCursorTo(Coordinate to);
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell& at(Coordinate const& _coord) noexcept
-    {
-        assert(crispy::ascending(1 - historyLineCount(), _coord.row, size_.height));
-        assert(crispy::ascending(1, _coord.column, size_.width));
-
-        if (_coord.row > 0)
-            return (*next(begin(lines()), _coord.row - 1))[_coord.column - 1];
-        else
-            return (*next(rbegin(savedLines_), -_coord.row))[_coord.column - 1];
-    }
+    Cell& at(Coordinate const& _coord) noexcept { return grid().at(_coord); }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell const& at(Coordinate const& _coord) const noexcept
-    {
-        return const_cast<Screen&>(*this).at(_coord);
-    }
+    Cell const& at(Coordinate const& _coord) const noexcept { return grid().at(_coord); }
 
-    bool isPrimaryScreen() const noexcept { return activeBuffer_ == &lines_[0]; }
-    bool isAlternateScreen() const noexcept { return activeBuffer_ == &lines_[1]; }
+    bool isPrimaryScreen() const noexcept { return activeGrid_ == &grids_[0]; }
+    bool isAlternateScreen() const noexcept { return activeGrid_ == &grids_[1]; }
 
     bool isModeEnabled(AnsiMode m) const noexcept { return modes_.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return modes_.enabled(m); }
@@ -834,7 +459,8 @@ class Screen {
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
     Margin const& margin() const noexcept { return margin_; }
-    Lines const& scrollbackLines() const noexcept { return savedLines_; }
+
+    auto scrollbackLines() const noexcept { return grid().scrollbackLines(); }
 
     void setTabWidth(int _value)
     {
@@ -902,13 +528,23 @@ class Screen {
   private:
     void setBuffer(ScreenType _type);
 
-    Coordinate resizeBuffer(Size const& _newSize, Lines& _buffer, Lines& _savedLines) const;
+    // Coordinate resizeBuffer(Size const& _newSize, Lines& _buffer, Lines& _savedLines) const;
+    // void shrinkColumns(Lines& _lines, int _cols) const;
 
-    Lines& primaryBuffer() noexcept { return lines_[0]; }
-    Lines& alternateBuffer() noexcept { return lines_[1]; }
+    /// @returns the primary screen's grid.
+    Grid& primaryGrid() noexcept { return grids_[0]; }
 
-    Lines const& lines() const noexcept { return *activeBuffer_; }
-    Lines& lines() noexcept { return *activeBuffer_; }
+    /// @returns the alternate  screen's grid.
+    Grid& alternateGrid() noexcept { return grids_[1]; }
+
+    /// @returns the primary screen's grid if primary screen is active.
+    Grid const& grid() const noexcept { return *activeGrid_; }
+
+    /// @returns the primary screen's grid if primary screen is active.
+    Grid& grid() noexcept { return *activeGrid_; }
+
+    /// @returns the primary screen's grid if alternate screen is active, and the alternate screen's grid otherwise.
+    Grid& backgroundGrid() noexcept { return isPrimaryScreen() ? alternateGrid() : primaryGrid(); }
 
     void clearAllTabs();
     void clearTabUnderCursor();
@@ -920,14 +556,11 @@ class Screen {
     void writeCharToCurrentAndAdvance(char32_t _codepoint);
     void clearAndAdvance(int _offset);
 
-    void clampSavedLines();
-    void clampSavedLines(Lines& _savedLines) const;
-
     void fail(std::string const& _message) const;
 
     void updateCursorIterators()
     {
-        currentLine_ = next(begin(lines()), cursor_.position.row - 1);
+        currentLine_ = next(begin(grid().mainPage()), cursor_.position.row - 1);
         updateColumnIterator();
     }
 
@@ -986,7 +619,6 @@ class Screen {
     int64_t instructionCounter_ = 0;
 
     Size size_;
-    std::optional<size_t> maxHistoryLineCount_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
@@ -1000,10 +632,13 @@ class Screen {
 
     // main/alt screen and history
     //
-    std::array<Lines, 2> lines_;
+    //std::array<Lines, 2> lines_;
     ScreenType screenType_ = ScreenType::Main;
-    Lines* activeBuffer_;
-    Lines savedLines_{};
+    // Lines* activeBuffer_;
+    // Lines savedLines_{};
+
+    std::array<Grid, 2> grids_;
+    Grid* activeGrid_;
 
     // cursor related
     //
@@ -1022,51 +657,6 @@ class Screen {
     HyperlinkRef currentHyperlink_ = {};
     std::unordered_map<std::string, HyperlinkRef> hyperlinks_; // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
 };
-
-// {{{ template functions
-template <typename RendererT>
-void Screen::render(RendererT _render, std::optional<int> _scrollOffset) const
-{
-    if (!_scrollOffset.has_value())
-    {
-        crispy::for_each(
-            crispy::times(1, size_.height) * crispy::times(1, size_.width),
-            [&](auto const& _pos) {
-                auto const [row, col] = _pos;
-                auto const pos = Coordinate{row, col};
-                _render({row, col}, at(pos));
-            }
-        );
-    }
-    else
-    {
-        _scrollOffset = std::clamp(*_scrollOffset, 0, historyLineCount());
-
-        int rowNumber = 1;
-
-        // render first part from history
-        for (auto line = next(begin(const_cast<Screen*>(this)->savedLines_), *_scrollOffset);
-                line != end(savedLines_) && rowNumber <= size_.height;
-                ++line, ++rowNumber)
-        {
-            if (static_cast<int>(line->size()) < size_.width)
-                line->resize(size_.width); // TODO: don't resize; fill the gap with stub render calls instead
-
-            auto column = begin(*line);
-            for (int colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
-                _render({rowNumber, colNumber}, *column);
-        }
-
-        // render second part from main screen buffer
-        for (auto line = begin(lines()); rowNumber <= size_.height; ++line, ++rowNumber)
-        {
-            auto column = begin(*line);
-            for (int colNumber = 1; colNumber <= size_.width; ++colNumber, ++column)
-                _render({rowNumber, colNumber}, *column);
-        }
-    }
-}
-// }}}
 
 }  // namespace terminal
 

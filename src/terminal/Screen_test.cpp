@@ -1681,24 +1681,17 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
 
     // first line in history
-    CHECK(screen.at({-1, 1}).codepoint(0) == '1');
-    CHECK(screen.at({-1, 2}).codepoint(0) == '2');
-    CHECK(screen.at({-1, 3}).codepoint(0) == '3');
+    auto const m1 = screen.renderTextLine(-1);
+    CHECK(screen.renderTextLine(-1) == "123");
 
     // second line in history
-    CHECK(screen.at({0, 1}).codepoint(0) == '4');
-    CHECK(screen.at({0, 2}).codepoint(0) == '5');
-    CHECK(screen.at({0, 3}).codepoint(0) == '6');
+    CHECK(screen.renderTextLine(0) == "456");
 
     // first line on screen buffer
-    CHECK(screen.at({1, 1}).codepoint(0) == 'A');
-    CHECK(screen.at({1, 2}).codepoint(0) == 'B');
-    CHECK(screen.at({1, 3}).codepoint(0) == 'C');
+    CHECK(screen.renderTextLine(1) == "ABC");
 
     // second line on screen buffer
-    CHECK(screen.at({2, 1}).codepoint(0) == 'D');
-    CHECK(screen.at({2, 2}).codepoint(0) == 'E');
-    CHECK(screen.at({2, 3}).codepoint(0) == 'F');
+    CHECK(screen.renderTextLine(2) == "DEF");
 
     // out-of-range corner cases
     // CHECK_THROWS(screen.at({3, 1}));
@@ -1726,7 +1719,7 @@ TEST_CASE("render into history", "[screen]")
 
     SECTION("main area") {
         screen.render(renderer);
-        REQUIRE("FGHIJ\nKLMNO\n" == screen.renderText());
+        REQUIRE("FGHIJ\nKLMNO\n" == renderedText);
     }
 
     SECTION("1 line into history") {
@@ -1741,11 +1734,6 @@ TEST_CASE("render into history", "[screen]")
 
     SECTION("3 lines into history") {
         screen.render(renderer, 0);
-        REQUIRE("12345\n67890\n" == renderedText);
-    }
-
-    SECTION("4 lines into history (1 clamped)") {
-        screen.render(renderer, -1);
         REQUIRE("12345\n67890\n" == renderedText);
     }
 }
@@ -2052,17 +2040,17 @@ TEST_CASE("findMarkerForward", "[screen]")
 
     SECTION("with marks") {
         // saved lines
-        screen.setMark();    // 0
+        screen.setMark();           // 0
         screen.write("1abc\r\n"sv);
         screen.write("2def\r\n"sv); // 1
         screen.setMark();
         screen.write("3ghi\r\n"sv); // 2
 
         // visibile screen
-        screen.setMark();    // 3
+        screen.setMark();           // 3
         screen.write("4jkl\r\n"sv);
         screen.write("5mno\r\n"sv); // 4
-        screen.setMark();    // 5
+        screen.setMark();           // 5
         screen.write("6pqr"sv);
 
         REQUIRE(screen.renderTextLine(-2) == "1abc");
@@ -2259,16 +2247,20 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
     CHECK_FALSE(screen.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 }
 
+// TODO: resize test (should be in Grid_test.cpp?)
 TEST_CASE("resize", "[screen]")
 {
     auto screen = MockScreen{{2, 2}};
     screen.write("ABCD");
     REQUIRE("AB\nCD\n" == screen.renderText());
     REQUIRE(screen.cursorPosition() == Coordinate{2, 2});
+    REQUIRE(screen.wrapPending() == 1);
+
+    screen.setMaxHistoryLineCount(10);
 
     SECTION("no-op") {
         screen.resize({2, 2});
-        REQUIRE("AB\nCD\n" == screen.renderText());
+        CHECK("AB\nCD\n" == screen.renderText());
     }
 
     SECTION("grow lines") {
@@ -2288,27 +2280,28 @@ TEST_CASE("resize", "[screen]")
 
     SECTION("shrink lines") {
         screen.resize({2, 1});
-        REQUIRE("CD\n" == screen.renderText());
-        REQUIRE("AB" == screen.renderHistoryTextLine(1));
-        REQUIRE(screen.cursorPosition() == Coordinate{1, 2});
+        CHECK("CD\n" == screen.renderText());
+        CHECK("AB" == screen.renderHistoryTextLine(1));
+        CHECK(screen.cursorPosition() == Coordinate{1, 2});
     }
 
     SECTION("grow columns") {
         screen.resize({3, 2});
-        REQUIRE("AB \nCD \n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+        CHECK("AB \nCD \n" == screen.renderText());
+        CHECK(screen.cursorPosition() == Coordinate{2, 3});
+        CHECK(screen.wrapPending() == 0);
     }
 
     SECTION("shrink columns") {
         screen.resize({1, 2});
-        REQUIRE("A\nC\n" == screen.renderText());
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 1});
+        CHECK("A\nC\n" == screen.renderText());
+        CHECK(screen.cursorPosition() == Coordinate{2, 1});
     }
 
     SECTION("regrow columns") {
         // 1.) grow
         screen.resize({3, 2});
-        REQUIRE(screen.cursorPosition() == Coordinate{2, 3});
+        CHECK(screen.cursorPosition() == Coordinate{2, 3});
 
         // 2.) fill
         screen.writeText('Y');

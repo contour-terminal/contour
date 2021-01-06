@@ -19,6 +19,7 @@
 #include <terminal/Size.h>
 #include <terminal/VTType.h>
 
+#include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
 #include <crispy/times.h>
@@ -47,6 +48,7 @@
 using namespace crispy;
 
 using std::accumulate;
+using std::array;
 using std::cerr;
 using std::endl;
 using std::get;
@@ -227,34 +229,23 @@ namespace // {{{ helper
         Color currentBackgroundColor_ = DefaultColor{};
         KeyMode cursorKeysMode_ = KeyMode::Normal;
     };
+
+    array<Grid, 2> emptyGrids(Size _size, bool _reflowOnResize, optional<int> _maxHistoryLineCount)
+    {
+        return array<Grid, 2>{
+            Grid(_size, _reflowOnResize, _maxHistoryLineCount),
+            Grid(_size, false, 0)
+        };
+    }
 }
 // }}}
-
-std::string Cell::toUtf8() const
-{
-    return unicode::to_utf8(codepoints_.data(), codepointCount_);
-}
-
-std::array<Lines, 2> emptyBuffers(Size _size)
-{
-    return std::array<Lines, 2>{
-        Lines(
-            static_cast<size_t>(_size.height),
-            Line(static_cast<size_t>(_size.width), Cell{})
-        ),
-        Lines(
-            static_cast<size_t>(_size.height),
-            Line(static_cast<size_t>(_size.width), Cell{})
-        )
-    };
-}
 
 Screen::Screen(Size const& _size,
                ScreenEvents& _eventListener,
                Logger const& _logger,
                bool _logRaw,
                bool _logTrace,
-               optional<size_t> _maxHistoryLineCount,
+               optional<int> _maxHistoryLineCount,
                Size _maxImageSize,
                int _maxImageColorRegisters,
                bool _sixelCursorConformance
@@ -279,32 +270,16 @@ Screen::Screen(Size const& _size,
     },
     parser_{ ref(sequencer_) },
     size_{ _size },
-    maxHistoryLineCount_{ _maxHistoryLineCount },
-    sixelCursorConformance_{ _sixelCursorConformance }
+    sixelCursorConformance_{ _sixelCursorConformance },
+    grids_{ emptyGrids(size(), false /*TODO: _reflowOnResize*/, _maxHistoryLineCount) },
+    activeGrid_{ &primaryGrid() }
 {
     resetHard();
 }
 
-void Screen::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
+void Screen::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
 {
-    maxHistoryLineCount_ = _maxHistoryLineCount;
-
-    maxHistoryLineCount_ = _maxHistoryLineCount;
-    clampSavedLines();
-
-    // Alternate buffer does not have a history usually (and for now we keep it that way).
-}
-
-void Screen::clampSavedLines()
-{
-    clampSavedLines(savedLines_);
-}
-
-void Screen::clampSavedLines(Lines& _savedLines) const
-{
-    if (maxHistoryLineCount_.has_value())
-        while (_savedLines.size() > maxHistoryLineCount_.value())
-            _savedLines.pop_front();
+    primaryGrid().setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
 void Screen::resizeColumns(int _newColumnCount, bool _clear)
@@ -334,12 +309,8 @@ void Screen::resizeColumns(int _newColumnCount, bool _clear)
 
 void Screen::resize(Size const& _newSize)
 {
-    // TODO: only resize current screen buffer, and then make sure we resize the other upon actual switch
-
-    auto dummyLines = Lines{};
-    resizeBuffer(_newSize, alternateBuffer(), dummyLines);
-
-    cursor_.position = resizeBuffer(_newSize, primaryBuffer(), savedLines_);
+    cursor_.position = grid().resize(_newSize, cursor_.position, wrapPending_);
+    backgroundGrid().resize(_newSize, cursor_.position, false);
 
     // update wrap-pending
     if (_newSize.width > size_.width)
@@ -360,12 +331,11 @@ void Screen::resize(Size const& _newSize)
 
     cursor_.position = clampCoordinate(cursor_.position);
     updateCursorIterators();
-    clampSavedLines();
 
     // update last-cursor position & iterators
     lastCursorPosition_ = clampCoordinate(lastCursorPosition_);
     lastColumn_ = columnIteratorAt(
-        begin(*next(begin(lines()), lastCursorPosition_.row - 1)), // last line
+        begin(*next(begin(grid().mainPage()), lastCursorPosition_.row - 1)), // last line
         lastCursorPosition_.column
     );
 
@@ -374,75 +344,6 @@ void Screen::resize(Size const& _newSize)
         tabs_.pop_back();
 
     // TODO: find out what to do with DECOM mode. Reset it to?
-}
-
-Coordinate Screen::resizeBuffer(Size const& _newSize,
-                                Lines& _lines,
-                                Lines& _savedLines) const
-{
-    auto newPosition = cursor_.position;
-
-    if (_newSize.height > size_.height)
-    {
-        // Grow line count by splicing available lines from history back into buffer, if available,
-        // or create new ones until size_.height == _newSize.height.
-        auto const extendCount = _newSize.height - size_.height;
-
-        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<int>(std::size(_savedLines)));
-
-        for_each(
-            crispy::times(rowsToTakeFromSavedLines),
-            [&](auto) {
-                _savedLines.back().resize(_newSize.width);
-                _lines.emplace_front(std::move(_savedLines.back()));
-                _savedLines.pop_back();
-            }
-        );
-
-        newPosition.row += rowsToTakeFromSavedLines;
-
-        auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
-        generate_n(
-            back_inserter(_lines),
-            fillLineCount,
-            [=]() { return Line{static_cast<size_t>(_newSize.width), Cell{}}; });
-    }
-    else if (_newSize.height < size_.height)
-    {
-        // Shrink existing line count to _newSize.height
-        // by splicing the number of lines to be shrinked by into savedLines bottom.
-        if (cursor_.position.row == size_.height)
-        {
-            auto const n = size_.height - _newSize.height;
-            crispy::for_each(
-                crispy::times(n),
-                [&](auto) {
-                    _lines.front().resize(_newSize.width);
-                    _savedLines.emplace_back(std::move(_lines.front()));
-                    _lines.pop_front();
-                }
-            );
-            clampSavedLines(_savedLines);
-        }
-        else
-            // Hard-cut below cursor by the number of lines to shrink.
-            _lines.resize(_newSize.height);
-
-        assert(_lines.size() == static_cast<size_t>(_newSize.height));
-    }
-
-    if (_newSize.width > size_.width)
-    {
-        // Grow existing columns to _newSize.width.
-        std::for_each(
-            begin(_lines),
-            end(_lines),
-            [=](auto& line) { line.resize(_newSize.width); }
-        );
-        newPosition.column += wrapPending_;
-    }
-
-    return newPosition;
 }
 
 void Screen::verifyState() const
@@ -459,8 +360,8 @@ void Screen::verifyState() const
         ));
     }
 
-    if (static_cast<size_t>(size_.height) != lines().size())
-        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", lines().size(), size_.height));
+    if (static_cast<size_t>(size_.height) != grid().mainPage().size())
+        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.", grid().mainPage().size(), size_.height));
 
     // verify cursor positions
     [[maybe_unused]] auto const clampedCursorPos = clampToScreen(cursor_.position);
@@ -469,7 +370,7 @@ void Screen::verifyState() const
     // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
 
     // verify iterators
-    [[maybe_unused]] auto const line = next(begin(lines()), cursor_.position.row - 1);
+    [[maybe_unused]] auto const line = next(begin(grid().mainPage()), cursor_.position.row - 1);
     [[maybe_unused]] auto const col = columnIteratorAt(cursor_.position.column);
 
     if (line != currentLine_)
@@ -593,8 +494,8 @@ string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
     assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= historyLineCount());
     string line;
     line.reserve(size_.width);
-    auto const lineIter = next(savedLines_.rbegin(), _lineNumberIntoHistory - 1);
-    for (Cell const& cell : *lineIter)
+
+    for (Cell const& cell : grid().lineAt(1 - _lineNumberIntoHistory))
         if (cell.codepointCount())
             line += cell.toUtf8();
         else
@@ -645,14 +546,8 @@ optional<int> Screen::findMarkerBackward(int _currentCursorLine) const
 
     _currentCursorLine = min(_currentCursorLine, historyLineCount() + size_.height);
 
-    // main lines
-    for (int i = _currentCursorLine - historyLineCount() - 1; i >= 0; --i)
-        if (lines().at(i).marked())
-            return {historyLineCount() + i};
-
-    // saved lines
-    for (int i = min(_currentCursorLine, historyLineCount()) - 1; i >= 0; --i)
-        if (savedLines_.at(i).marked())
+    for (int i = _currentCursorLine - 1; i >= 0; --i)
+        if (grid().absoluteLineAt(i).marked())
             return {i};
 
     return nullopt;
@@ -663,14 +558,9 @@ optional<int> Screen::findMarkerForward(int _currentCursorLine) const
     if (_currentCursorLine < 0 || !isPrimaryScreen())
         return nullopt;
 
-    for (int i = _currentCursorLine + 1; i < historyLineCount(); ++i)
-        if (savedLines_.at(i).marked())
+    for (int i = _currentCursorLine + 1; i < historyLineCount() + grid().screenSize().height; ++i)
+        if (grid().absoluteLineAt(i).marked())
             return {i};
-
-    for (int i = _currentCursorLine < historyLineCount()
-            ? 0 : _currentCursorLine - historyLineCount() + 1; i < size_.height; ++i)
-        if (lines().at(i).marked())
-            return {historyLineCount() + i};
 
     return nullopt;
 }
@@ -758,8 +648,8 @@ void Screen::resetHard()
     modes_ = Modes{};
     setMode(DECMode::AutoWrap, true);
 
-    lines_ = emptyBuffers(size_);
-    activeBuffer_ = &primaryBuffer();
+    grids_ = emptyGrids(size(), primaryGrid().reflowOnResize(), primaryGrid().maxHistoryLineCount());
+    activeGrid_ = &primaryGrid();
     moveCursorTo(Coordinate{1, 1});
 
     lastColumn_ = currentColumn_;
@@ -788,14 +678,14 @@ void Screen::setBuffer(ScreenType _type)
         {
             case ScreenType::Main:
                 eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-                activeBuffer_ = &primaryBuffer();
+                activeGrid_ = &primaryGrid();
                 break;
             case ScreenType::Alternate:
                 if (isModeEnabled(DECMode::MouseAlternateScroll))
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
                 else
                     eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-                activeBuffer_ = &alternateBuffer();
+                activeGrid_ = &alternateGrid();
                 break;
         }
         screenType_ = _type;
@@ -826,217 +716,15 @@ void Screen::linefeed(int _newColumn)
     }
 }
 
-void Screen::scrollUp(int v_n, Margin const& margin)
+void Screen::scrollUp(int _n, Margin const& _margin)
 {
-    if (margin.horizontal != Margin::Range{1, size_.width})
-    {
-        // a full "inside" scroll-up
-        auto const marginHeight = margin.vertical.length();
-        auto const n = min(v_n, marginHeight);
-
-        if (n < marginHeight)
-        {
-            auto targetLine = next(begin(lines()), margin.vertical.from - 1);     // target line
-            auto sourceLine = next(begin(lines()), margin.vertical.from - 1 + n); // source line
-            auto const bottomLine = next(begin(lines()), margin.vertical.to);     // bottom margin's end-line iterator
-
-            for (; sourceLine != bottomLine; ++sourceLine, ++targetLine)
-            {
-                copy_n(
-                    next(begin(*sourceLine), margin.horizontal.from - 1),
-                    margin.horizontal.length(),
-                    next(begin(*targetLine), margin.horizontal.from - 1)
-                );
-            }
-        }
-
-        // clear bottom n lines in margin.
-        auto const topLine = next(begin(lines()), margin.vertical.to - n);
-        auto const bottomLine = next(begin(lines()), margin.vertical.to);     // bottom margin's end-line iterator
-#if 1
-        for (Line& line : crispy::range(topLine, bottomLine))
-        {
-            fill_n(
-                next(begin(line), margin.horizontal.from - 1),
-                margin.horizontal.length(),
-                Cell{{}, cursor_.graphicsRendition}
-            );
-        }
-#else
-        for_each(
-            topLine,
-            bottomLine,
-            [&](Line& line) {
-                fill_n(
-                    next(begin(line), margin.horizontal.from - 1),
-                    margin.horizontal.length(),
-                    Cell{{}, cursor_.graphicsRendition}
-                );
-            }
-        );
-#endif
-    }
-    else if (margin.vertical == Margin::Range{1, size_.height})
-    {
-        // full-screen scroll-up
-        auto const n = min(v_n, size_.height);
-
-        if (n > 0)
-        {
-            if (isPrimaryScreen())
-            {
-                crispy::for_each(
-                    crispy::times(n),
-                    [&](auto) {
-                        savedLines_.emplace_back(std::move(lines().front()));
-                        lines().pop_front();
-                    }
-                );
-                clampSavedLines();
-            }
-            else
-            {
-                crispy::for_each(
-                    crispy::times(n),
-                    [&](auto) { lines().pop_front(); }
-                );
-            }
-
-            generate_n(
-                back_inserter(lines()),
-                n,
-                [this]() { return Line{static_cast<size_t>(size_.width), Cell{{}, cursor_.graphicsRendition}}; }
-            );
-        }
-    }
-    else
-    {
-        // scroll up only inside vertical margin with full horizontal extend
-        auto const marginHeight = margin.vertical.length();
-        auto const n = min(v_n, marginHeight);
-        if (n < marginHeight)
-        {
-            rotate(
-                next(begin(lines()), margin.vertical.from - 1),
-                next(begin(lines()), margin.vertical.from - 1 + n),
-                next(begin(lines()), margin.vertical.to)
-            );
-        }
-
-        for_each(
-            LIBTERMINAL_EXECUTION_COMMA(par)
-            next(begin(lines()), margin.vertical.to - n),
-            next(begin(lines()), margin.vertical.to),
-            [&](Line& line) {
-                fill(begin(line), end(line), Cell{{}, cursor_.graphicsRendition});
-            }
-        );
-    }
-
+    grid().scrollUp(_n, cursor().graphicsRendition, _margin);
     updateCursorIterators();
 }
 
-void Screen::scrollDown(int v_n, Margin const& _margin)
+void Screen::scrollDown(int _n, Margin const& _margin)
 {
-    auto const marginHeight = _margin.vertical.length();
-    auto const n = min(v_n, marginHeight);
-
-    if (_margin.horizontal != Margin::Range{1, size_.width})
-    {
-        // full "inside" scroll-down
-        if (n < marginHeight)
-        {
-            auto sourceLine = next(begin(lines()), _margin.vertical.to - n - 1);
-            auto targetLine = next(begin(lines()), _margin.vertical.to - 1);
-            auto const sourceEndLine = next(begin(lines()), _margin.vertical.from - 1);
-
-            while (sourceLine != sourceEndLine)
-            {
-                copy_n(
-                    next(begin(*sourceLine), _margin.horizontal.from - 1),
-                    _margin.horizontal.length(),
-                    next(begin(*targetLine), _margin.horizontal.from - 1)
-                );
-                --targetLine;
-                --sourceLine;
-            }
-
-            copy_n(
-                next(begin(*sourceLine), _margin.horizontal.from - 1),
-                _margin.horizontal.length(),
-                next(begin(*targetLine), _margin.horizontal.from - 1)
-            );
-
-            for_each(
-                next(begin(lines()), _margin.vertical.from - 1),
-                next(begin(lines()), _margin.vertical.from - 1 + n),
-                [_margin, this](Line& line) {
-                    fill_n(
-                        next(begin(line), _margin.horizontal.from - 1),
-                        _margin.horizontal.length(),
-                        Cell{{}, cursor_.graphicsRendition}
-                    );
-                }
-            );
-        }
-        else
-        {
-            // clear everything in margin
-            for_each(
-                next(begin(lines()), _margin.vertical.from - 1),
-                next(begin(lines()), _margin.vertical.to),
-                [_margin, this](Line& line) {
-                    fill_n(
-                        next(begin(line), _margin.horizontal.from - 1),
-                        _margin.horizontal.length(),
-                        Cell{{}, cursor_.graphicsRendition}
-                    );
-                }
-            );
-        }
-    }
-    else if (_margin.vertical == Margin::Range{1, size_.height})
-    {
-        rotate(
-            begin(lines()),
-            next(begin(lines()), marginHeight - n),
-            end(lines())
-        );
-
-        for_each(
-            begin(lines()),
-            next(begin(lines()), n),
-            [this](Line& line) {
-                fill(
-                    begin(line),
-                    end(line),
-                    Cell{{}, cursor_.graphicsRendition}
-                );
-            }
-        );
-    }
-    else
-    {
-        // scroll down only inside vertical margin with full horizontal extend
-        rotate(
-            next(begin(lines()), _margin.vertical.from - 1),
-            next(begin(lines()), _margin.vertical.to - n),
-            next(begin(lines()), _margin.vertical.to)
-        );
-
-        for_each(
-            next(begin(lines()), _margin.vertical.from - 1),
-            next(begin(lines()), _margin.vertical.from - 1 + n),
-            [this](Line& line) {
-                fill(
-                    begin(line),
-                    end(line),
-                    Cell{{}, cursor_.graphicsRendition}
-                );
-            }
-        );
-    }
-
+    grid().scrollDown(_n, cursor().graphicsRendition, _margin);
     updateCursorIterators();
 }
 
@@ -1181,7 +869,7 @@ void Screen::clearToEndOfScreen()
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
         next(currentLine_),
-        end(lines()),
+        end(grid().mainPage()),
         [&](Line& line) {
             fill(begin(line), end(line), Cell{{}, cursor_.graphicsRendition});
         }
@@ -1194,7 +882,7 @@ void Screen::clearToBeginOfScreen()
 
     for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(lines()),
+        begin(grid().mainPage()),
         currentLine_,
         [&](Line& line) {
             fill(begin(line), end(line), Cell{{}, cursor_.graphicsRendition});
@@ -1212,7 +900,8 @@ void Screen::clearScreen()
 
 void Screen::clearScrollbackBuffer()
 {
-    savedLines_.clear();
+    primaryGrid().clearHistory();
+    alternateGrid().clearHistory();
     eventListener_.scrollbackBufferCleared();
 }
 
@@ -1274,10 +963,10 @@ void Screen::insertChars(int _lineNo, int _n)
 {
     auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
 
-    auto line = next(begin(lines()), _lineNo - 1);
-    auto column0 = next(begin(*line), realCursorPosition().column - 1);
-    auto column1 = next(begin(*line), margin_.horizontal.to - n);
-    auto column2 = next(begin(*line), margin_.horizontal.to);
+    auto && line = grid().lineAt(_lineNo);
+    auto column0 = next(begin(line), realCursorPosition().column - 1);
+    auto column1 = next(begin(line), margin_.horizontal.to - n);
+    auto column2 = next(begin(line), margin_.horizontal.to);
 
     rotate(
         column0,
@@ -1285,11 +974,11 @@ void Screen::insertChars(int _lineNo, int _n)
         column2
     );
 
-    if (line == currentLine_)
+    if (&line == &*currentLine_)
         updateColumnIterator();
 
     fill_n(
-        columnIteratorAt(begin(*line), cursor_.position.column),
+        columnIteratorAt(begin(line), cursor_.position.column),
         n,
         Cell{L' ', cursor_.graphicsRendition}
     );
@@ -1338,7 +1027,7 @@ void Screen::deleteCharacters(int _n)
 
 void Screen::deleteChars(int _lineNo, int _n)
 {
-    auto line = next(begin(lines()), _lineNo - 1);
+    auto line = next(begin(grid().mainPage()), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
     auto rightMargin = next(begin(*line), margin_.horizontal.to);
     auto const n = min(_n, static_cast<int>(distance(column, rightMargin)));
@@ -1530,7 +1219,6 @@ void Screen::notify(string const& _title, string const& _content)
 
 void Screen::cursorForwardTab(int _count)
 {
-    printf("CHT: %d\n", _count);
     for (int i = 0; i < _count; ++i)
         moveCursorToNextTab();
 }
@@ -1838,14 +1526,12 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::ExtendedAltScreen:
             if (_enable)
             {
-                printf("ExtendedAltScreen: enabled\n");
                 savedPrimaryCursor_ = cursor();
                 setMode(DECMode::UseAlternateScreen, true);
                 clearScreen();
             }
             else
             {
-                printf("ExtendedAltScreen: false\n");
                 setMode(DECMode::UseAlternateScreen, false);
                 restoreCursor(savedPrimaryCursor_);
             }
@@ -1922,10 +1608,9 @@ void Screen::screenAlignmentPattern()
     moveCursorTo({1, 1});
 
     // fills the complete screen area with a test pattern
-    for_each(
+    crispy::for_each(
         LIBTERMINAL_EXECUTION_COMMA(par)
-        begin(lines()),
-        end(lines()),
+        grid().mainPage(),
         [&](Line& line) {
             fill(
                 LIBTERMINAL_EXECUTION_COMMA(par)
@@ -1972,10 +1657,11 @@ void Screen::sixelImage(Size _pixelSize, Image::Data&& _data)
     auto const resizePolicy = ImageResize::NoResize;
 
     auto const imageOffset = Coordinate{0, 0};
+    auto const imageSize = extent;
 
     if (auto const imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data)); imageRef)
         renderImage(imageRef, topLeft, extent,
-                    imageOffset, _pixelSize,
+                    imageOffset, imageSize,
                     alignmentPolicy, resizePolicy,
                     sixelScrolling);
 
@@ -1995,7 +1681,9 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
                          ImageResize _resizePolicy,
                          bool _autoScroll)
 {
-    // TODO: make use of THIS function in sixelImage, too!
+    // TODO: make use of _imageOffset and _imageSize
+    (void) _imageOffset;
+    (void) _imageSize;
 
     auto const linesAvailable = 1 + size_.height - _topLeft.row;
     auto const linesToBeRendered = min(_gridSize.height, linesAvailable);
