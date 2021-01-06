@@ -522,12 +522,6 @@ class Screen {
         reply(fmt::format(fmt, std::forward<Args>(args)...));
     }
 
-  private:
-    void setBuffer(ScreenType _type);
-
-    // Coordinate resizeBuffer(Size const& _newSize, Lines& _buffer, Lines& _savedLines) const;
-    // void shrinkColumns(Lines& _lines, int _cols) const;
-
     /// @returns the primary screen's grid.
     Grid& primaryGrid() noexcept { return grids_[0]; }
 
@@ -542,6 +536,9 @@ class Screen {
 
     /// @returns the primary screen's grid if alternate screen is active, and the alternate screen's grid otherwise.
     Grid& backgroundGrid() noexcept { return isPrimaryScreen() ? alternateGrid() : primaryGrid(); }
+
+  private:
+    void setBuffer(ScreenType _type);
 
     void clearAllTabs();
     void clearTabUnderCursor();

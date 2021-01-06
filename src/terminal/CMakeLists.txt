@@ -89,6 +89,7 @@ if(LIBTERMINAL_TESTING)
         test_main.cpp
 		Selector_test.cpp
         Functions_test.cpp
+        Grid_test.cpp
         Parser_test.cpp
         Screen_test.cpp
         Size_test.cpp

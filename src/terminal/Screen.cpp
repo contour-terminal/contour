@@ -230,10 +230,10 @@ namespace // {{{ helper
         KeyMode cursorKeysMode_ = KeyMode::Normal;
     };
 
-    array<Grid, 2> emptyGrids(Size _size, bool _reflowOnResize, optional<int> _maxHistoryLineCount)
+    array<Grid, 2> emptyGrids(Size _size, optional<int> _maxHistoryLineCount)
     {
         return array<Grid, 2>{
-            Grid(_size, _reflowOnResize, _maxHistoryLineCount),
+            Grid(_size, true, _maxHistoryLineCount),
             Grid(_size, false, 0)
         };
     }
@@ -268,7 +268,7 @@ Screen::Screen(Size const& _size,
     parser_{ ref(sequencer_) },
     size_{ _size },
     sixelCursorConformance_{ _sixelCursorConformance },
-    grids_{ emptyGrids(size(), false /*TODO: _reflowOnResize*/, _maxHistoryLineCount) },
+    grids_{ emptyGrids(size(), _maxHistoryLineCount) },
     activeGrid_{ &primaryGrid() }
 {
     resetHard();
@@ -413,7 +413,10 @@ void Screen::writeText(char32_t _char)
     bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
 
     if (wrapPending_ && cursor_.autoWrap)
+    {
         linefeed(margin_.horizontal.from);
+        currentLine_->setWrapped(true);
+    }
 
     auto const ch =
         _char < 127 ? cursor_.charsets.map(static_cast<char>(_char))
@@ -484,21 +487,6 @@ void Screen::clearAndAdvance(int _offset)
     {
         wrapPending_ = 1;
     }
-}
-
-string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
-{
-    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= historyLineCount());
-    string line;
-    line.reserve(size_.width);
-
-    for (Cell const& cell : grid().lineAt(1 - _lineNumberIntoHistory))
-        if (cell.codepointCount())
-            line += cell.toUtf8();
-        else
-            line += " "; // fill character
-
-    return line;
 }
 
 std::string Screen::screenshot() const
@@ -645,7 +633,7 @@ void Screen::resetHard()
     modes_ = Modes{};
     setMode(DECMode::AutoWrap, true);
 
-    grids_ = emptyGrids(size(), primaryGrid().reflowOnResize(), primaryGrid().maxHistoryLineCount());
+    grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();
     moveCursorTo(Coordinate{1, 1});
 
@@ -733,31 +721,29 @@ void Screen::setCurrentColumn(int _n)
     updateColumnIterator();
 }
 
+string Screen::renderText() const
+{
+    return grid().renderText();
+}
+
 string Screen::renderTextLine(int row) const
 {
+    return grid().renderTextLine(row);
+}
+
+string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
+{
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= historyLineCount());
     string line;
     line.reserve(size_.width);
-    for (int col = 1; col <= size_.width; ++col)
-        if (auto const& cell = at({row, col}); cell.codepointCount())
+
+    for (Cell const& cell : grid().lineAt(1 - _lineNumberIntoHistory))
+        if (cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
 
     return line;
-}
-
-string Screen::renderText() const
-{
-    string text;
-    text.reserve(size_.height * (size_.width + 1));
-
-    for (int row = 1; row <= size_.height; ++row)
-    {
-        text += renderTextLine(row);
-        text += '\n';
-    }
-
-    return text;
 }
 // }}}
 

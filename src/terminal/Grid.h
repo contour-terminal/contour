@@ -243,7 +243,7 @@ class Cell {
     constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
     constexpr int codepointCount() const noexcept { return codepointCount_; }
 
-    constexpr bool empty() const noexcept { return codepointCount_ == 0; }
+    constexpr bool empty() const noexcept { return codepointCount_ == 0 && !imageFragment_; }
 
     constexpr int width() const noexcept { return width_; }
 
@@ -354,32 +354,61 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 
 // }}}
 
-struct Line { // {{{
+class Line { // {{{
   public:
-    using LineBuffer = std::vector<Cell>;
-    using iterator = LineBuffer::iterator;
-    using const_iterator = LineBuffer::const_iterator;
-    using reverse_iterator = LineBuffer::reverse_iterator;
+    enum class Flags : uint8_t {
+        None    = 0x0000,
+        Marked  = 0x0001,
+        Wrapped = 0x0002,
+    };
+
+    using Buffer = std::deque<Cell>;
+    using iterator = Buffer::iterator;
+    using const_iterator = Buffer::const_iterator;
+    using reverse_iterator = Buffer::reverse_iterator;
 
     Line(int _numCols, Cell const& _defaultCell) : buffer_(static_cast<size_t>(_numCols), _defaultCell) {}
-    Line(int _numCols, LineBuffer const& _init);
+
+    explicit Line(Buffer const& _init, Flags _flags = Flags::None) : Line(Buffer(_init), _flags) {}
+    explicit Line(Buffer&& _init, Flags _flags = Flags::None);
+    Line(iterator _begin, iterator _end, Flags _flags = Flags::None);
+    Line(int _numCols, Buffer&& _init, Flags _flags = Flags::None);
+    Line(int _numCols, std::string const& _s);
+
+    Buffer& buffer() noexcept { return buffer_; }
+
     Line() = default;
     Line(Line const&) = default;
     Line(Line&&) = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) = default;
 
-    LineBuffer* operator->() noexcept { return &buffer_; }
-    LineBuffer const* operator->()  const noexcept { return &buffer_; }
+    Buffer* operator->() noexcept { return &buffer_; }
+    Buffer const* operator->()  const noexcept { return &buffer_; }
     auto& operator[](std::size_t _index) { return buffer_[_index]; }
     auto const& operator[](std::size_t _index) const { return buffer_[_index]; }
 
+    void prepend(Buffer const&);
+    void append(Buffer const&);
+    void append(int _count, Cell const& _initial);
+
+    Buffer remove(iterator _from, iterator _to);
+
+    /// Shhift left by @p _count cells and fill right with cells of @p _fill.
+    ///
+    /// @returns sequence of cells that have been shifted out.
+    Buffer shift_left(int _count, Cell const& _fill);
+
+    crispy::range<const_iterator> trim_blank_right() const;
+
     int size() const noexcept { return static_cast<int>(buffer_.size()); }
+
+    bool blank() const noexcept;
 
     // TODO (trimmed version of size()): int maxOccupiedColumns() const noexcept { return size(); }
 
     void resize(int _size);
-    [[nodiscard]] LineBuffer reflow(int _column);
+    [[nodiscard]] Buffer reflow(int _column);
 
     iterator begin() { return buffer_.begin(); }
     iterator end() { return buffer_.end(); }
@@ -390,19 +419,21 @@ struct Line { // {{{
     const_iterator cbegin() const { return buffer_.cbegin(); }
     const_iterator cend() const { return buffer_.cend(); }
 
-    bool marked() const noexcept { return isFlagEnabled(Flag::Marked); }
-    void setMarked(bool _enable) { setFlag(Flag::Marked, _enable); }
+    bool marked() const noexcept { return isFlagEnabled(Flags::Marked); }
+    void setMarked(bool _enable) { setFlag(Flags::Marked, _enable); }
 
-    bool wrapped() const noexcept { return isFlagEnabled(Flag::Wrapped); }
-    void setWrapped(bool _enable) { setFlag(Flag::Wrapped, _enable); }
+    bool wrapped() const noexcept { return isFlagEnabled(Flags::Wrapped); }
+    void setWrapped(bool _enable) { setFlag(Flags::Wrapped, _enable); }
+
+    std::string toUtf8() const;
+
+    void setText(std::string const& _u8string);
+
+    Flags flags() const noexcept { return static_cast<Flags>(flags_); }
 
   private:
-    enum class Flag : uint8_t {
-        Marked  = 0x0001,
-        Wrapped = 0x0002,
-    };
 
-    void setFlag(Flag _flag, bool _enable) noexcept
+    void setFlag(Flags _flag, bool _enable) noexcept
     {
         if (_enable)
             flags_ |= static_cast<unsigned>(_flag);
@@ -410,12 +441,17 @@ struct Line { // {{{
             flags_ &= ~static_cast<unsigned>(_flag);
     }
 
-    bool isFlagEnabled(Flag _flag) const noexcept { return (flags_ & static_cast<unsigned>(_flag)) != 0; }
+    bool isFlagEnabled(Flags _flag) const noexcept { return (flags_ & static_cast<unsigned>(_flag)) != 0; }
 
   private:
-    LineBuffer buffer_;
+    Buffer buffer_;
     unsigned flags_ = 0;
 };
+
+constexpr bool operator&(Line::Flags a, Line::Flags b) noexcept
+{
+    return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
+}
 // }}}
 
 using Lines = std::deque<Line>;
@@ -455,8 +491,7 @@ inline Line::const_iterator cend(Line const& _line) { return _line.cend(); }
  *       1                          screenSize.columns
  * </pre>
  */
-class Grid
-{
+class Grid {
   public:
     // TODO: Rename all "History" to "Scrollback"?
 
@@ -525,10 +560,20 @@ class Grid
     /// @param _margin the margin coordinates to perform the scrolling action into.
     void scrollDown(int _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
 
+    std::string renderTextLineAbsolute(int row) const;
+    std::string renderTextLine(int row) const;
+    std::string renderText() const;
+
+    /// Renders the full grid's text characters.
+    ///
+    /// Empty cells are represented as strings and lines split by LF.
+    std::string renderAllText() const;
+
   private:
     /// Ensures the maxHistoryLineCount attribute will be satisified, potentially deleting any
     /// overflowing history line.
     void clampHistory();
+    void appendNewLines(int _count, GraphicsAttributes _attr);
 
   private:
     Size screenSize_;
@@ -642,3 +687,26 @@ inline crispy::range<Lines::const_iterator> Grid::scrollbackLines() const
 // }}}
 
 } // end namespace
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::Line::Flags> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::Line::Flags _flags, FormatContext& ctx)
+        {
+            std::string s;
+            if (_flags & terminal::Line::Flags::Wrapped)
+                s += "Wrapped";
+            if (_flags & terminal::Line::Flags::Marked)
+            {
+                if (!s.empty())
+                    s += ",";
+                s += "Marked";
+            }
+            return format_to(ctx.out(), s);
+        }
+    };
+
+}

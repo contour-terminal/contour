@@ -14,19 +14,33 @@
 #include <terminal/Grid.h>
 
 #include <crispy/Comparison.h>
+#include <crispy/indexed.h>
+#include <crispy/range.h>
+
+#include <unicode/utf8.h>
 
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <tuple>
 #include <utility>
 
-using std::string;
-using std::optional;
-using std::min;
-using std::rotate;
-using std::for_each;
-using std::generate_n;
 using crispy::Comparison;
+
+using std::back_inserter;
+using std::fill_n;
+using std::for_each;
+using std::front_inserter;
+using std::generate_n;
+using std::min;
+using std::move;
+using std::next;
+using std::optional;
+using std::prev;
+using std::reverse;
+using std::rotate;
+using std::string;
+using std::tuple;
 
 #if defined(LIBTERMINAL_EXECUTION_PAR)
 #include <execution>
@@ -39,24 +53,117 @@ namespace terminal {
 
 namespace // {{{ helper
 {
-    bool isspace(Cell const& _cell)
+    bool is_blank(Cell const& _cell) noexcept
     {
-        return _cell.codepointCount() == 1
-            && _cell.codepoint(0) == 0x20;
+        return !_cell.imageFragment() && _cell.codepointCount() == 0;
+    }
+
+    template <typename... Args>
+    void logf([[maybe_unused]] Args&&... _args)
+    {
+#if 0
+        std::cout << fmt::format(std::forward<Args>(_args)...) << '\n';
+#endif
     }
 }
 // }}}
 // {{{ Cell impl
 string Cell::toUtf8() const
 {
-    return unicode::to_utf8(codepoints_.data(), codepointCount_);
+    if (codepointCount_)
+        return unicode::to_utf8(codepoints_.data(), codepointCount_);
+    else
+        return " ";
 }
 // }}}
 // {{{ Line impl
-Line::Line(int _numCols, LineBuffer const& _init)
-    : buffer_{_init}
+Line::Line(Buffer&& _init, Flags _flags) :
+    buffer_{ move(_init) },
+    flags_{ static_cast<unsigned>(_flags) }
+{
+}
+
+Line::Line(iterator _begin, iterator _end, Flags _flags) :
+    buffer_(_begin, _end),
+    flags_{ static_cast<unsigned>(_flags) }
+{
+}
+
+Line::Line(int _numCols, Buffer&& _init, Flags _flags) :
+    buffer_{move(_init)},
+    flags_{ static_cast<unsigned>(_flags) }
 {
     buffer_.resize(static_cast<int>(_numCols));
+}
+
+Line::Line(int _numCols, std::string const& _s) : Line(_numCols, Cell{})
+{
+    for (auto const && [i, ch] : crispy::indexed(_s))
+        buffer_.at(i).setCharacter(ch);
+}
+
+string Line::toUtf8() const
+{
+    string s;
+    s.reserve(size());
+    for (Cell const& cell : buffer_)
+        s += cell.toUtf8();
+    return s;
+}
+
+void Line::prepend(Buffer const& _cells)
+{
+    buffer_.insert(buffer_.begin(), _cells.begin(), _cells.end());
+}
+
+void Line::append(Buffer const& _cells)
+{
+    buffer_.insert(buffer_.end(), _cells.begin(), _cells.end());
+}
+
+void Line::append(int _count, Cell const& _initial)
+{
+    fill_n(back_inserter(buffer_), _count, _initial);
+}
+
+crispy::range<Line::const_iterator> Line::trim_blank_right() const
+{
+    auto i = buffer_.cbegin();
+    auto e = buffer_.cend();
+
+    while (i != e && is_blank(*prev(e)))
+        e = prev(e);
+
+    return crispy::range(i, e);
+}
+
+Line::Buffer Line::shift_left(int _count, Cell const& _fill)
+{
+    auto const actualShiftCount = min(_count, size());
+    auto const from = std::begin(buffer_);
+    auto const to = std::next(std::begin(buffer_), actualShiftCount);
+
+    auto out = remove(from, to);
+    append(actualShiftCount, _fill);
+
+    // trim trailing blanks
+    while (!out.empty() && is_blank(out.back()))
+        out.pop_back();
+
+    return out;
+}
+
+Line::Buffer Line::remove(iterator _from, iterator _to)
+{
+    auto removedColumns = Buffer(_from, _to);
+    buffer_.erase(_from, _to);
+    return removedColumns;
+}
+
+void Line::setText(std::string const& _u8string)
+{
+    for (auto const [i, ch] : crispy::indexed(unicode::from_utf8(_u8string)))
+        buffer_.at(i).setCharacter(ch);
 }
 
 void Line::resize(int _size)
@@ -65,57 +172,44 @@ void Line::resize(int _size)
         buffer_.resize(static_cast<int>(_size));
 }
 
-Line::LineBuffer Line::reflow(int _column)
+bool Line::blank() const noexcept
 {
-    LineBuffer wrappedColumns;
+    return std::all_of(cbegin(), cend(), is_blank);
+}
 
-    switch (crispy::strongCompare(_column, size()))
+Line::Buffer Line::reflow(int _newColumnCount)
+{
+    switch (crispy::strongCompare(_newColumnCount, size()))
     {
         case Comparison::Equal:
             break;
         case Comparison::Greater:
-            buffer_.resize(_column);
+            buffer_.resize(_newColumnCount);
             break;
         case Comparison::Less:
         {
-            // TODO: properly handle wide cells
+            // TODO: properly handle wide character cells
             // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
             //   cell needs to be injected to match the expected column width.
 
-            auto const oldSize = size();
-
-            auto const i = _column - 1; //- buffer_[_column].width();
-            auto a = next(buffer_.begin(), i);
-            wrappedColumns.insert(wrappedColumns.end(), a, buffer_.end());
-            buffer_.erase(a, buffer_.end());
-
-            setWrapped(!wrappedColumns.empty());
-
-            // truncate empty (non-reserved) cells
-            while (!wrappedColumns.empty())
+            auto const [reflowStart, reflowEnd] = [this, _newColumnCount]()
             {
-                Cell const& lastColumn = wrappedColumns.back();
-                if (lastColumn.codepointCount() != 0 && !isspace(lastColumn))
-                    break;
-                if (wrappedColumns.size() >= 2 && wrappedColumns[wrappedColumns.size() - 2].width() == 2)
-                    break;
-                wrappedColumns.pop_back();
-            }
+                auto const reflowStart = next(buffer_.begin(), _newColumnCount /* - buffer_[_newColumnCount].width()*/);
+                auto reflowEnd = buffer_.end();
 
-            if (wrappedColumns.size())
-            {
-                std::cout << fmt::format("reflow(): from {} to {}, wrap {}", oldSize, _column, wrappedColumns.size());
-                for (auto const& c : wrappedColumns)
-                    std::cout << fmt::format(" {}", c.toUtf8());
-                std::cout << '\n';
-                // std::cout << fmt::format("Line.reflow({}->{}): (cutoff: {} -> {}: {})\n",
-                //                          oldSize, _column, ca, cb, cd);
-            }
-            break;
+                while (reflowEnd != reflowStart && is_blank(*prev(reflowEnd)))
+                    reflowEnd = prev(reflowEnd);
+
+                return tuple{reflowStart, reflowEnd};
+            }();
+
+            auto removedColumns = Buffer(reflowStart, reflowEnd);
+            buffer_.erase(reflowStart, buffer_.end());
+            assert(size() == _newColumnCount);
+            return removedColumns;
         }
     }
-
-    return wrappedColumns;
+    return {};
 }
 // }}}
 // {{{ Grid impl
@@ -130,6 +224,33 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
 {
 }
 
+void addNewWrappedLines(Lines& _targetLines,
+                        int _newColumnCount,
+                        Line::Buffer&& _wrappedColumns,
+                        bool _initialNoWrap)
+{
+    // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
+    int i = 0;
+
+    while (static_cast<int>(_wrappedColumns.size()) >= _newColumnCount)
+    {
+        auto from = begin(_wrappedColumns);
+        auto to = next(begin(_wrappedColumns), _newColumnCount);
+        auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
+        _targetLines.emplace_back(Line(from, to, wrappedFlag));
+        logf(" - add line: '{}'", Line(from, to).toUtf8());
+        _wrappedColumns.erase(from, to);
+        ++i;
+    }
+
+    if (_wrappedColumns.size() > 0)
+    {
+        auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
+        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_wrappedColumns)).toUtf8());
+        _targetLines.emplace_back(Line(_newColumnCount, move(_wrappedColumns), wrappedFlag));
+    }
+}
+
 void Grid::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
 {
     maxHistoryLineCount_ = _maxHistoryLineCount;
@@ -138,7 +259,8 @@ void Grid::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
 
 Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapPending)
 {
-    auto const growLines = [this](int _newHeight) -> Coordinate {
+    auto const growLines = [this](int _newHeight) -> Coordinate
+    {
         // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until screenSize_.height == _newHeight.
 
@@ -160,7 +282,8 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         return Coordinate{rowsToTakeFromSavedLines, 0};
     };
 
-    auto const shrinkLines = [this](int _newHeight, Coordinate _cursor) -> Coordinate {
+    auto const shrinkLines = [this](int _newHeight, Coordinate _cursor) -> Coordinate
+    {
         // Shrink existing line count to _newSize.height
         // by splicing the number of lines to be shrinked by into savedLines bottom.
 
@@ -180,17 +303,139 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         }
     };
 
-    auto const growColumns = [this, _wrapPending](int _newColumnCount, Coordinate _cursor) -> Coordinate {
-        for (Line& line : lines_)
-            if (static_cast<int>(line.size()) < _newColumnCount)
-                line.resize(_newColumnCount);
-        screenSize_.width = _newColumnCount;
-        return _cursor + Coordinate{0, _wrapPending ? 1 : 0};
+    auto const growColumns = [this, _wrapPending](int _newColumnCount, Coordinate _cursor) -> Coordinate
+    {
+        if (!reflowOnResize_)
+        {
+            for (Line& line : lines_)
+                if (static_cast<int>(line.size()) < _newColumnCount)
+                    line.resize(_newColumnCount);
+            screenSize_.width = _newColumnCount;
+            return _cursor + Coordinate{0, _wrapPending ? 1 : 0};
+        }
+        else
+        {
+            // Grow columns by inverse shrink,
+            // i.e. the lines are traversed in reverse order.
+
+            auto const extendCount = _newColumnCount - screenSize_.width;
+            assert(extendCount > 0);
+
+            logf("Growing by {} cols", extendCount);
+
+            Lines grownLines;
+            Line::Buffer wrappedColumns; // Temporary state, representing wrapped columns from the line "below".
+
+            [[maybe_unused]] auto i = 1;
+            for (Line& line : lines_)
+            {
+                logf("{:>2}: line: '{}' (wrapped: '{}') {}",
+                     i++,
+                     line.toUtf8(),
+                     Line(wrappedColumns).toUtf8(),
+                     line.wrapped() ? "WRAPPED" : "");
+                assert(line.size() == screenSize_.width);
+
+                if (line.wrapped())
+                {
+                    crispy::copy(line.trim_blank_right(), back_inserter(wrappedColumns));
+                    logf(" - join: '{}'", Line(wrappedColumns).toUtf8());
+                }
+                else // line is not wrapped
+                {
+                    if (!wrappedColumns.empty())
+                    {
+                        addNewWrappedLines(grownLines, _newColumnCount, move(wrappedColumns), true);
+                        wrappedColumns.clear();
+                    }
+
+                    crispy::copy(line, back_inserter(wrappedColumns));
+                    logf(" - start new logical line: '{}'", line.toUtf8());
+                }
+            }
+
+            if (!wrappedColumns.empty())
+            {
+                addNewWrappedLines(grownLines, _newColumnCount, move(wrappedColumns), true);
+                wrappedColumns.clear();
+            }
+
+            lines_ = move(grownLines);
+            screenSize_.width = _newColumnCount;
+
+            auto cy = 0;
+            if (historyLineCount() < 0)
+            {
+                cy = historyLineCount();
+                appendNewLines(-historyLineCount(), lines_.back()->back().attributes());
+            }
+
+            return _cursor + Coordinate{cy, _wrapPending ? 1 : 0};
+        }
     };
 
-    auto const shrinkColumns = [this](int _newColumnCount, Coordinate _cursor) -> Coordinate {
-        screenSize_.width = _newColumnCount;
-        return _cursor + Coordinate{0, min(_cursor.column, _newColumnCount)};
+    auto const shrinkColumns = [this](int _newColumnCount, Coordinate _cursor) -> Coordinate
+    {
+        if (!reflowOnResize_)
+        {
+            screenSize_.width = _newColumnCount;
+            crispy::for_each(lines_, [=](Line& line) {
+                if (line.size() < _newColumnCount)
+                    line.resize(_newColumnCount);
+            });
+            return _cursor + Coordinate{0, min(_cursor.column, _newColumnCount)};
+        }
+        else
+        {
+            // Shrinking progress
+            // -----------------------------------------------------------------------
+            //  (one-by-one)        | (from-5-to-2)
+            // -----------------------------------------------------------------------
+            // "ABCDE"              | "ABCDE"
+            // "abcde"              | "xy   "
+            // ->                   | "abcde"
+            // "ABCD"               | ->
+            // "E   "   Wrapped     | "AB"                  push "AB", wrap "CDE"
+            // "abcd"               | "CD"      Wrapped     push "CD", wrap "E"
+            // "e   "   Wrapped     | "E"       Wrapped     push "E",  inc line
+            // ->                   | "xy"      no-wrapped  push "xy", inc line
+            // "ABC"                | "ab"      no-wrapped  push "ab", wrap "cde"
+            // "DE "    Wrapped     | "cd"      Wrapped     push "cd", wrap "e"
+            // "abc"                | "e "      Wrapped     push "e",  inc line
+            // "de "    Wrapped
+            // ->
+            // "AB"
+            // "DE"     Wrapped
+            // "E "     Wrapped
+            // "ab"
+            // "cd"     Wrapped
+            // "e "     Wrapped
+
+            Lines shrinkedLines;
+            Line::Buffer wrappedColumns;
+
+            for (Line& line : lines_)
+            {
+                if (!wrappedColumns.empty())
+                {
+                    if (line.wrapped())
+                        // Prepend previously wrapped columns into current line.
+                        line.prepend(wrappedColumns);
+                    else
+                        // Insert NEW line(s) between previous and this line with previously wrapped columns.
+                        addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), false);
+                }
+                wrappedColumns = line.reflow(_newColumnCount);
+                shrinkedLines.emplace_back(move(line));
+                assert(shrinkedLines.back().size() == _newColumnCount);
+            }
+            addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), false);
+
+            lines_ = move(shrinkedLines);
+            screenSize_.width = _newColumnCount;
+
+            return _cursor; // TODO
+        }
     };
 
     Coordinate cursorPosition = _currentCursorPos;
@@ -222,6 +467,18 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
     }
 
     return cursorPosition;
+}
+
+void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
+{
+    if (auto const n = min(_count, screenSize_.height); n > 0)
+    {
+        generate_n(
+            back_inserter(lines_),
+            n,
+            [&]() { return Line(screenSize_.width, Cell{{}, _attr}); }
+        );
+    }
 }
 
 void Grid::clearHistory()
@@ -295,11 +552,7 @@ void Grid::scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin
     {
         if (auto const n = min(_n, screenSize_.height); n > 0)
         {
-            generate_n(
-                back_inserter(lines_),
-                n,
-                [&]() { return Line(screenSize_.width, Cell{{}, _defaultAttributes}); }
-            );
+            appendNewLines(n, _defaultAttributes);
         }
     }
     else
@@ -427,6 +680,60 @@ void Grid::scrollDown(int v_n, GraphicsAttributes const& _defaultAttributes, Mar
             }
         );
     }
+}
+
+string Grid::renderTextLineAbsolute(int row) const
+{
+    string line;
+    line.reserve(screenSize_.width);
+    for (int col = 1; col <= screenSize_.width; ++col)
+        if (auto const& cell = at({row - historyLineCount() + 1, col}); cell.codepointCount())
+            line += cell.toUtf8();
+        else
+            line += " "; // fill character
+
+    return line;
+}
+
+string Grid::renderTextLine(int row) const
+{
+    string line;
+    line.reserve(screenSize_.width);
+    for (int col = 1; col <= screenSize_.width; ++col)
+        if (auto const& cell = at({row, col}); cell.codepointCount())
+            line += cell.toUtf8();
+        else
+            line += " "; // fill character
+
+    return line;
+}
+
+string Grid::renderAllText() const
+{
+    string text;
+    text.reserve((historyLineCount() + screenSize_.height) * (screenSize_.width + 1));
+
+    for (int lineNr = 0; lineNr < historyLineCount() + screenSize_.height; ++lineNr)
+    {
+        text += renderTextLineAbsolute(lineNr);
+        text += '\n';
+    }
+
+    return text;
+}
+
+string Grid::renderText() const
+{
+    string text;
+    text.reserve(screenSize_.height * (screenSize_.width + 1));
+
+    for (int lineNr = 1; lineNr <= screenSize_.height; ++lineNr)
+    {
+        text += renderTextLine(lineNr);
+        text += '\n';
+    }
+
+    return text;
 }
 // }}}
 

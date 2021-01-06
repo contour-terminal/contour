@@ -41,6 +41,7 @@ namespace
                 *this
             }
         {
+            grid().setReflowOnResize(false);
         }
     };
 }
