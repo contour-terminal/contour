@@ -21,6 +21,7 @@
 #include <harfbuzz/hb.h>
 #include <harfbuzz/hb-ft.h>
 
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -71,7 +72,7 @@ class TextShaper {
                reference<GlyphPositionList> _result);
 
   private:
-    hb_buffer_t* hb_buf_;
+    std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)> hb_buf_;
     std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
 };
 

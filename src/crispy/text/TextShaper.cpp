@@ -38,15 +38,19 @@ namespace
     }
 }
 
-TextShaper::TextShaper()
+TextShaper::TextShaper() :
+    hb_buf_(
+        hb_buffer_create(),
+        [](auto p) { hb_buffer_destroy(p); }
+    )
 {
-    hb_buf_ = hb_buffer_create();
+    if (!hb_buf_)
+        throw std::runtime_error("Could not initialize text shaper.");
 }
 
 TextShaper::~TextShaper()
 {
     clearCache();
-    hb_buffer_destroy(hb_buf_);
 }
 
 GlyphPositionList TextShaper::shape(unicode::Script _script,
@@ -119,16 +123,16 @@ bool TextShaper::shape(int _size,
                        int _advanceX,
                        reference<GlyphPositionList> _result)
 {
-    hb_buffer_clear_contents(hb_buf_);
+    hb_buffer_clear_contents(hb_buf_.get());
 
     for (size_t const i : times(_size))
-        hb_buffer_add(hb_buf_, _codepoints[i], _clusters[i] + _clusterGap);
+        hb_buffer_add(hb_buf_.get(), _codepoints[i], _clusters[i] + _clusterGap);
 
-    hb_buffer_set_content_type(hb_buf_, HB_BUFFER_CONTENT_TYPE_UNICODE);
-    hb_buffer_set_direction(hb_buf_, HB_DIRECTION_LTR);
-    hb_buffer_set_script(hb_buf_, mapScriptToHarfbuzzScript(_script));
-    hb_buffer_set_language(hb_buf_, hb_language_get_default());
-    hb_buffer_guess_segment_properties(hb_buf_);
+    hb_buffer_set_content_type(hb_buf_.get(), HB_BUFFER_CONTENT_TYPE_UNICODE);
+    hb_buffer_set_direction(hb_buf_.get(), HB_DIRECTION_LTR);
+    hb_buffer_set_script(hb_buf_.get(), mapScriptToHarfbuzzScript(_script));
+    hb_buffer_set_language(hb_buf_.get(), hb_language_get_default());
+    hb_buffer_guess_segment_properties(hb_buf_.get());
 
     hb_font_t* hb_font = nullptr;
     if (auto i = hb_fonts_.find(&_font); i != hb_fonts_.end())
@@ -139,13 +143,13 @@ bool TextShaper::shape(int _size,
         hb_fonts_[&_font] = hb_font;
     }
 
-    hb_shape(hb_font, hb_buf_, nullptr, 0);
+    hb_shape(hb_font, hb_buf_.get(), nullptr, 0);
 
-    hb_buffer_normalize_glyphs(hb_buf_);
+    hb_buffer_normalize_glyphs(hb_buf_.get());
 
-    auto const glyphCount = static_cast<int>(hb_buffer_get_length(hb_buf_));
-    hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hb_buf_, nullptr);
-    hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hb_buf_, nullptr);
+    auto const glyphCount = static_cast<int>(hb_buffer_get_length(hb_buf_.get()));
+    hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(hb_buf_.get(), nullptr);
+    hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(hb_buf_.get(), nullptr);
 
     _result.get().clear();
     _result.get().reserve(glyphCount);
