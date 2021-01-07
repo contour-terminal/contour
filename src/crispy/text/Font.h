@@ -15,7 +15,10 @@
 
 #include <crispy/reference.h>
 
+#include <fmt/format.h>
+
 #include <cmath>
+#include <sstream>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -142,23 +145,46 @@ constexpr FontStyle& operator|=(FontStyle& lhs, FontStyle rhs)
     return lhs;
 }
 
-struct GlyphBitmap {
-    int width;
-    int height;
-    std::vector<uint8_t> buffer;
+struct Vec2 {
+    int x;
+    int y;
+};
+
+struct GlobalGlyphMetrics {
+    int lineHeight;
+    int baseline;
+    int maxAdvance;
+    int ascender;
+    int descender;
+};
+
+struct GlyphMetrics {
+    Vec2 bitmapSize;        // glyph size in pixels
+    Vec2 bearing;           // offset from baseline to top of the glyph's bitmap
+    int advance;            // pixels from origin to next glyph's origin
+};
+
+struct Glyph {
+    GlyphMetrics metrics;
+    std::vector<uint8_t> bitmap;
 };
 
 class Font;
 
 struct GlyphPosition {
-    std::reference_wrapper<Font> font;
-    int x;
-    int y;
+    std::reference_wrapper<Font> font; // TODO: get rid of this
+
     uint32_t glyphIndex;
     int cluster;
 
+    Vec2 renderOffset;
+
     GlyphPosition(Font& _font, int _x, int _y, uint32_t _gi, int _cluster) :
-        font{_font}, x{_x}, y{_y}, glyphIndex{_gi}, cluster{_cluster} {}
+        font{_font},
+        glyphIndex{_gi},
+        cluster{_cluster},
+        renderOffset{_x, _y}
+    {}
 };
 
 using GlyphPositionList = std::vector<GlyphPosition>;
@@ -186,30 +212,52 @@ class Font {
     int bitmapWidth() const noexcept { return bitmapWidth_; }
     int bitmapHeight() const noexcept { return bitmapHeight_; }
 
-    int lineHeight() const noexcept
-    {
-        return static_cast<int>(std::ceil(static_cast<double>(FT_MulFix(face_->height, face_->size->metrics.y_scale)) / 64.0));
-    }
+    // global metrics
+    //
 
+    /// @returns the horizontal gap between two characters.
     int maxAdvance() const noexcept { return maxAdvance_; }
-    int baseline() const noexcept { return static_cast<int>(abs(face_->size->metrics.descender) >> 6); }
+
+    /// @returns the vertical gap between two baselines.
+    int lineHeight() const noexcept;
+
+    /// @returns the basline relative from top down to pen position (0,0) as a positive value.
+    int baseline() const noexcept;
+
+    /// @returns pixels from baseline to bitmap top
+    int ascender() const noexcept;
+
+    /// @returns pixels from baseline to bitmap bottom (negative)
+    int descender() const noexcept;
+
+    /// @returns pixels of center of underline position, relative to baseline.
+    int underlineOffset() const noexcept;
+    int underlineThickness() const noexcept;
 
     bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
+    // ------------------------------------------------------------------------
+    unsigned glyphIndexOfChar(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char); }
     void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    std::optional<GlyphBitmap> loadGlyphByIndex(int _glyphIndex);
+    std::optional<Glyph> loadGlyphByIndex(unsigned _glyphIndex);
 
-    operator FT_Face () noexcept { return face_; }
-    FT_Face operator->() noexcept { return face_; }
+    FT_Face face() noexcept { return face_; }
 
     static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize);
 
-  private:
-    static bool doSetFontSize(FT_Face _face, int _fontSize);
-    void updateBitmapDimensions();
+    int scaleHorizontal(long _value) const noexcept;
+    int scaleVertical(long _value) const noexcept;
 
   private:
+    static bool doSetFontSize(FT_Face _face, int _fontSize);
+    void recalculateMetrics();
+
+    // private data
+    //
+    std::size_t hashCode_;
+    std::string filePath_;
+
     FT_Library ft_;
     FT_Face face_;
     int fontSize_ = 0;
@@ -217,9 +265,6 @@ class Font {
     int bitmapWidth_ = 0;
     int bitmapHeight_ = 0;
     int maxAdvance_;
-
-    std::string filePath_;
-    std::size_t hashCode_;
 };
 
 using FontRef = std::reference_wrapper<Font>;
@@ -228,7 +273,7 @@ using FontList = std::pair<FontRef, FontFallbackList>;
 
 } // end namespace
 
-namespace std {
+namespace std { // {{{
     template<>
     struct hash<crispy::text::Font> {
         std::size_t operator()(crispy::text::Font const& _font) const noexcept
@@ -236,26 +281,65 @@ namespace std {
             return _font.hashCode();
         }
     };
+} // }}}
 
-    inline ostream& operator<<(ostream& _os, crispy::text::GlyphPosition const& _gpos)
-    {
-        _os << '{'
-            << "x:" << _gpos.x
-            << " y:" << _gpos.y
-            << " i:" << _gpos.glyphIndex
-            << " c:" << _gpos.cluster
-            << '}';
-        return _os;
-    }
-
-    inline ostream& operator<<(ostream& _os, crispy::text::GlyphPositionList const& _list)
-    {
-        int i = 0;
-        for (auto const& gp : _list)
+namespace fmt { // {{{
+    template <>
+    struct formatter<crispy::text::Vec2> {
+        using Vec2 = crispy::text::Vec2;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(Vec2 const& _v2, FormatContext& ctx)
         {
-            _os << (i ? " " : "") << gp;
-            i++;
+            return format_to(ctx.out(), "{},{}", _v2.x, _v2.y);
         }
-        return _os;
-    }
-}
+    };
+
+    template <>
+    struct formatter<crispy::text::GlyphMetrics> {
+        using GlyphMetrics = crispy::text::GlyphMetrics;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(GlyphMetrics const& _gm, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "bitmapSize:{}, bearing:{}, advance:{}",
+                                        _gm.bitmapSize,
+                                        _gm.bearing,
+                                        _gm.advance);
+        }
+    };
+
+    template <>
+    struct formatter<crispy::text::GlyphPosition> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::GlyphPosition const& _gpos, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "cluster:{}, glyphIndex:{}, offset:{}",
+                             _gpos.cluster,
+                             _gpos.glyphIndex,
+                             _gpos.renderOffset);
+        }
+    };
+
+    template <>
+    struct formatter<crispy::text::GlyphPositionList> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::GlyphPositionList const& _gposList, FormatContext& ctx)
+        {
+            std::stringstream os;
+            int i = 0;
+            for (auto const& gp : _gposList)
+            {
+                os << (i ? " " : "") << fmt::format("{}", gp);
+                i++;
+            }
+            return format_to(ctx.out(), "{}", os.str());
+        }
+    };
+} // }}}

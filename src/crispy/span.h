@@ -7,21 +7,25 @@ namespace crispy {
 template <typename T>
 class span {
   public:
-    using value_type = T;
+    using element_type = T;
 
-    using pointer_type = value_type*;
-    using const_pointer_type = value_type const*;
+    using pointer_type = element_type*;
+    using const_pointer_type = element_type const*;
 
     using iterator = pointer_type;
     using const_iterator = pointer_type;
 
-    using reference_type = value_type&;
-    using const_reference_type = value_type const&;
+    using reference_type = element_type&;
+    using const_reference_type = element_type const&;
 
     // constructors
     //
     constexpr span(iterator _begin, iterator _end) noexcept : begin_{_begin}, end_{_end} {}
     constexpr span(iterator _begin, size_t _count) noexcept : begin_{_begin}, end_{std::next(_begin, _count)} {}
+
+    template <std::size_t N>
+    constexpr span(element_type (&_array)[N]) noexcept : begin_{_array}, end_{_array + N} {}
+
     constexpr span() noexcept : begin_{}, end_{} {}
     constexpr span(span<T> const&) noexcept = default;
     constexpr span(span<T>&&) noexcept = default;
@@ -44,6 +48,9 @@ class span {
     //
     constexpr reference_type operator[](size_t i) noexcept { return begin_[i]; }
     constexpr const_reference_type operator[](size_t i) const noexcept { return begin_[i]; }
+
+    constexpr reference_type front() const noexcept { return begin_[0]; }
+    constexpr reference_type back() const noexcept { return std::prev(end_); }
 
   private:
     pointer_type begin_;

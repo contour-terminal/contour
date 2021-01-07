@@ -31,7 +31,8 @@ using crispy::copy;
 using crispy::text::Font;
 using crispy::text::FontList;
 using crispy::text::FontStyle;
-using crispy::text::GlyphBitmap;
+using crispy::text::Glyph;
+using crispy::text::GlyphMetrics;
 using crispy::text::GlyphPositionList;
 using crispy::times;
 
@@ -87,6 +88,7 @@ void TextRenderer::setCellSize(Size const& _cellSize)
 void TextRenderer::setFont(FontConfig const& _fonts)
 {
     fonts_ = _fonts;
+
     clearCache();
 }
 
@@ -266,17 +268,45 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         return _fonts.regular;
     }(fonts_, textStyle, isEmojiPresentation);
 
-    auto const advanceX = fonts_.regular.first.get().maxAdvance();
+    auto const& regularFont = fonts_.regular.first.get();
+    auto const advanceX = regularFont.maxAdvance();
+    auto const count = static_cast<int>(_run.end - _run.start);
+    auto const codepoints = codepoints_.data() + _run.start;
+    auto const clusters = clusters_.data() + _run.start;
+    auto const clusterGap = -static_cast<int>(clusters_[0]);
 
     GlyphPositionList gpos = textShaper_.shape(
         std::get<unicode::Script>(_run.properties),
         font,
         advanceX,
-        static_cast<int>(_run.end - _run.start),
-        codepoints_.data() + _run.start,
-        clusters_.data() + _run.start,
-        -static_cast<int>(clusters_[0])
+        count,
+        codepoints,
+        clusters,
+        clusterGap
     );
+
+    if (crispy::logging_sink::for_debug().enabled())
+    {
+        auto msg = debuglog();
+        msg.write("Shaping: {}\n", unicode::to_utf8(codepoints, count));
+        // A single shape run always uses the same font,
+        // so it is sufficient to just print that.
+        msg.write("via font: \"{}\"\n", gpos.at(0).font.get().filePath());
+        msg.write("with metrics: ");
+        for (crispy::text::GlyphPosition const& gp : gpos)
+        {
+            gp.font.get().filePath();
+            msg.write(" {}:{},{}",
+                      gp.glyphIndex,
+                      gp.renderOffset.x,
+                      gp.renderOffset.y);
+        }
+
+        // msg.write("\n");
+        // for (size_t const i : times(count))
+        //     msg.write(" {:X}", static_cast<uint32_t>(codepoints[i]));
+    }
+
     return gpos;
 }
 
@@ -328,41 +358,38 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
         return dataRef;
 
     Font& font = _id.font.get();
-    optional<GlyphBitmap> bitmap = font.loadGlyphByIndex(_id.glyphIndex);
-    if (!bitmap.has_value())
+    auto theGlyphOpt = font.loadGlyphByIndex(_id.glyphIndex);
+    if (!theGlyphOpt.has_value())
         return nullopt;
 
+    auto& theGlyph = theGlyphOpt.value();
     auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
 
-    //auto const cw = _id.font.get()->glyph->advance.x >> 6;
     // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-    auto const ratioX = colored ? static_cast<float>(cellSize_.width) * 2.0f / static_cast<float>(_id.font.get().bitmapWidth()) : 1.0f;
-    auto const ratioY = colored ? static_cast<float>(cellSize_.height) / static_cast<float>(_id.font.get().bitmapHeight()) : 1.0f;
+    auto const ratioX = colored ? static_cast<double>(cellSize_.width) * 2.0 / static_cast<float>(theGlyph.metrics.bitmapSize.x) : 1.0;
+    auto const ratioY = colored ? static_cast<double>(cellSize_.height) / static_cast<float>(theGlyph.metrics.bitmapSize.y) : 1.0;
 
-    auto metadata = Glyph{};
-    metadata.advance = _id.font.get()->glyph->advance.x >> 6;
-    metadata.bearing = QPoint(font->glyph->bitmap_left * ratioX, font->glyph->bitmap_top * ratioY);
-    metadata.descender = static_cast<int>(font->glyph->metrics.height >> 6) - font->glyph->bitmap_top;
-    metadata.height = static_cast<int>(static_cast<unsigned>(font->height) >> 6);
-    metadata.size = QPoint(static_cast<int>(font->glyph->bitmap.width), static_cast<int>(font->glyph->bitmap.rows));
+    GlyphMetrics metadata = theGlyph.metrics;
+    if (colored)
+    {
+        metadata.bearing.x = int(ceil(metadata.bearing.x * ratioX));
+        metadata.bearing.y = int(ceil(metadata.bearing.y * ratioY));
+    }
 
     if (crispy::logging_sink::for_debug().enabled())
-        if (_id.font.get().hasColor())
-            debuglog().write("insert glyph {}, advance:{}, descender:{}, height:{}, path:{}",
+        //if (_id.font.get().hasColor())
+            debuglog().write("insert glyph {}: {}; path:{}",
                              _id.glyphIndex,
-                             metadata.advance,
-                             metadata.descender,
-                             metadata.height,
+                             metadata,
                              _id.font.get().filePath());
 
-    auto& bmp = bitmap.value();
-    return _atlas.insert(_id, bmp.width, bmp.height,
-                         static_cast<unsigned>(static_cast<float>(bmp.width) * ratioX),
-                         static_cast<unsigned>(static_cast<float>(bmp.height) * ratioY),
+    return _atlas.insert(_id, theGlyph.metrics.bitmapSize.x, theGlyph.metrics.bitmapSize.y,
+                         unsigned(float(theGlyph.metrics.bitmapSize.x) * ratioX),
+                         unsigned(float(theGlyph.metrics.bitmapSize.y) * ratioY),
                          format,
-                         move(bmp.buffer),
+                         move(theGlyph.bitmap),
                          colored,
                          metadata);
 }
@@ -370,42 +397,54 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
 void TextRenderer::renderTexture(QPoint const& _pos,
                                  QVector4D const& _color,
                                  atlas::TextureInfo const& _textureInfo,
-                                 Glyph const& _glyph,
-                                 crispy::text::GlyphPosition const& _gpos)
+                                 GlyphMetrics const& _glyphMetrics,
+                                 crispy::text::GlyphPosition const& _glyphPos)
 {
-    auto const baseline = !_gpos.font.get().hasColor() ? fonts_.regular.first.get().baseline()
-                                                       : _gpos.font.get().baseline();
+    auto const colored = _glyphPos.font.get().hasColor();
 
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
-    auto const x = _pos.x() + _gpos.x + _glyph.bearing.x();
-    auto const y = _pos.y() + _gpos.y + baseline - _glyph.descender;
-#else
-    auto const x = _pos.x()
-                 + _gpos.x
-                 + _glyph.bearing.x();
+    if (colored)
+    {
+        auto const x = _pos.x()
+                     + _glyphMetrics.bearing.x
+                     + _glyphPos.renderOffset.x
+                     ;
 
-    auto const y = _pos.y()
-                 + _gpos.font.get().bitmapHeight()
-                 + _gpos.y
-                 ;
-#endif
+        auto const y = _pos.y();
+
+
+        renderTexture(QPoint(x, y), _color, _textureInfo);
+    }
+    else
+    {
+        auto const baseline = fonts_.regular.first.get().baseline();
+
+        auto const x = _pos.x()
+                     + _glyphPos.renderOffset.x
+                     + _glyphMetrics.bearing.x
+                     ;
+
+        // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
+        auto const y = _pos.y()                     // bottom left
+                     + _glyphPos.renderOffset.y     // -> harfbuzz adjustment
+                     + cellSize_.height             // -> top left
+                     - baseline                     // -> base line
+                     + _glyphMetrics.bearing.y      // -> bitmap top left
+                     - _glyphMetrics.bitmapSize.y   // -> bitmap height
+                     ;
+
+        renderTexture(QPoint(x, y), _color, _textureInfo);
+    }
 
 #if 0
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("xy={}:{} pos=({}:{}) gpos=({}:{}), baseline={}, lineHeight={}/{}, descender={}",
+        debuglog().write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
                          x, y,
                          _pos.x(), _pos.y(),
-                         _gpos.x, _gpos.y,
-                         _gpos.font.get().baseline(),
-                         _gpos.font.get().lineHeight(),
-                         _gpos.font.get().bitmapHeight(),
+                         _textureInfo.width, _textureInfo.height,
+                         _glyphPos.renderOffset.x, _glyphPos.renderOffset.y,
+                         _glyphPos.font.get().baseline(),
                          _glyph.descender);
 #endif
-
-    renderTexture(QPoint(x, y), _color, _textureInfo);
-
-    //auto const z = 0u;
-    //renderer_.scheduler().renderTexture({_textureInfo, x, y, z, _color});
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,

@@ -110,11 +110,9 @@ int main(int argc, char* argv[])
         crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
         {
             auto const srcIndex = string_view(_msg.location().file_name()).find("src");
-            auto const fileName = srcIndex != string_view::npos
+            auto const fileName = string(srcIndex != string_view::npos
                 ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
-                : string(_msg.location().file_name());
-
-            // TODO: handle multiline text
+                : string(_msg.location().file_name()));
 
             auto result = string{};
 

@@ -1,11 +1,18 @@
-# REFLOW
+### font related refactor
+- [x] get underline position & thickness from font metrics
+- [x] fix doubly underline
+- [x] fix curly underline
+- [ ] fix framed underline
+- [ ] add debug option to render frame around every texture quad in text renderer
+- [ ] add crispy::text::GlobalFontMetrics maybe
 
 ```
-// TODO: use `crispy::split(string) -> vector<string_view>` here
 * and at start of debug-logging, dump initial state once.
 * log debug-logging start/end events to the debug log, too.
 ```
 
+# REFLOW
+- [ ] "// TODO: use `crispy::split(string) -> vector<string_view>` here"
 - [ ] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
 - [ ] Fix column grow to insert spaces in unwrap.
 - [ ] handle wide characters

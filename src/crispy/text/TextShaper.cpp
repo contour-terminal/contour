@@ -142,7 +142,7 @@ bool TextShaper::shape(int _size,
         hb_font = i->second;
     else
     {
-        hb_font = hb_ft_font_create_referenced(_font);
+        hb_font = hb_ft_font_create_referenced(_font.face());
         hb_fonts_[&_font] = hb_font;
     }
 
@@ -161,51 +161,25 @@ bool TextShaper::shape(int _size,
     int cy = 0;
     for (auto const i : times(glyphCount))
     {
-        cx = static_cast<int>(info[i].cluster) * _advanceX;
-        //cx = _clusters[i] * _advanceX;
+        cx = static_cast<int>(info[i].cluster) * _advanceX; // Advance by cluster in fixed width steps.
 
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
-        _result.get().emplace_back(GlyphPosition{
+        _result.get().emplace_back(GlyphPosition(
             _font,
-            cx + (pos[i].x_offset >> 6),
-            cy + (pos[i].y_offset >> 6),
-            info[i].codepoint,
+            cx + int(float(pos[i].x_offset) / 64.0f),
+            cy + int(float(pos[i].y_offset) / 64.0f),   // not interesting, maybe font face's ascender instead?
+            info[i].codepoint,                          // glyph index
             static_cast<int>(info[i].cluster)
-        });
+        ));
     }
 
-    if (crispy::any_of(_result.get(), glyphMissing))
-        return false;
-
-#if 1 // !defined(NDEBUG))
-    if (crispy::logging_sink::for_debug().enabled() && crispy::none_of(_result.get(), glyphMissing))
-    {
-        auto msg = debuglog();
-        msg.write("Shaping: {}\n", unicode::to_utf8(_codepoints, _size));
-        msg.write("via font: \"{}\"\n", _font.filePath());
-
-        msg.write("with metrics: ");
-        for (GlyphPosition const& gp : _result.get())
-        {
-            msg.write(" {}/{}/{}",
-                      gp.glyphIndex,
-                      gp.x,
-                      gp.y);
-        }
-
-        //msg.write("\n");
-        // for (size_t const i : times(_size))
-        //     msg.write(" {:X}", static_cast<uint32_t>(_codepoints[i]));
-    }
-#endif
-
-    return true;
+    return !crispy::any_of(_result.get(), glyphMissing);
 }
 
 void TextShaper::replaceMissingGlyphs(Font& _font, GlyphPositionList& _result)
 {
     auto constexpr missingGlyphId = 0xFFFDu;
-    auto const missingGlyph = FT_Get_Char_Index(_font, missingGlyphId);
+    auto const missingGlyph = _font.glyphIndexOfChar(missingGlyphId);
 
     if (missingGlyph)
     {

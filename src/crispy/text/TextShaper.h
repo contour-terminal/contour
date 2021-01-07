@@ -71,7 +71,8 @@ class TextShaper {
                int _advanceX,
                reference<GlyphPositionList> _result);
 
-  private:
+    // private data fields
+    //
     std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)> hb_buf_;
     std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
 };

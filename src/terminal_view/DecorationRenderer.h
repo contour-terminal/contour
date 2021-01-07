@@ -17,6 +17,7 @@
 
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
+#include <crispy/text/Font.h>
 
 #include <terminal/Screen.h>
 
@@ -61,7 +62,7 @@ class DecorationRenderer {
     /// @param _commandListener
     /// @param _monochromeTextureAtlas
     /// @param _screenCoordinates
-    /// @param _lineThickness
+    /// @param _font used to retrieve font metrics
     /// @param _colorProfile
     /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
     /// @param _curlyFrequency the number of complete sine waves that one grid cell width will cover
@@ -71,11 +72,13 @@ class DecorationRenderer {
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover,
-                       int _lineThickness,
+                       crispy::text::Font const& _font,
                        float _curlyAmplitude,
                        float _curlyFrequency);
 
     void setColorProfile(ColorProfile const& _colorProfile);
+
+    void setFontMetrics(crispy::text::Font const& _font);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
@@ -102,12 +105,16 @@ class DecorationRenderer {
 
     std::optional<DataRef> getDataRef(Decorator _decorator);
 
-  private:
+    // private data members
+    //
     ScreenCoordinates const& screenCoordinates_;
 
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
+    int underlinePosition_ = 0;     // Center of the underline position, relative to cell bottom.
     int lineThickness_ = 1;
+    int ascender_;
+    int descender_;
     float curlyAmplitude_ = 1.0f;
     float curlyFrequency_ = 1.0f;
 

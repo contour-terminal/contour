@@ -48,33 +48,25 @@ namespace { // {{{ helper functions
         return "(Unknown error)";
     }
 
+    /// Computes the maximum horizontal advance for standard 7-bit text.
     int computeMaxAdvance(FT_Face _face)
     {
-        if (FT_Load_Char(_face, 'M', FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)
-            return _face->glyph->advance.x >> 6;
-
-        long long maxAdvance = 0;
-        int count = 0;
-        for (FT_Long glyphIndex = 0; glyphIndex < _face->num_glyphs; ++glyphIndex)
-        {
-            if (FT_Load_Glyph(_face, glyphIndex, FT_LOAD_BITMAP_METRICS_ONLY) == FT_Err_Ok)// FT_LOAD_BITMAP_METRICS_ONLY);
-            {
-                maxAdvance += _face->glyph->advance.x >> 6;
-                count++;
-            }
-        }
-        if (count != 0)
-            return static_cast<int>(maxAdvance / count);
-
-        return 8; // What else would it be.
+        int maxAdvance = 0;
+        for (int i = 32; i < 128; i++)
+            if (FT_Load_Glyph(_face, i, FT_LOAD_DEFAULT) == FT_Err_Ok)
+                maxAdvance = max(maxAdvance, int(ceilf(float(_face->glyph->metrics.horiAdvance) / 64.0f)));
+        return maxAdvance;
     }
 } // }}}
 
 FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize)
 {
     FT_Face face{};
-    if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face))
+    if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face) != FT_Err_Ok)
+    {
         debuglog().write("Failed to load font: \"{}\"", _fontPath);
+        return nullptr;
+    }
 
     FT_Error ec = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
     if (ec)
@@ -88,24 +80,24 @@ FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSi
 }
 
 Font::Font(FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath) :
+    hashCode_{ hash<string>{}(_fontPath)},
+    filePath_{ move(_fontPath) },
     ft_{ _ft },
     face_{ _face },
-    fontSize_{ _fontSize },
-    filePath_{ move(_fontPath) },
-    hashCode_{ hash<string>{}(filePath_)}
+    fontSize_{ _fontSize }
 {
-    updateBitmapDimensions();
+    recalculateMetrics();
 }
 
 Font::Font(Font&& v) noexcept :
+    hashCode_{ v.hashCode_ },
+    filePath_{ move(v.filePath_) },
     ft_{ v.ft_ },
     face_{ v.face_ },
     fontSize_{ v.fontSize_ },
     bitmapWidth_{ v.bitmapWidth_ },
     bitmapHeight_{ v.bitmapHeight_ },
-    maxAdvance_{ v.maxAdvance_ },
-    filePath_{ move(v.filePath_) },
-    hashCode_{ v.hashCode_ }
+    maxAdvance_{ v.maxAdvance_ }
 {
     v.ft_ = nullptr;
     v.face_ = nullptr;
@@ -146,9 +138,7 @@ Font::~Font()
         FT_Done_Face(face_);
 }
 
-#define LIBTERMINAL_VIEW_NATURAL_COORDS 1
-
-optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
+optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
 {
     FT_Int32 flags = FT_LOAD_DEFAULT;
     if (FT_HAS_COLOR(face_))
@@ -179,33 +169,36 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
         }
     }
 
+    auto metrics = GlyphMetrics{};
+    metrics.bitmapSize.x = static_cast<int>(face_->glyph->bitmap.width);
+    metrics.bitmapSize.y = static_cast<int>(face_->glyph->bitmap.rows);
+    metrics.bearing.x = face_->glyph->bitmap_left;
+    metrics.bearing.y = face_->glyph->bitmap_top;
+    metrics.advance = scaleHorizontal(face_->glyph->advance.x);
+
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
         if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
-            return {GlyphBitmap{}};
+            return nullopt; // {Glyph{}}; // TODO: why not nullopt?
 
-    auto const width = static_cast<int>(face_->glyph->bitmap.width);
-    auto const height = static_cast<int>(face_->glyph->bitmap.rows);
+    auto const width = metrics.bitmapSize.x;
+    auto const height = metrics.bitmapSize.y;
     auto const buffer = face_->glyph->bitmap.buffer;
 
     vector<uint8_t> bitmap;
     if (!hasColor())
     {
         auto const pitch = face_->glyph->bitmap.pitch;
-        bitmap.resize(height * width);
+        bitmap.resize(height * width); // 8-bit antialiased alpha channel
         for (int i = 0; i < height; ++i)
             for (int j = 0; j < width; ++j)
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
                 bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
-#else
-                bitmap[(height - i - 1) * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
-#endif
     }
     else
     {
-        bitmap.resize(height * width * 4);
+        bitmap.resize(height * width * 4); // RGBA
         auto t = bitmap.begin();
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
+
         auto s = buffer;
         for (int i = 0; i < width * height; ++i)
         {
@@ -216,28 +209,9 @@ optional<GlyphBitmap> Font::loadGlyphByIndex(int _glyphIndex)
             *t++ = s[3];
             s += 4;
         }
-#else
-        for (int y = 0; y < height; ++y)
-        {
-            auto s = buffer + (height - y - 1) * width * 4;
-            for (int x = 0; x < width * 4; x += 4)
-            {
-                // BGRA -> RGBA
-                *t++ = s[2];
-                *t++ = s[1];
-                *t++ = s[0];
-                *t++ = s[3];
-                s += 4;
-            }
-        }
-#endif
     }
 
-    return {GlyphBitmap{
-        width,
-        height,
-        move(bitmap)
-    }};
+    return {Glyph{metrics, move(bitmap)}};
 }
 
 bool Font::doSetFontSize(FT_Face _face, int _fontSize)
@@ -268,25 +242,65 @@ void Font::setFontSize(int _fontSize)
     if (fontSize_ != _fontSize && doSetFontSize(face_, _fontSize))
     {
         fontSize_ = _fontSize;
-        updateBitmapDimensions();
+        recalculateMetrics();
     }
 }
 
-void Font::updateBitmapDimensions()
+void Font::recalculateMetrics()
 {
     // update bitmap width/height
     if (FT_IS_SCALABLE(face_))
     {
-        bitmapWidth_ = FT_MulFix(face_->bbox.xMax - face_->bbox.xMin, face_->size->metrics.x_scale) >> 6;
-        bitmapHeight_ = FT_MulFix(face_->bbox.yMax - face_->bbox.yMin, face_->size->metrics.y_scale) >> 6;
+        bitmapWidth_ = scaleHorizontal(face_->bbox.xMax - face_->bbox.xMin);
+        bitmapHeight_ = scaleVertical(face_->bbox.yMax - face_->bbox.yMin);
     }
     else
     {
-        bitmapWidth_ = (face_->available_sizes[0].width);
-        bitmapHeight_ = (face_->available_sizes[0].height);
+        bitmapWidth_ = face_->available_sizes[0].width;
+        bitmapHeight_ = face_->available_sizes[0].height;
     }
 
     maxAdvance_ = computeMaxAdvance(face_);
+}
+
+int Font::lineHeight() const noexcept
+{
+    return scaleVertical(face_->height);
+}
+
+int Font::baseline() const noexcept
+{
+    return scaleVertical(face_->ascender);
+}
+
+int Font::ascender() const noexcept
+{
+    return scaleVertical(face_->ascender);
+}
+
+int Font::descender() const noexcept
+{
+    return scaleVertical(face_->descender);
+}
+
+int Font::underlineOffset() const noexcept
+{
+    return scaleVertical(face_->underline_position);
+}
+
+int Font::underlineThickness() const noexcept
+{
+    return scaleVertical(face_->underline_thickness);
+}
+
+int Font::scaleHorizontal(long _value) const noexcept
+{
+    return int(ceil(double(FT_MulFix(_value, face_->size->metrics.x_scale)) / 64.0));
+}
+
+int Font::scaleVertical(long _value) const noexcept
+{
+    return int(ceil(double(FT_MulFix(_value, face_->size->metrics.y_scale)) / 64.0));
 }
 
 } // end namespace

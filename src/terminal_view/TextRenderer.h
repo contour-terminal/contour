@@ -148,19 +148,13 @@ class TextRenderer {
                        QVector4D const& _color,
                        crispy::atlas::TextureInfo const& _textureInfo);
 
-  private:
     // rendering
     //
-    struct Glyph {
-        QPoint size;            // glyph size
-        QPoint bearing;         // offset from baseline to left/top of glyph
-        int height;
-        int descender;
-        int advance;            // offset to advance to next glyph in line.
-    };
-    friend struct fmt::formatter<TextRenderer::Glyph>;
+    using Glyph = crispy::text::Glyph;
+    using GlyphMetrics = crispy::text::GlyphMetrics;
+    friend struct fmt::formatter<GlyphMetrics>;
 
-    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<GlyphId, Glyph>;
+    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<GlyphId, GlyphMetrics>;
     using DataRef = TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
@@ -169,7 +163,7 @@ class TextRenderer {
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
                        crispy::atlas::TextureInfo const& _textureInfo,
-                       Glyph const& _glyph,
+                       GlyphMetrics const& _glyphMetrics,
                        crispy::text::GlyphPosition const& _gpos);
 
     // general properties
@@ -223,25 +217,6 @@ namespace fmt {
         auto format(GlyphId const& _glyphId, FormatContext& ctx)
         {
             return format_to(ctx.out(), "GlyphId<index:{}>", _glyphId.glyphIndex);
-        }
-    };
-
-    template <>
-    struct formatter<terminal::view::TextRenderer::Glyph> {
-        using Glyph = terminal::view::TextRenderer::Glyph;
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(Glyph const& _glyph, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "size:{}x{}, bearing:{}x{}, height:{}, descender:{}, advance:{}",
-                _glyph.size.x(),
-                _glyph.size.y(),
-                _glyph.bearing.x(),
-                _glyph.bearing.y(),
-                _glyph.height,
-                _glyph.descender,
-                _glyph.advance);
         }
     };
 }

@@ -118,6 +118,8 @@ class Renderer {
     void dumpState(std::ostream& _textOutput) const;
 
   private:
+    void updateMetricsAndClearCache();
+
     /// Invoked internally by render() function.
     uint64_t renderInternalNoFlush(Terminal& _terminal,
                                    std::chrono::steady_clock::time_point _now,

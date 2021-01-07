@@ -16,6 +16,8 @@
 
 #include <crispy/Atlas.h>
 #include <crispy/AtlasRenderer.h>
+#include <crispy/logger.h>
+#include <crispy/times.h>
 
 #include <array>
 #include <cmath>
@@ -26,6 +28,7 @@
 using std::array;
 using std::get;
 using std::max;
+using std::min;
 using std::nullopt;
 using std::optional;
 using std::pair;
@@ -61,19 +64,20 @@ DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover,
-                                       int _lineThickness,
+                                       crispy::text::Font const& _font,
                                        float _curlyAmplitude,
                                        float _curlyFrequency) :
     screenCoordinates_{ _screenCoordinates },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
-    lineThickness_{ _lineThickness },
+    underlinePosition_{ 0 }, // TODO
     curlyAmplitude_{ _curlyAmplitude },
     curlyFrequency_{ _curlyFrequency },
     colorProfile_{ _colorProfile },
     commandListener_{ _commandListener },
     atlas_{ _monochromeTextureAtlas }
 {
+    setFontMetrics(_font);
 }
 
 void DecorationRenderer::clearCache()
@@ -86,20 +90,33 @@ void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
     colorProfile_ = _colorProfile;
 }
 
+void DecorationRenderer::setFontMetrics(crispy::text::Font const& _font)
+{
+    underlinePosition_ = screenCoordinates_.textBaseline
+                       + _font.underlineOffset();
+    lineThickness_ = _font.underlineThickness();
+    ascender_ = _font.ascender();
+    descender_ = _font.descender();
+
+    atlas_.clear();
+}
+
 void DecorationRenderer::rebuild()
 {
     auto const width = screenCoordinates_.cellSize.width;
     auto const baseline = screenCoordinates_.textBaseline;
 
+
     { // {{{ underline
-        auto const thickness = max(lineThickness_ * baseline / 3, 1);
-        auto const height = baseline;
-        auto const base_y = max((height - thickness) / 2, 0);
+        auto const thickness_half = int(ceil(lineThickness_ / 2.0));
+        auto const thickness = min(1, thickness_half * 2);
+        auto const y0 = max(0, underlinePosition_ - thickness_half);
+        auto const height = y0 + thickness;
         auto image = atlas::Buffer(width * height, 0);
 
         for (int y = 1; y <= thickness; ++y)
             for (int x = 0; x < width; ++x)
-                image[(base_y + y) * width + x] = 0xFF;
+                image[(height - y0 - y) * width + x] = 0xFF;
 
         atlas_.insert(
             Decorator::Underline,
@@ -110,16 +127,19 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ double underline
-        auto const height = max(baseline - 1, 3);
-        auto const thickness = height / (3 * lineThickness_);
+        auto const thickness_half = int(ceil(lineThickness_ / 2.0));
+        auto const thickness = min(1, thickness_half * 2);
+        auto const y1 = max(0, underlinePosition_ - thickness_half);
+        auto const y0 = max(0, y1 - 2 * thickness);
+        auto const height = y1 + thickness;
         auto image = atlas::Buffer(width * height, 0);
 
-        for (int y = 0; y < thickness; ++y)
+        for (int y = 1; y <= thickness; ++y)
         {
             for (int x = 0; x < width; ++x)
             {
-                image[y * width + x] = 0xFF;
-                image[(height - 1 - y) * width + x] = 0xFF;
+                image[(height - y1 - y) * width + x] = 0xFF; // top line
+                image[(height - y0 - y) * width + x] = 0xFF; // bottom line
             }
         }
 
@@ -132,7 +152,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = max(static_cast<int>(curlyAmplitude_ * static_cast<float>(screenCoordinates_.textBaseline)), lineThickness_ * 3) - lineThickness_;
+        auto const height = int(ceil(double(screenCoordinates_.cellSize.height - ascender_) * 2.0 / 3.0));
         auto image = atlas::Buffer(width * height, 0);
 
         for (int x = 0; x < width; ++x)
@@ -156,7 +176,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const thickness = max(lineThickness_ * width / 6, 1);
+        auto const thickness = lineThickness_;
         auto const height = thickness;
         auto image = atlas::Buffer(width * height, 0);
 
@@ -176,7 +196,7 @@ void DecorationRenderer::rebuild()
     { // {{{ dashed underline
         // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
         // whereas the middle one is being skipped.
-        auto const thickness = max(lineThickness_ * width / 4, 1);
+        auto const thickness = lineThickness_;
         auto const height = thickness;
         auto image = atlas::Buffer(width * height, 0);
 
@@ -195,9 +215,9 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = screenCoordinates_.cellSize.height;
-        auto const thickness = max(lineThickness_ * width / 20, 1);
+        auto const thickness = lineThickness_;
         auto image = atlas::Buffer(width * cellHeight, 0u);
-        auto const gap = thickness;
+        auto const gap = 0; // thickness;
 
         // Draws the top and bottom horizontal lines
         for (int y = gap; y < thickness + gap; ++y)
@@ -225,7 +245,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ overline
         auto const cellHeight = screenCoordinates_.cellSize.height;
-        auto const thickness = max(lineThickness_ * baseline / 3, 1);
+        auto const thickness = lineThickness_;
         auto image = atlas::Buffer(width * cellHeight, 0);
 
         for (int y = 0; y < thickness; ++y)
@@ -329,11 +349,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
 #endif
         auto const pos = screenCoordinates_.map(_pos);
         auto const x = pos.x();
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
         auto const y = pos.y();
-#else
-        auto const y = pos.y() + screenCoordinates_.cellSize.height;
-#endif
         auto const z = 0;
         auto const color = QVector4D(
             static_cast<float>(_color.red) / 255.0f,
@@ -343,17 +359,8 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         );
         atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
         auto const advanceX = static_cast<int>(screenCoordinates_.cellSize.width);
-        for (int i = 0; i < static_cast<int>(_columnCount); ++i)
-        {
-#if 0 // !defined(NDEBUG)
-            cout << fmt::format(
-                " at: {}:{}\n",
-                x + advanceX + i,
-                y
-            );
-#endif
-            commandListener_.renderTexture({textureInfo, x + advanceX * i, y, z, color});
-        }
+        for (int const i : crispy::times(_columnCount))
+            commandListener_.renderTexture({textureInfo, i * advanceX + x, y, z, color});
     }
     else
     {

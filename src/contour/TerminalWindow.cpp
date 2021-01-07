@@ -29,6 +29,7 @@
 #include <crispy/logger.h>
 
 #include <QtCore/QDebug>
+#include <QtGui/QScreen>
 #include <QtGui/QGuiApplication>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMainWindow>

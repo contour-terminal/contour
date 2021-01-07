@@ -38,7 +38,7 @@ Renderer::Renderer(Size const& _screenSize,
             _fonts.regular.first.get().maxAdvance(), // cell width
             _fonts.regular.first.get().lineHeight()  // cell height
         },
-        _fonts.regular.first.get().baseline()
+        _fonts.regular.first.get().lineHeight() - _fonts.regular.first.get().baseline()
     },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
@@ -77,7 +77,8 @@ Renderer::Renderer(Size const& _screenSize,
         _colorProfile,
         _hyperlinkNormal,
         _hyperlinkHover,
-        1,      // line thickness (TODO: configurable)
+        _fonts.regular.first.get(),
+        // TODO: underline position
         0.75f,  // curly amplitude
         1.0f    // curly frequency
     },
@@ -124,18 +125,9 @@ void Renderer::clearCache()
 void Renderer::setFont(FontConfig const& _fonts)
 {
     fonts_ = _fonts;
-
-    screenCoordinates_.cellSize = Size{
-        fonts_.regular.first.get().maxAdvance(),
-        fonts_.regular.first.get().lineHeight()
-    };
-    screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
-
     textRenderer_.setFont(_fonts);
-    textRenderer_.setCellSize(cellSize());
-    imageRenderer_.setCellSize(cellSize());
 
-    clearCache();
+    updateMetricsAndClearCache();
 }
 
 bool Renderer::setFontSize(int _fontSize)
@@ -150,18 +142,24 @@ bool Renderer::setFontSize(int _fontSize)
             fallback.get().setFontSize(_fontSize);
     }
 
+    updateMetricsAndClearCache();
+
+    return true;
+}
+
+void Renderer::updateMetricsAndClearCache()
+{
     screenCoordinates_.cellSize = Size{
         fonts_.regular.first.get().maxAdvance(),
         fonts_.regular.first.get().lineHeight()
     };
-    screenCoordinates_.textBaseline = fonts_.regular.first.get().baseline();
+    screenCoordinates_.textBaseline = screenCoordinates_.cellSize.height - fonts_.regular.first.get().baseline();
 
     textRenderer_.setCellSize(cellSize());
     imageRenderer_.setCellSize(cellSize());
+    decorationRenderer_.setFontMetrics(fonts_.regular.first.get());
 
     clearCache();
-
-    return true;
 }
 
 void Renderer::setProjection(QMatrix4x4 const& _projectionMatrix)

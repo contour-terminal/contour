@@ -230,10 +230,12 @@ namespace // {{{ helper
         KeyMode cursorKeysMode_ = KeyMode::Normal;
     };
 
+    constexpr bool GridTextReflowEnabled = true;
+
     array<Grid, 2> emptyGrids(Size _size, optional<int> _maxHistoryLineCount)
     {
         return array<Grid, 2>{
-            Grid(_size, true, _maxHistoryLineCount),
+            Grid(_size, GridTextReflowEnabled, _maxHistoryLineCount),
             Grid(_size, false, 0)
         };
     }

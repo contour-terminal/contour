@@ -15,7 +15,10 @@ namespace terminal::view {
 struct ScreenCoordinates {
     Size screenSize;
     Size cellSize;
+
+    /// baseline for the pen in relative to cell bottom.
     int textBaseline;
+
     int leftMargin = 0;
     int bottomMargin = 0;
 
@@ -29,15 +32,12 @@ struct ScreenCoordinates {
         return map(Coordinate{row, col});
     }
 
-    constexpr QPoint map(Coordinate const& _pos) const noexcept {
-        return QPoint{
-            static_cast<int>(leftMargin + (_pos.column - 1) * cellSize.width),
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS) && LIBTERMINAL_VIEW_NATURAL_COORDS
-            static_cast<int>(bottomMargin + (screenSize.height - _pos.row) * cellSize.height)
-#else
-            static_cast<int>((_pos.row - 1) * cellSize.height)
-#endif
-        };
+    constexpr QPoint map(Coordinate const& _pos) const noexcept
+    {
+        auto const x = leftMargin + (_pos.column - 1) * cellSize.width;
+        auto const y = bottomMargin + (screenSize.height - _pos.row) * cellSize.height;
+
+        return QPoint{x, y};
     }
 };
 

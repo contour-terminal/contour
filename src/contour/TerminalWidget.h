@@ -56,6 +56,8 @@ class TerminalWidget :
 
     static QSurfaceFormat surfaceFormat();
 
+    int pointsToPixels(int _points) const noexcept;
+
     void initializeGL() override;
     void resizeGL(int _width, int _height) override;
     void paintGL() override;

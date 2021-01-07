@@ -387,7 +387,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     },
     updateTimer_(this)
 {
-    debuglog().write("ctor: fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
+    debuglog().write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
                      config_.profile(config_.defaultProfileName)->terminalSize,
                      profile().fontSize,
                      contentScale(),
@@ -427,6 +427,12 @@ TerminalWidget::~TerminalWidget()
     debuglog().write("TerminalWidget.dtor!");
     makeCurrent(); // XXX must be called.
     statsSummary();
+}
+
+
+int TerminalWidget::pointsToPixels(int _points) const noexcept
+{
+    return int(ceil(double(_points) / 72.0 * 96.0 * contentScale()));
 }
 
 void TerminalWidget::statsSummary()
@@ -556,10 +562,10 @@ void TerminalWidget::initializeGL()
     if (!infoPrinted)
     {
         infoPrinted = true;
-
         debuglog().write("[FYI] DPI             : {}x{} physical; {}x{} logical",
                          physicalDpiX(), physicalDpiY(),
                          logicalDpiX(), logicalDpiY());
+        debuglog().write("[FYI] Font size       : {}pt ({}px)", profile().fontSize, pointsToPixels(profile().fontSize));
         debuglog().write("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         debuglog().write("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         debuglog().write("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
@@ -667,11 +673,7 @@ void TerminalWidget::resizeGL(int _width, int _height)
     terminalView_->setProjection(
         ortho(
             0.0f, static_cast<float>(viewWidth),      // left, right
-#if defined(LIBTERMINAL_VIEW_NATURAL_COORDS)
             0.0f, static_cast<float>(viewHeight)      // bottom, top
-#else
-            static_cast<float>(viewHeight), 0.0f      // bottom, top
-#endif
         )
     );
 
@@ -1156,12 +1158,11 @@ bool TerminalWidget::setFontSize(int _fontSize)
     if (_fontSize > 100)
         return false;
 
-    float const fontSize = (static_cast<float>(_fontSize) / 72.0f) * static_cast<float>(logicalDpiX());
+    auto const fontSizePixels = pointsToPixels(_fontSize);
 
-    debuglog().write("{} -> {}; {} * {}", profile().fontSize, _fontSize, fontSize, contentScale());
+    debuglog().write("setting font size to {}pt ({}px)", _fontSize, fontSizePixels);
 
-    terminalView_->setFontSize(static_cast<int>(fontSize * contentScale()));
-
+    terminalView_->setFontSize(fontSizePixels);
     profile().fontSize = static_cast<short>(_fontSize);
 
     return true;
@@ -1403,9 +1404,9 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
 
 terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile const& _profile)
 {
-    int const fontSize = static_cast<int>((static_cast<float>(_profile.fontSize) / 72.0f) * static_cast<float>(logicalDpiX()));
+    int const fontSize = pointsToPixels(_profile.fontSize);
 
-    debuglog().write("size: {}; {} * {}", _profile.fontSize, fontSize, contentScale());
+    debuglog().write("using font size: {}pt ({}px)", _profile.fontSize, fontSize);
 
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
@@ -1413,7 +1414,7 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
         fontLoader_.load(_profile.fonts.bold.pattern, fontSize),
         fontLoader_.load(_profile.fonts.italic.pattern, fontSize),
         fontLoader_.load(_profile.fonts.boldItalic.pattern, fontSize),
-        fontLoader_.load("emoji", fontSize)
+        fontLoader_.load(_profile.fonts.emoji.pattern, fontSize)
     };
 }
 
