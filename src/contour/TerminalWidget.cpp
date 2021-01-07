@@ -671,6 +671,7 @@ void TerminalWidget::resizeGL(int _width, int _height)
     auto const viewHeight = height();
 
     terminalView_->resize(viewWidth, viewHeight);
+    setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
     terminalView_->setProjection(
         ortho(
             0.0f, static_cast<float>(viewWidth),      // left, right
