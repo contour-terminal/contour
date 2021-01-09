@@ -1164,7 +1164,7 @@ void Sequencer::handleSequence()
         screen_.verifyState();
     }
     else
-        std::cerr << fmt::format("Unknown VT sequence: {}\n", sequence_);
+        debuglog().write("Unknown VT sequence: {}", sequence_);
 }
 
 void Sequencer::flushBatchedSequences()
