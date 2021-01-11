@@ -60,7 +60,6 @@ endif()
 
 add_library(crispy-gui STATIC
     Atlas.h
-    AtlasRenderer.h AtlasRenderer.cpp
     text/Font.h text/Font.cpp
     text/FontLoader.h text/FontLoader.cpp
     text/TextShaper.h text/TextShaper.cpp
