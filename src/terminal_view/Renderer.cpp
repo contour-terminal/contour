@@ -77,10 +77,7 @@ Renderer::Renderer(Size const& _screenSize,
         _colorProfile,
         _hyperlinkNormal,
         _hyperlinkHover,
-        _fonts.regular.first.get(),
-        // TODO: underline position
-        0.75f,  // curly amplitude
-        1.0f    // curly frequency
+        _fonts.regular.first.get()
     },
     cursorRenderer_{
         renderTarget_.textureScheduler(),

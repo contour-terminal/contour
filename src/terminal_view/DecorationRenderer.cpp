@@ -63,15 +63,11 @@ DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover,
-                                       crispy::text::Font const& _font,
-                                       float _curlyAmplitude,
-                                       float _curlyFrequency) :
+                                       crispy::text::Font const& _font) :
     screenCoordinates_{ _screenCoordinates },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
     underlinePosition_{ 0 }, // TODO
-    curlyAmplitude_{ _curlyAmplitude },
-    curlyFrequency_{ _curlyFrequency },
     colorProfile_{ _colorProfile },
     commandListener_{ _commandListener },
     atlas_{ _monochromeTextureAtlas }
@@ -157,7 +153,7 @@ void DecorationRenderer::rebuild()
         for (int x = 0; x < width; ++x)
         {
             auto const normalizedX = static_cast<double>(x) / static_cast<double>(width);
-            auto const sin_x = curlyFrequency_ * normalizedX * 2.0 * M_PI;
+            auto const sin_x = normalizedX * 2.0 * M_PI;
             auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
             auto const y = static_cast<int>(normalizedY * static_cast<float>(height - lineThickness_));
@@ -200,7 +196,7 @@ void DecorationRenderer::rebuild()
         auto image = atlas::Buffer(width * height, 0);
 
         for (int x = 0; x < width; ++x)
-            if (fabs(float(x) / float(width) - 0.5f) >= 0.25f)
+            if (fabsf(float(x) / float(width) - 0.5f) >= 0.25f)
                 for (int y = 0; y < height; ++y)
                     image[y * width + x] = 0xFF;
 

@@ -63,17 +63,13 @@ class DecorationRenderer {
     /// @param _screenCoordinates
     /// @param _font used to retrieve font metrics
     /// @param _colorProfile
-    /// @param _curlyAmplitude the total hight in pixels the sine wave will take, that is: abs(minimum, maximum).
-    /// @param _curlyFrequency the number of complete sine waves that one grid cell width will cover
     DecorationRenderer(crispy::atlas::CommandListener& _commandListener,
                        crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                        ScreenCoordinates const& _screenCoordinates,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover,
-                       crispy::text::Font const& _font,
-                       float _curlyAmplitude,
-                       float _curlyFrequency);
+                       crispy::text::Font const& _font);
 
     void setColorProfile(ColorProfile const& _colorProfile);
 
@@ -81,7 +77,6 @@ class DecorationRenderer {
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
-        std::cout << fmt::format("setHyperlinkDecoration: {}; {}\n", _normal, _hover);
         hyperlinkNormal_  = _normal;
         hyperlinkHover_ = _hover;
     }
@@ -113,8 +108,6 @@ class DecorationRenderer {
     int lineThickness_ = 1;
     int ascender_;
     int descender_;
-    float curlyAmplitude_ = 1.0f;
-    float curlyFrequency_ = 1.0f;
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 
