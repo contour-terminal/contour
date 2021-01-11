@@ -310,7 +310,6 @@ void TextRenderer::render(QPoint _pos,
                           vector<crispy::text::GlyphPosition> const& _glyphPositions,
                           QVector4D const& _color)
 {
-    #if 1
     for (crispy::text::GlyphPosition const& gpos : _glyphPositions)
         if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
             renderTexture(_pos,
@@ -318,19 +317,6 @@ void TextRenderer::render(QPoint _pos,
                           get<0>(*ti).get(), // TextureInfo
                           get<1>(*ti).get(), // Metadata
                           gpos);
-    #else
-    unsigned offset = 0;
-    for (crispy::text::GlyphPosition const& gpos : _glyphPositions)
-    {
-        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
-            renderTexture(QPoint(_pos.x() + offset, _pos.y()),
-                          _color,
-                          get<0>(*ti).get(), // TextureInfo
-                          get<1>(*ti).get(), // Metadata
-                          gpos);
-        ++offset;
-    }
-    #endif
 }
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
@@ -339,12 +325,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         ? colorAtlas_
         : monochromeAtlas_;
 
-    return getTextureInfo(_id, atlas);
-}
-
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas)
-{
-    if (optional<DataRef> const dataRef = _atlas.get(_id); dataRef.has_value())
+    if (optional<DataRef> const dataRef = atlas.get(_id); dataRef.has_value())
         return dataRef;
 
     Font& font = _id.font.get();
@@ -377,13 +358,13 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
                              metadata,
                              _id.font.get().filePath());
 
-    return _atlas.insert(_id, theGlyph.metrics.bitmapSize.x, theGlyph.metrics.bitmapSize.y,
-                         unsigned(float(theGlyph.metrics.bitmapSize.x) * ratioX),
-                         unsigned(float(theGlyph.metrics.bitmapSize.y) * ratioY),
-                         format,
-                         move(theGlyph.bitmap),
-                         colored,
-                         metadata);
+    return atlas.insert(_id, theGlyph.metrics.bitmapSize.x, theGlyph.metrics.bitmapSize.y,
+                        unsigned(float(theGlyph.metrics.bitmapSize.x) * ratioX),
+                        unsigned(float(theGlyph.metrics.bitmapSize.y) * ratioY),
+                        format,
+                        move(theGlyph.bitmap),
+                        colored,
+                        metadata);
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,

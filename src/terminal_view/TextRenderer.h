@@ -154,7 +154,6 @@ class TextRenderer {
     using DataRef = TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id, TextureAtlas& _atlas);
 
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
