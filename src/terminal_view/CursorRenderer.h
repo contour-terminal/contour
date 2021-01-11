@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/GridMetrics.h>
 
 #include <crispy/Atlas.h>
 
@@ -29,7 +29,7 @@ class CursorRenderer {
   public:
     CursorRenderer(crispy::atlas::CommandListener& _commandListener,
                    crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                   ScreenCoordinates const& _screenCoordinates,
+                   GridMetrics const& _gridMetrics,
                    CursorShape _shape,
                    QVector4D const& _color);
 
@@ -50,7 +50,7 @@ class CursorRenderer {
   private:
     crispy::atlas::CommandListener& commandListener_;
     TextureAtlas textureAtlas_;
-    ScreenCoordinates const& screenCoordinates_;
+    GridMetrics const& gridMetrics_;
 
     CursorShape shape_;
     std::array<float, 4> color_;

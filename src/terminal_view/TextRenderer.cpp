@@ -13,7 +13,7 @@
  */
 
 #include <terminal_view/TextRenderer.h>
-#include <terminal_view/ScreenCoordinates.h>
+#include <terminal_view/GridMetrics.h>
 #include <terminal_view/RenderMetrics.h>
 
 #include <crispy/algorithm.h>
@@ -53,13 +53,11 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            crispy::atlas::CommandListener& _commandListener,
                            crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                           ScreenCoordinates const& _screenCoordinates,
-                           FontConfig const& _fonts,
-                           Size const& _cellSize) :
+                           GridMetrics const& _gridMetrics,
+                           FontConfig const& _fonts) :
     renderMetrics_{ _renderMetrics },
-    screenCoordinates_{ _screenCoordinates },
+    gridMetrics_{ _gridMetrics },
     fonts_{ _fonts },
-    cellSize_{ _cellSize },
     textShaper_{},
     commandListener_{ _commandListener },
     monochromeAtlas_{ _monochromeAtlasAllocator },
@@ -79,11 +77,6 @@ void TextRenderer::clearCache()
 #if !defined(NDEBUG)
     cacheHits_.clear();
 #endif
-}
-
-void TextRenderer::setCellSize(Size const& _cellSize)
-{
-    cellSize_ = _cellSize;
 }
 
 void TextRenderer::setFont(FontConfig const& _fonts)
@@ -169,11 +162,7 @@ void TextRenderer::flushPendingSegments()
         return;
 
     render(
-        #if 1
-        screenCoordinates_.map(startColumn_, row_),
-        #else
-        QPoint(startColumn_ - 1, row_ - 1), // `- 1` because it'll be zero-indexed
-        #endif
+        gridMetrics_.map(startColumn_, row_),
         cachedGlyphPositions(),
         QVector4D(
             static_cast<float>(color_.red) / 255.0f,
@@ -371,8 +360,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
 
     // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-    auto const ratioX = colored ? static_cast<double>(cellSize_.width) * 2.0 / static_cast<float>(theGlyph.metrics.bitmapSize.x) : 1.0;
-    auto const ratioY = colored ? static_cast<double>(cellSize_.height) / static_cast<float>(theGlyph.metrics.bitmapSize.y) : 1.0;
+    auto const ratioX = colored ? static_cast<double>(gridMetrics_.cellSize.width) * 2.0 / static_cast<float>(theGlyph.metrics.bitmapSize.x) : 1.0;
+    auto const ratioY = colored ? static_cast<double>(gridMetrics_.cellSize.height) / static_cast<float>(theGlyph.metrics.bitmapSize.y) : 1.0;
 
     GlyphMetrics metadata = theGlyph.metrics;
     if (colored)
@@ -414,13 +403,10 @@ void TextRenderer::renderTexture(QPoint const& _pos,
 
         auto const y = _pos.y();
 
-
         renderTexture(QPoint(x, y), _color, _textureInfo);
     }
     else
     {
-        auto const baseline = fonts_.regular.first.get().baseline();
-
         auto const x = _pos.x()
                      + _glyphPos.renderOffset.x
                      + _glyphMetrics.bearing.x
@@ -429,9 +415,8 @@ void TextRenderer::renderTexture(QPoint const& _pos,
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
         auto const y = _pos.y()                     // bottom left
                      + _glyphPos.renderOffset.y     // -> harfbuzz adjustment
-                     + cellSize_.height             // -> top left
-                     - baseline                     // -> base line
-                     + _glyphMetrics.bearing.y      // -> bitmap top left
+                     + gridMetrics_.baseline        // -> baseline
+                     + _glyphMetrics.bearing.y      // -> bitmap top
                      - _glyphMetrics.bitmapSize.y   // -> bitmap height
                      ;
 

@@ -23,6 +23,29 @@ using std::tuple;
 
 namespace terminal::view {
 
+void loadGridMetricsFromFont(crispy::text::Font const& _font, GridMetrics& _gm)
+{
+    _gm.cellSize = Size{ _font.maxAdvance(), _font.lineHeight() };
+    _gm.baseline = _gm.cellSize.height - _font.baseline();
+    _gm.ascender = _font.ascender();
+    _gm.descender = _font.descender();
+    _gm.underline.position = _gm.baseline + _font.underlineOffset();
+    _gm.underline.thickness = _font.underlineThickness();
+}
+
+GridMetrics loadGridMetrics(crispy::text::Font const& _font, Size _pageSize)
+{
+    auto gm = GridMetrics{};
+
+    gm.pageSize = _pageSize;
+    gm.cellMargin = {0, 0, 0, 0}; // TODO (pass as args, and make use of them)
+    gm.pageMargin = {0, 0};       // TODO (fill early)
+
+    loadGridMetricsFromFont(_font, gm);
+
+    return gm;
+}
+
 Renderer::Renderer(Size const& _screenSize,
                    FontConfig const& _fonts,
                    terminal::ColorProfile _colorProfile,
@@ -32,14 +55,7 @@ Renderer::Renderer(Size const& _screenSize,
                    ShaderConfig const& _backgroundShaderConfig,
                    ShaderConfig const& _textShaderConfig,
                    QMatrix4x4 const& _projectionMatrix) :
-    screenCoordinates_{
-        _screenSize,
-        Size{
-            _fonts.regular.first.get().maxAdvance(), // cell width
-            _fonts.regular.first.get().lineHeight()  // cell height
-        },
-        _fonts.regular.first.get().lineHeight() - _fonts.regular.first.get().baseline()
-    },
+    gridMetrics_{ loadGridMetrics(_fonts.regular.first.get(), _screenSize) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     fonts_{ _fonts },
@@ -52,7 +68,7 @@ Renderer::Renderer(Size const& _screenSize,
         {}, // TODO _cellSize?
     },
     backgroundRenderer_{
-        screenCoordinates_,
+        gridMetrics_,
         _colorProfile.defaultBackground,
         renderTarget_
     },
@@ -66,23 +82,21 @@ Renderer::Renderer(Size const& _screenSize,
         renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
-        screenCoordinates_,
-        _fonts,
-        cellSize()
+        gridMetrics_,
+        _fonts
     },
     decorationRenderer_{
         renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
-        screenCoordinates_,
+        gridMetrics_,
         _colorProfile,
         _hyperlinkNormal,
-        _hyperlinkHover,
-        _fonts.regular.first.get()
+        _hyperlinkHover
     },
     cursorRenderer_{
         renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
-        screenCoordinates_,
+        gridMetrics_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
         canonicalColor(_colorProfile.cursor)
     }
@@ -146,15 +160,10 @@ bool Renderer::setFontSize(int _fontSize)
 
 void Renderer::updateMetricsAndClearCache()
 {
-    screenCoordinates_.cellSize = Size{
-        fonts_.regular.first.get().maxAdvance(),
-        fonts_.regular.first.get().lineHeight()
-    };
-    screenCoordinates_.textBaseline = screenCoordinates_.cellSize.height - fonts_.regular.first.get().baseline();
+    loadGridMetricsFromFont(fonts_.regular.first.get(), gridMetrics_);
 
-    textRenderer_.setCellSize(cellSize());
     imageRenderer_.setCellSize(cellSize());
-    decorationRenderer_.setFontMetrics(fonts_.regular.first.get());
+    decorationRenderer_.clearCache();
 
     clearCache();
 }
@@ -184,7 +193,7 @@ uint64_t Renderer::render(Terminal& _terminal,
 {
     metrics_.clear();
 
-    screenCoordinates_.screenSize = _terminal.screenSize();
+    gridMetrics_.pageSize = _terminal.screenSize();
 
     executeImageDiscards();
 
@@ -261,7 +270,7 @@ void Renderer::renderCursor(Terminal const& _terminal)
         cursorRenderer_.setShape(cursorShape);
 
         cursorRenderer_.render(
-            screenCoordinates_.map(
+            gridMetrics_.map(
                 _terminal.screen().cursor().position.column,
                 _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset()
             ),
@@ -289,7 +298,7 @@ void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _rever
     decorationRenderer_.renderCell(_pos, _cell);
     textRenderer_.schedule(_pos, _cell, fg);
     if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
-        imageRenderer_.renderImage(screenCoordinates_.map(_pos), fragment.value());
+        imageRenderer_.renderImage(gridMetrics_.map(_pos), fragment.value());
 }
 
 void Renderer::dumpState(std::ostream& _textOutput) const

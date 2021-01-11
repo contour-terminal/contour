@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Screen.h>
-#include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/ShaderConfig.h>
 #include <terminal_view/FontConfig.h>
 
@@ -104,6 +103,7 @@ namespace std
 
 namespace terminal::view {
 
+struct GridMetrics;
 struct RenderMetrics;
 
 /// Text Rendering Pipeline
@@ -113,13 +113,10 @@ class TextRenderer {
                  crispy::atlas::CommandListener& _commandListener,
                  crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                 ScreenCoordinates const& _screenCoordinates,
-                 FontConfig const& _fonts,
-                 Size const& _cellSize);
+                 GridMetrics const& _gridMetrics,
+                 FontConfig const& _fonts);
 
     void setFont(FontConfig const& _fonts);
-
-    void setCellSize(Size const& _cellSize);
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
@@ -168,7 +165,7 @@ class TextRenderer {
     // general properties
     //
     RenderMetrics& renderMetrics_;
-    ScreenCoordinates const& screenCoordinates_;
+    GridMetrics const& gridMetrics_;
     FontConfig fonts_;
 
     // text run segmentation
@@ -197,7 +194,6 @@ class TextRenderer {
 
     // target surface rendering
     //
-    Size cellSize_;
     crispy::text::TextShaper textShaper_;
     crispy::atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;

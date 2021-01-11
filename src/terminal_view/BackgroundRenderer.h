@@ -21,17 +21,17 @@
 
 namespace terminal::view {
 
-struct ScreenCoordinates;
+struct GridMetrics;
 class OpenGLRenderer;
 
 class BackgroundRenderer {
   public:
     /// Constructs the decoration renderer.
     ///
-    /// @param _screenCoordinates
+    /// @param _gridMetrics
     /// @param _defaultColor
     /// @param _renderTarget
-    BackgroundRenderer(ScreenCoordinates const& _screenCoordinates,
+    BackgroundRenderer(GridMetrics const& _gridMetrics,
                        RGBColor const& _defaultColor,
                        OpenGLRenderer& _renderTarget);
 
@@ -54,7 +54,7 @@ class BackgroundRenderer {
     void renderCellRange();
 
   private:
-    ScreenCoordinates const& screenCoordinates_;
+    GridMetrics const& gridMetrics_;
     RGBColor defaultColor_;
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
 

@@ -29,12 +29,12 @@ namespace terminal::view {
 
 CursorRenderer::CursorRenderer(crispy::atlas::CommandListener& _commandListener,
                                crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                               ScreenCoordinates const& _screenCoordinates,
+                               GridMetrics const& _gridMetrics,
                                CursorShape _shape,
                                QVector4D const& _color) :
     commandListener_{ _commandListener },
     textureAtlas_{ _monochromeTextureAtlas },
-    screenCoordinates_{ _screenCoordinates },
+    gridMetrics_{ _gridMetrics },
     shape_{ _shape },
     color_{ _color[0], _color[1], _color[2], _color[3] },
     columnWidth_{ 1 }
@@ -64,12 +64,12 @@ void CursorRenderer::rebuild()
 {
     clearCache();
 
-    auto const width = screenCoordinates_.cellSize.width * columnWidth_;
-    auto const baseline = screenCoordinates_.textBaseline;
+    auto const width = gridMetrics_.cellSize.width * columnWidth_;
+    auto const baseline = gridMetrics_.baseline;
     auto constexpr LineThickness = 1;
 
     { // {{{ CursorShape::Block
-        auto const height = screenCoordinates_.cellSize.height;
+        auto const height = gridMetrics_.cellSize.height;
         auto image = crispy::atlas::Buffer(width * height, 0xFFu);
 
         textureAtlas_.insert(
@@ -100,7 +100,7 @@ void CursorRenderer::rebuild()
     } // }}}
     { // {{{ CursorShape::Bar
         auto const thickness = max(LineThickness * baseline / 3, 1);
-        auto const height = screenCoordinates_.cellSize.height;
+        auto const height = gridMetrics_.cellSize.height;
         //auto const base_y = max((height - thickness) / 2, 0);
         auto image = crispy::atlas::Buffer(width * height, 0);
 
@@ -117,7 +117,7 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Rectangle
-        auto const height = screenCoordinates_.cellSize.height;
+        auto const height = gridMetrics_.cellSize.height;
         auto image = crispy::atlas::Buffer(width * height, 0xFFu);
         auto const thickness = max(width / 12, 1);
 

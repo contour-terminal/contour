@@ -22,7 +22,7 @@
 
 namespace terminal::view {
 
-struct ScreenCoordinates;
+struct GridMetrics;
 
 /// Dectorator, to decorate a grid cell, eventually containing a character
 ///
@@ -60,20 +60,16 @@ class DecorationRenderer {
     ///
     /// @param _commandListener
     /// @param _monochromeTextureAtlas
-    /// @param _screenCoordinates
-    /// @param _font used to retrieve font metrics
+    /// @param _gridMetrics
     /// @param _colorProfile
     DecorationRenderer(crispy::atlas::CommandListener& _commandListener,
                        crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                       ScreenCoordinates const& _screenCoordinates,
+                       GridMetrics const& _gridMetrics,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
-                       Decorator _hyperlinkHover,
-                       crispy::text::Font const& _font);
+                       Decorator _hyperlinkHover);
 
     void setColorProfile(ColorProfile const& _colorProfile);
-
-    void setFontMetrics(crispy::text::Font const& _font);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
@@ -100,14 +96,10 @@ class DecorationRenderer {
 
     // private data members
     //
-    ScreenCoordinates const& screenCoordinates_;
+    GridMetrics const& gridMetrics_;
 
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
-    int underlinePosition_ = 0;     // Center of the underline position, relative to cell bottom.
-    int lineThickness_ = 1;
-    int ascender_;
-    int descender_;
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 

@@ -19,8 +19,8 @@
 #include <terminal_view/ImageRenderer.h>
 #include <terminal_view/TextRenderer.h>
 
+#include <terminal_view/GridMetrics.h>
 #include <terminal_view/RenderMetrics.h>
-#include <terminal_view/ScreenCoordinates.h>
 #include <terminal_view/ShaderConfig.h>
 
 #include <terminal_view/OpenGLRenderer.h>
@@ -61,9 +61,7 @@ class Renderer {
              ShaderConfig const& _textShaderConfig,
              QMatrix4x4 const& _projectionMatrix);
 
-    int cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
-    int cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
-    Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
+    Size cellSize() const noexcept { return gridMetrics_.cellSize; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
@@ -78,14 +76,14 @@ class Renderer {
 
     constexpr void setScreenSize(Size const& _screenSize) noexcept
     {
-        screenCoordinates_.screenSize = _screenSize;
+        gridMetrics_.pageSize = _screenSize;
     }
 
     constexpr void setMargin(int _leftMargin, int _bottomMargin) noexcept
     {
         renderTarget_.setMargin(_leftMargin, _bottomMargin);
-        screenCoordinates_.leftMargin = _leftMargin;
-        screenCoordinates_.bottomMargin = _bottomMargin;
+        gridMetrics_.pageMargin.left = _leftMargin;
+        gridMetrics_.pageMargin.bottom = _bottomMargin;
     }
 
     /**
@@ -134,7 +132,7 @@ class Renderer {
   private:
     RenderMetrics metrics_;
 
-    ScreenCoordinates screenCoordinates_;
+    GridMetrics gridMetrics_;
 
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
