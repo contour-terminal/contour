@@ -19,7 +19,6 @@
 #include <terminal_view/FontConfig.h>
 
 #include <crispy/Atlas.h>
-#include <crispy/AtlasRenderer.h>
 #include <crispy/FNV.h>
 #include <crispy/text/Font.h>
 #include <crispy/text/TextShaper.h>

@@ -57,13 +57,13 @@ Renderer::Renderer(Size const& _screenSize,
         renderTarget_
     },
     imageRenderer_{
-        renderTarget_,
+        renderTarget_.textureScheduler(),
         renderTarget_.coloredAtlasAllocator(),
         cellSize()
     },
     textRenderer_{
         metrics_,
-        renderTarget_,
+        renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
         screenCoordinates_,
@@ -71,7 +71,7 @@ Renderer::Renderer(Size const& _screenSize,
         cellSize()
     },
     decorationRenderer_{
-        renderTarget_,
+        renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
         _colorProfile,
@@ -83,7 +83,7 @@ Renderer::Renderer(Size const& _screenSize,
         1.0f    // curly frequency
     },
     cursorRenderer_{
-        renderTarget_,
+        renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         screenCoordinates_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);

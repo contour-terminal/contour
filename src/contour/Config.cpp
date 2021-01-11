@@ -24,6 +24,8 @@
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
 
+#include <QtGui/QOpenGLContext>
+
 #include <algorithm>
 #include <array>
 #include <fstream>

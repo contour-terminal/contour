@@ -14,10 +14,10 @@
 #pragma once
 
 #include <crispy/Atlas.h>
-#include <crispy/AtlasRenderer.h>
 
 #include <terminal/Image.h>
 #include <terminal/Size.h>
+#include <QtCore/QPoint>
 
 #include <vector>
 

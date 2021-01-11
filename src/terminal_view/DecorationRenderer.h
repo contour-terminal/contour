@@ -16,7 +16,6 @@
 #include <terminal_view/ShaderConfig.h>
 
 #include <crispy/Atlas.h>
-#include <crispy/AtlasRenderer.h>
 #include <crispy/text/Font.h>
 
 #include <terminal/Screen.h>
@@ -99,7 +98,6 @@ class DecorationRenderer {
   private:
     using Atlas = crispy::atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
     using DataRef = Atlas::DataRef;
-    using AtlasRenderer = crispy::atlas::Renderer;
 
     void rebuild();
 

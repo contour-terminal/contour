@@ -15,8 +15,6 @@
 
 #include <QtCore/QSize>
 
-#include <QtGui/QOpenGLFunctions> // for GL_RED
-
 #include <stdexcept>
 #include <vector>
 
@@ -38,7 +36,7 @@ CursorRenderer::CursorRenderer(crispy::atlas::CommandListener& _commandListener,
     textureAtlas_{ _monochromeTextureAtlas },
     screenCoordinates_{ _screenCoordinates },
     shape_{ _shape },
-    color_{ _color },
+    color_{ _color[0], _color[1], _color[2], _color[3] },
     columnWidth_{ 1 }
 {
 }
@@ -54,7 +52,7 @@ void CursorRenderer::setShape(CursorShape _shape)
 
 void CursorRenderer::setColor(QVector4D const& _color)
 {
-    color_ = _color;
+    color_ = { _color[0], _color[1], _color[2], _color[3] };
 }
 
 void CursorRenderer::clearCache()
@@ -78,7 +76,7 @@ void CursorRenderer::rebuild()
             CursorShape::Block,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -96,7 +94,7 @@ void CursorRenderer::rebuild()
             CursorShape::Underscore,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -114,7 +112,7 @@ void CursorRenderer::rebuild()
             CursorShape::Bar,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -134,7 +132,7 @@ void CursorRenderer::rebuild()
             CursorShape::Rectangle,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}

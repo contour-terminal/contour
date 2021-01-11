@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <QtGui/QVector4D>
-
 #include <fmt/format.h>
 #include <iostream>
 
@@ -32,6 +30,7 @@
 namespace crispy::atlas {
 
 using Buffer = std::vector<uint8_t>;
+enum class Format { Red, RGBA };
 
 struct CreateAtlas {
     unsigned atlas;
@@ -73,15 +72,15 @@ struct TextureInfo {
 struct UploadTexture {
     std::reference_wrapper<TextureInfo const> texture;  // texture's attributes
     Buffer data;                                        // texture data to be uploaded
-    unsigned format;                                    // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
+    Format format;                                      // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
 };
 
 struct RenderTexture {
     std::reference_wrapper<TextureInfo const> texture;
-    int x;           // window x coordinate to render the texture to
-    int y;           // window y coordinate to render the texture to
-    int z;           // window z coordinate to render the texture to
-    QVector4D color;      // optional; a color being associated with this texture
+    int x;                      // window x coordinate to render the texture to
+    int y;                      // window y coordinate to render the texture to
+    int z;                      // window z coordinate to render the texture to
+    std::array<float, 4> color; // optional; a color being associated with this texture
 };
 
 /// Generic listener API to events from an Atlas.
@@ -216,7 +215,7 @@ class TextureAtlasAllocator {
                               unsigned _height,
                               unsigned _targetWidth,
                               unsigned _targetHeight,
-                              unsigned _format,
+                              Format _format,
                               Buffer&& _data,
                               unsigned _user = 0)
     {
@@ -457,7 +456,7 @@ class MetadataTextureAtlas {
                                   unsigned _height,
                                   unsigned _targetWidth,
                                   unsigned _targetHeight,
-                                  unsigned _format,
+                                  Format _format,
                                   Buffer&& _data,
                                   unsigned _user = 0,
                                   Metadata _metadata = {})

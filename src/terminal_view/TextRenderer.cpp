@@ -20,6 +20,7 @@
 #include <crispy/logger.h>
 #include <crispy/times.h>
 
+using std::array;
 using std::get;
 using std::nullopt;
 using std::optional;
@@ -363,7 +364,9 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id,
         return nullopt;
 
     auto& theGlyph = theGlyphOpt.value();
-    auto const format = _id.font.get().hasColor() ? GL_RGBA : GL_RED;
+    auto const format = _id.font.get().hasColor()
+                      ? crispy::atlas::Format::RGBA
+                      : crispy::atlas::Format::Red;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
 
     // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
@@ -455,7 +458,8 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     auto const x = _pos.x();
     auto const y = _pos.y();
     auto const z = 0;
-    commandListener_.renderTexture({_textureInfo, x, y, z, _color});
+    auto const color = array{_color[0], _color[1], _color[2], _color[3]};
+    commandListener_.renderTexture({_textureInfo, x, y, z, color});
 }
 
 void TextRenderer::debugCache(std::ostream& _textOutput) const

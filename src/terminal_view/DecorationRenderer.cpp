@@ -15,7 +15,6 @@
 #include <terminal_view/ScreenCoordinates.h>
 
 #include <crispy/Atlas.h>
-#include <crispy/AtlasRenderer.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
 
@@ -122,7 +121,7 @@ void DecorationRenderer::rebuild()
             Decorator::Underline,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -147,7 +146,7 @@ void DecorationRenderer::rebuild()
             Decorator::DoubleUnderline,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -171,7 +170,7 @@ void DecorationRenderer::rebuild()
             Decorator::CurlyUnderline,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -189,7 +188,7 @@ void DecorationRenderer::rebuild()
             Decorator::DottedUnderline,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -209,7 +208,7 @@ void DecorationRenderer::rebuild()
             Decorator::DashedUnderline,
             width, height,
             width, height,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -239,7 +238,7 @@ void DecorationRenderer::rebuild()
             Decorator::Framed,
             width, cellHeight,
             width, cellHeight,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -256,7 +255,7 @@ void DecorationRenderer::rebuild()
             Decorator::Overline,
             width, cellHeight,
             width, cellHeight,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -273,7 +272,7 @@ void DecorationRenderer::rebuild()
             Decorator::CrossedOut,
             width, middleCell - thickness / 2,
             width, middleCell - thickness / 2,
-            GL_RED,
+            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -351,12 +350,12 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         auto const x = pos.x();
         auto const y = pos.y();
         auto const z = 0;
-        auto const color = QVector4D(
-            static_cast<float>(_color.red) / 255.0f,
-            static_cast<float>(_color.green) / 255.0f,
-            static_cast<float>(_color.blue) / 255.0f,
+        auto const color = array{
+            float(_color.red) / 255.0f,
+            float(_color.green) / 255.0f,
+            float(_color.blue) / 255.0f,
             1.0f
-        );
+        };
         atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
         auto const advanceX = static_cast<int>(screenCoordinates_.cellSize.width);
         for (int const i : crispy::times(_columnCount))

@@ -15,7 +15,9 @@
 
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
+#include <array>
 
+using std::array;
 using std::nullopt;
 using std::optional;
 using crispy::times;
@@ -44,7 +46,7 @@ void ImageRenderer::renderImage(QPoint _pos, ImageFragment const& _fragment)
     {
         //std::cout << fmt::format("ImageRenderer.renderImage: {}\n", _fragment);
 
-        auto const color = QVector4D(1.0f, 0.0f, 0.0f, 1.0f); // not used
+        auto const color = array{1.0f, 0.0f, 0.0f, 1.0f}; // not used
         crispy::atlas::TextureInfo const& textureInfo = std::get<0>(*dataRef).get();
 
         // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
@@ -77,7 +79,7 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
                          _fragment.rasterizedImage().cellSize().height,
                          cellSize_.width,
                          cellSize_.height,
-                         GL_RGBA,
+                         crispy::atlas::Format::RGBA,
                          _fragment.data(),
                          colored,
                          metadata);

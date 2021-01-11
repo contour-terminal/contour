@@ -20,6 +20,8 @@
 #include <QtCore/QPoint>
 #include <QtGui/QVector4D>
 
+#include <array>
+
 namespace terminal::view {
 
 /// Takes care of rendering the text cursor.
@@ -51,7 +53,7 @@ class CursorRenderer {
     ScreenCoordinates const& screenCoordinates_;
 
     CursorShape shape_;
-    QVector4D color_;
+    std::array<float, 4> color_;
     int columnWidth_;
 };
 
