@@ -22,6 +22,7 @@
 #include <harfbuzz/hb-ft.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -39,7 +40,8 @@ class TextShaper {
     ///
     /// @param _script      the matching script for the given codepoints
     /// @param _font        the font list in priority order to be used for text shaping
-    /// @param _advanceX    number of pixels to advance on X axis for each new glyph to be rendered
+    /// @param _advanceX    number of pixels to advance on X axis for each new glyph to be rendered.
+    ///                     If not specified, the pen will be advanced using glyph metrics.
     /// @param _codepoints  array of codepoints to be shaped
     /// @param _size        number of codepoints and clusters
     /// @param _clusters    cluster assignments for each codepoint (must be of equal size of @p _code_codepoints)
@@ -48,7 +50,7 @@ class TextShaper {
     /// @returns pointer to the shape result
     GlyphPositionList shape(unicode::Script _script,
                             FontList const& _font,
-                            int _advanceX,
+                            std::optional<int> _advanceX,
                             int _size,
                             char32_t const* _codepoints,
                             int const* _clusters,
@@ -68,7 +70,7 @@ class TextShaper {
                int _clusterGap,
                unicode::Script _script,
                Font& _font,
-               int _advanceX,
+               std::optional<int> _advanceX,
                reference<GlyphPositionList> _result);
 
     // private data fields

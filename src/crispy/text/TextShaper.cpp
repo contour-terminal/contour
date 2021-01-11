@@ -57,7 +57,7 @@ TextShaper::~TextShaper()
 
 GlyphPositionList TextShaper::shape(unicode::Script _script,
                                     FontList const& _fonts,
-                                    int _advanceX,
+                                    optional<int> _advanceX,
                                     int _size,
                                     char32_t const* _codepoints,
                                     int const* _clusters,
@@ -123,7 +123,7 @@ bool TextShaper::shape(int _size,
                        int _clusterGap,
                        unicode::Script _script,
                        Font& _font,
-                       int _advanceX,
+                       optional<int> _advanceX,
                        reference<GlyphPositionList> _result)
 {
     hb_buffer_clear_contents(hb_buf_.get());
@@ -161,8 +161,6 @@ bool TextShaper::shape(int _size,
     int cy = 0;
     for (auto const i : times(glyphCount))
     {
-        cx = static_cast<int>(info[i].cluster) * _advanceX; // Advance by cluster in fixed width steps.
-
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
         _result.get().emplace_back(GlyphPosition(
             _font,
@@ -171,6 +169,11 @@ bool TextShaper::shape(int _size,
             info[i].codepoint,                          // glyph index
             static_cast<int>(info[i].cluster)
         ));
+
+        if (_advanceX.has_value())
+            cx = static_cast<int>(info[i + 1].cluster) * _advanceX.value();
+        else
+            cx += pos[i].x_advance >> 6;
     }
 
     return !crispy::any_of(_result.get(), glyphMissing);
