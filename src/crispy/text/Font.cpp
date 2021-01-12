@@ -51,11 +51,14 @@ namespace { // {{{ helper functions
     /// Computes the maximum horizontal advance for standard 7-bit text.
     int computeMaxAdvance(FT_Face _face)
     {
-        int maxAdvance = 0;
+        FT_Pos maxAdvance = 0;
         for (int i = 32; i < 128; i++)
-            if (FT_Load_Glyph(_face, i, FT_LOAD_DEFAULT) == FT_Err_Ok)
-                maxAdvance = max(maxAdvance, int(ceilf(float(_face->glyph->metrics.horiAdvance) / 64.0f)));
-        return maxAdvance;
+        {
+            if (auto ci = FT_Get_Char_Index(_face, i); ci == FT_Err_Ok)
+                if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
+                    maxAdvance = max(maxAdvance, _face->glyph->metrics.horiAdvance);
+        }
+        return int(ceilf(float(maxAdvance) / 64.0f));
     }
 } // }}}
 
@@ -188,6 +191,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     vector<uint8_t> bitmap;
     if (!hasColor())
     {
+        assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY);
         auto const pitch = face_->glyph->bitmap.pitch;
         bitmap.resize(height * width); // 8-bit antialiased alpha channel
         for (int i = 0; i < height; ++i)
@@ -196,6 +200,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     }
     else
     {
+        assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
         bitmap.resize(height * width * 4); // RGBA
         auto t = bitmap.begin();
 
@@ -270,7 +275,7 @@ int Font::lineHeight() const noexcept
 
 int Font::baseline() const noexcept
 {
-    return scaleVertical(face_->ascender);
+    return scaleVertical(face_->height - face_->ascender);
 }
 
 int Font::ascender() const noexcept

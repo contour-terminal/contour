@@ -293,8 +293,9 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         }
 
         // msg.write("\n");
+        // msg.write("Codepoints:");
         // for (size_t const i : times(count))
-        //     msg.write(" {:X}", static_cast<uint32_t>(codepoints[i]));
+        //     msg.write(" U+{:X}", static_cast<uint32_t>(codepoints[i]));
     }
 
     return gpos;
@@ -333,18 +334,55 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     if (!theGlyphOpt.has_value())
         return nullopt;
 
-    auto& theGlyph = theGlyphOpt.value();
+    auto& glyph = theGlyphOpt.value();
     auto const format = _id.font.get().hasColor()
                       ? crispy::atlas::Format::RGBA
                       : crispy::atlas::Format::Red;
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
+    auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
+
+    auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
+    if (xMax > gridMetrics_.cellSize.width * numCells)
+        debuglog().write("Glyph width {}+{}={} exceeds cell width {}.",
+                         glyph.metrics.bearing.x,
+                         glyph.metrics.bitmapSize.x,
+                         xMax,
+                         gridMetrics_.cellSize.width * numCells);
+
+    auto const yMax = gridMetrics_.baseline + glyph.metrics.bearing.y;
+    auto const yOverflow = gridMetrics_.cellSize.height - yMax;
+    if (yMax > gridMetrics_.cellSize.height)
+    {
+        assert(yOverflow < 0);
+        if (yOverflow > gridMetrics_.descender)
+        {
+            // shift down
+            debuglog().write("Glyph height {}+{}={} exceeds cell height {}. With bitmap dimmension {}, shifting vertically by {}.",
+                    gridMetrics_.baseline,
+                    glyph.metrics.bearing.y,
+                    yMax,
+                    gridMetrics_.cellSize.height,
+                    glyph.metrics.bitmapSize,
+                    yOverflow);
+            glyph.metrics.bearing.y += yOverflow;
+        }
+        else
+        {
+            debuglog().write("Glyph height {}+{}={} exceeds cell height {}. Bitmap dimmension is {}.",
+                    gridMetrics_.baseline,
+                    glyph.metrics.bearing.y,
+                    yMax,
+                    gridMetrics_.cellSize.height,
+                    glyph.metrics.bitmapSize);
+        }
+    }
 
     // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-    auto const ratioX = colored ? static_cast<double>(gridMetrics_.cellSize.width) * 2.0 / static_cast<float>(theGlyph.metrics.bitmapSize.x) : 1.0;
-    auto const ratioY = colored ? static_cast<double>(gridMetrics_.cellSize.height) / static_cast<float>(theGlyph.metrics.bitmapSize.y) : 1.0;
+    auto const ratioX = colored ? static_cast<double>(gridMetrics_.cellSize.width) * 2.0 / static_cast<float>(glyph.metrics.bitmapSize.x) : 1.0;
+    auto const ratioY = colored ? static_cast<double>(gridMetrics_.cellSize.height) / static_cast<float>(glyph.metrics.bitmapSize.y) : 1.0;
 
-    GlyphMetrics metadata = theGlyph.metrics;
+    GlyphMetrics metadata = glyph.metrics;
     if (colored)
     {
         metadata.bearing.x = int(ceil(metadata.bearing.x * ratioX));
@@ -358,11 +396,11 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
                              metadata,
                              _id.font.get().filePath());
 
-    return atlas.insert(_id, theGlyph.metrics.bitmapSize.x, theGlyph.metrics.bitmapSize.y,
-                        unsigned(float(theGlyph.metrics.bitmapSize.x) * ratioX),
-                        unsigned(float(theGlyph.metrics.bitmapSize.y) * ratioY),
+    return atlas.insert(_id, glyph.metrics.bitmapSize.x, glyph.metrics.bitmapSize.y,
+                        unsigned(float(glyph.metrics.bitmapSize.x) * ratioX),
+                        unsigned(float(glyph.metrics.bitmapSize.y) * ratioY),
                         format,
-                        move(theGlyph.bitmap),
+                        move(glyph.bitmap),
                         colored,
                         metadata);
 }

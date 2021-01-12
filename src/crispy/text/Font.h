@@ -160,7 +160,7 @@ struct GlobalGlyphMetrics {
 
 struct GlyphMetrics {
     Vec2 bitmapSize;        // glyph size in pixels
-    Vec2 bearing;           // offset from baseline to top of the glyph's bitmap
+    Vec2 bearing;           // offset baseline and left to top and left of the glyph's bitmap
     int advance;            // pixels from origin to next glyph's origin
 };
 
@@ -221,7 +221,7 @@ class Font {
     /// @returns the vertical gap between two baselines.
     int lineHeight() const noexcept;
 
-    /// @returns the basline relative from top down to pen position (0,0) as a positive value.
+    /// @returns the basline, i.e. lineHeight - ascender.
     int baseline() const noexcept;
 
     /// @returns pixels from baseline to bitmap top
