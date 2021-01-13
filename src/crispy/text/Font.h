@@ -165,7 +165,7 @@ struct GlyphMetrics {
 };
 
 enum class BitmapFormat {
-    Monochrome, //!< AA 8-bit alpha channel
+    Gray,       //!< AA 8-bit alpha channel
     RGBA,       //!< usually colored glyphs (especially emoji)
     LCD,        //!< LCD optimized bitmap for using Subpixel rendering technique
 };
@@ -306,8 +306,8 @@ namespace fmt { // {{{
         {
             switch (_format)
             {
-                case crispy::text::BitmapFormat::Monochrome:
-                    return format_to(ctx.out(), "Monochrome");
+                case crispy::text::BitmapFormat::Gray:
+                    return format_to(ctx.out(), "Gray");
                 case crispy::text::BitmapFormat::RGBA:
                     return format_to(ctx.out(), "RGBA");
                 case crispy::text::BitmapFormat::LCD:

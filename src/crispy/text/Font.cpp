@@ -189,31 +189,40 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     auto const buffer = face_->glyph->bitmap.buffer;
 
     Bitmap bitmap;
-    if (!hasColor())
+    switch (face_->glyph->bitmap.pixel_mode)
     {
-        assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY);
-        auto const pitch = face_->glyph->bitmap.pitch;
-        bitmap.data.resize(height * width); // 8-bit antialiased alpha channel
-        for (int i = 0; i < height; ++i)
-            for (int j = 0; j < width; ++j)
-                bitmap.data[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
-    }
-    else
-    {
-        assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
-        bitmap.data.resize(height * width * 4); // RGBA
-        auto t = bitmap.data.begin();
-
-        auto s = buffer;
-        for (int i = 0; i < width * height; ++i)
+        case FT_PIXEL_MODE_MONO:
+            // TODO: I think this one needs to be handled different.
+        case FT_PIXEL_MODE_GRAY:
         {
-            // BGRA -> RGBA
-            *t++ = s[2];
-            *t++ = s[1];
-            *t++ = s[0];
-            *t++ = s[3];
-            s += 4;
+            bitmap.format = BitmapFormat::Gray;
+            auto const pitch = face_->glyph->bitmap.pitch;
+            bitmap.data.resize(height * width); // 8-bit antialiased alpha channel
+            for (int i = 0; i < height; ++i)
+                for (int j = 0; j < width; ++j)
+                    bitmap.data[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
+            break;
         }
+        case FT_PIXEL_MODE_BGRA:
+        {
+            bitmap.format = BitmapFormat::RGBA;
+            bitmap.data.resize(height * width * 4);
+            auto t = bitmap.data.begin();
+
+            auto s = buffer;
+            for (int i = 0; i < width * height; ++i)
+            {
+                // BGRA -> RGBA
+                *t++ = s[2];
+                *t++ = s[1];
+                *t++ = s[0];
+                *t++ = s[3];
+                s += 4;
+            }
+            break;
+        }
+        default:
+            break;
     }
 
     return {Glyph{metrics, move(bitmap)}};
