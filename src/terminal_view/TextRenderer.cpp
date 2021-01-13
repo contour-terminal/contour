@@ -282,7 +282,7 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
         msg.write("via font: \"{}\"\n", gpos.at(0).font.get().filePath());
-        msg.write("with metrics: ");
+        msg.write("with metrics:");
         for (crispy::text::GlyphPosition const& gp : gpos)
         {
             gp.font.get().filePath();
@@ -390,17 +390,16 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     }
 
     if (crispy::logging_sink::for_debug().enabled())
-        //if (_id.font.get().hasColor())
-            debuglog().write("insert glyph {}: {}; path:{}",
-                             _id.glyphIndex,
-                             metadata,
-                             _id.font.get().filePath());
+        debuglog().write("insert glyph {}: {}; path:{}",
+                         _id.glyphIndex,
+                         metadata,
+                         _id.font.get().filePath());
 
     return atlas.insert(_id, glyph.metrics.bitmapSize.x, glyph.metrics.bitmapSize.y,
                         unsigned(float(glyph.metrics.bitmapSize.x) * ratioX),
                         unsigned(float(glyph.metrics.bitmapSize.y) * ratioY),
                         format,
-                        move(glyph.bitmap),
+                        move(glyph.bitmap.data),
                         colored,
                         metadata);
 }
