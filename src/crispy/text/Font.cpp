@@ -188,21 +188,21 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     auto const height = metrics.bitmapSize.y;
     auto const buffer = face_->glyph->bitmap.buffer;
 
-    vector<uint8_t> bitmap;
+    Bitmap bitmap;
     if (!hasColor())
     {
         assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_GRAY);
         auto const pitch = face_->glyph->bitmap.pitch;
-        bitmap.resize(height * width); // 8-bit antialiased alpha channel
+        bitmap.data.resize(height * width); // 8-bit antialiased alpha channel
         for (int i = 0; i < height; ++i)
             for (int j = 0; j < width; ++j)
-                bitmap[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
+                bitmap.data[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
     }
     else
     {
         assert(face_->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA);
-        bitmap.resize(height * width * 4); // RGBA
-        auto t = bitmap.begin();
+        bitmap.data.resize(height * width * 4); // RGBA
+        auto t = bitmap.data.begin();
 
         auto s = buffer;
         for (int i = 0; i < width * height; ++i)

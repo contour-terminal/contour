@@ -164,9 +164,22 @@ struct GlyphMetrics {
     int advance;            // pixels from origin to next glyph's origin
 };
 
+enum class BitmapFormat {
+    Monochrome, //!< AA 8-bit alpha channel
+    RGBA,       //!< usually colored glyphs (especially emoji)
+    LCD,        //!< LCD optimized bitmap for using Subpixel rendering technique
+};
+
+struct Bitmap {
+    BitmapFormat format;
+    std::vector<uint8_t> data;
+};
+
+void scale(Bitmap& _bitmap, int _x, int _y); // TODO
+
 struct Glyph {
     GlyphMetrics metrics;
-    std::vector<uint8_t> bitmap;
+    Bitmap bitmap;
 };
 
 class Font;
@@ -284,6 +297,27 @@ namespace std { // {{{
 } // }}}
 
 namespace fmt { // {{{
+    template <>
+    struct formatter<crispy::text::BitmapFormat> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::BitmapFormat const& _format, FormatContext& ctx)
+        {
+            switch (_format)
+            {
+                case crispy::text::BitmapFormat::Monochrome:
+                    return format_to(ctx.out(), "Monochrome");
+                case crispy::text::BitmapFormat::RGBA:
+                    return format_to(ctx.out(), "RGBA");
+                case crispy::text::BitmapFormat::LCD:
+                    return format_to(ctx.out(), "LCD");
+                default:
+                    return format_to(ctx.out(), "Unknown({})", unsigned(_format));
+            }
+        }
+    };
+
     template <>
     struct formatter<crispy::text::Vec2> {
         using Vec2 = crispy::text::Vec2;
