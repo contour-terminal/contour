@@ -131,7 +131,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = int(ceil(double(gridMetrics_.cellSize.height - gridMetrics_.ascender) * 2.0 / 3.0));
+        auto const height = int(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
         auto image = atlas::Buffer(width * height, 0);
 
         for (int x = 0; x < width; ++x)
@@ -198,7 +198,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = gridMetrics_.cellSize.height;
-        auto const thickness = gridMetrics_.underline.thickness;
+        auto const thickness = max(1, gridMetrics_.underline.thickness / 2);
         auto image = atlas::Buffer(width * cellHeight, 0u);
         auto const gap = 0; // thickness;
 
