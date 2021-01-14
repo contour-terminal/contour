@@ -1796,7 +1796,7 @@ void TerminalWidget::dumpState()
 {
     // TODO: log this to debuglog()?
     terminalView_->terminal().screen().dumpState("Dump screen state.");
-    terminalView_->renderer().dumpState(std::cout);
+    //XXX terminalView_->renderer().dumpState(std::cout);
 }
 // }}}
 
