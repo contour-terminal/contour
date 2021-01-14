@@ -1402,7 +1402,7 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 {
     int const fontSize = _profile.fontSize;
 
-    debuglog().write("using font size: {}pt ({}px)", _profile.fontSize, fontSize);
+    debuglog().write("using font size: {}pt", _profile.fontSize, fontSize);
 
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
