@@ -1,6 +1,7 @@
 ### 0.2.0 (unreleased)
 
 - Fixes SGR decorations to use designated underline thickness and underline position.
+- Fixes font glyph render in some corner cases where the rendered glyph did result in rectangle garbage on the screen.
 - Adds VT sequence for enabling/disabling debug logging. `CSI ? 46 h` and `CSI ? 46 l` and CLI option `-d`.
 - Adds improved debug logging.
 - ...

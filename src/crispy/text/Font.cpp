@@ -27,6 +27,9 @@
 #define HAVE_FONTCONFIG
 #endif
 
+#include <ft2build.h>
+#include FT_BITMAP_H
+
 #if defined(HAVE_FONTCONFIG)
 #include <fontconfig/fontconfig.h>
 #endif
@@ -192,7 +195,33 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     switch (face_->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
-            // TODO: I think this one needs to be handled different.
+        {
+            // convert mono to gray
+            FT_Bitmap ftBitmap;
+            FT_Bitmap_Init(&ftBitmap);
+
+            auto const ec = FT_Bitmap_Convert(ft_, &face_->glyph->bitmap, &ftBitmap, 1);
+            if (ec != FT_Err_Ok)
+                return nullopt;
+
+            ftBitmap.num_grays = 256;
+
+            bitmap.format = BitmapFormat::Gray;
+            bitmap.data.resize(height * width); // 8-bit channel (with values 0 or 255)
+
+            unsigned int stride = abs(ftBitmap.pitch);
+            for (auto const i : crispy::times<unsigned>(ftBitmap.rows))
+            {
+                for (auto const j : crispy::times<unsigned>(ftBitmap.width))
+                {
+                    auto const v = ftBitmap.buffer[i * stride + j] * 255; // => 0 or 255
+                    bitmap.data[i * face_->glyph->bitmap.width + j] = v;
+                }
+            }
+
+            FT_Bitmap_Done(ft_, &ftBitmap);
+            break;
+        }
         case FT_PIXEL_MODE_GRAY:
         {
             bitmap.format = BitmapFormat::Gray;
