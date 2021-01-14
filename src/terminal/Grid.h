@@ -33,6 +33,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
 #include <deque>
 #include <functional>
 #include <list>
@@ -357,9 +358,10 @@ constexpr bool operator==(Cell const& a, Cell const& b) noexcept
 class Line { // {{{
   public:
     enum class Flags : uint8_t {
-        None    = 0x0000,
-        Marked  = 0x0001,
-        Wrapped = 0x0002,
+        None      = 0x0000,
+        Wrappable = 0x0001,
+        Wrapped   = 0x0002,
+        Marked    = 0x0004,
     };
 
     using Buffer = std::deque<Cell>;
@@ -367,12 +369,15 @@ class Line { // {{{
     using const_iterator = Buffer::const_iterator;
     using reverse_iterator = Buffer::reverse_iterator;
 
-    Line(int _numCols, Cell const& _defaultCell) : buffer_(static_cast<size_t>(_numCols), _defaultCell) {}
+    Line(int _numCols, Cell const& _defaultCell, Flags _flags) :
+        buffer_(static_cast<size_t>(_numCols), _defaultCell),
+        flags_{static_cast<unsigned>(_flags)}
+    {}
 
-    Line(Buffer const& _init, Flags _flags = Flags::None) : Line(Buffer(_init), _flags) {}
-    Line(Buffer&& _init, Flags _flags = Flags::None);
-    Line(iterator const& _begin, iterator const& _end, Flags _flags = Flags::None);
-    Line(int _numCols, Buffer&& _init, Flags _flags = Flags::None);
+    Line(Buffer const& _init, Flags _flags) : Line(Buffer(_init), _flags) {}
+    Line(Buffer&& _init, Flags _flags);
+    Line(iterator const& _begin, iterator const& _end, Flags _flags);
+    Line(int _numCols, Buffer&& _init, Flags _flags);
     Line(int _numCols, std::string const& _s);
 
     Buffer& buffer() noexcept { return buffer_; }
@@ -425,13 +430,17 @@ class Line { // {{{
     bool wrapped() const noexcept { return isFlagEnabled(Flags::Wrapped); }
     void setWrapped(bool _enable) { setFlag(Flags::Wrapped, _enable); }
 
+    bool wrappable() const noexcept { return isFlagEnabled(Flags::Wrappable); }
+    void setWrappable(bool _enable) { setFlag(Flags::Wrappable, _enable); }
+
+    Flags wrappableFlag() const noexcept { return wrappable() ? Line::Flags::Wrappable : Line::Flags::None; }
+    Flags markedFlag() const noexcept { return marked() ? Line::Flags::Marked : Line::Flags::None; }
+
     std::string toUtf8() const;
 
     void setText(std::string const& _u8string);
 
     Flags flags() const noexcept { return static_cast<Flags>(flags_); }
-
-  private:
 
     void setFlag(Flags _flag, bool _enable) noexcept
     {
@@ -445,12 +454,17 @@ class Line { // {{{
 
   private:
     Buffer buffer_;
-    unsigned flags_ = 0;
+    unsigned flags_;
 };
+
+constexpr Line::Flags operator|(Line::Flags a, Line::Flags b) noexcept
+{
+    return Line::Flags(unsigned(a) | unsigned(b));
+}
 
 constexpr bool operator&(Line::Flags a, Line::Flags b) noexcept
 {
-    return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
+    return (unsigned(a) & unsigned(b)) != 0;
 }
 // }}}
 
@@ -696,14 +710,20 @@ namespace fmt {
         template <typename FormatContext>
         auto format(const terminal::Line::Flags _flags, FormatContext& ctx)
         {
+            static const std::array<std::pair<terminal::Line::Flags, std::string_view>, 3> nameMap = {
+                std::pair{ terminal::Line::Flags::Wrappable, std::string_view("Wrappable")},
+                std::pair{ terminal::Line::Flags::Wrapped, std::string_view("Wrapped")},
+                std::pair{ terminal::Line::Flags::Marked, std::string_view("Marked")}
+            };
             std::string s;
-            if (_flags & terminal::Line::Flags::Wrapped)
-                s += "Wrapped";
-            if (_flags & terminal::Line::Flags::Marked)
+            for (auto const& mapping : nameMap)
             {
-                if (!s.empty())
-                    s += ",";
-                s += "Marked";
+                if (mapping.first & _flags)
+                {
+                    if (!s.empty())
+                        s += ",";
+                    s += mapping.second;
+                }
             }
             return format_to(ctx.out(), s);
         }

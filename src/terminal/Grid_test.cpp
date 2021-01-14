@@ -61,7 +61,7 @@ TEST_CASE("Line.reflow", "[grid]")
 {
     auto line = Line(5, "ABCDE");
     CHECK(!line.wrapped());
-    auto const reflowed = Line{line.reflow(3)};
+    auto const reflowed = Line(line.reflow(3), line.flags());
     CHECK(!line.wrapped());
     CHECK(line.toUtf8() == "ABC");
     CHECK(reflowed.size() == 2);

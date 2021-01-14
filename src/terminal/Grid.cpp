@@ -96,7 +96,8 @@ Line::Line(int _numCols, Buffer&& _init, Flags _flags) :
     buffer_.resize(static_cast<int>(_numCols));
 }
 
-Line::Line(int _numCols, std::string const& _s) : Line(_numCols, Cell{})
+Line::Line(int _numCols, std::string const& _s) :
+    Line(_numCols, Cell{}, Flags::None)
 {
     for (auto const && [i, ch] : crispy::indexed(_s))
         buffer_.at(i).setCharacter(ch);
@@ -219,7 +220,11 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
     maxHistoryLineCount_{ _maxHistoryLineCount },
     lines_(
         static_cast<size_t>(_screenSize.height),
-        Line(static_cast<size_t>(_screenSize.width), Cell{})
+        Line(
+            static_cast<size_t>(_screenSize.width),
+            Cell{},
+            Line::Flags::None
+        )
     )
 {
 }
@@ -238,7 +243,7 @@ void addNewWrappedLines(Lines& _targetLines,
         auto to = next(begin(_wrappedColumns), _newColumnCount);
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
         _targetLines.emplace_back(Line(from, to, wrappedFlag));
-        logf(" - add line: '{}'", Line(from, to).toUtf8());
+        logf(" - add line: '{}'", _targetLines.back().toUtf8());
         _wrappedColumns.erase(from, to);
         ++i;
     }
@@ -246,7 +251,7 @@ void addNewWrappedLines(Lines& _targetLines,
     if (_wrappedColumns.size() > 0)
     {
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_wrappedColumns)).toUtf8());
+        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_wrappedColumns), wrappedFlag).toUtf8());
         _targetLines.emplace_back(Line(_newColumnCount, move(_wrappedColumns), wrappedFlag));
     }
 }
@@ -274,7 +279,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         generate_n(
             back_inserter(lines_),
             fillLineCount,
-            [=]() { return Line(screenSize_.width, Cell{}); }
+            [=]() { return Line(screenSize_.width, Cell{}, Line::Flags::None); }
         );
 
         screenSize_.height = _newHeight;
@@ -332,14 +337,14 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
                 logf("{:>2}: line: '{}' (wrapped: '{}') {}",
                      i++,
                      line.toUtf8(),
-                     Line(wrappedColumns).toUtf8(),
+                     Line(Line::Buffer(wrappedColumns), Line::Flags::None).toUtf8(),
                      line.wrapped() ? "WRAPPED" : "");
                 assert(line.size() == screenSize_.width);
 
                 if (line.wrapped())
                 {
                     crispy::copy(line.trim_blank_right(), back_inserter(wrappedColumns));
-                    logf(" - join: '{}'", Line(wrappedColumns).toUtf8());
+                    logf(" - join: '{}'", Line(Line::Buffer(wrappedColumns), Line::Flags::None).toUtf8());
                 }
                 else // line is not wrapped
                 {
@@ -476,7 +481,7 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
         generate_n(
             back_inserter(lines_),
             n,
-            [&]() { return Line(screenSize_.width, Cell{{}, _attr}); }
+            [&]() { return Line(screenSize_.width, Cell{{}, _attr}, Line::Flags::None); }
         );
     }
 }
