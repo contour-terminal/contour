@@ -188,13 +188,12 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
         if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
-            return nullopt; // {Glyph{}}; // TODO: why not nullopt?
+            return nullopt;
 
     auto const width = metrics.bitmapSize.x;
     auto const height = metrics.bitmapSize.y;
-    auto const buffer = face_->glyph->bitmap.buffer;
 
-    Bitmap bitmap;
+    auto bitmap = Bitmap{};
     switch (face_->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
@@ -212,15 +211,10 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
             bitmap.format = BitmapFormat::Gray;
             bitmap.data.resize(height * width); // 8-bit channel (with values 0 or 255)
 
-            unsigned int stride = abs(ftBitmap.pitch);
-            for (auto const i : crispy::times<unsigned>(ftBitmap.rows))
-            {
-                for (auto const j : crispy::times<unsigned>(ftBitmap.width))
-                {
-                    auto const v = ftBitmap.buffer[i * stride + j] * 255; // => 0 or 255
-                    bitmap.data[i * face_->glyph->bitmap.width + j] = v;
-                }
-            }
+            auto const pitch = abs(ftBitmap.pitch);
+            for (auto const i : crispy::times(ftBitmap.rows))
+                for (auto const j : crispy::times(ftBitmap.width))
+                    bitmap.data[i * face_->glyph->bitmap.width + j] = ftBitmap.buffer[i * pitch + j] * 255;
 
             FT_Bitmap_Done(ft_, &ftBitmap);
             break;
@@ -228,11 +222,12 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
         case FT_PIXEL_MODE_GRAY:
         {
             bitmap.format = BitmapFormat::Gray;
-            auto const pitch = face_->glyph->bitmap.pitch;
             bitmap.data.resize(height * width); // 8-bit antialiased alpha channel
-            for (int i = 0; i < height; ++i)
-                for (int j = 0; j < width; ++j)
-                    bitmap.data[i * face_->glyph->bitmap.width + j] = buffer[i * pitch + j];
+            auto const s = face_->glyph->bitmap.buffer;
+            auto const pitch = face_->glyph->bitmap.pitch;
+            for (auto const i : crispy::times(height))
+                for (auto const j : crispy::times(width))
+                    bitmap.data[i * face_->glyph->bitmap.width + j] = s[i * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_BGRA:
@@ -240,21 +235,21 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
             bitmap.format = BitmapFormat::RGBA;
             bitmap.data.resize(height * width * 4);
             auto t = bitmap.data.begin();
+            auto s = face_->glyph->bitmap.buffer;
 
-            auto s = buffer;
-            for (int i = 0; i < width * height; ++i)
-            {
+            crispy::for_each(crispy::times(0, width * height, 4), [&](auto) {
                 // BGRA -> RGBA
                 *t++ = s[2];
                 *t++ = s[1];
                 *t++ = s[0];
                 *t++ = s[3];
                 s += 4;
-            }
+            });
             break;
         }
         default:
-            break;
+            debuglog().write("Glyph requested that has an unsupported pixel_mode:{}", face_->glyph->bitmap.pixel_mode);
+            return nullopt;
     }
 
     return {Glyph{metrics, move(bitmap)}};
