@@ -378,7 +378,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     profileName_{ std::move(_profileName) },
     profile_{ *config_.profile(profileName_) },
     programPath_{ std::move(_programPath) },
-    fontLoader_{},
+    fontLoader_{ logicalDpiX(), logicalDpiY() },
     fonts_{loadFonts(profile())},
     terminalView_{},
     configFileChangeWatcher_{
@@ -1158,11 +1158,7 @@ bool TerminalWidget::setFontSize(int _fontSize)
     if (_fontSize > 100)
         return false;
 
-    auto const fontSizePixels = pointsToPixels(_fontSize);
-
-    debuglog().write("setting font size to {}pt ({}px)", _fontSize, fontSizePixels);
-
-    terminalView_->setFontSize(fontSizePixels);
+    terminalView_->setFontSize(_fontSize);
     profile().fontSize = static_cast<short>(_fontSize);
 
     return true;
@@ -1404,7 +1400,7 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
 
 terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile const& _profile)
 {
-    int const fontSize = pointsToPixels(_profile.fontSize);
+    int const fontSize = _profile.fontSize;
 
     debuglog().write("using font size: {}pt ({}px)", _profile.fontSize, fontSize);
 

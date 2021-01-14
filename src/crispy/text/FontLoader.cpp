@@ -103,10 +103,12 @@ namespace {
     }
 }
 
-FontLoader::FontLoader() :
+FontLoader::FontLoader(int _dpiX, int _dpiY) :
     ft_{},
+    dpi_{ _dpiX, _dpiY },
     fonts_{}
 {
+    printf("FontLoader: DPI %dx%d\n", _dpiX, _dpiY);
     if (FT_Init_FreeType(&ft_))
         throw runtime_error{ "Failed to initialize FreeType." };
 }
@@ -117,7 +119,12 @@ FontLoader::~FontLoader()
     FT_Done_FreeType(ft_);
 }
 
-FontList FontLoader::load(string const& _fontPattern, int _fontSize)
+void FontLoader::setDpi(Vec2 _dpi)
+{
+    dpi_ = _dpi;
+}
+
+FontList FontLoader::load(string const& _fontPattern, double _fontSize)
 {
     vector<string> const filePaths = getFontFilePaths(_fontPattern);
 
@@ -141,7 +148,7 @@ FontList FontLoader::load(string const& _fontPattern, int _fontSize)
     return {*primaryFont, fallbackList};
 }
 
-Font* FontLoader::loadFromFilePath(std::string const& _path, int _fontSize)
+Font* FontLoader::loadFromFilePath(std::string const& _path, double _fontSize)
 {
     if (auto k = fonts_.find(_path); k != fonts_.end())
     {
@@ -150,8 +157,8 @@ Font* FontLoader::loadFromFilePath(std::string const& _path, int _fontSize)
         return &k->second;
     }
 
-    if (auto face = Font::loadFace(ft_, _path, _fontSize); face != nullptr)
-        return &fonts_.emplace(make_pair(_path, Font(ft_, face, _fontSize, _path))).first->second;
+    if (auto face = Font::loadFace(ft_, _path, _fontSize, dpi_); face != nullptr)
+        return &fonts_.emplace(make_pair(_path, Font(ft_, face, _fontSize, dpi_, _path))).first->second;
 
     return nullptr;
 }

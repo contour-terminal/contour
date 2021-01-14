@@ -36,19 +36,25 @@ namespace crispy::text {
 class FontLoader {
   public:
     FontLoader();
+    FontLoader(int _dpiX, int _dpiY);
     FontLoader(FontLoader&&) = delete;
     FontLoader(FontLoader const&) = delete;
     FontLoader& operator=(FontLoader&&) = delete;
     FontLoader& operator=(FontLoader const&) = delete;
     ~FontLoader();
 
-    FontList load(std::string const& _fontPattern, int _fontSize);
+    Vec2 dpi() const noexcept { return dpi_; }
+    void setDpi(Vec2 _dpi);
+    void setDpi(int _x, int _y) { setDpi(Vec2{_x, _y}); }
+
+    FontList load(std::string const& _fontPattern, double  _fontSize);
 
   private:
-    Font* loadFromFilePath(std::string const& _filePath, int _fontSize);
+    Font* loadFromFilePath(std::string const& _filePath, double  _fontSize);
 
   private:
     FT_Library ft_;
+    Vec2 dpi_;
     std::unordered_map<std::string, Font> fonts_;
 };
 

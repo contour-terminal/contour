@@ -65,7 +65,7 @@ namespace { // {{{ helper functions
     }
 } // }}}
 
-FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize)
+FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, double _fontSize, Vec2 _dpi)
 {
     FT_Face face{};
     if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face) != FT_Err_Ok)
@@ -78,19 +78,20 @@ FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSi
     if (ec)
         debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
 
-    if (doSetFontSize(face, _fontSize))
+    if (doSetFontSize(face, _fontSize, _dpi))
         return face;
 
     FT_Done_Face(face);
     return nullptr;
 }
 
-Font::Font(FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath) :
+Font::Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath) :
     hashCode_{ hash<string>{}(_fontPath)},
     filePath_{ move(_fontPath) },
     ft_{ _ft },
     face_{ _face },
-    fontSize_{ _fontSize }
+    fontSize_{ _fontSize },
+    dpi_{ _dpi }
 {
     recalculateMetrics();
 }
@@ -101,6 +102,7 @@ Font::Font(Font&& v) noexcept :
     ft_{ v.ft_ },
     face_{ v.face_ },
     fontSize_{ v.fontSize_ },
+    dpi_{ v.dpi_ },
     bitmapWidth_{ v.bitmapWidth_ },
     bitmapHeight_{ v.bitmapHeight_ },
     maxAdvance_{ v.maxAdvance_ }
@@ -121,6 +123,7 @@ Font& Font::operator=(Font&& v) noexcept
     ft_ = v.ft_;
     face_ = v.face_;
     fontSize_ = v.fontSize_;
+    dpi_ = v.dpi_;
     maxAdvance_ = v.maxAdvance_;
     bitmapWidth_ = v.bitmapWidth_;
     bitmapHeight_ = v.bitmapHeight_;
@@ -257,7 +260,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
     return {Glyph{metrics, move(bitmap)}};
 }
 
-bool Font::doSetFontSize(FT_Face _face, int _fontSize)
+bool Font::doSetFontSize(FT_Face _face, double _fontSize, Vec2 _dpi)
 {
     if (FT_HAS_COLOR(_face))
     {
@@ -270,7 +273,8 @@ bool Font::doSetFontSize(FT_Face _face, int _fontSize)
     }
     else
     {
-        FT_Error const ec = FT_Set_Pixel_Sizes(_face, 0, static_cast<FT_UInt>(_fontSize));
+        auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize * 64.0));
+        FT_Error const ec = FT_Set_Char_Size(_face, size, size, _dpi.x, _dpi.y);
         if (ec)
         {
             debuglog().write("Failed to FT_Set_Pixel_Sizes: {}\n", freetypeErrorString(ec));
@@ -280,9 +284,9 @@ bool Font::doSetFontSize(FT_Face _face, int _fontSize)
     return true;
 }
 
-void Font::setFontSize(int _fontSize)
+void Font::setFontSize(double _fontSize)
 {
-    if (fontSize_ != _fontSize && doSetFontSize(face_, _fontSize))
+    if (fontSize_ != _fontSize && doSetFontSize(face_, _fontSize, dpi_))
     {
         fontSize_ = _fontSize;
         recalculateMetrics();

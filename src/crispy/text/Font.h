@@ -207,7 +207,7 @@ using GlyphPositionList = std::vector<GlyphPosition>;
  */
 class Font {
   public:
-    Font(FT_Library _ft, FT_Face _face, int _fontSize, std::string _fontPath);
+    Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
     Font(Font&&) noexcept;
@@ -217,8 +217,8 @@ class Font {
     std::string const& filePath() const noexcept { return filePath_; }
     std::size_t hashCode() const noexcept { return hashCode_; }
 
-    void setFontSize(int _fontSize);
-    int fontSize() const noexcept { return fontSize_; }
+    void setFontSize(double _fontSize);
+    double fontSize() const noexcept { return fontSize_; }
 
     bool hasColor() const noexcept { return FT_HAS_COLOR(face_); }
 
@@ -257,13 +257,13 @@ class Font {
 
     FT_Face face() noexcept { return face_; }
 
-    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath, int _fontSize);
+    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath, double _fontSize, Vec2 _dpi);
 
     int scaleHorizontal(long _value) const noexcept;
     int scaleVertical(long _value) const noexcept;
 
   private:
-    static bool doSetFontSize(FT_Face _face, int _fontSize);
+    static bool doSetFontSize(FT_Face _face, double _fontSize, Vec2 _dpi);
     void recalculateMetrics();
 
     // private data
@@ -273,7 +273,8 @@ class Font {
 
     FT_Library ft_;
     FT_Face face_;
-    int fontSize_ = 0;
+    double fontSize_;
+    Vec2 dpi_;
 
     int bitmapWidth_ = 0;
     int bitmapHeight_ = 0;
