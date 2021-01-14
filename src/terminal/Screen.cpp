@@ -51,6 +51,7 @@ using std::accumulate;
 using std::array;
 using std::cerr;
 using std::endl;
+using std::function;
 using std::get;
 using std::holds_alternative;
 using std::make_shared;
@@ -491,7 +492,7 @@ void Screen::clearAndAdvance(int _offset)
     }
 }
 
-std::string Screen::screenshot() const
+std::string Screen::screenshot(function<string(int)> const& _postLine) const
 {
     auto result = std::stringstream{};
     auto writer = VTWriter(result);
@@ -519,6 +520,10 @@ std::string Screen::screenshot() const
                     writer.write(ch);
         }
         writer.sgr_add(GraphicsRendition::Reset);
+
+        if (_postLine)
+            writer.write(_postLine(row));
+
         writer.write('\r');
         writer.write('\n');
     }
@@ -1887,7 +1892,9 @@ void Screen::dumpState(std::string const& _message) const
     cerr << fmt::format("horizontal margins   : {}\n", margin_.horizontal);
 
     hline();
-    cerr << screenshot();
+    cerr << screenshot([this](int _lineNo) -> string {
+        return fmt::format("| {}", grid().lineAt(_lineNo).flags());
+    });
     hline();
 
     // TODO: print more useful debug information

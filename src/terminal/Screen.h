@@ -206,7 +206,7 @@ class Screen {
     ///
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
-    std::string screenshot() const;
+    std::string screenshot(std::function<std::string(int)> const& _postLine = {}) const;
 
     void setFocus(bool _focused) { focused_ = _focused; }
     bool focused() const noexcept { return focused_; }
