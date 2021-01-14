@@ -369,9 +369,9 @@ class Line { // {{{
 
     Line(int _numCols, Cell const& _defaultCell) : buffer_(static_cast<size_t>(_numCols), _defaultCell) {}
 
-    explicit Line(Buffer const& _init, Flags _flags = Flags::None) : Line(Buffer(_init), _flags) {}
-    explicit Line(Buffer&& _init, Flags _flags = Flags::None);
-    Line(iterator _begin, iterator _end, Flags _flags = Flags::None);
+    Line(Buffer const& _init, Flags _flags = Flags::None) : Line(Buffer(_init), _flags) {}
+    Line(Buffer&& _init, Flags _flags = Flags::None);
+    Line(iterator const& _begin, iterator const& _end, Flags _flags = Flags::None);
     Line(int _numCols, Buffer&& _init, Flags _flags = Flags::None);
     Line(int _numCols, std::string const& _s);
 
@@ -392,7 +392,7 @@ class Line { // {{{
     void append(Buffer const&);
     void append(int _count, Cell const& _initial);
 
-    Buffer remove(iterator _from, iterator _to);
+    Buffer remove(iterator const& _from, iterator const& _to);
 
     /// Shhift left by @p _count cells and fill right with cells of @p _fill.
     ///

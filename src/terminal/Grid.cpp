@@ -83,7 +83,7 @@ Line::Line(Buffer&& _init, Flags _flags) :
 {
 }
 
-Line::Line(iterator _begin, iterator _end, Flags _flags) :
+Line::Line(iterator const& _begin, iterator const& _end, Flags _flags) :
     buffer_(_begin, _end),
     flags_{ static_cast<unsigned>(_flags) }
 {
@@ -153,7 +153,7 @@ Line::Buffer Line::shift_left(int _count, Cell const& _fill)
     return out;
 }
 
-Line::Buffer Line::remove(iterator _from, iterator _to)
+Line::Buffer Line::remove(iterator const& _from, iterator const& _to)
 {
     auto removedColumns = Buffer(_from, _to);
     buffer_.erase(_from, _to);
