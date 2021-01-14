@@ -1,3 +1,12 @@
+# FRIDAY TODO
+- [ ] redo last commit in broken branch.
+  - one commit: change wrappedColumns to carriedColumns
+  - one commit: add SM/RM ?2027 (enable / disable&freeze reflow)
+- [ ] FIXME: growColumns messes with original line flags
+- [ ] [Font]: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
+- [ ] [Font]: investigate in faulty glyph offsetting?
+- [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y.
+
 ### font related refactor
 - [x] get underline position & thickness from font metrics
 - [x] fix doubly underline
@@ -12,6 +21,7 @@
 ```
 
 # REFLOW
+- [ ] Add changelog entry: "Adds experimental support for text reflow"
 - [ ] "// TODO: use `crispy::split(string) -> vector<string_view>` here"
 - [ ] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
 - [ ] Fix column grow to insert spaces in unwrap.
