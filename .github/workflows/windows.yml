@@ -5,6 +5,9 @@ on:
     branches:
     - master
     - wip
+    - testing
+    - unstable
+    - broken
   pull_request:
     branches:
     - master

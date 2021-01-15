@@ -6,6 +6,7 @@ on:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
     branches:
       - 'release'
+      - 'testing' # for public testing
       - 'gh-actions' # only for testing
 
 name: Create Release

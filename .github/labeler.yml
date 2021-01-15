@@ -1,7 +1,9 @@
 frontend:
-  - src/frontend/*.cpp
-  - src/frontend/*.h
-libterminal:
+  - src/contour/*.cpp
+  - src/contour/*.h
+  - src/terminal_view/*.cpp
+  - src/terminal_view/*.h
+backend:
   - src/terminal/*.cpp
   - src/terminal/*.h
 test:
