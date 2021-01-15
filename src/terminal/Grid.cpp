@@ -231,28 +231,28 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
 
 void addNewWrappedLines(Lines& _targetLines,
                         int _newColumnCount,
-                        Line::Buffer&& _wrappedColumns,
+                        Line::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
                         bool _initialNoWrap)
 {
     // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
     int i = 0;
 
-    while (static_cast<int>(_wrappedColumns.size()) >= _newColumnCount)
+    while (static_cast<int>(_logicalLineBuffer.size()) >= _newColumnCount)
     {
-        auto from = begin(_wrappedColumns);
-        auto to = next(begin(_wrappedColumns), _newColumnCount);
+        auto from = begin(_logicalLineBuffer);
+        auto to = next(begin(_logicalLineBuffer), _newColumnCount);
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
         _targetLines.emplace_back(Line(from, to, wrappedFlag));
         logf(" - add line: '{}'", _targetLines.back().toUtf8());
-        _wrappedColumns.erase(from, to);
+        _logicalLineBuffer.erase(from, to);
         ++i;
     }
 
-    if (_wrappedColumns.size() > 0)
+    if (_logicalLineBuffer.size() > 0)
     {
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_wrappedColumns), wrappedFlag).toUtf8());
-        _targetLines.emplace_back(Line(_newColumnCount, move(_wrappedColumns), wrappedFlag));
+        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_logicalLineBuffer), wrappedFlag).toUtf8());
+        _targetLines.emplace_back(Line(_newColumnCount, move(_logicalLineBuffer), wrappedFlag));
     }
 }
 
@@ -329,7 +329,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             logf("Growing by {} cols", extendCount);
 
             Lines grownLines;
-            Line::Buffer wrappedColumns; // Temporary state, representing wrapped columns from the line "below".
+            Line::Buffer logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
 
             [[maybe_unused]] auto i = 1;
             for (Line& line : lines_)
@@ -337,32 +337,32 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
                 logf("{:>2}: line: '{}' (wrapped: '{}') {}",
                      i++,
                      line.toUtf8(),
-                     Line(Line::Buffer(wrappedColumns), Line::Flags::None).toUtf8(),
+                     Line(Line::Buffer(logicalLineBuffer), Line::Flags::None).toUtf8(),
                      line.wrapped() ? "WRAPPED" : "");
                 assert(line.size() == screenSize_.width);
 
                 if (line.wrapped())
                 {
-                    crispy::copy(line.trim_blank_right(), back_inserter(wrappedColumns));
-                    logf(" - join: '{}'", Line(Line::Buffer(wrappedColumns), Line::Flags::None).toUtf8());
+                    crispy::copy(line.trim_blank_right(), back_inserter(logicalLineBuffer));
+                    logf(" - join: '{}'", Line(Line::Buffer(logicalLineBuffer), Line::Flags::None).toUtf8());
                 }
                 else // line is not wrapped
                 {
-                    if (!wrappedColumns.empty())
+                    if (!logicalLineBuffer.empty())
                     {
-                        addNewWrappedLines(grownLines, _newColumnCount, move(wrappedColumns), true);
-                        wrappedColumns.clear();
+                        addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), true);
+                        logicalLineBuffer.clear();
                     }
 
-                    crispy::copy(line, back_inserter(wrappedColumns));
+                    crispy::copy(line, back_inserter(logicalLineBuffer));
                     logf(" - start new logical line: '{}'", line.toUtf8());
                 }
             }
 
-            if (!wrappedColumns.empty())
+            if (!logicalLineBuffer.empty())
             {
-                addNewWrappedLines(grownLines, _newColumnCount, move(wrappedColumns), true);
-                wrappedColumns.clear();
+                addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), true);
+                logicalLineBuffer.clear();
             }
 
             lines_ = move(grownLines);
