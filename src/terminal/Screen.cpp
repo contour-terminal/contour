@@ -418,7 +418,8 @@ void Screen::writeText(char32_t _char)
     if (wrapPending_ && cursor_.autoWrap)
     {
         linefeed(margin_.horizontal.from);
-        currentLine_->setWrapped(true);
+        if (isModeEnabled(DECMode::TextReflow))
+            currentLine_->setWrapped(true);
     }
 
     auto const ch =
@@ -610,6 +611,7 @@ void Screen::resetSoft()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
+    setMode(DECMode::TextReflow, GridTextReflowEnabled);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     savedCursor_.position = Coordinate{1, 1}; // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
@@ -1444,6 +1446,28 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::BatchedRendering:
             // Only perform batched rendering when NOT in debugging mode.
             // TODO: also, do I still need this here?
+            break;
+        case DECMode::TextReflow:
+            printf("%s TextReflow from line %d .. %d\n", _enable ? "Enabling" : "Disabling",
+                    realCursorPosition().row, size_.height);
+            if (isPrimaryScreen())
+            {
+                if (_enable)
+                {
+                    // enabling reflow enables every line in the main page area
+                    for (Line& line : primaryGrid().mainPage())
+                        line.setFlag(Line::Flags::Wrappable, _enable);
+                }
+                else
+                {
+                    // disabling reflow only affects currently line and below
+                    auto const startLine = historyLineCount() + realCursorPosition().row - 1;
+                    auto const endLine = historyLineCount() + size_.height;
+                    assert(primaryGrid().lines(startLine, endLine).begin() == currentLine_);
+                    for (Line& line : primaryGrid().lines(startLine, endLine))
+                        line.setFlag(Line::Flags::Wrappable, _enable);
+                }
+            }
             break;
         case DECMode::DebugLogging:
             crispy::logging_sink::for_debug().enable(_enable);

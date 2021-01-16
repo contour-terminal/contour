@@ -18,7 +18,7 @@
 #include <iostream>
 
 using namespace terminal;
-using namespace std::string_literals;
+using namespace std::string_view_literals;
 using std::string;
 
 namespace // {{{ helper
@@ -57,15 +57,63 @@ namespace // {{{ helper
     }
 } // }}}
 
-TEST_CASE("Line.reflow", "[grid]")
+TEST_CASE("Line.reflow.unwrappable", "[grid]")
 {
-    auto line = Line(5, "ABCDE");
+    auto line = Line(5, "ABCDE"sv, Line::Flags::None);
+    REQUIRE(!line.wrappable());
+    REQUIRE(!line.wrapped());
+
+    auto const reflowed = line.reflow(3);
     CHECK(!line.wrapped());
-    auto const reflowed = Line(line.reflow(3), line.flags());
+    CHECK(line.size() == 3);
+    CHECK(line.toUtf8() == "ABC");
+    CHECK(reflowed.size() == 0);
+}
+
+TEST_CASE("Line.reflow.wrappable", "[grid]")
+{
+    auto line = Line(5, "ABCDE"sv, Line::Flags::Wrappable);
+    REQUIRE(line.wrappable());
+    REQUIRE(!line.wrapped());
+
+    auto const reflowed = Line(line.reflow(3), line.inheritableFlags() | Line::Flags::Wrapped);
     CHECK(!line.wrapped());
+    CHECK(line.size() == 3);
     CHECK(line.toUtf8() == "ABC");
     CHECK(reflowed.size() == 2);
     CHECK(reflowed.toUtf8() == "DE");
+}
+
+TEST_CASE("Line.reflow.empty", "[grid]")
+{
+    auto line = Line(5, Cell{}, Line::Flags::Wrappable);
+    REQUIRE(!line.wrapped());
+    REQUIRE(line.size() == 5);
+    REQUIRE(line.toUtf8() == "     ");
+
+    auto const reflowed = Line(line.reflow(3), line.flags());
+    CHECK(!line.wrapped());
+    CHECK(line.size() == 3);
+    CHECK(line.toUtf8() == "   ");
+    CHECK(reflowed.size() == 0);
+    CHECK(reflowed.toUtf8() == "");
+}
+
+TEST_CASE("Grid.reflow.shrink.wrappable", "[grid]")
+{
+    auto grid = Grid(Size{4, 4}, true, std::nullopt);
+    grid.lineAt(1).setText("ABCD");
+    grid.lineAt(1).setWrappable(true);
+    grid.lineAt(2).setWrappable(false);
+    grid.lineAt(3).setWrappable(false);
+    grid.lineAt(4).setWrappable(false);
+    logGridText(grid, "initial");
+
+    grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+    logGridText(grid, "after resize");
+
+    // TODO: test output
+    //CHECK(false);
 }
 
 TEST_CASE("Grid.reflow.shrink", "[grid]")
@@ -205,8 +253,8 @@ TEST_CASE("Grid.reflow.shrink_many", "[grid]")
 {
     auto grid = setupGrid5x2();
     REQUIRE(grid.screenSize() == Size{5, 2});
-    REQUIRE(grid.renderTextLine(1) == "ABCDE"s);
-    REQUIRE(grid.renderTextLine(2) == "abcde"s);
+    REQUIRE(grid.renderTextLine(1) == "ABCDE"sv);
+    REQUIRE(grid.renderTextLine(2) == "abcde"sv);
 
     grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 2x2");

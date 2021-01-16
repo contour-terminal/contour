@@ -35,6 +35,7 @@ using std::generate_n;
 using std::min;
 using std::move;
 using std::next;
+using std::nullopt;
 using std::optional;
 using std::prev;
 using std::reverse;
@@ -96,8 +97,8 @@ Line::Line(int _numCols, Buffer&& _init, Flags _flags) :
     buffer_.resize(static_cast<int>(_numCols));
 }
 
-Line::Line(int _numCols, std::string const& _s) :
-    Line(_numCols, Cell{}, Flags::None)
+Line::Line(int _numCols, std::string_view const& _s, Flags _flags) :
+    Line(_numCols, Cell{}, _flags)
 {
     for (auto const && [i, ch] : crispy::indexed(_s))
         buffer_.at(i).setCharacter(ch);
@@ -107,7 +108,7 @@ string Line::toUtf8() const
 {
     string s;
     s.reserve(size());
-    for (Cell const& cell : buffer_)
+    for (Cell const& cell : crispy::range(begin(), next(begin(), size())))
         s += cell.toUtf8();
     return s;
 }
@@ -193,21 +194,31 @@ Line::Buffer Line::reflow(int _newColumnCount)
             // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
             //   cell needs to be injected to match the expected column width.
 
-            auto const [reflowStart, reflowEnd] = [this, _newColumnCount]()
+            if (wrappable())
             {
-                auto const reflowStart = next(buffer_.begin(), _newColumnCount /* - buffer_[_newColumnCount].width()*/);
-                auto reflowEnd = buffer_.end();
+                auto const [reflowStart, reflowEnd] = [this, _newColumnCount]()
+                {
+                    auto const reflowStart = next(buffer_.begin(), _newColumnCount /* - buffer_[_newColumnCount].width()*/);
+                    auto reflowEnd = buffer_.end();
 
-                while (reflowEnd != reflowStart && is_blank(*prev(reflowEnd)))
-                    reflowEnd = prev(reflowEnd);
+                    while (reflowEnd != reflowStart && is_blank(*prev(reflowEnd)))
+                        reflowEnd = prev(reflowEnd);
 
-                return tuple{reflowStart, reflowEnd};
-            }();
+                    return tuple{reflowStart, reflowEnd};
+                }();
 
-            auto removedColumns = Buffer(reflowStart, reflowEnd);
-            buffer_.erase(reflowStart, buffer_.end());
-            assert(size() == _newColumnCount);
-            return removedColumns;
+                auto removedColumns = Buffer(reflowStart, reflowEnd);
+                buffer_.erase(reflowStart, buffer_.end());
+                assert(size() == _newColumnCount);
+                return removedColumns;
+            }
+            else
+            {
+                auto const reflowStart = next(buffer_.cbegin(), _newColumnCount);
+                buffer_.erase(reflowStart, buffer_.end());
+                assert(size() == _newColumnCount);
+                return {};
+            }
         }
     }
     return {};
@@ -223,15 +234,25 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
         Line(
             static_cast<size_t>(_screenSize.width),
             Cell{},
-            Line::Flags::None
+            _reflowOnResize ? Line::Flags::Wrappable : Line::Flags::None
         )
     )
 {
 }
 
+/**
+ * Appends logical line by splitting into fixed with lines.
+ *
+ * @param _targetLines
+ * @param _newColumnCount
+ * @param _logicalLineBuffer
+ * @param _baseFlags
+ * @param _initialNoWrap
+ */
 void addNewWrappedLines(Lines& _targetLines,
                         int _newColumnCount,
                         Line::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
+                        Line::Flags _baseFlags,
                         bool _initialNoWrap)
 {
     // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
@@ -242,8 +263,8 @@ void addNewWrappedLines(Lines& _targetLines,
         auto from = begin(_logicalLineBuffer);
         auto to = next(begin(_logicalLineBuffer), _newColumnCount);
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        _targetLines.emplace_back(Line(from, to, wrappedFlag));
-        logf(" - add line: '{}'", _targetLines.back().toUtf8());
+        _targetLines.emplace_back(Line(from, to, _baseFlags | wrappedFlag));
+        logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
         _logicalLineBuffer.erase(from, to);
         ++i;
     }
@@ -251,8 +272,8 @@ void addNewWrappedLines(Lines& _targetLines,
     if (_logicalLineBuffer.size() > 0)
     {
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        logf(" - add line: '{}'", Line(_newColumnCount, Line::Buffer(_logicalLineBuffer), wrappedFlag).toUtf8());
-        _targetLines.emplace_back(Line(_newColumnCount, move(_logicalLineBuffer), wrappedFlag));
+        _targetLines.emplace_back(Line(_newColumnCount, move(_logicalLineBuffer), _baseFlags | wrappedFlag));
+        logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
     }
 }
 
@@ -272,6 +293,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         auto const extendCount = _newHeight - screenSize_.height;
         auto const rowsToTakeFromSavedLines = min(extendCount, historyLineCount());
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
+        auto const wrappableFlag = lines_.back().wrappableFlag();
 
         assert(rowsToTakeFromSavedLines >= 0);
         assert(fillLineCount >= 0);
@@ -279,7 +301,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         generate_n(
             back_inserter(lines_),
             fillLineCount,
-            [=]() { return Line(screenSize_.width, Cell{}, Line::Flags::None); }
+            [=]() { return Line(screenSize_.width, Cell{}, wrappableFlag); }
         );
 
         screenSize_.height = _newHeight;
@@ -330,6 +352,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
 
             Lines grownLines;
             Line::Buffer logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
+            Line::Flags logicalLineFlags = Line::Flags::None;
 
             [[maybe_unused]] auto i = 1;
             for (Line& line : lines_)
@@ -337,31 +360,33 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
                 logf("{:>2}: line: '{}' (wrapped: '{}') {}",
                      i++,
                      line.toUtf8(),
-                     Line(Line::Buffer(logicalLineBuffer), Line::Flags::None).toUtf8(),
+                     Line(Line::Buffer(logicalLineBuffer), line.flags()).toUtf8(),
                      line.wrapped() ? "WRAPPED" : "");
-                assert(line.size() == screenSize_.width);
+                assert(line.size() >= screenSize_.width);
 
                 if (line.wrapped())
                 {
                     crispy::copy(line.trim_blank_right(), back_inserter(logicalLineBuffer));
-                    logf(" - join: '{}'", Line(Line::Buffer(logicalLineBuffer), Line::Flags::None).toUtf8());
+                    logf(" - join: '{}'", Line(Line::Buffer(logicalLineBuffer), line.flags()).toUtf8());
                 }
                 else // line is not wrapped
                 {
                     if (!logicalLineBuffer.empty())
                     {
-                        addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), true);
+                        addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
                         logicalLineBuffer.clear();
                     }
 
                     crispy::copy(line, back_inserter(logicalLineBuffer));
+                    logicalLineFlags = line.wrappableFlag() | line.markedFlag();
+
                     logf(" - start new logical line: '{}'", line.toUtf8());
                 }
             }
 
             if (!logicalLineBuffer.empty())
             {
-                addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), true);
+                addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
                 logicalLineBuffer.clear();
             }
 
@@ -392,7 +417,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         }
         else
         {
-            // Shrinking progress
+            // {{{ Shrinking progress
             // -----------------------------------------------------------------------
             //  (one-by-one)        | (from-5-to-2)
             // -----------------------------------------------------------------------
@@ -415,26 +440,52 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             // "ab"
             // "cd"     Wrapped
             // "e "     Wrapped
+            // }}}
 
             Lines shrinkedLines;
             Line::Buffer wrappedColumns;
+            Line::Flags previousFlags = lines_.front().inheritableFlags();
 
+            int i = 0;
             for (Line& line : lines_)
             {
+                logf("shrink line {}: \"{}\" wrapped: \"{}\"",
+                    i,
+                    line.toUtf8(),
+                    Line(Line::Buffer(wrappedColumns), previousFlags).toUtf8()
+                );
+                // do we have previous columns carried?
                 if (!wrappedColumns.empty())
                 {
-                    if (line.wrapped())
+                    if (line.wrapped() && line.inheritableFlags() == previousFlags)
+                    {
+                        assert(previousFlags == line.inheritableFlags());
                         // Prepend previously wrapped columns into current line.
                         line.prepend(wrappedColumns);
+                    }
                     else
+                    {
                         // Insert NEW line(s) between previous and this line with previously wrapped columns.
-                        addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), false);
+                        addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                        previousFlags = line.inheritableFlags();
+                    }
                 }
+                else
+                {
+                    previousFlags = line.inheritableFlags();
+                }
+
                 wrappedColumns = line.reflow(_newColumnCount);
+
+                auto const wrappedLine = Line(Line::Buffer(wrappedColumns), Line::Flags::None);
+                logf(" - ADD LINE: '{}' ({}) wrapped: \"{}\"", line.toUtf8(), line.flags(),
+                    Line(Line::Buffer(wrappedColumns), Line::Flags::None).toUtf8());
+
                 shrinkedLines.emplace_back(move(line));
-                assert(shrinkedLines.back().size() == _newColumnCount);
+                assert(shrinkedLines.back().size() >= _newColumnCount);
+                i++;
             }
-            addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), false);
+            addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
 
             lines_ = move(shrinkedLines);
             screenSize_.width = _newColumnCount;
@@ -476,12 +527,14 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
 
 void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
 {
+    auto const wrappableFlag = lines_.back().wrappableFlag();
+
     if (auto const n = min(_count, screenSize_.height); n > 0)
     {
         generate_n(
             back_inserter(lines_),
             n,
-            [&]() { return Line(screenSize_.width, Cell{{}, _attr}, Line::Flags::None); }
+            [&]() { return Line(screenSize_.width, Cell{{}, _attr}, wrappableFlag); }
         );
     }
 }
@@ -498,8 +551,21 @@ void Grid::clampHistory()
     {
         auto const actual = historyLineCount();
         auto const expected = maxHistoryLineCount_.value();
-        auto const garbage = actual > expected ? actual - expected : 0;
-        lines_.erase(begin(lines_), next(begin(lines_), garbage));
+        auto const diff = actual > expected ? actual - expected : 0;
+
+        // any line that moves into history is using the default Wrappable flag.
+        for (auto& line : lines(historyLineCount() - diff, historyLineCount()))
+        {
+            auto const wrappable = true;
+            std::cout << fmt::format(
+                "clampHistory: wrappable={}: \"{}\"\n",
+                wrappable ? "true" : "false",
+                line.toUtf8()
+            );
+            line.setFlag(Line::Flags::Wrappable, wrappable);
+        }
+
+        lines_.erase(begin(lines_), next(begin(lines_), diff));
     }
 }
 

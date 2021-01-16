@@ -169,6 +169,7 @@ namespace impl // {{{ some command generator helpers
             case 1049: return DECMode::ExtendedAltScreen;
             case 2004: return DECMode::BracketedPaste;
             case 2026: return DECMode::BatchedRendering;
+            case 2027: return DECMode::TextReflow;
         }
         return nullopt;
     }
@@ -1408,6 +1409,7 @@ std::string to_string(DECMode _mode)
         case DECMode::MouseURXVT: return "MouseURXVT";
         case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
         case DECMode::BatchedRendering: return "BatchedRendering";
+        case DECMode::TextReflow: return "TextReflow";
     }
     return fmt::format("({})", static_cast<unsigned>(_mode));
 };

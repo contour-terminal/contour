@@ -1,8 +1,5 @@
 # FRIDAY TODO
-- [ ] redo last commit in broken branch.
-  - one commit: change wrappedColumns to carriedColumns
-  - one commit: add SM/RM ?2027 (enable / disable&freeze reflow)
-- [ ] FIXME: growColumns messes with original line flags
+- [ ] [REFLOW] Grid: finish unit tests
 - [ ] [Font]: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
 - [ ] [Font]: investigate in faulty glyph offsetting?
 - [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y.

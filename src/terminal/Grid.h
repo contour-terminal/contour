@@ -378,7 +378,7 @@ class Line { // {{{
     Line(Buffer&& _init, Flags _flags);
     Line(iterator const& _begin, iterator const& _end, Flags _flags);
     Line(int _numCols, Buffer&& _init, Flags _flags);
-    Line(int _numCols, std::string const& _s);
+    Line(int _numCols, std::string_view const& _s, Flags _flags);
 
     Buffer& buffer() noexcept { return buffer_; }
 
@@ -441,6 +441,13 @@ class Line { // {{{
     void setText(std::string const& _u8string);
 
     Flags flags() const noexcept { return static_cast<Flags>(flags_); }
+
+    Flags inheritableFlags() const noexcept
+    {
+        auto constexpr Inheritables = unsigned(Flags::Wrappable)
+                                    | unsigned(Flags::Marked);
+        return static_cast<Flags>(flags_ & Inheritables);
+    }
 
     void setFlag(Flags _flag, bool _enable) noexcept
     {
@@ -549,6 +556,9 @@ class Grid {
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(Coordinate const& _coord) const noexcept;
 
+    crispy::range<Lines::const_iterator> lines(int _start, int _count) const;
+    crispy::range<Lines::iterator> lines(int _start, int _count);
+
     crispy::range<Lines::const_iterator> pageAtScrollOffset(std::optional<int> _scrollOffset) const;
     crispy::range<Lines::iterator> pageAtScrollOffset(std::optional<int> _scrollOffset);
 
@@ -650,6 +660,28 @@ inline Cell& Grid::at(Coordinate const& _coord) noexcept
 inline Cell const& Grid::at(Coordinate const& _coord) const noexcept
 {
     return const_cast<Grid&>(*this).at(_coord);
+}
+
+inline crispy::range<Lines::const_iterator> Grid::lines(int _start, int _end) const
+{
+    assert(crispy::ascending(0, _start, int(lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(_start, _end, int(lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
+
+    return crispy::range<Lines::const_iterator>(
+        next(lines_.cbegin(), _start),
+        next(lines_.cbegin(), _end)
+    );
+}
+
+inline crispy::range<Lines::iterator> Grid::lines(int _start, int _end)
+{
+    assert(crispy::ascending(0, _start, int(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(_start, _end, int(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
+
+    return crispy::range<Lines::iterator>(
+        next(lines_.begin(), _start),
+        next(lines_.begin(), _end)
+    );
 }
 
 inline crispy::range<Lines::const_iterator> Grid::pageAtScrollOffset(std::optional<int> _scrollOffset) const

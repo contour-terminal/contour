@@ -178,6 +178,11 @@ enum class DECMode { // {{{
     // a different VT sequence to be enabled. Instead of a DCS,
     // this feature is using CSI ? 2026 h (DECSM and DECRM).
     BatchedRendering = 2026,
+
+    // If this mode is unset, text reflow is blocked on on this line and any lines below.
+    // If this mode is set, the current line and any line below is allowed to reflow.
+    // Default: Enabled (if supported by terminal).
+    TextReflow = 2027,
     // }}}
 }; // }}}
 
@@ -269,6 +274,7 @@ constexpr std::string_view to_code(DECMode m)
         case DECMode::MouseURXVT: return "?1015";
         case DECMode::MouseAlternateScroll: return "?1007";
         case DECMode::BatchedRendering: return "?2026";
+        case DECMode::TextReflow: return "?2027";
     }
     return "0";
 }
