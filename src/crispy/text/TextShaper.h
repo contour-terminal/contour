@@ -28,6 +28,24 @@
 
 namespace crispy::text {
 
+struct GlyphPosition {
+    std::reference_wrapper<Font> font; // TODO: get rid of this
+
+    uint32_t glyphIndex;
+    int cluster;
+
+    Vec2 renderOffset;
+
+    GlyphPosition(Font& _font, int _x, int _y, uint32_t _gi, int _cluster) :
+        font{_font},
+        glyphIndex{_gi},
+        cluster{_cluster},
+        renderOffset{_x, _y}
+    {}
+};
+
+using GlyphPositionList = std::vector<GlyphPosition>;
+
 /**
  * Performs the actual text shaping.
  */
@@ -80,3 +98,37 @@ class TextShaper {
 };
 
 } // end namespace
+
+namespace fmt { //
+    template <>
+    struct formatter<crispy::text::GlyphPosition> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::GlyphPosition const& _gpos, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "cluster:{}, glyphIndex:{}, offset:{}",
+                             _gpos.cluster,
+                             _gpos.glyphIndex,
+                             _gpos.renderOffset);
+        }
+    };
+
+    template <>
+    struct formatter<crispy::text::GlyphPositionList> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::GlyphPositionList const& _gposList, FormatContext& ctx)
+        {
+            std::stringstream os;
+            int i = 0;
+            for (auto const& gp : _gposList)
+            {
+                os << (i ? " " : "") << fmt::format("{}", gp);
+                i++;
+            }
+            return format_to(ctx.out(), "{}", os.str());
+        }
+    };
+} // }}}
