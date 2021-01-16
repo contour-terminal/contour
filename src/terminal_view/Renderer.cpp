@@ -82,6 +82,7 @@ Renderer::Renderer(Size const& _screenSize,
         renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
+        renderTarget_.lcdAtlasAllocator(),
         gridMetrics_,
         _fonts
     },

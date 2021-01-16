@@ -79,7 +79,6 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
                          _fragment.rasterizedImage().cellSize().height,
                          cellSize_.width,
                          cellSize_.height,
-                         crispy::atlas::Format::RGBA,
                          _fragment.data(),
                          colored,
                          metadata);

@@ -19,11 +19,12 @@ namespace terminal::view {
 
 struct FontConfig
 {
-     crispy::text::FontList regular;
-     crispy::text::FontList bold;
-     crispy::text::FontList italic;
-     crispy::text::FontList boldItalic;
-     crispy::text::FontList emoji;
+    crispy::text::FontList regular;
+    crispy::text::FontList bold;
+    crispy::text::FontList italic;
+    crispy::text::FontList boldItalic;
+    crispy::text::FontList emoji;
+    crispy::text::RenderMode renderMode;
 };
 
 } // end namespace

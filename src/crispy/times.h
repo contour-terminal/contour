@@ -186,6 +186,12 @@ constexpr inline _Times2D<I, T1, T2> operator*(_Times<I, T1> a, _Times<I, T2> b)
     return _Times2D<I, T1, T2>{std::move(a), std::move(b)};
 }
 
+template <typename T>
+constexpr inline _Times2D<T, T, T> times2D(T a, T b)
+{
+    return _Times2D<T, T, T>{std::move(a), std::move(b)};
+}
+
 template<
     typename I,
     typename T1,

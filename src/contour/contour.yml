@@ -66,14 +66,26 @@ profiles:
 
         # Initial font size in pixels.
         font_size: 12
+
         # Font family to use for displaying text.
         font:
+            # Font render modes tell the font rasterizer engine what rendering technique to use.
+            #
+            # Modes availabe are:
+            # - lcd          Uses a subpixel rendering technique optimized for LCD displays.
+            # - light        Uses a subpixel rendering technique in gray-scale.
+            # - gray         Uses standard anti-aliasing.
+            # - monochrome   Uses pixel-perfect bitmap rendering.
+            render_mode: monochrome
+
             regular: "monospace"
+
             # if bold/italic/bold_italic are not explicitely specified, the regular font with
-            # a style appended will be used.
+            # the respective style will be used.
             #bold: "Hack:style=bold"
             #italic: "Hack:style=italic"
             #bold_italic: "Hack:style=bold italic"
+
         # Tab width to move the cursor to the right when a HT control character is recieved.
         tab_width: 8
         # Terminal cursor display configuration

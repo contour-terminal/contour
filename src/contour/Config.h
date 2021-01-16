@@ -65,6 +65,7 @@ struct FontSpecList
     FontSpec italic;
     FontSpec boldItalic;
     FontSpec emoji = {"emoji"};
+    crispy::text::RenderMode renderMode = crispy::text::RenderMode::LCD;
 };
 
 inline bool operator==(FontSpecList const& a, FontSpecList const& b) noexcept

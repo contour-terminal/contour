@@ -76,7 +76,6 @@ void CursorRenderer::rebuild()
             CursorShape::Block,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -94,7 +93,6 @@ void CursorRenderer::rebuild()
             CursorShape::Underscore,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -112,7 +110,6 @@ void CursorRenderer::rebuild()
             CursorShape::Bar,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -132,7 +129,6 @@ void CursorRenderer::rebuild()
             CursorShape::Rectangle,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}

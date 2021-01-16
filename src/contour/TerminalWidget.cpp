@@ -1410,7 +1410,8 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
         fontLoader_.load(_profile.fonts.bold.pattern, fontSize),
         fontLoader_.load(_profile.fonts.italic.pattern, fontSize),
         fontLoader_.load(_profile.fonts.boldItalic.pattern, fontSize),
-        fontLoader_.load(_profile.fonts.emoji.pattern, fontSize)
+        fontLoader_.load(_profile.fonts.emoji.pattern, fontSize),
+        _profile.fonts.renderMode
     };
 }
 

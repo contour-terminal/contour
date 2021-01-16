@@ -30,7 +30,7 @@
 namespace crispy::atlas {
 
 using Buffer = std::vector<uint8_t>;
-enum class Format { Red, RGBA };
+enum class Format { Red, RGB, RGBA };
 
 struct CreateAtlas {
     unsigned atlas;
@@ -38,7 +38,7 @@ struct CreateAtlas {
     unsigned width;
     unsigned height;
     unsigned depth;
-    unsigned format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
+    Format format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
 };
 
 struct DestroyAtlas {
@@ -142,7 +142,7 @@ class TextureAtlasAllocator {
                           unsigned _depth,
                           unsigned _width,
                           unsigned _height,
-                          unsigned _format, // such as GL_R8 or GL_RGBA8
+                          Format _format, // such as GL_R8 or GL_RGBA8
                           CommandListener& _listener,
                           std::string _name = {})
       : instanceBaseId_{ _instanceBaseId },
@@ -174,6 +174,9 @@ class TextureAtlasAllocator {
     constexpr unsigned depth() const noexcept { return depth_; }
     constexpr unsigned width() const noexcept { return width_; }
     constexpr unsigned height() const noexcept { return height_; }
+    constexpr Format format() const noexcept { return format_; }
+
+    constexpr unsigned instanceBaseId() const noexcept { return instanceBaseId_; }
 
     /// @return number of internally used 3D texture atlases.
     constexpr unsigned currentInstance() const noexcept { return currentInstanceId_; }
@@ -377,7 +380,7 @@ class TextureAtlasAllocator {
     unsigned const depth_;              // atlas total depth
     unsigned const width_;              // atlas total width
     unsigned const height_;             // atlas total height
-    unsigned const format_;             // internal storage format, such as GL_R8 or GL_RGBA8
+    Format const format_;               // internal storage format, such as GL_R8 or GL_RGBA8
 
     std::string const name_;            // atlas human readable name (only for debugging)
     CommandListener& commandListener_;  // atlas event listener (used to perform allocation/modification actions)
@@ -445,7 +448,6 @@ class MetadataTextureAtlas {
     /// @param _id       a unique identifier used for accessing this texture
     /// @param _width    texture width in pixels
     /// @param _height   texture height in pixels
-    /// @param _format   data format
     /// @param _data     raw texture data to be inserted
     /// @param _user     user defined data that is supplied along with TexCoord's 4th component
     /// @param _metadata user defined metadata for the host
@@ -456,14 +458,14 @@ class MetadataTextureAtlas {
                                   unsigned _height,
                                   unsigned _targetWidth,
                                   unsigned _targetHeight,
-                                  Format _format,
                                   Buffer&& _data,
                                   unsigned _user = 0,
                                   Metadata _metadata = {})
     {
         assert(allocations_.find(_id) == allocations_.end());
 
-        TextureInfo const* textureInfo = atlas_.insert(_width, _height, _targetWidth, _targetHeight, _format, std::move(_data), _user);
+        TextureInfo const* textureInfo = atlas_.insert(_width, _height, _targetWidth, _targetHeight,
+                                                       atlas_.format(), std::move(_data), _user);
         if (!textureInfo)
             return std::nullopt;
 

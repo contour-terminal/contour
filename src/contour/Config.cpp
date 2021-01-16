@@ -20,6 +20,7 @@
 
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
+#include <crispy/logger.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
@@ -746,6 +747,27 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(fonts, "italic", profile.fonts.italic.pattern, regularPattern + ":style=italic");
         softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, regularPattern + ":style=bold italic");
         softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
+
+        string renderModeStr;
+        softLoadValue(fonts, "render_mode", renderModeStr);
+        auto const renderModeMap = array{
+            pair{"lcd"sv, crispy::text::RenderMode::LCD},
+            pair{"light"sv, crispy::text::RenderMode::Light},
+            pair{"gray"sv, crispy::text::RenderMode::Gray},
+            pair{"monochrome"sv, crispy::text::RenderMode::Bitmap},
+        };
+        do
+        {
+            for (auto const modeMapping: renderModeMap)
+            {
+                if (modeMapping.first == renderModeStr)
+                {
+                    profile.fonts.renderMode = modeMapping.second;
+                    break;
+                }
+            }
+            debuglog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        } while (false);
     }
 
     softLoadValue(_node, "tab_width", profile.tabWidth);

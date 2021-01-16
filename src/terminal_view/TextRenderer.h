@@ -113,6 +113,7 @@ class TextRenderer {
                  crispy::atlas::CommandListener& _commandListener,
                  crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+                 crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                  GridMetrics const& _gridMetrics,
                  FontConfig const& _fonts);
 
@@ -197,6 +198,7 @@ class TextRenderer {
     crispy::atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
+    TextureAtlas lcdAtlas_;
 };
 
 } // end namespace

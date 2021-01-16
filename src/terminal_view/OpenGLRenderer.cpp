@@ -140,7 +140,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         maxTextureSize() / maxTextureDepth(),
         min(MaxMonochromeTextureSize, maxTextureSize()),
         min(MaxMonochromeTextureSize, maxTextureSize()),
-        GL_R8,
+        crispy::atlas::Format::Red,
         *textureScheduler_,
         "monochromeAtlas"
     },
@@ -150,9 +150,19 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         maxTextureSize() / maxTextureDepth(),
         min(MaxColorTextureSize, maxTextureSize()),
         min(MaxColorTextureSize, maxTextureSize()),
-        GL_RGBA8,
+        crispy::atlas::Format::RGBA,
         *textureScheduler_,
         "colorAtlas"
+    },
+    lcdAtlasAllocator_{
+        2,
+        MaxInstanceCount,
+        maxTextureSize() / maxTextureDepth(),
+        min(MaxColorTextureSize, maxTextureSize()),
+        min(MaxColorTextureSize, maxTextureSize()),
+        crispy::atlas::Format::RGB,
+        *textureScheduler_,
+        "lcdAtlas"
     },
     // rect
     rectShader_{ createShader(_rectShaderConfig) },
@@ -165,8 +175,9 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
     textShader_->bind();
-    textShader_->setUniformValue("fs_monochromeTextures", 0);
-    textShader_->setUniformValue("fs_colorTextures", 1);
+    textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId());
+    textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId());
+    textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId());
     textShader_->release();
 
     initializeRectRendering();
@@ -202,8 +213,6 @@ void OpenGLRenderer::initializeRectRendering()
 
 void OpenGLRenderer::initializeTextureRendering()
 {
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
     glGenVertexArrays(1, &vao_);
     glBindVertexArray(vao_);
 
@@ -256,6 +265,7 @@ void OpenGLRenderer::clearCache()
 {
     monochromeAtlasAllocator_.clear();
     coloredAtlasAllocator_.clear();
+    lcdAtlasAllocator_.clear();
 }
 
 unsigned OpenGLRenderer::maxTextureDepth()
@@ -276,13 +286,27 @@ unsigned OpenGLRenderer::maxTextureSize()
     return static_cast<unsigned>(value);
 }
 
+constexpr int glFormat(crispy::atlas::Format _f)
+{
+    switch (_f)
+    {
+        case crispy::atlas::Format::Red:
+            return GL_R8;
+        case crispy::atlas::Format::RGB:
+            return GL_RGB8;
+        case crispy::atlas::Format::RGBA:
+            return GL_RGBA8;
+    }
+    return GL_R8; // just in case
+}
+
 void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
     glGenTextures(1, &textureId);
     bindTexture2DArray(textureId);
 
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, _param.format, _param.width, _param.height, _param.depth);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, glFormat(_param.format), _param.width, _param.height, _param.depth);
 
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -297,7 +321,18 @@ void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
 void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
 {
     auto const& texture = _param.texture.get();
-    auto const format = _param.format == crispy::atlas::Format::RGBA ? GL_RGBA : GL_RED;
+    auto const glFormat = [&]() {
+        switch (_param.format)
+        {
+            case crispy::atlas::Format::RGBA:
+                return GL_RGBA;
+            case crispy::atlas::Format::RGB:
+                return GL_RGB;
+            case crispy::atlas::Format::Red:
+                return GL_RED;
+        }
+        return GL_RED;
+    }();
     auto const key = AtlasKey{texture.atlasName, texture.atlas};
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
     assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
@@ -315,8 +350,19 @@ void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
 
     bindTexture2DArray(textureId);
 
+    switch (_param.format)
+    {
+        case crispy::atlas::Format::RGB:
+        case crispy::atlas::Format::Red:
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            break;
+        case crispy::atlas::Format::RGBA:
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            break;
+    }
+
     glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
-                    format, type, _param.data.data());
+                    glFormat, type, _param.data.data());
 }
 
 void OpenGLRenderer::renderTexture(crispy::atlas::RenderTexture const& _param)

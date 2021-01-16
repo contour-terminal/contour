@@ -95,6 +95,14 @@ struct Glyph {
     Bitmap bitmap;
 };
 
+enum class RenderMode {
+    Bitmap, //!< bitmaps are preferred>
+    Gray,   //!< gray-scale anti-aliasing
+    Light,  //!< gray-scale anti-aliasing for optimized for LCD screens
+    LCD,    //!< LCD-optimized anti-aliasing
+    Color   //!< embedded color bitmaps are preferred
+};
+
 class Font;
 
 /**
@@ -146,9 +154,8 @@ class Font {
 
     // ------------------------------------------------------------------------
     unsigned glyphIndexOfChar(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char); }
-    void loadGlyphByChar(char32_t _char) { loadGlyphByIndex(FT_Get_Char_Index(face_, _char)); }
 
-    std::optional<Glyph> loadGlyphByIndex(unsigned _glyphIndex);
+    std::optional<Glyph> loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderMode);
 
     FT_Face face() noexcept { return face_; }
 

@@ -101,7 +101,6 @@ void DecorationRenderer::rebuild()
             Decorator::Underline,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -126,7 +125,6 @@ void DecorationRenderer::rebuild()
             Decorator::DoubleUnderline,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -150,7 +148,6 @@ void DecorationRenderer::rebuild()
             Decorator::CurlyUnderline,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -170,7 +167,6 @@ void DecorationRenderer::rebuild()
             Decorator::DottedUnderline,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -192,7 +188,6 @@ void DecorationRenderer::rebuild()
             Decorator::DashedUnderline,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -222,7 +217,6 @@ void DecorationRenderer::rebuild()
             Decorator::Framed,
             width, cellHeight,
             width, cellHeight,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -239,7 +233,6 @@ void DecorationRenderer::rebuild()
             Decorator::Overline,
             width, cellHeight,
             width, cellHeight,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}
@@ -256,7 +249,6 @@ void DecorationRenderer::rebuild()
             Decorator::CrossedOut,
             width, height,
             width, height,
-            crispy::atlas::Format::Red,
             move(image)
         );
     } // }}}

@@ -28,6 +28,8 @@
 #endif
 
 #include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_LCD_FILTER_H
 #include FT_BITMAP_H
 
 #if defined(HAVE_FONTCONFIG)
@@ -147,9 +149,29 @@ Font::~Font()
         FT_Done_Face(face_);
 }
 
-optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
+optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderMode)
 {
-    FT_Int32 flags = FT_LOAD_DEFAULT;
+    FT_Int32 flags = 0;
+    switch (_renderMode)
+    {
+        case RenderMode::Bitmap:
+            flags |= FT_LOAD_MONOCHROME;
+            break;
+        case RenderMode::Gray:
+            flags |= FT_LOAD_DEFAULT;
+            break;
+        case RenderMode::Light:
+            flags |= FT_LOAD_TARGET_LIGHT;
+            break;
+        case RenderMode::LCD:
+            flags |= FT_LOAD_TARGET_LCD;
+            break;
+        case RenderMode::Color:
+            if (FT_HAS_COLOR(face_))
+                flags = FT_LOAD_COLOR;
+            break;
+    }
+
     if (FT_HAS_COLOR(face_))
         flags |= FT_LOAD_COLOR;
 
@@ -187,17 +209,31 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
 
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
-        if (FT_Render_Glyph(face_->glyph, FT_RENDER_MODE_NORMAL) != FT_Err_Ok)
+    {
+        auto ftRenderMode = [&]() -> FT_Render_Mode {
+            switch (_renderMode)
+            {
+                case RenderMode::Bitmap: return FT_RENDER_MODE_MONO;
+                case RenderMode::Gray:   return FT_RENDER_MODE_NORMAL;
+                case RenderMode::Light:  return FT_RENDER_MODE_LIGHT;
+                case RenderMode::LCD:    return FT_RENDER_MODE_LCD;
+                case RenderMode::Color:  return FT_RENDER_MODE_NORMAL;
+                    break;
+            }
+            return FT_RENDER_MODE_NORMAL;
+        }();
+        if (FT_Render_Glyph(face_->glyph, ftRenderMode) != FT_Err_Ok)
             return nullopt;
-
-    auto const width = metrics.bitmapSize.x;
-    auto const height = metrics.bitmapSize.y;
+    }
 
     auto bitmap = Bitmap{};
     switch (face_->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
         {
+            auto const width = metrics.bitmapSize.x;
+            auto const height = metrics.bitmapSize.y;
+
             // convert mono to gray
             FT_Bitmap ftBitmap;
             FT_Bitmap_Init(&ftBitmap);
@@ -214,24 +250,49 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex)
             auto const pitch = abs(ftBitmap.pitch);
             for (auto const i : crispy::times(ftBitmap.rows))
                 for (auto const j : crispy::times(ftBitmap.width))
-                    bitmap.data[i * face_->glyph->bitmap.width + j] = ftBitmap.buffer[i * pitch + j] * 255;
+                    bitmap.data[i * width + j] = ftBitmap.buffer[i * pitch + j] * 255;
 
             FT_Bitmap_Done(ft_, &ftBitmap);
             break;
         }
         case FT_PIXEL_MODE_GRAY:
         {
+            auto const width = metrics.bitmapSize.x;
+            auto const height = metrics.bitmapSize.y;
+
             bitmap.format = BitmapFormat::Gray;
-            bitmap.data.resize(height * width); // 8-bit antialiased alpha channel
-            auto const s = face_->glyph->bitmap.buffer;
+            bitmap.data.resize(height * width);
+
             auto const pitch = face_->glyph->bitmap.pitch;
+            auto const s = face_->glyph->bitmap.buffer;
             for (auto const i : crispy::times(height))
                 for (auto const j : crispy::times(width))
-                    bitmap.data[i * face_->glyph->bitmap.width + j] = s[i * pitch + j];
+                    bitmap.data[i * width + j] = s[i * pitch + j];
+            break;
+        }
+        case FT_PIXEL_MODE_LCD:
+        {
+            auto const width = face_->glyph->bitmap.width;
+            auto const height = face_->glyph->bitmap.rows;
+            assert(width == unsigned(metrics.bitmapSize.x));
+
+            bitmap.format = BitmapFormat::LCD;
+            bitmap.data.resize(height * width);
+            metrics.bitmapSize.x /= 3;
+
+            auto const pitch = face_->glyph->bitmap.pitch;
+            auto s = face_->glyph->bitmap.buffer;
+            // for (auto const [i, j] : crispy::times2D(height, width))
+            for (auto const i : crispy::times(height))
+                for (auto const j : crispy::times(width))
+                    bitmap.data[i * width + j] = s[i * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_BGRA:
         {
+            auto const width = metrics.bitmapSize.x;
+            auto const height = metrics.bitmapSize.y;
+
             bitmap.format = BitmapFormat::RGBA;
             bitmap.data.resize(height * width * 4);
             auto t = bitmap.data.begin();

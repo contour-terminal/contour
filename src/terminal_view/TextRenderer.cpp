@@ -24,6 +24,7 @@ using std::array;
 using std::get;
 using std::nullopt;
 using std::optional;
+using std::pair;
 using std::u32string;
 using std::u32string_view;
 using std::vector;
@@ -53,15 +54,18 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            crispy::atlas::CommandListener& _commandListener,
                            crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+                           crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                            GridMetrics const& _gridMetrics,
                            FontConfig const& _fonts) :
     renderMetrics_{ _renderMetrics },
     gridMetrics_{ _gridMetrics },
+    // Light should be default - but as soon as LCD is functional, that's default
     fonts_{ _fonts },
     textShaper_{},
     commandListener_{ _commandListener },
     monochromeAtlas_{ _monochromeAtlasAllocator },
-    colorAtlas_{ _colorAtlasAllocator }
+    colorAtlas_{ _colorAtlasAllocator },
+    lcdAtlas_{ _lcdAtlasAllocator }
 {
 }
 
@@ -69,6 +73,7 @@ void TextRenderer::clearCache()
 {
     monochromeAtlas_.clear();
     colorAtlas_.clear();
+    lcdAtlas_.clear();
 
     textShaper_.clearCache();
 
@@ -322,22 +327,33 @@ void TextRenderer::render(QPoint _pos,
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 {
-    TextureAtlas& atlas = _id.font.get().hasColor()
-        ? colorAtlas_
-        : monochromeAtlas_;
+    TextureAtlas& lookupAtlas = [&]() -> TextureAtlas& {
+        if (_id.font.get().hasColor())
+            return colorAtlas_;
+        switch (fonts_.renderMode)
+        {
+            case crispy::text::RenderMode::Color:
+                return colorAtlas_;
+            case crispy::text::RenderMode::LCD:
+                return lcdAtlas_;
+            case crispy::text::RenderMode::Light:
+            case crispy::text::RenderMode::Gray:
+            case crispy::text::RenderMode::Bitmap:
+                return monochromeAtlas_;
+        }
+        return monochromeAtlas_;
+    }();
+    // TODO: what if lookupAtlas != targetAtlas. the lookup should be decoupled
 
-    if (optional<DataRef> const dataRef = atlas.get(_id); dataRef.has_value())
+    if (optional<DataRef> const dataRef = lookupAtlas.get(_id); dataRef.has_value())
         return dataRef;
 
     Font& font = _id.font.get();
-    auto theGlyphOpt = font.loadGlyphByIndex(_id.glyphIndex);
+    auto theGlyphOpt = font.loadGlyphByIndex(_id.glyphIndex, fonts_.renderMode);
     if (!theGlyphOpt.has_value())
         return nullopt;
 
-    auto& glyph = theGlyphOpt.value();
-    auto const format = _id.font.get().hasColor()
-                      ? crispy::atlas::Format::RGBA
-                      : crispy::atlas::Format::Red;
+    Glyph& glyph = theGlyphOpt.value();
     auto const colored = _id.font.get().hasColor() ? 1 : 0;
     auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
 
@@ -389,19 +405,37 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         metadata.bearing.y = int(ceil(metadata.bearing.y * ratioY));
     }
 
+    auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> {
+        // this format ID is used by the fragment shader to select the right texture atlas
+        if (_id.font.get().hasColor())
+            return {2, colorAtlas_};
+        switch (glyph.bitmap.format)
+        {
+            case crispy::text::BitmapFormat::RGBA:
+                return {1, colorAtlas_};
+            case crispy::text::BitmapFormat::LCD:
+                return {2, lcdAtlas_};
+            case crispy::text::BitmapFormat::Gray:
+                return {0, monochromeAtlas_};
+        }
+        return {0, monochromeAtlas_};
+    }();
+
     if (crispy::logging_sink::for_debug().enabled())
         debuglog().write("insert glyph {}: {}; path:{}",
                          _id.glyphIndex,
                          metadata,
                          _id.font.get().filePath());
 
-    return atlas.insert(_id, glyph.metrics.bitmapSize.x, glyph.metrics.bitmapSize.y,
-                        unsigned(float(glyph.metrics.bitmapSize.x) * ratioX),
-                        unsigned(float(glyph.metrics.bitmapSize.y) * ratioY),
-                        format,
-                        move(glyph.bitmap.data),
-                        colored,
-                        metadata);
+    assert(&lookupAtlas == &targetAtlas);
+    return targetAtlas.insert(_id,
+                              glyph.metrics.bitmapSize.x,
+                              glyph.metrics.bitmapSize.y,
+                              unsigned(float(glyph.metrics.bitmapSize.x) * ratioX),
+                              unsigned(float(glyph.metrics.bitmapSize.y) * ratioY),
+                              move(glyph.bitmap.data),
+                              userFormat,
+                              metadata);
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,

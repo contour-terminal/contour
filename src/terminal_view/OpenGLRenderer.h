@@ -53,6 +53,7 @@ class OpenGLRenderer : public QOpenGLExtraFunctions
 
     crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return monochromeAtlasAllocator_; }
     crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return coloredAtlasAllocator_; }
+    crispy::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept { return lcdAtlasAllocator_; }
 
     void execute();
 
@@ -120,6 +121,7 @@ class OpenGLRenderer : public QOpenGLExtraFunctions
     std::unique_ptr<TextureScheduler> textureScheduler_;
     crispy::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
     crispy::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
+    crispy::atlas::TextureAtlasAllocator lcdAtlasAllocator_;
 
     // private data members for rendering filled rectangles
     //

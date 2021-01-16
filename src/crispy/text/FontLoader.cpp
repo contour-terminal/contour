@@ -25,6 +25,11 @@
 #define HAVE_FONTCONFIG // TODO: use cmake, dude!
 #endif
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_LCD_FILTER_H
+#include FT_ERRORS_H
+
 #if defined(HAVE_FONTCONFIG)
 #include <fontconfig/fontconfig.h>
 #endif
@@ -34,6 +39,15 @@ namespace crispy::text {
 using namespace std;
 
 namespace {
+    inline string ftErrorStr([[maybe_unused]] FT_Error ec)
+    {
+#if defined(FT_CONFIG_OPTION_ERROR_STRINGS)
+        return FT_Error_String(ec);
+#else
+        return ""s;
+#endif
+    }
+
     static bool endsWithIgnoreCase(string const& _text, string const& _suffix)
     {
         if (_text.size() < _suffix.size())
@@ -108,9 +122,11 @@ FontLoader::FontLoader(int _dpiX, int _dpiY) :
     dpi_{ _dpiX, _dpiY },
     fonts_{}
 {
-    printf("FontLoader: DPI %dx%d\n", _dpiX, _dpiY);
-    if (FT_Init_FreeType(&ft_))
-        throw runtime_error{ "Failed to initialize FreeType." };
+    if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
+        throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
+
+    if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
+        throw runtime_error{ "freetype: Failed to set LCD filter. "s + ftErrorStr(ec)};
 }
 
 FontLoader::~FontLoader()
