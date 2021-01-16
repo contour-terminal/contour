@@ -1618,10 +1618,21 @@ void TerminalWidget::onSelectionComplete()
 
 void TerminalWidget::bufferChanged(terminal::ScreenType)
 {
-    setDefaultCursor();
+    post([this] ()
+    {
+        setDefaultCursor();
 
-    updateScrollBarPosition();
-    updateScrollBarValue();
+        if (terminalView_->terminal().screen().isPrimaryScreen())
+            scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
+        else
+            scrollBar_->setMaximum(0);
+
+        updateScrollBarPosition();
+        updateScrollBarValue();
+    });
+
+    if (setScreenDirty())
+        update();
 }
 
 void TerminalWidget::screenUpdated()
@@ -1632,22 +1643,19 @@ void TerminalWidget::screenUpdated()
     //     terminalMetrics_(command);
 #endif
 
-    if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
-        terminalView_->terminal().viewport().scrollToBottom();
-
     if (terminalView_->terminal().screen().isPrimaryScreen())
-        scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
-    else
-        scrollBar_->setMaximum(0);
-
-    //post([this]()
     {
-        updateScrollBarValue();
-
-        if (setScreenDirty())
-            update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+        post([this]()
+        {
+            scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
+            if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
+                terminalView_->terminal().viewport().scrollToBottom();
+            updateScrollBarValue();
+        });
     }
-    //);
+
+    if (setScreenDirty())
+        update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 }
 
 void TerminalWidget::updateScrollBarValue()
