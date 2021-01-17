@@ -407,8 +407,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 
     auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> {
         // this format ID is used by the fragment shader to select the right texture atlas
-        if (_id.font.get().hasColor())
-            return {2, colorAtlas_};
+        if (colored)
+            return {1, colorAtlas_};
         switch (glyph.bitmap.format)
         {
             case crispy::text::BitmapFormat::RGBA:
