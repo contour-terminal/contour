@@ -112,7 +112,7 @@ class TerminalWidget :
     bool fullscreen() const;
     void toggleFullScreen();
 
-    bool setFontSize(int _fontSize);
+    bool setFontSize(double _fontSize);
     std::string extractSelectionText();
     std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);

@@ -1150,7 +1150,7 @@ void TerminalWidget::toggleFullScreen()
     //     window_.setVisibility(QWindow::FullScreen);
 }
 
-bool TerminalWidget::setFontSize(int _fontSize)
+bool TerminalWidget::setFontSize(double _fontSize)
 {
     if (_fontSize < 5) // Let's not be crazy.
         return false;
@@ -1159,7 +1159,7 @@ bool TerminalWidget::setFontSize(int _fontSize)
         return false;
 
     terminalView_->setFontSize(_fontSize);
-    profile().fontSize = static_cast<short>(_fontSize);
+    profile().fontSize = _fontSize;
 
     return true;
 }

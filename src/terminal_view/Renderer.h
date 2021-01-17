@@ -66,7 +66,7 @@ class Renderer {
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setFont(FontConfig const& _fonts);
-    bool setFontSize(int _fontSize);
+    bool setFontSize(double _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)

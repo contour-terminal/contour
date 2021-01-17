@@ -91,7 +91,7 @@ struct TerminalProfile {
     int historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
-    short fontSize;
+    double fontSize;
     FontSpecList fonts;
 
     int tabWidth;

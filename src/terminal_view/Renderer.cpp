@@ -142,7 +142,7 @@ void Renderer::setFont(FontConfig const& _fonts)
     updateMetricsAndClearCache();
 }
 
-bool Renderer::setFontSize(int _fontSize)
+bool Renderer::setFontSize(double _fontSize)
 {
     if (_fontSize == fonts_.regular.first.get().fontSize())
         return false;

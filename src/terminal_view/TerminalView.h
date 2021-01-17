@@ -100,7 +100,7 @@ class TerminalView : private Terminal::Events {
     void resize(int _width, int _height);
 
     void setFont(FontConfig const& _fonts);
-    bool setFontSize(int _fontSize);
+    bool setFontSize(double _fontSize);
     bool setTerminalSize(Size _cells);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
