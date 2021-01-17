@@ -86,7 +86,7 @@ class TerminalWidget :
     void setProfile(const std::string& _newProfileName);
 
     /// Applies given profile, potentially setting/resetting terminal configuration.
-    void setProfile(config::TerminalProfile _newProfile);
+    void setProfile(std::string const& _name, config::TerminalProfile _newProfile);
 
     terminal::view::TerminalView* view() const noexcept { return terminalView_.get(); }
 

@@ -776,7 +776,7 @@ bool TerminalWidget::reloadConfigValues(std::string const& _profileName)
 
 bool TerminalWidget::reloadConfigValues(config::Config _newConfig)
 {
-    auto const profileName = _newConfig.defaultProfileName;
+    auto const profileName = profileName_;
     return reloadConfigValues(std::move(_newConfig), profileName);
 }
 
@@ -794,7 +794,7 @@ bool TerminalWidget::reloadConfigValues(config::Config _newConfig, string const&
 
     config_ = std::move(_newConfig);
     if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
-        setProfile(*profile);
+        setProfile(_profileName, *profile);
 
     return true;
 }
@@ -1419,12 +1419,12 @@ void TerminalWidget::setProfile(string const& _newProfileName)
 {
     debuglog().write("Changing profile to '{}'.", _newProfileName);
     if (auto newProfile = config_.profile(_newProfileName); newProfile)
-        setProfile(*newProfile);
+        setProfile(_newProfileName, *newProfile);
     else
         debuglog().write("No such profile: '{}'.", _newProfileName);
 }
 
-void TerminalWidget::setProfile(config::TerminalProfile newProfile)
+void TerminalWidget::setProfile(string const& _name, config::TerminalProfile newProfile)
 {
     if (newProfile.fonts != profile().fonts)
     {
@@ -1464,6 +1464,7 @@ void TerminalWidget::setProfile(config::TerminalProfile newProfile)
     updateScrollBarPosition();
 
     profile_ = std::move(newProfile);
+    profileName_ = _name;
 }
 
 string TerminalWidget::extractSelectionText()
@@ -1559,12 +1560,11 @@ float TerminalWidget::contentScale() const
 void TerminalWidget::onConfigReload(FileChangeWatcher::Event /*_event*/)
 {
     post([this]() {
-        if (reloadConfigValues())
-        {
-            setScreenDirty();
-            update();
-        }
+        reloadConfigValues();
     });
+
+    if (setScreenDirty())
+        update();
 }
 
 void TerminalWidget::post(std::function<void()> _fn)
