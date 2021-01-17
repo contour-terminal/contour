@@ -24,6 +24,7 @@
 #endif
 
 #include <crispy/logger.h>
+#include <terminal_view/OpenGLRenderer.h> // GL_DEBUGLOG(...)
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -583,7 +584,7 @@ void TerminalWidget::initializeGL()
 
         GLint glslNumShaderVersions{};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+        GL_DEBUGLOG( glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions) );
 #endif
         if (glslNumShaderVersions > 0)
         {
@@ -1400,7 +1401,7 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
 
 terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile const& _profile)
 {
-    int const fontSize = _profile.fontSize;
+    auto const fontSize = _profile.fontSize;
 
     debuglog().write("using font size: {}pt", _profile.fontSize, fontSize);
 

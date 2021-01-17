@@ -14,6 +14,7 @@
 #pragma once
 
 #include <crispy/Atlas.h>
+#include <crispy/logger.h>
 #include <terminal/Size.h>
 
 #include <QtGui/QMatrix4x4>
@@ -21,6 +22,13 @@
 #include <QtGui/QOpenGLShaderProgram>
 
 #include <memory>
+
+#define GL_DEBUGLOG(FnCall) do { \
+        FnCall; \
+        if (auto const ec = glGetError(); ec != GL_NO_ERROR) { \
+            debuglog().write("OpenGL function call failed with error code 0x{:X}.", ec); \
+        } \
+    } while (0)
 
 namespace terminal::view {
 
@@ -107,8 +115,6 @@ class OpenGLRenderer : public QOpenGLExtraFunctions
 
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;
-    int marginLocation_;
-    int cellSizeLocation_;
 
     // private data members for rendering textures
     //

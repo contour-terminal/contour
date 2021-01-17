@@ -13,6 +13,9 @@
  */
 #include <terminal_view/ShaderConfig.h>
 
+#include <crispy/logger.h>
+
+#include <iostream>
 #include <string>
 
 #include "background_vert.h"
@@ -37,9 +40,9 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
     switch (_shaderClass)
     {
         case ShaderClass::Background:
-            return {s(background_vert), s(background_frag)};
+            return {s(background_vert), s(background_frag), "builtin.background.vert", "builtin.background.frag"};
         case ShaderClass::Text:
-            return {s(text_vert), s(text_frag)};
+            return {s(text_vert), s(text_frag), "builtin.text.vert", "builtin.text.frag"};
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
@@ -48,21 +51,33 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig)
 {
     auto shader = std::make_unique<QOpenGLShaderProgram>();
+
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
     {
+        debuglog().write("Compiling vertex shader {} failed. {}", _shaderConfig.vertexShaderFileName,
+                                                                  shader->log().toStdString());
         qDebug() << shader->log();
         return {};
     }
+
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
     {
-        qDebug() << shader->log();
+        debuglog().write("Compiling fragment shader {} failed. {}", _shaderConfig.fragmentShaderFileName,
+                                                                    shader->log().toStdString());
         return {};
     }
+
     if (!shader->link())
     {
-        qDebug() << shader->log();
+        debuglog().write("Linking shaders {} & {} failed. {}",
+                         _shaderConfig.vertexShaderFileName,
+                         _shaderConfig.fragmentShaderFileName,
+                         shader->log().toStdString());
         return {};
     }
+
+    if (auto const logString = shader->log().toStdString(); !logString.empty())
+        debuglog().write(logString);
 
     return shader;
 }

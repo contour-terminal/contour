@@ -74,7 +74,7 @@ struct GlobalGlyphMetrics {
 struct GlyphMetrics {
     Vec2 bitmapSize;        // glyph size in pixels
     Vec2 bearing;           // offset baseline and left to top and left of the glyph's bitmap
-    int advance;            // pixels from origin to next glyph's origin
+    int advance;            // pixels from origin to next glyph's origin (TODO: do i need this?)
 };
 
 enum class BitmapFormat {
@@ -85,10 +85,12 @@ enum class BitmapFormat {
 
 struct Bitmap {
     BitmapFormat format;
+    int width;
+    int height;
     std::vector<uint8_t> data;
 };
 
-void scale(Bitmap& _bitmap, int _x, int _y); // TODO
+std::tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height);
 
 struct Glyph {
     GlyphMetrics metrics;
@@ -119,6 +121,8 @@ class Font {
 
     std::string const& filePath() const noexcept { return filePath_; }
     std::size_t hashCode() const noexcept { return hashCode_; }
+
+    bool selectSizeForWidth(int _width);
 
     void setFontSize(double _fontSize);
     double fontSize() const noexcept { return fontSize_; }
@@ -159,13 +163,12 @@ class Font {
 
     FT_Face face() noexcept { return face_; }
 
-    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath, double _fontSize, Vec2 _dpi);
+    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath);
 
     int scaleHorizontal(long _value) const noexcept;
     int scaleVertical(long _value) const noexcept;
 
   private:
-    static bool doSetFontSize(FT_Face _face, double _fontSize, Vec2 _dpi);
     void recalculateMetrics();
 
     // private data
@@ -175,6 +178,7 @@ class Font {
 
     FT_Library ft_;
     FT_Face face_;
+    int strikeIndex_;
     double fontSize_;
     Vec2 dpi_;
 

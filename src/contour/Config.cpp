@@ -928,28 +928,41 @@ std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
     auto const& defaultConfig = terminal::view::defaultShaderConfig(_shaderClass);
     auto const basename = to_string(_shaderClass);
 
-    auto const vertText = [&]() {
-        if (auto content = readConfigFile(basename + ".vert"); content.has_value())
-            return *content;
+    auto const vertText = [&]() -> pair<string, string> {
+        auto const fileName = basename + ".vert";
+        if (auto content = readConfigFile(fileName); content.has_value())
+            return {*content, fileName};
         else
-            return defaultConfig.vertexShader;
+            return {defaultConfig.vertexShader, defaultConfig.vertexShaderFileName};
     }();
 
-    auto const fragText = [&]() {
-        if (auto content = readConfigFile(basename + ".frag"); content.has_value())
-            return *content;
+    auto const fragText = [&]() -> pair<string, string> {
+        auto const fileName = basename + ".frag";
+        if (auto content = readConfigFile(fileName); content.has_value())
+            return {*content, fileName};
         else
-            return defaultConfig.fragmentShader;
+            return {defaultConfig.fragmentShader, defaultConfig.fragmentShaderFileName};
     }();
 
     auto const prependVersionPragma = [&](string const& _code) {
         if (QOpenGLContext::currentContext()->isOpenGLES())
-            return "#version 300 es\n#line 1\n" + _code;
+            return R"(#version 300 es
+precision mediump int;
+precision mediump float;
+precision mediump sampler2DArray;
+#line 1
+)" + _code;
+            //return "#version 300 es\n#line 1\n" + _code;
         else
             return "#version 330\n#line 1\n" + _code;
     };
 
-    return {ShaderConfig{prependVersionPragma(vertText), prependVersionPragma(fragText)}};
+    return {ShaderConfig{
+        prependVersionPragma(vertText.first),
+        prependVersionPragma(fragText.first),
+        vertText.second,
+        fragText.second
+    }};
 }
 
 } // namespace contour

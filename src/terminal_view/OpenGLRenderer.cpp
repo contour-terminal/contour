@@ -130,8 +130,6 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     cellSize_{ _cellSize },
     textShader_{ createShader(_textShaderConfig) },
     textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
-    marginLocation_{ textShader_->uniformLocation("vs_margin") },
-    cellSizeLocation_{ textShader_->uniformLocation("vs_cellSize") },
     // texture
     textureScheduler_{std::make_unique<TextureScheduler>()},
     monochromeAtlasAllocator_{
@@ -170,14 +168,30 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 {
     initialize();
 
+    assert(textProjectionLocation_ != -1);
+
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
-    //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
+    //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+    // //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
     textShader_->bind();
     textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId());
     textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId());
     textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId());
+    textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width()));
+
+    int maxUniforms = 0;
+    glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &maxUniforms);
+    std::cerr << fmt::format(
+        "uniform ({}) locations: {}, {}, {}, {}, {}\n",
+        maxUniforms,
+        textShader_->uniformLocation("vs_projection"),
+        textShader_->uniformLocation("fs_monochromeTextures"),
+        textShader_->uniformLocation("fs_colorTextures"),
+        textShader_->uniformLocation("fs_lcdTexture"),
+        textShader_->uniformLocation("pixel_x")
+    );
     textShader_->release();
 
     initializeRectRendering();
@@ -438,6 +452,12 @@ void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, 
 
 void OpenGLRenderer::execute()
 {
+    //FIXME
+    //glEnable(GL_BLEND);
+    //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+    //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+    //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
+
     // render filled rects
     //
     if (!rectBuffer_.empty())
@@ -462,14 +482,6 @@ void OpenGLRenderer::execute()
 
     // TODO: only upload when it actually DOES change
     textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
-    textShader_->setUniformValue(marginLocation_, QVector2D(
-        static_cast<float>(leftMargin_),
-        static_cast<float>(bottomMargin_)
-    ));
-    textShader_->setUniformValue(cellSizeLocation_, QVector2D(
-        static_cast<float>(cellSize_.width),
-        static_cast<float>(cellSize_.height)
-    ));
 
     executeRenderTextures();
 

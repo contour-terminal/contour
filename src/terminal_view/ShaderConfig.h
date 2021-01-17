@@ -31,6 +31,8 @@ enum class ShaderClass {
 struct ShaderConfig {
     std::string vertexShader;
     std::string fragmentShader;
+    std::string vertexShaderFileName;
+    std::string fragmentShaderFileName;
 };
 
 inline std::string to_string(ShaderClass _shaderClass)

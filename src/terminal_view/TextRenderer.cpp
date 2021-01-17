@@ -16,12 +16,15 @@
 #include <terminal_view/GridMetrics.h>
 #include <terminal_view/RenderMetrics.h>
 
+#include <crispy/text/Font.h>
 #include <crispy/algorithm.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
 
 using std::array;
 using std::get;
+using std::max;
+using std::move;
 using std::nullopt;
 using std::optional;
 using std::pair;
@@ -67,6 +70,14 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
     colorAtlas_{ _colorAtlasAllocator },
     lcdAtlas_{ _lcdAtlasAllocator }
 {
+    if (fonts_.emoji.first.get().hasColor())
+        fonts_.emoji.first.get().selectSizeForWidth(gridMetrics_.cellSize.width);
+
+    for (Font& fallbackFont : fonts_.emoji.second)
+    {
+        if (fallbackFont.hasColor())
+            fallbackFont.selectSizeForWidth(gridMetrics_.cellSize.width);
+    }
 }
 
 void TextRenderer::clearCache()
@@ -87,6 +98,10 @@ void TextRenderer::clearCache()
 void TextRenderer::setFont(FontConfig const& _fonts)
 {
     fonts_ = _fonts;
+
+    fonts_.emoji.first.get().selectSizeForWidth(gridMetrics_.cellSize.width);
+    for (Font& fallbackFont : fonts_.emoji.second)
+        fallbackFont.selectSizeForWidth(gridMetrics_.cellSize.width);
 
     clearCache();
 }
@@ -333,10 +348,11 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
             return colorAtlas_;
         switch (fonts_.renderMode)
         {
+            case crispy::text::RenderMode::LCD:
+                // fallthrough; return lcdAtlas_;
+                return lcdAtlas_;
             case crispy::text::RenderMode::Color:
                 return colorAtlas_;
-            case crispy::text::RenderMode::LCD:
-                return lcdAtlas_;
             case crispy::text::RenderMode::Light:
             case crispy::text::RenderMode::Gray:
             case crispy::text::RenderMode::Bitmap:
@@ -356,6 +372,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 
     Glyph& glyph = theGlyphOpt.value();
     auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
+    // FIXME: this `2` is a hack of my bad knowledge. FIXME.
+    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
     auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
     if (xMax > gridMetrics_.cellSize.width * numCells)
@@ -393,19 +411,64 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         }
     }
 
-    // FIXME: this `* 2` is a hack of my bad knowledge. FIXME.
-    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-    auto const ratioX = colored ? static_cast<double>(gridMetrics_.cellSize.width) * 2.0 / static_cast<float>(glyph.metrics.bitmapSize.x) : 1.0;
-    auto const ratioY = colored ? static_cast<double>(gridMetrics_.cellSize.height) / static_cast<float>(glyph.metrics.bitmapSize.y) : 1.0;
+    auto const [ratioX, ratioY] = [&]() -> pair<double, double> {
+        // only for emoji
+        if (!colored)
+            return {1.0, 1.0};
+        else
+            return {
+                double(gridMetrics_.cellSize.width * numCells) / double(glyph.metrics.bitmapSize.x),
+                double(gridMetrics_.cellSize.height) / double(glyph.metrics.bitmapSize.y)
+            };
+    }();
+    auto ratio = max(ratioX, ratioY);
 
-    GlyphMetrics metadata = glyph.metrics;
-    if (colored)
+    if (glyph.bitmap.format == crispy::text::BitmapFormat::RGBA)
     {
-        metadata.bearing.x = int(ceil(metadata.bearing.x * ratioX));
-        metadata.bearing.y = int(ceil(metadata.bearing.y * ratioY));
+        auto const cellSize = gridMetrics_.cellSize;
+
+        // std::cout << fmt::format("colored: {}x{} metric.size: {}, cell.size: {}\n",
+        //         glyph.bitmap.width, glyph.bitmap.height,
+        //         glyph.metrics.bitmapSize, cellSize);
+#if 1
+        if (numCells > 1 && // XXX for now, only if emoji glyph
+                (glyph.metrics.bitmapSize.x > cellSize.width * numCells
+              || glyph.metrics.bitmapSize.y > cellSize.height))
+        {
+            auto [scaled, factor] = scale(glyph.bitmap, cellSize.width * numCells, cellSize.height);
+            glyph.metrics.bearing.x /= factor;
+            glyph.metrics.bearing.y /= factor;
+            glyph.metrics.bitmapSize.x = scaled.width;
+            glyph.metrics.bitmapSize.y = scaled.height; // TODO: there shall be only one with'x'height.
+            glyph.bitmap = move(scaled);
+
+            int rightEdge = std::numeric_limits<int>::max();
+            for (int x = glyph.bitmap.width - 1; x >= 0; --x)
+            {
+                for (int y = 0; y < glyph.bitmap.height; ++y)
+                {
+                    auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
+                    if (pixel[3] > 20)
+                        rightEdge = x;
+                }
+                if (rightEdge != std::numeric_limits<int>::max())
+                    break;
+            }
+            if (rightEdge != std::numeric_limits<int>::max())
+            {
+                printf("right edge found. %d < %d.\n", rightEdge+1, glyph.bitmap.width);
+            }
+
+            ratio = 1.0;// / factor; // pre-scale
+        }
+#else
+        GlyphMetrics& metadata = glyph.metrics;
+        metadata.bearing.x = int(ceil(metadata.bearing.x * ratio));
+        metadata.bearing.y = int(ceil(metadata.bearing.y * ratio));
+#endif
     }
 
-    auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> {
+    auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
         if (colored)
             return {1, colorAtlas_};
@@ -419,23 +482,23 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
                 return {0, monochromeAtlas_};
         }
         return {0, monochromeAtlas_};
-    }();
+    }(); // }}}
 
     if (crispy::logging_sink::for_debug().enabled())
         debuglog().write("insert glyph {}: {}; path:{}",
                          _id.glyphIndex,
-                         metadata,
+                         glyph.metrics,
                          _id.font.get().filePath());
 
     assert(&lookupAtlas == &targetAtlas);
     return targetAtlas.insert(_id,
                               glyph.metrics.bitmapSize.x,
                               glyph.metrics.bitmapSize.y,
-                              unsigned(float(glyph.metrics.bitmapSize.x) * ratioX),
-                              unsigned(float(glyph.metrics.bitmapSize.y) * ratioY),
+                              unsigned(ceil(double(glyph.metrics.bitmapSize.x) * ratio)),
+                              unsigned(ceil(double(glyph.metrics.bitmapSize.y) * ratio)),
                               move(glyph.bitmap.data),
                               userFormat,
-                              metadata);
+                              glyph.metrics);
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,

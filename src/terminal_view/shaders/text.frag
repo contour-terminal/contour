@@ -1,61 +1,155 @@
-// layout (binding = 0) uniform mediump sampler2DArray fs_monochromeTextures;   // R
-// layout (binding = 1) uniform mediump sampler2DArray fs_colorTextures;        // RGBA
-// layout (binding = 2) uniform mediump sampler2DArray fs_lcdTexture;           // RGB
-uniform mediump sampler2DArray fs_monochromeTextures; // R
-uniform mediump sampler2DArray fs_colorTextures;      // RGBA
-uniform mediump sampler2DArray fs_lcdTexture;         // RGB
+uniform float pixel_x;                        // 1.0 / lcdAtlas.width
+uniform sampler2DArray fs_monochromeTextures; // R
+uniform sampler2DArray fs_colorTextures;      // RGBA
+uniform sampler2DArray fs_lcdTexture;         // RGB
 
-in mediump vec4 fs_TexCoord;
-in mediump vec4 fs_textColor;
+in vec4 fs_TexCoord;
+in vec4 fs_textColor;
 
 // Dual source blending (since OpenGL 3.3)
 // layout (location = 0, index = 0) out vec4 color;
 // layout (location = 0, index = 1) out vec4 colorMask;
-out mediump vec4 color;
+out vec4 fragColor;
 
-void renderGray()
+void renderGrayscaleGlyph()
 {
     // XXX monochrome glyph (RGB)
-    //mediump vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xyz);
-    //color = fs_textColor;
+    //vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xyz);
+    //fragColor = fs_textColor;
     //colorMask = alphaMap;
 
     // when only using the RED-channel
-    mediump float v = texture(fs_monochromeTextures, fs_TexCoord.xyz).r;
-    mediump vec4 sampled = vec4(1.0, 1.0, 1.0, v);
-    color = sampled * fs_textColor;
+    float v = texture(fs_monochromeTextures, fs_TexCoord.xyz).r;
+    vec4 sampled = vec4(1.0, 1.0, 1.0, v);
+    fragColor = sampled * fs_textColor;
 }
 
+// Renders an RGBA texture. This is used to render images (such as Sixel graphics or Emoji).
 void renderColoredRGBA()
 {
-    // colored glyph (RGBA)
-    mediump vec4 v = texture(fs_colorTextures, fs_TexCoord.xyz);
-    color = v;
+    // colored image (RGBA)
+    vec4 v = texture(fs_colorTextures, fs_TexCoord.xyz);
+    fragColor = v;
 }
 
-void renderLcdRGB()
+// Simple LCD subpixel rendering will cause color fringes on the left/right side of the glyph
+// shapes. People may be used to this already?
+void renderLcdGlyphSimple()
 {
     // LCD glyph (RGB)
-    mediump vec4 v = texture(fs_lcdTexture, fs_TexCoord.xyz); // .rgb ?
-    mediump float a = min(v.r, min(v.g, v.b));
+    vec4 v = texture(fs_lcdTexture, fs_TexCoord.xyz); // .rgb ?
+
+    // float a = min(v.r, min(v.g, v.b));
+    float a = (v.r + v.g + v.b) / 3.0;
+
     v = v * fs_textColor;
     v.a = a;
-    color = v;
+
+    fragColor = v;
+}
+
+// Calcualtes subpixel shifting.
+//
+// @param current       current pixel to render
+// @param previous      previous pixel, left neighbor of current.
+// @param shift         fraction of a pixel to shift in range [0.0 .. 1.0)
+//
+// @return the shifted pixel
+//
+vec3 lcdPixelShift(vec3 current, vec3 previous, float shift)
+{
+    const float OneThird = 1.0 / 3.0;
+    const float TwoThird = 2.0 / 3.0;
+
+    float r = current.r;
+    float g = current.g;
+    float b = current.b;
+
+    // maybe faster?
+    //
+    //    int ishift = int(shift * 100.0) / 33; // 0, 1, 2, 3
+    //    switch (ishift) { case 0, 1, 2... }
+
+    if (shift <= OneThird)
+    {
+        float z = shift / OneThird;
+        r = mix(current.r, previous.b, z);
+        g = mix(current.g, current.r,  z);
+        b = mix(current.b, current.g,  z);
+    }
+    else if (shift <= TwoThird)
+    {
+        float z = (shift - OneThird) / OneThird;
+        r = mix(previous.b, previous.g, z);
+        g = mix(current.r,  previous.b, z);
+        b = mix(current.g,  current.r,  z);
+    }
+    else if (shift < 1.0)
+    {
+        float z = (shift - TwoThird) / OneThird;
+        r = mix(previous.g, previous.r, z);
+        g = mix(previous.b, previous.g, z);
+        b = mix(current.r,  previous.b, z);
+    }
+
+    return vec3(r, g, b);
+}
+
+// Renders the LCD subpixel optimized glyph as described in:
+//     Nicolas P. Rougier, Higher Quality 2D Text Rendering,
+//     Journal of Computer Graphics Techniques (JCGT), vol. 2, no. 1, 50-64, 2013
+// See:
+//     http://jcgt.org/published/0002/01/04/
+void renderLcdGlyph()
+{
+    float px = pixel_x;
+    vec3 pixelOffset = vec3(1.0, 0.0, 0.0) * px;
+
+    // LCD glyph (RGB)
+    vec4 current  = texture(fs_lcdTexture, fs_TexCoord.xyz);
+    vec4 previous = texture(fs_lcdTexture, fs_TexCoord.xyz - pixelOffset);
+
+    // The text in a terminal does enforce fixed-width advances, and therefore
+    // rendering a glyph should always start at a full pixel with no shift.
+    //
+    // We keep this variable here anyways for clearance.
+    const float shift = 0.0;
+    vec3 shifted = lcdPixelShift(current.rgb, previous.rgb, shift);
+
+    float r = shifted.r;
+    float g = shifted.g;
+    float b = shifted.b;
+
+    float rgbAvg = (r + g + b) / 3.0;
+    float rgbMin = min(min(r, g), b);
+    float rgbMax = max(max(r, g), b);
+    float rgbMaxNormComplement = 1.0 - rgbMax;
+
+    vec4 colorContribution = vec4(fs_textColor.rgb, rgbAvg) * rgbMax;
+    vec4 glyphContribution = vec4(r, g, b, rgbMin)          * rgbMaxNormComplement;
+    vec4 color = glyphContribution + colorContribution;
+
+    float alpha = color.a * fs_textColor.a;
+
+    fragColor = vec4(color.rgb, alpha);
 }
 
 void main()
 {
-    switch (int(fs_TexCoord.w))
+    int textureSelector = int(fs_TexCoord.w);
+
+    switch (textureSelector)
     {
         case 2:
-            renderLcdRGB();
+            // renderLcdGlyphSimple();
+            renderLcdGlyph();
             break;
         case 1:
             renderColoredRGBA();
             break;
         case 0:
         default:
-            renderGray();
+            renderGrayscaleGlyph();
             break;
     }
 }

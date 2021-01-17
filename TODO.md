@@ -1,8 +1,12 @@
-# FRIDAY TODO
+- [ ] debug log must include software git sha (and version)
+- [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
+- [?] merge rgb into rgba texture atlas
+- [ ] invert texture in texture atlas, for better debugging
 - [ ] [REFLOW] Grid: finish unit tests
 - [ ] [Font]: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
 - [ ] [Font]: investigate in faulty glyph offsetting?
 - [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y.
+- [ ] BUG: emoji in wintitle not working anymore?
 
 ### font related refactor
 - [x] get underline position & thickness from font metrics

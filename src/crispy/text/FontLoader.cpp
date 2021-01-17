@@ -173,10 +173,17 @@ Font* FontLoader::loadFromFilePath(std::string const& _path, double _fontSize)
         return &k->second;
     }
 
-    if (auto face = Font::loadFace(ft_, _path, _fontSize, dpi_); face != nullptr)
+    auto face = FT_Face{};
+    if (auto const ec = FT_New_Face(ft_, _path.c_str(), 0, &face); ec != FT_Err_Ok)
+    {
+        debuglog().write("Failed to load font from path {}. {}", _path, ftErrorStr(ec));
+        FT_Done_Face(face);
+        return nullptr;
+    }
+    else
+    {
         return &fonts_.emplace(make_pair(_path, Font(ft_, face, _fontSize, dpi_, _path))).first->second;
-
-    return nullptr;
+    }
 }
 
 } // end namespace

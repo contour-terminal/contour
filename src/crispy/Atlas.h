@@ -16,6 +16,7 @@
 #include <fmt/format.h>
 #include <iostream>
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <functional>
@@ -247,12 +248,14 @@ class TextureAtlasAllocator {
             }
         }
 
+        auto constexpr HorizontalGap = 1; // put a tiny gap between the sub textures
+
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
         if (_height > height_ || _width > width_)
             return nullptr;
 
         // ensure we have enough width space in current row
-        if (currentX_ + _width >= width_ && !advanceY())
+        if (currentX_ + _width >= width_ + HorizontalGap && !advanceY())
             return nullptr;
 
         // ensure we have enoguh height space in current row
@@ -263,7 +266,7 @@ class TextureAtlasAllocator {
                                                     Offset{currentInstanceId_, currentX_, currentY_, currentZ_},
                                                     _user);
 
-        currentX_ += _width;
+        currentX_ = std::min(currentX_ + _width + HorizontalGap, width_);
 
         if (_height > maxTextureHeightInCurrentRow_)
             maxTextureHeightInCurrentRow_ = _height;

@@ -1,5 +1,5 @@
-in mediump vec4 fs_textColor;
-out mediump vec4 outColor;
+in vec4 fs_textColor;
+out vec4 outColor;
 
 void main()
 {

@@ -67,7 +67,73 @@ namespace { // {{{ helper functions
     }
 } // }}}
 
-FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, double _fontSize, Vec2 _dpi)
+tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height)
+{
+    assert(_bitmap.format == BitmapFormat::RGBA);
+    // assert(_bitmap.width <= _width);
+    // assert(_bitmap.height <= _height);
+
+    auto const ratioX = float(_bitmap.width) / float(_width);
+    auto const ratioY = float(_bitmap.height) / float(_height);
+    auto const ratio = max(ratioX, ratioY);
+    auto const factor = int(ceilf(ratio));
+
+    vector<uint8_t> dest;
+    dest.resize(_height * _width * 4);
+
+    debuglog().write("scale: from {}x{} to {}x{}, ratio {}x{} ({}), factor {}",
+            _bitmap.width, _bitmap.height,
+            _width, _height,
+            ratioX, ratioY, ratio, factor);
+
+    // std::cerr << fmt::format("scale: from {}x{} to {}x{}, ratio {}x{} ({}), factor {}\n",
+    //         _bitmap.width, _bitmap.height,
+    //         _width, _height,
+    //         ratioX, ratioY, ratio, factor);
+
+#if 1
+    uint8_t* d = dest.data();
+    for (int i = 0, sr = 0; i < _height; i++, sr += factor)
+    {
+        for (int j = 0, sc = 0; j < _width; j++, sc += factor, d += 4)
+        {
+            // calculate area average
+            unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
+            for (int y = sr; y < min(sr + factor, _bitmap.height); y++)
+            {
+                uint8_t const* p = _bitmap.data.data() + (y * _bitmap.width * 4) + sc * 4;
+                for (int x = sc; x < min(sc + factor, _bitmap.width); x++, count++)
+                {
+                    b += *(p++);
+                    g += *(p++);
+                    r += *(p++);
+                    a += *(p++);
+                }
+            }
+
+            if (count)
+            {
+                d[0] = b / count;
+                d[1] = g / count;
+                d[2] = r / count;
+                d[3] = a / count;
+            }
+        }
+    }
+#else
+    dest = _bitmap.data;
+#endif
+
+    auto output = Bitmap{};
+    output.format = _bitmap.format;
+    output.width = _width;
+    output.height = _height;
+    output.data = move(dest);
+
+    return {output, factor};
+}
+
+FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath)
 {
     FT_Face face{};
     if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face) != FT_Err_Ok)
@@ -76,15 +142,7 @@ FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath, double _fon
         return nullptr;
     }
 
-    FT_Error ec = FT_Select_Charmap(face, FT_ENCODING_UNICODE);
-    if (ec)
-        debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
-
-    if (doSetFontSize(face, _fontSize, _dpi))
-        return face;
-
-    FT_Done_Face(face);
-    return nullptr;
+    return face;
 }
 
 Font::Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath) :
@@ -92,10 +150,14 @@ Font::Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::stri
     filePath_{ move(_fontPath) },
     ft_{ _ft },
     face_{ _face },
-    fontSize_{ _fontSize },
+    strikeIndex_{ 0 },
+    fontSize_{ 0 },
     dpi_{ _dpi }
 {
-    recalculateMetrics();
+    if (FT_Error const ec = FT_Select_Charmap(face_, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
+        debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
+
+    setFontSize(_fontSize);
 }
 
 Font::Font(Font&& v) noexcept :
@@ -245,6 +307,8 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             ftBitmap.num_grays = 256;
 
             bitmap.format = BitmapFormat::Gray;
+            bitmap.width = width;
+            bitmap.height = height;
             bitmap.data.resize(height * width); // 8-bit channel (with values 0 or 255)
 
             auto const pitch = abs(ftBitmap.pitch);
@@ -261,6 +325,8 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             auto const height = metrics.bitmapSize.y;
 
             bitmap.format = BitmapFormat::Gray;
+            bitmap.width = width;
+            bitmap.height = height;
             bitmap.data.resize(height * width);
 
             auto const pitch = face_->glyph->bitmap.pitch;
@@ -272,11 +338,14 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
         }
         case FT_PIXEL_MODE_LCD:
         {
+#if 1
             auto const width = face_->glyph->bitmap.width;
             auto const height = face_->glyph->bitmap.rows;
             assert(width == unsigned(metrics.bitmapSize.x));
 
             bitmap.format = BitmapFormat::LCD;
+            bitmap.width = int(width / 3);
+            bitmap.height = height;
             bitmap.data.resize(height * width);
             metrics.bitmapSize.x /= 3;
 
@@ -286,26 +355,66 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             for (auto const i : crispy::times(height))
                 for (auto const j : crispy::times(width))
                     bitmap.data[i * width + j] = s[i * pitch + j];
+#else
+            // This code path converts the LCD RGB image into an RGBA image
+            auto const width = face_->glyph->bitmap.width / 3;
+            auto const height = face_->glyph->bitmap.rows;
+
+            bitmap.format = BitmapFormat::RGBA;
+            bitmap.width = width;
+            bitmap.height = height;
+            bitmap.data.resize(height * width * 4);
+
+            // that is interesting, that FT_PIXEL_MODE_LCD's width accounts for each color component
+            metrics.bitmapSize.x /= 3;
+
+            auto const pitch = face_->glyph->bitmap.pitch;
+            auto s = face_->glyph->bitmap.buffer;
+            auto t = bitmap.data.begin();
+
+            for (auto i = 0u; i < height; ++i)
+            {
+                for (auto j = 0u; j < width; ++j)
+                {
+                    auto const [r, g, b] = tuple{s[j * 3 + 0], s[j * 3 + 1], s[j * 3 + 2]};
+                    auto const a = int(ceil(r + g + b) / 3.0);
+                    *t++ = r;
+                    *t++ = g;
+                    *t++ = b;
+                    *t++ = a;
+                }
+                s += pitch;
+            }
+#endif
             break;
         }
         case FT_PIXEL_MODE_BGRA:
         {
             auto const width = metrics.bitmapSize.x;
             auto const height = metrics.bitmapSize.y;
+            assert(unsigned(width) == face_->glyph->bitmap.width);
+            assert(unsigned(height) == face_->glyph->bitmap.rows);
 
             bitmap.format = BitmapFormat::RGBA;
+            bitmap.width = width;
+            bitmap.height = height;
             bitmap.data.resize(height * width * 4);
             auto t = bitmap.data.begin();
             auto s = face_->glyph->bitmap.buffer;
 
-            crispy::for_each(crispy::times(0, width * height, 4), [&](auto) {
-                // BGRA -> RGBA
-                *t++ = s[2];
-                *t++ = s[1];
-                *t++ = s[0];
-                *t++ = s[3];
-                s += 4;
-            });
+            for ([[maybe_unused]] auto const _ : crispy::times(height))
+            {
+                for (auto const j : crispy::times(width))
+                {
+                    // BGRA -> RGBA
+                    *t++ = s[j * 4 + 2];
+                    *t++ = s[j * 4 + 1];
+                    *t++ = s[j * 4 + 0];
+                    *t++ = s[j * 4 + 3];
+                }
+                s += face_->glyph->bitmap.pitch;
+            }
+
             break;
         }
         default:
@@ -316,41 +425,58 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
     return {Glyph{metrics, move(bitmap)}};
 }
 
-bool Font::doSetFontSize(FT_Face _face, double _fontSize, Vec2 _dpi)
+bool Font::selectSizeForWidth(int _width) // or call it: selectStrikeIndexForWidth(int _width))
 {
-    if (FT_HAS_COLOR(_face))
+    int best = 0, diff = std::numeric_limits<int>::max();
+    for (int i = 0; i < face_->num_fixed_sizes; ++i)
     {
-        FT_Error const ec = FT_Select_Size(_face, 0); // FIXME i think this one can be omitted?
-        if (ec != FT_Err_Ok)
+        auto const width = face_->available_sizes[i].width;
+        auto const d = width > _width ? width - _width
+                                      : _width - width;
+        if (d < diff) {
+            diff = d;
+            best = i;
+        }
+    }
+
+    strikeIndex_ = best;
+
+    if (face_->num_fixed_sizes > 1)
+        debuglog().write("set strike index to {} (total: {}) for font {}",
+                         best, face_->num_fixed_sizes, filePath_);
+
+    FT_Error const ec = FT_Select_Size(face_, best);
+    if (ec != FT_Err_Ok)
+        debuglog().write("Failed to FT_Select_Size: {}", freetypeErrorString(ec));
+
+    return ec == FT_Err_Ok;
+}
+
+void Font::setFontSize(double _fontSize)
+{
+    if (fontSize_ == _fontSize)
+        return;
+
+    if (FT_HAS_COLOR(face_))
+    {
+        if (FT_Error const ec = FT_Select_Size(face_, strikeIndex_); ec != FT_Err_Ok)
         {
             debuglog().write("Failed to FT_Select_Size: {}", freetypeErrorString(ec));
-            return false;
         }
     }
     else
     {
         auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize * 64.0));
-        FT_Error const ec = FT_Set_Char_Size(_face, size, size, _dpi.x, _dpi.y);
-        if (ec)
+        if (FT_Error const ec = FT_Set_Char_Size(face_, size, size, dpi_.x, dpi_.y); ec != FT_Err_Ok)
         {
             debuglog().write("Failed to FT_Set_Pixel_Sizes: {}\n", freetypeErrorString(ec));
-            return false;
         }
     }
-    return true;
-}
 
-void Font::setFontSize(double _fontSize)
-{
-    if (fontSize_ != _fontSize && doSetFontSize(face_, _fontSize, dpi_))
-    {
-        fontSize_ = _fontSize;
-        recalculateMetrics();
-    }
-}
+    fontSize_ = _fontSize;
 
-void Font::recalculateMetrics()
-{
+    // recalculate metrics
+
     // update bitmap width/height
     if (FT_IS_SCALABLE(face_))
     {
@@ -359,8 +485,8 @@ void Font::recalculateMetrics()
     }
     else
     {
-        bitmapWidth_ = face_->available_sizes[0].width;
-        bitmapHeight_ = face_->available_sizes[0].height;
+        bitmapWidth_ = face_->available_sizes[strikeIndex_].width;
+        bitmapHeight_ = face_->available_sizes[strikeIndex_].height;
     }
 
     maxAdvance_ = computeMaxAdvance(face_);
