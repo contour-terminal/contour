@@ -327,8 +327,9 @@ void TextRenderer::render(QPoint _pos,
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 {
+    auto const colored = _id.font.get().hasColor();
     TextureAtlas& lookupAtlas = [&]() -> TextureAtlas& {
-        if (_id.font.get().hasColor())
+        if (colored)
             return colorAtlas_;
         switch (fonts_.renderMode)
         {
@@ -354,7 +355,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         return nullopt;
 
     Glyph& glyph = theGlyphOpt.value();
-    auto const colored = _id.font.get().hasColor() ? 1 : 0;
     auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
 
     auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
