@@ -201,6 +201,30 @@ namespace std { // {{{
 
 namespace fmt { // {{{
     template <>
+    struct formatter<crispy::text::RenderMode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::RenderMode const& _mode, FormatContext& ctx)
+        {
+            switch (_mode)
+            {
+                case crispy::text::RenderMode::Bitmap:
+                    return format_to(ctx.out(), "Bitmap");
+                case crispy::text::RenderMode::Gray:
+                    return format_to(ctx.out(), "Gray");
+                case crispy::text::RenderMode::Light:
+                    return format_to(ctx.out(), "RGBA");
+                case crispy::text::RenderMode::LCD:
+                    return format_to(ctx.out(), "LCD");
+                case crispy::text::RenderMode::Color:
+                    return format_to(ctx.out(), "Color");
+            }
+            return format_to(ctx.out(), "({})", unsigned(_mode));
+        }
+    };
+
+    template <>
     struct formatter<crispy::text::BitmapFormat> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
@@ -215,9 +239,8 @@ namespace fmt { // {{{
                     return format_to(ctx.out(), "RGBA");
                 case crispy::text::BitmapFormat::LCD:
                     return format_to(ctx.out(), "LCD");
-                default:
-                    return format_to(ctx.out(), "Unknown({})", unsigned(_format));
             }
+            return format_to(ctx.out(), "Unknown({})", unsigned(_format));
         }
     };
 
