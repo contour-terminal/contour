@@ -39,6 +39,8 @@
 #include <Windows.h>
 #endif
 
+auto constexpr MinimumFontSize = 8.0;
+
 namespace contour::config {
 
 using namespace std;
@@ -738,6 +740,12 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     }
 
     softLoadValue(_node, "font_size", profile.fontSize);
+    if (profile.fontSize < MinimumFontSize)
+    {
+        debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
+                         profile.fontSize, MinimumFontSize);
+        profile.fontSize = MinimumFontSize;
+    }
 
     if (auto fonts = _node["font"]; fonts)
     {
