@@ -16,6 +16,7 @@
 #include <fmt/format.h>
 #include <iostream>
 
+#include <array>
 #include <cassert>
 #include <functional>
 #include <iomanip> // setprecision
