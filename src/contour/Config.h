@@ -74,7 +74,8 @@ inline bool operator==(FontSpecList const& a, FontSpecList const& b) noexcept
         && a.bold == b.bold
         && a.italic == b.italic
         && a.boldItalic == b.boldItalic
-        && a.emoji == b.emoji;
+        && a.emoji == b.emoji
+        && a.renderMode == b.renderMode;
 }
 
 inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
