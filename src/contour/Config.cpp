@@ -758,24 +758,18 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
         string renderModeStr;
         softLoadValue(fonts, "render_mode", renderModeStr);
-        auto const renderModeMap = array{
+        auto const static renderModeMap = array{
             pair{"lcd"sv, crispy::text::RenderMode::LCD},
             pair{"light"sv, crispy::text::RenderMode::Light},
             pair{"gray"sv, crispy::text::RenderMode::Gray},
             pair{"monochrome"sv, crispy::text::RenderMode::Bitmap},
         };
-        do
-        {
-            for (auto const modeMapping: renderModeMap)
-            {
-                if (modeMapping.first == renderModeStr)
-                {
-                    profile.fonts.renderMode = modeMapping.second;
-                    break;
-                }
-            }
+
+        auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
+        if (i != renderModeMap.end())
+            profile.fonts.renderMode = i->second;
+        else
             debuglog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
-        } while (false);
     }
 
     softLoadValue(_node, "tab_width", profile.tabWidth);

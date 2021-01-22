@@ -1289,8 +1289,13 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Silently;
         },
         [this](actions::ChangeProfile const& v) -> Result {
-            setProfile(v.name);
-            return Result::Dirty;
+            if (v.name == profileName_)
+            {
+                setProfile(v.name);
+                return Result::Dirty;
+            }
+            else
+                return Result::Silently;
         },
         [this](actions::NewTerminal const& v) -> Result {
             spawnNewTerminal(v.profileName.value_or(profileName_));
@@ -1418,11 +1423,13 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 
 void TerminalWidget::setProfile(string const& _newProfileName)
 {
-    debuglog().write("Changing profile to '{}'.", _newProfileName);
     if (auto newProfile = config_.profile(_newProfileName); newProfile)
+    {
+        debuglog().write("Changing profile to '{}'.", _newProfileName);
         setProfile(_newProfileName, *newProfile);
+    }
     else
-        debuglog().write("No such profile: '{}'.", _newProfileName);
+        debuglog().write("Cannot change profile. No such profile: '{}'.", _newProfileName);
 }
 
 void TerminalWidget::setProfile(string const& _name, config::TerminalProfile newProfile)
