@@ -411,14 +411,14 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         }
     }
 
-    auto const [ratioX, ratioY] = [&]() -> pair<double, double> {
+    auto const [ratioX, ratioY] = [&]() -> pair<float, float> {
         // only for emoji
         if (!colored)
-            return {1.0, 1.0};
+            return {1.0f, 1.0f};
         else
             return {
-                double(gridMetrics_.cellSize.width * numCells) / double(glyph.metrics.bitmapSize.x),
-                double(gridMetrics_.cellSize.height) / double(glyph.metrics.bitmapSize.y)
+                float(gridMetrics_.cellSize.width * numCells) / float(glyph.metrics.bitmapSize.x),
+                float(gridMetrics_.cellSize.height) / float(glyph.metrics.bitmapSize.y)
             };
     }();
     auto ratio = max(ratioX, ratioY);
@@ -494,8 +494,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     return targetAtlas.insert(_id,
                               glyph.metrics.bitmapSize.x,
                               glyph.metrics.bitmapSize.y,
-                              unsigned(ceil(double(glyph.metrics.bitmapSize.x) * ratio)),
-                              unsigned(ceil(double(glyph.metrics.bitmapSize.y) * ratio)),
+                              unsigned(ceilf(float(glyph.metrics.bitmapSize.x) * ratio)),
+                              unsigned(ceilf(float(glyph.metrics.bitmapSize.y) * ratio)),
                               move(glyph.bitmap.data),
                               userFormat,
                               glyph.metrics);
