@@ -74,9 +74,9 @@ profiles:
             # Modes availabe are:
             # - lcd          Uses a subpixel rendering technique optimized for LCD displays.
             # - light        Uses a subpixel rendering technique in gray-scale.
-            # - gray         Uses standard anti-aliasing.
+            # - gray         Uses standard gray-scaled anti-aliasing.
             # - monochrome   Uses pixel-perfect bitmap rendering.
-            render_mode: monochrome
+            render_mode: gray
 
             regular: "monospace"
 
