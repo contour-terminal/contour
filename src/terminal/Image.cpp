@@ -59,9 +59,19 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     // TODO: if input format is (RGB | PNG), transform to RGBA
 
     auto target = &fragData[0];
+
+    // fill horizontal gap at the bottom
+    for (int y = availableHeight * cellSize_.width; y < cellSize_.height * cellSize_.width; ++y)
+    {
+        *target++ = defaultColor_.red();
+        *target++ = defaultColor_.green();
+        *target++ = defaultColor_.blue();
+        *target++ = defaultColor_.alpha();
+    }
+
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset = ((pixelOffset.row + y) * image_->width() + pixelOffset.column) * 4;
+        auto const startOffset = ((pixelOffset.row + (availableHeight - 1 - y)) * image_->width() + pixelOffset.column) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 
@@ -73,15 +83,6 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
             *target++ = defaultColor_.blue();
             *target++ = defaultColor_.alpha();
         }
-    }
-
-    // fill horizontal gap at the bottom
-    for (int y = availableHeight * cellSize_.width; y < cellSize_.height * cellSize_.width; ++y)
-    {
-        *target++ = defaultColor_.red();
-        *target++ = defaultColor_.green();
-        *target++ = defaultColor_.blue();
-        *target++ = defaultColor_.alpha();
     }
 
     return fragData;
