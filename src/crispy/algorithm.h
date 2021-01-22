@@ -19,6 +19,12 @@ namespace crispy {
 
 // XXX Some C++20 backports
 
+template <typename Container, typename Pred>
+auto find_if(Container && _container, Pred && _pred)
+{
+    return std::find_if(begin(_container), end(_container), std::forward<Pred>(_pred));
+}
+
 template <typename Container, typename Fn>
 bool any_of(Container && _container, Fn && _fn)
 {
