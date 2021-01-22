@@ -114,17 +114,17 @@ inline std::string encode(const std::string_view& value)
 template <typename Iterator, typename IndexTable>
 size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 {
-    Iterator pos = begin;
+    auto pos = begin;
 
     auto const indexSize = std::size(index);
 
-    while (pos != end && index[static_cast<size_t>(*pos)] < indexSize)
+    while (pos != end && index[size_t(*pos)] < indexSize)
         pos++;
 
-    int const nprbytes = std::distance(begin, pos) - 1;
-    int const nbytesdecoded = ((nprbytes + 3) / 4) * 3;
+    auto const nprbytes = std::distance(begin, pos) - 1;
+    auto const nbytesdecoded = ((nprbytes + 3) / 4) * 3;
 
-    return nbytesdecoded;
+    return size_t(nbytesdecoded);
 }
 
 template <typename Iterator>
