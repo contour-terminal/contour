@@ -80,14 +80,14 @@ struct OpenGLRenderer::TextureScheduler : public crispy::atlas::CommandListener
         GLfloat const vertices[6 * 11] = {
             // first triangle
         // <X      Y      Z> <X       Y       I  U>  <R   G   B   A>
-            x,     y + s, z,  rx,     ry,     i, u,  cr, cg, cb, ca,
-            x,     y,     z,  rx,     ry + h, i, u,  cr, cg, cb, ca,
-            x + r, y,     z,  rx + w, ry + h, i, u,  cr, cg, cb, ca,
+            x,     y + s, z,  rx,     ry + h, i, u,  cr, cg, cb, ca, // left top
+            x,     y,     z,  rx,     ry,     i, u,  cr, cg, cb, ca, // left bottom
+            x + r, y,     z,  rx + w, ry,     i, u,  cr, cg, cb, ca, // right bottom
 
             // second triangle
-            x,     y + s, z,  rx,     ry,     i, u,  cr, cg, cb, ca,
-            x + r, y,     z,  rx + w, ry + h, i, u,  cr, cg, cb, ca,
-            x + r, y + s, z,  rx + w, ry,     i, u,  cr, cg, cb, ca,
+            x,     y + s, z,  rx,     ry + h, i, u,  cr, cg, cb, ca, // left top
+            x + r, y,     z,  rx + w, ry,     i, u,  cr, cg, cb, ca, // right bottom
+            x + r, y + s, z,  rx + w, ry + h, i, u,  cr, cg, cb, ca, // right top
         };
 
         crispy::copy(vertices, back_inserter(buffer));

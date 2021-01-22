@@ -314,7 +314,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             auto const pitch = abs(ftBitmap.pitch);
             for (auto const i : crispy::times(ftBitmap.rows))
                 for (auto const j : crispy::times(ftBitmap.width))
-                    bitmap.data[i * width + j] = ftBitmap.buffer[i * pitch + j] * 255;
+                    bitmap.data[i * width + j] = ftBitmap.buffer[(height - 1 - i) * pitch + j] * 255;
 
             FT_Bitmap_Done(ft_, &ftBitmap);
             break;
@@ -333,7 +333,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             auto const s = face_->glyph->bitmap.buffer;
             for (auto const i : crispy::times(height))
                 for (auto const j : crispy::times(width))
-                    bitmap.data[i * width + j] = s[i * pitch + j];
+                    bitmap.data[i * width + j] = s[(height - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD:
@@ -354,7 +354,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             // for (auto const [i, j] : crispy::times2D(height, width))
             for (auto const i : crispy::times(height))
                 for (auto const j : crispy::times(width))
-                    bitmap.data[i * width + j] = s[i * pitch + j];
+                    bitmap.data[i * width + j] = s[(height - 1 - i) * pitch + j];
 #else
             // This code path converts the LCD RGB image into an RGBA image
             auto const width = face_->glyph->bitmap.width / 3;
@@ -400,19 +400,20 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
             bitmap.height = height;
             bitmap.data.resize(height * width * 4);
             auto t = bitmap.data.begin();
-            auto s = face_->glyph->bitmap.buffer;
 
-            for ([[maybe_unused]] auto const _ : crispy::times(height))
+            auto const pitch = face_->glyph->bitmap.pitch;
+            for (auto const i : crispy::times(height))
             {
                 for (auto const j : crispy::times(width))
                 {
+                    auto const s = &face_->glyph->bitmap.buffer[(height - i - 1) * pitch + j * 4];
+
                     // BGRA -> RGBA
-                    *t++ = s[j * 4 + 2];
-                    *t++ = s[j * 4 + 1];
-                    *t++ = s[j * 4 + 0];
-                    *t++ = s[j * 4 + 3];
+                    *t++ = s[2];
+                    *t++ = s[1];
+                    *t++ = s[0];
+                    *t++ = s[3];
                 }
-                s += face_->glyph->bitmap.pitch;
             }
 
             break;
