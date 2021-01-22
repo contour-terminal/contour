@@ -180,18 +180,6 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId());
     textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId());
     textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width()));
-
-    int maxUniforms = 0;
-    glGetIntegerv(GL_MAX_UNIFORM_LOCATIONS, &maxUniforms);
-    std::cerr << fmt::format(
-        "uniform ({}) locations: {}, {}, {}, {}, {}\n",
-        maxUniforms,
-        textShader_->uniformLocation("vs_projection"),
-        textShader_->uniformLocation("fs_monochromeTextures"),
-        textShader_->uniformLocation("fs_colorTextures"),
-        textShader_->uniformLocation("fs_lcdTexture"),
-        textShader_->uniformLocation("pixel_x")
-    );
     textShader_->release();
 
     initializeRectRendering();
