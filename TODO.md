@@ -1,3 +1,6 @@
+- [ ] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
+    - how to do that without unnecessary memory copies just to inverse Y-axis?
+- [ ] align emoji to baseline?
 - [ ] debug log must include software git sha (and version)
 - [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
 - [?] merge rgb into rgba texture atlas
