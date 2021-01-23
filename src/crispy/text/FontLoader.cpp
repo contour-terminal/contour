@@ -126,7 +126,7 @@ FontLoader::FontLoader(int _dpiX, int _dpiY) :
         throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
 
     if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
-        throw runtime_error{ "freetype: Failed to set LCD filter. "s + ftErrorStr(ec)};
+        debuglog().write("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 }
 
 FontLoader::~FontLoader()
