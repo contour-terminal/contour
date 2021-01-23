@@ -1,7 +1,5 @@
 # Contour - A modern C++ Terminal Emulator
-[![Ubuntu](https://github.com/christianparpart/contour/workflows/Ubuntu/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AUbuntu)
-[![Windows](https://github.com/christianparpart/contour/workflows/Windows/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AWindows)
-[![OS/X](https://github.com/christianparpart/contour/workflows/MacOS/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3AMacOS)
+[![CI Build](https://github.com/christianparpart/contour/workflows/Build/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3ABuild)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
 
