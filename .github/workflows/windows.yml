@@ -36,7 +36,7 @@ jobs:
     - name: "Build"
       run: cmake --build build/
     - name: "test: libcrispy"
-      run: .\build\src\crispy\Debug\crispy_test.exe --success --durations=yes --verbosity=normal
+      run: .\build\src\crispy\Debug\crispy_test.exe
     - name: "test: libterminal"
-      run: .\build\src\terminal\Debug\terminal_test.exe --success --durations=yes --verbosity=normal
+      run: .\build\src\terminal\Debug\terminal_test.exe
 
