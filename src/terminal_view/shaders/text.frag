@@ -11,6 +11,8 @@ in vec4 fs_textColor;
 // layout (location = 0, index = 1) out vec4 colorMask;
 out vec4 fragColor;
 
+const vec4 TEST_PIXEL = vec4(1.0, 0.0, 0.0, 1.0); // test pixel for debugging
+
 void renderGrayscaleGlyph()
 {
     // XXX monochrome glyph (RGB)
@@ -29,6 +31,7 @@ void renderColoredRGBA()
 {
     // colored image (RGBA)
     vec4 v = texture(fs_colorTextures, fs_TexCoord.xyz);
+    //v = TEST_PIXEL;
     fragColor = v;
 }
 
