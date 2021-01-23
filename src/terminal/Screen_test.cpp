@@ -1705,31 +1705,39 @@ TEST_CASE("render into history", "[screen]")
     REQUIRE(screen.historyLineCount() == 3);
 
     string renderedText;
-    renderedText.resize(2 * 6);
+    renderedText.resize((screen.size().width + 1) * screen.size().height);
     auto const renderer = [&](Coordinate const& pos, Cell const& cell) {
-        auto const offset = (pos.row - 1) * 6 + (pos.column - 1);
+        auto const offset = (pos.row - 1) * (screen.size().width + 1)
+                          + (pos.column - 1);
         renderedText.at(offset) = static_cast<char>(cell.codepoint(0));
-        if (pos.column == 5)
+        if (pos.column == screen.size().width)
+        {
+            printf("render at %d and %d\n", offset, offset+1);
             renderedText.at(offset + 1) = '\n';
+        }
     };
 
     SECTION("main area") {
         screen.render(renderer);
+        printf("text: '%s'\n", renderedText.c_str());
         REQUIRE("FGHIJ\nKLMNO\n" == renderedText);
     }
 
     SECTION("1 line into history") {
         screen.render(renderer, 2);
+        printf("text: '%s'\n", renderedText.c_str());
         REQUIRE("ABCDE\nFGHIJ\n" == renderedText);
     }
 
     SECTION("2 lines into history") {
         screen.render(renderer, 1);
+        printf("text: '%s'\n", renderedText.c_str());
         REQUIRE("67890\nABCDE\n" == renderedText);
     }
 
     SECTION("3 lines into history") {
         screen.render(renderer, 0);
+        printf("text: '%s'\n", renderedText.c_str());
         REQUIRE("12345\n67890\n" == renderedText);
     }
 }
