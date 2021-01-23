@@ -688,13 +688,11 @@ inline crispy::range<Lines::const_iterator> Grid::pageAtScrollOffset(std::option
 {
     assert(crispy::ascending(0, _scrollOffset.value_or(0), historyLineCount()) && "Absolute scroll offset must not be negative or overflowing.");
 
-    return crispy::range<Lines::const_iterator>(
-        std::next(
-            lines_.cbegin(),
-            static_cast<size_t>(_scrollOffset.value_or(historyLineCount()))
-        ),
-        lines_.cend()
-    );
+    auto const start = std::next(lines_.cbegin(),
+                                 static_cast<size_t>(_scrollOffset.value_or(historyLineCount())));
+    auto const end = std::next(start, screenSize_.height);
+
+    return crispy::range<Lines::const_iterator>(start, end);
 }
 
 inline crispy::range<Lines::iterator> Grid::pageAtScrollOffset(std::optional<int> _scrollOffset)
