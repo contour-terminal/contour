@@ -1,15 +1,15 @@
-- [ ] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
-    - how to do that without unnecessary memory copies just to inverse Y-axis?
-- [ ] align emoji to baseline?
+- [ ] emoji: resize-to-fit cell size then center.
 - [ ] debug log must include software git sha (and version)
 - [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
-- [?] merge rgb into rgba texture atlas
 - [ ] invert texture in texture atlas, for better debugging
 - [ ] [REFLOW] Grid: finish unit tests
 - [ ] [Font]: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
 - [ ] [Font]: investigate in faulty glyph offsetting?
-- [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y.
+- [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
 - [ ] BUG: emoji in wintitle not working anymore?
+- [x] merge rgb into rgba texture atlas => NO
+- [x] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
+    - how to do that without unnecessary memory copies just to inverse Y-axis?
 
 ### font related refactor
 - [x] get underline position & thickness from font metrics
