@@ -1707,9 +1707,10 @@ TEST_CASE("render into history", "[screen]")
     string renderedText;
     renderedText.resize(2 * 6);
     auto const renderer = [&](Coordinate const& pos, Cell const& cell) {
-        renderedText[(pos.row - 1) * 6 + (pos.column - 1)] = static_cast<char>(cell.codepoint(0));
+        auto const offset = (pos.row - 1) * 6 + (pos.column - 1);
+        renderedText.at(offset) = static_cast<char>(cell.codepoint(0));
         if (pos.column == 5)
-            renderedText[(pos.row - 1) * 6 + (pos.column)] = '\n';
+            renderedText.at(offset + 1) = '\n';
     };
 
     SECTION("main area") {
