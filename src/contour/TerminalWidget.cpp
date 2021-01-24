@@ -645,11 +645,6 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-    debuglog().write("{}x{}, geometry: {}/{}",
-                     _width, _height,
-                     terminal::Size{geometry().top(), geometry().left()},
-                     terminal::Size{geometry().width(), geometry().height()});
-
     if (_width == 0 || _height == 0)
         return;
 
@@ -669,12 +664,18 @@ void TerminalWidget::resizeGL(int _width, int _height)
     auto const viewWidth = width() - scrollBar_->sizeHint().width();
     auto const viewHeight = height();
 
+    debuglog().write("widget: {}, view: {}, geometry: {}/{}",
+                     terminal::Size{_width, _height},
+                     terminal::Size{viewWidth, viewHeight},
+                     terminal::Size{geometry().top(), geometry().left()},
+                     terminal::Size{geometry().width(), geometry().height()});
+
     terminalView_->resize(viewWidth, viewHeight);
     setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
     terminalView_->setProjection(
         ortho(
-            0.0f, static_cast<float>(viewWidth),      // left, right
-            0.0f, static_cast<float>(viewHeight)      // bottom, top
+            0.0f, float(_width),      // left, right
+            0.0f, float(_height)      // bottom, top
         )
     );
 
