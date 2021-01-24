@@ -74,9 +74,9 @@ profiles:
         # - deny      Denies the given functionality
         # - ask       Asks the user interactively via popup dialog for permission of the given action.
         #
-        # Default for all of these entries should be: "ask"."
+        # Default for all of these entries should be: "ask".
         permissions:
-            # Allows changing the font.via `OSC 50 ; Pt ST` (this is the regular font face).
+            # Allows changing the font via `OSC 50 ; Pt ST` (this is the regular font face).
             change_font: ask
 
         # Font family to use for displaying text.
