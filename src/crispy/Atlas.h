@@ -206,6 +206,10 @@ class TextureAtlasAllocator {
 
     TextureInfo const& get(size_t _index) const { return *std::next(std::begin(textureInfos_), _index); }
 
+    // Configure some enforced horizontal/vertical gap between the subtextures.
+    auto inline static constexpr HorizontalGap = 0;
+    auto inline static constexpr VerticalGap = 0;
+
     /// Inserts a new texture into the atlas.
     ///
     /// @param _id       a unique identifier used for accessing this texture
@@ -248,8 +252,6 @@ class TextureAtlasAllocator {
             }
         }
 
-        auto constexpr HorizontalGap = 1; // put a tiny gap between the sub textures
-
         // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
         if (_height > height_ || _width > width_)
             return nullptr;
@@ -259,7 +261,7 @@ class TextureAtlasAllocator {
             return nullptr;
 
         // ensure we have enoguh height space in current row
-        if (currentY_ + _height > height_ && !advanceZ())
+        if (currentY_ + _height > height_ + VerticalGap && !advanceZ())
             return nullptr;
 
         TextureInfo const& info = appendTextureInfo(_width, _height, _targetWidth, _targetHeight,
@@ -301,7 +303,7 @@ class TextureAtlasAllocator {
     {
         if (currentY_ + maxTextureHeightInCurrentRow_ <= height_)
         {
-            currentY_ += maxTextureHeightInCurrentRow_;
+            currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
             currentX_ = 0;
             maxTextureHeightInCurrentRow_ = 0;
             return true;
