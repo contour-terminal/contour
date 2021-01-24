@@ -21,6 +21,7 @@
 #include <terminal/Size.h>
 #include <terminal/Terminal.h>
 
+#include <crispy/text/FontLoader.h>
 #include <crispy/text/Font.h>
 
 #include <atomic>
@@ -46,6 +47,7 @@ class TerminalView : private Terminal::Events {
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void screenUpdated() {}
+        virtual void setFont(std::string_view const& /*_fontSpec*/) {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
@@ -60,6 +62,7 @@ class TerminalView : private Terminal::Events {
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
+                 crispy::text::FontLoader& _fontLoader,
                  FontConfig const& _fonts,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
@@ -141,6 +144,8 @@ class TerminalView : private Terminal::Events {
     void bell() override;
     void bufferChanged(ScreenType) override;
     void screenUpdated() override;
+    std::string getFont() override;
+    void setFont(std::string_view const& _fontSpec) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
@@ -155,6 +160,7 @@ class TerminalView : private Terminal::Events {
 
   private:
     Events& events_;
+    crispy::text::FontLoader& fontLoader_;
     FontConfig fonts_;
     Size size_;
     WindowMargin windowMargin_;

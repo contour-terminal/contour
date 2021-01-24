@@ -284,6 +284,20 @@ void softLoadValue(YAML::Node const& _node, string const& _name, T& _store, U co
         _store = _default;
 }
 
+void softLoadPermission(YAML::Node const& _node, string const& _name, Permission& _out)
+{
+    if (auto const valueNode = _node[_name]; valueNode.IsScalar())
+    {
+        auto const value = valueNode.as<string>();
+        if (value == "allow")
+            _out = Permission::Allow;
+        else if (value == "deny")
+            _out = Permission::Deny;
+        else if (value == "ask")
+            _out = Permission::Ask;
+    }
+}
+
 void createFileIfNotExists(FileSystem::path const& _path)
 {
     if (!FileSystem::is_regular_file(_path))
@@ -745,6 +759,12 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
                          profile.fontSize, MinimumFontSize);
         profile.fontSize = MinimumFontSize;
+    }
+
+    if (auto const permissions = _node["permissions"]; permissions && permissions.IsMap())
+    {
+        softLoadPermission(permissions, "change_font", profile.permissions.changeFont);
+        // ...
     }
 
     if (auto fonts = _node["font"]; fonts)

@@ -27,6 +27,7 @@
 #include <terminal_view/OpenGLRenderer.h> // GL_DEBUGLOG(...)
 
 #include <QtCore/QDebug>
+#include <QtCore/QMetaObject>
 #include <QtCore/QFileInfo>
 #include <QtCore/QProcess>
 #include <QtCore/QTimer>
@@ -38,6 +39,7 @@
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QScrollBar>
+#include <QtWidgets/QMessageBox>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
@@ -612,6 +614,7 @@ void TerminalWidget::initializeGL()
         *this,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
+        fontLoader_,
         fonts_,
         profile().cursorShape,
         profile().cursorDisplay,
@@ -1802,6 +1805,65 @@ void TerminalWidget::onClosed()
                                                             normalExit.exitCode));
     else
         close(); // TODO: call this only from within the GUI thread!
+}
+
+void TerminalWidget::setFont(std::string_view const& _fontSpec)
+{
+    QMetaObject::invokeMethod(this, [this, spec = string(_fontSpec)]() {
+        if (requestPermissionChangeFont())
+        {
+            auto newFonts = fonts_;
+            newFonts.regular = fontLoader_.load(spec, fonts_.regular.first.get().fontSize());
+
+            fonts_ = newFonts;
+            terminalView_->setFont(newFonts);
+        }
+    });
+}
+
+bool TerminalWidget::requestPermissionChangeFont()
+{
+    switch (profile().permissions.changeFont)
+    {
+        case config::Permission::Allow:
+            debuglog().write("Permission for font change allowed by configuration.");
+            return true;
+        case config::Permission::Deny:
+            debuglog().write("Permission for font change denied by configuration.");
+            return false;
+        case config::Permission::Ask:
+            break;
+    }
+
+    if (rememberedPermissions_.changeFont.has_value())
+        return rememberedPermissions_.changeFont.value();
+
+    debuglog().write("Permission for font change requires asking user.");
+
+    auto const reply = QMessageBox::question(this,
+        "Font change requested",
+        QString::fromStdString(fmt::format("The application has requested to change the font. Do you allow this?")),
+        QMessageBox::StandardButton::Yes
+            | QMessageBox::StandardButton::YesToAll
+            | QMessageBox::StandardButton::No
+            | QMessageBox::StandardButton::NoToAll,
+        QMessageBox::StandardButton::NoButton
+    );
+
+    switch (reply)
+    {
+        case QMessageBox::StandardButton::NoToAll:
+            rememberedPermissions_.changeFont = false;
+            break;
+        case QMessageBox::StandardButton::YesToAll:
+            rememberedPermissions_.changeFont = true;
+            [[fallthrough]];
+        case QMessageBox::StandardButton::Yes:
+            return true;
+        default:
+            break;
+    }
+    return false;
 }
 
 void TerminalWidget::copyToClipboard(std::string_view const& _text)

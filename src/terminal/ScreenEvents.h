@@ -38,6 +38,8 @@ class ScreenEvents {
     virtual void bufferChanged(ScreenType) {}
     virtual void scrollbackBufferCleared() {}
     virtual void screenUpdated() {}
+    virtual std::string getFont() { return ""; }
+    virtual void setFont(std::string_view const& /*_fontSpec*/) {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}
     virtual void dumpState() {}
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}

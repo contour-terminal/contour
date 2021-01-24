@@ -42,6 +42,13 @@ enum class ScrollBarPosition
     Right
 };
 
+enum class Permission
+{
+    Deny,
+    Allow,
+    Ask
+};
+
 struct FontSpec
 {
     std::string pattern;
@@ -96,6 +103,10 @@ struct TerminalProfile {
     FontSpecList fonts;
 
     int tabWidth;
+
+    struct {
+        Permission changeFont = Permission::Ask;
+    } permissions;
 
     terminal::ColorProfile colors;
 
@@ -164,3 +175,26 @@ Config loadConfig();
 std::error_code createDefaultConfig(FileSystem::path const& _path);
 
 } // namespace contour::config
+
+namespace fmt // {{{
+{
+    template <>
+    struct formatter<contour::config::Permission> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(contour::config::Permission const& _perm, FormatContext& ctx)
+        {
+            switch (_perm)
+            {
+                case contour::config::Permission::Allow:
+                    return format_to(ctx.out(), "allow");
+                case contour::config::Permission::Deny:
+                    return format_to(ctx.out(), "deny");
+                case contour::config::Permission::Ask:
+                    return format_to(ctx.out(), "ask");
+            }
+            return format_to(ctx.out(), "({})", unsigned(_perm));
+        }
+    };
+} // }}}

@@ -45,6 +45,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
+                           crispy::text::FontLoader& _fontLoader,
                            FontConfig const& _fonts,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
@@ -59,6 +60,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig) :
     events_{ _events },
+    fontLoader_{ _fontLoader },
     fonts_{ _fonts },
     size_{
         static_cast<int>(_pty->screenSize().width * _fonts.regular.first.get().maxAdvance()),
@@ -141,10 +143,11 @@ void TerminalView::setFont(FontConfig const& _fonts)
     fonts_ = _fonts;
     auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
 
-    debuglog().write("with size={}, adjusting margin from {}x{} to {}x{}\n",
+    debuglog().write("with size={}, adjusting margin from {}x{} to {}x{}; regular face: {}\n",
                      _fonts.regular.first.get().fontSize(),
                      windowMargin_.left, windowMargin_.bottom,
-                     newMargin.left, newMargin.bottom);
+                     newMargin.left, newMargin.bottom,
+                     _fonts.regular.first.get().filePath());
 
     windowMargin_ = newMargin;
     renderer_.setFont(_fonts);
@@ -251,6 +254,16 @@ void TerminalView::bufferChanged(ScreenType _type)
 void TerminalView::screenUpdated()
 {
     events_.screenUpdated();
+}
+
+string TerminalView::getFont()
+{
+    return fonts_.regular.first.get().filePath();
+}
+
+void TerminalView::setFont(std::string_view const& _fontSpec)
+{
+    events_.setFont(_fontSpec);
 }
 
 void TerminalView::copyToClipboard(std::string_view const& _data)

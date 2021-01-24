@@ -34,6 +34,7 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 using std::array;
@@ -51,6 +52,8 @@ using std::string;
 using std::stringstream;
 using std::unique_ptr;
 using std::vector;
+
+using namespace std::string_view_literals;
 
 #define CONTOUR_SYNCHRONIZED_OUTPUT 1
 
@@ -556,6 +559,25 @@ namespace impl // {{{ some command generator helpers
             _screen.setDynamicColor(_name, color.value());
         else
             return ApplyResult::Invalid;
+
+        return ApplyResult::Ok;
+    }
+
+    ApplyResult setFont(Sequence const& _seq, Screen& _screen)
+    {
+        auto const& params = _seq.intermediateCharacters();
+        auto const splits = crispy::split(params, ';');
+
+        if (splits.size() != 1)
+            return ApplyResult::Invalid;
+
+        if (splits[0] != "?"sv)
+            _screen.eventListener().setFont(splits[0]);
+        else
+        {
+            auto const font = _screen.eventListener().getFont();
+            _screen.reply("\033]50;{}\033\\", font);
+        }
 
         return ApplyResult::Ok;
     }
@@ -1318,6 +1340,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case COLORCURSOR: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::TextCursorColor);
         case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseBackgroundColor);
+        case SETFONT: return impl::setFont(_seq, screen_);
         case CLIPBOARD: return impl::clipboard(_seq, screen_);
         // TODO: case COLORSPECIAL: return impl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: screen_.resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;

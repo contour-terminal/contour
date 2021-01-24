@@ -317,6 +317,7 @@ constexpr inline auto COLORBG       = detail::OSC(11, "COLORBG", "Change or requ
 constexpr inline auto COLORCURSOR   = detail::OSC(12, "COLORCURSOR", "Change text cursor color to Pt.");
 constexpr inline auto COLORMOUSEFG  = detail::OSC(13, "COLORMOUSEFG", "Change mouse foreground color.");
 constexpr inline auto COLORMOUSEBG  = detail::OSC(14, "COLORMOUSEBG", "Change mouse background color.");
+constexpr inline auto SETFONT       = detail::OSC(50, "SETFONT", "Set font.");
 // printf "\033]52;c;$(printf "%s" "blabla" | base64)\a"
 constexpr inline auto CLIPBOARD     = detail::OSC(52, "CLIPBOARD", "Clipboard management.");
 constexpr inline auto COLORSPECIAL  = detail::OSC(106, "COLORSPECIAL", "Enable/disable Special Color Number c.");
@@ -437,6 +438,7 @@ inline auto const& functions() noexcept
             COLORCURSOR,
             COLORMOUSEFG,
             COLORMOUSEBG,
+            SETFONT,
             CLIPBOARD,
             COLORSPECIAL,
             RCOLORFG,

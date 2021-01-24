@@ -67,6 +67,18 @@ profiles:
         # Initial font size in pixels.
         font_size: 12
 
+        # Some VT sequences should need access permissions.
+        #
+        # These can be to:
+        # - allow     Allows the given functionality
+        # - deny      Denies the given functionality
+        # - ask       Asks the user interactively via popup dialog for permission of the given action.
+        #
+        # Default for all of these entries should be: "ask"."
+        permissions:
+            # Allows changing the font.via `OSC 50 ; Pt ST` (this is the regular font face).
+            change_font: ask
+
         # Font family to use for displaying text.
         font:
             # Font render modes tell the font rasterizer engine what rendering technique to use.
