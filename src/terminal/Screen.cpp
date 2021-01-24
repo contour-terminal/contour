@@ -1448,8 +1448,6 @@ void Screen::setMode(DECMode _mode, bool _enable)
             // TODO: also, do I still need this here?
             break;
         case DECMode::TextReflow:
-            printf("%s TextReflow from line %d .. %d\n", _enable ? "Enabling" : "Disabling",
-                    realCursorPosition().row, size_.height);
             if (isPrimaryScreen())
             {
                 if (_enable)
