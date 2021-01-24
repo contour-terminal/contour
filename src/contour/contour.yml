@@ -64,9 +64,6 @@ profiles:
             # Number of lines to scroll on ScrollUp & ScrollDown events.
             scroll_multiplier: 3
 
-        # Initial font size in pixels.
-        font_size: 12
-
         # Some VT sequences should need access permissions.
         #
         # These can be to:
@@ -79,8 +76,11 @@ profiles:
             # Allows changing the font via `OSC 50 ; Pt ST` (this is the regular font face).
             change_font: ask
 
-        # Font family to use for displaying text.
+        # Font related configuration (font face, styles, size, rendering mode).
         font:
+            # Initial font size in pixels.
+            size: 12
+
             # Font render modes tell the font rasterizer engine what rendering technique to use.
             #
             # Modes availabe are:
@@ -90,6 +90,7 @@ profiles:
             # - monochrome   Uses pixel-perfect bitmap rendering.
             render_mode: gray
 
+            # Font family to use for displaying text.
             regular: "monospace"
 
             # if bold/italic/bold_italic are not explicitely specified, the regular font with

@@ -753,14 +753,6 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(terminalSize, "lines", profile.terminalSize.height);
     }
 
-    softLoadValue(_node, "font_size", profile.fontSize);
-    if (profile.fontSize < MinimumFontSize)
-    {
-        debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
-                         profile.fontSize, MinimumFontSize);
-        profile.fontSize = MinimumFontSize;
-    }
-
     if (auto const permissions = _node["permissions"]; permissions && permissions.IsMap())
     {
         softLoadPermission(permissions, "change_font", profile.permissions.changeFont);
@@ -769,6 +761,14 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
     if (auto fonts = _node["font"]; fonts)
     {
+        softLoadValue(fonts, "size", profile.fontSize);
+        if (profile.fontSize < MinimumFontSize)
+        {
+            debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
+                             profile.fontSize, MinimumFontSize);
+            profile.fontSize = MinimumFontSize;
+        }
+
         auto& regularPattern = profile.fonts.regular.pattern;
         softLoadValue(fonts, "regular", profile.fonts.regular.pattern, "monospace");
         softLoadValue(fonts, "bold", profile.fonts.bold.pattern, regularPattern + ":style=bold");
