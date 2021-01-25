@@ -133,18 +133,6 @@ tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height)
     return {output, factor};
 }
 
-FT_Face Font::loadFace(FT_Library _ft, std::string const& _fontPath)
-{
-    FT_Face face{};
-    if (FT_New_Face(_ft, _fontPath.c_str(), 0, &face) != FT_Err_Ok)
-    {
-        debuglog().write("Failed to load font: \"{}\"", _fontPath);
-        return nullptr;
-    }
-
-    return face;
-}
-
 Font::Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath) :
     hashCode_{ hash<string>{}(_fontPath)},
     filePath_{ move(_fontPath) },

@@ -132,6 +132,11 @@ class Font {
         return face_->family_name;
     }
 
+    std::string styleName() const
+    {
+        return face_->style_name;
+    }
+
     FontStyle style() const noexcept
     {
         if (face_->style_flags & (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC))
@@ -178,8 +183,6 @@ class Font {
     std::optional<Glyph> loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderMode);
 
     FT_Face face() noexcept { return face_; }
-
-    static FT_Face loadFace(FT_Library _ft, std::string const& _fontPath);
 
     int scaleHorizontal(long _value) const noexcept;
     int scaleVertical(long _value) const noexcept;

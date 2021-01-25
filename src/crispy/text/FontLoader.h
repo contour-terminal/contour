@@ -47,7 +47,8 @@ class FontLoader {
     void setDpi(Vec2 _dpi);
     void setDpi(int _x, int _y) { setDpi(Vec2{_x, _y}); }
 
-    FontList load(std::string const& _fontPattern, double  _fontSize);
+    std::optional<FontList> load(std::string const& _family, FontStyle _style, double _fontSize);
+    [[deprecated]] FontList load(std::string const& _fontPattern, double _fontSize);
 
   private:
     Font* loadFromFilePath(std::string const& _filePath, double  _fontSize);

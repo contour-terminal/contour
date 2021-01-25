@@ -140,6 +140,34 @@ void FontLoader::setDpi(Vec2 _dpi)
     dpi_ = _dpi;
 }
 
+optional<FontList> FontLoader::load(std::string const& _family, FontStyle _style, double _fontSize)
+{
+    auto const pattern =  _style == FontStyle::Regular ? _family : fmt::format("{}:style={}", _family, _style);
+    vector<string> const filePaths = getFontFilePaths(pattern);
+
+    Font* primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
+    if (!primaryFont)
+    {
+        debuglog().write("Failed to load primary font \"{}\".", pattern);
+        return nullopt;
+    }
+
+    FontFallbackList fallbackList;
+    for (size_t i = 1; i < filePaths.size(); ++i)
+        if (auto fallbackFont = loadFromFilePath(filePaths[i], _fontSize); fallbackFont != nullptr)
+            fallbackList.push_back(*fallbackFont);
+
+    debuglog().write("FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}",
+                     pattern,
+                     primaryFont->filePath(),
+                     primaryFont->baseline(),
+                     primaryFont->bitmapHeight(),
+                     _fontSize,
+                     fallbackList.size());
+
+    return FontList{*primaryFont, fallbackList};
+}
+
 FontList FontLoader::load(string const& _fontPattern, double _fontSize)
 {
     vector<string> const filePaths = getFontFilePaths(_fontPattern);
