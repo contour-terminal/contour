@@ -60,8 +60,9 @@ profiles:
         environment:
             TERM: xterm-256color
             COLORTERM: truecolor
-        fontSize: 12
         font:
+            size: 12
+            render_mode: lcd
             regular: "Fira Code"
             bold: "Fira Code:style=bold"
             italic: "Hack:style=italic"
