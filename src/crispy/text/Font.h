@@ -127,6 +127,22 @@ class Font {
     void setFontSize(double _fontSize);
     double fontSize() const noexcept { return fontSize_; }
 
+    std::string familyName() const
+    {
+        return face_->family_name;
+    }
+
+    FontStyle style() const noexcept
+    {
+        if (face_->style_flags & (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC))
+            return FontStyle::BoldItalic;
+        if (face_->style_flags & FT_STYLE_FLAG_BOLD)
+            return FontStyle::Bold;
+        if (face_->style_flags & FT_STYLE_FLAG_ITALIC)
+            return FontStyle::Italic;
+        return FontStyle::Regular;
+    }
+
     bool hasColor() const noexcept { return FT_HAS_COLOR(face_); }
 
     int bitmapWidth() const noexcept { return bitmapWidth_; }
@@ -204,6 +220,28 @@ namespace std { // {{{
 } // }}}
 
 namespace fmt { // {{{
+    template <>
+    struct formatter<crispy::text::FontStyle> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(crispy::text::FontStyle const& _value, FormatContext& ctx)
+        {
+            switch (_value)
+            {
+                case crispy::text::FontStyle::Regular:
+                    return format_to(ctx.out(), "regular");
+                case crispy::text::FontStyle::Bold:
+                    return format_to(ctx.out(), "bold");
+                case crispy::text::FontStyle::Italic:
+                    return format_to(ctx.out(), "italic");
+                case crispy::text::FontStyle::BoldItalic:
+                    return format_to(ctx.out(), "bold italic");
+            }
+            return format_to(ctx.out(), "({})", unsigned(_value));
+        }
+    };
+
     template <>
     struct formatter<crispy::text::RenderMode> {
         template <typename ParseContext>
