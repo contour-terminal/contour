@@ -139,7 +139,7 @@ class TerminalWidget :
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void screenUpdated() override;
-    void setFont(std::string_view const& _fontSpec) override;
+    void setFontSpec(terminal::FontSpec const& _fontSpec) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;

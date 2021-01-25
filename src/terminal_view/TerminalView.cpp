@@ -28,6 +28,7 @@ using std::nullopt;
 using std::optional;
 using std::string;
 using std::unique_ptr;
+using std::tuple;
 
 namespace terminal::view {
 
@@ -256,14 +257,44 @@ void TerminalView::screenUpdated()
     events_.screenUpdated();
 }
 
-string TerminalView::getFont()
+FontSpec TerminalView::getFontSpec()
 {
-    return fonts_.regular.first.get().filePath();
+    auto const fontByStyle = [&](crispy::text::FontStyle _style) -> crispy::text::Font&
+    {
+        switch (_style)
+        {
+            case crispy::text::FontStyle::Bold:
+                return fonts_.bold.first.get();
+            case crispy::text::FontStyle::Italic:
+                return fonts_.italic.first.get();
+            case crispy::text::FontStyle::BoldItalic:
+                return fonts_.boldItalic.first.get();
+            case crispy::text::FontStyle::Regular:
+            default:
+                return fonts_.regular.first.get();
+        }
+    };
+    auto const nameOfStyledFont = [&](crispy::text::FontStyle _style) -> string
+    {
+        auto const& regularFont = fontByStyle(crispy::text::FontStyle::Regular);
+        auto const& styledFont = fontByStyle(_style);
+        if (styledFont.familyName() == regularFont.familyName())
+            return "auto";
+        else
+            return styledFont.familyName();
+    };
+    return {
+        fonts_.regular.first.get().fontSize(),
+        fonts_.regular.first.get().familyName(),
+        nameOfStyledFont(crispy::text::FontStyle::Bold),
+        nameOfStyledFont(crispy::text::FontStyle::Italic),
+        nameOfStyledFont(crispy::text::FontStyle::BoldItalic)
+    };
 }
 
-void TerminalView::setFont(std::string_view const& _fontSpec)
+void TerminalView::setFontSpec(FontSpec const& _fontSpec)
 {
-    events_.setFont(_fontSpec);
+    events_.setFontSpec(_fontSpec);
 }
 
 void TerminalView::copyToClipboard(std::string_view const& _data)

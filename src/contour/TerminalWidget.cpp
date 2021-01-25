@@ -48,6 +48,7 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <string_view>
 
 using namespace std::string_literals;
 
@@ -73,6 +74,8 @@ using std::runtime_error;
 using std::scoped_lock;
 using std::string;
 using std::string_view;
+
+using namespace std::string_view_literals;
 
 #if defined(CONTOUR_PERF_STATS)
 #define STATS_INC(name)   ++(stats_. name)
@@ -1807,13 +1810,34 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
-void TerminalWidget::setFont(std::string_view const& _fontSpec)
+void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
 {
-    QMetaObject::invokeMethod(this, [this, spec = string(_fontSpec)]() {
+    QMetaObject::invokeMethod(this, [this, spec = terminal::FontSpec(_fontSpec)]() {
         if (requestPermissionChangeFont())
         {
             auto newFonts = fonts_;
-            newFonts.regular = fontLoader_.load(spec, fonts_.regular.first.get().fontSize());
+
+            auto const fontSize = spec.size != 0 ? spec.size : fonts_.regular.first.get().fontSize();
+
+            if (!spec.regular.empty())
+                newFonts.regular = fontLoader_.load(spec.regular, fontSize);
+
+            auto const styledFont = [&](string_view _font, string_view _style) -> string {
+                // if a styled font is "auto" then infer froom regular font"
+                if (_font == "auto"sv)
+                    return fmt::format("{}:style={}", spec.regular, _style);
+                else
+                    return fmt::format("{}:style={}", _font, _style);
+            };
+
+            if (!spec.bold.empty())
+                newFonts.regular = fontLoader_.load(styledFont(spec.bold, "bold"), fontSize);
+
+            if (!spec.italic.empty())
+                newFonts.italic = fontLoader_.load(styledFont(spec.italic, "italic"), fontSize);
+
+            if (!spec.boldItalic.empty())
+                newFonts.boldItalic = fontLoader_.load(styledFont(spec.boldItalic, "bold italic"), fontSize);
 
             fonts_ = newFonts;
             terminalView_->setFont(newFonts);

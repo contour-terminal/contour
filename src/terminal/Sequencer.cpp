@@ -34,6 +34,7 @@
 #include <numeric>
 #include <optional>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -48,6 +49,8 @@ using std::optional;
 using std::pair;
 using std::runtime_error;
 using std::shared_ptr;
+using std::string_view;
+using std::stoi;
 using std::string;
 using std::stringstream;
 using std::unique_ptr;
@@ -563,6 +566,78 @@ namespace impl // {{{ some command generator helpers
         return ApplyResult::Ok;
     }
 
+    int toInt(string_view _value)
+    {
+        int out = 0;
+        for (auto const ch : _value)
+        {
+            if (!(ch >= '0' && ch <= '9'))
+                return 0;
+
+            out = out * 10 + (ch - '0');
+        }
+        return out;
+    }
+
+    string autoFontFace(string_view _value, string_view _regular, string_view _style)
+    {
+        (void) _style;
+        (void) _regular;
+        return string(_value);
+        // if (!_value.empty() && _value != "auto")
+        //     return string(_value);
+        // else
+        //     return fmt::format("{}:style={}", _regular, _style);
+    }
+
+    ApplyResult setAllFont(Sequence const& _seq, Screen& _screen)
+    {
+        // [read]  OSC 60 ST
+        // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
+        auto const& params = _seq.intermediateCharacters();
+        auto const splits = crispy::split(params, ';');
+        auto const param = [&](int _index) -> string_view {
+            if (_index < int(splits.size()))
+                return splits.at(_index);
+            else
+                return string_view{};
+        };
+        auto const emptyParams = [&]() -> bool {
+            for (auto const& x : splits)
+                if (!x.empty())
+                    return false;
+            return true;
+        }();
+        if (emptyParams)
+        {
+            auto const fonts = _screen.eventListener().getFontSpec();
+            _screen.reply(
+                "\033]60;{};{};{};{};{}\033\\",
+                int(fonts.size * 100), // precission-shift
+                fonts.regular,
+                fonts.bold,
+                fonts.italic,
+                fonts.boldItalic
+            );
+        }
+        else
+        {
+            auto const size = double(toInt(param(0))) / 100.0;
+            auto const regular = string(param(1));
+            auto const bold = string(param(2));
+            auto const italic = string(param(3));
+            auto const boldItalic = string(param(4));
+            _screen.eventListener().setFontSpec(FontSpec{
+                size,
+                regular,
+                bold,
+                italic,
+                boldItalic
+            });
+        }
+        return ApplyResult::Ok;
+    }
+
     ApplyResult setFont(Sequence const& _seq, Screen& _screen)
     {
         auto const& params = _seq.intermediateCharacters();
@@ -572,11 +647,15 @@ namespace impl // {{{ some command generator helpers
             return ApplyResult::Invalid;
 
         if (splits[0] != "?"sv)
-            _screen.eventListener().setFont(splits[0]);
+        {
+            auto fontSpec = FontSpec{};
+            fontSpec.regular = splits[0];
+            _screen.eventListener().setFontSpec(fontSpec);
+        }
         else
         {
-            auto const font = _screen.eventListener().getFont();
-            _screen.reply("\033]50;{}\033\\", font);
+            auto const fonts = _screen.eventListener().getFontSpec();
+            _screen.reply("\033]50;{}\033\\", fonts.regular);
         }
 
         return ApplyResult::Ok;
@@ -1341,6 +1420,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case COLORMOUSEFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseForegroundColor);
         case COLORMOUSEBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::MouseBackgroundColor);
         case SETFONT: return impl::setFont(_seq, screen_);
+        case SETFONTALL: return impl::setAllFont(_seq, screen_);
         case CLIPBOARD: return impl::clipboard(_seq, screen_);
         // TODO: case COLORSPECIAL: return impl::setOrRequestDynamicColor(_seq, _output, DynamicColorName::HighlightForegroundColor);
         case RCOLORFG: screen_.resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
