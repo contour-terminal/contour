@@ -23,6 +23,38 @@ using std::min;
 
 namespace terminal::view {
 
+namespace
+{
+    constexpr int glFormatZ(crispy::atlas::Format _f)
+    {
+        switch (_f)
+        {
+            case crispy::atlas::Format::Red:
+                return GL_R8;
+            case crispy::atlas::Format::RGB:
+                return GL_RGB8;
+            case crispy::atlas::Format::RGBA:
+                return GL_RGBA8;
+        }
+        return GL_R8; // just in case
+    }
+
+    int glFormat(crispy::atlas::Format _format)
+    {
+        switch (_format)
+        {
+            case crispy::atlas::Format::RGBA:
+                return GL_RGBA;
+            case crispy::atlas::Format::RGB:
+                return GL_RGB;
+            case crispy::atlas::Format::Red:
+                return GL_RED;
+        }
+        return GL_RED;
+    }
+
+}
+
 constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxMonochromeTextureSize = 1024;
 constexpr unsigned MaxColorTextureSize = 2048;
@@ -288,33 +320,62 @@ unsigned OpenGLRenderer::maxTextureSize()
     return static_cast<unsigned>(value);
 }
 
-constexpr int glFormat(crispy::atlas::Format _f)
-{
-    switch (_f)
-    {
-        case crispy::atlas::Format::Red:
-            return GL_R8;
-        case crispy::atlas::Format::RGB:
-            return GL_RGB8;
-        case crispy::atlas::Format::RGBA:
-            return GL_RGBA8;
-    }
-    return GL_R8; // just in case
-}
-
 void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
     glGenTextures(1, &textureId);
     bindTexture2DArray(textureId);
 
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, glFormat(_param.format), _param.width, _param.height, _param.depth);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, glFormatZ(_param.format), _param.width, _param.height, _param.depth);
 
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST); // NEAREST, because LINEAR yields borders at the edges
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+#if 1
+    // pre-initialize texture for better debugging (qrenderdoc)
+    auto constexpr target = GL_TEXTURE_2D_ARRAY;
+    auto constexpr levelOfDetail = 0;
+    auto constexpr depth = 1;
+    auto constexpr type = GL_UNSIGNED_BYTE;
+    auto constexpr x0 = 0;
+    auto constexpr y0 = 0;
+    auto constexpr z0 = 0;
+
+    std::vector<uint8_t> stub;
+    stub.resize(_param.width * _param.height * crispy::atlas::element_count(_param.format));
+    auto t = stub.begin();
+    switch (_param.format)
+    {
+        case crispy::atlas::Format::Red:
+            for (auto i = 0u; i < _param.width * _param.height; ++i)
+                *t++ = 0x40;
+            break;
+        case crispy::atlas::Format::RGB:
+            for (auto i = 0u; i < _param.width * _param.height; ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0x00;
+                *t++ = 0x80;
+            }
+            break;
+        case crispy::atlas::Format::RGBA:
+            for (auto i = 0u; i < _param.width * _param.height; ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0x00;
+                *t++ = 0x80;
+                *t++ = 0x00;
+            }
+            break;
+    }
+    assert(t == stub.end());
+
+    glTexSubImage3D(target, levelOfDetail, x0, y0, z0, _param.width, _param.height, depth,
+                    glFormat(_param.format), type, stub.data());
+#endif
 
     auto const key = AtlasKey{_param.atlasName, _param.atlas};
     atlasMap_[key] = textureId;
@@ -323,18 +384,6 @@ void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
 void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
 {
     auto const& texture = _param.texture.get();
-    auto const glFormat = [&]() {
-        switch (_param.format)
-        {
-            case crispy::atlas::Format::RGBA:
-                return GL_RGBA;
-            case crispy::atlas::Format::RGB:
-                return GL_RGB;
-            case crispy::atlas::Format::Red:
-                return GL_RED;
-        }
-        return GL_RED;
-    }();
     auto const key = AtlasKey{texture.atlasName, texture.atlas};
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
     assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
@@ -364,7 +413,7 @@ void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
     }
 
     glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
-                    glFormat, type, _param.data.data());
+                    glFormat(_param.format), type, _param.data.data());
 }
 
 void OpenGLRenderer::renderTexture(crispy::atlas::RenderTexture const& _param)

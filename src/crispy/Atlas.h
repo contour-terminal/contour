@@ -34,6 +34,17 @@ namespace crispy::atlas {
 using Buffer = std::vector<uint8_t>;
 enum class Format { Red, RGB, RGBA };
 
+constexpr int element_count(Format _format) noexcept
+{
+    switch (_format)
+    {
+        case Format::Red: return 1;
+        case Format::RGB: return 3;
+        case Format::RGBA: return 4;
+    }
+    return 0;
+}
+
 struct CreateAtlas {
     unsigned atlas;
     std::reference_wrapper<std::string const> atlasName;
