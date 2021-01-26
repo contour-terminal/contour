@@ -48,7 +48,7 @@ namespace {
 #endif
     }
 
-    static bool endsWithIgnoreCase(string const& _text, string const& _suffix)
+    static bool endsWithIgnoreCase(string_view const& _text, string const& _suffix)
     {
         if (_text.size() < _suffix.size())
             return false;
@@ -61,14 +61,13 @@ namespace {
         return true;
     }
 
-    static vector<string> getFontFilePaths([[maybe_unused]] string const& _fontPattern)
+    static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style)
     {
-        if (endsWithIgnoreCase(_fontPattern, ".ttf") || endsWithIgnoreCase(_fontPattern, ".otf"))
-            return {_fontPattern};
+        auto const pattern = _style == FontStyle::Regular ? string(_family) : fmt::format("{}:style={}", _family, _style);
+        if (endsWithIgnoreCase(pattern, ".ttf") || endsWithIgnoreCase(pattern, ".otf")) // TODO: and regular file exists
+            return {string(_family)};
 
         #if defined(HAVE_FONTCONFIG)
-        string const& pattern = _fontPattern; // TODO: append bold/italic if needed
-
         FcConfig* fcConfig = FcInitLoadConfigAndFonts();
         FcPattern* fcPattern = FcNameParse((FcChar8 const*) pattern.c_str());
 
@@ -119,8 +118,7 @@ namespace {
 
 FontLoader::FontLoader(int _dpiX, int _dpiY) :
     ft_{},
-    dpi_{ _dpiX, _dpiY },
-    fonts_{}
+    dpi_{ _dpiX, _dpiY }
 {
     if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
         throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
@@ -131,7 +129,6 @@ FontLoader::FontLoader(int _dpiX, int _dpiY) :
 
 FontLoader::~FontLoader()
 {
-    fonts_.clear();
     FT_Done_FreeType(ft_);
 }
 
@@ -140,78 +137,22 @@ void FontLoader::setDpi(Vec2 _dpi)
     dpi_ = _dpi;
 }
 
-optional<FontList> FontLoader::load(std::string const& _family, FontStyle _style, double _fontSize)
+FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize)
 {
-    auto const pattern =  _style == FontStyle::Regular ? _family : fmt::format("{}:style={}", _family, _style);
-    vector<string> const filePaths = getFontFilePaths(pattern);
+    FontList out;
 
-    Font* primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
-    if (!primaryFont)
+    for (auto const& filename : getFontFilePaths(_family, _style))
+        out.emplace_back(ft_, dpi_, filename);
+
+    if (!out.empty())
     {
-        debuglog().write("Failed to load primary font \"{}\".", pattern);
-        return nullopt;
-    }
-
-    FontFallbackList fallbackList;
-    for (size_t i = 1; i < filePaths.size(); ++i)
-        if (auto fallbackFont = loadFromFilePath(filePaths[i], _fontSize); fallbackFont != nullptr)
-            fallbackList.push_back(*fallbackFont);
-
-    debuglog().write("FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}",
-                     pattern,
-                     primaryFont->filePath(),
-                     primaryFont->baseline(),
-                     primaryFont->bitmapHeight(),
-                     _fontSize,
-                     fallbackList.size());
-
-    return FontList{*primaryFont, fallbackList};
-}
-
-FontList FontLoader::load(string const& _fontPattern, double _fontSize)
-{
-    vector<string> const filePaths = getFontFilePaths(_fontPattern);
-
-    Font* primaryFont = loadFromFilePath(filePaths.front(), _fontSize);
-    if (!primaryFont)
-        throw runtime_error{fmt::format("Failed to load primary font \"{}\".", _fontPattern)};
-
-    FontFallbackList fallbackList;
-    for (size_t i = 1; i < filePaths.size(); ++i)
-        if (auto fallbackFont = loadFromFilePath(filePaths[i], _fontSize); fallbackFont != nullptr)
-            fallbackList.push_back(*fallbackFont);
-
-    debuglog().write("FontLoader: loading font \"{}\" from \"{}\", baseline={}, height={}, size={}, fallbacks={}",
-                     _fontPattern,
-                     primaryFont->filePath(),
-                     primaryFont->baseline(),
-                     primaryFont->bitmapHeight(),
-                     _fontSize,
-                     fallbackList.size());
-
-    return {*primaryFont, fallbackList};
-}
-
-Font* FontLoader::loadFromFilePath(std::string const& _path, double _fontSize)
-{
-    if (auto k = fonts_.find(_path); k != fonts_.end())
-    {
-        if (k->second.fontSize() != _fontSize)
-            k->second.setFontSize(_fontSize);
-        return &k->second;
-    }
-
-    auto face = FT_Face{};
-    if (auto const ec = FT_New_Face(ft_, _path.c_str(), 0, &face); ec != FT_Err_Ok)
-    {
-        debuglog().write("Failed to load font from path {}. {}", _path, ftErrorStr(ec));
-        FT_Done_Face(face);
-        return nullptr;
+        if (out.front().load())
+            out.front().setFontSize(_fontSize);
     }
     else
-    {
-        return &fonts_.emplace(make_pair(_path, Font(ft_, face, _fontSize, dpi_, _path))).first->second;
-    }
+        debuglog().write("FontLoader: loading font \"{}\" \"{}\" failed. No font candiates found.");
+
+    return out;
 }
 
 } // end namespace

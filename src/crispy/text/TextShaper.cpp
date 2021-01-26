@@ -56,7 +56,7 @@ TextShaper::~TextShaper()
 }
 
 GlyphPositionList TextShaper::shape(unicode::Script _script,
-                                    FontList const& _fonts,
+                                    FontList& _fonts,
                                     optional<int> _advanceX,
                                     int _size,
                                     char32_t const* _codepoints,
@@ -65,13 +65,8 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
 {
     GlyphPositionList glyphPositions;
 
-    // try primary font
-    if (shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions)))
-        return glyphPositions;
-
-    // try fallback fonts
-    for (reference_wrapper<Font> const& fallback : _fonts.second)
-        if (shape(_size, _codepoints, _clusters, _clusterGap, _script, fallback.get(), _advanceX, ref(glyphPositions)))
+    for (Font& font: _fonts)
+        if (shape(_size, _codepoints, _clusters, _clusterGap, _script, font, _advanceX, ref(glyphPositions)))
             return glyphPositions;
 
     if (crispy::logging_sink::for_debug().enabled())
@@ -87,8 +82,8 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
     }
 
     // render primary font with glyph-missing hints
-    shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.first.get(), _advanceX, ref(glyphPositions));
-    replaceMissingGlyphs(_fonts.first.get(), glyphPositions);
+    shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.front(), _advanceX, ref(glyphPositions));
+    replaceMissingGlyphs(_fonts.front(), glyphPositions);
     return glyphPositions;
 }
 
@@ -142,6 +137,9 @@ bool TextShaper::shape(int _size,
         hb_font = i->second;
     else
     {
+        if (!_font.loaded())
+            _font.load();
+
         hb_font = hb_ft_font_create_referenced(_font.face());
         hb_fonts_[&_font] = hb_font;
     }

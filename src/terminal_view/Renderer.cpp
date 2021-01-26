@@ -14,8 +14,10 @@
 #include <terminal_view/Renderer.h>
 #include <terminal_view/TextRenderer.h>
 
+#include <array>
 #include <functional>
 
+using std::array;
 using std::scoped_lock;
 using std::chrono::steady_clock;
 using std::optional;
@@ -47,7 +49,7 @@ GridMetrics loadGridMetrics(crispy::text::Font const& _font, Size _pageSize)
 }
 
 Renderer::Renderer(Size const& _screenSize,
-                   FontConfig const& _fonts,
+                   FontConfig& _fonts,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
@@ -55,7 +57,7 @@ Renderer::Renderer(Size const& _screenSize,
                    ShaderConfig const& _backgroundShaderConfig,
                    ShaderConfig const& _textShaderConfig,
                    QMatrix4x4 const& _projectionMatrix) :
-    gridMetrics_{ loadGridMetrics(_fonts.regular.first.get(), _screenSize) },
+    gridMetrics_{ loadGridMetrics(_fonts.regular.front(), _screenSize) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
     fonts_{ _fonts },
@@ -134,35 +136,33 @@ void Renderer::clearCache()
     imageRenderer_.clearCache();
 }
 
-void Renderer::setFont(FontConfig const& _fonts)
-{
-    fonts_ = _fonts;
-    textRenderer_.setFont(_fonts);
-
-    updateMetricsAndClearCache();
-}
-
 bool Renderer::setFontSize(double _fontSize)
 {
-    if (_fontSize == fonts_.regular.first.get().fontSize())
+    if (_fontSize == fonts_.regular.front().fontSize())
         return false;
 
-    for (auto& font: {fonts_.regular, fonts_.bold, fonts_.italic, fonts_.boldItalic, fonts_.emoji})
-    {
-        font.first.get().setFontSize(_fontSize);
-        for (auto& fallback : font.second)
-            fallback.get().setFontSize(_fontSize);
-    }
+    auto const updateFontList = [&](crispy::text::FontList& fontList) {
+        for (auto& font : fontList)
+            if (font.loaded())
+                font.setFontSize(_fontSize);
+    };
 
-    updateMetricsAndClearCache();
+    updateFontList(fonts_.regular);
+    updateFontMetrics();
+
+    updateFontList(fonts_.bold);
+    updateFontList(fonts_.italic);
+    updateFontList(fonts_.boldItalic);
+    updateFontList(fonts_.emoji);
 
     return true;
 }
 
-void Renderer::updateMetricsAndClearCache()
+void Renderer::updateFontMetrics()
 {
-    loadGridMetricsFromFont(fonts_.regular.first.get(), gridMetrics_);
+    loadGridMetricsFromFont(fonts_.regular.front(), gridMetrics_);
 
+    textRenderer_.updateFontMetrics();
     imageRenderer_.setCellSize(cellSize());
     decorationRenderer_.clearCache();
 

@@ -28,6 +28,7 @@
 #include <functional>
 #include <iosfwd>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace crispy::text {
@@ -47,16 +48,11 @@ class FontLoader {
     void setDpi(Vec2 _dpi);
     void setDpi(int _x, int _y) { setDpi(Vec2{_x, _y}); }
 
-    std::optional<FontList> load(std::string const& _family, FontStyle _style, double _fontSize);
-    [[deprecated]] FontList load(std::string const& _fontPattern, double _fontSize);
-
-  private:
-    Font* loadFromFilePath(std::string const& _filePath, double  _fontSize);
+    FontList load(std::string_view const& _family, FontStyle _style, double _fontSize);
 
   private:
     FT_Library ft_;
     Vec2 dpi_;
-    std::unordered_map<std::string, Font> fonts_;
 };
 
 } // end namespace

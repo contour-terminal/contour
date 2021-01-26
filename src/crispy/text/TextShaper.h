@@ -29,7 +29,7 @@
 namespace crispy::text {
 
 struct GlyphPosition {
-    std::reference_wrapper<Font> font; // TODO: get rid of this
+    FontRef font; // TODO: get rid of this
 
     uint32_t glyphIndex;
     int cluster;
@@ -67,7 +67,7 @@ class TextShaper {
     ///
     /// @returns pointer to the shape result
     GlyphPositionList shape(unicode::Script _script,
-                            FontList const& _font,
+                            FontList& _font,
                             std::optional<int> _advanceX,
                             int _size,
                             char32_t const* _codepoints,
@@ -94,7 +94,7 @@ class TextShaper {
     // private data fields
     //
     std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)> hb_buf_;
-    std::unordered_map<Font const*, hb_font_t*> hb_fonts_ = {};
+    std::unordered_map<Font*, hb_font_t*> hb_fonts_ = {};
 };
 
 } // end namespace

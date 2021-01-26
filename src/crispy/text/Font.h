@@ -17,9 +17,6 @@
 
 #include <fmt/format.h>
 
-#include <cmath>
-#include <sstream>
-
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_ERRORS_H
@@ -30,9 +27,13 @@
 #endif
 
 #include <array>
+#include <cassert>
+#include <cmath>
 #include <functional>
+#include <list>
 #include <optional>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -112,12 +113,15 @@ class Font;
  */
 class Font {
   public:
-    Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath);
+    Font(FT_Library _ft, Vec2 _dpi, std::string _fontPath);
     Font(Font const&) = delete;
     Font& operator=(Font const&) = delete;
-    Font(Font&&) noexcept;
-    Font& operator=(Font&&) noexcept;
+    Font(Font&&) noexcept = delete;
+    Font& operator=(Font&&) noexcept = delete;
     ~Font();
+
+    bool loaded() const noexcept { return face_ != nullptr; }
+    bool load();
 
     std::string const& filePath() const noexcept { return filePath_; }
     std::size_t hashCode() const noexcept { return hashCode_; }
@@ -125,17 +129,11 @@ class Font {
     bool selectSizeForWidth(int _width);
 
     void setFontSize(double _fontSize);
-    double fontSize() const noexcept { return fontSize_; }
+    double fontSize() const noexcept { assert(face_); return fontSize_; }
 
-    std::string familyName() const
-    {
-        return face_->family_name;
-    }
+    std::string familyName() const { assert(face_); return face_->family_name; }
 
-    std::string styleName() const
-    {
-        return face_->style_name;
-    }
+    std::string styleName() const { assert(face_); return face_->style_name; }
 
     FontStyle style() const noexcept
     {
@@ -148,16 +146,16 @@ class Font {
         return FontStyle::Regular;
     }
 
-    bool hasColor() const noexcept { return FT_HAS_COLOR(face_); }
+    bool hasColor() const noexcept { assert(face_); return FT_HAS_COLOR(face_); }
 
-    int bitmapWidth() const noexcept { return bitmapWidth_; }
-    int bitmapHeight() const noexcept { return bitmapHeight_; }
+    int bitmapWidth() const noexcept { assert(face_); return bitmapWidth_; }
+    int bitmapHeight() const noexcept { assert(face_); return bitmapHeight_; }
 
     // global metrics
     //
 
     /// @returns the horizontal gap between two characters.
-    int maxAdvance() const noexcept { return maxAdvance_; }
+    int maxAdvance() const noexcept { assert(face_); return maxAdvance_; }
 
     /// @returns the vertical gap between two baselines.
     int lineHeight() const noexcept;
@@ -175,14 +173,14 @@ class Font {
     int underlineOffset() const noexcept;
     int underlineThickness() const noexcept;
 
-    bool isFixedWidth() const noexcept { return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
+    bool isFixedWidth() const noexcept { assert(face_); return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
 
     // ------------------------------------------------------------------------
-    unsigned glyphIndexOfChar(char32_t _char) const noexcept { return FT_Get_Char_Index(face_, _char); }
+    unsigned glyphIndexOfChar(char32_t _char) const noexcept { assert(face_); return FT_Get_Char_Index(face_, _char); }
 
     std::optional<Glyph> loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderMode);
 
-    FT_Face face() noexcept { return face_; }
+    FT_Face face() const noexcept { assert(face_); return face_; }
 
     int scaleHorizontal(long _value) const noexcept;
     int scaleVertical(long _value) const noexcept;
@@ -192,11 +190,12 @@ class Font {
 
     // private data
     //
+    bool loaded_ = false;
     std::size_t hashCode_;
     std::string filePath_;
 
     FT_Library ft_;
-    FT_Face face_;
+    FT_Face face_ = nullptr;
     int strikeIndex_;
     double fontSize_;
     Vec2 dpi_;
@@ -207,8 +206,7 @@ class Font {
 };
 
 using FontRef = std::reference_wrapper<Font>;
-using FontFallbackList = std::vector<FontRef>;
-using FontList = std::pair<FontRef, FontFallbackList>;
+using FontList = std::list<Font>;
 
 } // end namespace
 

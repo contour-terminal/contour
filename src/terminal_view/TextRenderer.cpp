@@ -59,7 +59,7 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                            GridMetrics const& _gridMetrics,
-                           FontConfig const& _fonts) :
+                           FontConfig& _fonts) :
     renderMetrics_{ _renderMetrics },
     gridMetrics_{ _gridMetrics },
     // Light should be default - but as soon as LCD is functional, that's default
@@ -70,13 +70,13 @@ TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
     colorAtlas_{ _colorAtlasAllocator },
     lcdAtlas_{ _lcdAtlasAllocator }
 {
-    if (fonts_.emoji.first.get().hasColor())
-        fonts_.emoji.first.get().selectSizeForWidth(gridMetrics_.cellSize.width);
-
-    for (Font& fallbackFont : fonts_.emoji.second)
+    if (!fonts_.emoji.empty())
     {
-        if (fallbackFont.hasColor())
-            fallbackFont.selectSizeForWidth(gridMetrics_.cellSize.width);
+        Font& emoji = fonts_.emoji.front();
+        if (!emoji.loaded())
+            emoji.load();
+        if (emoji.hasColor())
+            emoji.selectSizeForWidth(gridMetrics_.cellSize.width);
     }
 }
 
@@ -95,13 +95,11 @@ void TextRenderer::clearCache()
 #endif
 }
 
-void TextRenderer::setFont(FontConfig const& _fonts)
+void TextRenderer::updateFontMetrics()
 {
-    fonts_ = _fonts;
-
-    fonts_.emoji.first.get().selectSizeForWidth(gridMetrics_.cellSize.width);
-    for (Font& fallbackFont : fonts_.emoji.second)
-        fallbackFont.selectSizeForWidth(gridMetrics_.cellSize.width);
+    for (Font& font : fonts_.emoji)
+        if (font.loaded())
+            font.selectSizeForWidth(gridMetrics_.cellSize.width);
 
     clearCache();
 }
@@ -278,7 +276,7 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         return _fonts.regular;
     }(fonts_, textStyle, isEmojiPresentation);
 
-    auto const& regularFont = fonts_.regular.first.get();
+    auto const& regularFont = fonts_.regular.front();
     auto const advanceX = regularFont.maxAdvance();
     auto const count = static_cast<int>(_run.end - _run.start);
     auto const codepoints = codepoints_.data() + _run.start;

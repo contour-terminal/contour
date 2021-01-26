@@ -52,7 +52,7 @@ class Renderer {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     Renderer(Size const& _screenSize,
-             FontConfig const& _fonts,
+             FontConfig& _fonts,
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
@@ -65,9 +65,9 @@ class Renderer {
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setFont(FontConfig const& _fonts);
-    bool setFontSize(double _fontSize);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
+    bool setFontSize(double _fontSize);
+    void updateFontMetrics();
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
@@ -116,8 +116,6 @@ class Renderer {
     void dumpState(std::ostream& _textOutput) const;
 
   private:
-    void updateMetricsAndClearCache();
-
     /// Invoked internally by render() function.
     uint64_t renderInternalNoFlush(Terminal& _terminal,
                                    std::chrono::steady_clock::time_point _now,
@@ -137,7 +135,7 @@ class Renderer {
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
 
-    FontConfig fonts_;
+    FontConfig& fonts_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.

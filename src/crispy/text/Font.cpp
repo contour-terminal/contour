@@ -18,6 +18,7 @@
 
 #include <fmt/format.h>
 
+#include <cassert>
 #include <cctype>
 #include <iostream>
 #include <map>
@@ -133,64 +134,46 @@ tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height)
     return {output, factor};
 }
 
-Font::Font(FT_Library _ft, FT_Face _face, double _fontSize, Vec2 _dpi, std::string _fontPath) :
+Font::Font(FT_Library _ft, Vec2 _dpi, std::string _fontPath) :
     hashCode_{ hash<string>{}(_fontPath)},
     filePath_{ move(_fontPath) },
     ft_{ _ft },
-    face_{ _face },
+    face_{ nullptr },
     strikeIndex_{ 0 },
-    fontSize_{ 0 },
+    fontSize_{ 0.0 },
     dpi_{ _dpi }
 {
+}
+
+bool Font::load()
+{
+    assert(!loaded());
+    if (face_)
+    {
+        debuglog().write("Font already loaded ({}).\n", filePath_);
+        return true;
+    }
+
+    if (auto const ec = FT_New_Face(ft_, filePath_.c_str(), 0, &face_); ec != FT_Err_Ok)
+    {
+        debuglog().write("Failed to load font from path {}. {}", filePath_, freetypeErrorString(ec));
+        FT_Done_Face(face_);
+        face_ = nullptr;
+        return false;
+    }
+
+    debuglog().write("FontLoader: loading font \"{}\" \"{}\" from \"{}\", baseline={}, height={}, size={}",
+                     familyName(),
+                     styleName(),
+                     filePath(),
+                     baseline(),
+                     bitmapHeight(),
+                     fontSize_);
+
     if (FT_Error const ec = FT_Select_Charmap(face_, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
         debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
 
-    setFontSize(_fontSize);
-}
-
-Font::Font(Font&& v) noexcept :
-    hashCode_{ v.hashCode_ },
-    filePath_{ move(v.filePath_) },
-    ft_{ v.ft_ },
-    face_{ v.face_ },
-    fontSize_{ v.fontSize_ },
-    dpi_{ v.dpi_ },
-    bitmapWidth_{ v.bitmapWidth_ },
-    bitmapHeight_{ v.bitmapHeight_ },
-    maxAdvance_{ v.maxAdvance_ }
-{
-    v.ft_ = nullptr;
-    v.face_ = nullptr;
-    v.fontSize_ = 0;
-    v.bitmapWidth_ = 0;
-    v.bitmapHeight_ = 0;
-    v.filePath_ = {};
-    v.hashCode_ = 0;
-}
-
-Font& Font::operator=(Font&& v) noexcept
-{
-    // TODO: free current resources, if any
-
-    ft_ = v.ft_;
-    face_ = v.face_;
-    fontSize_ = v.fontSize_;
-    dpi_ = v.dpi_;
-    maxAdvance_ = v.maxAdvance_;
-    bitmapWidth_ = v.bitmapWidth_;
-    bitmapHeight_ = v.bitmapHeight_;
-    filePath_ = move(v.filePath_);
-    hashCode_ = v.hashCode_;
-
-    v.ft_ = nullptr;
-    v.face_ = nullptr;
-    v.fontSize_ = 0;
-    v.bitmapWidth_ = 0;
-    v.bitmapHeight_ = 0;
-    v.filePath_ = {};
-    v.hashCode_ = 0;
-
-    return *this;
+    return true;
 }
 
 Font::~Font()
@@ -201,6 +184,7 @@ Font::~Font()
 
 optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderMode)
 {
+    assert(face_);
     FT_Int32 flags = 0;
     switch (_renderMode)
     {
@@ -416,6 +400,7 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
 
 bool Font::selectSizeForWidth(int _width) // or call it: selectStrikeIndexForWidth(int _width))
 {
+    assert(face_);
     int best = 0, diff = std::numeric_limits<int>::max();
     for (int i = 0; i < face_->num_fixed_sizes; ++i)
     {
@@ -443,9 +428,7 @@ bool Font::selectSizeForWidth(int _width) // or call it: selectStrikeIndexForWid
 
 void Font::setFontSize(double _fontSize)
 {
-    if (fontSize_ == _fontSize)
-        return;
-
+    assert(face_ != 0);
     if (FT_HAS_COLOR(face_))
     {
         if (FT_Error const ec = FT_Select_Size(face_, strikeIndex_); ec != FT_Err_Ok)
@@ -483,41 +466,49 @@ void Font::setFontSize(double _fontSize)
 
 int Font::lineHeight() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->height);
 }
 
 int Font::baseline() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->height - face_->ascender);
 }
 
 int Font::ascender() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->ascender);
 }
 
 int Font::descender() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->descender);
 }
 
 int Font::underlineOffset() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->underline_position);
 }
 
 int Font::underlineThickness() const noexcept
 {
+    assert(face_);
     return scaleVertical(face_->underline_thickness);
 }
 
 int Font::scaleHorizontal(long _value) const noexcept
 {
+    assert(face_);
     return int(ceil(double(FT_MulFix(_value, face_->size->metrics.x_scale)) / 64.0));
 }
 
 int Font::scaleVertical(long _value) const noexcept
 {
+    assert(face_);
     return int(ceil(double(FT_MulFix(_value, face_->size->metrics.y_scale)) / 64.0));
 }
 

@@ -1,3 +1,5 @@
+- [ ] pre-init atlas with pure RED or GREEN or BLUE (rgb/a) - or black for R.
+- [ ] font: load on demand
 - [ ] emoji: resize-to-fit cell size then center.
 - [ ] debug log must include software git sha (and version)
 - [ ] opengl calls to guard with `GL_DEBUGLOG(x)`

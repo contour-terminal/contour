@@ -36,7 +36,7 @@
 namespace terminal::view
 {
     struct GlyphId {
-        std::reference_wrapper<crispy::text::Font> font;
+        crispy::text::FontRef font;
         unsigned glyphIndex;
     };
 
@@ -115,9 +115,9 @@ class TextRenderer {
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                  GridMetrics const& _gridMetrics,
-                 FontConfig const& _fonts);
+                 FontConfig& _fonts);
 
-    void setFont(FontConfig const& _fonts);
+    void updateFontMetrics();
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
@@ -166,7 +166,7 @@ class TextRenderer {
     //
     RenderMetrics& renderMetrics_;
     GridMetrics const& gridMetrics_;
-    FontConfig fonts_;
+    FontConfig& fonts_;
 
     // text run segmentation
     //

@@ -63,7 +63,7 @@ class TerminalView : private Terminal::Events {
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
                  crispy::text::FontLoader& _fontLoader,
-                 FontConfig const& _fonts,
+                 FontConfig& _fonts,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -83,15 +83,15 @@ class TerminalView : private Terminal::Events {
     TerminalView& operator=(TerminalView&&) = delete;
     ~TerminalView() = default;
 
-    int cellWidth() const noexcept { return fonts_.regular.first.get().maxAdvance(); }
-    int cellHeight() const noexcept { return fonts_.regular.first.get().lineHeight(); }
+    int cellWidth() const noexcept { return fonts_.regular.front().maxAdvance(); }
+    int cellHeight() const noexcept { return fonts_.regular.front().lineHeight(); }
     Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
 
     Size screenSize() const noexcept
     {
         return Size{
-            size_.width / fonts_.regular.first.get().maxAdvance(),
-            size_.height / fonts_.regular.first.get().lineHeight()
+            size_.width / fonts_.regular.front().maxAdvance(),
+            size_.height / fonts_.regular.front().lineHeight()
         };
     }
 
@@ -102,7 +102,7 @@ class TerminalView : private Terminal::Events {
     /// PTY slave about the window resize event.
     void resize(int _width, int _height);
 
-    void setFont(FontConfig const& _fonts);
+    void updateFontMetrics();
     bool setFontSize(double _fontSize);
     bool setTerminalSize(Size _cells);
     void setCursorShape(CursorShape _shape);
@@ -161,7 +161,7 @@ class TerminalView : private Terminal::Events {
   private:
     Events& events_;
     crispy::text::FontLoader& fontLoader_;
-    FontConfig fonts_;
+    FontConfig& fonts_;
     Size size_;
     WindowMargin windowMargin_;
 
