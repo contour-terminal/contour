@@ -51,7 +51,8 @@ enum class Permission
 
 struct FontSpec
 {
-    std::string pattern;
+    std::string pattern; // TODO: rename to family
+    // TODO: add FontStyle style; -- or string?
     std::vector<std::string> features = {};
 };
 
