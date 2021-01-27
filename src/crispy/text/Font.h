@@ -84,6 +84,20 @@ enum class BitmapFormat {
     LCD,        //!< LCD optimized bitmap for using Subpixel rendering technique
 };
 
+constexpr int pixelSize(BitmapFormat _format) noexcept
+{
+    switch (_format)
+    {
+        case BitmapFormat::RGBA:
+            return 4;
+        case BitmapFormat::LCD:
+            return 3;
+        case BitmapFormat::Gray:
+            return 1;
+    }
+    return 1;
+};
+
 struct Bitmap {
     BitmapFormat format;
     int width;

@@ -82,17 +82,11 @@ tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height)
     vector<uint8_t> dest;
     dest.resize(_height * _width * 4);
 
-    debuglog().write("scale: from {}x{} to {}x{}, ratio {}x{} ({}), factor {}",
+    debuglog().write("scaling from {}x{} to {}x{}, ratio {}x{} ({}), factor {}",
             _bitmap.width, _bitmap.height,
             _width, _height,
             ratioX, ratioY, ratio, factor);
 
-    // std::cerr << fmt::format("scale: from {}x{} to {}x{}, ratio {}x{} ({}), factor {}\n",
-    //         _bitmap.width, _bitmap.height,
-    //         _width, _height,
-    //         ratioX, ratioY, ratio, factor);
-
-#if 1
     uint8_t* d = dest.data();
     for (int i = 0, sr = 0; i < _height; i++, sr += factor)
     {
@@ -121,9 +115,6 @@ tuple<Bitmap, float> scale(Bitmap const& _bitmap, int _width, int _height)
             }
         }
     }
-#else
-    dest = _bitmap.data;
-#endif
 
     auto output = Bitmap{};
     output.format = _bitmap.format;
@@ -162,13 +153,10 @@ bool Font::load()
         return false;
     }
 
-    debuglog().write("FontLoader: loading font \"{}\" \"{}\" from \"{}\", baseline={}, height={}, size={}",
+    debuglog().write("FontLoader: loading font \"{}\" \"{}\" from \"{}\"",
                      familyName(),
                      styleName(),
-                     filePath(),
-                     baseline(),
-                     bitmapHeight(),
-                     fontSize_);
+                     filePath());
 
     if (FT_Error const ec = FT_Select_Charmap(face_, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
         debuglog().write("FT_Select_Charmap failed. Ignoring; {}", freetypeErrorString(ec));
@@ -216,8 +204,6 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
 
         if (missingGlyph)
             ec = FT_Load_Glyph(face_, missingGlyph, flags);
-        else
-            ec = FT_Err_Invalid_Glyph_Index;
 
         if (ec != FT_Err_Ok)
         {
@@ -387,7 +373,6 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
                     *t++ = s[3];
                 }
             }
-
             break;
         }
         default:
@@ -401,7 +386,10 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
 bool Font::selectSizeForWidth(int _width) // or call it: selectStrikeIndexForWidth(int _width))
 {
     assert(face_);
-    int best = 0, diff = std::numeric_limits<int>::max();
+    debuglog().write("Select size for width {} for font {}.", _width, filePath_);
+
+    int best = 0;
+    int diff = std::numeric_limits<int>::max();
     for (int i = 0; i < face_->num_fixed_sizes; ++i)
     {
         auto const width = face_->available_sizes[i].width;
@@ -415,11 +403,9 @@ bool Font::selectSizeForWidth(int _width) // or call it: selectStrikeIndexForWid
 
     strikeIndex_ = best;
 
-    if (face_->num_fixed_sizes > 1)
-        debuglog().write("set strike index to {} (total: {}) for font {}",
-                         best, face_->num_fixed_sizes, filePath_);
+    debuglog().write("set strike index {} (total: {}) for colored font {}.", strikeIndex_, face_->num_fixed_sizes, filePath_);
 
-    FT_Error const ec = FT_Select_Size(face_, best);
+    FT_Error const ec = FT_Select_Size(face_, strikeIndex_);
     if (ec != FT_Err_Ok)
         debuglog().write("Failed to FT_Select_Size: {}", freetypeErrorString(ec));
 
@@ -431,10 +417,7 @@ void Font::setFontSize(double _fontSize)
     assert(face_ != 0);
     if (FT_HAS_COLOR(face_))
     {
-        if (FT_Error const ec = FT_Select_Size(face_, strikeIndex_); ec != FT_Err_Ok)
-        {
-            debuglog().write("Failed to FT_Select_Size: {}", freetypeErrorString(ec));
-        }
+        selectSizeForWidth(int(_fontSize)); // TODO: should be font width (not height)
     }
     else
     {
@@ -462,6 +445,12 @@ void Font::setFontSize(double _fontSize)
     }
 
     maxAdvance_ = computeMaxAdvance(face_);
+
+    debuglog().write("set font size to {} with baseline={}, height={}, path={}",
+                     fontSize_,
+                     baseline(),
+                     bitmapHeight(),
+                     filePath());
 }
 
 int Font::lineHeight() const noexcept

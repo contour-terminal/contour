@@ -162,6 +162,8 @@ class TextRenderer {
                        GlyphMetrics const& _glyphMetrics,
                        crispy::text::GlyphPosition const& _gpos);
 
+    TextureAtlas& atlasForFont(crispy::text::Font const& _font);
+
     // general properties
     //
     RenderMetrics& renderMetrics_;

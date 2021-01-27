@@ -171,7 +171,7 @@ bool TextShaper::shape(int _size,
         if (_advanceX.has_value())
             cx = static_cast<int>(info[i + 1].cluster) * _advanceX.value();
         else
-            cx += pos[i].x_advance >> 6;
+            cx += int(pos[i].x_advance / 64.0f);
     }
 
     return !crispy::any_of(_result.get(), glyphMissing);

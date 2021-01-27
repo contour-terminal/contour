@@ -20,6 +20,7 @@
 #include <crispy/algorithm.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
+#include <crispy/range.h>
 
 using std::array;
 using std::get;
@@ -296,24 +297,29 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
     if (crispy::logging_sink::for_debug().enabled())
     {
         auto msg = debuglog();
-        msg.write("Shaping: {}\n", unicode::to_utf8(codepoints, count));
+        msg.write("Shaped codepoints: {}", unicode::to_utf8(codepoints, count));
+
+        msg.write(" (");
+        for (auto const [i, codepoint] : crispy::indexed(crispy::range(codepoints, codepoints + count)))
+        {
+            if (i)
+                msg.write(" ");
+            msg.write("U+{:04X}:{}", unsigned(codepoint), gpos.at(i).glyphIndex);
+        }
+        msg.write(")\n");
+
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
-        msg.write("via font: \"{}\"\n", gpos.at(0).font.get().filePath());
+        auto const& font = gpos.front().font.get();
+        msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
         msg.write("with metrics:");
         for (crispy::text::GlyphPosition const& gp : gpos)
         {
-            gp.font.get().filePath();
             msg.write(" {}:{},{}",
                       gp.glyphIndex,
                       gp.renderOffset.x,
                       gp.renderOffset.y);
         }
-
-        // msg.write("\n");
-        // msg.write("Codepoints:");
-        // for (size_t const i : times(count))
-        //     msg.write(" U+{:X}", static_cast<uint32_t>(codepoints[i]));
     }
 
     return gpos;
@@ -338,32 +344,41 @@ void TextRenderer::render(QPoint _pos,
                           gpos);
 }
 
+TextRenderer::TextureAtlas& TextRenderer::atlasForFont(crispy::text::Font const& _font)
+{
+    if (_font.hasColor())
+        return colorAtlas_;
+
+    switch (fonts_.renderMode)
+    {
+        case crispy::text::RenderMode::LCD:
+            // fallthrough; return lcdAtlas_;
+            return lcdAtlas_;
+        case crispy::text::RenderMode::Color:
+            return colorAtlas_;
+        case crispy::text::RenderMode::Light:
+        case crispy::text::RenderMode::Gray:
+        case crispy::text::RenderMode::Bitmap:
+            return monochromeAtlas_;
+    }
+
+    return monochromeAtlas_;
+}
+
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
 {
-    auto const colored = _id.font.get().hasColor();
-    TextureAtlas& lookupAtlas = [&]() -> TextureAtlas& {
-        if (colored)
-            return colorAtlas_;
-        switch (fonts_.renderMode)
-        {
-            case crispy::text::RenderMode::LCD:
-                // fallthrough; return lcdAtlas_;
-                return lcdAtlas_;
-            case crispy::text::RenderMode::Color:
-                return colorAtlas_;
-            case crispy::text::RenderMode::Light:
-            case crispy::text::RenderMode::Gray:
-            case crispy::text::RenderMode::Bitmap:
-                return monochromeAtlas_;
-        }
-        return monochromeAtlas_;
-    }();
+    Font& font = _id.font.get();
+    auto const colored = font.hasColor();
+    TextureAtlas& lookupAtlas = atlasForFont(font);
     // TODO: what if lookupAtlas != targetAtlas. the lookup should be decoupled
 
     if (optional<DataRef> const dataRef = lookupAtlas.get(_id); dataRef.has_value())
         return dataRef;
 
-    Font& font = _id.font.get();
+    if (font.fontSize() == 0.0)
+        // set font size on-demand
+        font.setFontSize(fonts_.regular.front().fontSize()); // TODO: find a better way
+
     auto theGlyphOpt = font.loadGlyphByIndex(_id.glyphIndex, fonts_.renderMode);
     if (!theGlyphOpt.has_value())
         return nullopt;
@@ -373,98 +388,85 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
-    if (xMax > gridMetrics_.cellSize.width * numCells)
-        debuglog().write("Glyph width {}+{}={} exceeds cell width {}.",
-                         glyph.metrics.bearing.x,
-                         glyph.metrics.bitmapSize.x,
-                         xMax,
-                         gridMetrics_.cellSize.width * numCells);
+    debuglog().write("Glyph metrics: {}", glyph.metrics);
+    // auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
+    // if (xMax > gridMetrics_.cellSize.width * numCells)
+    // {
+    //     debuglog().write("Glyph width {}+{}={} exceeds cell width {}.",
+    //                      glyph.metrics.bearing.x,
+    //                      glyph.metrics.bitmapSize.x,
+    //                      xMax,
+    //                      gridMetrics_.cellSize.width * numCells);
+    // }
 
-    auto const yMax = gridMetrics_.baseline + glyph.metrics.bearing.y;
-    auto const yOverflow = gridMetrics_.cellSize.height - yMax;
-    if (yMax > gridMetrics_.cellSize.height)
-    {
-        assert(yOverflow < 0);
-        if (yOverflow > gridMetrics_.descender)
-        {
-            // shift down
-            debuglog().write("Glyph height {}+{}={} exceeds cell height {}. With bitmap dimmension {}, shifting vertically by {}.",
-                    gridMetrics_.baseline,
-                    glyph.metrics.bearing.y,
-                    yMax,
-                    gridMetrics_.cellSize.height,
-                    glyph.metrics.bitmapSize,
-                    yOverflow);
-            glyph.metrics.bearing.y += yOverflow;
-        }
-        else
-        {
-            debuglog().write("Glyph height {}+{}={} exceeds cell height {}. Bitmap dimmension is {}.",
-                    gridMetrics_.baseline,
-                    glyph.metrics.bearing.y,
-                    yMax,
-                    gridMetrics_.cellSize.height,
-                    glyph.metrics.bitmapSize);
-        }
-    }
-
-    auto const [ratioX, ratioY] = [&]() -> pair<float, float> {
-        // only for emoji
-        if (!colored)
-            return {1.0f, 1.0f};
-        else
-            return {
-                float(gridMetrics_.cellSize.width * numCells) / float(glyph.metrics.bitmapSize.x),
-                float(gridMetrics_.cellSize.height) / float(glyph.metrics.bitmapSize.y)
-            };
-    }();
-    auto ratio = max(ratioX, ratioY);
-
+    // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.bitmap.format == crispy::text::BitmapFormat::RGBA)
     {
+        assert(colored && "RGBA should be only used on colored (i.e. emoji) fonts.");
+        assert(numCells >= 2);
         auto const cellSize = gridMetrics_.cellSize;
 
-        // std::cout << fmt::format("colored: {}x{} metric.size: {}, cell.size: {}\n",
-        //         glyph.bitmap.width, glyph.bitmap.height,
-        //         glyph.metrics.bitmapSize, cellSize);
-#if 1
         if (numCells > 1 && // XXX for now, only if emoji glyph
                 (glyph.metrics.bitmapSize.x > cellSize.width * numCells
               || glyph.metrics.bitmapSize.y > cellSize.height))
         {
             auto [scaled, factor] = scale(glyph.bitmap, cellSize.width * numCells, cellSize.height);
-            glyph.metrics.bearing.x /= factor;
-            glyph.metrics.bearing.y /= factor;
+
             glyph.metrics.bitmapSize.x = scaled.width;
             glyph.metrics.bitmapSize.y = scaled.height; // TODO: there shall be only one with'x'height.
+
+            // center the image in the middle of the cell
+            glyph.metrics.bearing.y = gridMetrics_.cellSize.height - gridMetrics_.baseline;
+            glyph.metrics.bearing.x = (gridMetrics_.cellSize.width * numCells - glyph.metrics.bitmapSize.x) / 2;
+
+            // (old way)
+            // glyph.metrics.bearing.x /= factor;
+            // glyph.metrics.bearing.y /= factor;
+
             glyph.bitmap = move(scaled);
 
-            int rightEdge = std::numeric_limits<int>::max();
-            for (int x = glyph.bitmap.width - 1; x >= 0; --x)
-            {
-                for (int y = 0; y < glyph.bitmap.height; ++y)
-                {
-                    auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
-                    if (pixel[3] > 20)
-                        rightEdge = x;
-                }
-                if (rightEdge != std::numeric_limits<int>::max())
-                    break;
-            }
-            if (rightEdge != std::numeric_limits<int>::max())
-            {
-                printf("right edge found. %d < %d.\n", rightEdge+1, glyph.bitmap.width);
-            }
-
-            ratio = 1.0;// / factor; // pre-scale
+            // XXX currently commented out because it's not used.
+            // TODO: But it should be used for cutting the image off the right edge with unnecessary
+            // transparent pixels.
+            //
+            // int const rightEdge = [&]() {
+            //     auto rightEdge = std::numeric_limits<int>::max();
+            //     for (int x = glyph.bitmap.width - 1; x >= 0; --x) {
+            //         for (int y = 0; y < glyph.bitmap.height; ++y)
+            //         {
+            //             auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
+            //             if (pixel[3] > 20)
+            //                 rightEdge = x;
+            //         }
+            //         if (rightEdge != std::numeric_limits<int>::max())
+            //             break;
+            //     }
+            //     return rightEdge;
+            // }();
+            // if (rightEdge != std::numeric_limits<int>::max())
+            //     debuglog().write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
         }
-#else
-        GlyphMetrics& metadata = glyph.metrics;
-        metadata.bearing.x = int(ceil(metadata.bearing.x * ratio));
-        metadata.bearing.y = int(ceil(metadata.bearing.y * ratio));
-#endif
     }
+    // }}}
+
+    auto const yMax = gridMetrics_.baseline + glyph.metrics.bearing.y;
+    auto const yMin = yMax - glyph.bitmap.height;
+
+    auto const ratio = !colored
+                     ? 1.0f
+                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.metrics.bitmapSize.x),
+                           float(gridMetrics_.cellSize.height) / float(glyph.metrics.bitmapSize.y));
+
+    auto const yOverflow = gridMetrics_.cellSize.height - yMax;
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog().write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}; path:{}",
+                         _id.glyphIndex,
+                         colored ? "emoji" : "text",
+                         ratio,
+                         yOverflow < 0 ? yOverflow : 0,
+                         yMin < 0 ? yMin : 0,
+                         glyph.metrics,
+                         _id.font.get().filePath());
 
     auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
@@ -482,11 +484,23 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
         return {0, monochromeAtlas_};
     }(); // }}}
 
-    if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("insert glyph {}: {}; path:{}",
-                         _id.glyphIndex,
-                         glyph.metrics,
-                         _id.font.get().filePath());
+    if (yOverflow < 0)
+    {
+        debuglog().write("Cropping {} overflowing bitmap rows.", -yOverflow);
+        glyph.bitmap.height += yOverflow;
+        glyph.metrics.bitmapSize.y += yOverflow;
+        glyph.metrics.bearing.y += yOverflow;
+    }
+
+    if (yMin < 0)
+    {
+        auto const rowCount = -yMin;
+        auto const pixelCount = rowCount * glyph.bitmap.width * pixelSize(glyph.bitmap.format);
+        debuglog().write("Cropping {} underflowing bitmap rows.", rowCount);
+        glyph.metrics.bitmapSize.y += yMin;
+        auto& data = glyph.bitmap.data;
+        data.erase(begin(data), next(begin(data), pixelCount));
+    }
 
     assert(&lookupAtlas == &targetAtlas);
     return targetAtlas.insert(_id,
