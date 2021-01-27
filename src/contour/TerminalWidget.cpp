@@ -1419,7 +1419,7 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
-        fontLoader_.load(_profile.fonts.regular.pattern, crispy::text::FontStyle::Bold, fontSize),
+        fontLoader_.load(_profile.fonts.regular.pattern, crispy::text::FontStyle::Regular, fontSize),
         fontLoader_.load(_profile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize),
         fontLoader_.load(_profile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize),
         fontLoader_.load(_profile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize),
