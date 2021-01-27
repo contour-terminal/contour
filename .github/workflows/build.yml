@@ -13,9 +13,9 @@ on:
       - master
 
 jobs:
-  ubuntu_latest:
-    name: "Ubuntu Linux"
-    runs-on: ubuntu-latest
+  ubuntu_2004:
+    name: "Ubuntu Linux 20.04"
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v1
       - name: "initialize sub modules"
@@ -45,9 +45,9 @@ jobs:
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
 
-  ubuntu_latest_qt_kde:
-    name: "Ubuntu Linux (with KWin support)"
-    runs-on: ubuntu-latest
+  ubuntu_2004_qt_kde:
+    name: "Ubuntu Linux 20.04 (with KWin support)"
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v1
       - name: "initialize sub modules"
