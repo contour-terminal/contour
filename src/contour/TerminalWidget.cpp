@@ -1818,9 +1818,21 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
+template <typename F>
+static void postToObject(QObject* obj, F&& fun)
+{
+    QMetaObject::invokeMethod(obj, std::forward<F>(fun));
+}
+
 void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
 {
+#if 0
+    // Qt >= 5.10
     QMetaObject::invokeMethod(this, [this, spec = terminal::FontSpec(_fontSpec)]() {
+#else
+    // Qt < 5.10
+    postToObject(this, [this, spec = terminal::FontSpec(_fontSpec)]() {
+#endif
         if (requestPermissionChangeFont())
         {
             auto const fontSize = spec.size != 0 ? spec.size : fonts_.regular.front().fontSize();
