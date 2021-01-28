@@ -1,17 +1,22 @@
-- [ ] pre-init atlas with pure RED or GREEN or BLUE (rgb/a) - or black for R.
-- [ ] font: load on demand
-- [ ] emoji: resize-to-fit cell size then center.
+- [ ] CLI: add `--live-config`, and default to non-live
+- [ ] REFLOW: "// TODO: use `crispy::split(string) -> vector<string_view>` here"
+- [ ] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
+- [ ] Font: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
+- [ ] REFLOW Grid: finish unit tests
 - [ ] debug log must include software git sha (and version)
 - [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
-- [ ] invert texture in texture atlas, for better debugging
-- [ ] [REFLOW] Grid: finish unit tests
-- [ ] [Font]: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
-- [ ] [Font]: investigate in faulty glyph offsetting?
-- [ ] [Font]: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
-- [ ] BUG: emoji in wintitle not working anymore?
+- [ ] Font: investigate in faulty glyph offsetting?
+- [ ] IMAGE: blend sleected grid cels that contain an image (respecting current selection config, if possible)
+- [ ] IMAGE: copy-to-clipboard
+- [x] BUG: emoji in wintitle not working anymore?
 - [x] merge rgb into rgba texture atlas => NO
 - [x] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
     - how to do that without unnecessary memory copies just to inverse Y-axis?
+- [x] pre-init atlas with pure RED or GREEN or BLUE (rgb/a) - or black for R.
+- [x] font: load on demand
+- [x] invert texture in texture atlas, for better debugging
+- [x] emoji: resize-to-fit cell size then center.
+- [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
 
 ### font related refactor
 - [x] get underline position & thickness from font metrics
@@ -27,16 +32,15 @@
 ```
 
 # REFLOW
-- [ ] Add changelog entry: "Adds experimental support for text reflow"
-- [ ] "// TODO: use `crispy::split(string) -> vector<string_view>` here"
-- [ ] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
-- [ ] Fix column grow to insert spaces in unwrap.
 - [ ] handle wide characters
 - [ ] handle images, maybe don't wrap lines that contain image cells?
 - [ ] selection: to honor wrapped lines in word-select
 - [ ] selection: to honor wrapped lines in line-select
 - [x] autoWrap to make use of reflow (also add test case)
 - [x] don't scroll to bottom on resize
+- [x] Fix column grow to insert spaces in unwrap.
+- [x] Add changelog entry: "Adds experimental support for text reflow"
+- [x] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
 
 # TODO
 
