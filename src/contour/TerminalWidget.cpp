@@ -1203,11 +1203,11 @@ bool TerminalWidget::executeAction(Action const& _action)
         },
         [&](actions::IncreaseFontSize) -> Result {
             setFontSize(profile().fontSize + 1);
-            return Result::Silently;
+            return Result::Dirty;
         },
         [&](actions::DecreaseFontSize) -> Result {
             setFontSize(profile().fontSize - 1);
-            return Result::Silently;
+            return Result::Dirty;
         },
         [&](actions::IncreaseOpacity) -> Result {
             if (static_cast<uint8_t>(profile().backgroundOpacity) < 0xFF)
