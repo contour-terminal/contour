@@ -718,7 +718,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     {
         string const& value = wd.Scalar();
         if (value.empty())
-            profile.shell.workingDirectory = terminal::Process::homeDirectory();
+            profile.shell.workingDirectory = FileSystem::current_path();
         else if (value[0] != '~')
             profile.shell.workingDirectory = FileSystem::path(value);
         else
@@ -729,7 +729,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         }
     }
     else
-        profile.shell.workingDirectory = terminal::Process::homeDirectory();
+        profile.shell.workingDirectory = FileSystem::current_path();
 
     if (auto env = _node["environment"]; env)
     {
