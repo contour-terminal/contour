@@ -104,14 +104,17 @@ namespace {
         // TODO: Read https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-enumfontfamiliesexa
         // This is pretty damn hard coded, and to be properly implemented once the other font related code's done,
         // *OR* being completely deleted when FontConfig's windows build fix released and available via vcpkg.
-        if (_fontPattern.find("bold italic") != string::npos)
-            return {"C:\\Windows\\Fonts\\consolaz.ttf"};
-        else if (_fontPattern.find("italic") != string::npos)
-            return {"C:\\Windows\\Fonts\\consolai.ttf"};
-        else if (_fontPattern.find("bold") != string::npos)
-            return {"C:\\Windows\\Fonts\\consolab.ttf"};
-        else
-            return {"C:\\Windows\\Fonts\\consola.ttf"};
+        switch (_style)
+        {
+            case FontStyle::Bold:
+                return {"C:\\Windows\\Fonts\\consolab.ttf"};
+            case FontStyle::Italic:
+                return {"C:\\Windows\\Fonts\\consolai.ttf"};
+            case FontStyle::BoldItalic:
+                return {"C:\\Windows\\Fonts\\consolaz.ttf"};
+            case FontStyle::Regular:
+                return {"C:\\Windows\\Fonts\\consola.ttf"};
+        }
         #endif
     }
 }
