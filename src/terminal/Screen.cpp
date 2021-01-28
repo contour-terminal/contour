@@ -641,6 +641,7 @@ void Screen::resetHard()
 
     modes_ = Modes{};
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::TextReflow, true);
 
     grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();
