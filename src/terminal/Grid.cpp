@@ -241,7 +241,7 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
 }
 
 /**
- * Appends logical line by splitting into fixed with lines.
+ * Appends logical line by splitting into fixed-width lines.
  *
  * @param _targetLines
  * @param _newColumnCount
