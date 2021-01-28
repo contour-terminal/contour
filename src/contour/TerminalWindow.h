@@ -51,7 +51,7 @@ class TerminalWindow :
     Q_OBJECT
 
   public:
-    TerminalWindow(config::Config _config, std::string _profileName, std::string _programPath);
+    TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
     //bool event(QEvent* _event) override;
@@ -71,6 +71,7 @@ class TerminalWindow :
 
   private:
     config::Config config_;
+    const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
     TerminalWidget* terminalWidget_;

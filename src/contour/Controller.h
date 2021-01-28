@@ -31,6 +31,7 @@ class Controller : public QThread {
   public:
     Controller(std::string _programPath,
                contour::config::Config _config,
+               bool _liveConfig,
                std::string _profileName);
 
     ~Controller();
@@ -49,6 +50,7 @@ class Controller : public QThread {
 
     std::string programPath_;
     contour::config::Config config_;
+    bool const liveConfig_;
     std::string profileName_;
 
     std::list<TerminalWindow*> terminalWindows_;

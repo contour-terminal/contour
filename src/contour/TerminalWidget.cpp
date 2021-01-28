@@ -376,6 +376,7 @@ namespace // {{{
 } // }}}
 
 TerminalWidget::TerminalWidget(config::Config _config,
+                               bool _liveConfig,
                                string _profileName,
                                string _programPath) :
     QOpenGLWidget(),
@@ -387,10 +388,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     fontLoader_{ logicalDpiX(), logicalDpiY() },
     fonts_{loadFonts(profile())},
     terminalView_{},
-    configFileChangeWatcher_{
-        config_.backingFilePath,
-        [this](FileChangeWatcher::Event event) { onConfigReload(event); }
-    },
+    configFileChangeWatcher_{},
     updateTimer_(this)
 {
     debuglog().write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
@@ -401,6 +399,14 @@ TerminalWidget::TerminalWidget(config::Config _config,
                      geometry().left(),
                      geometry().bottom(),
                      geometry().right());
+
+    if (_liveConfig)
+    {
+        debuglog().write("Enable live configuration reloading of file {}.",
+                         config_.backingFilePath.generic_string());
+        configFileChangeWatcher_.emplace(config_.backingFilePath,
+                                         [this](FileChangeWatcher::Event event) { onConfigReload(event); });
+    }
 
     setMouseTracking(true);
 

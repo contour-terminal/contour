@@ -25,9 +25,11 @@ Controller* Controller::self_ = nullptr;
 
 Controller::Controller(std::string _programPath,
                        config::Config _config,
+                       bool _liveConfig,
                        std::string _profileName) :
     programPath_{ move(_programPath) },
     config_{ move(_config) },
+    liveConfig_{ _liveConfig },
     profileName_{ move(_profileName) }
 {
     // systrayIcon_ = new QSystemTrayIcon(nullptr);
@@ -48,6 +50,7 @@ void Controller::newWindow()
 {
     auto mainWindow = new TerminalWindow{
         config_,
+        liveConfig_,
         profileName_,
         programPath_
     };

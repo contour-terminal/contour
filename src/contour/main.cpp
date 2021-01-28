@@ -36,6 +36,7 @@ namespace contour {
             addOption(configOption);
             addOption(profileOption);
             addOption(workingDirectoryOption);
+            addOption(liveConfigOption);
             addOption(parserTable);
             addOption(enableDebugLogging);
             addPositionalArgument("executable", "path to executable to execute.");
@@ -63,6 +64,11 @@ namespace contour {
         QCommandLineOption const enableDebugLogging{
             QStringList() << "d" << "enable-debug-logging",
             QCoreApplication::translate("main", "Enables debug logging.")
+        };
+
+        QCommandLineOption const liveConfigOption{
+            QStringList() << "live-config",
+            QCoreApplication::translate("main", "Enables live config reloading.")
         };
 
         QString profileName() const { return value(profileOption); }
@@ -198,6 +204,8 @@ int main(int argc, char* argv[])
         if (configFailures)
             return EXIT_FAILURE;
 
+        bool const liveConfig = cli.isSet(cli.liveConfigOption);
+
         // Possibly override shell to be executed
         if (auto const positionalArgs = cli.positionalArguments(); !positionalArgs.empty())
         {
@@ -208,7 +216,7 @@ int main(int argc, char* argv[])
                 shell.arguments.push_back(positionalArgs.at(i).toStdString());
         }
 
-        contour::Controller controller(argv[0], config, profileName);
+        contour::Controller controller(argv[0], config, liveConfig, profileName);
         controller.start();
 
         auto const rv = app.exec();

@@ -57,8 +57,9 @@ namespace contour {
 using terminal::view::Renderer;
 using actions::Action;
 
-TerminalWindow::TerminalWindow(config::Config _config, string _profileName, string _programPath) :
+TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath) :
     config_{ std::move(_config) },
+    liveConfig_{ _liveConfig },
     profileName_{ std::move(_profileName) },
     programPath_{ std::move(_programPath) }
 {
@@ -90,7 +91,7 @@ TerminalWindow::~TerminalWindow()
 
 TerminalWidget* TerminalWindow::createTerminalWidget()
 {
-    auto terminalWidget = new TerminalWidget(config_, profileName_, programPath_);
+    auto terminalWidget = new TerminalWidget(config_, liveConfig_, profileName_, programPath_);
 
     connect(terminalWidget, SIGNAL(terminated(TerminalWidget*)), this, SLOT(onTerminalClosed(TerminalWidget*)));
     connect(terminalWidget, SIGNAL(setBackgroundBlur(bool)), this, SLOT(setBackgroundBlur(bool)));

@@ -34,6 +34,7 @@
 #include <atomic>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace contour {
@@ -49,6 +50,7 @@ class TerminalWidget :
 
   public:
     TerminalWidget(config::Config _config,
+                   bool _liveConfig,
                    std::string _profileName,
                    std::string _programPath);
 
@@ -225,7 +227,7 @@ class TerminalWidget :
     crispy::text::FontLoader fontLoader_;
     terminal::view::FontConfig fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
-    FileChangeWatcher configFileChangeWatcher_;
+    std::optional<FileChangeWatcher> configFileChangeWatcher_;
     std::mutex queuedCallsLock_;
     std::vector<std::function<void()>> queuedCalls_;
     std::vector<std::function<void()>> activatedCalls_;
