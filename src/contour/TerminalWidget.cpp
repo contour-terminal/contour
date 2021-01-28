@@ -373,6 +373,29 @@ namespace // {{{
     {
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
+
+    template <typename F>
+    class FunctionCallEvent : public QEvent {
+      private:
+       using Fun = typename std::decay<F>::type;
+       Fun fun;
+      public:
+       FunctionCallEvent(Fun && fun) : QEvent(QEvent::None), fun(std::move(fun)) {}
+       FunctionCallEvent(Fun const& fun) : QEvent(QEvent::None), fun(fun) {}
+       ~FunctionCallEvent() { fun(); }
+    };
+
+    template <typename F>
+    void postToObject(QObject* obj, F fun)
+    {
+#if 0
+        // Qt >= 5.10
+        QMetaObject::invokeMethod(obj, std::forward<F>(fun));
+#else
+        // Qt < 5.10
+        QCoreApplication::postEvent(obj, new FunctionCallEvent<F>(std::forward<F>(fun)));
+#endif
+    }
 } // }}}
 
 TerminalWidget::TerminalWidget(config::Config _config,
@@ -711,8 +734,6 @@ void TerminalWidget::paintGL()
         state_.store(State::CleanPainting);
         now_ = steady_clock::now();
 
-        invokeQueuedCalls();
-
         bool const reverseVideo =
             terminalView_->terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
 
@@ -737,16 +758,6 @@ void TerminalWidget::paintGL()
     {
         reportUnhandledException(__PRETTY_FUNCTION__, e);
     }
-}
-
-void TerminalWidget::invokeQueuedCalls()
-{
-    {
-        auto lg = lock_guard{queuedCallsLock_};
-        swap(activatedCalls_, queuedCalls_);
-    }
-    crispy::for_each(activatedCalls_, [](auto& _call) { _call(); });
-    activatedCalls_.clear();
 }
 
 bool TerminalWidget::reloadConfigValues()
@@ -1598,9 +1609,7 @@ void TerminalWidget::onConfigReload(FileChangeWatcher::Event /*_event*/)
 
 void TerminalWidget::post(std::function<void()> _fn)
 {
-	auto lg = lock_guard{queuedCallsLock_};
-    queuedCalls_.emplace_back(std::move(_fn));
-    QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+    postToObject(this, std::move(_fn));
 }
 
 // {{{ TerminalView::Events overrides
@@ -1824,20 +1833,9 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
-static void postToObject(QObject* obj, std::function<void()> fun)
-{
-    QMetaObject::invokeMethod(obj, std::move(fun));
-}
-
 void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
 {
-#if 0
-    // Qt >= 5.10
-    QMetaObject::invokeMethod(this, [this, spec = terminal::FontSpec(_fontSpec)]() {
-#else
-    // Qt < 5.10
-    postToObject(this, [this, spec = terminal::FontSpec(_fontSpec)]() {
-#endif
+    post([this, spec = terminal::FontSpec(_fontSpec)]() {
         if (requestPermissionChangeFont())
         {
             auto const fontSize = spec.size != 0 ? spec.size : fonts_.regular.front().fontSize();

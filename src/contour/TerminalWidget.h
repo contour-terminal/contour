@@ -213,7 +213,6 @@ class TerminalWidget :
     void statsSummary();
     void doResize(terminal::Size _size);
     void setSize(terminal::Size _size);
-    void invokeQueuedCalls();
 
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
@@ -228,9 +227,6 @@ class TerminalWidget :
     terminal::view::FontConfig fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
-    std::mutex queuedCallsLock_;
-    std::vector<std::function<void()>> queuedCalls_;
-    std::vector<std::function<void()>> activatedCalls_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
     std::mutex screenUpdateLock_;
     bool renderingPressure_ = false;
