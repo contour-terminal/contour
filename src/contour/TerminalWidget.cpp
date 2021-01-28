@@ -1818,10 +1818,9 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
-template <typename F>
-static void postToObject(QObject* obj, F&& fun)
+static void postToObject(QObject* obj, std::function<void()> fun)
 {
-    QMetaObject::invokeMethod(obj, std::forward<F>(fun));
+    QMetaObject::invokeMethod(obj, std::move(fun));
 }
 
 void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
