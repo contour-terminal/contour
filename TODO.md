@@ -1,11 +1,9 @@
-- [ ] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
-- [ ] clipboard: don't include trailing spaces per line
 - [ ] REFLOW: "// TODO: use `crispy::split(string) -> vector<string_view>` here"
 - [ ] Font: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
+- [ ] Font: investigate in faulty glyph offsetting?
 - [ ] REFLOW Grid: finish unit tests
 - [ ] debug log must include software git sha (and version)
 - [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
-- [ ] Font: investigate in faulty glyph offsetting?
 - [ ] IMAGE: blend sleected grid cels that contain an image (respecting current selection config, if possible)
 - [ ] IMAGE: copy-to-clipboard
 - [x] BUG: emoji in wintitle not working anymore?
@@ -18,6 +16,8 @@
 - [x] emoji: resize-to-fit cell size then center.
 - [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
 - [x] CLI: add `--live-config`, and default to non-live
+- [x] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
+- [x] clipboard: don't include trailing spaces per line
 
 ### font related refactor
 - [x] get underline position & thickness from font metrics
