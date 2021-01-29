@@ -1514,9 +1514,16 @@ string TerminalWidget::extractSelectionText()
     string text;
     string currentLine;
 
+    auto const trimRight = [](string& value)
+    {
+        while (!value.empty() && std::isspace(value.back()))
+            value.pop_back();
+    };
+
     terminalView_->terminal().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
         if (_pos.column <= lastColumn)
         {
+            trimRight(currentLine);
             text += currentLine;
             text += '\n';
             currentLine.clear();
@@ -1524,6 +1531,8 @@ string TerminalWidget::extractSelectionText()
         currentLine += _cell.toUtf8();
         lastColumn = _pos.column;
     });
+
+    trimRight(currentLine);
     text += currentLine;
 
     return text;

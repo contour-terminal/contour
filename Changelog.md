@@ -2,6 +2,7 @@
 
 - Fixes SGR decorations to use designated underline thickness and underline position.
 - Fixes font glyph render in some corner cases where the rendered glyph did result in rectangle garbage on the screen.
+- Fixes copying the selection containing trailing whitespaces.
 - Preserve active profile when reloading config, and forces redraw after config reload.
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
 - Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter `--live-config`.
