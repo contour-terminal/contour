@@ -156,6 +156,8 @@ bool TextShaper::shape(int _size,
         else
             pen.x += int(pos[i].x_advance / 64.0f);
 
+        pen.y += int(float(pos[i].y_offset) / 64.0f),   // not interesting, maybe font face's ascender instead?
+
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
         _result.get().emplace_back(GlyphPosition(
             _font,
