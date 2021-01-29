@@ -52,7 +52,7 @@ using GlyphPositionList = std::vector<GlyphPosition>;
 class TextShaper {
   public:
     TextShaper();
-    ~TextShaper();
+    ~TextShaper() = default;
 
     /// Renders codepoints into glyph positions with the first font fully matching all codepoints.
     ///
@@ -93,13 +93,16 @@ class TextShaper {
 
     // private data fields
     //
-    std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)> hb_buf_;
-    std::unordered_map<Font*, hb_font_t*> hb_fonts_ = {};
+    using HbBufferPtr = std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)>;
+    using HbFontPtr = std::unique_ptr<hb_font_t, void(*)(hb_font_t*)>;
+
+    HbBufferPtr hb_buf_;
+    std::unordered_map<Font*, HbFontPtr> hb_fonts_;
 };
 
 } // end namespace
 
-namespace fmt { //
+namespace fmt { // {{{
     template <>
     struct formatter<crispy::text::GlyphPosition> {
         template <typename ParseContext>

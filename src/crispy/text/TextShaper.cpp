@@ -50,11 +50,6 @@ TextShaper::TextShaper() :
         throw std::runtime_error("Could not initialize text shaper.");
 }
 
-TextShaper::~TextShaper()
-{
-    clearCache();
-}
-
 GlyphPositionList TextShaper::shape(unicode::Script _script,
                                     FontList& _fonts,
                                     optional<int> _advanceX,
@@ -89,9 +84,6 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
 
 void TextShaper::clearCache()
 {
-    for ([[maybe_unused]] auto [_, hbf] : hb_fonts_)
-        hb_font_destroy(hbf);
-
     hb_fonts_.clear();
 }
 
@@ -134,14 +126,14 @@ bool TextShaper::shape(int _size,
 
     hb_font_t* hb_font = nullptr;
     if (auto i = hb_fonts_.find(&_font); i != hb_fonts_.end())
-        hb_font = i->second;
+        hb_font = i->second.get();
     else
     {
         if (!_font.loaded())
             _font.load();
 
         hb_font = hb_ft_font_create_referenced(_font.face());
-        hb_fonts_[&_font] = hb_font;
+        hb_fonts_.emplace(&_font, HbFontPtr(hb_font, [](auto p) { hb_font_destroy(p); }));
     }
 
     hb_shape(hb_font, hb_buf_.get(), nullptr, 0);
