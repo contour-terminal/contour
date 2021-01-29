@@ -231,7 +231,9 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
     while (rs.consume(out(run)))
     {
         METRIC_INCREMENT(shapedText);
-        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
+        GlyphPositionList gpos = shapeRun(run);
+        crispy::copy(gpos, std::back_inserter(glyphPositions));
+        //crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
     }
 
     return glyphPositions;
@@ -304,8 +306,11 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         {
             if (i)
                 msg.write(" ");
-            msg.write("U+{:04X}:{}", unsigned(codepoint), gpos.at(i).glyphIndex);
+            msg.write("U+{:04X}", unsigned(codepoint));
         }
+        msg.write(";");
+        for (auto const& gp : gpos)
+            msg.write(" {}", gp.glyphIndex);
         msg.write(")\n");
 
         // A single shape run always uses the same font,
@@ -535,8 +540,8 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     else
     {
         auto const x = _pos.x()
-                     + _glyphPos.renderOffset.x
                      + _glyphMetrics.bearing.x
+                     + _glyphPos.renderOffset.x
                      ;
 
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;

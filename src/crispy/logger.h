@@ -120,7 +120,7 @@ class logging_sink {
     logging_sink(bool _enabled, std::ostream& _output) :
         logging_sink(
             _enabled,
-            [out = &_output](std::string_view const& text) { *out << text; }
+            [out = &_output](std::string_view const& text) { *out << text; out->flush(); }
         )
     {}
 

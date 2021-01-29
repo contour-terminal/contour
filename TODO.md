@@ -1,6 +1,6 @@
-- [ ] CLI: add `--live-config`, and default to non-live
-- [ ] REFLOW: "// TODO: use `crispy::split(string) -> vector<string_view>` here"
 - [ ] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
+- [ ] clipboard: don't include trailing spaces per line
+- [ ] REFLOW: "// TODO: use `crispy::split(string) -> vector<string_view>` here"
 - [ ] Font: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
 - [ ] REFLOW Grid: finish unit tests
 - [ ] debug log must include software git sha (and version)
@@ -17,6 +17,7 @@
 - [x] invert texture in texture atlas, for better debugging
 - [x] emoji: resize-to-fit cell size then center.
 - [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
+- [x] CLI: add `--live-config`, and default to non-live
 
 ### font related refactor
 - [x] get underline position & thickness from font metrics

@@ -169,7 +169,8 @@ bool TextShaper::shape(int _size,
         ));
 
         if (_advanceX.has_value())
-            cx = static_cast<int>(info[i + 1].cluster) * _advanceX.value();
+            //cx = static_cast<int>(info[i + 1].cluster) * _advanceX.value();
+            cx = static_cast<int>(info[i].cluster) * _advanceX.value(); // Advance by cluster in fixed width steps.
         else
             cx += int(pos[i].x_advance / 64.0f);
     }
