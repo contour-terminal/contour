@@ -13,6 +13,7 @@
  */
 #include <crispy/text/TextShaper.h>
 #include <crispy/algorithm.h>
+#include <crispy/point.h>
 #include <crispy/times.h>
 #include <crispy/span.h>
 #include <crispy/indexed.h>
@@ -147,20 +148,19 @@ bool TextShaper::shape(int _size,
     _result.get().clear();
     _result.get().reserve(glyphCount);
 
-    int cx = 0;
-    int cy = 0;
+    auto pen = Point{0, 0};
     for (auto const i : times(glyphCount))
     {
         if (_advanceX.has_value())
-            cx = static_cast<int>(info[i].cluster) * _advanceX.value(); // Advance by cluster in fixed width steps.
+            pen.x = static_cast<int>(info[i].cluster) * _advanceX.value(); // Advance by cluster in fixed width steps.
         else
-            cx += int(pos[i].x_advance / 64.0f);
+            pen.x += int(pos[i].x_advance / 64.0f);
 
         // TODO: maybe right in here, apply incremented cx/xy only if cluster number has changed?
         _result.get().emplace_back(GlyphPosition(
             _font,
-            cx + int(float(pos[i].x_offset) / 64.0f),
-            cy + int(float(pos[i].y_offset) / 64.0f),   // not interesting, maybe font face's ascender instead?
+            pen.x + int(float(pos[i].x_offset) / 64.0f),
+            pen.y + int(float(pos[i].y_offset) / 64.0f),   // not interesting, maybe font face's ascender instead?
             info[i].codepoint,                          // glyph index
             static_cast<int>(info[i].cluster)
         ));
