@@ -68,19 +68,38 @@ namespace {
             return {string(_family)};
 
         #if defined(HAVE_FONTCONFIG)
-        FcConfig* fcConfig = FcInitLoadConfigAndFonts();
+        #if 0
         FcPattern* fcPattern = FcNameParse((FcChar8 const*) pattern.c_str());
+        #else
+        auto fcPattern = FcPatternCreate();
+        auto family = string(_family);
+        FcPatternAddString(fcPattern, FC_FAMILY, (FcChar8 const*) family.c_str());
+        FcPatternAddInteger(fcPattern, FC_SPACING, FC_MONO);
+        //FcPatternAddDouble(fcPattern, FC_SIZE, sizeInPt); // do we want to provide these hints?
+        //FcPatternAddDouble(fcPattern, FC_DPI, _dpi);
+        if (int(_style) & int(FontStyle::Bold))
+            FcPatternAddInteger(fcPattern, FC_WEIGHT, FC_WEIGHT_BOLD);
+        if (int(_style) & int(FontStyle::Italic))
+            FcPatternAddInteger(fcPattern, FC_SLANT, FC_SLANT_ITALIC);
+        #endif
 
+        // FcConfig* fcConfig = nullptr;
+        FcConfig* fcConfig = FcInitLoadConfigAndFonts();
         FcDefaultSubstitute(fcPattern);
         FcConfigSubstitute(fcConfig, fcPattern, FcMatchPattern);
-
-        FcResult fcResult = FcResultNoMatch;
 
         vector<string> paths;
 
         // find font along with all its fallback fonts
         FcCharSet* fcCharSet = nullptr;
+        FcResult fcResult = FcResultNoMatch;
+#if 1
         FcFontSet* fcFontSet = FcFontSort(fcConfig, fcPattern, /*trim*/FcTrue, &fcCharSet, &fcResult);
+#else
+        FcFontSet* fcFontSet = nullptr;
+        FcObjectSet* fcObjectSet = FcObjectSetBuild(FC_FILE, FC_POSTSCRIPT_NAME, FC_FAMILY, FC_STYLE, FC_FULLNAME, FC_WEIGHT, FC_WIDTH, FC_SLANT, FC_HINT_STYLE, FC_INDEX, FC_HINTING, FC_SCALABLE, FC_OUTLINE, FC_COLOR, FC_SPACING, NULL);
+        fcFontSet = FcFontList(nullptr, fcPattern, fcObjectSet);
+#endif
         for (int i = 0; i < fcFontSet->nfont; ++i)
         {
             FcChar8* fcFile = nullptr;
