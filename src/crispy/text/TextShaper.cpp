@@ -114,17 +114,6 @@ bool TextShaper::shape(int _size,
                        optional<int> _advanceX,
                        reference<GlyphPositionList> _result)
 {
-    hb_buffer_clear_contents(hb_buf_.get());
-
-    for (size_t const i : times(_size))
-        hb_buffer_add(hb_buf_.get(), _codepoints[i], _clusters[i] + _clusterGap);
-
-    hb_buffer_set_content_type(hb_buf_.get(), HB_BUFFER_CONTENT_TYPE_UNICODE);
-    hb_buffer_set_direction(hb_buf_.get(), HB_DIRECTION_LTR);
-    hb_buffer_set_script(hb_buf_.get(), mapScriptToHarfbuzzScript(_script));
-    hb_buffer_set_language(hb_buf_.get(), hb_language_get_default());
-    hb_buffer_guess_segment_properties(hb_buf_.get());
-
     hb_font_t* hb_font = nullptr;
     if (auto i = hb_fonts_.find(&_font); i != hb_fonts_.end())
         hb_font = i->second.get();
@@ -136,6 +125,18 @@ bool TextShaper::shape(int _size,
         hb_font = hb_ft_font_create_referenced(_font.face());
         hb_fonts_.emplace(&_font, HbFontPtr(hb_font, [](auto p) { hb_font_destroy(p); }));
     }
+
+    // {{{ prepare buffer: hb_buf_
+    hb_buffer_clear_contents(hb_buf_.get());
+    for (size_t const i : times(_size))
+        hb_buffer_add(hb_buf_.get(), _codepoints[i], _clusters[i] + _clusterGap);
+
+    hb_buffer_set_content_type(hb_buf_.get(), HB_BUFFER_CONTENT_TYPE_UNICODE);
+    hb_buffer_set_direction(hb_buf_.get(), HB_DIRECTION_LTR);
+    hb_buffer_set_script(hb_buf_.get(), mapScriptToHarfbuzzScript(_script));
+    hb_buffer_set_language(hb_buf_.get(), hb_language_get_default());
+    hb_buffer_guess_segment_properties(hb_buf_.get());
+    // }}}
 
     hb_shape(hb_font, hb_buf_.get(), nullptr, 0);
 
