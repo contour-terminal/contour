@@ -188,6 +188,7 @@ class Font {
     int underlineThickness() const noexcept;
 
     bool isFixedWidth() const noexcept { assert(face_); return face_->face_flags & FT_FACE_FLAG_FIXED_WIDTH; }
+    bool isScalable() const noexcept { assert(face_); return face_->face_flags & FT_FACE_FLAG_SCALABLE; }
 
     // ------------------------------------------------------------------------
     unsigned glyphIndexOfChar(char32_t _char) const noexcept { assert(face_); return FT_Get_Char_Index(face_, _char); }
