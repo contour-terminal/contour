@@ -769,11 +769,11 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.fontSize = MinimumFontSize;
         }
 
-        auto& regularPattern = profile.fonts.regular.pattern;
+        auto& defaultFontFamily = profile.fonts.regular.pattern;
         softLoadValue(fonts, "regular", profile.fonts.regular.pattern, "monospace");
-        softLoadValue(fonts, "bold", profile.fonts.bold.pattern, regularPattern + ":style=bold");
-        softLoadValue(fonts, "italic", profile.fonts.italic.pattern, regularPattern + ":style=italic");
-        softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, regularPattern + ":style=bold italic");
+        softLoadValue(fonts, "bold", profile.fonts.bold.pattern, defaultFontFamily);
+        softLoadValue(fonts, "italic", profile.fonts.italic.pattern, defaultFontFamily);
+        softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, defaultFontFamily);
         softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
 
         string renderModeStr;
