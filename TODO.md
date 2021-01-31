@@ -1,55 +1,60 @@
-- [ ] REFLOW: "// TODO: use `crispy::split(string) -> vector<string_view>` here"
-- [ ] Font: refactor Font API. - hasColor should not determine whether a glyph is emoji or not
-- [ ] Font: investigate in faulty glyph offsetting?
-- [ ] REFLOW Grid: finish unit tests
+# Milestone 0.2.0 checklist
+
+- Twitch Highlight: Wednesday: 3:30:00 to 3:41:00
+- [ ] leaving fullscreen to restore last window size
+- [ ] I think fullscreen toggle doesn't properly propagate resize event to TTY as CSI ?2027 l/h doesn't seem to be invoked
+- [ ] logger: on win32 the function name is too verbose.
+- [ ] Font: fix framed underline
+- [ ] Font: add crispy::text::GlobalFontMetrics maybe
+- [ ] Font: hasColor should not determine whether a glyph is emoji or not
+- [ ] Font: rework API to also support DirectWrite and maybe CoreText
+- [ ] Font: check harfbuzz font api (can it replace freetype, at least on linux/unix?)
+- [ ] SGR underline not visible when inverse is set
+- [ ] Text shaping on emoji presentation modifiers seem to sometimes get it wrong.
+- [ ] Don't perform pressure-performance optimization when in alt-buffer
+- [ ] charset SCS/SS not well tested (i.e.: write unit tests)
+- [ ] U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
+  https://www.unicode.org/reports/tr11/tr11-36.html#Recommendations
+  Chapter 5 (Recommendations), last bullet point!
+  - provide VT sequence to get/set unicode (width) conformance level (pre unicode 9, and unicode 9+)
+  - see https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/9
+- [ ] walk through the source code and apply cleanups & coding style
+- [ ] cleanup config (and contour.yml) from dead options (logging?)
+- [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).
+  This function is behind permission gate and triggers a popup dialog when set to "ask".
 - [ ] debug log must include software git sha (and version)
-- [ ] opengl calls to guard with `GL_DEBUGLOG(x)`
-- [ ] IMAGE: blend sleected grid cels that contain an image (respecting current selection config, if possible)
-- [ ] IMAGE: copy-to-clipboard
+- [ ] REFLOW Grid: finish unit tests
 - [x] BUG: emoji in wintitle not working anymore?
 - [x] merge rgb into rgba texture atlas => NO
 - [x] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
     - how to do that without unnecessary memory copies just to inverse Y-axis?
 - [x] pre-init atlas with pure RED or GREEN or BLUE (rgb/a) - or black for R.
-- [x] font: load on demand
 - [x] invert texture in texture atlas, for better debugging
 - [x] emoji: resize-to-fit cell size then center.
-- [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
 - [x] CLI: add `--live-config`, and default to non-live
+- [x] font: load on demand
+- [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
 - [x] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
+- [x] Font: investigate in faulty glyph offsetting?
 - [x] clipboard: don't include trailing spaces per line
-
-### font related refactor
+- [x] "// TODO: use `crispy::split(string) -> vector<string_view>` here"
+- [x] verify OpenConfiguration is working (with ctrl+shift+,)
+- [x] RENDERING: respect propotion of colored (emoji) glyph (y-offset / bearing)?
+- [x] OpenFileManager action is missing impl, use xdg-open for that
 - [x] get underline position & thickness from font metrics
 - [x] fix doubly underline
 - [x] fix curly underline
-- [ ] fix framed underline
-- [ ] add debug option to render frame around every texture quad in text renderer
-- [ ] add crispy::text::GlobalFontMetrics maybe
+- [x] `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
+- [x] fullscreen profile config
 
 ```
 * and at start of debug-logging, dump initial state once.
 * log debug-logging start/end events to the debug log, too.
 ```
 
-# REFLOW
-- [ ] handle wide characters
-- [ ] handle images, maybe don't wrap lines that contain image cells?
-- [ ] selection: to honor wrapped lines in word-select
-- [ ] selection: to honor wrapped lines in line-select
-- [x] autoWrap to make use of reflow (also add test case)
-- [x] don't scroll to bottom on resize
-- [x] Fix column grow to insert spaces in unwrap.
-- [x] Add changelog entry: "Adds experimental support for text reflow"
-- [x] zsh/prompt integration: `SM/RM ? <number>` to enable/disable reflow on current and newly created lines (ignored in alternate screen).
-
 # TODO
 
-- [ ] REFACTOR: wrap row/col/width/height numbers into structs
-- [ ] writing text to stdout that triggers AutoWrap marks this line as auto-wrapped, so that
-  word-selection will continue selecting on the enxt line.
-  This mechanism could be used for a future text reflow functionality, too.
-- [ ] ?? config's default-profile should also mandate defaults for other profiles. ??
+- [ ] QA: wrap row/col/width/height numbers into `boxed<int, Tag...>`?
 - [ ] move to profile: `word_delimiters`
 - [ ] move to profile: `scrollbar.*`
 - [ ] move to profile: `images.*`
@@ -57,30 +62,16 @@
 - [ ] make sure `input_mapping` overrides can also remove mappings
 - [ ] move to ranges-v3 (eliminating some crispy helpers)
 
-### Features to be added to 0.2.0 milestone
-
-- [ ] contour: provide `--mono` (or alike) CLI flag to "just" provide a QOpenGLWindow for best performance,
-      lacking UI features as compromise.
-- [ ] RENDERING: respect propotion of colored (emoji) glyph (y-offset / bearing)?
-
-### Known Bugs / Odds
+### Features to be added to 0.3.0 milestone
 
 - [ ] "The impossible happened" in TerminalWidget
-- [ ] SGR underline not visible when inverse is set
-- [ ] Text shaping on emoji presentation modifiers seem to sometimes get it wrong.
-- [ ] `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
-- [ ] Do not do pressure-performance optimization when in alt-buffer
-- [ ] charset SCS/SS not well tested (i.e.: write unit tests)
-- [ ] OpenFileManager action is missing impl, use xdg-open for that
-- [ ] U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
-	https://www.unicode.org/reports/tr11/tr11-36.html#Recommendations
-	Chapter 5 (Recommendations), last bullet point!
-	- provide a config option? (compile/run time?)
+- [ ] contour: provide `--mono` (or alike) CLI flag to "just" provide a QOpenGLWindow for best performance,
+      lacking UI features as compromise.
 
 ### Usability Improvements
 
-- Images: copy action should uxe U+FFFC (object replacement) on grid cells that contain an image for text-based clipboard action
-- Images: Selecting grid cells that contain an image should colorize/tint this cell.
+- ? Images: copy action should uxe U+FFFC (object replacement) on grid cells that contain an image for text-based clipboard action
+- ? Images: Selecting grid cells that contain an image should colorize/tint this cell.
 - don't `throw` but send notifications to `Terminal::warning(...)` and `Terminal::error(...)`;
   These notifications can then be bubbles or overlay-text (or whatever) per terminal view.
 - mouse wheel: if configured action was executed, don't forward mouse action to terminal. example: alt+wheel in vim
@@ -151,3 +142,10 @@
 - Rethink an easily adaptable keyboard input protocol (CSI based)
   - should support any key with modifier information (ctrl,alt,meta,SHIFT)
 - Evaluate Shell Integration proposals from: http://per.bothner.com/blog/2019/shell-integration-proposal/
+
+### Taken over from ticket "final cleanup"
+- FEATURE: Configuration: ability to disable ligatures globally (or enable selectively by unicode range?)
+- FEATURE: respect aspect ratio of colored (emoji) glyph (y-offset / bearing)?
+- FEATURE: mouse shift-clicks for selecting text even if terminal app has enabled mouse tracking
+- FEATURE: proper windows font loading; either get fontconfig to work on windows, or use Windows APIs for that - https://docs.microsoft.com/en-us/windows/win32/directwrite/custom-font-sets-win10
+
