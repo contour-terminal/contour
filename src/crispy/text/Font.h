@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <crispy/reference.h>
-
 #include <fmt/format.h>
 
 #include <ft2build.h>
