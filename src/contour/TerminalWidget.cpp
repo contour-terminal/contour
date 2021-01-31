@@ -1342,7 +1342,7 @@ bool TerminalWidget::executeAction(Action const& _action)
         },
         [this](actions::ResetFontSize) -> Result {
             setFontSize(config_.profile(profileName_)->fontSize);
-            return Result::Silently;
+            return Result::Dirty;
         },
         [this](actions::ReloadConfig const& action) -> Result {
             if (action.profileName.has_value())
