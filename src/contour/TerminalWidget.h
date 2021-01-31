@@ -217,6 +217,8 @@ class TerminalWidget :
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
 
+    terminal::view::GridMetrics const& gridMetrics() const noexcept { return terminalView_->gridMetrics(); }
+
   private:
     std::chrono::steady_clock::time_point now_;
     config::Config config_;

@@ -27,7 +27,8 @@ namespace terminal::view {
 
 void loadGridMetricsFromFont(crispy::text::Font const& _font, GridMetrics& _gm)
 {
-    _gm.cellSize = Size{ _font.maxAdvance(), _font.lineHeight() };
+    _gm.cellSize.width = _font.maxAdvance();
+    _gm.cellSize.height = _font.lineHeight();
     _gm.baseline = _font.baseline();
     _gm.ascender = _font.ascender();
     _gm.descender = _font.descender();

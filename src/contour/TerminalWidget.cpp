@@ -1475,8 +1475,8 @@ void TerminalWidget::setProfile(string const& _name, config::TerminalProfile new
         setFontSize(newProfile.fontSize);
 
     auto const newScreenSize = terminal::Size{
-        size().width() / fonts_.regular.front().maxAdvance(),
-        size().height() / fonts_.regular.front().lineHeight()
+        size().width() / gridMetrics().cellSize.width,
+        size().height() / gridMetrics().cellSize.height
     };
 
     if (newScreenSize != terminalView_->terminal().screenSize())
@@ -1767,8 +1767,8 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
         if (!_height)
             _height = screenSize.height();
 
-        auto const width = _width / fonts_.regular.front().maxAdvance();
-        auto const height = _height / fonts_.regular.front().lineHeight();
+        auto const width = _width / gridMetrics().cellSize.width;
+        auto const height = _height / gridMetrics().cellSize.height;
         auto const newScreenSize = terminal::Size{width, height};
         post([this, newScreenSize]() { setSize(newScreenSize); });
     }
@@ -1791,6 +1791,8 @@ QSize TerminalWidget::minimumSizeHint() const
 
     auto const w = MinimumScreenSize.width * fonts_.regular.front().maxAdvance();
     auto const h = MinimumScreenSize.height * fonts_.regular.front().lineHeight();
+    // auto const w = MinimumScreenSize.width * gridMetrics().cellSize.width;
+    // auto const h = MinimumScreenSize.height * gridMetrics().cellSize.height;
 
     return QSize(w, h);
 }
@@ -1798,8 +1800,11 @@ QSize TerminalWidget::minimumSizeHint() const
 QSize TerminalWidget::sizeHint() const
 {
     auto const scrollbarWidth = scrollBar_->isHidden() ? 0 : scrollBar_->sizeHint().width();
+
     auto const viewWidth = profile().terminalSize.width * fonts_.regular.front().maxAdvance();
     auto const viewHeight = profile().terminalSize.height * fonts_.regular.front().lineHeight();
+    // auto const viewWidth = profile().terminalSize.width * gridMetrics().cellSize.width;
+    // auto const viewHeight = profile().terminalSize.height * gridMetrics().cellSize.height;
 
     debuglog().write("Calling sizeHint: {}, SBW: {}, terminalSize: {}",
                      terminal::Size{viewWidth + scrollbarWidth, viewHeight},

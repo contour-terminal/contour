@@ -127,6 +127,7 @@ class TerminalView : private Terminal::Events {
     Terminal& terminal() noexcept { return terminal_; }
 
     Renderer const& renderer() const { return renderer_; }
+    GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
 
     void setColorProfile(terminal::ColorProfile const& _colors);
 

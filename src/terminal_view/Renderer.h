@@ -69,6 +69,8 @@ class Renderer {
     bool setFontSize(double _fontSize);
     void updateFontMetrics();
 
+    GridMetrics const& gridMetrics() const noexcept { return gridMetrics_; }
+
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
