@@ -122,8 +122,9 @@ bool TextShaper::shape(int _size,
         if (!_font.loaded())
             _font.load();
 
-        // if (!_font.isFixedWidth() && !_font.hasColor())
-        //     return false;
+        // XXX for some reason the fonts sometimes are not monospace even though we requested that (twice).
+        if (!_font.isFixedWidth())// && !_font.hasColor())
+            return false;
 
         hb_font = hb_ft_font_create_referenced(_font.face());
         hb_fonts_.emplace(&_font, HbFontPtr(hb_font, [](auto p) { hb_font_destroy(p); }));

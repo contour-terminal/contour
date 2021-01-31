@@ -61,63 +61,77 @@ namespace {
         return true;
     }
 
-    static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style)
+    static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style, bool _monospace)
     {
-        auto const pattern = _style == FontStyle::Regular ? string(_family) : fmt::format("{}:style={}", _family, _style);
-        if (endsWithIgnoreCase(pattern, ".ttf") || endsWithIgnoreCase(pattern, ".otf")) // TODO: and regular file exists
+        if (endsWithIgnoreCase(_family, ".ttf") || endsWithIgnoreCase(_family, ".otf")) // TODO: and regular file exists
             return {string(_family)};
 
-        #if defined(HAVE_FONTCONFIG)
-        #if 0
-        FcPattern* fcPattern = FcNameParse((FcChar8 const*) pattern.c_str());
-        #else
-        auto fcPattern = FcPatternCreate();
-        auto family = string(_family);
-        FcPatternAddString(fcPattern, FC_FAMILY, (FcChar8 const*) family.c_str());
-        FcPatternAddInteger(fcPattern, FC_SPACING, FC_MONO);
-        //FcPatternAddDouble(fcPattern, FC_SIZE, sizeInPt); // do we want to provide these hints?
-        //FcPatternAddDouble(fcPattern, FC_DPI, _dpi);
+        #if defined(HAVE_FONTCONFIG) // {{{
+        auto const family = string(_family);
+        auto pat = unique_ptr<FcPattern, void(*)(FcPattern*)>(
+            FcPatternCreate(),
+            [](auto p) { FcPatternDestroy(p); });
+
+        FcPatternAddBool(pat.get(), FC_OUTLINE, true);
+        FcPatternAddBool(pat.get(), FC_SCALABLE, true);
+
+        // XXX It should be recommended to turn that on if you are looking for colored fonts,
+        //     such as for emoji, but it seems like fontconfig doesn't care, it works either way.
+        //
+        // if (_color)
+        //     FcPatternAddBool(pat.get(), FC_COLOR, true);
+
+        if (!_family.empty())
+            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) family.c_str());
+
+        // XXX While it absolutely makes sense to also include FC_MONO when looking for monospace
+        //     fonts, it turns out that the font fallback fonts seem to yield to bad font choices,
+        //     i.e. some Zsh prompts are broken, that are not broken otherwise!
+        //
+        // if (_monospace)
+        // {
+        //     if (_family != "monospace")
+        //         FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
+        //     FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
+        // }
+        (void) _monospace;
+
         if (int(_style) & int(FontStyle::Bold))
-            FcPatternAddInteger(fcPattern, FC_WEIGHT, FC_WEIGHT_BOLD);
+            FcPatternAddInteger(pat.get(), FC_WEIGHT, FC_WEIGHT_BOLD);
+
         if (int(_style) & int(FontStyle::Italic))
-            FcPatternAddInteger(fcPattern, FC_SLANT, FC_SLANT_ITALIC);
-        #endif
+            FcPatternAddInteger(pat.get(), FC_SLANT, FC_SLANT_ITALIC);
 
-        // FcConfig* fcConfig = nullptr;
-        FcConfig* fcConfig = FcInitLoadConfigAndFonts();
-        FcDefaultSubstitute(fcPattern);
-        FcConfigSubstitute(fcConfig, fcPattern, FcMatchPattern);
+        FcConfigSubstitute(nullptr, pat.get(), FcMatchPattern);
+        FcDefaultSubstitute(pat.get());
 
-        vector<string> paths;
+        FcResult result = FcResultNoMatch;
+        auto fs = unique_ptr<FcFontSet, void(*)(FcFontSet*)>(
+            FcFontSort(nullptr, pat.get(), /*unicode-trim*/FcTrue, /*FcCharSet***/nullptr, &result),
+            [](auto p) { FcFontSetDestroy(p); });
 
-        // find font along with all its fallback fonts
-        FcCharSet* fcCharSet = nullptr;
-        FcResult fcResult = FcResultNoMatch;
-#if 1
-        FcFontSet* fcFontSet = FcFontSort(fcConfig, fcPattern, /*trim*/FcTrue, &fcCharSet, &fcResult);
-#else
-        FcFontSet* fcFontSet = nullptr;
-        FcObjectSet* fcObjectSet = FcObjectSetBuild(FC_FILE, FC_POSTSCRIPT_NAME, FC_FAMILY, FC_STYLE, FC_FULLNAME, FC_WEIGHT, FC_WIDTH, FC_SLANT, FC_HINT_STYLE, FC_INDEX, FC_HINTING, FC_SCALABLE, FC_OUTLINE, FC_COLOR, FC_SPACING, NULL);
-        fcFontSet = FcFontList(nullptr, fcPattern, fcObjectSet);
-#endif
-        for (int i = 0; i < fcFontSet->nfont; ++i)
+        if (!fs || result != FcResultMatch)
+            return {};
+
+        vector<string> output;
+        for (int i = 0; i < fs->nfont; ++i)
         {
-            FcChar8* fcFile = nullptr;
-            if (FcPatternGetString(fcFontSet->fonts[i], FC_FILE, 0, &fcFile) == FcResultMatch)
-            {
-                // FcBool fcColor = false;
-                // FcPatternGetBool(fcFontSet->fonts[i], FC_COLOR, 0, &fcColor);
-                if (fcFile)
-                    paths.emplace_back((char const*) fcFile);
-            }
-        }
-        FcFontSetDestroy(fcFontSet);
-        FcCharSetDestroy(fcCharSet);
+            FcPattern* font = fs->fonts[i];
 
-        FcPatternDestroy(fcPattern);
-        FcConfigDestroy(fcConfig);
-        return paths;
-        #endif
+            FcChar8 *file;
+            if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
+                continue;
+
+            int spacing = -1;
+            FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
+
+            // XXX See _monospace comment above.
+            // if (!_monospace || spacing >= FC_DUAL)
+            //     output.emplace_back((char const*)(file));
+            output.emplace_back((char const*)(file));
+        }
+        return output;
+        #endif // }}}
 
         #if defined(_WIN32)
         // TODO: Read https://docs.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-enumfontfamiliesexa
@@ -142,6 +156,10 @@ FontLoader::FontLoader(int _dpiX, int _dpiY) :
     ft_{},
     dpi_{ _dpiX, _dpiY }
 {
+#if defined(HAVE_FONTCONFIG)
+    FcInit();
+#endif
+
     if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
         throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
 
@@ -152,6 +170,10 @@ FontLoader::FontLoader(int _dpiX, int _dpiY) :
 FontLoader::~FontLoader()
 {
     FT_Done_FreeType(ft_);
+
+#if defined(HAVE_FONTCONFIG)
+    FcFini();
+#endif
 }
 
 void FontLoader::setDpi(Vec2 _dpi)
@@ -162,8 +184,9 @@ void FontLoader::setDpi(Vec2 _dpi)
 FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize)
 {
     FontList out;
+    bool monospace = true;
 
-    for (auto const& filename : getFontFilePaths(_family, _style))
+    for (auto const& filename : getFontFilePaths(_family, _style, monospace))
         out.emplace_back(ft_, dpi_, filename);
 
     if (!out.empty())
