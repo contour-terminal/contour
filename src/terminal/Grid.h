@@ -550,6 +550,9 @@ class Grid {
     Line& lineAt(int _line) noexcept;
     Line const& lineAt(int _line) const noexcept;
 
+    /// Converts a relative line number into an absolute line number.
+    int toAbsoluteLine(int _relativeLine) const noexcept;
+
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept;
 
@@ -644,6 +647,11 @@ inline Line& Grid::lineAt(int _line) noexcept
 inline Line const& Grid::lineAt(int _line) const noexcept
 {
     return const_cast<Grid&>(*this).lineAt(_line);
+}
+
+inline int Grid::toAbsoluteLine(int _relativeLine) const noexcept
+{
+    return historyLineCount() + _relativeLine - 1;
 }
 
 inline Cell& Grid::at(Coordinate const& _coord) noexcept
