@@ -123,6 +123,8 @@ class Selector {
         return false;
     }
 
+    constexpr Mode mode() const noexcept { return mode_; }
+
     /// Tests whether selection is upwards.
     constexpr bool negativeSelection() const noexcept { return to_ < from_; }
     constexpr bool singleLineSelection() const noexcept { return from_.row == to_.row; }
