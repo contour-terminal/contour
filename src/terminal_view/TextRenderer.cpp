@@ -203,21 +203,15 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
 #endif
         return cached->second;
     }
-    else
-    {
-        cacheKeyStorage_.emplace_back(u32string{codepoints});
 
-        auto const cacheKeyFromStorage = CacheKey{
-            cacheKeyStorage_.back(),
-            characterStyleMask_
-        };
+    cacheKeyStorage_.emplace_back(u32string{codepoints});
+    auto const cacheKeyFromStorage = CacheKey{ cacheKeyStorage_.back(), characterStyleMask_ };
 
 #if !defined(NDEBUG)
-        cacheHits_[cacheKeyFromStorage] = 0;
+    cacheHits_[cacheKeyFromStorage] = 0;
 #endif
 
-        return cache_[cacheKeyFromStorage] = requestGlyphPositions();
-    }
+    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
 GlyphPositionList TextRenderer::requestGlyphPositions()
@@ -231,9 +225,7 @@ GlyphPositionList TextRenderer::requestGlyphPositions()
     while (rs.consume(out(run)))
     {
         METRIC_INCREMENT(shapedText);
-        GlyphPositionList gpos = shapeRun(run);
-        crispy::copy(gpos, std::back_inserter(glyphPositions));
-        //crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
+        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
     }
 
     return glyphPositions;
