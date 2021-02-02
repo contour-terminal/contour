@@ -59,6 +59,14 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
                                     int const* _clusters,
                                     int _clusterGap)
 {
+    if (crispy::logging_sink::for_debug().enabled())
+    {
+        auto logMessage = debuglog();
+        logMessage.write("Shaping codepoints:");
+        for (auto [i, codepoint] : crispy::indexed(crispy::span(_codepoints, _codepoints + _size)))
+            logMessage.write(" U+{:x}", static_cast<unsigned>(codepoint));
+    }
+
     GlyphPositionList glyphPositions;
 
     for (Font& font: _fonts)
@@ -66,16 +74,7 @@ GlyphPositionList TextShaper::shape(unicode::Script _script,
             return glyphPositions;
 
     if (crispy::logging_sink::for_debug().enabled())
-    {
-        auto logMessage = debuglog();
-        logMessage.write("Shaping failed codepoints: ");
-        for (auto [i, codepoint] : crispy::indexed(crispy::span(_codepoints, _codepoints + _size)))
-        {
-            if (i != 0)
-                logMessage.write(" ");
-            logMessage.write("{:<6x}", static_cast<unsigned>(codepoint));
-        }
-    }
+        debuglog().write("Shaping failed.");
 
     // render primary font with glyph-missing hints
     shape(_size, _codepoints, _clusters, _clusterGap, _script, _fonts.front(), _advanceX, ref(glyphPositions));
