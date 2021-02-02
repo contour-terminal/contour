@@ -60,7 +60,8 @@ Selector::Selector(Mode _mode,
         [screen = std::ref(_screen)](Coordinate const& _pos) -> Cell const* {
             assert(_pos.row >= 0 && "must be absolute coordinate");
             auto const& buffer = screen.get();
-            auto const row = _pos.row - buffer.historyLineCount(); // translate to coordinate relative to the screen's home position
+            // convert line number  from absolute line to relative line number.
+            auto const row = _pos.row - buffer.historyLineCount() + 1;
             if (row <= buffer.size().height)
                 return &buffer.at({row, _pos.column});
             else

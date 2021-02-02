@@ -106,7 +106,7 @@ class Terminal : public ScreenEvents {
     Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
     {
         // TODO: unit test case me BEFORE merge, yo !
-        auto const row = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount()) + _pos.row;
+        auto const row = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount()) + (_pos.row - 1);
         auto const col = _pos.column;
         return Coordinate{row, col};
     }

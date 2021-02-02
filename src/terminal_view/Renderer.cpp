@@ -239,7 +239,7 @@ uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
 
     _terminal.screen().render(
         [&](Coordinate const& _pos, Cell const& _cell) {
-            auto const absolutePos = Coordinate{baseLine + _pos.row, _pos.column};
+            auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
             auto const selected = _terminal.isSelectedAbsolute(absolutePos);
             renderCell(_pos, _cell, reverseVideo, selected);
         },
