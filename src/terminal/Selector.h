@@ -157,10 +157,7 @@ class Selector {
         for (auto const& range : selection())
             for (auto const col : crispy::times(range.fromColumn, range.length()))
                 if (Cell const* cell = at({range.line, col}); cell != nullptr)
-                {
-                    auto const pos = Coordinate{range.line, col};
-                    _render(pos, *cell);
-                }
+                    _render(Coordinate{range.line, col}, *cell);
     }
 
   private:
