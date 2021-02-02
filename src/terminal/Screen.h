@@ -537,6 +537,9 @@ class Screen {
     /// @returns the primary screen's grid if alternate screen is active, and the alternate screen's grid otherwise.
     Grid& backgroundGrid() noexcept { return isPrimaryScreen() ? alternateGrid() : primaryGrid(); }
 
+    /// @returns true iff given absolute line number is wrapped, false otherwise.
+    bool lineWrapped(int _lineNumber) const { return activeGrid_->absoluteLineAt(_lineNumber).wrapped(); }
+
   private:
     void setBuffer(ScreenType _type);
 

@@ -155,6 +155,8 @@ class Terminal : public ScreenEvents {
     /// Only access this when having locked.
     Screen& screen() noexcept { return screen_; }
 
+    bool lineWrapped(int _lineNumber) const { return screen_.lineWrapped(_lineNumber); }
+
     Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
 
     // {{{ cursor management
@@ -206,6 +208,11 @@ class Terminal : public ScreenEvents {
             && selector_->state() != Selector::State::Waiting
             && selector_->contains(_coord);
     }
+
+    /// Tests if current selection is covering the whole screen width.
+    ///
+    /// @param _lineNumber an absolute line number
+    bool isFullLineSelection(int _lineNumber) const;
 
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }

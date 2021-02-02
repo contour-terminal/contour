@@ -191,7 +191,7 @@ class Selector {
 
 } // namespace terminal
 
-namespace fmt {
+namespace fmt { // {{{
     template <>
     struct formatter<terminal::Selector::State> {
         template <typename ParseContext>
@@ -234,5 +234,4 @@ namespace fmt {
                              _selector.state());
         }
     };
-}
-
+} // }}}

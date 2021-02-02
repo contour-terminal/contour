@@ -1521,7 +1521,11 @@ string TerminalWidget::extractSelectionText()
     };
 
     terminalView_->terminal().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
-        if (_pos.column <= lastColumn)
+        auto const _lock = scoped_lock{ terminalView_->terminal() };
+        auto const isNewLine = _pos.column <= lastColumn;
+        auto const isLineWrapped = terminalView_->terminal().lineWrapped(_pos.row);
+        bool const isFullLineSelection = terminalView_->terminal().isFullLineSelection(_pos.row);
+        if (isNewLine && (!isLineWrapped || !isFullLineSelection))
         {
             trimRight(currentLine);
             text += currentLine;
