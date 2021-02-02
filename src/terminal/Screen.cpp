@@ -1916,7 +1916,8 @@ void Screen::dumpState(std::string const& _message) const
 
     hline();
     cerr << screenshot([this](int _lineNo) -> string {
-        return fmt::format("| {}", grid().lineAt(_lineNo).flags());
+        auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
+        return fmt::format("| {}: {}", absoluteLine, grid().lineAt(_lineNo).flags());
     });
     hline();
 
