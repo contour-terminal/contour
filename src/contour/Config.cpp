@@ -710,6 +710,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     if (profile.shell.program.empty())
         profile.shell.program = terminal::Process::loginShell();
 
+    softLoadValue(_node, "fullscreen", profile.fullscreen, false);
+
     if (auto args = _node["arguments"]; args && args.IsSequence())
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());

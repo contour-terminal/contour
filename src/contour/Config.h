@@ -93,6 +93,7 @@ inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
 
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;
+    bool fullscreen = false;
 
     terminal::Size terminalSize;
 
@@ -132,8 +133,6 @@ struct Config {
     FileSystem::path backingFilePath;
 
     std::optional<FileSystem::path> logFilePath;
-
-    bool fullscreen;
 
     std::unordered_map<std::string, terminal::ColorProfile> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
