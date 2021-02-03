@@ -17,8 +17,8 @@
 
 #include <terminal/Parser.h>
 #include <crispy/logger.h>
-#include <crispy/split.h>
 #include <crispy/indexed.h>
+#include <crispy/utils.h>
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QThread>

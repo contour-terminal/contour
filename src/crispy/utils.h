@@ -1,7 +1,8 @@
 #pragma once
 
-#include <unordered_map>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace crispy {
@@ -44,23 +45,21 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
     return result;
 }
 
-inline std::vector<std::string_view> split(std::string_view const&  _text, char _delimiter)
+inline auto split(std::string_view _text, char _delimiter) -> std::vector<std::string_view>
 {
-    auto res = std::vector<std::string_view>{};
-
-    size_t i_beg = 0;
-    size_t i = _text.find(_delimiter);
-
-    // e.g.: foobar::foo2:foo3:....
-    while (i != _text.npos)
+    std::vector<std::string_view> output{};
+    size_t a = 0;
+    size_t b = 0;
+    while ((b = _text.find(_delimiter, a)) != std::string_view::npos)
     {
-        res.push_back(std::string_view(_text.data() + i_beg, i - i_beg));
-
-        i_beg = i + 1;
-        i = _text.find(_delimiter, i_beg);
+        output.emplace_back(_text.substr(a, b - a));
+        a = b + 1;
     }
-    res.push_back(std::string_view{_text.data() + i_beg, _text.size() - i_beg});
-    return res;
+
+    if (a < _text.size())
+        output.emplace_back(_text.substr(a));
+
+    return output;
 }
 
 inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(std::string_view const&  _text, char _delimiter)
