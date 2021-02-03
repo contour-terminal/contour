@@ -17,6 +17,8 @@
 
 #include <terminal/Parser.h>
 #include <crispy/logger.h>
+#include <crispy/split.h>
+#include <crispy/indexed.h>
 
 #include <QtCore/QCommandLineParser>
 #include <QtCore/QThread>
@@ -122,11 +124,7 @@ int main(int argc, char* argv[])
 
             auto result = string{};
 
-            // TODO: use `crispy::split(string) -> vector<string_view>` here
-            size_t a = 0;
-            size_t b = 0;
-            int i = 0;
-            while ((b = _msg.text().find('\n', a)) != string::npos)
+            for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
             {
                 if (i != 0)
                     result += "        ";
@@ -136,25 +134,7 @@ int main(int argc, char* argv[])
                                           _msg.location().line(),
                                           _msg.location().function_name());
 
-                result += _msg.text().substr(a, b - a);
-                result += '\n';
-
-                a = b + 1;
-                i++;
-            }
-
-            if (a < _msg.text().size())
-            {
-                if (i != 0)
-                    result += "        ";
-                else
-                {
-                    result += fmt::format("[{}:{}:{}] ",
-                                          fileName,
-                                          _msg.location().line(),
-                                          _msg.location().function_name());
-                }
-                result += _msg.text().substr(a);
+                result += line;
                 result += '\n';
             }
 
