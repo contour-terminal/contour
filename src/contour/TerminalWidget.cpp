@@ -1330,8 +1330,11 @@ bool TerminalWidget::executeAction(Action const& _action)
                 cerr << "Could not open configuration file \"" << config_.backingFilePath << "\"" << endl;
             return Result::Silently;
         },
-        [](actions::OpenFileManager) -> Result {
-            // TODO open file manager at current window's current working directory (via /proc/self/cwd)
+        [this](actions::OpenFileManager) -> Result {
+            auto const _l = scoped_lock{terminalView_->terminal()};
+            auto const& cwd = terminalView_->terminal().screen().currentWorkingDirectory();
+            if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
+                cerr << "Could not open file \"" << cwd << "\"" << endl;
             return Result::Silently;
         },
         [this](actions::Quit) -> Result {

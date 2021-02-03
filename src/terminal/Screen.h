@@ -270,7 +270,7 @@ class Screen {
     void setCurrentWorkingDirectory(std::string const& _url);             // OSC 7
 
     /// @returns either an empty string or a file:// URL of the last set working directory.
-    std::string currentWorkingDirectory() const noexcept { return currentWorkingDirectory_; }
+    std::string const& currentWorkingDirectory() const noexcept { return currentWorkingDirectory_; }
 
     void hyperlink(std::string const& _id, std::string const& _uri);      // OSC 8
     void notify(std::string const& _title, std::string const& _content);  // OSC 777

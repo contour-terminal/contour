@@ -222,6 +222,7 @@ color_schemes:
 # - IncreaseOpacity   Increases the default-background opacity by 5%.
 # - NewTerminal       Spawns a new terminal at the current terminals current working directory.
 # - OpenConfiguration Opens the configuration file.
+# - OpenFileManager   Opens the current working directory in a system file manager.
 # - PasteClipboard    Pastes clipboard to standard input.
 # - PasteSelection    Pastes current selection to standard input.
 # - Quit              Quits the application.
@@ -273,6 +274,7 @@ input_mapping:
     - { mods: [Shift, Alt],     key: 'j',           action: ScrollMarkDown }
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
+    - { mods: [Control],        key: O,             action: OpenFileManager }
 
 # Logging section
 logging:
