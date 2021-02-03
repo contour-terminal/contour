@@ -1524,9 +1524,11 @@ string TerminalWidget::extractSelectionText()
         auto const _lock = scoped_lock{ terminalView_->terminal() };
         auto const isNewLine = _pos.column <= lastColumn;
         auto const isLineWrapped = terminalView_->terminal().lineWrapped(_pos.row);
-        bool const isFullLineSelection = terminalView_->terminal().isFullLineSelection(_pos.row);
-        if (isNewLine && (!isLineWrapped || !isFullLineSelection))
+        bool const touchesRightPage = _pos.row > 0
+            && terminalView_->terminal().isSelectedAbsolute({_pos.row - 1, gridMetrics().pageSize.width});
+        if (isNewLine && (!isLineWrapped || !touchesRightPage))
         {
+            // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
             trimRight(currentLine);
             text += currentLine;
             text += '\n';

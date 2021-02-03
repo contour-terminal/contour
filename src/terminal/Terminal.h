@@ -209,11 +209,6 @@ class Terminal : public ScreenEvents {
             && selector_->contains(_coord);
     }
 
-    /// Tests if current selection is covering the whole screen width.
-    ///
-    /// @param _lineNumber an absolute line number
-    bool isFullLineSelection(int _lineNumber) const;
-
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
 

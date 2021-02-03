@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/Screen.h>
+//#include <terminal/Screen.h>
 #include <terminal/Size.h>          // Coordinate
 
 #include <crispy/utils.h>
@@ -28,6 +28,7 @@
 namespace terminal {
 
 class Screen;
+class Cell;
 
 /**
  * Selector API.
@@ -73,20 +74,22 @@ class Selector {
 
 
     enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
-	using GetCellAt = std::function<Cell const*(Coordinate const&)>;
+	using GetCellAt = std::function<Cell const*(Coordinate)>;
+    using GetWrappedFlag = std::function<bool(int)>;
 
     Selector(Mode _mode,
 			 GetCellAt _at,
+             GetWrappedFlag _wrappedFlag,
 			 std::u32string const& _wordDelimiters,
 			 int _totalRowCount,
              int _columnCount,
-			 Coordinate const& _from);
+			 Coordinate _from);
 
 	/// Convenience constructor when access to Screen is available.
     Selector(Mode _mode,
 			 std::u32string const& _wordDelimiters,
 			 Screen const& _screen,
-			 Coordinate const& _from);
+			 Coordinate _from);
 
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
@@ -181,6 +184,7 @@ class Selector {
     State state_{State::Waiting};
 	Mode mode_;
 	GetCellAt getCellAt_;
+    GetWrappedFlag wrapped_;
 	std::u32string wordDelimiters_;
 	int totalRowCount_;
     int columnCount_;

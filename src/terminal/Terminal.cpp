@@ -200,6 +200,10 @@ void Terminal::clearSelection()
 
 bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
 {
+    if (_mouseMove.coordinates() == currentMousePosition_)
+        // Do not handle mouse-move events in sub-cell dimensions.
+        return false;
+
     auto const newPosition = _mouseMove.coordinates();
 
     currentMousePosition_ = newPosition;
@@ -389,65 +393,6 @@ void Terminal::setWordDelimiters(string const& _wordDelimiters)
     wordDelimiters_ = unicode::from_utf8(_wordDelimiters);
 }
 
-bool Terminal::isFullLineSelection(int _lineNumber) const
-{
-    if (!selector_)
-        return false;
-
-    switch (selector_->mode())
-    {
-        case Selector::Mode::FullLine:
-        {
-            auto const top = std::min(selector_->from().row, selector_->to().row);
-            auto const bottom = std::max(selector_->from().row, selector_->to().row);
-            return top <= _lineNumber && _lineNumber <= bottom;
-        }
-        case Selector::Mode::Linear:
-        case Selector::Mode::LinearWordWise:
-        {
-            auto const left = std::min(selector_->from().column, selector_->to().column);
-            auto const right = std::max(selector_->from().column, selector_->to().column);
-            auto const top = std::min(selector_->from().row, selector_->to().row);
-            auto const bottom = std::max(selector_->from().row, selector_->to().row);
-
-            // == one line
-            if (top == bottom)
-                return left == 1 && right == screen().size().width;
-
-            // >= 3 lines and active is inside borders
-            if (top < _lineNumber && _lineNumber < bottom)
-                return true;
-
-            auto const lines = bottom - top;
-            if (lines >= 3 && _lineNumber == top)
-                return left == 1;
-
-            if (lines >= 3 && _lineNumber == bottom)
-                return right == screen().size().width;
-
-            // last case, 2 lines
-            assert(lines == 2);
-
-            if (_lineNumber == top && left == 1)
-                return true;
-
-            if (_lineNumber == bottom && right == screen().size().width)
-                return true;
-
-            return false;
-        }
-        case Selector::Mode::Rectangular:
-        {
-            auto const left = std::min(selector_->from().column, selector_->to().column);
-            auto const right = std::max(selector_->from().column, selector_->to().column);
-            auto const top = std::min(selector_->from().row, selector_->to().row);
-            auto const bottom = std::max(selector_->from().row, selector_->to().row);
-            return top <= _lineNumber && _lineNumber <= bottom
-                && left == 1 && right == screen().size().width;
-        }
-    }
-    return false;
-}
 // {{{ ScreenEvents overrides
 optional<RGBColor> Terminal::requestDynamicColor(DynamicColorName _name)
 {

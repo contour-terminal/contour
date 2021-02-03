@@ -23,12 +23,14 @@ namespace terminal {
 
 Selector::Selector(Mode _mode,
 				   GetCellAt _getCellAt,
+                   GetWrappedFlag _wrappedFlag,
 				   std::u32string const& _wordDelimiters,
 				   int _totalRowCount,
 				   int _columnCount,
-				   Coordinate const& _from) :
+				   Coordinate _from) :
 	mode_{_mode},
 	getCellAt_{move(_getCellAt)},
+    wrapped_{move(_wrappedFlag)},
 	wordDelimiters_{_wordDelimiters},
 	totalRowCount_{_totalRowCount},
     columnCount_{_columnCount},
@@ -41,9 +43,18 @@ Selector::Selector(Mode _mode,
 		extend({from_.row, 1u});
 		swapDirection();
 		extend({from_.row, columnCount_});
+
+        // backward
+        while (from_.row > 0 && wrapped_(from_.row))
+            from_.row--;
+
+        // forward
+        while (to_.row < _totalRowCount && wrapped_(to_.row + 1))
+            to_.row++;
 	}
 	else if (isWordWiseSelection())
 	{
+        // TODO: expand logical line to complete word, if on line boundary
 		state_ = State::InProgress;
 		extendSelectionBackward();
 		swapDirection();
@@ -54,10 +65,10 @@ Selector::Selector(Mode _mode,
 Selector::Selector(Mode _mode,
                    std::u32string const& _wordDelimiters,
                    Screen const& _screen,
-                   Coordinate const& _from) :
+                   Coordinate _from) :
     Selector{
         _mode,
-        [screen = std::ref(_screen)](Coordinate const& _pos) -> Cell const* {
+        [screen = std::ref(_screen)](Coordinate _pos) -> Cell const* {
             assert(_pos.row >= 0 && "must be absolute coordinate");
             auto const& buffer = screen.get();
             // convert line number  from absolute line to relative line number.
@@ -66,6 +77,9 @@ Selector::Selector(Mode _mode,
                 return &buffer.at({row, _pos.column});
             else
                 return nullptr;
+        },
+        [screen = std::ref(_screen)](int _line) -> bool {
+            return screen.get().lineWrapped(_line);
         },
         _wordDelimiters,
         _screen.size().height + static_cast<int>(_screen.historyLineCount()),
@@ -116,21 +130,43 @@ bool Selector::extend(Coordinate const& _coord)
 
     state_ = State::InProgress;
 
-	if (!isWordWiseSelection())
-        to_ = stretchedColumn(coord);
-	else if (coord > start_)
-	{
-		to_ = coord;
-		extendSelectionForward();
-	}
-	else
-	{
-		to_ = coord;
-		extendSelectionBackward();
-		swapDirection();
-		to_ = start_;
-		extendSelectionForward();
-	}
+    switch (mode_)
+    {
+        case Mode::FullLine:
+            if (coord > start_)
+            {
+                to_ = coord;
+                while (to_.row < totalRowCount_ && wrapped_(to_.row + 1))
+                    to_.row++;
+            }
+            else if (coord < start_)
+            {
+                from_ = coord;
+                while (from_.row > 0 && wrapped_(from_.row))
+                    from_.row--;
+            }
+            break;
+        case Mode::Linear:
+            to_ = stretchedColumn(coord);
+            break;
+        case Mode::LinearWordWise:
+            // TODO: handle logical line wraps
+        case Mode::Rectangular:
+            if (coord > start_)
+            {
+                to_ = coord;
+                extendSelectionForward();
+            }
+            else
+            {
+                to_ = coord;
+                extendSelectionBackward(); //TODO adapt
+                swapDirection();
+                to_ = start_;
+                extendSelectionForward();
+            }
+            break;
+    }
 
     // TODO: indicates whether or not a scroll action must take place.
     return false;
@@ -146,9 +182,10 @@ void Selector::extendSelectionBackward()
     auto last = to_;
     auto current = last;
     for (;;) {
+        auto const wrapIntoPreviousLine = current.column == 1 && current.row > 0 && wrapped_(current.row);
         if (current.column > 1)
             current.column--;
-        else if (current.row > 1)
+        else if (current.row > 0 || wrapIntoPreviousLine)
         {
             current.row--;
             current.column = columnCount_;
@@ -180,6 +217,13 @@ void Selector::extendSelectionForward()
     auto last = to_;
     auto current = last;
     for (;;) {
+        if (current.column == columnCount_ && current.row + 1 < totalRowCount_ && wrapped_(current.row + 1))
+        {
+            current.row++;
+            current.column = 1;
+            current = stretchedColumn({current.row, current.column + 1});
+        }
+
         if (current.column < columnCount_)
         {
             current = stretchedColumn({current.row, current.column + 1});
