@@ -540,6 +540,9 @@ class Screen {
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     bool lineWrapped(int _lineNumber) const { return activeGrid_->absoluteLineAt(_lineNumber).wrapped(); }
 
+    int toAbsoluteLine(int _relativeLine) const noexcept { return activeGrid_->toAbsoluteLine(_relativeLine); }
+    Coordinate toAbsolute(Coordinate _coord) const noexcept { return {activeGrid_->toAbsoluteLine(_coord.row), _coord.column}; }
+
   private:
     void setBuffer(ScreenType _type);
 

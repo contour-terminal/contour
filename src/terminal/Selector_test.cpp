@@ -49,23 +49,24 @@ TEST_CASE("Selector.Linear", "[selector]")
     auto screenEvents = ScreenEvents{};
     auto screen = Screen{Size{11, 3}, screenEvents};
     screen.write(
-    //   123456789AB
-        "12345,67890"s +
-        "ab,cdefg,hi"s +
-        "12345,67890"s
+        //       123456789AB
+        /* 0 */ "12345,67890"s +
+        /* 1 */ "ab,cdefg,hi"s +
+        /* 2 */ "12345,67890"s
     );
 
     SECTION("single-cell") { // "b"
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 2}};
-        selector.extend(Coordinate{2, 2});
+        auto const pos = screen.toAbsolute({2, 2});
+        auto selector = Selector{Selector::Mode::Linear, U",", screen, pos};
+        selector.extend(pos);
         selector.stop();
 
         vector<Selector::Range> const selection = selector.selection();
         REQUIRE(selection.size() == 1);
         Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 2);
-        CHECK(r1.fromColumn == 2);
-        CHECK(r1.toColumn == 2);
+        CHECK(r1.line == pos.row);
+        CHECK(r1.fromColumn == pos.column);
+        CHECK(r1.toColumn == pos.column);
         CHECK(r1.length() == 1);
 
         auto selectedText = TextSelection{};
@@ -74,14 +75,14 @@ TEST_CASE("Selector.Linear", "[selector]")
     }
 
     SECTION("forward single-line") { // "b,c"
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 2}};
-        selector.extend(Coordinate{2, 4});
+        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 2}};
+        selector.extend(Coordinate{1, 4});
         selector.stop();
 
         vector<Selector::Range> const selection = selector.selection();
         REQUIRE(selection.size() == 1);
         Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 2);
+        CHECK(r1.line == 1);
         CHECK(r1.fromColumn == 2);
         CHECK(r1.toColumn == 4);
         CHECK(r1.length() == 3);
@@ -92,21 +93,21 @@ TEST_CASE("Selector.Linear", "[selector]")
     }
 
     SECTION("forward multi-line") { // "b,cdefg,hi\n1234"
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 2}};
-        selector.extend(Coordinate{3, 4});
+        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 2}};
+        selector.extend(Coordinate{2, 4});
         selector.stop();
 
         vector<Selector::Range> const selection = selector.selection();
         REQUIRE(selection.size() == 2);
 
         Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 2);
+        CHECK(r1.line == 1);
         CHECK(r1.fromColumn == 2);
         CHECK(r1.toColumn == 11);
         CHECK(r1.length() == 10);
 
         Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 3);
+        CHECK(r2.line == 2);
         CHECK(r2.fromColumn == 1);
         CHECK(r2.toColumn == 4);
         CHECK(r2.length() == 4);
@@ -126,21 +127,21 @@ TEST_CASE("Selector.Linear", "[selector]")
         "bar"
         */
 
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 7}};
-        selector.extend(Coordinate{3, 3});
+        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 7}};
+        selector.extend(Coordinate{2, 3});
         selector.stop();
 
         vector<Selector::Range> const selection = selector.selection();
         REQUIRE(selection.size() == 2);
 
         Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 2);
+        CHECK(r1.line == 1);
         CHECK(r1.fromColumn == 7);
         CHECK(r1.toColumn == 11);
         CHECK(r1.length() == 5);
 
         Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 3);
+        CHECK(r2.line == 2);
         CHECK(r2.fromColumn == 1);
         CHECK(r2.toColumn == 3);
         CHECK(r2.length() == 3);
@@ -160,27 +161,27 @@ TEST_CASE("Selector.Linear", "[selector]")
         "bar"
         */
 
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{2, 9}};
-        selector.extend(Coordinate{4, 2});
+        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 9}};
+        selector.extend(Coordinate{3, 2});
         selector.stop();
 
         vector<Selector::Range> const selection = selector.selection();
         REQUIRE(selection.size() == 3);
 
         Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 2);
+        CHECK(r1.line == 1);
         CHECK(r1.fromColumn == 9);
         CHECK(r1.toColumn == 11);
         CHECK(r1.length() == 3);
 
         Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 3);
+        CHECK(r2.line == 2);
         CHECK(r2.fromColumn == 1);
         CHECK(r2.toColumn == 11);
         CHECK(r2.length() == 11);
 
         Selector::Range const& r3 = selection[2];
-        CHECK(r3.line == 4);
+        CHECK(r3.line == 3);
         CHECK(r3.fromColumn == 1);
         CHECK(r3.toColumn == 2);
         CHECK(r3.length() == 2);

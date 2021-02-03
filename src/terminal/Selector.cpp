@@ -136,7 +136,7 @@ bool Selector::extend(Coordinate const& _coord)
             if (coord > start_)
             {
                 to_ = coord;
-                while (to_.row < totalRowCount_ && wrapped_(to_.row + 1))
+                while (to_.row + 1 < totalRowCount_ && wrapped_(to_.row + 1))
                     to_.row++;
             }
             else if (coord < start_)
