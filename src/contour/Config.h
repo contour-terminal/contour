@@ -93,6 +93,7 @@ inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
 
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;
+    bool maximized = false;
     bool fullscreen = false;
 
     terminal::Size terminalSize;

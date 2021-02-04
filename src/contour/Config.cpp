@@ -710,6 +710,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     if (profile.shell.program.empty())
         profile.shell.program = terminal::Process::loginShell();
 
+    softLoadValue(_node, "maximized", profile.maximized, false);
     softLoadValue(_node, "fullscreen", profile.fullscreen, false);
 
     if (auto args = _node["arguments"]; args && args.IsSequence())

@@ -232,6 +232,7 @@ class TerminalWidget :
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
     std::mutex screenUpdateLock_;
     bool renderingPressure_ = false;
+    bool maximizedState_ = false;
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> consecutiveRenderCount = 0;

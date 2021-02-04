@@ -12,6 +12,7 @@
 - Adds VT sequence for querying/setting current font `OSC 50 ; ? ST` and `OSC 50 ; Font ST`.
 - Adds experimental text reflow.
 - Adds OpenFileManager action to configuration.
+- Adds config option `profile.*.maximized: BOOL` to indicate maximized state during profile activation.
 - Adds config option `profile.*.fullscreen: BOOL` to indicate fullscreen state during profile activation.
 - ...
 

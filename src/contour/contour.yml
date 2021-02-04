@@ -52,6 +52,10 @@ profiles:
         # It is activated during startup as well as when switching from another profile to this one.
         fullscreen: false
 
+        # When this profile is *activated*, this flag decides
+        # whether or not to put the window into maximized mode.
+        maximized: false
+
         # Environment variables to be passed to the shell.
         environment:
             TERM: xterm-256color

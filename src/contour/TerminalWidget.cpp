@@ -677,8 +677,14 @@ void TerminalWidget::initializeGL()
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
 
+    if (profile_.maximized)
+        window()->showMaximized();
+
     if (profile_.fullscreen)
+    {
+        maximizedState_ = window()->isMaximized();
         window()->showFullScreen();
+    }
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
@@ -1163,9 +1169,16 @@ bool TerminalWidget::fullscreen() const
 void TerminalWidget::toggleFullscreen()
 {
     if (window()->isFullScreen())
+    {
         window()->showNormal();
+        if (maximizedState_)
+            window()->showMaximized();
+    }
     else
+    {
+        maximizedState_ = window()->isMaximized();
         window()->showFullScreen();
+    }
 
     // if (window_.visibility() == QWindow::FullScreen)
     //     window_.setVisibility(QWindow::Windowed);
@@ -1501,6 +1514,11 @@ void TerminalWidget::activateProfile(string const& _name, config::TerminalProfil
 
     if (newProfile.tabWidth != profile().tabWidth)
         terminalView_->terminal().screen().setTabWidth(newProfile.tabWidth);
+
+    if (newProfile.maximized)
+        window()->showMaximized();
+    else
+        window()->showNormal();
 
     if (newProfile.fullscreen != window()->isFullScreen())
         toggleFullscreen();
