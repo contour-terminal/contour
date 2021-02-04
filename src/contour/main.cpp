@@ -96,9 +96,9 @@ int main(int argc, char* argv[])
 
     try
     {
-        auto const HTS = "\033H";
-        auto const TBC = "\033[g";
-        printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
+        // auto const HTS = "\033H";
+        // auto const TBC = "\033[g";
+        // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
         QCoreApplication::setApplicationName("contour");
         QCoreApplication::setOrganizationName("contour");
@@ -208,7 +208,7 @@ int main(int argc, char* argv[])
         controller.exit();
         controller.wait();
 
-        printf("\r%s", TBC);
+        // printf("\r%s", TBC);
         return rv;
     }
     catch (exception const& e)
