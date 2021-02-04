@@ -562,7 +562,6 @@ optional<int> Screen::findMarkerForward(int _currentCursorLine) const
 void Screen::clearAllTabs()
 {
     tabs_.clear();
-    tabWidth_ = 0;
 }
 
 void Screen::clearTabUnderCursor()
@@ -642,6 +641,8 @@ void Screen::resetHard()
     modes_ = Modes{};
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::TextReflow, true);
+
+    clearAllTabs();
 
     grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();

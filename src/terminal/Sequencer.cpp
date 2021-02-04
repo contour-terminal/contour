@@ -535,7 +535,7 @@ namespace impl // {{{ some command generator helpers
     {
         if (_seq.parameterCount() != 1)
         {
-            _screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+            _screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
             return ApplyResult::Ok;
         }
 
