@@ -764,12 +764,12 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
     if (auto fonts = _node["font"]; fonts)
     {
-        softLoadValue(fonts, "size", profile.fontSize);
-        if (profile.fontSize < MinimumFontSize)
+        softLoadValue(fonts, "size", profile.fonts.size);
+        if (profile.fonts.size < MinimumFontSize)
         {
             debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
-                             profile.fontSize, MinimumFontSize);
-            profile.fontSize = MinimumFontSize;
+                             profile.fonts.size, MinimumFontSize);
+            profile.fonts.size = MinimumFontSize;
         }
 
         auto& defaultFontFamily = profile.fonts.regular.pattern;
@@ -778,6 +778,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(fonts, "italic", profile.fonts.italic.pattern, defaultFontFamily);
         softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, defaultFontFamily);
         softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
+        softLoadValue(fonts, "only_monospace", profile.fonts.onlyMonospace, true);
 
         string renderModeStr;
         softLoadValue(fonts, "render_mode", renderModeStr);
@@ -785,6 +786,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             pair{"lcd"sv, crispy::text::RenderMode::LCD},
             pair{"light"sv, crispy::text::RenderMode::Light},
             pair{"gray"sv, crispy::text::RenderMode::Gray},
+            pair{""sv, crispy::text::RenderMode::Gray},
             pair{"monochrome"sv, crispy::text::RenderMode::Bitmap},
         };
 

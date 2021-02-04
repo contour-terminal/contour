@@ -63,6 +63,7 @@ namespace {
 
     static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style, bool _monospace)
     {
+        std::cerr << fmt::format("getFontFilePaths: family=({}), style={}, {}\n", _family, _style, _monospace ? "monospace" : "anyspace");
         if (endsWithIgnoreCase(_family, ".ttf") || endsWithIgnoreCase(_family, ".otf")) // TODO: and regular file exists
             return {string(_family)};
 
@@ -84,17 +85,13 @@ namespace {
         if (!_family.empty())
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) family.c_str());
 
-        // XXX While it absolutely makes sense to also include FC_MONO when looking for monospace
-        //     fonts, it turns out that the font fallback fonts seem to yield to bad font choices,
-        //     i.e. some Zsh prompts are broken, that are not broken otherwise!
-        //
-        // if (_monospace)
-        // {
-        //     if (_family != "monospace")
-        //         FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
-        //     FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
-        // }
-        (void) _monospace;
+        if (_monospace)
+        {
+            if (_family != "monospace")
+                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
+            FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
+            FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
+        }
 
         if (int(_style) & int(FontStyle::Bold))
             FcPatternAddInteger(pat.get(), FC_WEIGHT, FC_WEIGHT_BOLD);
@@ -118,17 +115,15 @@ namespace {
         {
             FcPattern* font = fs->fonts[i];
 
-            FcChar8 *file;
+            FcChar8* file;
             if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
                 continue;
 
-            int spacing = -1;
+            int spacing = -1; // ignore font if we cannot retrieve spacing information
             FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
 
-            // XXX See _monospace comment above.
-            // if (!_monospace || spacing >= FC_DUAL)
-            //     output.emplace_back((char const*)(file));
-            output.emplace_back((char const*)(file));
+            if (spacing >= FC_DUAL || !_monospace)
+                output.emplace_back((char const*)(file));
         }
         return output;
         #endif // }}}
@@ -181,12 +176,11 @@ void FontLoader::setDpi(Vec2 _dpi)
     dpi_ = _dpi;
 }
 
-FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize)
+FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize, bool _monospace)
 {
     FontList out;
-    bool monospace = true;
 
-    for (auto const& filename : getFontFilePaths(_family, _style, monospace))
+    for (auto const& filename : getFontFilePaths(_family, _style, _monospace))
         out.emplace_back(ft_, dpi_, filename);
 
     if (!out.empty())

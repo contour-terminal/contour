@@ -1,16 +1,15 @@
 # Milestone 0.2.0 checklist
 
 - Twitch Highlight: Wednesday: 3:30:00 to 3:41:00
-- [ ] leaving fullscreen to restore last window size
-- [ ] I think fullscreen toggle doesn't properly propagate resize event to TTY as CSI ?2027 l/h doesn't seem to be invoked
-- [ ] logger: on win32 the function name is too verbose.
+- [ ] report bug to Zsh (omg, mailinglist) that `precmd` is not invoked early enough on FIRST prompt.
 - [ ] Font: fix framed underline
 - [ ] Font: add crispy::text::GlobalFontMetrics maybe
 - [ ] Font: hasColor should not determine whether a glyph is emoji or not
 - [ ] Font: rework API to also support DirectWrite and maybe CoreText
 - [ ] Font: check harfbuzz font api (can it replace freetype, at least on linux/unix?)
+- [ ] logger: on win32 the function name is too verbose.
 - [ ] SGR underline not visible when inverse is set
-- [ ] Text shaping on emoji presentation modifiers seem to sometimes get it wrong.
+- [ ] Text shaping on emoji presentation modifiers seem to sometimes get it wrong (wrt. fe0e and fe0f).
 - [ ] Don't perform pressure-performance optimization when in alt-buffer
 - [ ] charset SCS/SS not well tested (i.e.: write unit tests)
 - [ ] U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
@@ -46,6 +45,7 @@
 - [x] fix curly underline
 - [x] `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
 - [x] fullscreen profile config
+- [x] leaving fullscreen to restore last window size / maximized state
 
 ```
 * and at start of debug-logging, dump initial state once.

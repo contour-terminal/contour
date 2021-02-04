@@ -68,6 +68,8 @@ inline bool operator!=(FontSpec const& a, FontSpec const& b) noexcept
 
 struct FontSpecList
 {
+    double size; // size in Pt
+    bool onlyMonospace = true;
     FontSpec regular;
     FontSpec bold;
     FontSpec italic;
@@ -102,7 +104,6 @@ struct TerminalProfile {
     int historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
-    double fontSize;
     FontSpecList fonts;
 
     int tabWidth;

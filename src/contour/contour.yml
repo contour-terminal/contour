@@ -91,6 +91,10 @@ profiles:
             # Initial font size in pixels.
             size: 12
 
+            # Indicates whether or not to include *only* monospace fonts in the font and
+            # font-fallback list (Default: true).
+            only_monospace: true
+
             # Font render modes tell the font rasterizer engine what rendering technique to use.
             #
             # Modes availabe are:

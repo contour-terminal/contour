@@ -10,11 +10,12 @@
 - Adds VT sequence for enabling/disabling debug logging. `CSI ? 46 h` and `CSI ? 46 l` and CLI option `-d`.
 - Adds improved debug logging.
 - Adds support for different font render modes: `lcd`, `light`, `gray`, `monochrome` in `profiles.NAME.font.render_mode` (default: `lcd`).
-- Adds VT sequence for querying/setting current font `OSC 50 ; ? ST` and `OSC 50 ; Font ST`.
+- Adds VT sequence for querying/setting current font `OSC 50 ; ? ST` and `OSC 50 ; Font ST` (and `OSC 60 Ps Ps Ps Ps Ps ST` for a more fine grained font query/setting control).
 - Adds experimental text reflow.
 - Adds OpenFileManager action to configuration.
 - Adds config option `profile.*.maximized: BOOL` to indicate maximized state during profile activation.
 - Adds config option `profile.*.fullscreen: BOOL` to indicate fullscreen state during profile activation.
+- Adds config option `profile.*.fonts.only_monospace: BOOL` to indicate that only monospace fonts may be used.
 - ...
 
 ### 0.1.1 (2020-12-31)

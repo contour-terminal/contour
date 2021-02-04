@@ -1239,6 +1239,8 @@ void Sequencer::handleSequence()
     if (crispy::logging_sink::for_debug().enabled())
         debuglog().write("Trace sequence: {}", sequence_);
 #endif
+    // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,
+    //         sequence_.functionDefinition() ? sequence_.functionDefinition()->comment : ""sv);
 
     instructionCounter_++;
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
