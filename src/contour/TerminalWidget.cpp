@@ -676,6 +676,9 @@ void TerminalWidget::initializeGL()
     screen.setMaxImageSize(config_.maxImageSize);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
+
+    if (profile_.fullscreen)
+        window()->showFullScreen();
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
@@ -819,7 +822,7 @@ bool TerminalWidget::reloadConfigValues(config::Config _newConfig, string const&
 
     config_ = std::move(_newConfig);
     if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
-        setProfile(_profileName, *profile);
+        activateProfile(_profileName, *profile);
 
     return true;
 }
@@ -1157,13 +1160,8 @@ bool TerminalWidget::fullscreen() const
     // return window_.isFullScreen();
 }
 
-void TerminalWidget::toggleFullScreen()
+void TerminalWidget::toggleFullscreen()
 {
-    // if (window_.isFullScreen())
-    //     window_.showNormal();
-    // else
-    //     window_.showFullScreen();
-
     if (window()->isFullScreen())
         window()->showNormal();
     else
@@ -1214,8 +1212,8 @@ bool TerminalWidget::executeAction(Action const& _action)
             terminalView_->terminal().writeToScreen(_write.chars);
             return Result::Silently;
         },
-        [&](actions::ToggleFullScreen) -> Result {
-            toggleFullScreen();
+        [&](actions::ToggleFullscreen) -> Result {
+            toggleFullscreen();
             return Result::Silently;
         },
         [&](actions::IncreaseFontSize) -> Result {
@@ -1313,9 +1311,9 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Silently;
         },
         [this](actions::ChangeProfile const& v) -> Result {
-            if (v.name == profileName_)
+            if (v.name != profileName_)
             {
-                setProfile(v.name);
+                activateProfile(v.name);
                 return Result::Dirty;
             }
             else
@@ -1448,18 +1446,18 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
     };
 }
 
-void TerminalWidget::setProfile(string const& _newProfileName)
+void TerminalWidget::activateProfile(string const& _newProfileName)
 {
     if (auto newProfile = config_.profile(_newProfileName); newProfile)
     {
         debuglog().write("Changing profile to '{}'.", _newProfileName);
-        setProfile(_newProfileName, *newProfile);
+        activateProfile(_newProfileName, *newProfile);
     }
     else
         debuglog().write("Cannot change profile. No such profile: '{}'.", _newProfileName);
 }
 
-void TerminalWidget::setProfile(string const& _name, config::TerminalProfile newProfile)
+void TerminalWidget::activateProfile(string const& _name, config::TerminalProfile newProfile)
 {
     if (newProfile.fonts != profile().fonts)
     {
@@ -1503,6 +1501,9 @@ void TerminalWidget::setProfile(string const& _name, config::TerminalProfile new
 
     if (newProfile.tabWidth != profile().tabWidth)
         terminalView_->terminal().screen().setTabWidth(newProfile.tabWidth);
+
+    if (newProfile.fullscreen != window()->isFullScreen())
+        toggleFullscreen();
 
     updateScrollBarPosition();
 
@@ -1660,7 +1661,7 @@ void TerminalWidget::setWindowTitle(std::string_view const& _title)
 void TerminalWidget::setTerminalProfile(std::string const& _configProfileName)
 {
     post([this, name = string(_configProfileName)]() {
-        setProfile(name);
+        activateProfile(name);
     });
 }
 

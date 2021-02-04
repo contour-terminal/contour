@@ -46,8 +46,8 @@ profiles:
         # Default value is the user's home directory.
         initial_working_directory: "~"
 
-        # When this profile is being *activated*, this flag
-        # decides whether or not to put the terminal's screen into fullscreen mode.
+        # When this profile is being *activated*, this flag decides
+        # whether or not to put the terminal's screen into fullscreen mode.
         #
         # It is activated during startup as well as when switching from another profile to this one.
         fullscreen: false

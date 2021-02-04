@@ -85,10 +85,10 @@ class TerminalWidget :
     void post(std::function<void()> _fn);
 
     /// Applies given profile, potentially setting/resetting terminal configuration.
-    void setProfile(const std::string& _newProfileName);
+    void activateProfile(const std::string& _newProfileName);
 
     /// Applies given profile, potentially setting/resetting terminal configuration.
-    void setProfile(std::string const& _name, config::TerminalProfile _newProfile);
+    void activateProfile(std::string const& _name, config::TerminalProfile _newProfile);
 
     terminal::view::TerminalView* view() const noexcept { return terminalView_.get(); }
 
@@ -112,7 +112,7 @@ class TerminalWidget :
     void scrollToBottomAndRedraw();
 
     bool fullscreen() const;
-    void toggleFullScreen();
+    void toggleFullscreen();
 
     bool setFontSize(double _fontSize);
     std::string extractSelectionText();
