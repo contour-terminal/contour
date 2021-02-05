@@ -456,9 +456,6 @@ void Font::setFontSize(double _fontSize)
 int Font::lineHeight() const noexcept
 {
     assert(face_);
-    //auto const lineGap = 0;
-    //return scaleVertical(face_->ascender + face_->descender) + lineGap;
-    //return scaleVertical(face_->size->metrics.height);
     return scaleVertical(face_->height);
 }
 
