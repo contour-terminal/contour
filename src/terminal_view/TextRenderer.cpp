@@ -22,6 +22,9 @@
 #include <crispy/times.h>
 #include <crispy/range.h>
 
+#include <fmt/format.h>
+#include <fmt/ostream.h>
+
 using std::array;
 using std::get;
 using std::max;
@@ -255,7 +258,11 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
 
     FontList& font = [](FontConfig& _fonts, FontStyle _style, bool _isEmoji) -> FontList& {
         if (_isEmoji)
+        {
+            debuglog().write("presentation: is emoji");
             return _fonts.emoji;
+        }
+        debuglog().write("presentation: is text ");
 
         switch (_style)
         {
@@ -292,6 +299,9 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
     {
         auto msg = debuglog();
         msg.write("Shaped codepoints: {}", unicode::to_utf8(codepoints, count));
+        msg.write("  (presentation: {}/{})",
+                isEmojiPresentation ? "emoji" : "text",
+                get<unicode::PresentationStyle>(_run.properties));
 
         msg.write(" (");
         for (auto const [i, codepoint] : crispy::indexed(crispy::range(codepoints, codepoints + count)))
@@ -312,10 +322,12 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         msg.write("with metrics:");
         for (crispy::text::GlyphPosition const& gp : gpos)
         {
-            msg.write(" {}:{},{}",
+            msg.write(" {}:{},{} ({})",
                       gp.glyphIndex,
                       gp.renderOffset.x,
-                      gp.renderOffset.y);
+                      gp.renderOffset.y,
+                      gp.font.get().familyName()
+                      );
         }
     }
 

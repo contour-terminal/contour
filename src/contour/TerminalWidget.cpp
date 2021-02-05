@@ -1451,11 +1451,11 @@ terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile con
 
     // TODO: make these fonts customizable even further for the user
     return terminal::view::FontConfig{
-        fontLoader_.load(_profile.fonts.regular.pattern, crispy::text::FontStyle::Regular, fontSize, monospace),
-        fontLoader_.load(_profile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace),
-        fontLoader_.load(_profile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace),
-        fontLoader_.load(_profile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace),
-        fontLoader_.load(_profile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace),
+        fontLoader_.load(_profile.fonts.regular.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, false),
+        fontLoader_.load(_profile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
+        fontLoader_.load(_profile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace, false),
+        fontLoader_.load(_profile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace, false),
+        fontLoader_.load(_profile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, true),
         _profile.fonts.renderMode
     };
 }
@@ -1478,11 +1478,11 @@ void TerminalWidget::activateProfile(string const& _name, config::TerminalProfil
         auto const fontSize = newProfile.fonts.size;
         auto const monospace = newProfile.fonts.onlyMonospace;
 
-        fonts_.regular = fontLoader_.load(newProfile.fonts.regular.pattern, crispy::text::FontStyle::Bold, fontSize, monospace),
-        fonts_.bold = fontLoader_.load(newProfile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace),
-        fonts_.italic = fontLoader_.load(newProfile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace),
-        fonts_.boldItalic = fontLoader_.load(newProfile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace),
-        fonts_.emoji = fontLoader_.load(newProfile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace),
+        fonts_.regular = fontLoader_.load(newProfile.fonts.regular.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
+        fonts_.bold = fontLoader_.load(newProfile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
+        fonts_.italic = fontLoader_.load(newProfile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace, false),
+        fonts_.boldItalic = fontLoader_.load(newProfile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace, false),
+        fonts_.emoji = fontLoader_.load(newProfile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, true),
         fonts_.renderMode = newProfile.fonts.renderMode;
 
         terminalView_->updateFontMetrics();
@@ -1886,14 +1886,14 @@ void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
             auto const monospace = profile_.fonts.onlyMonospace;
 
             if (!spec.regular.empty())
-                fonts_.regular = fontLoader_.load(spec.regular, crispy::text::FontStyle::Regular, fontSize, monospace);
+                fonts_.regular = fontLoader_.load(spec.regular, crispy::text::FontStyle::Regular, fontSize, monospace, false);
 
             auto const styledFont = [&](string_view _font, crispy::text::FontStyle _style) {
                 // if a styled font is "auto" then infer froom regular font"
                 if (_font == "auto"sv)
-                    return fontLoader_.load(spec.regular, _style, fontSize, monospace);
+                    return fontLoader_.load(spec.regular, _style, fontSize, monospace, false);
                 else
-                    return fontLoader_.load(string(_font), _style, fontSize, monospace);
+                    return fontLoader_.load(string(_font), _style, fontSize, monospace, false);
             };
 
             if (!spec.bold.empty())
@@ -1904,6 +1904,8 @@ void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
 
             if (!spec.boldItalic.empty())
                 fonts_.boldItalic = styledFont(spec.italic, crispy::text::FontStyle::BoldItalic);
+
+            // TODO: add support for changing emoji font face.
 
             terminalView_->updateFontMetrics();
         }

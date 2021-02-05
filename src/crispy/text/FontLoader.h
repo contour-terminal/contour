@@ -48,7 +48,7 @@ class FontLoader {
     void setDpi(Vec2 _dpi);
     void setDpi(int _x, int _y) { setDpi(Vec2{_x, _y}); }
 
-    FontList load(std::string_view const& _family, FontStyle _style, double _fontSize, bool _monospace);
+    FontList load(std::string_view const& _family, FontStyle _style, double _fontSize, bool _monospace, bool _color);
 
   private:
     FT_Library ft_;

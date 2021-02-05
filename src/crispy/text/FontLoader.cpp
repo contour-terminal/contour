@@ -61,7 +61,7 @@ namespace {
         return true;
     }
 
-    static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style, bool _monospace)
+    static vector<string> getFontFilePaths(string_view const& _family, FontStyle _style, bool _monospace, bool _color)
     {
         std::cerr << fmt::format("getFontFilePaths: family=({}), style={}, {}\n", _family, _style, _monospace ? "monospace" : "anyspace");
         if (endsWithIgnoreCase(_family, ".ttf") || endsWithIgnoreCase(_family, ".otf")) // TODO: and regular file exists
@@ -75,12 +75,12 @@ namespace {
 
         FcPatternAddBool(pat.get(), FC_OUTLINE, true);
         FcPatternAddBool(pat.get(), FC_SCALABLE, true);
+        //FcPatternAddBool(pat.get(), FC_EMBEDDED_BITMAP, false);
 
         // XXX It should be recommended to turn that on if you are looking for colored fonts,
         //     such as for emoji, but it seems like fontconfig doesn't care, it works either way.
         //
-        // if (_color)
-        //     FcPatternAddBool(pat.get(), FC_COLOR, true);
+        FcPatternAddBool(pat.get(), FC_COLOR, _color);
 
         if (!_family.empty())
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) family.c_str());
@@ -119,11 +119,29 @@ namespace {
             if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
                 continue;
 
+            FcBool color = FcFalse;
+            FcPatternGetInteger(font, FC_COLOR, 0, &color);
+            if (color && !_color)
+            {
+                debuglog().write("Skipping font (contains color). {}", (char const*) file);
+                continue;
+            }
+
             int spacing = -1; // ignore font if we cannot retrieve spacing information
             FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
+            if (_monospace && spacing < FC_DUAL)
+            {
+                debuglog().write("Skipping font ({}, {}): {}",
+                                 _monospace ? "monospace" : "no-monospace",
+                                 spacing == FC_PROPORTIONAL ? "propotional" :
+                                    spacing == FC_MONO ? "mono" :
+                                    spacing == FC_DUAL ? "dual" :
+                                    spacing == FC_CHARCELL ? "charcell" : "unknown",
+                                 (char const*) file);
+                continue;
+            }
 
-            if (spacing >= FC_DUAL || !_monospace)
-                output.emplace_back((char const*)(file));
+            output.emplace_back((char const*)(file));
         }
         return output;
         #endif // }}}
@@ -176,11 +194,11 @@ void FontLoader::setDpi(Vec2 _dpi)
     dpi_ = _dpi;
 }
 
-FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize, bool _monospace)
+FontList FontLoader::load(std::string_view const& _family, FontStyle _style, double _fontSize, bool _monospace, bool _color)
 {
     FontList out;
 
-    for (auto const& filename : getFontFilePaths(_family, _style, _monospace))
+    for (auto const& filename : getFontFilePaths(_family, _style, _monospace, _color))
         out.emplace_back(ft_, dpi_, filename);
 
     if (!out.empty())

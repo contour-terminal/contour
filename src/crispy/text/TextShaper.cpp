@@ -128,6 +128,7 @@ bool TextShaper::shape(int _size,
         hb_font = hb_ft_font_create_referenced(_font.face());
         hb_fonts_.emplace(&_font, HbFontPtr(hb_font, [](auto p) { hb_font_destroy(p); }));
     }
+    debuglog().write("Try shaping with font: {} {}", _font.familyName(), _font.styleName());
 
     // {{{ prepare buffer: hb_buf_
     hb_buffer_clear_contents(hb_buf_.get());
@@ -170,6 +171,11 @@ bool TextShaper::shape(int _size,
             info[i].codepoint,                          // glyph index
             static_cast<int>(info[i].cluster)
         ));
+
+        if (glyphMissing(_result.get().back()))
+            debuglog().write("Glyph missing for {}/{}",
+                    (unsigned) _codepoints[_clusterGap + i],
+                    info[i].codepoint);
     }
 
     return !crispy::any_of(_result.get(), glyphMissing);
