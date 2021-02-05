@@ -21,7 +21,7 @@
 #include <vector>
 #include <iostream>
 
-#if defined(__linux__) || defined(__APPLE__)
+#if 1 // defined(__linux__) || defined(__APPLE__)
 #define HAVE_FONTCONFIG // TODO: use cmake, dude!
 #endif
 
