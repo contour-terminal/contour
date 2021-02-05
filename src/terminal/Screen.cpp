@@ -34,6 +34,7 @@
 #include <iostream>
 #include <iterator>
 #include <sstream>
+#include <string_view>
 #include <variant>
 
 #include <assert.h>
@@ -46,6 +47,7 @@
 #endif
 
 using namespace crispy;
+using namespace std::string_view_literals;
 
 using std::accumulate;
 using std::array;
@@ -1861,7 +1863,7 @@ void Screen::requestTabStops()
 {
     // Response: `DCS 2 $ u Pt ST`
     ostringstream dcs;
-    dcs << "\033P2$u"; // DCS
+    dcs << "\033P2$u"sv; // DCS
     if (!tabs_.empty())
     {
         for (size_t const i : times(tabs_.size()))
@@ -1873,11 +1875,11 @@ void Screen::requestTabStops()
     }
     else if (tabWidth_ != 0)
     {
-        dcs << tabWidth_ + 1;
-        for (int column = 2 * tabWidth_ + 1; column <= size().width; column += tabWidth_)
+        dcs << 1;
+        for (int column = tabWidth_ + 1; column <= size().width; column += tabWidth_)
             dcs << '/' << column;
     }
-    dcs << '\x5c'; // ST
+    dcs << "\033\\"sv; // ST
 
     reply(dcs.str());
 }

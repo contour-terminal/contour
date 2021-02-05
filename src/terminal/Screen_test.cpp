@@ -2201,13 +2201,13 @@ TEST_CASE("DECTABSR", "[screen]")
 
     SECTION("default tabstops") {
         screen.requestTabStops();
-        CHECK(screen.replyData == "\033P2$u9/17/25/33\x5c");
+        CHECK(screen.replyData == "\033P2$u1/9/17/25/33\033\\");
     }
 
     SECTION("cleared tabs") {
         screen.horizontalTabClear(HorizontalTabClear::AllTabs);
         screen.requestTabStops();
-        CHECK(screen.replyData == "\033P2$u\x5c");
+        CHECK(screen.replyData == "\033P2$u1/9/17/25/33\033\\");
     }
 
     SECTION("custom tabstops") {
@@ -2226,7 +2226,7 @@ TEST_CASE("DECTABSR", "[screen]")
         screen.horizontalTabSet();
 
         screen.requestTabStops();
-        CHECK(screen.replyData == "\033P2$u2/4/8/16\x5c");
+        CHECK(screen.replyData == "\033P2$u2/4/8/16\033\\");
     }
 }
 
