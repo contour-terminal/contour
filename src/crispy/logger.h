@@ -171,7 +171,9 @@ class logging_sink {
     }
 #elif defined(__GNUC__) || defined(__clang__)
     #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__)))
-#elif defined(__FUNCSIG__)
-    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCSIG__)))
+#elif defined(__func__)
+    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __func__)))
+#elif defined(__FUNCTION__)
+    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__)))
 #endif
 
