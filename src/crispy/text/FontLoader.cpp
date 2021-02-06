@@ -34,6 +34,10 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
+#if defined(_WIN32)
+#include <crispy/text/FontDescription.h>
+#endif
+
 namespace crispy::text {
 
 using namespace std;
@@ -66,6 +70,27 @@ namespace {
         std::cerr << fmt::format("getFontFilePaths: family=({}), style={}, {}\n", _family, _style, _monospace ? "monospace" : "anyspace");
         if (endsWithIgnoreCase(_family, ".ttf") || endsWithIgnoreCase(_family, ".otf")) // TODO: and regular file exists
             return {string(_family)};
+
+        #if defined(_WIN32)
+        {
+            FontPattern pattern{};
+            pattern.monospace = _monospace;
+            pattern.family = _family;
+            pattern.weight = _style == FontStyle::Bold || _style == FontStyle::BoldItalic
+                ? FontWeight::Bold : FontWeight::Normal;
+            pattern.slant = _style == FontStyle::Italic || _style == FontStyle::BoldItalic
+                ? FontSlant::Italic : FontSlant::Normal;
+            std::vector<FontDescription> fonts = findFonts(pattern);
+            vector<string> out;
+            for (auto const& f: fonts)
+            {
+                debuglog().write("Adding: {}", f.path);
+                out.emplace_back(f.path);
+            }
+            if (!out.empty())
+                return out;
+        }
+        #endif
 
         #if defined(HAVE_FONTCONFIG) // {{{
         auto const family = string(_family);
@@ -207,7 +232,8 @@ FontList FontLoader::load(std::string_view const& _family, FontStyle _style, dou
             out.front().setFontSize(_fontSize);
     }
     else
-        debuglog().write("FontLoader: loading font \"{}\" \"{}\" failed. No font candiates found.");
+        debuglog().write("FontLoader: loading font \"{}\" \"{}\" failed. No font candiates found.",
+                         _family, _style);
 
     return out;
 }
