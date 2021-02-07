@@ -73,7 +73,7 @@ struct GlobalGlyphMetrics {
 struct GlyphMetrics {
     Vec2 bitmapSize;        // glyph size in pixels
     Vec2 bearing;           // offset baseline and left to top and left of the glyph's bitmap
-    int advance;            // pixels from origin to next glyph's origin (TODO: do i need this?)
+    //int advance;            // pixels from origin to next glyph's origin (TODO: do i need this?)
 };
 
 enum class BitmapFormat {
@@ -320,10 +320,9 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(GlyphMetrics const& _gm, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "bitmapSize:{}, bearing:{}, advance:{}",
+            return format_to(ctx.out(), "bitmapSize:{}, bearing:{}",
                                         _gm.bitmapSize,
-                                        _gm.bearing,
-                                        _gm.advance);
+                                        _gm.bearing);
         }
     };
 } // }}}

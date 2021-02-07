@@ -225,7 +225,6 @@ optional<Glyph> Font::loadGlyphByIndex(unsigned _glyphIndex, RenderMode _renderM
     metrics.bitmapSize.y = static_cast<int>(face_->glyph->bitmap.rows);
     metrics.bearing.x = face_->glyph->bitmap_left;
     metrics.bearing.y = face_->glyph->bitmap_top;
-    metrics.advance = scaleHorizontal(face_->glyph->advance.x);
 
     // NB: colored fonts are bitmap fonts, they do not need rendering
     if (!FT_HAS_COLOR(face_))
