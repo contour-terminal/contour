@@ -82,6 +82,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/libunicode")
 
 # ----------------------------------------------------------------------------
 add_subdirectory(src/crispy)
+add_subdirectory(src/text_shaper)
 add_subdirectory(src/terminal)
 add_subdirectory(src/terminal_view)
 
