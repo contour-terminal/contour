@@ -18,9 +18,6 @@
 #include <contour/FileChangeWatcher.h>
 #include <terminal/Metrics.h>
 #include <terminal_view/TerminalView.h>
-#include <terminal_view/FontConfig.h>
-
-#include <crispy/text/FontLoader.h>
 
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
@@ -58,7 +55,7 @@ class TerminalWidget :
 
     static QSurfaceFormat surfaceFormat();
 
-    int pointsToPixels(double _points) const noexcept;
+    int pointsToPixels(text::font_size _fontSize) const noexcept;
 
     void initializeGL() override;
     void resizeGL(int _width, int _height) override;
@@ -104,7 +101,6 @@ class TerminalWidget :
     void onScrollBarValueChanged();
 
   private:
-    terminal::view::FontConfig loadFonts(config::TerminalProfile const& _profile);
     bool executeAction(actions::Action const& _action);
     bool executeAllActions(std::vector<actions::Action> const& _actions);
     bool executeInput(terminal::MouseEvent const& event);
@@ -114,7 +110,7 @@ class TerminalWidget :
     bool fullscreen() const;
     void toggleFullscreen();
 
-    bool setFontSize(double _fontSize);
+    bool setFontSize(text::font_size _fontSize);
     std::string extractSelectionText();
     std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);
@@ -141,7 +137,7 @@ class TerminalWidget :
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void screenUpdated() override;
-    void setFontSpec(terminal::FontSpec const& _fontSpec) override;
+    void setFontDef(terminal::FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
@@ -219,14 +215,14 @@ class TerminalWidget :
 
     terminal::view::GridMetrics const& gridMetrics() const noexcept { return terminalView_->gridMetrics(); }
 
-  private:
+    // private data fields
+    //
     std::chrono::steady_clock::time_point now_;
     config::Config config_;
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
-    crispy::text::FontLoader fontLoader_;
-    terminal::view::FontConfig fonts_;
+    terminal::view::FontDescriptions fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.

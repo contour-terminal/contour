@@ -18,9 +18,6 @@
 #include <contour/FileChangeWatcher.h>
 #include <terminal/Metrics.h>
 #include <terminal_view/TerminalView.h>
-#include <terminal_view/FontConfig.h>
-
-#include <crispy/text/FontLoader.h>
 
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>

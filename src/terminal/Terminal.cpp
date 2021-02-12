@@ -426,14 +426,14 @@ void Terminal::screenUpdated()
     eventListener_.screenUpdated();
 }
 
-FontSpec Terminal::getFontSpec()
+FontDef Terminal::getFontDef()
 {
-    return eventListener_.getFontSpec();
+    return eventListener_.getFontDef();
 }
 
-void Terminal::setFontSpec(FontSpec const& _fontSpec)
+void Terminal::setFontDef(FontDef const& _fontDef)
 {
-    eventListener_.setFontSpec(_fontSpec);
+    eventListener_.setFontDef(_fontDef);
 }
 
 void Terminal::copyToClipboard(std::string_view const& _data)

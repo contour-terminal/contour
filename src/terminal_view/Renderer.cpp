@@ -14,29 +14,36 @@
 #include <terminal_view/Renderer.h>
 #include <terminal_view/TextRenderer.h>
 
+#include <text_shaper/open_shaper.h>
+
 #include <array>
 #include <functional>
+#include <memory>
 
 using std::array;
 using std::scoped_lock;
 using std::chrono::steady_clock;
+using std::make_unique;
+using std::move;
 using std::optional;
 using std::tuple;
 
 namespace terminal::view {
 
-void loadGridMetricsFromFont(crispy::text::Font const& _font, GridMetrics& _gm)
+void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
 {
-    _gm.cellSize.width = _font.maxAdvance();
-    _gm.cellSize.height = _font.lineHeight();
-    _gm.baseline = _font.baseline();
-    _gm.ascender = _font.ascender();
-    _gm.descender = _font.descender();
-    _gm.underline.position = _gm.baseline + _font.underlineOffset();
-    _gm.underline.thickness = _font.underlineThickness();
+    auto const m = _textShaper.metrics(_font);
+
+    _gm.cellSize.width = m.advance;
+    _gm.cellSize.height = m.line_height;
+    _gm.baseline = m.line_height - m.ascender;
+    _gm.ascender = m.ascender;
+    _gm.descender = m.descender;
+    _gm.underline.position = _gm.baseline + m.underline_position;
+    _gm.underline.thickness = m.underline_thickness;
 }
 
-GridMetrics loadGridMetrics(crispy::text::Font const& _font, Size _pageSize)
+GridMetrics loadGridMetrics(text::font_key _font, Size _pageSize, text::shaper& _textShaper)
 {
     auto gm = GridMetrics{};
 
@@ -44,13 +51,28 @@ GridMetrics loadGridMetrics(crispy::text::Font const& _font, Size _pageSize)
     gm.cellMargin = {0, 0, 0, 0}; // TODO (pass as args, and make use of them)
     gm.pageMargin = {0, 0};       // TODO (fill early)
 
-    loadGridMetricsFromFont(_font, gm);
+    loadGridMetricsFromFont(_font, gm, _textShaper);
 
     return gm;
 }
 
+FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
+{
+    FontKeys output{};
+
+    output.regular = _shaper.load_font(_fd.regular, _fd.size).value_or(text::font_key{});
+    output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(text::font_key{});
+    output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(text::font_key{});
+    output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(text::font_key{});
+    output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(text::font_key{});
+
+    return output;
+}
+
 Renderer::Renderer(Size const& _screenSize,
-                   FontConfig& _fonts,
+                   int _logicalDpiX,
+                   int _logicalDpiY,
+                   FontDescriptions const& _fontDescriptions,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
@@ -58,10 +80,12 @@ Renderer::Renderer(Size const& _screenSize,
                    ShaderConfig const& _backgroundShaderConfig,
                    ShaderConfig const& _textShaderConfig,
                    QMatrix4x4 const& _projectionMatrix) :
-    gridMetrics_{ loadGridMetrics(_fonts.regular.front(), _screenSize) },
+    textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
+    fontDescriptions_{ _fontDescriptions },
+    fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
+    gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
-    fonts_{ _fonts },
     renderTarget_{
         _textShaderConfig,
         _backgroundShaderConfig,
@@ -81,13 +105,14 @@ Renderer::Renderer(Size const& _screenSize,
         cellSize()
     },
     textRenderer_{
-        metrics_,
         renderTarget_.textureScheduler(),
         renderTarget_.monochromeAtlasAllocator(),
         renderTarget_.coloredAtlasAllocator(),
         renderTarget_.lcdAtlasAllocator(),
         gridMetrics_,
-        _fonts
+        *textShaper_,
+        fontDescriptions_,
+        fonts_
     },
     decorationRenderer_{
         renderTarget_.textureScheduler(),
@@ -137,31 +162,25 @@ void Renderer::clearCache()
     imageRenderer_.clearCache();
 }
 
-bool Renderer::setFontSize(double _fontSize)
+void Renderer::setFonts(FontDescriptions _fontDescriptions)
 {
-    if (_fontSize == fonts_.regular.front().fontSize())
-        return false;
-
-    auto const updateFontList = [&](crispy::text::FontList& fontList) {
-        for (auto& font : fontList)
-            if (font.loaded())
-                font.setFontSize(_fontSize);
-    };
-
-    updateFontList(fonts_.regular);
+    fontDescriptions_ = move(_fontDescriptions);
+    fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
     updateFontMetrics();
+}
 
-    updateFontList(fonts_.bold);
-    updateFontList(fonts_.italic);
-    updateFontList(fonts_.boldItalic);
-    updateFontList(fonts_.emoji);
+bool Renderer::setFontSize(text::font_size _fontSize)
+{
+    fontDescriptions_.size = _fontSize;
+    fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
+    updateFontMetrics();
 
     return true;
 }
 
 void Renderer::updateFontMetrics()
 {
-    loadGridMetricsFromFont(fonts_.regular.front(), gridMetrics_);
+    gridMetrics_ = loadGridMetrics(fonts_.regular, gridMetrics_.pageSize, *textShaper_);
 
     textRenderer_.updateFontMetrics();
     imageRenderer_.setCellSize(cellSize());
@@ -193,8 +212,6 @@ uint64_t Renderer::render(Terminal& _terminal,
                           terminal::Coordinate const& _currentMousePosition,
                           bool _pressure)
 {
-    metrics_.clear();
-
     gridMetrics_.pageSize = _terminal.screenSize();
 
     executeImageDiscards();

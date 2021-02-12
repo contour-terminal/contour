@@ -408,8 +408,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     profileName_{ std::move(_profileName) },
     profile_{ *config_.profile(profileName_) },
     programPath_{ std::move(_programPath) },
-    fontLoader_{ logicalDpiX(), logicalDpiY() },
-    fonts_{loadFonts(profile())},
+    fonts_{ profile().fonts },
     terminalView_{},
     configFileChangeWatcher_{},
     updateTimer_(this)
@@ -465,9 +464,9 @@ TerminalWidget::~TerminalWidget()
 }
 
 
-int TerminalWidget::pointsToPixels(double _points) const noexcept
+int TerminalWidget::pointsToPixels(text::font_size _size) const noexcept
 {
-    return int(ceil(_points / 72.0 * 96.0 * contentScale()));
+    return int(ceil(_size.pt / 72.0 * 96.0 * contentScale()));
 }
 
 void TerminalWidget::statsSummary()
@@ -646,8 +645,9 @@ void TerminalWidget::initializeGL()
         *this,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
-        fontLoader_,
-        fonts_,
+        logicalDpiX(),
+        logicalDpiY(),
+        profile().fonts,
         profile().cursorShape,
         profile().cursorDisplay,
         profile().cursorBlinkInterval,
@@ -1186,12 +1186,12 @@ void TerminalWidget::toggleFullscreen()
     //     window_.setVisibility(QWindow::FullScreen);
 }
 
-bool TerminalWidget::setFontSize(double _fontSize)
+bool TerminalWidget::setFontSize(text::font_size _fontSize)
 {
-    if (_fontSize < 5) // Let's not be crazy.
+    if (_fontSize.pt < 5.) // Let's not be crazy.
         return false;
 
-    if (_fontSize > 100)
+    if (_fontSize.pt > 200.)
         return false;
 
     terminalView_->setFontSize(_fontSize);
@@ -1213,6 +1213,7 @@ bool TerminalWidget::executeAllActions(std::vector<actions::Action> const& _acti
 bool TerminalWidget::executeAction(Action const& _action)
 {
     enum class Result { Nothing, Silently, Dirty };
+    auto constexpr OnePt = text::font_size{ 1.0 };
 
     auto const postScroll = [this](bool _dirty) -> Result {
         if (_dirty)
@@ -1230,11 +1231,11 @@ bool TerminalWidget::executeAction(Action const& _action)
             return Result::Silently;
         },
         [&](actions::IncreaseFontSize) -> Result {
-            setFontSize(profile().fonts.size + 1);
+            setFontSize(profile().fonts.size + OnePt);
             return Result::Dirty;
         },
         [&](actions::DecreaseFontSize) -> Result {
-            setFontSize(profile().fonts.size - 1);
+            setFontSize(profile().fonts.size - OnePt);
             return Result::Dirty;
         },
         [&](actions::IncreaseOpacity) -> Result {
@@ -1442,24 +1443,6 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromUtf8(std::string(_hyperlink.path()).c_str())));
 }
 
-terminal::view::FontConfig TerminalWidget::loadFonts(config::TerminalProfile const& _profile)
-{
-    auto const fontSize = _profile.fonts.size;
-    auto const monospace = _profile.fonts.onlyMonospace;
-
-    debuglog().write("using font size: {}pt", fontSize);
-
-    // TODO: make these fonts customizable even further for the user
-    return terminal::view::FontConfig{
-        fontLoader_.load(_profile.fonts.regular.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, false),
-        fontLoader_.load(_profile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
-        fontLoader_.load(_profile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace, false),
-        fontLoader_.load(_profile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace, false),
-        fontLoader_.load(_profile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, true),
-        _profile.fonts.renderMode
-    };
-}
-
 void TerminalWidget::activateProfile(string const& _newProfileName)
 {
     if (auto newProfile = config_.profile(_newProfileName); newProfile)
@@ -1475,16 +1458,7 @@ void TerminalWidget::activateProfile(string const& _name, config::TerminalProfil
 {
     if (newProfile.fonts != profile().fonts)
     {
-        auto const fontSize = newProfile.fonts.size;
-        auto const monospace = newProfile.fonts.onlyMonospace;
-
-        fonts_.regular = fontLoader_.load(newProfile.fonts.regular.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
-        fonts_.bold = fontLoader_.load(newProfile.fonts.bold.pattern, crispy::text::FontStyle::Bold, fontSize, monospace, false),
-        fonts_.italic = fontLoader_.load(newProfile.fonts.italic.pattern, crispy::text::FontStyle::Italic, fontSize, monospace, false),
-        fonts_.boldItalic = fontLoader_.load(newProfile.fonts.boldItalic.pattern, crispy::text::FontStyle::BoldItalic, fontSize, monospace, false),
-        fonts_.emoji = fontLoader_.load(newProfile.fonts.emoji.pattern, crispy::text::FontStyle::Regular, fontSize, monospace, true),
-        fonts_.renderMode = newProfile.fonts.renderMode;
-
+        terminalView_->renderer().setFonts(newProfile.fonts);
         terminalView_->updateFontMetrics();
     }
     else
@@ -1819,8 +1793,11 @@ QSize TerminalWidget::minimumSizeHint() const
 {
     auto constexpr MinimumScreenSize = terminal::Size{1, 1};
 
-    auto const w = MinimumScreenSize.width * fonts_.regular.front().maxAdvance();
-    auto const h = MinimumScreenSize.height * fonts_.regular.front().lineHeight();
+    auto const cellSize = terminalView_ ? terminalView_->renderer().gridMetrics().cellSize
+                                        : terminal::Size{10, 20};
+
+    auto const w = MinimumScreenSize.width * cellSize.width;
+    auto const h = MinimumScreenSize.height * cellSize.height;
     // auto const w = MinimumScreenSize.width * gridMetrics().cellSize.width;
     // auto const h = MinimumScreenSize.height * gridMetrics().cellSize.height;
 
@@ -1831,8 +1808,11 @@ QSize TerminalWidget::sizeHint() const
 {
     auto const scrollbarWidth = scrollBar_->isHidden() ? 0 : scrollBar_->sizeHint().width();
 
-    auto const viewWidth = profile().terminalSize.width * fonts_.regular.front().maxAdvance();
-    auto const viewHeight = profile().terminalSize.height * fonts_.regular.front().lineHeight();
+    auto const cellSize = terminalView_ ? terminalView_->renderer().gridMetrics().cellSize
+                                        : terminal::Size{100, 100};
+
+    auto const viewWidth = profile().terminalSize.width * cellSize.width;
+    auto const viewHeight = profile().terminalSize.height * cellSize.height;
     // auto const viewWidth = profile().terminalSize.width * gridMetrics().cellSize.width;
     // auto const viewHeight = profile().terminalSize.height * gridMetrics().cellSize.height;
 
@@ -1877,37 +1857,41 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
-void TerminalWidget::setFontSpec(terminal::FontSpec const& _fontSpec)
+void TerminalWidget::setFontDef(terminal::FontDef const& _fontDef)
 {
-    post([this, spec = terminal::FontSpec(_fontSpec)]() {
+    post([this, spec = terminal::FontDef(_fontDef)]() {
         if (requestPermissionChangeFont())
         {
-            auto const fontSize = spec.size != 0 ? spec.size : fonts_.regular.front().fontSize();
-            auto const monospace = profile_.fonts.onlyMonospace;
+            auto const& currentFonts = terminalView_->renderer().fontDescriptions();
+            terminal::view::FontDescriptions newFonts = currentFonts;
+
+            if (spec.size != 0.0)
+                newFonts.size = text::font_size{ spec.size };
 
             if (!spec.regular.empty())
-                fonts_.regular = fontLoader_.load(spec.regular, crispy::text::FontStyle::Regular, fontSize, monospace, false);
+                newFonts.regular = currentFonts.regular;
 
-            auto const styledFont = [&](string_view _font, crispy::text::FontStyle _style) {
+            auto const styledFont = [&](string_view _font) -> text::font_description {
                 // if a styled font is "auto" then infer froom regular font"
                 if (_font == "auto"sv)
-                    return fontLoader_.load(spec.regular, _style, fontSize, monospace, false);
+                    return currentFonts.regular;
                 else
-                    return fontLoader_.load(string(_font), _style, fontSize, monospace, false);
+                    return text::font_description::parse(_font);
             };
 
             if (!spec.bold.empty())
-                fonts_.bold = styledFont(spec.italic, crispy::text::FontStyle::Bold);
+                fonts_.bold = styledFont(spec.bold);
 
             if (!spec.italic.empty())
-                fonts_.italic = styledFont(spec.italic, crispy::text::FontStyle::Italic);
+                fonts_.italic = styledFont(spec.italic);
 
             if (!spec.boldItalic.empty())
-                fonts_.boldItalic = styledFont(spec.italic, crispy::text::FontStyle::BoldItalic);
+                fonts_.boldItalic = styledFont(spec.boldItalic);
 
-            // TODO: add support for changing emoji font face.
+            if (!spec.emoji.empty() && spec.emoji != "auto"sv)
+                fonts_.emoji = text::font_description::parse(spec.emoji);
 
-            terminalView_->updateFontMetrics();
+            terminalView_->renderer().setFonts(newFonts);
         }
     });
 }

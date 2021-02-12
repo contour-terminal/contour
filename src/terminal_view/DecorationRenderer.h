@@ -16,7 +16,6 @@
 #include <terminal_view/ShaderConfig.h>
 
 #include <crispy/Atlas.h>
-#include <crispy/text/Font.h>
 
 #include <terminal/Screen.h>
 

@@ -49,8 +49,8 @@ class Terminal : public ScreenEvents {
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void screenUpdated() {}
-        virtual FontSpec getFontSpec() { return {}; }
-        virtual void setFontSpec(FontSpec const& /*_fontSpec*/) {}
+        virtual FontDef getFontDef() { return {}; }
+        virtual void setFontDef(FontDef const& /*_fontSpec*/) {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
@@ -237,8 +237,8 @@ class Terminal : public ScreenEvents {
     void bufferChanged(ScreenType) override;
     void scrollbackBufferCleared() override;
     void screenUpdated() override;
-    FontSpec getFontSpec() override;
-    void setFontSpec(FontSpec const& _fontSpec) override;
+    FontDef getFontDef() override;
+    void setFontDef(FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& _title, std::string_view const& _body) override;

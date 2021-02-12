@@ -31,61 +31,8 @@ target_sources(crispy-core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/span.h
     ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
     ${CMAKE_CURRENT_SOURCE_DIR}/times.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Atlas.h
 )
-
-# --------------------------------------------------------------------------------------------------------
-# crispy::gui
-
-find_package(Freetype REQUIRED)
-find_package(OpenGL REQUIRED)
-find_package(Qt5 COMPONENTS Gui REQUIRED)  # apt install qtbase5-dev libqt5gui5
-find_package(Fontconfig REQUIRED)
-
-if(APPLE)
-    find_package(PkgConfig REQUIRED)
-    #pkg_check_modules(fontconfig REQUIRED IMPORTED_TARGET fontconfig)
-    pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
-    execute_process(
-        COMMAND sh -c "brew --prefix harfbuzz | cut -d. -f1 | tr -d $'\n'"
-        OUTPUT_VARIABLE HARFBUZZ_APPLE_INCLUDE)
-    include_directories(${HARFBUZZ_APPLE_INCLUDE}/include)
-elseif("${CMAKE_SYSTEM}" MATCHES "Linux")
-    #find_package(fontconfig)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
-elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
-    # installed via vcpkg
-    find_package(harfbuzz CONFIG REQUIRED)
-endif()
-
-add_library(crispy-gui STATIC
-    Atlas.h
-    text/Font.h text/Font.cpp
-    text/FontDescription.h text/FontDescription.cpp
-    text/FontLoader.h text/FontLoader.cpp
-    text/TextShaper.h text/TextShaper.cpp
-)
-add_library(crispy::gui ALIAS crispy-gui)
-
-target_include_directories(crispy-gui PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_include_directories(crispy-gui PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-
-set(LIBCRISPY_GUI_LIBRARIES Qt5::Gui Freetype::Freetype crispy::core)
-list(APPEND LIBCRISPY_GUI_LIBRARIES Fontconfig::Fontconfig)
-if(APPLE)
-    #list(APPEND LIBCRISPY_GUI_LIBRARIES PkgConfig::fontconfig)
-    list(APPEND LIBCRISPY_GUI_LIBRARIES PkgConfig::harfbuzz)
-elseif("${CMAKE_SYSTEM}" MATCHES "Linux" OR APPLE)
-    #list(APPEND LIBCRISPY_GUI_LIBRARIES fontconfig)
-    list(APPEND LIBCRISPY_GUI_LIBRARIES PkgConfig::harfbuzz)
-elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
-    list(APPEND LIBCRISPY_GUI_LIBRARIES harfbuzz::harfbuzz)
-    list(APPEND LIBCRISPY_GUI_LIBRARIES dwrite)
-    #list(APPEND LIBCRISPY_GUI_LIBRARIES unofficial::fontconfig::fontconfig)
-endif()
-target_link_libraries(crispy-gui PUBLIC ${LIBCRISPY_GUI_LIBRARIES})
-
-message(STATUS "[crispy::gui] Librarires: ${LIBCRISPY_GUI_LIBRARIES}")
 
 # --------------------------------------------------------------------------------------------------------
 # crispy_test

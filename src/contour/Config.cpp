@@ -39,7 +39,7 @@
 #include <Windows.h>
 #endif
 
-auto constexpr MinimumFontSize = 8.0;
+auto constexpr MinimumFontSize = text::font_size{ 8.0 };
 
 namespace contour::config {
 
@@ -689,6 +689,22 @@ terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
     return colors;
 }
 
+void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store, string_view _default)
+{
+    if (auto value = _node[string(_key)]; value)
+        _store = text::font_description::parse(value.as<string>());
+    else
+        _store = text::font_description::parse(_default);
+}
+
+void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store, text::font_description const& _default)
+{
+    if (auto value = _node[string(_key)]; value)
+        _store = text::font_description::parse(value.as<string>());
+    else
+        _store = _default;
+}
+
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
                                     unordered_map<string, terminal::ColorProfile> const& _colorschemes)
 {
@@ -764,7 +780,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
     if (auto fonts = _node["font"]; fonts)
     {
-        softLoadValue(fonts, "size", profile.fonts.size);
+        softLoadValue(fonts, "size", profile.fonts.size.pt);
         if (profile.fonts.size < MinimumFontSize)
         {
             debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
@@ -772,22 +788,36 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.fonts.size = MinimumFontSize;
         }
 
-        auto& defaultFontFamily = profile.fonts.regular.pattern;
-        softLoadValue(fonts, "regular", profile.fonts.regular.pattern, "monospace");
-        softLoadValue(fonts, "bold", profile.fonts.bold.pattern, defaultFontFamily);
-        softLoadValue(fonts, "italic", profile.fonts.italic.pattern, defaultFontFamily);
-        softLoadValue(fonts, "bold_italic", profile.fonts.boldItalic.pattern, defaultFontFamily);
-        softLoadValue(fonts, "emoji", profile.fonts.emoji.pattern, "emoji");
         softLoadValue(fonts, "only_monospace", profile.fonts.onlyMonospace, true);
+
+        auto& defaultFontFamily = profile.fonts.regular;
+        softLoadFont(fonts, "regular", profile.fonts.regular, "monospace");
+        profile.fonts.regular.spacing = text::font_spacing::mono;
+
+        softLoadFont(fonts, "bold", profile.fonts.bold, defaultFontFamily);
+        profile.fonts.bold.spacing = text::font_spacing::mono;
+        profile.fonts.bold.weight = text::font_weight::bold;
+
+        softLoadFont(fonts, "italic", profile.fonts.italic, defaultFontFamily);
+        profile.fonts.italic.spacing = text::font_spacing::mono;
+        profile.fonts.italic.slant = text::font_slant::italic;
+
+        softLoadFont(fonts, "bold_italic", profile.fonts.boldItalic, defaultFontFamily);
+        profile.fonts.boldItalic.spacing = text::font_spacing::mono;
+        profile.fonts.boldItalic.weight = text::font_weight::bold;
+        profile.fonts.boldItalic.slant = text::font_slant::italic;
+
+        softLoadFont(fonts, "emoji", profile.fonts.emoji, "emoji");
+        profile.fonts.emoji.spacing = text::font_spacing::mono;
 
         string renderModeStr;
         softLoadValue(fonts, "render_mode", renderModeStr);
         auto const static renderModeMap = array{
-            pair{"lcd"sv, crispy::text::RenderMode::LCD},
-            pair{"light"sv, crispy::text::RenderMode::Light},
-            pair{"gray"sv, crispy::text::RenderMode::Gray},
-            pair{""sv, crispy::text::RenderMode::Gray},
-            pair{"monochrome"sv, crispy::text::RenderMode::Bitmap},
+            pair{"lcd"sv, text::render_mode::lcd},
+            pair{"light"sv, text::render_mode::light},
+            pair{"gray"sv, text::render_mode::gray},
+            pair{""sv, text::render_mode::gray},
+            pair{"monochrome"sv, text::render_mode::bitmap},
         };
 
         auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
@@ -795,6 +825,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.fonts.renderMode = i->second;
         else
             debuglog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        debuglog().write("Using render mode: {}", profile.fonts.renderMode);
     }
 
     softLoadValue(_node, "tab_width", profile.tabWidth);

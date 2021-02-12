@@ -29,13 +29,14 @@ enum class ScreenType {
     Alternate = 1
 };
 
-struct FontSpec
+struct FontDef
 {
-    double size = 0.0;
+    double size;
     std::string regular;
     std::string bold;
     std::string italic;
     std::string boldItalic;
+    std::string emoji;
 };
 
 class ScreenEvents {
@@ -47,8 +48,8 @@ class ScreenEvents {
     virtual void bufferChanged(ScreenType) {}
     virtual void scrollbackBufferCleared() {}
     virtual void screenUpdated() {}
-    virtual FontSpec getFontSpec() { return {}; }
-    virtual void setFontSpec(FontSpec const& /*_fontSpec*/) {}
+    virtual FontDef getFontDef() { return {}; }
+    virtual void setFontDef(FontDef const& /*_fontDef*/) {}
     virtual void copyToClipboard(std::string_view const& /*_data*/) {}
     virtual void dumpState() {}
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}

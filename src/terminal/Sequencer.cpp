@@ -610,14 +610,15 @@ namespace impl // {{{ some command generator helpers
         }();
         if (emptyParams)
         {
-            auto const fonts = _screen.eventListener().getFontSpec();
+            auto const fonts = _screen.eventListener().getFontDef();
             _screen.reply(
-                "\033]60;{};{};{};{};{}\033\\",
+                "\033]60;{};{};{};{};{};{}\033\\",
                 int(fonts.size * 100), // precission-shift
                 fonts.regular,
                 fonts.bold,
                 fonts.italic,
-                fonts.boldItalic
+                fonts.boldItalic,
+                fonts.emoji
             );
         }
         else
@@ -627,12 +628,14 @@ namespace impl // {{{ some command generator helpers
             auto const bold = string(param(2));
             auto const italic = string(param(3));
             auto const boldItalic = string(param(4));
-            _screen.eventListener().setFontSpec(FontSpec{
+            auto const emoji = string(param(5));
+            _screen.eventListener().setFontDef(FontDef{
                 size,
                 regular,
                 bold,
                 italic,
-                boldItalic
+                boldItalic,
+                emoji
             });
         }
         return ApplyResult::Ok;
@@ -648,13 +651,13 @@ namespace impl // {{{ some command generator helpers
 
         if (splits[0] != "?"sv)
         {
-            auto fontSpec = FontSpec{};
-            fontSpec.regular = splits[0];
-            _screen.eventListener().setFontSpec(fontSpec);
+            auto fontDef = FontDef{};
+            fontDef.regular = splits[0];
+            _screen.eventListener().setFontDef(fontDef);
         }
         else
         {
-            auto const fonts = _screen.eventListener().getFontSpec();
+            auto const fonts = _screen.eventListener().getFontDef();
             _screen.reply("\033]50;{}\033\\", fonts.regular);
         }
 

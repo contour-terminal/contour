@@ -14,9 +14,9 @@
 
 #include <terminal_view/TextRenderer.h>
 #include <terminal_view/GridMetrics.h>
-#include <terminal_view/RenderMetrics.h>
 
-#include <crispy/text/Font.h>
+#include <text_shaper/open_shaper.h>
+
 #include <crispy/algorithm.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
@@ -24,6 +24,11 @@
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
+
+using crispy::copy;
+using crispy::times;
+
+using unicode::out;
 
 using std::array;
 using std::get;
@@ -36,52 +41,27 @@ using std::u32string;
 using std::u32string_view;
 using std::vector;
 
-using crispy::copy;
-using crispy::text::Font;
-using crispy::text::FontList;
-using crispy::text::FontStyle;
-using crispy::text::Glyph;
-using crispy::text::GlyphMetrics;
-using crispy::text::GlyphPositionList;
-using crispy::times;
-
-using unicode::out;
-
 namespace atlas = crispy::atlas;
 
 namespace terminal::view {
 
-#if !defined(NDEBUG)
-#define METRIC_INCREMENT(name) do { ++renderMetrics_. name ; } while (0)
-#else
-#define METRIC_INCREMENT(name) do {} while (0)
-#endif
-
-TextRenderer::TextRenderer(RenderMetrics& _renderMetrics,
-                           crispy::atlas::CommandListener& _commandListener,
+TextRenderer::TextRenderer(crispy::atlas::CommandListener& _commandListener,
                            crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                            crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                            GridMetrics const& _gridMetrics,
-                           FontConfig& _fonts) :
-    renderMetrics_{ _renderMetrics },
+                           text::shaper& _textShaper,
+                           FontDescriptions& _fontDescriptions,
+                           FontKeys const& _fonts) :
     gridMetrics_{ _gridMetrics },
-    // Light should be default - but as soon as LCD is functional, that's default
+    fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{},
+    textShaper_{ _textShaper },
     commandListener_{ _commandListener },
     monochromeAtlas_{ _monochromeAtlasAllocator },
     colorAtlas_{ _colorAtlasAllocator },
     lcdAtlas_{ _lcdAtlasAllocator }
 {
-    if (!fonts_.emoji.empty())
-    {
-        Font& emoji = fonts_.emoji.front();
-        if (!emoji.loaded())
-            emoji.load();
-        if (emoji.hasColor())
-            emoji.selectSizeForWidth(gridMetrics_.cellSize.width);
-    }
 }
 
 void TextRenderer::clearCache()
@@ -90,10 +70,9 @@ void TextRenderer::clearCache()
     colorAtlas_.clear();
     lcdAtlas_.clear();
 
-    textShaper_.clearCache();
-
     cacheKeyStorage_.clear();
     cache_.clear();
+
 #if !defined(NDEBUG)
     cacheHits_.clear();
 #endif
@@ -101,10 +80,6 @@ void TextRenderer::clearCache()
 
 void TextRenderer::updateFontMetrics()
 {
-    for (Font& font : fonts_.emoji)
-        if (font.loaded())
-            font.selectSizeForWidth(gridMetrics_.cellSize.width);
-
     clearCache();
 }
 
@@ -195,12 +170,11 @@ void TextRenderer::flushPendingSegments()
     );
 }
 
-GlyphPositionList const& TextRenderer::cachedGlyphPositions()
+text::shape_result const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
     if (auto const cached = cache_.find(CacheKey{codepoints, characterStyleMask_}); cached != cache_.end())
     {
-        METRIC_INCREMENT(cachedText);
 #if !defined(NDEBUG)
         cacheHits_[cached->first]++;
 #endif
@@ -217,37 +191,32 @@ GlyphPositionList const& TextRenderer::cachedGlyphPositions()
     return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
-GlyphPositionList TextRenderer::requestGlyphPositions()
+text::shape_result TextRenderer::requestGlyphPositions()
 {
     // if (characterStyleMask_.mask() != 0)
     //     debuglog().write("TextRenderer.requestGlyphPositions: styles=({})", characterStyleMask_);
 
-    GlyphPositionList glyphPositions;
+    text::shape_result glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run)))
-    {
-        METRIC_INCREMENT(shapedText);
         crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
-    }
 
     return glyphPositions;
 }
 
-GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
+text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
 {
     if ((characterStyleMask_ & CharacterStyleMask::Hidden))
         return {};
 
-    FontStyle const textStyle = [](CharacterStyleMask const& _styles) -> FontStyle {
-        auto const bold = _styles & CharacterStyleMask::Bold
-            ? FontStyle::Bold
-            : FontStyle::Regular;
-        auto const italic = _styles & CharacterStyleMask::Italic
-            ? FontStyle::Italic
-            : FontStyle::Regular;
-        return FontStyle::Regular | bold | italic;
-    }(characterStyleMask_);
+    // auto const weight = characterStyleMask_ & CharacterStyleMask::Bold
+    //     ? text::font_weight::bold
+    //     : text::font_weight::normal;
+    //
+    // auto const slant = characterStyleMask_ & CharacterStyleMask::Italic
+    //     ? text::font_slant::italic
+    //     : text::font_slant::normal;
 
     if (characterStyleMask_ & CharacterStyleMask::Blinking)
     {
@@ -256,55 +225,44 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
 
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
-    FontList& font = [](FontConfig& _fonts, FontStyle _style, bool _isEmoji) -> FontList& {
-        if (_isEmoji)
-        {
-            debuglog().write("presentation: is emoji");
-            return _fonts.emoji;
-        }
-        debuglog().write("presentation: is text ");
+    auto font = [&]() -> text::font_key {
+        if (isEmojiPresentation)
+            return fonts_.emoji;
+        if (characterStyleMask_ & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+            return fonts_.boldItalic;
+        if (characterStyleMask_ & CharacterStyleMask::Mask::Bold)
+            return fonts_.bold;
+        if (characterStyleMask_ & CharacterStyleMask::Mask::Italic)
+            return fonts_.italic;
 
-        switch (_style)
-        {
-            case FontStyle::Bold:
-                return _fonts.bold;
-            case FontStyle::Italic:
-                return _fonts.italic;
-            case FontStyle::BoldItalic:
-                return _fonts.boldItalic;
-            case FontStyle::Regular:
-                return _fonts.regular;
-        }
-        return _fonts.regular;
-    }(fonts_, textStyle, isEmojiPresentation);
+        return fonts_.regular;
+    }();
 
-    auto const& regularFont = fonts_.regular.front();
-    auto const advanceX = regularFont.maxAdvance();
+    // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
     auto const count = static_cast<int>(_run.end - _run.start);
-    auto const codepoints = codepoints_.data() + _run.start;
-    auto const clusters = clusters_.data() + _run.start;
-    auto const clusterGap = -static_cast<int>(clusters_[0]);
+    auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
+    auto const clusters = crispy::span(clusters_.data() + _run.start, count);
+    // XXX auto const clusterGap = -static_cast<int>(clusters_[0]);
 
-    GlyphPositionList gpos = textShaper_.shape(
-        std::get<unicode::Script>(_run.properties),
+    text::shape_result gpos;
+    textShaper_.shape(
         font,
-        advanceX,
-        count,
         codepoints,
         clusters,
-        clusterGap
+        std::get<unicode::Script>(_run.properties),
+        gpos
     );
 
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
     {
         auto msg = debuglog();
-        msg.write("Shaped codepoints: {}", unicode::to_utf8(codepoints, count));
+        msg.write("Shaped codepoints: {}", unicode::to_utf8(codepoints));
         msg.write("  (presentation: {}/{})",
                 isEmojiPresentation ? "emoji" : "text",
                 get<unicode::PresentationStyle>(_run.properties));
 
         msg.write(" (");
-        for (auto const [i, codepoint] : crispy::indexed(crispy::range(codepoints, codepoints + count)))
+        for (auto const [i, codepoint] : crispy::indexed(codepoints))
         {
             if (i)
                 msg.write(" ");
@@ -312,22 +270,20 @@ GlyphPositionList TextRenderer::shapeRun(unicode::run_segmenter::range const& _r
         }
         msg.write(";");
         for (auto const& gp : gpos)
-            msg.write(" {}", gp.glyphIndex);
+            msg.write(" {}", gp.glyph.index);
         msg.write(")\n");
 
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
-        auto const& font = gpos.front().font.get();
-        msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
+        // auto const& font = gpos.front().glyph.font;
+        // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
         msg.write("with metrics:");
-        for (crispy::text::GlyphPosition const& gp : gpos)
+        for (text::glyph_position const& gp : gpos)
         {
-            msg.write(" {}:{},{} ({})",
-                      gp.glyphIndex,
-                      gp.renderOffset.x,
-                      gp.renderOffset.y,
-                      gp.font.get().familyName()
-                      );
+            msg.write(" {}:{},{}",
+                      gp.glyph.index.value,
+                      gp.x,
+                      gp.y);
         }
     }
 
@@ -341,98 +297,102 @@ void TextRenderer::finish()
 }
 
 void TextRenderer::render(QPoint _pos,
-                          vector<crispy::text::GlyphPosition> const& _glyphPositions,
+                          text::shape_result const& _glyphPositions,
                           QVector4D const& _color)
 {
-    for (crispy::text::GlyphPosition const& gpos : _glyphPositions)
-        if (optional<DataRef> const ti = getTextureInfo(GlyphId{gpos.font, gpos.glyphIndex}); ti.has_value())
-            renderTexture(_pos,
+    QPoint pen = _pos;
+    auto const advanceX = gridMetrics_.cellSize.width;
+
+    for (text::glyph_position const& gpos : _glyphPositions)
+    {
+        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph); ti.has_value())
+        {
+            renderTexture(pen,
                           _color,
                           get<0>(*ti).get(), // TextureInfo
                           get<1>(*ti).get(), // Metadata
                           gpos);
+        }
+        pen.setX(pen.x() + advanceX); // only advance horizontally, as we're (guess what) a terminal. :-)
+    }
 }
 
-TextRenderer::TextureAtlas& TextRenderer::atlasForFont(crispy::text::Font const& _font)
+TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
 {
-    if (_font.hasColor())
+    if (textShaper_.has_color(_font))
         return colorAtlas_;
 
-    switch (fonts_.renderMode)
+    switch (fontDescriptions_.renderMode)
     {
-        case crispy::text::RenderMode::LCD:
+        case text::render_mode::lcd:
             // fallthrough; return lcdAtlas_;
             return lcdAtlas_;
-        case crispy::text::RenderMode::Color:
+        case text::render_mode::color:
             return colorAtlas_;
-        case crispy::text::RenderMode::Light:
-        case crispy::text::RenderMode::Gray:
-        case crispy::text::RenderMode::Bitmap:
+        case text::render_mode::light:
+        case text::render_mode::gray:
+        case text::render_mode::bitmap:
             return monochromeAtlas_;
     }
 
     return monochromeAtlas_;
 }
 
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
 {
-    Font& font = _id.font.get();
-    auto const colored = font.hasColor();
+    auto font = _id.font;
+    auto const colored = textShaper_.has_color(font);
     TextureAtlas& lookupAtlas = atlasForFont(font);
     // TODO: what if lookupAtlas != targetAtlas. the lookup should be decoupled
 
     if (optional<DataRef> const dataRef = lookupAtlas.get(_id); dataRef.has_value())
         return dataRef;
 
-    if (font.fontSize() == 0.0)
-        // set font size on-demand
-        font.setFontSize(fonts_.regular.front().fontSize()); // TODO: find a better way
-
-    auto theGlyphOpt = font.loadGlyphByIndex(_id.glyphIndex, fonts_.renderMode);
+    auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
     if (!theGlyphOpt.has_value())
         return nullopt;
 
-    Glyph& glyph = theGlyphOpt.value();
+    text::rasterized_glyph& glyph = theGlyphOpt.value();
     auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    debuglog().write("Glyph metrics: {}", glyph.metrics);
-    // auto const xMax = glyph.metrics.bearing.x + glyph.metrics.bitmapSize.x;
+    debuglog().write("Glyph metrics: {}", glyph);
+    // auto const xMax = glyph.left + glyph.width;
     // if (xMax > gridMetrics_.cellSize.width * numCells)
     // {
     //     debuglog().write("Glyph width {}+{}={} exceeds cell width {}.",
-    //                      glyph.metrics.bearing.x,
-    //                      glyph.metrics.bitmapSize.x,
+    //                      glyph.left,
+    //                      glyph.width,
     //                      xMax,
     //                      gridMetrics_.cellSize.width * numCells);
     // }
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
-    if (glyph.bitmap.format == crispy::text::BitmapFormat::RGBA)
+    if (glyph.format == text::bitmap_format::rgba)
     {
         assert(colored && "RGBA should be only used on colored (i.e. emoji) fonts.");
         assert(numCells >= 2);
         auto const cellSize = gridMetrics_.cellSize;
 
         if (numCells > 1 && // XXX for now, only if emoji glyph
-                (glyph.metrics.bitmapSize.x > cellSize.width * numCells
-              || glyph.metrics.bitmapSize.y > cellSize.height))
+                (glyph.width > cellSize.width * numCells
+              || glyph.height > cellSize.height))
         {
-            auto [scaled, factor] = scale(glyph.bitmap, cellSize.width * numCells, cellSize.height);
+            auto [scaled, factor] = text::scale(glyph, cellSize.width * numCells, cellSize.height);
 
-            glyph.metrics.bitmapSize.x = scaled.width;
-            glyph.metrics.bitmapSize.y = scaled.height; // TODO: there shall be only one with'x'height.
+            glyph.width = scaled.width;
+            glyph.height = scaled.height; // TODO: there shall be only one with'x'height.
 
             // center the image in the middle of the cell
-            glyph.metrics.bearing.y = gridMetrics_.cellSize.height - gridMetrics_.baseline;
-            glyph.metrics.bearing.x = (gridMetrics_.cellSize.width * numCells - glyph.metrics.bitmapSize.x) / 2;
+            glyph.top = gridMetrics_.cellSize.height - gridMetrics_.baseline;
+            glyph.left = (gridMetrics_.cellSize.width * numCells - glyph.width) / 2;
 
             // (old way)
             // glyph.metrics.bearing.x /= factor;
             // glyph.metrics.bearing.y /= factor;
 
-            glyph.bitmap = move(scaled);
+            glyph.bitmap = move(scaled.bitmap);
 
             // XXX currently commented out because it's not used.
             // TODO: But it should be used for cutting the image off the right edge with unnecessary
@@ -458,36 +418,35 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     }
     // }}}
 
-    auto const yMax = gridMetrics_.baseline + glyph.metrics.bearing.y;
-    auto const yMin = yMax - glyph.bitmap.height;
+    auto const yMax = gridMetrics_.baseline + glyph.top;
+    auto const yMin = yMax - glyph.height;
 
     auto const ratio = !colored
                      ? 1.0f
-                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.metrics.bitmapSize.x),
-                           float(gridMetrics_.cellSize.height) / float(glyph.metrics.bitmapSize.y));
+                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.width),
+                           float(gridMetrics_.cellSize.height) / float(glyph.height));
 
     auto const yOverflow = gridMetrics_.cellSize.height - yMax;
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}; path:{}",
-                         _id.glyphIndex,
+        debuglog().write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+                         _id.index,
                          colored ? "emoji" : "text",
                          ratio,
                          yOverflow < 0 ? yOverflow : 0,
                          yMin < 0 ? yMin : 0,
-                         glyph.metrics,
-                         _id.font.get().filePath());
+                         glyph);
 
     auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
         if (colored)
             return {1, colorAtlas_};
-        switch (glyph.bitmap.format)
+        switch (glyph.format)
         {
-            case crispy::text::BitmapFormat::RGBA:
+            case text::bitmap_format::rgba:
                 return {1, colorAtlas_};
-            case crispy::text::BitmapFormat::LCD:
+            case text::bitmap_format::rgb:
                 return {2, lcdAtlas_};
-            case crispy::text::BitmapFormat::Gray:
+            case text::bitmap_format::alpha_mask:
                 return {0, monochromeAtlas_};
         }
         return {0, monochromeAtlas_};
@@ -496,45 +455,51 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(GlyphId const& _id)
     if (yOverflow < 0)
     {
         debuglog().write("Cropping {} overflowing bitmap rows.", -yOverflow);
-        glyph.bitmap.height += yOverflow;
-        glyph.metrics.bitmapSize.y += yOverflow;
-        glyph.metrics.bearing.y += yOverflow;
+        glyph.height += yOverflow;
+        glyph.top += yOverflow;
     }
 
     if (yMin < 0)
     {
         auto const rowCount = -yMin;
-        auto const pixelCount = rowCount * glyph.bitmap.width * pixelSize(glyph.bitmap.format);
+        auto const pixelCount = rowCount * glyph.width * text::pixel_size(glyph.format);
         debuglog().write("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.metrics.bitmapSize.y += yMin;
-        auto& data = glyph.bitmap.data;
+        glyph.height += yMin;
+        auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount));
     }
 
     assert(&lookupAtlas == &targetAtlas);
+
+    GlyphMetrics metrics{};
+    metrics.bitmapSize.x = glyph.width;
+    metrics.bitmapSize.y = glyph.height;
+    metrics.bearing.x = glyph.left;
+    metrics.bearing.y = glyph.top;
+
     return targetAtlas.insert(_id,
-                              glyph.metrics.bitmapSize.x,
-                              glyph.metrics.bitmapSize.y,
-                              unsigned(ceilf(float(glyph.metrics.bitmapSize.x) * ratio)),
-                              unsigned(ceilf(float(glyph.metrics.bitmapSize.y) * ratio)),
-                              move(glyph.bitmap.data),
+                              glyph.width,
+                              glyph.height,
+                              unsigned(ceilf(float(glyph.width) * ratio)),
+                              unsigned(ceilf(float(glyph.height) * ratio)),
+                              move(glyph.bitmap),
                               userFormat,
-                              glyph.metrics);
+                              metrics);
 }
 
 void TextRenderer::renderTexture(QPoint const& _pos,
                                  QVector4D const& _color,
                                  atlas::TextureInfo const& _textureInfo,
                                  GlyphMetrics const& _glyphMetrics,
-                                 crispy::text::GlyphPosition const& _glyphPos)
+                                 text::glyph_position const& _glyphPos)
 {
-    auto const colored = _glyphPos.font.get().hasColor();
+    auto const colored = textShaper_.has_color(_glyphPos.glyph.font);
 
     if (colored)
     {
         auto const x = _pos.x()
                      + _glyphMetrics.bearing.x
-                     + _glyphPos.renderOffset.x
+                     + _glyphPos.x
                      ;
 
         auto const y = _pos.y();
@@ -545,12 +510,12 @@ void TextRenderer::renderTexture(QPoint const& _pos,
     {
         auto const x = _pos.x()
                      + _glyphMetrics.bearing.x
-                     + _glyphPos.renderOffset.x
+                     + _glyphPos.x
                      ;
 
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
         auto const y = _pos.y()                     // bottom left
-                     + _glyphPos.renderOffset.y     // -> harfbuzz adjustment
+                     + _glyphPos.y                  // -> harfbuzz adjustment
                      + gridMetrics_.baseline        // -> baseline
                      + _glyphMetrics.bearing.y      // -> bitmap top
                      - _glyphMetrics.bitmapSize.y   // -> bitmap height
@@ -565,8 +530,8 @@ void TextRenderer::renderTexture(QPoint const& _pos,
                          x, y,
                          _pos.x(), _pos.y(),
                          _textureInfo.width, _textureInfo.height,
-                         _glyphPos.renderOffset.x, _glyphPos.renderOffset.y,
-                         _glyphPos.font.get().baseline(),
+                         _glyphPos.x, _glyphPos.y,
+                         textShaper_.metrics(_glyphPos.glyph.font).baseline(),
                          _glyph.descender);
 #endif
 }

@@ -27,8 +27,6 @@
 
 #include <terminal/Terminal.h>
 
-#include <crispy/text/Font.h>
-
 #include <fmt/format.h>
 
 #include <chrono>
@@ -52,7 +50,9 @@ class Renderer {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     Renderer(Size const& _screenSize,
-             FontConfig& _fonts,
+             int _logicalDpiX,
+             int _logicalDpiY,
+             FontDescriptions const& _fontDescriptions,
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
@@ -66,8 +66,11 @@ class Renderer {
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setProjection(QMatrix4x4 const& _projectionMatrix);
-    bool setFontSize(double _fontSize);
+    bool setFontSize(text::font_size _fontSize);
     void updateFontMetrics();
+
+    FontDescriptions const& fontDescriptions() const noexcept { return fontDescriptions_; }
+    void setFonts(FontDescriptions _fontDescriptions);
 
     GridMetrics const& gridMetrics() const noexcept { return gridMetrics_; }
 
@@ -98,8 +101,6 @@ class Renderer {
                     terminal::Coordinate const& _currentMousePosition,
                     bool _pressure);
 
-    RenderMetrics const& metrics() const noexcept { return metrics_; }
-
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
     static constexpr QVector4D canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
     {
@@ -129,15 +130,15 @@ class Renderer {
 
     void executeImageDiscards();
 
-  private:
-    RenderMetrics metrics_;
+    std::unique_ptr<text::shaper> textShaper_;
+
+    FontDescriptions fontDescriptions_;
+    FontKeys fonts_;
 
     GridMetrics gridMetrics_;
 
     ColorProfile colorProfile_;
     Opacity backgroundOpacity_;
-
-    FontConfig& fonts_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.

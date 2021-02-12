@@ -14,15 +14,12 @@
 #pragma once
 
 #include <terminal_view/Renderer.h>
-#include <terminal_view/FontConfig.h>
+#include <terminal_view/GridMetrics.h>
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
 #include <terminal/Size.h>
 #include <terminal/Terminal.h>
-
-#include <crispy/text/FontLoader.h>
-#include <crispy/text/Font.h>
 
 #include <atomic>
 #include <chrono>
@@ -47,7 +44,7 @@ class TerminalView : private Terminal::Events {
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void screenUpdated() {}
-        virtual void setFontSpec(FontSpec const& /*_fontSpec*/) {}
+        virtual void setFontDef(FontDef const& /*_fontDef*/) {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
@@ -62,8 +59,9 @@ class TerminalView : private Terminal::Events {
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
-                 crispy::text::FontLoader& _fontLoader,
-                 FontConfig& _fonts,
+                 int _logicalDpiX,
+                 int _logicalDpiY,
+                 FontDescriptions const& _fontDescriptions,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
@@ -83,15 +81,15 @@ class TerminalView : private Terminal::Events {
     TerminalView& operator=(TerminalView&&) = delete;
     ~TerminalView() = default;
 
-    int cellWidth() const noexcept { return fonts_.regular.front().maxAdvance(); }
-    int cellHeight() const noexcept { return fonts_.regular.front().lineHeight(); }
-    Size cellSize() const noexcept { return Size{cellWidth(), cellHeight()}; }
+    int cellWidth() const noexcept { return gridMetrics().cellSize.width; }
+    int cellHeight() const noexcept { return gridMetrics().cellSize.height; }
+    Size cellSize() const noexcept { return gridMetrics().cellSize; }
 
     Size screenSize() const noexcept
     {
         return Size{
-            size_.width / fonts_.regular.front().maxAdvance(),
-            size_.height / fonts_.regular.front().lineHeight()
+            size_.width / gridMetrics().cellSize.width,
+            size_.height / gridMetrics().cellSize.height
         };
     }
 
@@ -103,7 +101,8 @@ class TerminalView : private Terminal::Events {
     void resize(int _width, int _height);
 
     void updateFontMetrics();
-    bool setFontSize(double _fontSize);
+    void setFonts(FontDef const& _fonts);
+    bool setFontSize(text::font_size  _fontSize);
     bool setTerminalSize(Size _cells);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
@@ -126,7 +125,8 @@ class TerminalView : private Terminal::Events {
     Terminal const& terminal() const noexcept { return terminal_; }
     Terminal& terminal() noexcept { return terminal_; }
 
-    Renderer const& renderer() const { return renderer_; }
+    Renderer& renderer() noexcept { return renderer_; }
+    Renderer const& renderer() const noexcept { return renderer_; }
     GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
 
     void setColorProfile(terminal::ColorProfile const& _colors);
@@ -145,8 +145,8 @@ class TerminalView : private Terminal::Events {
     void bell() override;
     void bufferChanged(ScreenType) override;
     void screenUpdated() override;
-    FontSpec getFontSpec() override;
-    void setFontSpec(FontSpec const& _fontSpec) override;
+    FontDef getFontDef() override;
+    void setFontDef(FontDef const& _fontSpec) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
@@ -161,12 +161,12 @@ class TerminalView : private Terminal::Events {
 
   private:
     Events& events_;
-    crispy::text::FontLoader& fontLoader_;
-    FontConfig& fonts_;
-    Size size_;
     WindowMargin windowMargin_;
 
     Renderer renderer_;
+
+    text::font_size fontSize_;
+    Size size_;                     // view size in pixels
 
     Terminal terminal_;
     Process process_;

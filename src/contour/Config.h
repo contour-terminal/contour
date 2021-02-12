@@ -17,10 +17,13 @@
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
-#include <terminal/Sequencer.h>               // CursorDisplay
+#include <terminal/Sequencer.h>                 // CursorDisplay
 #include <terminal/Size.h>
 #include <terminal_view/ShaderConfig.h>
-#include <terminal_view/DecorationRenderer.h> // Decorator
+#include <terminal_view/TextRenderer.h>         // FontDef
+#include <terminal_view/DecorationRenderer.h>   // Decorator
+
+#include <text_shaper/font.h>
 
 #include <crispy/stdfs.h>
 
@@ -49,50 +52,6 @@ enum class Permission
     Ask
 };
 
-struct FontSpec
-{
-    std::string pattern; // TODO: rename to family
-    // TODO: add FontStyle style; -- or string?
-    std::vector<std::string> features = {};
-};
-
-inline bool operator==(FontSpec const& a, FontSpec const& b) noexcept
-{
-    return a.pattern == b.pattern && a.features == b.features;
-}
-
-inline bool operator!=(FontSpec const& a, FontSpec const& b) noexcept
-{
-    return !(a == b);
-}
-
-struct FontSpecList
-{
-    double size; // size in Pt
-    bool onlyMonospace = true;
-    FontSpec regular;
-    FontSpec bold;
-    FontSpec italic;
-    FontSpec boldItalic;
-    FontSpec emoji = {"emoji"};
-    crispy::text::RenderMode renderMode = crispy::text::RenderMode::LCD;
-};
-
-inline bool operator==(FontSpecList const& a, FontSpecList const& b) noexcept
-{
-    return a.regular == b.regular
-        && a.bold == b.bold
-        && a.italic == b.italic
-        && a.boldItalic == b.boldItalic
-        && a.emoji == b.emoji
-        && a.renderMode == b.renderMode;
-}
-
-inline bool operator!=(FontSpecList const& a, FontSpecList const& b) noexcept
-{
-    return !(a == b);
-}
-
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;
     bool maximized = false;
@@ -104,7 +63,7 @@ struct TerminalProfile {
     int historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
-    FontSpecList fonts;
+    terminal::view::FontDescriptions fonts;
 
     int tabWidth;
 

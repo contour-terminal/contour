@@ -14,13 +14,14 @@
 #pragma once
 
 #include <terminal/Screen.h>
+
 #include <terminal_view/ShaderConfig.h>
-#include <terminal_view/FontConfig.h>
+
+#include <text_shaper/font.h>
+#include <text_shaper/shaper.h>
 
 #include <crispy/Atlas.h>
 #include <crispy/FNV.h>
-#include <crispy/text/Font.h>
-#include <crispy/text/TextShaper.h>
 
 #include <unicode/run_segmenter.h>
 
@@ -30,29 +31,13 @@
 
 #include <functional>
 #include <list>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 namespace terminal::view
 {
-    struct GlyphId {
-        crispy::text::FontRef font;
-        unsigned glyphIndex;
-    };
-
-    inline bool operator==(GlyphId const& _lhs, GlyphId const& _rhs) noexcept {
-        return _lhs.font.get().filePath() == _rhs.font.get().filePath() && _lhs.glyphIndex == _rhs.glyphIndex;
-    }
-
-    inline bool operator<(GlyphId const& _lhs, GlyphId const& _rhs) noexcept {
-        if (_lhs.font.get().filePath() < _rhs.font.get().filePath())
-            return true;
-
-        if (_lhs.font.get().filePath() == _rhs.font.get().filePath())
-            return _lhs.glyphIndex < _rhs.glyphIndex;
-
-        return false;
-    }
+    using GlyphId = text::glyph_key;
 
     struct CacheKey {
         std::u32string_view text;
@@ -83,14 +68,6 @@ namespace terminal::view
 
 namespace std
 {
-    template<>
-    struct hash<terminal::view::GlyphId> {
-        size_t operator()(terminal::view::GlyphId const& _glyphId) const noexcept
-        {
-            return hash<crispy::text::Font>{}(_glyphId.font.get()) + _glyphId.glyphIndex;
-        }
-    };
-
     template <>
     struct hash<terminal::view::CacheKey> {
         size_t operator()(terminal::view::CacheKey const& _key) const noexcept
@@ -104,18 +81,53 @@ namespace std
 namespace terminal::view {
 
 struct GridMetrics;
-struct RenderMetrics;
+
+struct FontDescriptions {
+    text::font_size size;
+    bool onlyMonospace;                 // indication on how font fallback should search
+    text::font_description regular;
+    text::font_description bold;
+    text::font_description italic;
+    text::font_description boldItalic;
+    text::font_description emoji;
+    text::render_mode renderMode;
+};
+
+inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
+{
+    return a.size.pt == b.size.pt
+        && a.regular == b.regular
+        && a.bold == b.bold
+        && a.italic == b.italic
+        && a.boldItalic == b.boldItalic
+        && a.emoji == b.emoji
+        && a.renderMode == b.renderMode;
+}
+
+inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noexcept
+{
+    return !(a == b);
+}
+
+struct FontKeys {
+    text::font_key regular;
+    text::font_key bold;
+    text::font_key italic;
+    text::font_key boldItalic;
+    text::font_key emoji;
+};
 
 /// Text Rendering Pipeline
 class TextRenderer {
   public:
-    TextRenderer(RenderMetrics& _renderMetrics,
-                 crispy::atlas::CommandListener& _commandListener,
+    TextRenderer(crispy::atlas::CommandListener& _commandListener,
                  crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                  crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                  GridMetrics const& _gridMetrics,
-                 FontConfig& _fonts);
+                 text::shaper& _textShaper,
+                 FontDescriptions& _fontDescriptions,
+                 FontKeys const& _fontKeys);
 
     void updateFontMetrics();
 
@@ -131,13 +143,13 @@ class TextRenderer {
   private:
     void reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color);
     void extend(Cell const& _cell, int _column);
-    crispy::text::GlyphPositionList shapeRun(unicode::run_segmenter::range const& _range);
+    text::shape_result shapeRun(unicode::run_segmenter::range const& _range);
 
-    crispy::text::GlyphPositionList const& cachedGlyphPositions();
-    crispy::text::GlyphPositionList requestGlyphPositions();
+    text::shape_result const& cachedGlyphPositions();
+    text::shape_result requestGlyphPositions();
 
     void render(QPoint _pos,
-                std::vector<crispy::text::GlyphPosition> const& glyphPositions,
+                std::vector<text::glyph_position> const& glyphPositions,
                 QVector4D const& _color);
 
     /// Renders an arbitrary texture.
@@ -147,11 +159,13 @@ class TextRenderer {
 
     // rendering
     //
-    using Glyph = crispy::text::Glyph;
-    using GlyphMetrics = crispy::text::GlyphMetrics;
+    struct GlyphMetrics {
+        text::vec2 bitmapSize;        // glyph size in pixels
+        text::vec2 bearing;           // offset baseline and left to top and left of the glyph's bitmap
+    };
     friend struct fmt::formatter<GlyphMetrics>;
 
-    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<GlyphId, GlyphMetrics>;
+    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
     using DataRef = TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
@@ -160,15 +174,15 @@ class TextRenderer {
                        QVector4D const& _color,
                        crispy::atlas::TextureInfo const& _textureInfo,
                        GlyphMetrics const& _glyphMetrics,
-                       crispy::text::GlyphPosition const& _gpos);
+                       text::glyph_position const& _gpos);
 
-    TextureAtlas& atlasForFont(crispy::text::Font const& _font);
+    TextureAtlas& atlasForFont(text::font_key _font);
 
     // general properties
     //
-    RenderMetrics& renderMetrics_;
     GridMetrics const& gridMetrics_;
-    FontConfig& fonts_;
+    FontDescriptions& fontDescriptions_;
+    FontKeys const& fonts_;
 
     // text run segmentation
     //
@@ -189,14 +203,14 @@ class TextRenderer {
     // text shaping cache
     //
     std::list<std::u32string> cacheKeyStorage_;
-    std::unordered_map<CacheKey, crispy::text::GlyphPositionList> cache_;
+    std::unordered_map<CacheKey, text::shape_result> cache_;
 #if !defined(NDEBUG)
     std::unordered_map<CacheKey, int64_t> cacheHits_;
 #endif
 
     // target surface rendering
     //
-    crispy::text::TextShaper textShaper_;
+    text::shaper& textShaper_;
     crispy::atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
@@ -204,17 +218,3 @@ class TextRenderer {
 };
 
 } // end namespace
-
-namespace fmt {
-    template <>
-    struct formatter<terminal::view::GlyphId> {
-        using GlyphId = terminal::view::GlyphId;
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(GlyphId const& _glyphId, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "GlyphId<index:{}>", _glyphId.glyphIndex);
-        }
-    };
-}

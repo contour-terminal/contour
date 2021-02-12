@@ -13,7 +13,6 @@
  */
 #include <terminal_view/TerminalView.h>
 
-#include <crispy/text/Font.h>
 #include <crispy/logger.h>
 
 #include <fmt/ostream.h>
@@ -46,8 +45,9 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
-                           crispy::text::FontLoader& _fontLoader,
-                           FontConfig& _fonts,
+                           int _logicalDpiX,
+                           int _logicalDpiY,
+                           FontDescriptions const& _fontDescriptions,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            milliseconds _cursorBlinkInterval,
@@ -61,15 +61,11 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig) :
     events_{ _events },
-    fontLoader_{ _fontLoader },
-    fonts_{ _fonts },
-    size_{
-        static_cast<int>(_pty->screenSize().width * _fonts.regular.front().maxAdvance()),
-        static_cast<int>(_pty->screenSize().height * _fonts.regular.front().lineHeight())
-    },
     renderer_{
         _pty->screenSize(),
-        _fonts,
+        _logicalDpiX,
+        _logicalDpiY,
+        _fontDescriptions,
         _colorProfile,
         _backgroundOpacity,
         _hyperlinkNormal,
@@ -77,6 +73,11 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _backgroundShaderConfig,
         _textShaderConfig,
         _projectionMatrix
+    },
+    fontSize_{ _fontDescriptions.size },
+    size_{
+        static_cast<int>(_pty->screenSize().width * gridMetrics().cellSize.width),
+        static_cast<int>(_pty->screenSize().height * gridMetrics().cellSize.height)
     },
     terminal_(
         std::move(_pty),
@@ -143,11 +144,10 @@ void TerminalView::updateFontMetrics()
 {
     auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
 
-    debuglog().write("with size={}, adjusting margin from {}x{} to {}x{}; regular face: {}\n",
-                     fonts_.regular.front().fontSize(),
+    debuglog().write("with font size {}, adjusting margin from {}x{} to {}x{}\n",
+                     fontSize_,
                      windowMargin_.left, windowMargin_.bottom,
-                     newMargin.left, newMargin.bottom,
-                     fonts_.regular.front().filePath());
+                     newMargin.left, newMargin.bottom);
 
     windowMargin_ = newMargin;
     renderer_.updateFontMetrics();
@@ -157,7 +157,7 @@ void TerminalView::updateFontMetrics()
     resize(size_.width, size_.height);
 }
 
-bool TerminalView::setFontSize(double _fontSize)
+bool TerminalView::setFontSize(text::font_size _fontSize)
 {
     if (!renderer_.setFontSize(_fontSize))
         return false;
@@ -175,7 +175,7 @@ TerminalView::WindowMargin TerminalView::computeMargin(Size const& ws,
                                                        [[maybe_unused]] unsigned _width,
                                                        unsigned _height) const noexcept
 {
-    auto const usedHeight = static_cast<int>(ws.height * fonts_.regular.front().lineHeight());
+    auto const usedHeight = static_cast<int>(ws.height * gridMetrics().cellSize.height);
     auto const freeHeight = static_cast<int>(_height - usedHeight);
     auto const bottomMargin = freeHeight;
 
@@ -256,44 +256,43 @@ void TerminalView::screenUpdated()
     events_.screenUpdated();
 }
 
-FontSpec TerminalView::getFontSpec()
+FontDef TerminalView::getFontDef()
 {
-    auto const fontByStyle = [&](crispy::text::FontStyle _style) -> crispy::text::Font&
+    auto const fontByStyle = [&](text::font_weight _weight, text::font_slant _slant) -> text::font_description const&
     {
-        switch (_style)
-        {
-            case crispy::text::FontStyle::Bold:
-                return fonts_.bold.front();
-            case crispy::text::FontStyle::Italic:
-                return fonts_.italic.front();
-            case crispy::text::FontStyle::BoldItalic:
-                return fonts_.boldItalic.front();
-            case crispy::text::FontStyle::Regular:
-            default:
-                return fonts_.regular.front();
-        }
+        auto const bold = _weight != text::font_weight::normal;
+        auto const italic = _slant != text::font_slant::normal;
+        if (bold && italic)
+            return renderer_.fontDescriptions().boldItalic;
+        else if (bold)
+            return renderer_.fontDescriptions().bold;
+        else if (italic)
+            return renderer_.fontDescriptions().italic;
+        else
+            return renderer_.fontDescriptions().regular;
     };
-    auto const nameOfStyledFont = [&](crispy::text::FontStyle _style) -> string
+    auto const nameOfStyledFont = [&](text::font_weight _weight, text::font_slant _slant) -> string
     {
-        auto const& regularFont = fontByStyle(crispy::text::FontStyle::Regular);
-        auto const& styledFont = fontByStyle(_style);
-        if (styledFont.familyName() == regularFont.familyName())
+        auto const& regularFont = renderer_.fontDescriptions().regular;
+        auto const& styledFont = fontByStyle(_weight, _slant);
+        if (styledFont.familyName == regularFont.familyName)
             return "auto";
         else
-            return styledFont.familyName();
+            return styledFont.toPattern();
     };
     return {
-        fonts_.regular.front().fontSize(),
-        fonts_.regular.front().familyName(),
-        nameOfStyledFont(crispy::text::FontStyle::Bold),
-        nameOfStyledFont(crispy::text::FontStyle::Italic),
-        nameOfStyledFont(crispy::text::FontStyle::BoldItalic)
+        renderer_.fontDescriptions().size.pt,
+        renderer_.fontDescriptions().regular.familyName,
+        nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
+        nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
+        nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
+        renderer_.fontDescriptions().emoji.toPattern()
     };
 }
 
-void TerminalView::setFontSpec(FontSpec const& _fontSpec)
+void TerminalView::setFontDef(FontDef const& _fontSpec)
 {
-    events_.setFontSpec(_fontSpec);
+    events_.setFontDef(_fontSpec);
 }
 
 void TerminalView::copyToClipboard(std::string_view const& _data)
