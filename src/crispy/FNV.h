@@ -19,7 +19,7 @@ class FNV {
 
     /// Incrementally builds up an FNV hash by applying @p _value to already constructed @p _memory
     /// and returns the applied FNV result.
-    constexpr T operator()(T _memory, T _value) const noexcept
+    constexpr unsigned operator()(unsigned _memory, T _value) const noexcept
     {
         _memory ^= _value;
         _memory *= prime_;
@@ -27,7 +27,15 @@ class FNV {
     }
 
     /// Builds the FNV hash between [_begin, _end)
-    constexpr T operator()(T const* _begin, T const* _end) const noexcept
+    constexpr unsigned operator()(unsigned _memory, std::basic_string<T> const& str) const noexcept
+    {
+        for (auto const ch : str)
+            _memory = (*this)(_memory, ch);
+        return _memory;
+    }
+
+    /// Builds the FNV hash between [_begin, _end)
+    constexpr unsigned operator()(T const* _begin, T const* _end) const noexcept
     {
         auto memory = basis_;
         while (_begin != _end)
@@ -36,14 +44,20 @@ class FNV {
     }
 
     /// Builds the FNV hash between [_begin, _begin + len)
-    constexpr T operator()(T const* data, size_t len) const noexcept
+    constexpr unsigned operator()(T const* data, size_t len) const noexcept
     {
         return (*this)(data, data + len);
     }
 
+    /// Builds the FNV hash between [_begin, _begin + len)
+    constexpr unsigned operator()(std::basic_string<T> const& _str) const noexcept
+    {
+        return (*this)(_str.data(), _str.data() + _str.size());
+    }
+
   protected:
-    T const basis_;
-    T const prime_;
+    unsigned const basis_;
+    unsigned const prime_;
 };
 
 } // end namespace crispy
