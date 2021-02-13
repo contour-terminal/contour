@@ -23,7 +23,7 @@ using std::min;
 
 namespace terminal::view {
 
-namespace
+namespace // {{{ helper
 {
     constexpr int glFormatZ(crispy::atlas::Format _f)
     {
@@ -53,7 +53,16 @@ namespace
         return GL_RED;
     }
 
-}
+    QMatrix4x4 ortho(float left, float right, float bottom, float top)
+    {
+        constexpr float nearPlane = -1.0f;
+        constexpr float farPlane = 1.0f;
+
+        QMatrix4x4 mat;
+        mat.ortho(left, right, bottom, top, nearPlane, farPlane);
+        return mat;
+    }
+} // }}}
 
 constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxMonochromeTextureSize = 1024;
@@ -152,11 +161,12 @@ struct OpenGLRenderer::TextureScheduler : public crispy::atlas::CommandListener
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
-                               QMatrix4x4 const& _projectionMatrix,
+                               int _width,
+                               int _height,
                                int _leftMargin,
                                int _bottomMargin,
                                Size const& _cellSize) :
-    projectionMatrix_{ _projectionMatrix },
+    projectionMatrix_{ },
     leftMargin_{ _leftMargin },
     bottomMargin_{ _bottomMargin },
     cellSize_{ _cellSize },
@@ -200,6 +210,8 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 {
     initialize();
 
+    setRenderSize(_width, _height);
+
     assert(textProjectionLocation_ != -1);
 
     glEnable(GL_BLEND);
@@ -216,6 +228,40 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 
     initializeRectRendering();
     initializeTextureRendering();
+}
+
+void OpenGLRenderer::setRenderSize(int _width, int _height)
+{
+    projectionMatrix_ = ortho(
+        0.0f, float(_width),      // left, right
+        0.0f, float(_height)      // bottom, top
+    );
+}
+
+void OpenGLRenderer::setMargin(int _left, int _bottom) noexcept
+{
+    leftMargin_ = _left;
+    bottomMargin_ = _bottom;
+}
+
+void OpenGLRenderer::setCellSize(Size const& _cellSize) noexcept
+{
+    cellSize_ = _cellSize;
+}
+
+crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::monochromeAtlasAllocator() noexcept
+{
+    return monochromeAtlasAllocator_;
+}
+
+crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::coloredAtlasAllocator() noexcept
+{
+    return coloredAtlasAllocator_;
+}
+
+crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::lcdAtlasAllocator() noexcept
+{
+    return lcdAtlasAllocator_;
 }
 
 crispy::atlas::CommandListener& OpenGLRenderer::textureScheduler()
@@ -460,17 +506,18 @@ void OpenGLRenderer::selectTextureUnit(unsigned _id)
     }
 }
 
-void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color)
+void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+                                     float _r, float _g, float _b, float _a)
 {
     GLfloat const x = _x;
     GLfloat const y = _y;
     GLfloat const z = 0.0f;
     GLfloat const r = _width;
     GLfloat const s = _height;
-    GLfloat const cr = _color[0];
-    GLfloat const cg = _color[1];
-    GLfloat const cb = _color[2];
-    GLfloat const ca = _color[3];
+    GLfloat const cr = _r;
+    GLfloat const cg = _g;
+    GLfloat const cb = _b;
+    GLfloat const ca = _a;
 
     GLfloat const vertices[6 * 7] = {
         // first triangle

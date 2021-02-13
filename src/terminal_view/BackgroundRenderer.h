@@ -22,7 +22,7 @@
 namespace terminal::view {
 
 struct GridMetrics;
-class OpenGLRenderer;
+class RenderTarget;
 
 class BackgroundRenderer {
   public:
@@ -33,7 +33,7 @@ class BackgroundRenderer {
     /// @param _renderTarget
     BackgroundRenderer(GridMetrics const& _gridMetrics,
                        RGBColor const& _defaultColor,
-                       OpenGLRenderer& _renderTarget);
+                       RenderTarget& _renderTarget);
 
     void setDefaultColor(RGBColor const& _color) noexcept { defaultColor_ = _color; }
 
@@ -65,7 +65,7 @@ class BackgroundRenderer {
     unsigned columnCount_ = 0;
 
     // rendering
-    OpenGLRenderer& renderTarget_;
+    RenderTarget& renderTarget_;
 };
 
 } // end namespace

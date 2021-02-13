@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/TerminalView.h>
+#include <terminal_view/OpenGLRenderer.h>
 
 #include <crispy/logger.h>
 
@@ -19,15 +20,17 @@
 
 #include <array>
 #include <chrono>
+#include <memory>
 #include <utility>
 
 using std::chrono::milliseconds;
 using std::chrono::steady_clock;
+using std::make_unique;
 using std::nullopt;
 using std::optional;
 using std::string;
-using std::unique_ptr;
 using std::tuple;
+using std::unique_ptr;
 
 namespace terminal::view {
 
@@ -57,7 +60,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
                            Process::ExecInfo const& _shell,
-                           QMatrix4x4 const& _projectionMatrix,
+                           int _width,
+                           int _height,
                            ShaderConfig const& _backgroundShaderConfig,
                            ShaderConfig const& _textShaderConfig) :
     events_{ _events },
@@ -70,9 +74,15 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _backgroundOpacity,
         _hyperlinkNormal,
         _hyperlinkHover,
-        _backgroundShaderConfig,
-        _textShaderConfig,
-        _projectionMatrix
+        make_unique<OpenGLRenderer>(
+            _textShaderConfig,
+            _backgroundShaderConfig,
+            _width,
+            _height,
+            0, // TODO left margin
+            0, // TODO bottom margin
+            Size{} // TODO _cellSize?
+        )
     },
     fontSize_{ _fontDescriptions.size },
     size_{
@@ -194,6 +204,7 @@ void TerminalView::resize(int _width, int _height)
 
     windowMargin_ = computeMargin(newScreenSize, _width, _height);
 
+    renderer_.setRenderSize(_width, _height);
     renderer_.setScreenSize(newScreenSize);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
     //renderer_.clearCache();

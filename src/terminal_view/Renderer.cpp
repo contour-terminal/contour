@@ -27,6 +27,7 @@ using std::make_unique;
 using std::move;
 using std::optional;
 using std::tuple;
+using std::unique_ptr;
 
 namespace terminal::view {
 
@@ -77,54 +78,49 @@ Renderer::Renderer(Size const& _screenSize,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover,
-                   ShaderConfig const& _backgroundShaderConfig,
-                   ShaderConfig const& _textShaderConfig,
-                   QMatrix4x4 const& _projectionMatrix) :
+                   unique_ptr<RenderTarget> _renderTarget) :
+                   // ShaderConfig const& _backgroundShaderConfig,
+                   // ShaderConfig const& _textShaderConfig,
+                   // int _width,
+                   // int _height) :
     textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
-    renderTarget_{
-        _textShaderConfig,
-        _backgroundShaderConfig,
-        _projectionMatrix,
-        0, // TODO left margin
-        0, // TODO bottom margin
-        {}, // TODO _cellSize?
-    },
+    renderTarget_{ move(_renderTarget) },
     backgroundRenderer_{
         gridMetrics_,
         _colorProfile.defaultBackground,
-        renderTarget_
+        *renderTarget_
     },
     imageRenderer_{
-        renderTarget_.textureScheduler(),
-        renderTarget_.coloredAtlasAllocator(),
+        renderTarget_->textureScheduler(),
+        renderTarget_->coloredAtlasAllocator(),
         cellSize()
     },
     textRenderer_{
-        renderTarget_.textureScheduler(),
-        renderTarget_.monochromeAtlasAllocator(),
-        renderTarget_.coloredAtlasAllocator(),
-        renderTarget_.lcdAtlasAllocator(),
+        renderTarget_->textureScheduler(),
+        renderTarget_->monochromeAtlasAllocator(),
+        renderTarget_->coloredAtlasAllocator(),
+        renderTarget_->lcdAtlasAllocator(),
         gridMetrics_,
         *textShaper_,
         fontDescriptions_,
         fonts_
     },
     decorationRenderer_{
-        renderTarget_.textureScheduler(),
-        renderTarget_.monochromeAtlasAllocator(),
+        renderTarget_->textureScheduler(),
+        renderTarget_->monochromeAtlasAllocator(),
         gridMetrics_,
         _colorProfile,
         _hyperlinkNormal,
         _hyperlinkHover
     },
     cursorRenderer_{
-        renderTarget_.textureScheduler(),
-        renderTarget_.monochromeAtlasAllocator(),
+        renderTarget_->textureScheduler(),
+        renderTarget_->monochromeAtlasAllocator(),
         gridMetrics_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
         canonicalColor(_colorProfile.cursor)
@@ -152,7 +148,7 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
-    renderTarget_.clearCache();
+    renderTarget_->clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
     // either that, or only the render target is allowed to clear the actual atlas caches.
@@ -189,9 +185,9 @@ void Renderer::updateFontMetrics()
     clearCache();
 }
 
-void Renderer::setProjection(QMatrix4x4 const& _projectionMatrix)
+void Renderer::setRenderSize(int _width, int _height)
 {
-    renderTarget_.setProjection(_projectionMatrix);
+    renderTarget_->setRenderSize(_width, _height);
 }
 
 void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
@@ -224,7 +220,7 @@ uint64_t Renderer::render(Terminal& _terminal,
     textRenderer_.flushPendingSegments();
     textRenderer_.finish();
 
-    renderTarget_.execute();
+    renderTarget_->execute();
 
     return changes;
 }

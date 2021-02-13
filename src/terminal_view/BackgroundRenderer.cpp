@@ -13,7 +13,7 @@
  */
 #include <terminal_view/BackgroundRenderer.h>
 #include <terminal_view/GridMetrics.h>
-#include <terminal_view/OpenGLRenderer.h>
+#include <terminal_view/RenderTarget.h>
 
 #include <crispy/algorithm.h>
 
@@ -24,7 +24,7 @@ namespace terminal::view {
 
 BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics,
                                        RGBColor const& _defaultColor,
-                                       OpenGLRenderer& _renderTarget) :
+                                       RenderTarget& _renderTarget) :
     gridMetrics_{ _gridMetrics },
     defaultColor_{ _defaultColor },
     renderTarget_{ _renderTarget }
@@ -65,17 +65,15 @@ void BackgroundRenderer::renderCellRange()
 
     auto const pos = QPoint{gridMetrics_.map(startColumn_, row_)};
 
-    auto const color = QVector4D{static_cast<float>(color_.red) / 255.0f,
-                                 static_cast<float>(color_.green) / 255.0f,
-                                 static_cast<float>(color_.blue) / 255.0f,
-                                 opacity_};
-
     renderTarget_.renderRectangle(
         static_cast<unsigned>(pos.x()),
         static_cast<unsigned>(pos.y()),
         gridMetrics_.cellSize.width * columnCount_,
         gridMetrics_.cellSize.height,
-        color
+        static_cast<float>(color_.red) / 255.0f,
+        static_cast<float>(color_.green) / 255.0f,
+        static_cast<float>(color_.blue) / 255.0f,
+        opacity_
     );
 
     columnCount_ = 0;

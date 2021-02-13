@@ -23,7 +23,7 @@
 #include <terminal_view/RenderMetrics.h>
 #include <terminal_view/ShaderConfig.h>
 
-#include <terminal_view/OpenGLRenderer.h>
+#include <terminal_view/RenderTarget.h>
 
 #include <terminal/Terminal.h>
 
@@ -57,15 +57,13 @@ class Renderer {
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
              Decorator _hyperlinkHover,
-             ShaderConfig const& _backgroundShaderConfig,
-             ShaderConfig const& _textShaderConfig,
-             QMatrix4x4 const& _projectionMatrix);
+             std::unique_ptr<RenderTarget> _renderTarget);
 
     Size cellSize() const noexcept { return gridMetrics_.cellSize; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setProjection(QMatrix4x4 const& _projectionMatrix);
+    void setRenderSize(int _width, int _height);
     bool setFontSize(text::font_size _fontSize);
     void updateFontMetrics();
 
@@ -79,14 +77,14 @@ class Renderer {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    constexpr void setScreenSize(Size const& _screenSize) noexcept
+    void setScreenSize(Size const& _screenSize) noexcept
     {
         gridMetrics_.pageSize = _screenSize;
     }
 
-    constexpr void setMargin(int _leftMargin, int _bottomMargin) noexcept
+    void setMargin(int _leftMargin, int _bottomMargin) noexcept
     {
-        renderTarget_.setMargin(_leftMargin, _bottomMargin);
+        renderTarget_->setMargin(_leftMargin, _bottomMargin);
         gridMetrics_.pageMargin.left = _leftMargin;
         gridMetrics_.pageMargin.bottom = _bottomMargin;
     }
@@ -143,7 +141,7 @@ class Renderer {
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
 
-    OpenGLRenderer renderTarget_;
+    std::unique_ptr<RenderTarget> renderTarget_;
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

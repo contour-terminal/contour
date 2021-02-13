@@ -213,16 +213,6 @@ namespace // {{{
         return nullopt;
     }
 
-    inline QMatrix4x4 ortho(float left, float right, float bottom, float top)
-    {
-        constexpr float nearPlane = -1.0f;
-        constexpr float farPlane = 1.0f;
-
-        QMatrix4x4 mat;
-        mat.ortho(left, right, bottom, top, nearPlane, farPlane);
-        return mat;
-    }
-
 #if 0 // !defined(NDEBUG)
     QDebug operator<<(QDebug str, QEvent const& ev) {
         static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
@@ -617,7 +607,7 @@ void TerminalWidget::initializeGL()
 
         GLint glslNumShaderVersions{};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-        GL_DEBUGLOG( glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions) );
+        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
 #endif
         if (glslNumShaderVersions > 0)
         {
@@ -661,7 +651,8 @@ void TerminalWidget::initializeGL()
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
         profile().shell,
-        ortho(0.0f, static_cast<float>(width()), 0.0f, static_cast<float>(height())),
+        width(),
+        height(),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         *config::Config::loadShaderConfig(config::ShaderClass::Text)
     );
@@ -716,12 +707,6 @@ void TerminalWidget::resizeGL(int _width, int _height)
 
     terminalView_->resize(viewWidth, viewHeight);
     setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
-    terminalView_->setProjection(
-        ortho(
-            0.0f, float(_width),      // left, right
-            0.0f, float(_height)      // bottom, top
-        )
-    );
 
     // if (setScreenDirty())
     //     update();

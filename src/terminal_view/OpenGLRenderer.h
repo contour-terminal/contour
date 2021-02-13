@@ -13,9 +13,10 @@
  */
 #pragma once
 
+#include <terminal_view/RenderTarget.h>
+#include <terminal/Size.h>
 #include <crispy/Atlas.h>
 #include <crispy/logger.h>
-#include <terminal/Size.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -23,18 +24,13 @@
 
 #include <memory>
 
-#define GL_DEBUGLOG(FnCall) do { \
-        FnCall; \
-        if (auto const ec = glGetError(); ec != GL_NO_ERROR) { \
-            debuglog().write("OpenGL function call failed with error code 0x{:X}.", ec); \
-        } \
-    } while (0)
-
 namespace terminal::view {
 
 struct ShaderConfig;
 
-class OpenGLRenderer : public QOpenGLExtraFunctions
+class OpenGLRenderer :
+    public RenderTarget,
+    public QOpenGLExtraFunctions
 {
   private:
     struct TextureScheduler;
@@ -42,28 +38,30 @@ class OpenGLRenderer : public QOpenGLExtraFunctions
   public:
     OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                    ShaderConfig const& _rectShaderConfig,
-                   QMatrix4x4 const& _projectionMatrix,
+                   int _width,
+                   int _height,
                    int _leftMargin,
                    int _bottomMargin,
                    Size const& _cellSize);
 
-    ~OpenGLRenderer();
+    ~OpenGLRenderer() override;
 
-    void clearCache();
+    void setRenderSize(int _width, int _height) override;
+    void setMargin(int _left, int _bottom) noexcept override;
+    void setCellSize(Size const& _cellSize) noexcept override;
 
-    crispy::atlas::CommandListener& textureScheduler();
+    crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
+    crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
+    crispy::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
 
-    constexpr void setMargin(int _left, int _bottom) noexcept { leftMargin_ = _left; bottomMargin_ = _bottom; }
-    constexpr void setCellSize(Size const& _cellSize) noexcept { cellSize_ = _cellSize; }
-    constexpr void setProjection(QMatrix4x4 const& _projectionMatrix) noexcept { projectionMatrix_ = _projectionMatrix; }
+    crispy::atlas::CommandListener& textureScheduler() override;
 
-    void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
+    void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+                         float _r, float _g, float _b, float _a) override;
 
-    crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return monochromeAtlasAllocator_; }
-    crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return coloredAtlasAllocator_; }
-    crispy::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept { return lcdAtlasAllocator_; }
+    void execute() override;
 
-    void execute();
+    void clearCache() override;
 
   private:
     // private helper methods

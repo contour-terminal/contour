@@ -71,7 +71,8 @@ class TerminalView : private Terminal::Events {
                  Decorator _hyperlinkHover,
                  std::unique_ptr<Pty> _client,
                  Process::ExecInfo const& _shell,
-                 QMatrix4x4 const& _projectionMatrix,
+                 int _width,
+                 int _height,
                  ShaderConfig const& _backgroundShaderConfig,
                  ShaderConfig const& _textShaderConfig);
 
@@ -107,7 +108,6 @@ class TerminalView : private Terminal::Events {
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
-    void setProjection(QMatrix4x4 const& _projectionMatrix) { return renderer_.setProjection(_projectionMatrix); }
 
     /// Renders the screen buffer to the current OpenGL screen.
     uint64_t render(std::chrono::steady_clock::time_point const& _now, bool _pressure);
