@@ -3,7 +3,6 @@
 - Twitch Highlight: Wednesday: 3:30:00 to 3:41:00
 - [ ] report bug to Zsh (omg, mailinglist) that `precmd` is not invoked early enough on FIRST prompt.
 - [ ] Font: fix framed underline
-- [ ] Font: add crispy::text::GlobalFontMetrics maybe
 - [ ] Font: hasColor should not determine whether a glyph is emoji or not
 - [ ] Font: rework API to also support DirectWrite and maybe CoreText
 - [ ] Font: check harfbuzz font api (can it replace freetype, at least on linux/unix?)
