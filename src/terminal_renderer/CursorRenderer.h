@@ -13,22 +13,22 @@
  */
 #pragma once
 
-#include <terminal_view/GridMetrics.h>
-
-#include <crispy/Atlas.h>
+#include <terminal/Sequencer.h> // CursorShape
+#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/GridMetrics.h>
 
 #include <QtCore/QPoint>
 #include <QtGui/QVector4D>
 
 #include <array>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 /// Takes care of rendering the text cursor.
 class CursorRenderer {
   public:
-    CursorRenderer(crispy::atlas::CommandListener& _commandListener,
-                   crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+    CursorRenderer(atlas::CommandListener& _commandListener,
+                   atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                    GridMetrics const& _gridMetrics,
                    CursorShape _shape,
                    QVector4D const& _color);
@@ -41,14 +41,14 @@ class CursorRenderer {
     void clearCache();
 
   private:
-    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<CursorShape, int>;
+    using TextureAtlas = atlas::MetadataTextureAtlas<CursorShape, int>;
     using DataRef = TextureAtlas::DataRef;
 
     void rebuild();
     std::optional<DataRef> getDataRef(CursorShape _shape);
 
   private:
-    crispy::atlas::CommandListener& commandListener_;
+    atlas::CommandListener& commandListener_;
     TextureAtlas textureAtlas_;
     GridMetrics const& gridMetrics_;
 

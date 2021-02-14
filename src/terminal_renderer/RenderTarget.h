@@ -13,12 +13,12 @@
  */
 #pragma once
 
+#include <terminal_renderer/Atlas.h>
 #include <terminal/Size.h>
-#include <crispy/Atlas.h>
 
 #include <memory>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 /**
  * Terminal render target interface.
@@ -32,13 +32,12 @@ class RenderTarget
 
     virtual void setRenderSize(int _width, int _height) = 0;
     virtual void setMargin(int _left, int _bottom) = 0;
-    virtual void setCellSize(Size const& _cellSize) = 0;
 
-    virtual crispy::atlas::CommandListener& textureScheduler() = 0;
+    virtual atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;
+    virtual atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept = 0;
+    virtual atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept = 0;
 
-    virtual crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;
-    virtual crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept = 0;
-    virtual crispy::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept = 0;
+    virtual atlas::CommandListener& textureScheduler() = 0;
 
     virtual void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
                                  float _r, float _g, float _b, float _a) = 0;

@@ -54,7 +54,6 @@ using namespace std::placeholders;
 
 namespace contour {
 
-using terminal::view::Renderer;
 using actions::Action;
 
 TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath) :

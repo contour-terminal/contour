@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/CursorRenderer.h>
+#include <terminal_renderer/CursorRenderer.h>
 
 #include <QtCore/QSize>
 
@@ -25,10 +25,10 @@ using std::optional;
 using std::runtime_error;
 using std::string;
 
-namespace terminal::view {
+namespace terminal::renderer {
 
-CursorRenderer::CursorRenderer(crispy::atlas::CommandListener& _commandListener,
-                               crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+CursorRenderer::CursorRenderer(atlas::CommandListener& _commandListener,
+                               atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                                GridMetrics const& _gridMetrics,
                                CursorShape _shape,
                                QVector4D const& _color) :
@@ -70,7 +70,7 @@ void CursorRenderer::rebuild()
 
     { // {{{ CursorShape::Block
         auto const height = gridMetrics_.cellSize.height;
-        auto image = crispy::atlas::Buffer(width * height, 0xFFu);
+        auto image = atlas::Buffer(width * height, 0xFFu);
 
         textureAtlas_.insert(
             CursorShape::Block,
@@ -83,7 +83,7 @@ void CursorRenderer::rebuild()
         auto const thickness = max(LineThickness * baseline / 3, 1);
         auto const height = baseline;
         auto const base_y = max((height - thickness) / 2, 0);
-        auto image = crispy::atlas::Buffer(width * height, 0);
+        auto image = atlas::Buffer(width * height, 0);
 
         for (int y = 1; y <= thickness; ++y)
             for (int x = 0; x < width; ++x)
@@ -100,7 +100,7 @@ void CursorRenderer::rebuild()
         auto const thickness = max(LineThickness * baseline / 3, 1);
         auto const height = gridMetrics_.cellSize.height;
         //auto const base_y = max((height - thickness) / 2, 0);
-        auto image = crispy::atlas::Buffer(width * height, 0);
+        auto image = atlas::Buffer(width * height, 0);
 
         for (int x = 0; x < thickness; ++x)
             for (int y = 0; y < height; ++y)
@@ -115,7 +115,7 @@ void CursorRenderer::rebuild()
     } // }}}
     { // {{{ CursorShape::Rectangle
         auto const height = gridMetrics_.cellSize.height;
-        auto image = crispy::atlas::Buffer(width * height, 0xFFu);
+        auto image = atlas::Buffer(width * height, 0xFFu);
         auto const thickness = max(width / 12, 1);
 
         auto const innerWidth = width - 2 * thickness;

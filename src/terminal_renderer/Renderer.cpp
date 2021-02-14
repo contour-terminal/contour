@@ -11,10 +11,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/Renderer.h>
-#include <terminal_view/TextRenderer.h>
+#include <terminal_renderer/Renderer.h>
+#include <terminal_renderer/TextRenderer.h>
 
 #include <text_shaper/open_shaper.h>
+
+#include <crispy/logger.h>
 
 #include <array>
 #include <functional>
@@ -29,7 +31,7 @@ using std::optional;
 using std::tuple;
 using std::unique_ptr;
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
 {
@@ -53,6 +55,8 @@ GridMetrics loadGridMetrics(text::font_key _font, Size _pageSize, text::shaper& 
     gm.pageMargin = {0, 0};       // TODO (fill early)
 
     loadGridMetricsFromFont(_font, gm, _textShaper);
+
+    debuglog().write("Loading grid metrics: {}", gm);
 
     return gm;
 }
@@ -79,10 +83,6 @@ Renderer::Renderer(Size const& _screenSize,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover,
                    unique_ptr<RenderTarget> _renderTarget) :
-                   // ShaderConfig const& _backgroundShaderConfig,
-                   // ShaderConfig const& _textShaderConfig,
-                   // int _width,
-                   // int _height) :
     textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },

@@ -13,13 +13,11 @@
  */
 #pragma once
 
-#include <terminal_view/ShaderConfig.h>
-
-#include <crispy/Atlas.h>
+#include <terminal_renderer/Atlas.h>
 
 #include <terminal/Screen.h>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 struct GridMetrics;
 
@@ -61,8 +59,8 @@ class DecorationRenderer {
     /// @param _monochromeTextureAtlas
     /// @param _gridMetrics
     /// @param _colorProfile
-    DecorationRenderer(crispy::atlas::CommandListener& _commandListener,
-                       crispy::atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
+    DecorationRenderer(atlas::CommandListener& _commandListener,
+                       atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                        GridMetrics const& _gridMetrics,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
@@ -86,7 +84,7 @@ class DecorationRenderer {
     void clearCache();
 
   private:
-    using Atlas = crispy::atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
+    using Atlas = atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
     using DataRef = Atlas::DataRef;
 
     void rebuild();
@@ -102,7 +100,7 @@ class DecorationRenderer {
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 
-    crispy::atlas::CommandListener& commandListener_;
+    atlas::CommandListener& commandListener_;
     Atlas atlas_;
 };
 

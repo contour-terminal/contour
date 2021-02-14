@@ -13,13 +13,11 @@
  */
 #pragma once
 
-#include <terminal_view/ShaderConfig.h>
-
 #include <terminal/Screen.h>
 
 #include <memory>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 struct GridMetrics;
 class RenderTarget;

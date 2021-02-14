@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/ShaderConfig.h>
+#include <terminal_renderer/opengl/ShaderConfig.h>
 
 #include <crispy/logger.h>
 
@@ -23,7 +23,7 @@
 #include "text_vert.h"
 #include "text_frag.h"
 
-namespace terminal::view {
+namespace terminal::renderer::opengl {
 
 namespace {
     template <size_t N>

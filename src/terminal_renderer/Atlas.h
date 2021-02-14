@@ -14,22 +14,18 @@
 #pragma once
 
 #include <fmt/format.h>
-#include <iostream>
 
 #include <algorithm>
 #include <array>
 #include <cassert>
 #include <functional>
-#include <iomanip> // setprecision
 #include <list>
 #include <map>
 #include <optional>
-#include <ostream>
 #include <type_traits>
-#include <variant>
 #include <vector>
 
-namespace crispy::atlas {
+namespace terminal::renderer::atlas {
 
 using Buffer = std::vector<uint8_t>;
 enum class Format { Red, RGB, RGBA };
@@ -533,11 +529,11 @@ class MetadataTextureAtlas {
 
 namespace fmt { // {{{
     template <>
-    struct formatter<crispy::atlas::CreateAtlas> {
+    struct formatter<terminal::renderer::atlas::CreateAtlas> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::CreateAtlas const& _cmd, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::CreateAtlas const& _cmd, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<atlas:{}, dim:{}x{}, depth:{}, format:{}>",
                 _cmd.atlasName.get(),
@@ -550,11 +546,11 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::TextureInfo> {
+    struct formatter<terminal::renderer::atlas::TextureInfo> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::TextureInfo const& info, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::TextureInfo const& info, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<{}; {}x{}/{}x{}; {}/{}/{}>",
                 info.atlasName.get(),
@@ -570,11 +566,11 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::UploadTexture> {
+    struct formatter<terminal::renderer::atlas::UploadTexture> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::UploadTexture const& _cmd, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::UploadTexture const& _cmd, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<texture:{}, len:{}, format:{}>",
                 _cmd.texture.get(),
@@ -585,11 +581,11 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::RenderTexture> {
+    struct formatter<terminal::renderer::atlas::RenderTexture> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::RenderTexture const& _cmd, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::RenderTexture const& _cmd, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<AtlasCoord:{}, target: {}:{}:{}>",
                 _cmd.texture.get(),
@@ -601,11 +597,11 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::DestroyAtlas> {
+    struct formatter<terminal::renderer::atlas::DestroyAtlas> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::DestroyAtlas const& _cmd, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::DestroyAtlas const& _cmd, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<atlas: {}, id:{}>",
                 _cmd.atlasName.get(),
@@ -615,11 +611,11 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<crispy::atlas::TextureAtlasAllocator> {
+    struct formatter<terminal::renderer::atlas::TextureAtlasAllocator> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(crispy::atlas::TextureAtlasAllocator const& _atlas, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::TextureAtlasAllocator const& _atlas, FormatContext& ctx)
         {
             return format_to(ctx.out(), "TextureAtlasAllocator<instance: {}/{}, dim: {}x{}x{}, at: {}x{}x{}, rowHeight:{}>",
                 _atlas.currentInstance(), _atlas.maxInstances(),

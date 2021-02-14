@@ -85,6 +85,8 @@ add_subdirectory(src/crispy)
 add_subdirectory(src/text_shaper)
 add_subdirectory(src/terminal)
 add_subdirectory(src/terminal_view)
+add_subdirectory(src/terminal_renderer)
+add_subdirectory(src/terminal_renderer/opengl)
 
 if(CONTOUR_CLIENT)
     add_subdirectory(src/contour)

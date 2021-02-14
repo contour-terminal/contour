@@ -21,7 +21,7 @@
 
 #include <QOpenGLShaderProgram>
 
-namespace terminal::view {
+namespace terminal::renderer::opengl {
 
 enum class ShaderClass {
     Background,

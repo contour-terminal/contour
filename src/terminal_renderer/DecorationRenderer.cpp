@@ -11,10 +11,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/DecorationRenderer.h>
-#include <terminal_view/GridMetrics.h>
+#include <terminal_renderer/DecorationRenderer.h>
+#include <terminal_renderer/GridMetrics.h>
+#include <terminal_renderer/Atlas.h>
 
-#include <crispy/Atlas.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
 
@@ -33,9 +33,7 @@ using std::optional;
 using std::pair;
 using std::string;
 
-namespace atlas = crispy::atlas;
-
-namespace terminal::view {
+namespace terminal::renderer {
 
 optional<Decorator> to_decorator(std::string const& _value)
 {

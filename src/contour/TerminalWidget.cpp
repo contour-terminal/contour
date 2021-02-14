@@ -24,7 +24,8 @@
 #endif
 
 #include <crispy/logger.h>
-#include <terminal_view/OpenGLRenderer.h> // GL_DEBUGLOG(...)
+
+#include <terminal_renderer/opengl/OpenGLRenderer.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QMetaObject>
@@ -95,7 +96,6 @@ using namespace std::string_view_literals;
 
 namespace contour {
 
-using terminal::view::Renderer;
 using actions::Action;
 
 namespace // {{{
@@ -651,10 +651,14 @@ void TerminalWidget::initializeGL()
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
         profile().shell,
-        width(),
-        height(),
-        *config::Config::loadShaderConfig(config::ShaderClass::Background),
-        *config::Config::loadShaderConfig(config::ShaderClass::Text)
+        make_unique<terminal::renderer::opengl::OpenGLRenderer>(
+            *config::Config::loadShaderConfig(config::ShaderClass::Text),
+            *config::Config::loadShaderConfig(config::ShaderClass::Background),
+            width(),
+            height(),
+            0, // TODO left margin
+            0 // TODO bottom margin
+        )
     );
 
     terminal::Screen& screen = terminalView_->terminal().screen();
@@ -731,7 +735,7 @@ void TerminalWidget::paintGL()
         bool const reverseVideo =
             terminalView_->terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
 
-        QVector4D const bg = Renderer::canonicalColor(
+        QVector4D const bg = terminal::renderer::Renderer::canonicalColor(
             reverseVideo
                 ? profile().colors.defaultForeground
                 : profile().colors.defaultBackground,
@@ -1848,7 +1852,7 @@ void TerminalWidget::setFontDef(terminal::FontDef const& _fontDef)
         if (requestPermissionChangeFont())
         {
             auto const& currentFonts = terminalView_->renderer().fontDescriptions();
-            terminal::view::FontDescriptions newFonts = currentFonts;
+            terminal::renderer::FontDescriptions newFonts = currentFonts;
 
             if (spec.size != 0.0)
                 newFonts.size = text::font_size{ spec.size };

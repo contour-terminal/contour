@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <crispy/Atlas.h>
+#include <terminal_renderer/Atlas.h>
 
 #include <terminal/Image.h>
 #include <terminal/Size.h>
@@ -21,7 +21,7 @@
 
 #include <vector>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 /// Image Rendering API.
 ///
@@ -30,8 +30,8 @@ class ImageRenderer
 {
   public:
     ImageRenderer(
-         crispy::atlas::CommandListener& _commandListener,
-         crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+         atlas::CommandListener& _commandListener,
+         atlas::TextureAtlasAllocator& _colorAtlasAllocator,
          Size const& _cellSize
     );
 
@@ -71,7 +71,7 @@ class ImageRenderer
         // TODO: do we want/need anything here?
     };
 
-    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
+    using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
     using DataRef = TextureAtlas::DataRef;
 
     void clearCache();
@@ -83,7 +83,7 @@ class ImageRenderer
     ImagePool imagePool_;
     std::map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
     Size cellSize_;
-    crispy::atlas::CommandListener& commandListener_;
+    atlas::CommandListener& commandListener_;
     TextureAtlas atlas_;
 };
 

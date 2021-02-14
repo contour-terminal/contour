@@ -13,20 +13,17 @@
  */
 #pragma once
 
+#include <terminal_renderer/Atlas.h>
 #include <terminal/Screen.h>
-
-#include <terminal_view/ShaderConfig.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/shaper.h>
 
-#include <crispy/Atlas.h>
 #include <crispy/FNV.h>
 
 #include <unicode/run_segmenter.h>
 
 #include <QtCore/QPoint>
-
 #include <QtGui/QVector4D>
 
 #include <functional>
@@ -35,7 +32,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace terminal::view
+namespace terminal::renderer
 {
     using GlyphId = text::glyph_key;
 
@@ -69,8 +66,8 @@ namespace terminal::view
 namespace std
 {
     template <>
-    struct hash<terminal::view::CacheKey> {
-        size_t operator()(terminal::view::CacheKey const& _key) const noexcept
+    struct hash<terminal::renderer::CacheKey> {
+        size_t operator()(terminal::renderer::CacheKey const& _key) const noexcept
         {
             auto fnv = crispy::FNV<char32_t>{};
             return static_cast<size_t>(fnv(fnv(_key.text.data(), _key.text.size()), static_cast<char32_t>(_key.styles)));
@@ -78,7 +75,7 @@ namespace std
     };
 }
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 struct GridMetrics;
 
@@ -120,10 +117,10 @@ struct FontKeys {
 /// Text Rendering Pipeline
 class TextRenderer {
   public:
-    TextRenderer(crispy::atlas::CommandListener& _commandListener,
-                 crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
-                 crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                 crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
+    TextRenderer(atlas::CommandListener& _commandListener,
+                 atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
+                 atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+                 atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                  GridMetrics const& _gridMetrics,
                  text::shaper& _textShaper,
                  FontDescriptions& _fontDescriptions,
@@ -155,7 +152,7 @@ class TextRenderer {
     /// Renders an arbitrary texture.
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
-                       crispy::atlas::TextureInfo const& _textureInfo);
+                       atlas::TextureInfo const& _textureInfo);
 
     // rendering
     //
@@ -165,14 +162,14 @@ class TextRenderer {
     };
     friend struct fmt::formatter<GlyphMetrics>;
 
-    using TextureAtlas = crispy::atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
+    using TextureAtlas = atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
     using DataRef = TextureAtlas::DataRef;
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
 
     void renderTexture(QPoint const& _pos,
                        QVector4D const& _color,
-                       crispy::atlas::TextureInfo const& _textureInfo,
+                       atlas::TextureInfo const& _textureInfo,
                        GlyphMetrics const& _glyphMetrics,
                        text::glyph_position const& _gpos);
 
@@ -211,7 +208,7 @@ class TextRenderer {
     // target surface rendering
     //
     text::shaper& textShaper_;
-    crispy::atlas::CommandListener& commandListener_;
+    atlas::CommandListener& commandListener_;
     TextureAtlas monochromeAtlas_;
     TextureAtlas colorAtlas_;
     TextureAtlas lcdAtlas_;

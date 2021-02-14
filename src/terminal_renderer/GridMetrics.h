@@ -13,17 +13,13 @@
  */
 #pragma once
 
-#include <terminal/Screen.h>
-#include <terminal/Color.h>
-
-#include <ostream>
-#include <utility>
-
-#include <fmt/format.h>
+#include <terminal/Size.h>
 
 #include <QtCore/QPoint>
 
-namespace terminal::view {
+#include <fmt/format.h>
+
+namespace terminal::renderer {
 
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
@@ -77,11 +73,11 @@ struct GridMetrics
 namespace fmt
 {
     template <>
-    struct formatter<terminal::view::GridMetrics> {
+    struct formatter<terminal::renderer::GridMetrics> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::view::GridMetrics const& v, FormatContext& ctx)
+        auto format(terminal::renderer::GridMetrics const& v, FormatContext& ctx)
         {
             return format_to(
                 ctx.out(),

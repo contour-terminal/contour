@@ -15,13 +15,15 @@
 
 #include "Actions.h"
 
+#include <terminal_renderer/opengl/ShaderConfig.h>
+
+#include <terminal_renderer/TextRenderer.h>         // FontDescriptions
+#include <terminal_renderer/DecorationRenderer.h>   // Decorator
+
 #include <terminal/Color.h>
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h>                 // CursorDisplay
 #include <terminal/Size.h>
-#include <terminal_view/ShaderConfig.h>
-#include <terminal_view/TextRenderer.h>         // FontDef
-#include <terminal_view/DecorationRenderer.h>   // Decorator
 
 #include <text_shaper/font.h>
 
@@ -63,7 +65,7 @@ struct TerminalProfile {
     int historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
-    terminal::view::FontDescriptions fonts;
+    terminal::renderer::FontDescriptions fonts;
 
     int tabWidth;
 
@@ -81,13 +83,13 @@ struct TerminalProfile {
     bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
 
     struct {
-        terminal::view::Decorator normal = terminal::view::Decorator::DottedUnderline;
-        terminal::view::Decorator hover = terminal::view::Decorator::Underline;
+        terminal::renderer::Decorator normal = terminal::renderer::Decorator::DottedUnderline;
+        terminal::renderer::Decorator hover = terminal::renderer::Decorator::Underline;
     } hyperlinkDecoration;
 };
 
-using terminal::view::ShaderConfig;
-using terminal::view::ShaderClass;
+using terminal::renderer::opengl::ShaderConfig;
+using terminal::renderer::opengl::ShaderClass;
 
 // NB: All strings in here must be UTF8-encoded.
 struct Config {
@@ -115,8 +117,8 @@ struct Config {
 
     static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
 
-    ShaderConfig backgroundShader = terminal::view::defaultShaderConfig(ShaderClass::Background);
-    ShaderConfig textShader = terminal::view::defaultShaderConfig(ShaderClass::Text);
+    ShaderConfig backgroundShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Background);
+    ShaderConfig textShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Text);
 
     bool sixelScrolling = false;
     bool sixelCursorConformance = true;

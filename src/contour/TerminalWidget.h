@@ -213,7 +213,7 @@ class TerminalWidget :
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }
 
-    terminal::view::GridMetrics const& gridMetrics() const noexcept { return terminalView_->gridMetrics(); }
+    terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return terminalView_->gridMetrics(); }
 
     // private data fields
     //
@@ -222,7 +222,7 @@ class TerminalWidget :
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
-    terminal::view::FontDescriptions fonts_;
+    terminal::renderer::FontDescriptions fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.

@@ -13,17 +13,14 @@
  */
 #pragma once
 
-#include <terminal_view/BackgroundRenderer.h>
-#include <terminal_view/CursorRenderer.h>
-#include <terminal_view/DecorationRenderer.h>
-#include <terminal_view/ImageRenderer.h>
-#include <terminal_view/TextRenderer.h>
+#include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/GridMetrics.h>
 
-#include <terminal_view/GridMetrics.h>
-#include <terminal_view/RenderMetrics.h>
-#include <terminal_view/ShaderConfig.h>
-
-#include <terminal_view/RenderTarget.h>
+#include <terminal_renderer/BackgroundRenderer.h>
+#include <terminal_renderer/CursorRenderer.h>
+#include <terminal_renderer/DecorationRenderer.h>
+#include <terminal_renderer/ImageRenderer.h>
+#include <terminal_renderer/TextRenderer.h>
 
 #include <terminal/Terminal.h>
 
@@ -34,9 +31,7 @@
 #include <vector>
 #include <utility>
 
-namespace terminal::view {
-
-struct ShaderConfig;
+namespace terminal::renderer {
 
 /**
  * Renders a terminal's screen to the current OpenGL context.

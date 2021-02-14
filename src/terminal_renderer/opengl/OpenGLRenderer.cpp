@@ -11,43 +11,43 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/OpenGLRenderer.h>
-#include <terminal_view/TextRenderer.h>
+#include <terminal_renderer/opengl/OpenGLRenderer.h>
+#include <terminal_renderer/opengl/ShaderConfig.h>
+#include <terminal_renderer/Atlas.h>
 
-#include <crispy/Atlas.h>
 #include <crispy/algorithm.h>
 
 #include <algorithm>
 
 using std::min;
 
-namespace terminal::view {
+namespace terminal::renderer::opengl {
 
 namespace // {{{ helper
 {
-    constexpr int glFormatZ(crispy::atlas::Format _f)
+    constexpr int glFormatZ(atlas::Format _f)
     {
         switch (_f)
         {
-            case crispy::atlas::Format::Red:
+            case atlas::Format::Red:
                 return GL_R8;
-            case crispy::atlas::Format::RGB:
+            case atlas::Format::RGB:
                 return GL_RGB8;
-            case crispy::atlas::Format::RGBA:
+            case atlas::Format::RGBA:
                 return GL_RGBA8;
         }
         return GL_R8; // just in case
     }
 
-    int glFormat(crispy::atlas::Format _format)
+    int glFormat(atlas::Format _format)
     {
         switch (_format)
         {
-            case crispy::atlas::Format::RGBA:
+            case atlas::Format::RGBA:
                 return GL_RGBA;
-            case crispy::atlas::Format::RGB:
+            case atlas::Format::RGB:
                 return GL_RGB;
-            case crispy::atlas::Format::Red:
+            case atlas::Format::Red:
                 return GL_RED;
         }
         return GL_RED;
@@ -68,12 +68,12 @@ constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxMonochromeTextureSize = 1024;
 constexpr unsigned MaxColorTextureSize = 2048;
 
-struct OpenGLRenderer::TextureScheduler : public crispy::atlas::CommandListener
+struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
 {
-    using CreateAtlas = crispy::atlas::CreateAtlas;
-    using UploadTexture= crispy::atlas::UploadTexture;
-    using RenderTexture = crispy::atlas::RenderTexture;
-    using DestroyAtlas = crispy::atlas::DestroyAtlas;
+    using CreateAtlas = atlas::CreateAtlas;
+    using UploadTexture= atlas::UploadTexture;
+    using RenderTexture = atlas::RenderTexture;
+    using DestroyAtlas = atlas::DestroyAtlas;
 
     std::vector<CreateAtlas> createAtlases;
     std::vector<UploadTexture> uploadTextures;
@@ -164,12 +164,10 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                int _width,
                                int _height,
                                int _leftMargin,
-                               int _bottomMargin,
-                               Size const& _cellSize) :
+                               int _bottomMargin) :
     projectionMatrix_{ },
     leftMargin_{ _leftMargin },
     bottomMargin_{ _bottomMargin },
-    cellSize_{ _cellSize },
     textShader_{ createShader(_textShaderConfig) },
     textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
     // texture
@@ -180,7 +178,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         maxTextureSize() / maxTextureDepth(),
         min(MaxMonochromeTextureSize, maxTextureSize()),
         min(MaxMonochromeTextureSize, maxTextureSize()),
-        crispy::atlas::Format::Red,
+        atlas::Format::Red,
         *textureScheduler_,
         "monochromeAtlas"
     },
@@ -190,7 +188,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         maxTextureSize() / maxTextureDepth(),
         min(MaxColorTextureSize, maxTextureSize()),
         min(MaxColorTextureSize, maxTextureSize()),
-        crispy::atlas::Format::RGBA,
+        atlas::Format::RGBA,
         *textureScheduler_,
         "colorAtlas"
     },
@@ -200,7 +198,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         maxTextureSize() / maxTextureDepth(),
         min(MaxColorTextureSize, maxTextureSize()),
         min(MaxColorTextureSize, maxTextureSize()),
-        crispy::atlas::Format::RGB,
+        atlas::Format::RGB,
         *textureScheduler_,
         "lcdAtlas"
     },
@@ -244,27 +242,22 @@ void OpenGLRenderer::setMargin(int _left, int _bottom) noexcept
     bottomMargin_ = _bottom;
 }
 
-void OpenGLRenderer::setCellSize(Size const& _cellSize) noexcept
-{
-    cellSize_ = _cellSize;
-}
-
-crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::monochromeAtlasAllocator() noexcept
+atlas::TextureAtlasAllocator& OpenGLRenderer::monochromeAtlasAllocator() noexcept
 {
     return monochromeAtlasAllocator_;
 }
 
-crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::coloredAtlasAllocator() noexcept
+atlas::TextureAtlasAllocator& OpenGLRenderer::coloredAtlasAllocator() noexcept
 {
     return coloredAtlasAllocator_;
 }
 
-crispy::atlas::TextureAtlasAllocator& OpenGLRenderer::lcdAtlasAllocator() noexcept
+atlas::TextureAtlasAllocator& OpenGLRenderer::lcdAtlasAllocator() noexcept
 {
     return lcdAtlasAllocator_;
 }
 
-crispy::atlas::CommandListener& OpenGLRenderer::textureScheduler()
+atlas::CommandListener& OpenGLRenderer::textureScheduler()
 {
     return *textureScheduler_;
 }
@@ -366,7 +359,7 @@ unsigned OpenGLRenderer::maxTextureSize()
     return static_cast<unsigned>(value);
 }
 
-void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
+void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
     glGenTextures(1, &textureId);
@@ -391,15 +384,15 @@ void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
     auto constexpr z0 = 0;
 
     std::vector<uint8_t> stub;
-    stub.resize(_param.width * _param.height * crispy::atlas::element_count(_param.format));
+    stub.resize(_param.width * _param.height * atlas::element_count(_param.format));
     auto t = stub.begin();
     switch (_param.format)
     {
-        case crispy::atlas::Format::Red:
+        case atlas::Format::Red:
             for (auto i = 0u; i < _param.width * _param.height; ++i)
                 *t++ = 0x40;
             break;
-        case crispy::atlas::Format::RGB:
+        case atlas::Format::RGB:
             for (auto i = 0u; i < _param.width * _param.height; ++i)
             {
                 *t++ = 0x00;
@@ -407,7 +400,7 @@ void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
                 *t++ = 0x80;
             }
             break;
-        case crispy::atlas::Format::RGBA:
+        case atlas::Format::RGBA:
             for (auto i = 0u; i < _param.width * _param.height; ++i)
             {
                 *t++ = 0x00;
@@ -427,7 +420,7 @@ void OpenGLRenderer::createAtlas(crispy::atlas::CreateAtlas const& _param)
     atlasMap_[key] = textureId;
 }
 
-void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
+void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
 {
     auto const& texture = _param.texture.get();
     auto const key = AtlasKey{texture.atlasName, texture.atlas};
@@ -449,11 +442,11 @@ void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
 
     switch (_param.format)
     {
-        case crispy::atlas::Format::RGB:
-        case crispy::atlas::Format::Red:
+        case atlas::Format::RGB:
+        case atlas::Format::Red:
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             break;
-        case crispy::atlas::Format::RGBA:
+        case atlas::Format::RGBA:
             glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
             break;
     }
@@ -462,7 +455,7 @@ void OpenGLRenderer::uploadTexture(crispy::atlas::UploadTexture const& _param)
                     glFormat(_param.format), type, _param.data.data());
 }
 
-void OpenGLRenderer::renderTexture(crispy::atlas::RenderTexture const& _param)
+void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
 {
     auto const key = AtlasKey{_param.texture.get().atlasName, _param.texture.get().atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
@@ -477,7 +470,7 @@ void OpenGLRenderer::renderTexture(crispy::atlas::RenderTexture const& _param)
     }
 }
 
-void OpenGLRenderer::destroyAtlas(crispy::atlas::DestroyAtlas const& _param)
+void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
 {
     auto const key = AtlasKey{_param.atlasName.get(), _param.atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())

@@ -855,11 +855,11 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     if (auto deco = _node["hyperlink_decoration"]; deco)
     {
         if (auto normal = deco["normal"]; normal && normal.IsScalar())
-            if (auto const pdeco = terminal::view::to_decorator(normal.as<string>()); pdeco.has_value())
+            if (auto const pdeco = terminal::renderer::to_decorator(normal.as<string>()); pdeco.has_value())
                 profile.hyperlinkDecoration.normal = *pdeco;
 
         if (auto hover = deco["hover"]; hover && hover.IsScalar())
-            if (auto const pdeco = terminal::view::to_decorator(hover.as<string>()); pdeco.has_value())
+            if (auto const pdeco = terminal::renderer::to_decorator(hover.as<string>()); pdeco.has_value())
                 profile.hyperlinkDecoration.hover = *pdeco;
     }
 
@@ -975,7 +975,7 @@ optional<std::string> readConfigFile(std::string const& _filename)
 
 std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
 {
-    auto const& defaultConfig = terminal::view::defaultShaderConfig(_shaderClass);
+    auto const& defaultConfig = terminal::renderer::opengl::defaultShaderConfig(_shaderClass);
     auto const basename = to_string(_shaderClass);
 
     auto const vertText = [&]() -> pair<string, string> {

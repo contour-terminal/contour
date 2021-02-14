@@ -13,9 +13,11 @@
  */
 #pragma once
 
-#include <terminal_view/RenderTarget.h>
+#include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/Atlas.h>
+
 #include <terminal/Size.h>
-#include <crispy/Atlas.h>
+
 #include <crispy/logger.h>
 
 #include <QtGui/QMatrix4x4>
@@ -24,7 +26,7 @@
 
 #include <memory>
 
-namespace terminal::view {
+namespace terminal::renderer::opengl {
 
 struct ShaderConfig;
 
@@ -41,20 +43,18 @@ class OpenGLRenderer :
                    int _width,
                    int _height,
                    int _leftMargin,
-                   int _bottomMargin,
-                   Size const& _cellSize);
+                   int _bottomMargin);
 
     ~OpenGLRenderer() override;
 
     void setRenderSize(int _width, int _height) override;
     void setMargin(int _left, int _bottom) noexcept override;
-    void setCellSize(Size const& _cellSize) noexcept override;
 
-    crispy::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
-    crispy::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
-    crispy::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
+    atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
+    atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
+    atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
 
-    crispy::atlas::CommandListener& textureScheduler() override;
+    atlas::CommandListener& textureScheduler() override;
 
     void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
                          float _r, float _g, float _b, float _a) override;
@@ -77,10 +77,10 @@ class OpenGLRenderer :
     void bindTexture2DArray(GLuint _textureId);
 
     void executeRenderTextures();
-    void createAtlas(crispy::atlas::CreateAtlas const& _param);
-    void uploadTexture(crispy::atlas::UploadTexture const& _param);
-    void renderTexture(crispy::atlas::RenderTexture const& _param);
-    void destroyAtlas(crispy::atlas::DestroyAtlas const& _param);
+    void createAtlas(atlas::CreateAtlas const& _param);
+    void uploadTexture(atlas::UploadTexture const& _param);
+    void renderTexture(atlas::RenderTexture const& _param);
+    void destroyAtlas(atlas::DestroyAtlas const& _param);
 
     void executeRenderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
 
@@ -109,7 +109,6 @@ class OpenGLRenderer :
 
     int leftMargin_ = 0;
     int bottomMargin_ = 0;
-    Size cellSize_;
 
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;
@@ -123,9 +122,9 @@ class OpenGLRenderer :
     GLuint currentActiveTexture_ = std::numeric_limits<GLuint>::max();
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
-    crispy::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
-    crispy::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
-    crispy::atlas::TextureAtlasAllocator lcdAtlasAllocator_;
+    atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
+    atlas::TextureAtlasAllocator coloredAtlasAllocator_;
+    atlas::TextureAtlasAllocator lcdAtlasAllocator_;
 
     // private data members for rendering filled rectangles
     //

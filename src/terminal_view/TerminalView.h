@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal_view/Renderer.h>
-#include <terminal_view/GridMetrics.h>
+#include <terminal_renderer/GridMetrics.h>
+#include <terminal_renderer/Renderer.h>
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
@@ -61,20 +61,17 @@ class TerminalView : private Terminal::Events {
                  std::string const& _wordDelimiters,
                  int _logicalDpiX,
                  int _logicalDpiY,
-                 FontDescriptions const& _fontDescriptions,
+                 renderer::FontDescriptions const& _fontDescriptions,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
                  terminal::ColorProfile _colorProfile,
                  terminal::Opacity _backgroundOpacity,
-                 Decorator _hyperlinkNormal,
-                 Decorator _hyperlinkHover,
+                 renderer::Decorator _hyperlinkNormal,
+                 renderer::Decorator _hyperlinkHover,
                  std::unique_ptr<Pty> _client,
                  Process::ExecInfo const& _shell,
-                 int _width,
-                 int _height,
-                 ShaderConfig const& _backgroundShaderConfig,
-                 ShaderConfig const& _textShaderConfig);
+                 std::unique_ptr<renderer::RenderTarget> _renderTarget);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -107,7 +104,7 @@ class TerminalView : private Terminal::Events {
     bool setTerminalSize(Size _cells);
     void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
-    void setHyperlinkDecoration(Decorator _normal, Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
+    void setHyperlinkDecoration(renderer::Decorator _normal, renderer::Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
 
     /// Renders the screen buffer to the current OpenGL screen.
     uint64_t render(std::chrono::steady_clock::time_point const& _now, bool _pressure);
@@ -125,9 +122,9 @@ class TerminalView : private Terminal::Events {
     Terminal const& terminal() const noexcept { return terminal_; }
     Terminal& terminal() noexcept { return terminal_; }
 
-    Renderer& renderer() noexcept { return renderer_; }
-    Renderer const& renderer() const noexcept { return renderer_; }
-    GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
+    renderer::Renderer& renderer() noexcept { return renderer_; }
+    renderer::Renderer const& renderer() const noexcept { return renderer_; }
+    renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
 
     void setColorProfile(terminal::ColorProfile const& _colors);
 
@@ -163,7 +160,7 @@ class TerminalView : private Terminal::Events {
     Events& events_;
     WindowMargin windowMargin_;
 
-    Renderer renderer_;
+    renderer::Renderer renderer_;
 
     text::font_size fontSize_;
     Size size_;                     // view size in pixels

@@ -12,8 +12,8 @@
  * limitations under the License.
  */
 
-#include <terminal_view/TextRenderer.h>
-#include <terminal_view/GridMetrics.h>
+#include <terminal_renderer/TextRenderer.h>
+#include <terminal_renderer/GridMetrics.h>
 
 #include <text_shaper/open_shaper.h>
 
@@ -41,14 +41,12 @@ using std::u32string;
 using std::u32string_view;
 using std::vector;
 
-namespace atlas = crispy::atlas;
+namespace terminal::renderer {
 
-namespace terminal::view {
-
-TextRenderer::TextRenderer(crispy::atlas::CommandListener& _commandListener,
-                           crispy::atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
-                           crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                           crispy::atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
+TextRenderer::TextRenderer(atlas::CommandListener& _commandListener,
+                           atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
+                           atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+                           atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
                            GridMetrics const& _gridMetrics,
                            text::shaper& _textShaper,
                            FontDescriptions& _fontDescriptions,
@@ -268,23 +266,16 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
                 msg.write(" ");
             msg.write("U+{:04X}", unsigned(codepoint));
         }
-        msg.write(";");
-        for (auto const& gp : gpos)
-            msg.write(" {}", gp.glyph.index);
         msg.write(")\n");
 
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
         // auto const& font = gpos.front().glyph.font;
         // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
+
         msg.write("with metrics:");
         for (text::glyph_position const& gp : gpos)
-        {
-            msg.write(" {}:{},{}",
-                      gp.glyph.index.value,
-                      gp.x,
-                      gp.y);
-        }
+            msg.write(" {}", gp);
     }
 
     return gpos;

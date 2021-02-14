@@ -11,16 +11,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/BackgroundRenderer.h>
-#include <terminal_view/GridMetrics.h>
-#include <terminal_view/RenderTarget.h>
+#include <terminal_renderer/BackgroundRenderer.h>
+#include <terminal_renderer/GridMetrics.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <crispy/algorithm.h>
 
 #include <algorithm>
 #include <iostream>
 
-namespace terminal::view {
+namespace terminal::renderer {
 
 BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics,
                                        RGBColor const& _defaultColor,

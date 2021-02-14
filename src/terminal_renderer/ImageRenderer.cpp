@@ -11,10 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_view/ImageRenderer.h>
+#include <terminal_renderer/ImageRenderer.h>
 
 #include <crispy/times.h>
 #include <crispy/algorithm.h>
+
 #include <array>
 
 using std::array;
@@ -22,10 +23,10 @@ using std::nullopt;
 using std::optional;
 using crispy::times;
 
-namespace terminal::view {
+namespace terminal::renderer {
 
-ImageRenderer::ImageRenderer(crispy::atlas::CommandListener& _commandListener,
-                             crispy::atlas::TextureAtlasAllocator& _colorAtlasAllocator,
+ImageRenderer::ImageRenderer(atlas::CommandListener& _commandListener,
+                             atlas::TextureAtlasAllocator& _colorAtlasAllocator,
                              Size const& _cellSize) :
     imagePool_{},
     cellSize_{ _cellSize },
@@ -47,7 +48,7 @@ void ImageRenderer::renderImage(QPoint _pos, ImageFragment const& _fragment)
         //std::cout << fmt::format("ImageRenderer.renderImage: {}\n", _fragment);
 
         auto const color = array{1.0f, 0.0f, 0.0f, 1.0f}; // not used
-        crispy::atlas::TextureInfo const& textureInfo = std::get<0>(*dataRef).get();
+        atlas::TextureInfo const& textureInfo = std::get<0>(*dataRef).get();
 
         // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
         auto const x = _pos.x();

@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_view/TerminalView.h>
-#include <terminal_view/OpenGLRenderer.h>
+#include <terminal_renderer/opengl/OpenGLRenderer.h>
 
 #include <crispy/logger.h>
 
@@ -50,20 +50,17 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            string const& _wordDelimiters,
                            int _logicalDpiX,
                            int _logicalDpiY,
-                           FontDescriptions const& _fontDescriptions,
+                           renderer::FontDescriptions const& _fontDescriptions,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            milliseconds _cursorBlinkInterval,
                            terminal::ColorProfile _colorProfile,
                            terminal::Opacity _backgroundOpacity,
-                           Decorator _hyperlinkNormal,
-                           Decorator _hyperlinkHover,
+                           renderer::Decorator _hyperlinkNormal,
+                           renderer::Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
                            Process::ExecInfo const& _shell,
-                           int _width,
-                           int _height,
-                           ShaderConfig const& _backgroundShaderConfig,
-                           ShaderConfig const& _textShaderConfig) :
+                           unique_ptr<renderer::RenderTarget> _renderTarget) :
     events_{ _events },
     renderer_{
         _pty->screenSize(),
@@ -74,15 +71,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _backgroundOpacity,
         _hyperlinkNormal,
         _hyperlinkHover,
-        make_unique<OpenGLRenderer>(
-            _textShaderConfig,
-            _backgroundShaderConfig,
-            _width,
-            _height,
-            0, // TODO left margin
-            0, // TODO bottom margin
-            Size{} // TODO _cellSize?
-        )
+        move(_renderTarget)
     },
     fontSize_{ _fontDescriptions.size },
     size_{
