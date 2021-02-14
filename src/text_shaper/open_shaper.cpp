@@ -36,8 +36,6 @@
 #include <unordered_map>
 #include <utility>
 
-#define HAVE_FONTCONFIG 1
-
 using std::max;
 using std::move;
 using std::nullopt;
@@ -436,9 +434,7 @@ struct open_shaper::Private // {{{
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey_{}
     {
-#if defined(HAVE_FONTCONFIG)
         FcInit();
-#endif
 
         if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
             throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
@@ -453,9 +449,7 @@ struct open_shaper::Private // {{{
     {
         FT_Done_FreeType(ft_);
 
-#if defined(HAVE_FONTCONFIG)
         FcFini();
-#endif
     }
 }; // }}}
 
