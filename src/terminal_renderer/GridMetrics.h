@@ -28,8 +28,6 @@ struct GridMetrics
     Size cellSize;      // grid cell size in pixels
 
     int baseline;           // glyph's baseline position relative to cell bottom.
-    int ascender;           // glyph ascender relative to baseline
-    int descender;          // glyph descender relative to baseline
 
     struct {
         int position = 1;   // center underline position relative to cell bottom

@@ -1,7 +1,6 @@
 # Milestone 0.2.0 checklist
 
 - Twitch Highlight: Wednesday: 3:30:00 to 3:41:00
-- [ ] GridMetrics: use `text::font_metrics`
 - [ ] Font: support DirectWrite backend
 - [ ] Font: fix framed underline
 - [ ] Font: hasColor should not determine whether a glyph is emoji or not

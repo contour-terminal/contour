@@ -40,8 +40,6 @@ void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shape
     _gm.cellSize.width = m.advance;
     _gm.cellSize.height = m.line_height;
     _gm.baseline = m.line_height - m.ascender;
-    _gm.ascender = m.ascender;
-    _gm.descender = m.descender;
     _gm.underline.position = _gm.baseline + m.underline_position;
     _gm.underline.thickness = m.underline_thickness;
 }
