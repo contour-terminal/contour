@@ -17,7 +17,7 @@
 
 #include <terminal/Image.h>
 #include <terminal/Size.h>
-#include <QtCore/QPoint>
+#include <crispy/point.h>
 
 #include <vector>
 
@@ -38,7 +38,7 @@ class ImageRenderer
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(Size const& _cellSize);
 
-    void renderImage(QPoint _pos, ImageFragment const& _fragment);
+    void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some GPU caches.
     void discardImage(Image::Id _imageId);

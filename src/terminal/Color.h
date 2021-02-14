@@ -123,6 +123,9 @@ struct RGBAColor {
 
     constexpr RGBAColor(RGBColor _color) : RGBAColor{_color.red, _color.green, _color.blue, 0xFF} {}
 
+    constexpr RGBAColor(RGBColor _color, uint8_t _alpha) :
+        RGBAColor{_color.red, _color.green, _color.blue, _alpha} {}
+
     constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
 
     RGBAColor& operator=(std::string const& _hexCode);

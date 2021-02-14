@@ -41,7 +41,7 @@ void ImageRenderer::setCellSize(Size const& _cellSize)
     // TODO: recompute slices here?
 }
 
-void ImageRenderer::renderImage(QPoint _pos, ImageFragment const& _fragment)
+void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& _fragment)
 {
     if (optional<DataRef> const dataRef = getTextureInfo(_fragment); dataRef.has_value())
     {
@@ -51,8 +51,8 @@ void ImageRenderer::renderImage(QPoint _pos, ImageFragment const& _fragment)
         atlas::TextureInfo const& textureInfo = std::get<0>(*dataRef).get();
 
         // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-        auto const x = _pos.x();
-        auto const y = _pos.y();
+        auto const x = _pos.x;
+        auto const y = _pos.y;
         auto const z = 0;
         commandListener_.renderTexture({textureInfo, x, y, z, color});
     }

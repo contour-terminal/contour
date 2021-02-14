@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal_view/TerminalView.h>
-#include <terminal_renderer/opengl/OpenGLRenderer.h>
 
 #include <crispy/logger.h>
 
@@ -33,16 +32,6 @@ using std::tuple;
 using std::unique_ptr;
 
 namespace terminal::view {
-
-inline QVector4D makeColor(terminal::RGBColor const& _rgb, terminal::Opacity _opacity = terminal::Opacity::Opaque)
-{
-    return QVector4D{
-        static_cast<float>(_rgb.red) / 255.0f,
-        static_cast<float>(_rgb.green) / 255.0f,
-        static_cast<float>(_rgb.blue) / 255.0f,
-        static_cast<float>(_opacity) / 255.0f
-    };
-}
 
 TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,

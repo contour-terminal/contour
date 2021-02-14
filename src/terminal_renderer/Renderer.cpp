@@ -123,7 +123,7 @@ Renderer::Renderer(Size const& _screenSize,
         renderTarget_->monochromeAtlasAllocator(),
         gridMetrics_,
         CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        canonicalColor(_colorProfile.cursor)
+        _colorProfile.cursor
     }
 {
 }
@@ -200,7 +200,7 @@ void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
     colorProfile_ = _colors;
     backgroundRenderer_.setDefaultColor(_colors.defaultBackground);
     decorationRenderer_.setColorProfile(_colors);
-    cursorRenderer_.setColor(canonicalColor(colorProfile_.cursor));
+    cursorRenderer_.setColor(RGBAColor(colorProfile_.cursor));
 }
 
 uint64_t Renderer::render(Terminal& _terminal,

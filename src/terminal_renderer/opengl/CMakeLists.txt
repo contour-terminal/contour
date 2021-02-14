@@ -19,6 +19,7 @@ target_include_directories(terminal_renderer_opengl PRIVATE "${CMAKE_CURRENT_BIN
 target_include_directories(terminal_renderer_opengl PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 
 target_link_libraries(terminal_renderer_opengl PUBLIC
+    Qt5::Core
     Qt5::Gui
     crispy::core
     terminal

@@ -95,9 +95,9 @@ class Renderer {
                     bool _pressure);
 
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
-    static constexpr QVector4D canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
+    static constexpr std::array<float, 4> canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
     {
-        return QVector4D{
+        return std::array<float, 4>{
             static_cast<float>(_rgb.red) / 255.0f,
             static_cast<float>(_rgb.green) / 255.0f,
             static_cast<float>(_rgb.blue) / 255.0f,

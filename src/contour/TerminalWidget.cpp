@@ -14,6 +14,7 @@
 #include <contour/TerminalWidget.h>
 #include <contour/Actions.h>
 
+#include <terminal/Color.h>
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
 
@@ -735,15 +736,20 @@ void TerminalWidget::paintGL()
         bool const reverseVideo =
             terminalView_->terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
 
-        QVector4D const bg = terminal::renderer::Renderer::canonicalColor(
+        auto const bg =
             reverseVideo
-                ? profile().colors.defaultForeground
-                : profile().colors.defaultBackground,
-            profile().backgroundOpacity);
+                ? terminal::RGBAColor(profile().colors.defaultForeground, uint8_t(profile().backgroundOpacity))
+                : terminal::RGBAColor(profile().colors.defaultBackground, uint8_t(profile().backgroundOpacity));
 
         if (bg != renderStateCache_.backgroundColor)
         {
-            glClearColor(bg[0], bg[1], bg[2], bg[3]);
+            auto const clearColor = array<float, 4>{
+                float(bg.red()) / 255.0f,
+                float(bg.green()) / 255.0f,
+                float(bg.blue()) / 255.0f,
+                float(bg.alpha()) / 255.0f
+            };
+            glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
             renderStateCache_.backgroundColor = bg;
         }
 

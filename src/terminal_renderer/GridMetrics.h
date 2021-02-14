@@ -15,7 +15,7 @@
 
 #include <terminal/Size.h>
 
-#include <QtCore/QPoint>
+#include <crispy/point.h>
 
 #include <fmt/format.h>
 
@@ -54,17 +54,17 @@ struct GridMetrics
     /// @param row screen coordinate's line (between 1 and number of screen lines)
     ///
     /// @return 2D point into drawing coordinate system
-    constexpr QPoint map(int col, int row) const noexcept
+    constexpr crispy::Point map(int col, int row) const noexcept
     {
         return map(Coordinate{row, col});
     }
 
-    constexpr QPoint map(Coordinate const& _pos) const noexcept
+    constexpr crispy::Point map(Coordinate const& _pos) const noexcept
     {
         auto const x = pageMargin.left + (_pos.column - 1) * cellSize.width;
         auto const y = pageMargin.bottom + (pageSize.height - _pos.row) * cellSize.height;
 
-        return QPoint{x, y};
+        return {x, y};
     }
 };
 

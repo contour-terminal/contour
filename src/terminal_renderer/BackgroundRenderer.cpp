@@ -63,11 +63,11 @@ void BackgroundRenderer::renderCellRange()
     if (color_ == defaultColor_)
         return;
 
-    auto const pos = QPoint{gridMetrics_.map(startColumn_, row_)};
+    auto const pos = gridMetrics_.map(startColumn_, row_);
 
     renderTarget_.renderRectangle(
-        static_cast<unsigned>(pos.x()),
-        static_cast<unsigned>(pos.y()),
+        static_cast<unsigned>(pos.x),
+        static_cast<unsigned>(pos.y),
         gridMetrics_.cellSize.width * columnCount_,
         gridMetrics_.cellSize.height,
         static_cast<float>(color_.red) / 255.0f,

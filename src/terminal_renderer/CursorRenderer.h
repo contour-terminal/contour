@@ -13,12 +13,12 @@
  */
 #pragma once
 
+#include <terminal/Color.h>
 #include <terminal/Sequencer.h> // CursorShape
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
 
-#include <QtCore/QPoint>
-#include <QtGui/QVector4D>
+#include <crispy/point.h>
 
 #include <array>
 
@@ -31,13 +31,13 @@ class CursorRenderer {
                    atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                    GridMetrics const& _gridMetrics,
                    CursorShape _shape,
-                   QVector4D const& _color);
+                   RGBAColor _color);
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
-    void setColor(QVector4D const& _color);
+    void setColor(RGBAColor const& _color);
 
-    void render(QPoint _pos, int _columnWidth);
+    void render(crispy::Point _pos, int _columnWidth);
     void clearCache();
 
   private:

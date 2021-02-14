@@ -321,8 +321,8 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         );
 #endif
         auto const pos = gridMetrics_.map(_pos);
-        auto const x = pos.x();
-        auto const y = pos.y();
+        auto const x = pos.x;
+        auto const y = pos.y;
         auto const z = 0;
         auto const color = array{
             float(_color.red) / 255.0f,

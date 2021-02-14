@@ -159,12 +159,7 @@ void TextRenderer::flushPendingSegments()
     render(
         gridMetrics_.map(startColumn_, row_),
         cachedGlyphPositions(),
-        QVector4D(
-            static_cast<float>(color_.red) / 255.0f,
-            static_cast<float>(color_.green) / 255.0f,
-            static_cast<float>(color_.blue) / 255.0f,
-            1.0f
-        )
+        color_
     );
 }
 
@@ -287,11 +282,11 @@ void TextRenderer::finish()
     codepoints_.clear();
 }
 
-void TextRenderer::render(QPoint _pos,
+void TextRenderer::render(crispy::Point _pos,
                           text::shape_result const& _glyphPositions,
-                          QVector4D const& _color)
+                          RGBAColor const& _color)
 {
-    QPoint pen = _pos;
+    crispy::Point pen = _pos;
     auto const advanceX = gridMetrics_.cellSize.width;
 
     for (text::glyph_position const& gpos : _glyphPositions)
@@ -304,7 +299,7 @@ void TextRenderer::render(QPoint _pos,
                           get<1>(*ti).get(), // Metadata
                           gpos);
         }
-        pen.setX(pen.x() + advanceX); // only advance horizontally, as we're (guess what) a terminal. :-)
+        pen.x = pen.x + advanceX; // only advance horizontally, as we're (guess what) a terminal. :-)
     }
 }
 
@@ -478,8 +473,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                               metrics);
 }
 
-void TextRenderer::renderTexture(QPoint const& _pos,
-                                 QVector4D const& _color,
+void TextRenderer::renderTexture(crispy::Point const& _pos,
+                                 RGBAColor const& _color,
                                  atlas::TextureInfo const& _textureInfo,
                                  GlyphMetrics const& _glyphMetrics,
                                  text::glyph_position const& _glyphPos)
@@ -488,31 +483,31 @@ void TextRenderer::renderTexture(QPoint const& _pos,
 
     if (colored)
     {
-        auto const x = _pos.x()
+        auto const x = _pos.x
                      + _glyphMetrics.bearing.x
                      + _glyphPos.x
                      ;
 
-        auto const y = _pos.y();
+        auto const y = _pos.y;
 
-        renderTexture(QPoint(x, y), _color, _textureInfo);
+        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
     }
     else
     {
-        auto const x = _pos.x()
+        auto const x = _pos.x
                      + _glyphMetrics.bearing.x
                      + _glyphPos.x
                      ;
 
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
-        auto const y = _pos.y()                     // bottom left
+        auto const y = _pos.y                       // bottom left
                      + _glyphPos.y                  // -> harfbuzz adjustment
                      + gridMetrics_.baseline        // -> baseline
                      + _glyphMetrics.bearing.y      // -> bitmap top
                      - _glyphMetrics.bitmapSize.y   // -> bitmap height
                      ;
 
-        renderTexture(QPoint(x, y), _color, _textureInfo);
+        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
     }
 
 #if 0
@@ -527,15 +522,20 @@ void TextRenderer::renderTexture(QPoint const& _pos,
 #endif
 }
 
-void TextRenderer::renderTexture(QPoint const& _pos,
-                                 QVector4D const& _color,
+void TextRenderer::renderTexture(crispy::Point const& _pos,
+                                 RGBAColor const& _color,
                                  atlas::TextureInfo const& _textureInfo)
 {
     // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-    auto const x = _pos.x();
-    auto const y = _pos.y();
+    auto const x = _pos.x;
+    auto const y = _pos.y;
     auto const z = 0;
-    auto const color = array{_color[0], _color[1], _color[2], _color[3]};
+    auto const color = array{
+        float(_color.red()) / 255.0f,
+        float(_color.green()) / 255.0f,
+        float(_color.blue()) / 255.0f,
+        float(_color.alpha()) / 255.0f,
+    };
     commandListener_.renderTexture({_textureInfo, x, y, z, color});
 }
 

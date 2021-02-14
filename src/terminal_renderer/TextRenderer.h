@@ -14,17 +14,17 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+
+#include <terminal/Color.h>
 #include <terminal/Screen.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/shaper.h>
 
 #include <crispy/FNV.h>
+#include <crispy/point.h>
 
 #include <unicode/run_segmenter.h>
-
-#include <QtCore/QPoint>
-#include <QtGui/QVector4D>
 
 #include <functional>
 #include <list>
@@ -145,13 +145,13 @@ class TextRenderer {
     text::shape_result const& cachedGlyphPositions();
     text::shape_result requestGlyphPositions();
 
-    void render(QPoint _pos,
+    void render(crispy::Point _pos,
                 std::vector<text::glyph_position> const& glyphPositions,
-                QVector4D const& _color);
+                RGBAColor const& _color);
 
     /// Renders an arbitrary texture.
-    void renderTexture(QPoint const& _pos,
-                       QVector4D const& _color,
+    void renderTexture(crispy::Point const& _pos,
+                       RGBAColor const& _color,
                        atlas::TextureInfo const& _textureInfo);
 
     // rendering
@@ -167,8 +167,8 @@ class TextRenderer {
 
     std::optional<DataRef> getTextureInfo(GlyphId const& _id);
 
-    void renderTexture(QPoint const& _pos,
-                       QVector4D const& _color,
+    void renderTexture(crispy::Point const& _pos,
+                       RGBAColor const& _color,
                        atlas::TextureInfo const& _textureInfo,
                        GlyphMetrics const& _glyphMetrics,
                        text::glyph_position const& _gpos);

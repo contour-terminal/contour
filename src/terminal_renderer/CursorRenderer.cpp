@@ -13,11 +13,10 @@
  */
 #include <terminal_renderer/CursorRenderer.h>
 
-#include <QtCore/QSize>
-
 #include <stdexcept>
 #include <vector>
 
+using std::array;
 using std::get;
 using std::max;
 using std::nullopt;
@@ -31,12 +30,17 @@ CursorRenderer::CursorRenderer(atlas::CommandListener& _commandListener,
                                atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
                                GridMetrics const& _gridMetrics,
                                CursorShape _shape,
-                               QVector4D const& _color) :
+                               RGBAColor _color) :
     commandListener_{ _commandListener },
     textureAtlas_{ _monochromeTextureAtlas },
     gridMetrics_{ _gridMetrics },
     shape_{ _shape },
-    color_{ _color[0], _color[1], _color[2], _color[3] },
+    color_{
+        float(_color.red()) / 255.0f,
+        float(_color.green()) / 255.0f,
+        float(_color.blue()) / 255.0f,
+        float(_color.alpha()) / 255.0f,
+    },
     columnWidth_{ 1 }
 {
 }
@@ -50,9 +54,14 @@ void CursorRenderer::setShape(CursorShape _shape)
     }
 }
 
-void CursorRenderer::setColor(QVector4D const& _color)
+void CursorRenderer::setColor(RGBAColor const& _color)
 {
-    color_ = { _color[0], _color[1], _color[2], _color[3] };
+    color_ = array{
+        float(_color.red()) / 255.0f,
+        float(_color.green()) / 255.0f,
+        float(_color.blue()) / 255.0f,
+        float(_color.alpha()) / 255.0f,
+    };
 }
 
 void CursorRenderer::clearCache()
@@ -148,7 +157,7 @@ optional<CursorRenderer::DataRef> CursorRenderer::getDataRef(CursorShape _shape)
     return nullopt;
 }
 
-void CursorRenderer::render(QPoint _pos, int _columnWidth)
+void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
 {
     if (columnWidth_ != _columnWidth)
     {
@@ -160,8 +169,8 @@ void CursorRenderer::render(QPoint _pos, int _columnWidth)
     if (optional<DataRef> const dataRef = getDataRef(shape_); dataRef.has_value())
     {
         auto const& textureInfo = get<0>(dataRef.value()).get();
-        auto const x = _pos.x();
-        auto const y = _pos.y();
+        auto const x = _pos.x;
+        auto const y = _pos.y;
         auto constexpr z = 0;
         commandListener_.renderTexture({textureInfo, x, y, z, color_});
     }

@@ -16,6 +16,7 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/FileChangeWatcher.h>
+#include <terminal/Color.h>
 #include <terminal/Metrics.h>
 #include <terminal_view/TerminalView.h>
 
@@ -244,7 +245,7 @@ class TerminalWidget :
 
     // render state cache
     struct {
-        QVector4D backgroundColor{};
+        terminal::RGBAColor backgroundColor{};
     } renderStateCache_;
 
     QScrollBar* scrollBar_ = nullptr;
