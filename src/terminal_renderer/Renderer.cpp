@@ -15,6 +15,7 @@
 #include <terminal_renderer/TextRenderer.h>
 
 #include <text_shaper/open_shaper.h>
+#include <text_shaper/directwrite_shaper.h>
 
 #include <crispy/debuglog.h>
 
@@ -80,8 +81,14 @@ Renderer::Renderer(Size _screenSize,
                    terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
-                   Decorator _hyperlinkHover) :
-    textShaper_{ make_unique<text::open_shaper>(_logicalDpi) },
+                   Decorator _hyperlinkHover):
+    textShaper_{
+        #if defined(_WIN32)
+        make_unique<text::directwrite_shaper>(_logicalDpi)
+        #else
+        make_unique<text::open_shaper>(_logicalDpi)
+        #endif
+    },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },

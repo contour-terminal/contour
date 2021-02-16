@@ -1,10 +1,18 @@
-add_library(text_shaper STATIC
+set(text_shaper_SRC
     shaper.cpp shaper.h
     font.cpp font.h
     open_shaper.cpp open_shaper.h
-    # TODO: directwrite_shaper.cpp directwrite_shaper.h
-    # TODO: coretext_shaper.cpp coretext_shaper.h
 )
+
+if("${CMAKE_SYSTEM}" MATCHES "Windows")
+    list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.h)
+endif()
+
+# TODO: coretext_shaper.cpp coretext_shaper.h
+add_library(text_shaper STATIC ${text_shaper_SRC})
+
+find_package(Fontconfig REQUIRED)
+find_package(Freetype REQUIRED)
 
 set(TEXT_SHAPER_LIBS unicode::core)
 list(APPEND TEXT_SHAPER_LIBS fmt::fmt-header-only)
