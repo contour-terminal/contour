@@ -15,8 +15,6 @@
 #include <terminal_renderer/TextRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
 
-#include <text_shaper/open_shaper.h>
-
 #include <crispy/algorithm.h>
 #include <crispy/logger.h>
 #include <crispy/times.h>
