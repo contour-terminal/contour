@@ -183,6 +183,81 @@ namespace // {{{ helper
         }
     }
 
+    char const* fcWeightStr(int _value)
+    {
+        switch (_value)
+        {
+            case FC_WEIGHT_THIN: return "Thin";
+            case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
+            case FC_WEIGHT_LIGHT: return "Light";
+            case FC_WEIGHT_DEMILIGHT: return "DemiLight";
+            case FC_WEIGHT_BOOK: return "Book";
+            case FC_WEIGHT_REGULAR: return "Regular";
+            case FC_WEIGHT_MEDIUM: return "Medium";
+            case FC_WEIGHT_DEMIBOLD: return "DemiBold";
+            case FC_WEIGHT_BOLD: return "Bold";
+            case FC_WEIGHT_EXTRABOLD: return "ExtraBold";
+            case FC_WEIGHT_BLACK: return "Black";
+            case FC_WEIGHT_EXTRABLACK: return "ExtraBlack";
+            default: return "?";
+        }
+    }
+
+    char const* fcSlantStr(int _value)
+    {
+        switch (_value)
+        {
+            case FC_SLANT_ROMAN: return "Roman";
+            case FC_SLANT_ITALIC: return "Italic";
+            case FC_SLANT_OBLIQUE: return "Oblique";
+            default: return "?";
+        }
+    }
+
+    static optional<vector<string>> getAvailableFonts()
+    {
+        FcPattern* pat = FcPatternCreate();
+        FcObjectSet* os = FcObjectSetBuild(FC_FILE, FC_POSTSCRIPT_NAME, FC_FAMILY, FC_STYLE, FC_FULLNAME, FC_WEIGHT, FC_WIDTH, FC_SLANT, FC_HINT_STYLE, FC_INDEX, FC_HINTING, FC_SCALABLE, FC_OUTLINE, FC_COLOR, FC_SPACING, NULL);
+        FcFontSet* fs = FcFontList(nullptr, pat, os);
+
+        vector<string> output;
+
+        for (auto i = 0; i < fs->nfont; ++i)
+        {
+            FcPattern* font = fs->fonts[i];
+
+            FcChar8* filename = nullptr;
+            FcPatternGetString(font, FC_FILE, 0, &filename);
+
+            FcChar8* family = nullptr;
+            FcPatternGetString(font, FC_FAMILY, 0, &family);
+
+            int spacing = -1; // ignore font if we cannot retrieve spacing information
+            FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
+
+            int weight = -1;
+            FcPatternGetInteger(font, FC_WEIGHT, 0, &weight);
+
+            int slant = -1;
+            FcPatternGetInteger(font, FC_SLANT, 0, &slant);
+
+            if (spacing >= FC_DUAL)
+            {
+                std::cerr << fmt::format("font({}, {}): {}\n",
+                    fcWeightStr(weight),
+                    fcSlantStr(slant),
+                    (char*) family);
+                output.emplace_back((char const*) filename);
+            }
+        }
+
+        FcObjectSetDestroy(os);
+        FcFontSetDestroy(fs);
+        FcPatternDestroy(pat);
+
+        return output;
+    }
+
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
         debuglog().write("Loading font chain for: {}", _fd);
@@ -443,6 +518,8 @@ struct open_shaper::Private // {{{
         if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
             debuglog().write("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 #endif
+
+        getAvailableFonts();
     }
 
     ~Private()
