@@ -717,7 +717,7 @@ optional<tuple<optional<text::font_weight>, optional<text::font_slant>>> parseFo
     size_t i = 0;
 
     auto const currentToken = [&]() {
-        return tokens[i];
+        return i < tokens.size() ? tokens[i] : ""sv;
     };
     auto const nextToken = [&]() {
         if (i < tokens.size())
@@ -828,10 +828,32 @@ void softLoadFont(YAML::Node const& _node, string_view _key, text::font_descript
 
 void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store, text::font_description const& _default)
 {
-    if (auto value = _node[string(_key)]; value)
-        _store = text::font_description::parse(value.as<string>());
-    else
+    auto node = _node[string(_key)];
+    if (!node)
+    {
         _store = _default;
+    }
+    else if (node.IsScalar())
+    {
+        _store = text::font_description::parse(node.as<string>());
+    }
+    else if (node.IsMap())
+    {
+        if (node["family"].IsScalar())
+            _store.familyName = node["family"].as<string>();
+
+        if (auto const styleOpt = parseFontStyle(node["style"]); styleOpt.has_value())
+        {
+            auto const [weight, slant] = styleOpt.value();
+            _store.weight = weight.value_or(_store.weight);
+            _store.slant = slant.value_or(_store.slant);
+        }
+
+        if (node["features"].IsSequence())
+        {
+            // TODO: array of strings into _store.features
+        }
+    }
 }
 
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
@@ -919,7 +941,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
         softLoadValue(fonts, "only_monospace", profile.fonts.onlyMonospace, true);
 
-        auto& defaultFontFamily = profile.fonts.regular;
+        text::font_description const& defaultFontFamily = profile.fonts.regular;
         profile.fonts.regular.spacing = text::font_spacing::mono;
         softLoadFont(fonts, "regular", profile.fonts.regular, "monospace");
 
