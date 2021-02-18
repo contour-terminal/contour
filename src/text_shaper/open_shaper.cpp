@@ -519,7 +519,7 @@ struct open_shaper::Private // {{{
             debuglog().write("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 #endif
 
-        getAvailableFonts();
+        //getAvailableFonts();
     }
 
     ~Private()

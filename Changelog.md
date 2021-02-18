@@ -17,6 +17,7 @@
 - Adds config option `profile.*.maximized: BOOL` to indicate maximized state during profile activation.
 - Adds config option `profile.*.fullscreen: BOOL` to indicate fullscreen state during profile activation.
 - Adds config option `profile.*.fonts.only_monospace: BOOL` to indicate that only monospace fonts may be used.
+- Adds config option `profile.*.fonts.TYPE.weight: WEIGHT` and `profile.*.fonts.TYPE.slant: SLANT` options (optional) along with `profile.*.fonts.TYPE.family: STRING`.
 - ...
 
 ### 0.1.1 (2020-12-31)
