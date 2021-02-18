@@ -631,6 +631,11 @@ void TerminalWidget::initializeGL()
     glDebugMessageCallback(&glMessageCallback, this);
 #endif
 
+    auto shell = profile().shell;
+    shell.env["TERMINAL_NAME"] = "contour";
+    shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR);
+    shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
+
     terminalView_ = make_unique<terminal::view::TerminalView>(
         now_,
         *this,
@@ -651,7 +656,7 @@ void TerminalWidget::initializeGL()
 #else
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
-        profile().shell,
+        shell,
         make_unique<terminal::renderer::opengl::OpenGLRenderer>(
             *config::Config::loadShaderConfig(config::ShaderClass::Text),
             *config::Config::loadShaderConfig(config::ShaderClass::Background),
