@@ -30,9 +30,17 @@ struct vec2
 enum class font_weight
 {
     thin,
-    normal,
+    extra_light, // aka. ultralight
+    light,
+    demilight,   // aka. semilight
+    book,
+    normal,      // aka. regular
+    medium,
+    demibold,    // aka. semibold
     bold,
-    extra_bold,
+    extra_bold,  // aka. ultrabold
+    black,
+    extra_black, // aka. ultrablack
 };
 
 enum class font_slant
@@ -222,12 +230,28 @@ namespace fmt { // {{{
             {
                 case text::font_weight::thin:
                     return format_to(ctx.out(), "Thin");
+                case text::font_weight::extra_light:
+                    return format_to(ctx.out(), "ExtraLight");
+                case text::font_weight::light:
+                    return format_to(ctx.out(), "Light");
+                case text::font_weight::demilight:
+                    return format_to(ctx.out(), "DemiLight");
+                case text::font_weight::book:
+                    return format_to(ctx.out(), "Book");
                 case text::font_weight::normal:
                     return format_to(ctx.out(), "Regular");
+                case text::font_weight::medium:
+                    return format_to(ctx.out(), "Medium");
+                case text::font_weight::demibold:
+                    return format_to(ctx.out(), "DemiBold");
                 case text::font_weight::bold:
                     return format_to(ctx.out(), "Bold");
                 case text::font_weight::extra_bold:
-                    return format_to(ctx.out(), "Extra Bold");
+                    return format_to(ctx.out(), "ExtraBold");
+                case text::font_weight::black:
+                    return format_to(ctx.out(), "Black");
+                case text::font_weight::extra_black:
+                    return format_to(ctx.out(), "ExtraBlack");
             }
             return format_to(ctx.out(), "({})", unsigned(_value));
         }
