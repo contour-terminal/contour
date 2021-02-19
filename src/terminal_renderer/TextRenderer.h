@@ -81,7 +81,6 @@ struct GridMetrics;
 
 struct FontDescriptions {
     text::font_size size;
-    bool onlyMonospace;                 // indication on how font fallback should search
     text::font_description regular;
     text::font_description bold;
     text::font_description italic;
@@ -215,3 +214,25 @@ class TextRenderer {
 };
 
 } // end namespace
+
+namespace fmt {
+    template <>
+    struct formatter<terminal::renderer::FontDescriptions> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
+        {
+            return format_to(
+                ctx.out(),
+                "({}, {}, {}, {}, {}, {})",
+                fd.size,
+                fd.regular,
+                fd.bold,
+                fd.italic,
+                fd.boldItalic,
+                fd.emoji,
+                fd.renderMode);
+        }
+    };
+}

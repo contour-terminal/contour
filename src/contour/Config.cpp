@@ -939,23 +939,28 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.fonts.size = MinimumFontSize;
         }
 
-        softLoadValue(fonts, "only_monospace", profile.fonts.onlyMonospace, true);
+        bool onlyMonospace = true;
+        softLoadValue(fonts, "only_monospace", onlyMonospace, true);
 
         text::font_description const& defaultFontFamily = profile.fonts.regular;
         profile.fonts.regular.spacing = text::font_spacing::mono;
+        profile.fonts.regular.force_spacing = onlyMonospace;
         softLoadFont(fonts, "regular", profile.fonts.regular, "monospace");
 
         profile.fonts.bold.spacing = text::font_spacing::mono;
         profile.fonts.bold.weight = text::font_weight::bold;
+        profile.fonts.bold.force_spacing = onlyMonospace;
         softLoadFont(fonts, "bold", profile.fonts.bold, defaultFontFamily);
 
         profile.fonts.italic.spacing = text::font_spacing::mono;
         profile.fonts.italic.slant = text::font_slant::italic;
+        profile.fonts.italic.force_spacing = onlyMonospace;
         softLoadFont(fonts, "italic", profile.fonts.italic, defaultFontFamily);
 
         profile.fonts.boldItalic.spacing = text::font_spacing::mono;
         profile.fonts.boldItalic.weight = text::font_weight::bold;
         profile.fonts.boldItalic.slant = text::font_slant::italic;
+        profile.fonts.boldItalic.force_spacing = onlyMonospace;
         softLoadFont(fonts, "bold_italic", profile.fonts.boldItalic, defaultFontFamily);
 
         profile.fonts.emoji.spacing = text::font_spacing::mono;

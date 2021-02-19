@@ -323,10 +323,24 @@ namespace // {{{ helper
 
             int spacing = -1; // ignore font if we cannot retrieve spacing information
             FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-            if (_fd.spacing != font_spacing::proportional && spacing < FC_DUAL)
+            if (_fd.force_spacing)
             {
-                //debuglog().write("Skipping font: {} ({})", (char const*)(file), spacing);
-                continue;
+                if (_fd.spacing == font_spacing::proportional)
+                {
+                    if (spacing != FC_PROPORTIONAL)
+                    {
+                        debuglog().write("Skipping font: {} ({})", (char const*)(file), spacing);
+                        continue;
+                    }
+                }
+                else if (_fd.spacing == font_spacing::mono)
+                {
+                    if (spacing < FC_DUAL)
+                    {
+                        debuglog().write("Skipping font: {} ({})", (char const*)(file), spacing);
+                        continue;
+                    }
+                }
             }
 
             fallbackFonts.emplace_back((char const*)(file));

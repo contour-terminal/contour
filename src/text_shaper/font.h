@@ -62,6 +62,7 @@ struct font_description
     font_weight weight = font_weight::normal;
     font_slant slant = font_slant::normal;
     font_spacing spacing = font_spacing::proportional;
+    bool force_spacing = false;
 
     // returns "familyName [weight] [slant]"
     std::string toPattern() const;
@@ -75,7 +76,8 @@ inline bool operator==(font_description const& a, font_description const& b)
     return a.familyName == b.familyName
         && a.weight == b.weight
         && a.slant == b.slant
-        && a.spacing == b.spacing;
+        && a.spacing == b.spacing
+        && a.force_spacing == b.force_spacing;
 }
 
 inline bool operator!=(font_description const& a, font_description const& b)
@@ -201,7 +203,7 @@ namespace std { // {{{
         {
             auto fnv = crispy::FNV<char>();
             return size_t(
-                fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing))
+                fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)), char(fd.force_spacing))
             );
         }
     };
@@ -302,11 +304,12 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(text::font_description const& _desc, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "(family={} weight={} slant={} spacing={})",
+            return format_to(ctx.out(), "(family={} weight={} slant={} spacing={}, force_spacing={})",
                                         _desc.familyName,
                                         _desc.weight,
                                         _desc.slant,
-                                        _desc.spacing);
+                                        _desc.spacing,
+                                        _desc.force_spacing ? "yes" : "no");
         }
     };
 
