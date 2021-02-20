@@ -347,6 +347,17 @@ namespace // {{{ helper
             // debuglog().write("Found font: {}", fallbackFonts.back());
         }
 
+        #if defined(_WIN32)
+        if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal)
+            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolaz.ttf");
+        else if (_fd.weight != font_weight::normal)
+            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolab.ttf");
+        else if (_fd.slant != font_slant::normal)
+            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolai.ttf");
+        else
+            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consola.ttf");
+        #endif
+
         if (fallbackFonts.empty())
             return nullopt;
 
