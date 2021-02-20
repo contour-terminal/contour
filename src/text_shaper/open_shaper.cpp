@@ -403,14 +403,29 @@ namespace // {{{ helper
         }
 
         #if defined(_WIN32)
-        if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal)
-            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolaz.ttf");
-        else if (_fd.weight != font_weight::normal)
-            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolab.ttf");
-        else if (_fd.slant != font_slant::normal)
-            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consolai.ttf");
-        else
-            fallbackFonts.emplace_back("C:\\Windows\\Fonts\\consola.ttf");
+        #define FONTDIR "C:\\Windows\\Fonts\\"
+        if (_fd.familyName == "emoji") {
+            fallbackFonts.emplace_back(FONTDIR "seguiemj.ttf");
+            fallbackFonts.emplace_back(FONTDIR "seguisym.ttf");
+        }
+        else if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal) {
+            fallbackFonts.emplace_back(FONTDIR "consolaz.ttf");
+            fallbackFonts.emplace_back(FONTDIR "seguisbi.ttf");
+        }
+        else if (_fd.weight != font_weight::normal) {
+            fallbackFonts.emplace_back(FONTDIR "consolab.ttf");
+            fallbackFonts.emplace_back(FONTDIR "seguisb.ttf");
+        }
+        else if (_fd.slant != font_slant::normal) {
+            fallbackFonts.emplace_back(FONTDIR "consolai.ttf");
+            fallbackFonts.emplace_back(FONTDIR "seguisli.ttf");
+        }
+        else {
+            fallbackFonts.emplace_back(FONTDIR "consola.ttf");
+            fallbackFonts.emplace_back(FONTDIR "seguisym.ttf");
+        }
+
+        #undef FONTDIR
         #endif
 
         if (fallbackFonts.empty())
