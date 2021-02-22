@@ -20,6 +20,8 @@
 #include <crispy/times.h>
 #include <crispy/range.h>
 
+#include <unicode/convert.h>
+
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
@@ -247,7 +249,7 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
     if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
     {
         auto msg = debuglog();
-        msg.write("Shaped codepoints: {}", unicode::to_utf8(codepoints));
+        msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
         msg.write("  (presentation: {}/{})",
                 isEmojiPresentation ? "emoji" : "text",
                 get<unicode::PresentationStyle>(_run.properties));
@@ -550,13 +552,14 @@ void TextRenderer::debugCache(std::ostream& _textOutput) const
     _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
     for (auto && [word, key] : orderedKeys)
     {
+        auto const vword = u32string_view(word);
 #if !defined(NDEBUG)
         auto hits = int64_t{};
         if (auto i = cacheHits_.find(key); i != cacheHits_.end())
             hits = i->second;
-        _textOutput << fmt::format("{:>5} : {}\n", hits, unicode::to_utf8(word));
+        _textOutput << fmt::format("{:>5} : {}\n", hits, unicode::convert_to<char>(vword));
 #else
-        _textOutput << fmt::format("  {}\n", unicode::to_utf8(word));
+        _textOutput << fmt::format("  {}\n", unicode::convert_to<char>(vword));
 #endif
     }
 }

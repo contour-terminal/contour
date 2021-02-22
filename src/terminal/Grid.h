@@ -438,7 +438,7 @@ class Line { // {{{
 
     std::string toUtf8() const;
 
-    void setText(std::string const& _u8string);
+    void setText(std::string_view _u8string);
 
     Flags flags() const noexcept { return static_cast<Flags>(flags_); }
 

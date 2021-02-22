@@ -14,7 +14,7 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/ControlCode.h>
 
-#include <unicode/utf8.h>
+#include <unicode/convert.h>
 
 #include <algorithm>
 #include <array>
@@ -365,7 +365,7 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
     else if (_modifier.control() && _characterEvent >= '[' && _characterEvent <= '_')
         return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
     else if (!_modifier || _modifier == Modifier::Shift)
-        return append(unicode::to_utf8(_characterEvent));
+        return append(unicode::convert_to<char>(_characterEvent));
     else
         return false;
 }

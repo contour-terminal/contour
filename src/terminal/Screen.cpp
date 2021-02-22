@@ -28,6 +28,7 @@
 #include <unicode/emoji_segmenter.h>
 #include <unicode/word_segmenter.h>
 #include <unicode/grapheme_segmenter.h>
+#include <unicode/convert.h>
 #include <unicode/utf8.h>
 
 #include <algorithm>
@@ -52,6 +53,7 @@ using namespace std::string_view_literals;
 using std::accumulate;
 using std::array;
 using std::cerr;
+using std::distance;
 using std::endl;
 using std::function;
 using std::get;
@@ -88,7 +90,10 @@ namespace // {{{ helper
 
         void write(char32_t v)
         {
-            write(unicode::to_utf8(v));
+            char buf[4];
+            auto enc = unicode::encoder<char>{};
+            auto count = distance(buf, enc(v, buf));
+            write(string_view(buf, count));
         }
 
         void write(std::string_view const& _s)
@@ -398,19 +403,14 @@ void Screen::write(char const * _data, size_t _size)
         debuglog().write("raw: \"{}\"", escape(_data, _data + _size));
 #endif
 
-    parser_.parseFragment(_data, _size);
-
+    parser_.parseFragment(string_view(_data, _size));
     eventListener_.screenUpdated();
 }
 
 void Screen::write(std::u32string_view const& _text)
 {
-    for (char32_t codepoint : _text)
-    {
-        uint8_t bytes[4];
-        auto const len = unicode::to_utf8(codepoint, bytes);
-        write((char const*) bytes, len);
-    }
+    parser_.parseFragment(_text);
+    eventListener_.screenUpdated();
 }
 
 void Screen::writeText(char32_t _char)
@@ -754,7 +754,7 @@ string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
         if (cell.codepointCount())
             line += cell.toUtf8();
         else
-            line += " "; // fill character
+            line += ' '; // fill character
 
     return line;
 }

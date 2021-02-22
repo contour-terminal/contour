@@ -24,6 +24,7 @@
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>
+#include <unicode/convert.h>
 
 #include <fmt/format.h>
 
@@ -39,6 +40,7 @@
 #include <vector>
 
 using std::array;
+using std::distance;
 using std::get;
 using std::holds_alternative;
 using std::make_shared;
@@ -54,6 +56,7 @@ using std::stoi;
 using std::string;
 using std::stringstream;
 using std::unique_ptr;
+using std::u32string_view;
 using std::vector;
 
 using namespace std::string_view_literals;
@@ -1027,7 +1030,7 @@ void Sequencer::startOSC()
 void Sequencer::putOSC(char32_t _char)
 {
     uint8_t u8[4];
-    size_t const count = unicode::to_utf8(_char, u8);
+    size_t const count = distance(u8, unicode::encoder<char>{}(_char, u8));
     if (sequence_.intermediateCharacters().size() + count < Sequence::MaxOscLength)
         for (size_t i = 0; i < count; ++i)
             sequence_.intermediateCharacters().push_back(u8[i]);
@@ -1149,8 +1152,8 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
 unique_ptr<ParserExtension> Sequencer::hookSTP(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>(
-        [this](std::u32string const& _data) {
-            screen_.eventListener().setTerminalProfile(unicode::to_utf8(_data));
+        [this](u32string_view const& _data) {
+            screen_.eventListener().setTerminalProfile(unicode::convert_to<char>(_data));
         }
     );
     return nullptr;
@@ -1159,9 +1162,9 @@ unique_ptr<ParserExtension> Sequencer::hookSTP(Sequence const& /*_seq*/)
 unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>(
-        [this](std::u32string const& _data) {
-            auto const s = [](std::u32string const& _dataString) -> optional<RequestStatusString> {
-                auto const mappings = std::array<std::pair<std::u32string_view, RequestStatusString>, 9>{
+        [this](u32string_view const& _data) {
+            auto const s = [](u32string_view const& _dataString) -> optional<RequestStatusString> {
+                auto const mappings = std::array<std::pair<u32string_view, RequestStatusString>, 9>{
                     pair{U"m",   RequestStatusString::SGR},
                     pair{U"\"p", RequestStatusString::DECSCL},
                     pair{U" q",  RequestStatusString::DECSCUSR},

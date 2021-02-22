@@ -17,7 +17,7 @@
 #include <crispy/indexed.h>
 #include <crispy/range.h>
 
-#include <unicode/utf8.h>
+#include <unicode/convert.h>
 
 #include <algorithm>
 #include <iostream>
@@ -72,7 +72,7 @@ namespace // {{{ helper
 string Cell::toUtf8() const
 {
     if (codepointCount_)
-        return unicode::to_utf8(codepoints_.data(), codepointCount_);
+        return unicode::convert_to<char>(codepoints());
     else
         return " ";
 }
@@ -107,9 +107,21 @@ Line::Line(int _numCols, std::string_view const& _s, Flags _flags) :
 string Line::toUtf8() const
 {
     string s;
-    s.reserve(size());
+    s.resize(size() * 4);
+    auto t = s.data();
     for (Cell const& cell : crispy::range(begin(), next(begin(), size())))
-        s += cell.toUtf8();
+    {
+        if (cell.codepointCount() == 0)
+        {
+            *t++ = ' '; // NB: empty cells are represented as space.
+        }
+        else
+        {
+            for (char32_t codepoint : cell.codepoints())
+                t = unicode::encoder<char>{}(codepoint, t);
+        }
+    }
+    s.resize(std::distance(s.data(), t));
     return s;
 }
 
@@ -162,9 +174,9 @@ Line::Buffer Line::remove(iterator const& _from, iterator const& _to)
     return removedColumns;
 }
 
-void Line::setText(std::string const& _u8string)
+void Line::setText(std::string_view _u8string)
 {
-    for (auto const [i, ch] : crispy::indexed(unicode::from_utf8(_u8string)))
+    for (auto const [i, ch] : crispy::indexed(unicode::convert_to<char32_t>(_u8string)))
         buffer_.at(i).setCharacter(ch);
 }
 

@@ -23,7 +23,7 @@ class ParserExtension
 class SimpleStringCollector : public ParserExtension
 {
   public:
-    explicit SimpleStringCollector(std::function<void(std::u32string const&)> _done)
+    explicit SimpleStringCollector(std::function<void(std::u32string_view const&)> _done)
         : data_{},
           done_{ std::move(_done) }
     {}
@@ -46,7 +46,7 @@ class SimpleStringCollector : public ParserExtension
 
   private:
     std::u32string data_;
-    std::function<void(std::u32string const&)> done_;
+    std::function<void(std::u32string_view const&)> done_;
 };
 
 } // end namespace

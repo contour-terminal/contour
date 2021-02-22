@@ -727,12 +727,18 @@ class Parser {
 
     void parseFragment(char const* s, size_t n)
     {
-        parseFragment((uint8_t const*) s, (uint8_t const*) s + n);
+        parseFragment(iterator(s), iterator(s + n));
     }
 
-    void parseFragment(std::string const& s)
+    void parseFragment(std::string_view const& s)
     {
-        parseFragment((uint8_t const*) &s[0], (uint8_t const*) &s[0] + s.size());
+        parseFragment(iterator(s.data()), iterator(s.data() + s.size()));
+    }
+
+    void parseFragment(std::u32string_view const& s)
+    {
+        for (auto const codepoint : s)
+            processInput(codepoint);
     }
 
   private:
