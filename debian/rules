@@ -3,11 +3,11 @@
 
 export DH_VERBOSE=1
 
-BUILDDIR = build
+BUILDDIR = release
 
 configure: configure-stamp
 configure-stamp:
-	mkdir -p build
+	mkdir -p ${BUILDDIR}
 	cmake . \
 		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 		-DCMAKE_INSTALL_PREFIX="/usr" \
@@ -17,8 +17,9 @@ configure-stamp:
 		-DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
 		-DYAML_CPP_INSTALL=OFF \
 		-DCONTOUR_EXAMPLES=OFF \
-		-DLIBTERMINAL_TESTING=OFF \
-		-DLIBUNICODE_TESTING=OFF \
+		-DCRISPY_TESTING=ON \
+		-DLIBTERMINAL_TESTING=ON \
+		-DLIBUNICODE_TESTING=ON \
 		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
 		-B ${BUILDDIR}
 	touch $@
@@ -27,6 +28,9 @@ build: build-stamp
 build-stamp: configure-stamp
 	dh_testdir
 	$(MAKE) -C ${BUILDDIR} -j3
+	${BUILDDIR}/3rdparty/libunicode/src/unicode/unicode_test
+	${BUILDDIR}/src/crispy/crispy_test
+	${BUILDDIR}/src/terminal/terminal_test
 	touch $@
 
 install: install-stamp

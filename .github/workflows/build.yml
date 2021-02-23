@@ -2,149 +2,246 @@ name: Build
 
 on:
   push:
+    paths-ignore:
+    - 'docs/**'
+    - '.github/ISSUE_TEMPLATE/**'
+    - '.github/*.yml'
+    - 'TODO.md'
     branches:
-      - master
-      - wip
-      - testing
-      - unstable
-      - broken
+    - master
+    - feature/**
+    - fix/**
+    - improvement/**
+    - wip
+    - testing
+    - unstable
+    - broken
   pull_request:
     branches:
-      - master
+    - master
 
 jobs:
+  ubuntu_2004_no_kwin:
+    name: "Ubuntu Linux 20.04 (no KWin)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v1
+    - name: "initialize sub modules"
+      run: git submodule update --init --recursive
+    - name: "install dependencies"
+      run: |
+        set -ex
+        cat /etc/apt/sources.list
+        sudo apt -q update
+        sudo apt install -y "g++-9" \
+                build-essential cmake \
+                libfreetype6-dev \
+                qtbase5-dev libqt5gui5 extra-cmake-modules \
+                libfontconfig1-dev libharfbuzz-dev
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        cd build && cmake .. \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
+          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+          -DYAML_CPP_INSTALL=OFF
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
   ubuntu_2004:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v1
-      - name: "initialize sub modules"
-        run: git submodule update --init --recursive
-      - name: "install dependencies"
-        run: |
-          set -ex
-          cat /etc/apt/sources.list
-          sudo apt -q update
-          sudo apt install -y "g++-9" \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 cmake extra-cmake-modules \
-                  libfontconfig1-dev libharfbuzz-dev
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          cd build && cmake .. \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
-            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-            -DYAML_CPP_INSTALL=OFF
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
-
-  ubuntu_2004_qt_kde:
-    name: "Ubuntu Linux 20.04 (with KWin support)"
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v1
-      - name: "initialize sub modules"
-        run: git submodule update --init --recursive
-      - name: "install dependencies"
-        run: |
-          set -ex
-          cat /etc/apt/sources.list
-          sudo apt -q update
-          sudo apt install -y "g++-9" \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          cd build && cmake .. \
-            -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
-            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-            -DYAML_CPP_INSTALL=OFF
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
+    - uses: actions/checkout@v1
+    - name: "initialize sub modules"
+      run: git submodule update --init --recursive
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        cat /etc/apt/sources.list
+        sudo apt -q update
+        sudo apt install -y "g++-9" "g++-10" \
+                libfreetype6-dev \
+                qtbase5-dev libqt5gui5 cmake extra-cmake-modules libkf5windowsystem-dev \
+                libfontconfig1-dev libharfbuzz-dev \
+                debhelper dpkg-dev
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        cd build && cmake .. \
+          -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=g++-9 \
+          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+          -DYAML_CPP_INSTALL=OFF
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "CPack: Creating DEB & TGZ package"
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        ls -hl
+    - name: "Uploading artifact .deb package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 30
+    - name: "Uploading artifact ZIP package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        if-no-files-found: error
+        retention-days: 30
 
   ubuntu1804:
     name: "Ubuntu Linux 18.04"
     runs-on: ubuntu-18.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - name: "initialize sub modules"
-        run: git submodule update --init --recursive
-      - name: "install dependencies"
-        run: |
-          set -ex
-          cat /etc/apt/sources.list
-          sudo apt -q update
-          sudo apt install -y "g++-9" libboost-all-dev \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev \
-                  debhelper dpkg-dev
-      - name: "Get specific version CMake, v3.18.3"
-        uses: lukka/get-cmake@v3.18.3
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          cd build && cmake .. \
-            -DUSE_BOOST_FILESYSTEM=ON \
-            -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-            -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
-            -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-            -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-            -DYAML_CPP_INSTALL=OFF
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: "initialize sub modules"
+      run: git submodule update --init --recursive
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        cat /etc/apt/sources.list
+        sudo apt -q update
+        sudo apt install -y "g++-9" libboost-all-dev \
+                cmake \
+                libfreetype6-dev \
+                qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                libfontconfig1-dev libharfbuzz-dev
+    - name: "Get specific version CMake, v3.18.3"
+      uses: lukka/get-cmake@v3.18.3
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        cd build && cmake .. \
+          -DUSE_BOOST_FILESYSTEM=ON \
+          -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
+          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+          -DYAML_CPP_INSTALL=OFF
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "CPack: Creating TGZ package"
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        # CPack DEB:
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        # CPack TGZ:
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        echo "pwd: `pwd`" && ls -hl
+    - name: "Uploading artifact .deb package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 30
+    - name: "Uploading artifact ZIP package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        if-no-files-found: error
+        retention-days: 30
 
   osx:
     name: "OS/X"
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v1
-      - name: "Initialize sub modules"
-        run: git submodule update --init --recursive
-      - name: "Install dependencies"
-        run: |
-          set -ex
-          #brew update
-          brew install freetype fontconfig qt5 harfbuzz boost pkg-config
-      - name: "Create build directory"
-        run: mkdir build
-      - name: "Generate build files"
-        run: |
-          cmake . \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-                -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-                -DYAML_CPP_INSTALL=OFF \
-                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
-                -B build/
-      - name: "Build"
-        run: cmake --build build/
-      - name: "test: libcrispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
+    - uses: actions/checkout@v1
+    - name: "Initialize sub modules"
+      run: git submodule update --init --recursive
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Install dependencies"
+      run: |
+        set -ex
+        #brew update
+        brew install freetype fontconfig qt5 harfbuzz boost pkg-config
+    - name: "Create build directory"
+      run: mkdir build
+    - name: "Generate build files"
+      run: |
+        cmake . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+              -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+              -DYAML_CPP_INSTALL=OFF \
+              -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
+              -B build/
+    - name: "Build"
+      run: cmake --build build/
+    - name: "test: libcrispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "Create Package(s)"
+      run: |
+        set -ex
+        cd build
+        sudo cpack
+        BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
+        echo "pwd: `pwd`:" && ls -hl
+        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
+        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
+    - name: Upload to artifact store (DMG)
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+        if-no-files-found: error
+        retention-days: 30
 
   windows:
     name: "Windows"
@@ -153,6 +250,12 @@ jobs:
     - uses: actions/checkout@v1
     - name: "Initialize sub modules"
       run: git submodule update --init --recursive
+    - name: setup environment
+      shell: powershell
+      id: set_vars
+      run: .\scripts\ci-set-vars.ps1
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
     - name: Install Qt
       uses: jurplel/install-qt-action@v2
     - name: "vcpkg: Install dependencies"
@@ -166,11 +269,32 @@ jobs:
     - name: "create build directory"
       run: mkdir build
     - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
     - name: "Build"
-      run: cmake --build build/
+      run: cmake --build build/ --config Release
     - name: "test: libcrispy"
-      run: .\build\src\crispy\Debug\crispy_test.exe
+      run: .\build\src\crispy\Release\crispy_test.exe
     - name: "test: libterminal"
-      run: .\build\src\terminal\Debug\terminal_test.exe
+      run: .\build\src\terminal\Release\terminal_test.exe
+    - name: "Create Package(s)"
+      shell: powershell
+      run: |
+        cd build
+        cpack
+        type "_CPack_Packages/win64/WIX/wix.log"
+    - name: inspect
+      run: Get-ChildItem -Recurse
+    - name: "Rename packages"
+      run: |
+        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
+        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
+    - name: "Inspect again"
+      run: Get-ChildItem
+    - name: "Uploading MSI to artifact store"
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+        if-no-files-found: error
+        retention-days: 30
 

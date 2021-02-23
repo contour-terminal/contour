@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Christian Parpart <christian@parpart.family>
 Build-Depends:
   cmake,
-  debhelper (>= 9),
+  debhelper,
   make,
   g++-9,
   libkf5windowsystem-dev,

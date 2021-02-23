@@ -28,16 +28,34 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     endif()
 
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/.git"))
-        execute_process(COMMAND git describe --always --dirty=-modified --tags
-            OUTPUT_VARIABLE version_text
+        execute_process(COMMAND git describe --all
+            OUTPUT_VARIABLE git_branch
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             OUTPUT_STRIP_TRAILING_WHITESPACE)
-        string(REGEX MATCH "^v?([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ ${version_text})
-        if(NOT("${CMAKE_MATCH_1}" STREQUAL ""))
-            set(THE_VERSION ${CMAKE_MATCH_1})
-            set(THE_VERSION_STRING "${version_text}")
-            set(THE_SOURCE "git")
+        string(REGEX MATCH "^(.*)\/(.*)$$" _ ${git_branch})
+        set(THE_GIT_BRANCH "${CMAKE_MATCH_2}")
+        message(STATUS "[Version] Git branch: ${THE_GIT_BRANCH}")
+
+        execute_process(COMMAND git rev-parse --short HEAD
+            OUTPUT_VARIABLE git_sha_short
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(THE_GIT_SHA_SHORT "${git_sha_short}")
+        message(STATUS "[Version] Git SHA: ${THE_GIT_SHA_SHORT}")
+
+        file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
+        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+).*$" _ "${changelog_contents}")
+        # extract and construct version triple
+        set(THE_VERSION ${CMAKE_MATCH_1})
+        # extract suffix, construct full version string
+        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
+
+        if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
+            set(THE_VERSION_STRING "${THE_VERSION}-${CMAKE_MATCH_2}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
+        else()
+            set(THE_VERSION_STRING "${THE_VERSION}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
         endif()
+        set(THE_SOURCE "git & ${CMAKE_SOURCE_DIR}/Changelog.md")
     endif()
 
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/Changelog.md"))

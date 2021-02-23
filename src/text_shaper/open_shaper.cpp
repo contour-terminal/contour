@@ -190,7 +190,9 @@ namespace // {{{ helper
             case FC_WEIGHT_THIN: return "Thin";
             case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
             case FC_WEIGHT_LIGHT: return "Light";
+#if defined(FC_WEIGHT_DEMILIGHT)
             case FC_WEIGHT_DEMILIGHT: return "DemiLight";
+#endif
             case FC_WEIGHT_BOOK: return "Book";
             case FC_WEIGHT_REGULAR: return "Regular";
             case FC_WEIGHT_MEDIUM: return "Medium";
@@ -217,7 +219,28 @@ namespace // {{{ helper
     static optional<vector<string>> getAvailableFonts()
     {
         FcPattern* pat = FcPatternCreate();
-        FcObjectSet* os = FcObjectSetBuild(FC_FILE, FC_POSTSCRIPT_NAME, FC_FAMILY, FC_STYLE, FC_FULLNAME, FC_WEIGHT, FC_WIDTH, FC_SLANT, FC_HINT_STYLE, FC_INDEX, FC_HINTING, FC_SCALABLE, FC_OUTLINE, FC_COLOR, FC_SPACING, NULL);
+        FcObjectSet* os = FcObjectSetBuild(
+#if defined(FC_COLOR)
+            FC_COLOR,
+#endif
+            FC_FAMILY,
+            FC_FILE,
+            FC_FULLNAME,
+            FC_HINTING,
+            FC_HINT_STYLE,
+            FC_INDEX,
+            FC_OUTLINE,
+#if defined(FC_POSTSCRIPT_NAME)
+            FC_POSTSCRIPT_NAME,
+#endif
+            FC_SCALABLE,
+            FC_SLANT,
+            FC_SPACING,
+            FC_STYLE,
+            FC_WEIGHT,
+            FC_WIDTH,
+            NULL
+        );
         FcFontSet* fs = FcFontList(nullptr, pat, os);
 
         vector<string> output;

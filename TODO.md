@@ -1,6 +1,9 @@
 # Milestone 0.2.0 checklist
 
-- Twitch Highlight: Wednesday: 3:30:00 to 3:41:00
+- [ ] CI: use cpack to build linux zip's (and maybe deb files?)
+- [ ] CI: ensure installers contain right version + git sha + prerelease suffix
+- [ ] CI: Fix ubuntu 18.04 dependencies
+
 - [ ] Font: support DirectWrite backend
 - [ ] Font: fix framed underline
 - [ ] Font: hasColor should not determine whether a glyph is emoji or not
@@ -19,33 +22,6 @@
 - [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).
   This function is behind permission gate and triggers a popup dialog when set to "ask".
 - [ ] debug log must include software git sha (and version)
-- [ ] REFLOW Grid: finish unit tests
-- [x] BUG: emoji in wintitle not working anymore?
-- [x] merge rgb into rgba texture atlas => NO
-- [x] inverting y-axis on texture: I've forgotten to adapt ImageFragment's (sixel graphics))
-    - how to do that without unnecessary memory copies just to inverse Y-axis?
-- [x] pre-init atlas with pure RED or GREEN or BLUE (rgb/a) - or black for R.
-- [x] invert texture in texture atlas, for better debugging
-- [x] emoji: resize-to-fit cell size then center.
-- [x] CLI: add `--live-config`, and default to non-live
-- [x] font: load on demand
-- [x] Font: investigate in glyphs exceeding cell dimensions in X, Y, or X & Y (other terms seem to resize that font face's glyph, or scale down, then)
-- [x] Font: emojis sometimes use the wrong `x_offset` are are displayed at the beginning of the line.
-- [x] Font: investigate in faulty glyph offsetting?
-- [x] clipboard: don't include trailing spaces per line
-- [x] "// TODO: use `crispy::split(string) -> vector<string_view>` here"
-- [x] verify OpenConfiguration is working (with ctrl+shift+,)
-- [x] RENDERING: respect propotion of colored (emoji) glyph (y-offset / bearing)?
-- [x] OpenFileManager action is missing impl, use xdg-open for that
-- [x] get underline position & thickness from font metrics
-- [x] fix doubly underline
-- [x] fix curly underline
-- [x] `Config::fullscreen` is uninitialized and seems to be a dead member. Revive then.
-- [x] fullscreen profile config
-- [x] leaving fullscreen to restore last window size / maximized state
-- [x] report bug to Zsh (omg, mailinglist) that `precmd` is not invoked early enough on FIRST prompt.
-- [x] Text shaping on emoji presentation modifiers seem to sometimes get it wrong (wrt. fe0e and fe0f).
-- [x] Font: rework API to also enable the ability to support DirectWrite and maybe CoreText
 
 ```
 * and at start of debug-logging, dump initial state once.
