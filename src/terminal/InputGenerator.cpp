@@ -77,10 +77,13 @@ namespace mappings {
     // the modifier parameter is going to be replaced via fmt::format()
     array<KeyMapping, 30> functionKeysWithModifiers{
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
-        KeyMapping{Key::F1, CSI "1;{}P"},
-        KeyMapping{Key::F2, CSI "1;{}Q"},
-        KeyMapping{Key::F3, CSI "1;{}R"},
-        KeyMapping{Key::F4, CSI "1;{}S"},
+        // XXX: Maybe I am blind when reading ctlseqs.txt, but F1..F4 with "1;{}P".. seems not to
+        // match what other terminal emulators send out with modifiers and I don't see how to match
+        // xterm's behaviour along with getting for example vim working to bind to these.
+        KeyMapping{Key::F1, ESC "O{}P"}, // "1;{}P"
+        KeyMapping{Key::F2, ESC "O{}Q"}, // "1;{}Q"
+        KeyMapping{Key::F3, ESC "O{}R"}, // "1;{}R"
+        KeyMapping{Key::F4, ESC "O{}S"}, // "1;{}S"
         KeyMapping{Key::F5, CSI "15;{}~"},
         KeyMapping{Key::F6, CSI "17;{}~"},
         KeyMapping{Key::F7, CSI "18;{}~"},
