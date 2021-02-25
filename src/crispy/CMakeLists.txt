@@ -10,6 +10,8 @@ set(CRISPY_CORE_LIBS fmt::fmt-header-only unicode::core)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core INTERFACE USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)
+else()
+    list(APPEND CRISPY_CORE_LIBS ${FILESYSTEM_LIBS})
 endif()
 
 target_link_libraries(crispy-core INTERFACE ${CRISPY_CORE_LIBS})

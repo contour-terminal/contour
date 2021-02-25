@@ -257,7 +257,7 @@ constexpr Modifier modifier(InputEvent _event) noexcept
     }, _event);
 }
 
-constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
+inline bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
 {
     if (modifier(_lhs) < modifier(_rhs))
         return true;
@@ -286,7 +286,7 @@ constexpr bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcep
     return false;
 }
 
-constexpr bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
+inline bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
 {
     if (modifier(_lhs) == modifier(_rhs))
     {

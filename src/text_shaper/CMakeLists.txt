@@ -6,30 +6,38 @@ add_library(text_shaper STATIC
     # TODO: coretext_shaper.cpp coretext_shaper.h
 )
 
-find_package(Fontconfig REQUIRED)
-find_package(Freetype REQUIRED)
-
 set(TEXT_SHAPER_LIBS unicode::core)
 list(APPEND TEXT_SHAPER_LIBS fmt::fmt-header-only)
-list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
-list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
 
 if(APPLE)
     find_package(PkgConfig REQUIRED)
+    find_package(Fontconfig REQUIRED)
+    find_package(Freetype REQUIRED)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
     execute_process(
         COMMAND sh -c "brew --prefix harfbuzz | cut -d. -f1 | tr -d $'\n'"
         OUTPUT_VARIABLE HARFBUZZ_APPLE_INCLUDE)
     include_directories("${HARFBUZZ_APPLE_INCLUDE}/include")
-    list(APPEND TEXT_SHAPER_LIBS  PkgConfig::harfbuzz)
+    list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
+    list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
+    list(APPEND TEXT_SHAPER_LIBS PkgConfig::harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Linux")
     find_package(PkgConfig REQUIRED)
+    #find_package(Fontconfig REQUIRED)
+    pkg_check_modules(Fontconfig REQUIRED IMPORTED_TARGET fontconfig)
+    find_package(Freetype REQUIRED)
     pkg_check_modules(harfbuzz REQUIRED IMPORTED_TARGET harfbuzz)
     list(APPEND TEXT_SHAPER_LIBS PkgConfig::harfbuzz)
+    list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
+    list(APPEND TEXT_SHAPER_LIBS PkgConfig::Fontconfig)
 elseif("${CMAKE_SYSTEM}" MATCHES "Windows")
     # installed via vcpkg
     find_package(harfbuzz CONFIG REQUIRED)
+    find_package(Freetype REQUIRED)
+    find_package(Fontconfig REQUIRED)
     list(APPEND TEXT_SHAPER_LIBS harfbuzz::harfbuzz)
+    list(APPEND TEXT_SHAPER_LIBS Fontconfig::Fontconfig)
+    list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
     list(APPEND TEXT_SHAPER_LIBS dwrite)
 endif()
 
