@@ -633,7 +633,7 @@ void TerminalWidget::initializeGL()
 
     auto shell = profile().shell;
     shell.env["TERMINAL_NAME"] = "contour";
-    shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR);
+    shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
     shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
     terminalView_ = make_unique<terminal::view::TerminalView>(
