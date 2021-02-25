@@ -129,10 +129,10 @@ namespace mappings {
         KeyMapping{Key::PageDown, CSI "6~"},
 
         // function keys
-        KeyMapping{Key::F1, ESC "0P"},
-        KeyMapping{Key::F2, ESC "0Q"},
-        KeyMapping{Key::F3, ESC "0R"},
-        KeyMapping{Key::F4, ESC "0S"},
+        KeyMapping{Key::F1, ESC "OP"},
+        KeyMapping{Key::F2, ESC "OQ"},
+        KeyMapping{Key::F3, ESC "OR"},
+        KeyMapping{Key::F4, ESC "OS"},
         KeyMapping{Key::F5, CSI "15~"},
         KeyMapping{Key::F6, CSI "17~"},
         KeyMapping{Key::F7, CSI "18~"},
