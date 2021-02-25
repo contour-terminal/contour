@@ -463,8 +463,7 @@ namespace // {{{ helper
             }
         }
 
-        FtFacePtr facePtr(ftFace, [](FT_Face p) { FT_Done_Face(p); });
-        return facePtr;
+        return optional<FtFacePtr>{FtFacePtr(ftFace, [](FT_Face p) { FT_Done_Face(p); })};
     }
 
     void replaceMissingGlyphs(FT_Face _ftFace, shape_result& _result)

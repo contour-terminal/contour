@@ -2,9 +2,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../FilesystemResolver.cmake")
 add_executable(cincludeme cincludeme.cpp)
 
 if(${USING_BOOST_FILESYSTEM})
-    message(STATUS "cincludeme: Using boost::filesystem")
     target_compile_definitions(cincludeme PRIVATE USING_BOOST_FILESYSTEM=1)
-    target_link_libraries(cincludeme Boost::filesystem)
-else()
-    message(STATUS "cincludeme: Using std c++fs")
 endif()
+
+target_link_libraries(cincludeme "${FILESYSTEM_LIBS}")

@@ -918,7 +918,7 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::parser::State state, FormatContext& ctx)
         {
-            auto constexpr mappings = std::array<std::string_view, 15>{
+            auto static const mappings = std::array<std::string_view, 15>{
                 "Undefined",
                 "Ground",
                 "Escape",
