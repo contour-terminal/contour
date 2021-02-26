@@ -785,6 +785,12 @@ namespace impl // {{{ some command generator helpers
                 case 16:
                     _screen.requestPixelSize(RequestPixelSize::CellArea);
                     break;
+                case 18:
+                    _screen.requestCharacterSize(RequestPixelSize::TextArea);
+                    break;
+                case 19:
+                    _screen.requestCharacterSize(RequestPixelSize::WindowArea);
+                    break;
                 default:
                     return ApplyResult::Unsupported;
             }

@@ -289,6 +289,7 @@ class Screen {
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
     void requestPixelSize(RequestPixelSize _area);
+    void requestCharacterSize(RequestPixelSize _area);
     void sixelImage(Size _pixelSize, Image::Data&& _rgba);
     void requestStatusString(RequestStatusString _value);
     void requestTabStops();

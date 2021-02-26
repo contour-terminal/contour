@@ -1828,6 +1828,22 @@ void Screen::requestPixelSize(RequestPixelSize _area)
     }
 }
 
+void Screen::requestCharacterSize(RequestPixelSize _area) // TODO: rename RequestPixelSize to RequestArea?
+{
+    switch (_area)
+    {
+        case RequestPixelSize::TextArea:
+            reply("\033[8;{};{}t", size_.height, size_.width);
+            break;
+        case RequestPixelSize::WindowArea:
+            reply("\033[9;{};{}t", size_.height, size_.width);
+            break;
+        case RequestPixelSize::CellArea:
+            assert(!"Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
+            break;
+    }
+}
+
 void Screen::requestStatusString(RequestStatusString _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
