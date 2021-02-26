@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -100,5 +101,36 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
 
     return params;
 }
+
+template <typename Ch>
+bool startsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _prefix)
+{
+    if (_text.size() < _prefix.size())
+        return false;
+
+    for (size_t i = 0; i < _prefix.size(); ++i)
+        if (_text[i] != _prefix[i])
+            return false;
+
+    return true;
+}
+
+template <typename Ch>
+bool endsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _prefix)
+{
+    if (_text.size() < _prefix.size())
+        return false;
+
+    for (size_t i = 0; i < _prefix.size(); ++i)
+        if (_text[_text.size() - _prefix.size() + i] != _prefix[i])
+            return false;
+
+    return true;
+}
+
+struct finally {
+    std::function<void()> hook{};
+    ~finally() { hook(); }
+};
 
 } // end namespace
