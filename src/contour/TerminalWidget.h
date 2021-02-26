@@ -142,6 +142,7 @@ class TerminalWidget :
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
+    void reply(std::string_view const& /*_reply*/) override;
     void onClosed() override;
     void onSelectionComplete() override;
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;

@@ -325,11 +325,18 @@ void Terminal::sendPaste(string_view const& _text)
     flushInput();
 }
 
+void Terminal::sendRaw(std::string_view const& _text)
+{
+    inputGenerator_.generate(_text);
+    flushInput();
+}
+
 void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
     if (!pendingInput_.empty())
     {
+        // XXX should be the only location that does write to the PTY's stdin to avoid race conditions.
         pty_->write(pendingInput_.data(), pendingInput_.size());
         debuglog().write(crispy::escape(begin(pendingInput_), end(pendingInput_)));
         pendingInput_.clear();
@@ -451,9 +458,9 @@ void Terminal::notify(std::string_view const& _title, std::string_view const& _b
     eventListener_.notify(_title, _body);
 }
 
-void Terminal::reply(string_view const& reply)
+void Terminal::reply(string_view const& _reply)
 {
-    pty_->write(reply.data(), reply.size());
+    eventListener_.reply(_reply);
 }
 
 void Terminal::resetDynamicColor(DynamicColorName _name)

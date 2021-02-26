@@ -48,6 +48,7 @@ class TerminalView : private Terminal::Events {
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
+        virtual void reply(std::string_view const& /*_response*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
@@ -147,6 +148,7 @@ class TerminalView : private Terminal::Events {
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
+    void reply(std::string_view const& /*_response*/) override;
     void onClosed() override;
     void onSelectionComplete() override;
     void resetDynamicColor(DynamicColorName /*_name*/) override;

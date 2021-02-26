@@ -456,6 +456,12 @@ bool InputGenerator::generate(FocusOutEvent const&)
     return true;
 }
 
+bool InputGenerator::generate(std::string_view const& _raw)
+{
+    append(_raw);
+    return true;
+}
+
 // {{{ mouse handling
 void InputGenerator::setMouseProtocol(MouseProtocol _mouseProtocol, bool _enabled)
 {

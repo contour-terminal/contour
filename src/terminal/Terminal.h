@@ -54,6 +54,7 @@ class Terminal : public ScreenEvents {
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
         virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
+        virtual void reply(std::string_view const& /*_response*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
         virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
@@ -99,6 +100,8 @@ class Terminal : public ScreenEvents {
 
     /// Sends verbatim text in bracketed mode to application.
     void sendPaste(std::string_view const& _text);
+
+    void sendRaw(std::string_view const& _text);
     // }}}
 
     // {{{ screen proxy
@@ -219,7 +222,6 @@ class Terminal : public ScreenEvents {
   private:
     void flushInput();
     void screenUpdateThread();
-    void onScreenReply(std::string_view const& reply);
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
 
     template <typename Renderer, typename... RemainingPasses>
