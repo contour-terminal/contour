@@ -382,6 +382,9 @@ class InputGenerator {
     bool generate(FocusInEvent const&);
     bool generate(FocusOutEvent const&);
 
+    /// Generates raw input, usually used for sending reply VT sequences.
+    bool generate(std::string_view const& _raw);
+
     /// Swaps out the generated input control sequences.
     void swap(Sequence& _other);
 

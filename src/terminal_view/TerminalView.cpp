@@ -299,6 +299,11 @@ void TerminalView::notify(std::string_view const& _title, std::string_view const
     events_.notify(_title, _body);
 }
 
+void TerminalView::reply(std::string_view const& _response)
+{
+    events_.reply(_response);
+}
+
 void TerminalView::onClosed()
 {
     events_.onClosed();

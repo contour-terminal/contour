@@ -1641,6 +1641,13 @@ void TerminalWidget::notify(std::string_view const& _title, std::string_view con
                           QString::fromUtf8(_content.data(), static_cast<int>(_content.size())));
 }
 
+void TerminalWidget::reply(std::string_view const& _reply)
+{
+    post([this, data = string(_reply)]() {
+        terminalView_->terminal().sendRaw(data);
+    });
+}
+
 void TerminalWidget::setWindowTitle(std::string_view const& _title)
 {
     post([this, terminalTitle = string(_title)]() {
