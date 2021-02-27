@@ -1,0 +1,24 @@
+#!/bin/sh
+set -o errexit -o pipefail
+
+export cpuCount=$(awk '/^processor/{n+=1}END{print n}' /proc/cpuinfo)
+git submodule update --init --recursive
+mkdir -p build
+cd build && cmake .. \
+          -GNinja \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
+          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+          -DYAML_CPP_INSTALL=OFF
+ninja -j$cpuCount
+strip src/contour/contour
+
+cd ..
+
+mkdir artifact
+
+mv build/src/contour/contour artifact
+mv src/contour/contour.desktop artifact
+mv src/contour/res/images/contour-logo.png artifact
+
+tar --zstd -cfcontour.tar.zst -C artifact contour contour.desktop contour-logo.png
