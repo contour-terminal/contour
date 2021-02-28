@@ -33,6 +33,10 @@ using std::move;
 
 namespace terminal {
 
+namespace {
+    auto const KeyboardTag = crispy::debugtag::make("terminal.input", "Logs terminal input events.");
+}
+
 Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
@@ -98,7 +102,7 @@ void Terminal::screenUpdateThread()
 
 bool Terminal::send(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_point _now)
 {
-    debuglog().write("key: {}; keyEvent: {}", to_string(_keyEvent.key), to_string(_keyEvent.modifier));
+    debuglog(KeyboardTag).write("key: {}; keyEvent: {}", to_string(_keyEvent.key), to_string(_keyEvent.modifier));
 
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
@@ -118,9 +122,9 @@ bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time
     lastCursorBlink_ = _now;
 
     if (_charEvent.value <= 0x7F && isprint(static_cast<int>(_charEvent.value)))
-        debuglog().write("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier));
+        debuglog(KeyboardTag).write("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier));
     else
-        debuglog().write("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier));
+        debuglog(KeyboardTag).write("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier));
 
     // Early exit if KAM is enabled.
     if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
@@ -338,7 +342,7 @@ void Terminal::flushInput()
     {
         // XXX should be the only location that does write to the PTY's stdin to avoid race conditions.
         pty_->write(pendingInput_.data(), pendingInput_.size());
-        debuglog().write(crispy::escape(begin(pendingInput_), end(pendingInput_)));
+        debuglog(KeyboardTag).write(crispy::escape(begin(pendingInput_), end(pendingInput_)));
         pendingInput_.clear();
     }
 }

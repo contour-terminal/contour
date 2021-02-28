@@ -54,8 +54,6 @@ GridMetrics loadGridMetrics(text::font_key _font, Size _pageSize, text::shaper& 
 
     loadGridMetricsFromFont(_font, gm, _textShaper);
 
-    debuglog().write("Loading grid metrics: {}", gm);
-
     return gm;
 }
 

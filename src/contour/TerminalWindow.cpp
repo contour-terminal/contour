@@ -54,6 +54,10 @@ using namespace std::placeholders;
 
 namespace contour {
 
+namespace {
+    auto const WindowTag = crispy::debugtag::make("terminal.window", "Logs system window debug events.");
+}
+
 using actions::Action;
 
 TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath) :
@@ -128,7 +132,7 @@ void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
 {
 #if 0
     int index = indexOf(_terminalWidget);
-    debuglog().write("index: {}; title {}", index, _terminalWidget->view()->terminal().screen().windowTitle());
+    debuglog(WindowTag).write("index: {}; title {}", index, _terminalWidget->view()->terminal().screen().windowTitle());
     if (index != -1)
         removeTab(index);
 
@@ -136,7 +140,7 @@ void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
         close();
 #else
     (void) _terminalWidget;
-    debuglog().write("title {}", _terminalWidget->view()->terminal().screen().windowTitle());
+    debuglog(WindowTag).write("title {}", _terminalWidget->view()->terminal().screen().windowTitle());
     close();
 #endif
 }

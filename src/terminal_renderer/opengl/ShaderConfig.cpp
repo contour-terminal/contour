@@ -26,6 +26,8 @@
 namespace terminal::renderer::opengl {
 
 namespace {
+    auto const OpenGLRendererTag = crispy::debugtag::make("renderer.opengl", "Logs OpenGL render target details.");
+
     template <size_t N>
     inline std::string s(std::array<uint8_t, N> const& data)
     {
@@ -54,7 +56,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
 
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
     {
-        debuglog().write("Compiling vertex shader {} failed. {}", _shaderConfig.vertexShaderFileName,
+        debuglog(OpenGLRendererTag).write("Compiling vertex shader {} failed. {}", _shaderConfig.vertexShaderFileName,
                                                                   shader->log().toStdString());
         qDebug() << shader->log();
         return {};
@@ -62,22 +64,22 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
 
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
     {
-        debuglog().write("Compiling fragment shader {} failed. {}", _shaderConfig.fragmentShaderFileName,
+        debuglog(OpenGLRendererTag).write("Compiling fragment shader {} failed. {}", _shaderConfig.fragmentShaderFileName,
                                                                     shader->log().toStdString());
         return {};
     }
 
     if (!shader->link())
     {
-        debuglog().write("Linking shaders {} & {} failed. {}",
-                         _shaderConfig.vertexShaderFileName,
-                         _shaderConfig.fragmentShaderFileName,
-                         shader->log().toStdString());
+        debuglog(OpenGLRendererTag).write("Linking shaders {} & {} failed. {}",
+                                          _shaderConfig.vertexShaderFileName,
+                                          _shaderConfig.fragmentShaderFileName,
+                                          shader->log().toStdString());
         return {};
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        debuglog().write(logString);
+        debuglog(OpenGLRendererTag).write(logString);
 
     return shader;
 }

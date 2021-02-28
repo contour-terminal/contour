@@ -65,6 +65,11 @@ using namespace std::string_view_literals;
 
 namespace terminal {
 
+namespace {
+    auto const VTParserTag = crispy::debugtag::make("vtparser.errors", "Logs terminal parser errors.");
+    auto const VTParserTraceTag = crispy::debugtag::make("vtparser.trace", "Logs terminal parser instruction trace.");
+}
+
 namespace // {{{ helpers
 {
     /// @returns parsed tuple with OSC code and offset to first data parameter byte.
@@ -944,7 +949,7 @@ Sequencer::Sequencer(Screen& _screen,
 
 void Sequencer::error(std::string_view const& _errorString)
 {
-    debuglog().write("Parser error: {}", _errorString);
+    debuglog(VTParserTag).write("Parser error: {}", _errorString);
 }
 
 void Sequencer::print(char32_t _char)
@@ -1234,16 +1239,16 @@ void Sequencer::executeControlFunction(char _c0)
             screen_.restoreCursor();
             break;
         default:
-            debuglog().write("Unsupported C0 sequence: {}", crispy::escape(_c0));
+            debuglog(VTParserTag).write("Unsupported C0 sequence: {}", crispy::escape(_c0));
             break;
     }
 }
 
 void Sequencer::handleSequence()
 {
-#if 0 // defined(LIBTERMINAL_LOG_TRACE)
+#if defined(LIBTERMINAL_LOG_TRACE)
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("Trace sequence: {}", sequence_);
+        debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
 #endif
     // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,
     //         sequence_.functionDefinition() ? sequence_.functionDefinition()->comment : ""sv);
@@ -1274,7 +1279,7 @@ void Sequencer::handleSequence()
         screen_.verifyState();
     }
     else
-        debuglog().write("Unknown VT sequence: {}", sequence_);
+        debuglog(VTParserTag).write("Unknown VT sequence: {}", sequence_);
 }
 
 void Sequencer::flushBatchedSequences()

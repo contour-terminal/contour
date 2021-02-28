@@ -26,6 +26,9 @@
 #include <QSurfaceFormat>
 
 #include <iostream>
+#include <iomanip>
+#include <algorithm>
+#include <numeric>
 
 using namespace std;
 
@@ -41,6 +44,7 @@ namespace contour {
             addOption(liveConfigOption);
             addOption(parserTable);
             addOption(enableDebugLogging);
+            addOption(listDebugTags);
             addPositionalArgument("executable", "path to executable to execute.");
         }
 
@@ -64,8 +68,14 @@ namespace contour {
         };
 
         QCommandLineOption const enableDebugLogging{
-            QStringList() << "d" << "enable-debug-logging",
-            QCoreApplication::translate("main", "Enables debug logging.")
+            QStringList() << "d" << "enable-debug",
+            QCoreApplication::translate("main", "Enables debug logging, using a comma seperated list of tags."),
+            QCoreApplication::translate("main", "TAGS")
+        };
+
+        QCommandLineOption const listDebugTags{
+            QStringList() << "D" << "list-debug-tags",
+            QCoreApplication::translate("main", "Lists all available debug tags and exits.")
         };
 
         QCommandLineOption const liveConfigOption{
@@ -74,6 +84,7 @@ namespace contour {
         };
 
         QString profileName() const { return value(profileOption); }
+        std::string debuglogFilter() const { return value(enableDebugLogging).toStdString(); }
 
         QCommandLineOption const workingDirectoryOption{
             QStringList() << "w" << "working-directory",
@@ -145,8 +156,50 @@ int main(int argc, char* argv[])
             return result;
         });
 
+        if (cli.isSet(cli.listDebugTags))
+        {
+            auto tags = crispy::debugtag::store();
+            sort(
+                begin(tags),
+                end(tags),
+                [](crispy::debugtag::tag_info const& a, crispy::debugtag::tag_info const& b) {
+                   return a.name < b.name;
+                }
+            );
+            auto const maxNameLength = std::accumulate(
+                begin(tags),
+                end(tags),
+                size_t{0},
+                [&](auto _acc, auto const& _tag) { return max(_acc, _tag.name.size()); }
+            );
+            auto const column1Length = maxNameLength + 2u;
+            for (auto const& tag: tags)
+            {
+                std::cout
+                    << left << setw(int(column1Length)) << tag.name
+                    << "; " << tag.description << '\n';
+            }
+            return EXIT_SUCCESS;
+        }
+
         if (cli.isSet(cli.enableDebugLogging))
+        {
+            auto const filterString = cli.debuglogFilter();
+            auto const filters = crispy::split(filterString, ',');
             crispy::logging_sink::for_debug().enable(true);
+            for (auto& tag: crispy::debugtag::store())
+            {
+                tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
+                    if (filterPattern.back() != '*')
+                        return tag.name == filterPattern;
+                    return std::equal(
+                        begin(filterPattern),
+                        prev(end(filterPattern)),
+                        begin(tag.name)
+                    );
+                });
+            }
+        }
 
         QString const configPath = cli.value(cli.configOption);
 
