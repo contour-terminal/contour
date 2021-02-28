@@ -334,32 +334,22 @@ jobs:
     - name: Build ${{ matrix.arch }} release
       shell: bash
       run: |
-        arch="${{ matrix.arch }}"
-        PLATFORM=${arch%% *}
-        ARCH=${arch##* }
-        mkdir artifacts
-        docker buildx build --platform $PLATFORM \
-        --tag contour:$ARCH \
-        -f archlinux/Dockerfile \
+        docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
+        --tag contour:${{ steps.tags.outputs.ARCH }} \
+        -f .github/archlinux/Dockerfile \
         --load \
         .
-        docker create --name contour-$ARCH contour:$ARCH
-        docker cp contour-$ARCH:/app/contour.tar.zst contour-$ARCH.tar.zst
-        docker container rm contour-$ARCH
+        docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
+        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.tar.zst contour-${{ steps.tags.outputs.ARCH }}.tar.zst
+        docker container rm contour-${{ steps.tags.outputs.ARCH }}
     - name: "test: libcrispy"
       shell: bash
       run: |
-        arch="${{ matrix.arch }}"
-        PLATFORM=${arch%% *}
-        ARCH=${arch##* }
-        docker run --rm contour:$ARCH build/src/crispy/crispy_test
+        docker run --rm contour:${{ steps.tags.outputs.ARCH }} build/src/crispy/crispy_test
     - name: "test: libterminal"
       shell: bash
       run: |
-        arch="${{ matrix.arch }}"
-        PLATFORM=${arch%% *}
-        ARCH=${arch##* }
-        docker run --rm contour:$ARCH build/src/terminal/terminal_test
+        docker run --rm contour:${{ steps.tags.outputs.ARCH }} build/src/terminal/terminal_test
     - name: "Uploading Archlinux .tar.zst package"
       uses: actions/upload-artifact@v2
       with:

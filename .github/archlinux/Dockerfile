@@ -10,4 +10,4 @@ RUN pacman -Su --noconfirm gcc ninja cmake extra-cmake-modules qt5-base fontconf
 
 RUN ls -la
 
-RUN ./archlinux/dist
+RUN ./.github/archlinux/build
