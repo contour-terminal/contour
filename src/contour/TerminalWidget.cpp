@@ -24,7 +24,7 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <terminal_renderer/opengl/OpenGLRenderer.h>
 

@@ -18,7 +18,7 @@
 
 #include <terminal/Size.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>

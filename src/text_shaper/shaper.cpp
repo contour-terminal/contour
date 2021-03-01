@@ -13,7 +13,7 @@
  */
 #include <text_shaper/shaper.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <utility>
 #include <vector>

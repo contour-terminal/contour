@@ -15,7 +15,7 @@
 #include <text_shaper/font.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/indexed.h>
 

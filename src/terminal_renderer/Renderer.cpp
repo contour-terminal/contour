@@ -16,7 +16,7 @@
 
 #include <text_shaper/open_shaper.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <array>
 #include <functional>

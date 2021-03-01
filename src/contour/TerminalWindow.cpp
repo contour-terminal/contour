@@ -26,7 +26,7 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <QtCore/QDebug>
 #include <QtGui/QScreen>

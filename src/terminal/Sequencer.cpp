@@ -20,7 +20,7 @@
 #include <crispy/algorithm.h>
 #include <crispy/base64.h>
 #include <crispy/escape.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>

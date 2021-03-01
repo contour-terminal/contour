@@ -20,7 +20,7 @@
 
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>

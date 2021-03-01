@@ -18,7 +18,7 @@
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <chrono>
 #include <utility>

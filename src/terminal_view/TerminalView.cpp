@@ -13,7 +13,7 @@
  */
 #include <terminal_view/TerminalView.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <fmt/ostream.h>
 

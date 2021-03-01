@@ -16,7 +16,7 @@
 #include <contour/TerminalWidget.h>
 
 #include <terminal/Parser.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/indexed.h>
 #include <crispy/utils.h>
 

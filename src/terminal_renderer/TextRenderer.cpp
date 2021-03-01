@@ -16,7 +16,7 @@
 #include <terminal_renderer/GridMetrics.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/range.h>
 

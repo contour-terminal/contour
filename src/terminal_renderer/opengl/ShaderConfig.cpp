@@ -13,7 +13,7 @@
  */
 #include <terminal_renderer/opengl/ShaderConfig.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <iostream>
 #include <string>
