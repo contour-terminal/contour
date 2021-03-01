@@ -569,11 +569,11 @@ void Grid::clampHistory()
         for (auto& line : lines(historyLineCount() - diff, historyLineCount()))
         {
             auto const wrappable = true;
-            std::cout << fmt::format(
-                "clampHistory: wrappable={}: \"{}\"\n",
-                wrappable ? "true" : "false",
-                line.toUtf8()
-            );
+            // std::cout << fmt::format(
+            //     "clampHistory: wrappable={}: \"{}\"\n",
+            //     wrappable ? "true" : "false",
+            //     line.toUtf8()
+            // );
             line.setFlag(Line::Flags::Wrappable, wrappable);
         }
 
