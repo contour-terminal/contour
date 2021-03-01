@@ -15,7 +15,7 @@
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/Atlas.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/times.h>
 
 #include <array>

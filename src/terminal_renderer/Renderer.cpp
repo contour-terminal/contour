@@ -16,7 +16,7 @@
 
 #include <text_shaper/open_shaper.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <array>
 #include <functional>
@@ -53,8 +53,6 @@ GridMetrics loadGridMetrics(text::font_key _font, Size _pageSize, text::shaper& 
     gm.pageMargin = {0, 0};       // TODO (fill early)
 
     loadGridMetricsFromFont(_font, gm, _textShaper);
-
-    debuglog().write("Loading grid metrics: {}", gm);
 
     return gm;
 }

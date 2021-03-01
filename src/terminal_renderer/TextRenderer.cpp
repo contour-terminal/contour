@@ -16,7 +16,7 @@
 #include <terminal_renderer/GridMetrics.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/range.h>
 
@@ -42,6 +42,10 @@ using std::u32string_view;
 using std::vector;
 
 namespace terminal::renderer {
+
+namespace {
+    auto const TextRendererTag = crispy::debugtag::make("renderer.text", "Logs details about text rendering.");
+}
 
 TextRenderer::TextRenderer(atlas::CommandListener& _commandListener,
                            atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
@@ -83,8 +87,6 @@ void TextRenderer::updateFontMetrics()
 
 void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color)
 {
-    // debuglog().write("styles:{}, color:{}", _styles, _color);
-
     row_ = _pos.row;
     startColumn_ = _pos.column;
     characterStyleMask_ = _styles;
@@ -186,9 +188,6 @@ text::shape_result const& TextRenderer::cachedGlyphPositions()
 
 text::shape_result TextRenderer::requestGlyphPositions()
 {
-    // if (characterStyleMask_.mask() != 0)
-    //     debuglog().write("TextRenderer.requestGlyphPositions: styles=({})", characterStyleMask_);
-
     text::shape_result glyphPositions;
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
@@ -248,7 +247,7 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
 
     if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
     {
-        auto msg = debuglog();
+        auto msg = debuglog(TextRendererTag);
         msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
         msg.write("  (presentation: {}/{})",
                 isEmojiPresentation ? "emoji" : "text",
@@ -343,15 +342,15 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    debuglog().write("Glyph metrics: {}", glyph);
+    debuglog(TextRendererTag).write("Glyph metrics: {}", glyph);
     // auto const xMax = glyph.left + glyph.width;
     // if (xMax > gridMetrics_.cellSize.width * numCells)
     // {
-    //     debuglog().write("Glyph width {}+{}={} exceeds cell width {}.",
-    //                      glyph.left,
-    //                      glyph.width,
-    //                      xMax,
-    //                      gridMetrics_.cellSize.width * numCells);
+    //     debuglog(TextRendererTag).write("Glyph width {}+{}={} exceeds cell width {}.",
+    //                                     glyph.left,
+    //                                     glyph.width,
+    //                                     xMax,
+    //                                     gridMetrics_.cellSize.width * numCells);
     // }
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
@@ -399,7 +398,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
             //     return rightEdge;
             // }();
             // if (rightEdge != std::numeric_limits<int>::max())
-            //     debuglog().write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
+            //     debuglog(TextRendererTag).write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
         }
     }
     // }}}
@@ -414,13 +413,13 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
 
     auto const yOverflow = gridMetrics_.cellSize.height - yMax;
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
-                         _id.index,
-                         colored ? "emoji" : "text",
-                         ratio,
-                         yOverflow < 0 ? yOverflow : 0,
-                         yMin < 0 ? yMin : 0,
-                         glyph);
+        debuglog(TextRendererTag).write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+                                        _id.index,
+                                        colored ? "emoji" : "text",
+                                        ratio,
+                                        yOverflow < 0 ? yOverflow : 0,
+                                        yMin < 0 ? yMin : 0,
+                                        glyph);
 
     auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
@@ -440,7 +439,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
 
     if (yOverflow < 0)
     {
-        debuglog().write("Cropping {} overflowing bitmap rows.", -yOverflow);
+        debuglog(TextRendererTag).write("Cropping {} overflowing bitmap rows.", -yOverflow);
         glyph.height += yOverflow;
         glyph.top += yOverflow;
     }
@@ -449,7 +448,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     {
         auto const rowCount = -yMin;
         auto const pixelCount = rowCount * glyph.width * text::pixel_size(glyph.format);
-        debuglog().write("Cropping {} underflowing bitmap rows.", rowCount);
+        debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.height += yMin;
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount));
@@ -512,13 +511,13 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
 
 #if 0
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
-                         x, y,
-                         _pos.x(), _pos.y(),
-                         _textureInfo.width, _textureInfo.height,
-                         _glyphPos.x, _glyphPos.y,
-                         textShaper_.metrics(_glyphPos.glyph.font).baseline(),
-                         _glyph.descender);
+        debuglog(TextRendererTag).write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
+                                        x, y,
+                                        _pos.x(), _pos.y(),
+                                        _textureInfo.width, _textureInfo.height,
+                                        _glyphPos.x, _glyphPos.y,
+                                        textShaper_.metrics(_glyphPos.glyph.font).baseline(),
+                                        _glyph.descender);
 #endif
 }
 

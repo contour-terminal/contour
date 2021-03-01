@@ -13,7 +13,7 @@
  */
 #include <terminal_view/TerminalView.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <fmt/ostream.h>
 
@@ -32,6 +32,10 @@ using std::tuple;
 using std::unique_ptr;
 
 namespace terminal::view {
+
+namespace {
+    auto const ViewTag = crispy::debugtag::make("terminal.view", "Logs render target independent terminal view event.");
+}
 
 TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,
@@ -132,14 +136,16 @@ void TerminalView::updateFontMetrics()
 {
     auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
 
-    debuglog().write("with font size {}, adjusting margin from {}x{} to {}x{}\n",
-                     fontSize_,
-                     windowMargin_.left, windowMargin_.bottom,
-                     newMargin.left, newMargin.bottom);
+    debuglog(ViewTag).write("with font size {}, adjusting margin from {}x{} to {}x{}\n",
+                            fontSize_,
+                            windowMargin_.left, windowMargin_.bottom,
+                            newMargin.left, newMargin.bottom);
 
     windowMargin_ = newMargin;
     renderer_.updateFontMetrics();
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+    debuglog(ViewTag).write("Loading grid metrics: {}", renderer_.gridMetrics());
+
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
     resize(size_.width, size_.height);
@@ -193,7 +199,7 @@ void TerminalView::resize(int _width, int _height)
         terminal_.clearSelection();
     }
 
-    debuglog().write("Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}",
+    debuglog(ViewTag).write("Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}",
         size_,
         newScreenSize,
         windowMargin_.left, windowMargin_.bottom,
@@ -208,7 +214,7 @@ void TerminalView::setCursorShape(CursorShape _shape)
 
 bool TerminalView::setTerminalSize(Size _cells)
 {
-    debuglog().write("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
+    debuglog(ViewTag).write("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
 
     if (terminal_.screenSize() == _cells)
         return false;

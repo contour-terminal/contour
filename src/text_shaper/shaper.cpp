@@ -13,7 +13,7 @@
  */
 #include <text_shaper/shaper.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <utility>
 #include <vector>
@@ -24,6 +24,10 @@ using std::max;
 using std::vector;
 
 namespace text {
+
+namespace {
+    auto FontScaleTag = crispy::debugtag::make("font.scaling", "Logs about font's glyph scaling metrics, if required.");
+}
 
 tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, int _width, int _height)
 {
@@ -39,10 +43,10 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, int _width
     vector<uint8_t> dest;
     dest.resize(_height * _width * 4);
 
-    debuglog().write("scaling from {}x{} to {}x{}, ratio {}x{} ({}), factor {}",
-            _bitmap.width, _bitmap.height,
-            _width, _height,
-            ratioX, ratioY, ratio, factor);
+    debuglog(FontScaleTag).write("scaling from {}x{} to {}x{}, ratio {}x{} ({}), factor {}",
+                                 _bitmap.width, _bitmap.height,
+                                 _width, _height,
+                                 ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     for (int i = 0, sr = 0; i < _height; i++, sr += factor)

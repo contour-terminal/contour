@@ -13,6 +13,9 @@
  */
 #pragma once
 
+#include <crispy/indexed.h>
+#include <crispy/algorithm.h>
+
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -65,13 +68,62 @@ namespace detail {
     using source_location = detail::dummy_source_location;
 #endif
 
+namespace debugtag
+{
+    struct tag_info {
+        std::string name;
+        bool enabled;
+        std::string description;
+    };
+    struct tag_id { size_t value; };
+
+    inline std::vector<tag_info>& store()
+    {
+        static std::vector<tag_info> tagStore;
+        return tagStore;
+    }
+
+    // inline tag_id get(std::string_view _name)
+    // {
+    //     for (auto const && [i, t] : crispy::indexed(store()))
+    //         if (_name == t.name)
+    //             return tag_id{ i };
+    //
+    //     store().emplace_back(std::pair{_name, false});
+    //     return tag_id{ store().size() - 1 };
+    // }
+
+    inline tag_id make(std::string_view _name, std::string_view _description)
+    {
+        assert(crispy::none_of(store(), [&](tag_info const& x) { return x.name == _name; }));
+        store().emplace_back(tag_info{std::string(_name), false, std::string(_description)});
+        return tag_id{ store().size() - 1 };
+    }
+
+    inline void enable(tag_id _tag)
+    {
+        store().at(_tag.value).enabled = true;
+    }
+
+    inline void disable(tag_id _tag)
+    {
+        store().at(_tag.value).enabled = false;
+    }
+
+    inline bool enabled(tag_id _tag) noexcept
+    {
+        return _tag.value < store().size() && store().at(_tag.value).enabled;
+    }
+}
+
 class log_message {
   public:
     using Flush = std::function<void(log_message const&)>;
 
-    log_message(Flush _flush, source_location _sloc) :
+    log_message(Flush _flush, source_location _sloc, debugtag::tag_id _tag) :
         flush_{ std::move(_flush) },
-        location_{ std::move(_sloc) }
+        location_{ std::move(_sloc) },
+        tag_{ _tag }
     {}
 
     ~log_message()
@@ -82,21 +134,25 @@ class log_message {
     template <typename... Args>
     void write(std::string_view _message)
     {
-        text_.append(_message);
+        if (debugtag::enabled(tag_))
+            text_.append(_message);
     }
 
     template <typename... Args>
     void write(std::string_view _format, Args&&... _args)
     {
-        text_.append(fmt::format(_format, std::forward<Args>(_args)...));
+        if (debugtag::enabled(tag_))
+            text_.append(fmt::format(_format, std::forward<Args>(_args)...));
     }
 
     source_location const& location() const noexcept { return location_; }
+    debugtag::tag_id tag() const noexcept { return tag_; }
     std::string const& text() const noexcept { return text_; }
 
   private:
     Flush flush_;
     source_location const location_;
+    debugtag::tag_id const tag_;
     std::string text_;
 };
 
@@ -165,15 +221,15 @@ class logging_sink {
 #if defined(CRISPY_SOURCE_LOCATION)
     // XXX: sadly, this must be a global function so we can provide the fallback below.
     // TODO: Change that as soon as we get C++20's std::source_location on all major platforms supported.
-    inline ::crispy::log_message debuglog(crispy::source_location _sloc = crispy::source_location::current())
+    inline ::crispy::log_message debuglog(::crispy::debugtag::tag_id _tag, crispy::source_location _sloc = crispy::source_location::current())
     {
-        return crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, _sloc);
+        return crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, _sloc, _tag);
     }
 #elif defined(__GNUC__) || defined(__clang__)
-    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__)))
+    #define debuglog(_tag) (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__), (_tag)))
 #elif defined(__func__)
-    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __func__)))
+    #define debuglog(_tag) (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __func__), (_tag)))
 #elif defined(__FUNCTION__)
-    #define debuglog() (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__)))
+    #define debuglog(_tag) (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__), (_tag)))
 #endif
 

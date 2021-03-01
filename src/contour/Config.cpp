@@ -20,7 +20,7 @@
 
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
@@ -42,6 +42,10 @@
 auto constexpr MinimumFontSize = text::font_size{ 8.0 };
 
 namespace contour::config {
+
+namespace {
+    auto const ConfigTag = crispy::debugtag::make("config", "Logs configuration file loading.");
+}
 
 using namespace std;
 using actions::Action;
@@ -934,8 +938,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(fonts, "size", profile.fonts.size.pt);
         if (profile.fonts.size < MinimumFontSize)
         {
-            debuglog().write("Invalid font size {} set in config file. Minimum value is {}.",
-                             profile.fonts.size, MinimumFontSize);
+            debuglog(ConfigTag).write("Invalid font size {} set in config file. Minimum value is {}.",
+                                      profile.fonts.size, MinimumFontSize);
             profile.fonts.size = MinimumFontSize;
         }
 
@@ -980,8 +984,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         if (i != renderModeMap.end())
             profile.fonts.renderMode = i->second;
         else
-            debuglog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
-        debuglog().write("Using render mode: {}", profile.fonts.renderMode);
+            debuglog(ConfigTag).write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        debuglog(ConfigTag).write("Using render mode: {}", profile.fonts.renderMode);
     }
 
     softLoadValue(_node, "tab_width", profile.tabWidth);

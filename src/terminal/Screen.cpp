@@ -21,7 +21,7 @@
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -396,11 +396,17 @@ void Screen::fail(std::string const& _message) const
     assert(false);
 }
 
+#if defined(LIBTERMINAL_LOG_RAW)
+namespace {
+    auto const ScreenRawOutputTag = crispy::debugtag::make("terminal.output", "Logs raw writes to the terminal screen.");
+}
+#endif
+
 void Screen::write(char const * _data, size_t _size)
 {
-#if 0 // defined(LIBTERMINAL_LOG_RAW)
+#if defined(LIBTERMINAL_LOG_RAW)
     if (crispy::logging_sink::for_debug().enabled())
-        debuglog().write("raw: \"{}\"", escape(_data, _data + _size));
+        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data, _data + _size));
 #endif
 
     parser_.parseFragment(string_view(_data, _size));
@@ -1472,7 +1478,11 @@ void Screen::setMode(DECMode _mode, bool _enable)
             }
             break;
         case DECMode::DebugLogging:
+            // Since this mode (Xterm extension) does not support finer graind control,
+            // we'll be just globally enable/disable all debug logging.
             crispy::logging_sink::for_debug().enable(_enable);
+            for (auto& tag: crispy::debugtag::store())
+                tag.enabled = _enable;
             break;
         case DECMode::UseAlternateScreen:
             if (_enable)
