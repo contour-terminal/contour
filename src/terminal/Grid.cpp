@@ -559,26 +559,29 @@ void Grid::clearHistory()
 
 void Grid::clampHistory()
 {
-    if (maxHistoryLineCount_.has_value())
+    if (!maxHistoryLineCount_.has_value())
+        return;
+
+    auto const actual = historyLineCount();
+    auto const maxHistoryLines = maxHistoryLineCount_.value();
+    if (actual < maxHistoryLines)
+        return;
+
+    auto const diff = actual - maxHistoryLines;
+
+    // any line that moves into history is using the default Wrappable flag.
+    for (auto& line : lines(historyLineCount() - diff, historyLineCount()))
     {
-        auto const actual = historyLineCount();
-        auto const expected = maxHistoryLineCount_.value();
-        auto const diff = actual > expected ? actual - expected : 0;
-
-        // any line that moves into history is using the default Wrappable flag.
-        for (auto& line : lines(historyLineCount() - diff, historyLineCount()))
-        {
-            auto const wrappable = true;
-            // std::cout << fmt::format(
-            //     "clampHistory: wrappable={}: \"{}\"\n",
-            //     wrappable ? "true" : "false",
-            //     line.toUtf8()
-            // );
-            line.setFlag(Line::Flags::Wrappable, wrappable);
-        }
-
-        lines_.erase(begin(lines_), next(begin(lines_), diff));
+        auto const wrappable = true;
+        // std::cout << fmt::format(
+        //     "clampHistory: wrappable={}: \"{}\"\n",
+        //     wrappable ? "true" : "false",
+        //     line.toUtf8()
+        // );
+        line.setFlag(Line::Flags::Wrappable, wrappable);
     }
+
+    lines_.erase(begin(lines_), next(begin(lines_), diff));
 }
 
 void Grid::scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
