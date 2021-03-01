@@ -548,6 +548,7 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
             n,
             [&]() { return Line(screenSize_.width, Cell{{}, _attr}, wrappableFlag); }
         );
+        clampHistory();
     }
 }
 
