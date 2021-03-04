@@ -486,6 +486,9 @@ void TerminalWidget::createScrollBar()
     scrollBar_->setCursor(Qt::ArrowCursor);
 
     connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&TerminalWidget::onScrollBarValueChanged));
+
+    if (config_.scrollbarPosition == config::ScrollBarPosition::Hidden)
+        scrollBar_->hide();
 }
 
 QSurfaceFormat TerminalWidget::surfaceFormat()
