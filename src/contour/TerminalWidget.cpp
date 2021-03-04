@@ -695,6 +695,7 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
+    debuglog(WidgetTag).write("width={}, height={}, scrollbarPos={}", _width, _height, config_.scrollbarPosition);
     if (_width == 0 || _height == 0)
         return;
 
