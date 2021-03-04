@@ -80,7 +80,7 @@ elseif(APPLE)
     )
 endif()
 
-target_link_libraries(contour terminal_view terminal_renderer_opengl yaml-cpp Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
+target_link_libraries(contour terminal_view terminal_renderer_opengl yaml-cpp::yaml-cpp Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(contour ${Boost_LIBRARIES})
