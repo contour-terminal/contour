@@ -486,6 +486,9 @@ void TerminalWidget::createScrollBar()
     scrollBar_->setCursor(Qt::ArrowCursor);
 
     connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&TerminalWidget::onScrollBarValueChanged));
+
+    if (config_.scrollbarPosition == config::ScrollBarPosition::Hidden)
+        scrollBar_->hide();
 }
 
 QSurfaceFormat TerminalWidget::surfaceFormat()
@@ -695,6 +698,7 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
+    debuglog(WidgetTag).write("width={}, height={}, scrollbarPos={}", _width, _height, config_.scrollbarPosition);
     if (_width == 0 || _height == 0)
         return;
 
