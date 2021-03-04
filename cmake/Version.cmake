@@ -32,7 +32,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
             OUTPUT_VARIABLE git_branch
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             OUTPUT_STRIP_TRAILING_WHITESPACE)
-        string(REGEX MATCH "^(.*)\/(.*)$$" _ ${git_branch})
+        string(REGEX MATCH "^(.*)\\/(.*)$$" _ ${git_branch})
         set(THE_GIT_BRANCH "${CMAKE_MATCH_2}")
         message(STATUS "[Version] Git branch: ${THE_GIT_BRANCH}")
 
@@ -44,11 +44,11 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         message(STATUS "[Version] Git SHA: ${THE_GIT_SHA_SHORT}")
 
         file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
-        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
         # extract and construct version triple
         set(THE_VERSION ${CMAKE_MATCH_1})
         # extract suffix, construct full version string
-        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
 
         if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
             set(THE_VERSION_STRING "${THE_VERSION}-${CMAKE_MATCH_2}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
@@ -61,10 +61,10 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/Changelog.md"))
         file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
         # extract and construct version triple
-        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
         set(THE_VERSION ${CMAKE_MATCH_1})
         # extract suffix, construct full version string
-        string(REGEX MATCH "^^### ([0-9]*\.[0-9]+\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
         if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
             set(THE_VERSION_STRING "${THE_VERSION}-${CMAKE_MATCH_2}")
         else()
