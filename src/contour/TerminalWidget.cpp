@@ -1445,7 +1445,7 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
     if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
     {
         QStringList args;
-        args.append("-c");
+        args.append("config");
         args.append(QString::fromStdString(config_.backingFilePath.string()));
         args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(programPath_), args);
@@ -1453,7 +1453,7 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
     else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
     {
         QStringList args;
-        args.append("-c");
+        args.append("config");
         args.append(QString::fromStdString(config_.backingFilePath.string()));
         args.append(QString::fromStdString(editorEnv));
         args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));

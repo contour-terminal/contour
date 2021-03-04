@@ -35,15 +35,31 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 ## CLI - Command Line Interface
 
 ```txt
-Usage: contour [options]
-Contour Terminal Emulator
+  Usage:
 
-Options:
-  -h, --help            Displays this help.
-  -v, --version         Displays version information.
-  -c, --config <PATH>   Path to configuration file to load at startup
-                        [~/.config/contour/contour.yml].
-  -p, --profile <NAME>  Terminal Profile to load.
+    contour [terminal] [config STRING] [profile STRING] [debug STRING] [live-config]
+                       [working-directory STRING] [PROGRAM ARGS...]
+    contour help
+    contour version
+    contour parser-table
+    contour list-debug-tags
+    contour capture [logical] [timeout FLOAT] [count INT] output STRING
+
+  Detailed description:
+
+    contour [terminal]
+        Spawns a new terminal application.
+
+        Options:
+
+            [config STRING]             Path to configuration file to load at startup.
+                                        [default: /home/trapni/.config/contour/contour.yml]
+            [profile STRING]            Terminal Profile to load.
+            [debug STRING]              Enables debug logging, using a comma seperated list of tags.
+            [live-config]               Enables live config reloading. [default: false]
+            [working-directory STRING]  Sets initial working directory. [default: .]
+            [PROGRAM ARGS...]           Executes given program instead of the configuration profided one.
+
 ```
 
 ## Example Configuration File

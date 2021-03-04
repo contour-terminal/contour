@@ -3,36 +3,38 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/FilesystemResolver.cmake")
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
-add_library(crispy-core INTERFACE)
+set(crispy_SOURCES
+    CLI.h CLI.cpp
+    Comparison.h
+    algorithm.h
+    base64.h
+    compose.h
+    debuglog.h
+    escape.h
+    indexed.h
+    overloaded.h
+    reference.h
+    span.h
+    stdfs.h
+    times.h
+)
+
+add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
 set(CRISPY_CORE_LIBS fmt::fmt-header-only unicode::core)
 if(${USING_BOOST_FILESYSTEM})
-    target_compile_definitions(crispy-core INTERFACE USING_BOOST_FILESYSTEM=1)
+    target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)
 else()
     list(APPEND CRISPY_CORE_LIBS ${FILESYSTEM_LIBS})
 endif()
 
-target_link_libraries(crispy-core INTERFACE ${CRISPY_CORE_LIBS})
-target_compile_features(crispy-core INTERFACE cxx_std_17)
-target_include_directories(crispy-core INTERFACE
+target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
+target_compile_features(crispy-core PUBLIC cxx_std_17)
+target_include_directories(crispy-core PUBLIC
     $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
-)
-target_sources(crispy-core INTERFACE
-    ${CMAKE_CURRENT_SOURCE_DIR}/Comparison.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/algorithm.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/base64.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/compose.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/escape.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/indexed.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/debuglog.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/overloaded.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/reference.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/span.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/stdfs.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/times.h
 )
 
 # --------------------------------------------------------------------------------------------------------
@@ -42,6 +44,7 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
+        CLI_test.cpp
         base64_test.cpp
         indexed_test.cpp
         compose_test.cpp

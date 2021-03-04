@@ -136,6 +136,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName);
 Config loadConfig();
 
 std::error_code createDefaultConfig(FileSystem::path const& _path);
+std::string defaultConfigFilePath();
 
 } // namespace contour::config
 
