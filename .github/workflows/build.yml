@@ -54,6 +54,76 @@ jobs:
     - name: "test: libterminal"
       run: ./build/src/terminal/terminal_test
 
+  ubuntu_2004_sysdep:
+    name: "Ubuntu Linux 20.04 (sysdep)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v1
+    - name: "initialize sub modules"
+      run: git submodule update --init --recursive
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        cat /etc/apt/sources.list
+        sudo apt -q update
+        sudo apt install -y "g++-9" "g++-10" \
+                libyaml-cpp-dev \
+                libfreetype6-dev \
+                qtbase5-dev libqt5gui5 cmake extra-cmake-modules libkf5windowsystem-dev \
+                libfontconfig1-dev libharfbuzz-dev \
+                debhelper dpkg-dev
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        # TODO: fmtlib via sysdep
+        cd build && cmake .. \
+          -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+          -DCMAKE_CXX_COMPILER=g++-9 \
+          -DCONTOUR_EMBEDDED_CATCH2=ON \
+          -DCONTOUR_EMBEDDED_FMTLIB=ON \
+          -DCONTOUR_EMBEDDED_LIBUNICODE=ON \
+          -DCONTOUR_EMBEDDED_YAML_CPP=OFF \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "CPack: Creating DEB & TGZ package"
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        ls -hl
+    - name: "Uploading artifact .deb package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 30
+    - name: "Uploading artifact ZIP package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        if-no-files-found: error
+        retention-days: 30
+
   ubuntu_2004:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
