@@ -638,10 +638,7 @@ inline Line& Grid::lineAt(int _line) noexcept
 {
     assert(crispy::ascending(1 - historyLineCount(), _line, screenSize_.height));
 
-    if (_line > 0)
-        return *next(lines_.begin(), historyLineCount() + _line - 1);
-    else
-        return *next(lines_.begin(), -_line);
+    return *next(lines_.begin(), historyLineCount() + _line - 1);
 }
 
 inline Line const& Grid::lineAt(int _line) const noexcept
