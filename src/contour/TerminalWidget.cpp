@@ -1018,9 +1018,14 @@ void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
     {
         auto const _l = scoped_lock{terminalView_->terminal()};
         auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
+        auto const currentMousePositionRel = terminal::Coordinate{
+            currentMousePosition.row - terminalView_->terminal().viewport().relativeScrollOffset(),
+            currentMousePosition.column
+        };
+
         if (terminalView_->terminal().screen().contains(currentMousePosition))
         {
-            if (terminalView_->terminal().screen().at(currentMousePosition).hyperlink())
+            if (terminalView_->terminal().screen().at(currentMousePositionRel).hyperlink())
                 setCursor(Qt::CursorShape::PointingHandCursor);
             else
                 setDefaultCursor();
@@ -1401,9 +1406,13 @@ bool TerminalWidget::executeAction(Action const& _action)
         [this](actions::FollowHyperlink) -> Result {
             auto const _l = scoped_lock{terminalView_->terminal()};
             auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
+            auto const currentMousePositionRel = terminal::Coordinate{
+                currentMousePosition.row - terminalView_->terminal().viewport().relativeScrollOffset(),
+                currentMousePosition.column
+            };
             if (terminalView_->terminal().screen().contains(currentMousePosition))
             {
-                if (auto hyperlink = terminalView_->terminal().screen().at(currentMousePosition).hyperlink(); hyperlink != nullptr)
+                if (auto hyperlink = terminalView_->terminal().screen().at(currentMousePositionRel).hyperlink(); hyperlink != nullptr)
                 {
                     followHyperlink(*hyperlink);
                     return Result::Silently;
@@ -1450,8 +1459,10 @@ void TerminalWidget::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
         QProcess::execute(QString::fromStdString(programPath_), args);
     }
-    else
+    else if (isLocal)
         QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromUtf8(std::string(_hyperlink.path()).c_str())));
+    else
+        QDesktopServices::openUrl(QString::fromUtf8(_hyperlink.uri.c_str()));
 }
 
 void TerminalWidget::activateProfile(string const& _newProfileName)
