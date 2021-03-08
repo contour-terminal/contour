@@ -16,84 +16,58 @@
 #include <contour/TerminalWidget.h>
 
 #include <terminal/Parser.h>
+
+#include <crispy/CLI.h>
 #include <crispy/debuglog.h>
 #include <crispy/indexed.h>
 #include <crispy/utils.h>
 
-#include <QtCore/QCommandLineParser>
-#include <QtCore/QThread>
 #include <QtWidgets/QApplication>
 #include <QSurfaceFormat>
 
-#include <iostream>
-#include <iomanip>
 #include <algorithm>
+#include <cstdio>
+#include <iomanip>
+#include <iostream>
 #include <numeric>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
 
 using namespace std;
 
-namespace contour {
-    struct CLI : public QCommandLineParser {
-        CLI() {
-            setApplicationDescription("Contour Terminal Emulator");
-            addHelpOption();
-            addVersionOption();
-            addOption(configOption);
-            addOption(profileOption);
-            addOption(workingDirectoryOption);
-            addOption(liveConfigOption);
-            addOption(parserTable);
-            addOption(enableDebugLogging);
-            addOption(listDebugTags);
-            addPositionalArgument("executable", "path to executable to execute.");
-        }
+namespace CLI = crispy::cli;
 
-        QCommandLineOption const configOption{
-            QStringList() << "c" << "config",
-            QCoreApplication::translate("main", "Path to configuration file to load at startup."),
-            QCoreApplication::translate("main", "PATH")
-        };
+CLI::HelpStyle helpStyle()
+{
+    auto style = CLI::HelpStyle{};
 
-        QString configPath() const { return value(configOption); }
+    style.optionStyle = CLI::OptionStyle::Natural;
 
-        QCommandLineOption const profileOption{
-            QStringList() << "p" << "profile",
-            QCoreApplication::translate("main", "Terminal Profile to load."),
-            QCoreApplication::translate("main", "NAME")
-        };
+#if !defined(_WIN32)
+    if (!isatty(STDOUT_FILENO))
+    {
+        style.colors.reset();
+        style.hyperlink = false;
+    }
+#endif
 
-        QCommandLineOption const parserTable{
-            QStringList() << "t" << "parser-table",
-            QCoreApplication::translate("main", "Dumps parser table")
-        };
+     return style;
+}
 
-        QCommandLineOption const enableDebugLogging{
-            QStringList() << "d" << "enable-debug",
-            QCoreApplication::translate("main", "Enables debug logging, using a comma seperated list of tags."),
-            QCoreApplication::translate("main", "TAGS")
-        };
+int screenWidth()
+{
+    constexpr auto DefaultWidth = 80;
 
-        QCommandLineOption const listDebugTags{
-            QStringList() << "D" << "list-debug-tags",
-            QCoreApplication::translate("main", "Lists all available debug tags and exits.")
-        };
+#if !defined(_WIN32)
+    auto ws = winsize{};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
+        return ws.ws_col;
+#endif
 
-        QCommandLineOption const liveConfigOption{
-            QStringList() << "live-config",
-            QCoreApplication::translate("main", "Enables live config reloading.")
-        };
-
-        QString profileName() const { return value(profileOption); }
-        std::string debuglogFilter() const { return value(enableDebugLogging).toStdString(); }
-
-        QCommandLineOption const workingDirectoryOption{
-            QStringList() << "w" << "working-directory",
-            QCoreApplication::translate("main", "Sets initial working directory."),
-            QCoreApplication::translate("main", "NAME")
-        };
-
-        QString workingDirectory() const { return value(workingDirectoryOption); }
-    };
+    return DefaultWidth;
 }
 
 int main(int argc, char* argv[])
@@ -120,10 +94,67 @@ int main(int argc, char* argv[])
 
         QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
 
-        auto cli = contour::CLI{};
-        cli.process(app);
+        auto const cliDef = CLI::Command{
+            "contour",
+            "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/christianparpart/contour/ ;-)",
+            CLI::OptionList{},
+            CLI::CommandList{
+                CLI::Command{
+                    "terminal",
+                    "Spawns a new terminal application.",
+                    CLI::OptionList{
+                        CLI::Option{"config", CLI::Value{contour::config::defaultConfigFilePath()}, "Path to configuration file to load at startup."},
+                        CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load."},
+                        CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma seperated list of tags."},
+                        CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
+                        CLI::Option{"working-directory", CLI::Value{"."s}, "Sets initial working directory."},
+                    },
+                    CLI::CommandList{},
+                    CLI::CommandSelect::Implicit,
+                    CLI::Verbatim{"PROGRAM ARGS...", "Executes given program instead of the configuration profided one."}
+                },
+                CLI::Command{"help", "Shows this help and exits."},
+                CLI::Command{"version", "Shows The version and exits."},
+                CLI::Command{"parser-table", "Dumps parser table"},
+                CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
+                CLI::Command{
+                    "capture",
+                    "Captures the screen buffer of the currently running terminal.",
+                    {
+                        CLI::Option{"logical", CLI::Value{false}, "Tells the terminal to use logical lines for counting and capturing."},
+                        CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond."},
+                        CLI::Option{"count", CLI::Value{0}, "The number of lines to capture"},
+                        CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to.", "FILE", CLI::Presence::Required},
+                    }
+                }
+            }
+        };
 
-        if (cli.isSet(cli.parserTable))
+        optional<CLI::FlagStore> const flagsOpt = CLI::parse(cliDef, argc, argv);
+        if (!flagsOpt.has_value())
+        {
+            std::cerr << "Failed to parse command line parameters.\n";
+            return EXIT_FAILURE;
+        }
+        CLI::FlagStore const& flags = flagsOpt.value();
+
+        // std::cout << fmt::format("Flags: {}\n", flags.values.size());
+        // for (auto const & [k, v] : flags.values)
+        //     std::cout << fmt::format(" - {}: {}\n", k, v);
+
+        if (flags.get<bool>("contour.version"))
+        {
+            std::cout << fmt::format("Contour Terminal Emulator {}\n\n", CONTOUR_VERSION_STRING);
+            return EXIT_SUCCESS;
+        }
+
+        if (flags.get<bool>("contour.help"))
+        {
+            std::cout << CLI::helpText(cliDef, helpStyle(), screenWidth());
+            return EXIT_SUCCESS;
+        }
+
+        if (flags.get<bool>("contour.parser-table"))
         {
             terminal::parser::dot(std::cout, terminal::parser::ParserTable::get());
             return EXIT_SUCCESS;
@@ -156,7 +187,7 @@ int main(int argc, char* argv[])
             return result;
         });
 
-        if (cli.isSet(cli.listDebugTags))
+        if (flags.get<bool>("contour.list-debug-tags"))
         {
             auto tags = crispy::debugtag::store();
             sort(
@@ -182,9 +213,8 @@ int main(int argc, char* argv[])
             return EXIT_SUCCESS;
         }
 
-        if (cli.isSet(cli.enableDebugLogging))
+        if (auto const filterString = flags.get<string>("contour.terminal.debug"); !filterString.empty())
         {
-            auto const filterString = cli.debuglogFilter();
             auto const filters = crispy::split(filterString, ',');
             crispy::logging_sink::for_debug().enable(true);
             for (auto& tag: crispy::debugtag::store())
@@ -201,15 +231,15 @@ int main(int argc, char* argv[])
             }
         }
 
-        QString const configPath = cli.value(cli.configOption);
+        auto const configPath = QString::fromStdString(flags.get<string>("contour.terminal.config"));
 
         auto config =
             configPath.isEmpty() ? contour::config::loadConfig()
                                  : contour::config::loadConfigFromFile(configPath.toStdString());
 
         string const profileName = [&]() {
-            if (!cli.value(cli.profileOption).isEmpty())
-                return cli.value(cli.profileOption).toStdString();
+            if (auto profile = flags.get<string>("contour.terminal.profile"); !profile.empty())
+                return profile;
 
             if (!config.defaultProfileName.empty())
                 return config.defaultProfileName;
@@ -234,23 +264,23 @@ int main(int argc, char* argv[])
             configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
         }
 
-        if (!cli.workingDirectory().isEmpty())
+        if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
             config.profile(profileName)->shell.workingDirectory =
-                FileSystem::path(cli.workingDirectory().toUtf8().toStdString());
+                FileSystem::path(wd);
 
         if (configFailures)
             return EXIT_FAILURE;
 
-        bool const liveConfig = cli.isSet(cli.liveConfigOption);
+        bool const liveConfig = flags.get<bool>("contour.terminal.live-config");
 
         // Possibly override shell to be executed
-        if (auto const positionalArgs = cli.positionalArguments(); !positionalArgs.empty())
+        if (!flags.verbatim.empty())
         {
             auto& shell = config.profile(profileName)->shell;
-            shell.program = positionalArgs.at(0).toStdString();
-            auto args = vector<string>{};
-            for (int i = 1; i < positionalArgs.size(); ++i)
-                shell.arguments.push_back(positionalArgs.at(i).toStdString());
+            shell.program = flags.verbatim.front();
+            shell.arguments.clear();
+            for (size_t i = 1; i < flags.verbatim.size(); ++i)
+                 shell.arguments.push_back(string(flags.verbatim.at(i)));
         }
 
         contour::Controller controller(argv[0], config, liveConfig, profileName);

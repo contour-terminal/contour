@@ -598,9 +598,14 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     }
 }
 
+std::string defaultConfigFilePath()
+{
+    return (configHome() / "contour.yml").string();
+}
+
 Config loadConfig()
 {
-    return loadConfigFromFile((configHome() / "contour.yml").string());
+    return loadConfigFromFile(defaultConfigFilePath());
 }
 
 Config loadConfigFromFile(FileSystem::path const& _fileName)
