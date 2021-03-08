@@ -60,6 +60,9 @@ namespace
 #if defined(IUTF8)
         tio.c_iflag |= IUTF8;     // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
 #endif
+#if defined(IUCLC)
+        tio.c_iflag &= IUCLC;     // Map uppercase characters to lowercase on input (not in POSIX).
+#endif
         tio.c_iflag &= ~IXON;     // Disable CTRL-S / CTRL-Q on output.
         tio.c_iflag &= ~IXOFF;    // Disable CTRL-S / CTRL-Q on input.
         tio.c_iflag &= ~ICRNL;    // Ensure CR isn't translated to NL.

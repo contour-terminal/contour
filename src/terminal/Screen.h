@@ -275,6 +275,8 @@ class Screen {
     void hyperlink(std::string const& _id, std::string const& _uri);      // OSC 8
     void notify(std::string const& _title, std::string const& _content);  // OSC 777
 
+    void captureBuffer(int _numLines, bool _logicalLines);
+
     void setForegroundColor(Color const& _color);
     void setBackgroundColor(Color const& _color);
     void setUnderlineColor(Color const& _color);
@@ -543,6 +545,9 @@ class Screen {
 
     int toAbsoluteLine(int _relativeLine) const noexcept { return activeGrid_->toAbsoluteLine(_relativeLine); }
     Coordinate toAbsolute(Coordinate _coord) const noexcept { return {activeGrid_->toAbsoluteLine(_coord.row), _coord.column}; }
+
+    int toRelativeLine(int _absoluteLine) const noexcept { return activeGrid_->toRelativeLine(_absoluteLine); }
+    Coordinate toRelative(Coordinate _coord) const noexcept { return {activeGrid_->toRelativeLine(_coord.row), _coord.column}; }
 
   private:
     void setBuffer(ScreenType _type);

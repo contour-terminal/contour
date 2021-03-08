@@ -1888,10 +1888,20 @@ void TerminalWidget::onClosed()
         close(); // TODO: call this only from within the GUI thread!
 }
 
+void TerminalWidget::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
+{
+    post([this, _absoluteStartLine, _lineCount]() {
+        if (requestPermission(profile().permissions.captureBuffer, "capture screen buffer"))
+        {
+            terminalView_->terminal().screen().captureBuffer(_absoluteStartLine, _lineCount);
+        }
+    });
+}
+
 void TerminalWidget::setFontDef(terminal::FontDef const& _fontDef)
 {
     post([this, spec = terminal::FontDef(_fontDef)]() {
-        if (requestPermissionChangeFont())
+        if (requestPermission(profile().permissions.changeFont, "changing font"))
         {
             auto const& currentFonts = terminalView_->renderer().fontDescriptions();
             terminal::renderer::FontDescriptions newFonts = currentFonts;
@@ -1927,28 +1937,29 @@ void TerminalWidget::setFontDef(terminal::FontDef const& _fontDef)
     });
 }
 
-bool TerminalWidget::requestPermissionChangeFont()
+bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, string_view _topicText)
 {
-    switch (profile().permissions.changeFont)
+    switch (_allowedByConfig)
     {
         case config::Permission::Allow:
-            debuglog(WidgetTag).write("Permission for font change allowed by configuration.");
+            debuglog(WidgetTag).write("Permission for {} allowed by configuration.", _topicText);
             return true;
         case config::Permission::Deny:
-            debuglog(WidgetTag).write("Permission for font change denied by configuration.");
+            debuglog(WidgetTag).write("Permission for {} denied by configuration.", _topicText);
             return false;
         case config::Permission::Ask:
             break;
     }
 
-    if (rememberedPermissions_.changeFont.has_value())
-        return rememberedPermissions_.changeFont.value();
+    // Did we remember a last interactive question?
+    if (auto const i = rememberedPermissions_.mapping.find(string(_topicText)); i != rememberedPermissions_.mapping.end())
+        return i->second;
 
-    debuglog(WidgetTag).write("Permission for font change requires asking user.");
+    debuglog(WidgetTag).write("Permission for {} requires asking user.", _topicText);
 
     auto const reply = QMessageBox::question(this,
-        "Font change requested",
-        QString::fromStdString(fmt::format("The application has requested to change the font. Do you allow this?")),
+        fmt::format("{} requested", _topicText).c_str(),
+        QString::fromStdString(fmt::format("The application has requested for {}. Do you allow this?", _topicText)),
         QMessageBox::StandardButton::Yes
             | QMessageBox::StandardButton::YesToAll
             | QMessageBox::StandardButton::No
@@ -1959,16 +1970,17 @@ bool TerminalWidget::requestPermissionChangeFont()
     switch (reply)
     {
         case QMessageBox::StandardButton::NoToAll:
-            rememberedPermissions_.changeFont = false;
+            rememberedPermissions_.mapping[string(_topicText)] = false;
             break;
         case QMessageBox::StandardButton::YesToAll:
-            rememberedPermissions_.changeFont = true;
+            rememberedPermissions_.mapping[string(_topicText)] = true;
             [[fallthrough]];
         case QMessageBox::StandardButton::Yes:
             return true;
         default:
             break;
     }
+
     return false;
 }
 

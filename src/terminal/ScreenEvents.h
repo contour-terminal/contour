@@ -43,6 +43,7 @@ class ScreenEvents {
   public:
     virtual ~ScreenEvents() = default;
 
+    virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
     virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
     virtual void bell() {}
     virtual void bufferChanged(ScreenType) {}

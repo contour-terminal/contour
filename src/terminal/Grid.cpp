@@ -125,6 +125,14 @@ string Line::toUtf8() const
     return s;
 }
 
+string Line::toUtf8Trimmed() const
+{
+    string output = toUtf8();
+    while (!output.empty() && isspace(output.back()))
+        output.pop_back();
+    return output;
+}
+
 void Line::prepend(Buffer const& _cells)
 {
     buffer_.insert(buffer_.begin(), _cells.begin(), _cells.end());
@@ -293,6 +301,38 @@ void Grid::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
 {
     maxHistoryLineCount_ = _maxHistoryLineCount;
     clampHistory();
+}
+
+// TODO: rename to include word Logical
+/**
+ * Computes the relative line number for the bottom-most @p _n logical lines.
+ */
+int Grid::computeRelativeLineNumberFromBottom(int _n) const noexcept
+{
+    int logicalLineCount = 0;
+    int outputRelativePhysicalLine = screenSize_.height;
+
+    auto i = lines_.rbegin();
+    while (i != lines_.rend())
+    {
+        if (!i->wrapped())
+            logicalLineCount++;
+        outputRelativePhysicalLine--;
+        ++i;
+        if (logicalLineCount == _n)
+            break;
+    }
+
+    // XXX If the top-most logical line is reached, we still need to traverse upwards until the
+    // beginning of the top-most logical line (the one that does not have the wrapped-flag set).
+    while (i != lines_.rend() && i->wrapped())
+    {
+        printf("further upwards: l %d, p %d\n", logicalLineCount, outputRelativePhysicalLine);
+        outputRelativePhysicalLine--;
+        ++i;
+    }
+
+    return outputRelativePhysicalLine;
 }
 
 Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapPending)

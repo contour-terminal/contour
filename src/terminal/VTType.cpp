@@ -61,9 +61,10 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 11>{
+    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 12>{
         pair{DeviceAttributes::AnsiColor, "22"},
         pair{DeviceAttributes::AnsiTextLocator, "29"},
+        pair{DeviceAttributes::CaptureScreenBuffer, "314"},
         pair{DeviceAttributes::Columns132, "1"},
         pair{DeviceAttributes::NationalReplacementCharacterSets, "9"},
         pair{DeviceAttributes::Printer, "2"},

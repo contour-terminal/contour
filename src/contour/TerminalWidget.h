@@ -138,6 +138,7 @@ class TerminalWidget :
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void screenUpdated() override;
+    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     void setFontDef(terminal::FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
@@ -148,7 +149,8 @@ class TerminalWidget :
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
-    bool requestPermissionChangeFont();
+
+    bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText);
 
   signals:
     void showNotification(QString const& _title, QString const& _body);
@@ -242,6 +244,7 @@ class TerminalWidget :
 
     struct {
         std::optional<bool> changeFont;
+        std::map<std::string, bool> mapping;
     } rememberedPermissions_;
 
     // render state cache

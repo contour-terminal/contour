@@ -290,7 +290,7 @@ void softLoadValue(YAML::Node const& _node, string const& _name, T& _store, U co
 
 void softLoadPermission(YAML::Node const& _node, string const& _name, Permission& _out)
 {
-    if (auto const valueNode = _node[_name]; valueNode.IsScalar())
+    if (auto const valueNode = _node[_name]; valueNode && valueNode.IsScalar())
     {
         auto const value = valueNode.as<string>();
         if (value == "allow")
@@ -934,8 +934,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
     if (auto const permissions = _node["permissions"]; permissions && permissions.IsMap())
     {
+        softLoadPermission(permissions, "capture_buffer", profile.permissions.captureBuffer);
         softLoadPermission(permissions, "change_font", profile.permissions.changeFont);
-        // ...
     }
 
     if (auto fonts = _node["font"]; fonts)
