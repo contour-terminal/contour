@@ -237,9 +237,14 @@ uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
 
     auto const renderHyperlinks = !pressure && _terminal.screen().contains(_currentMousePosition);
 
+    auto const currentMousePositionRel = Coordinate{
+        _currentMousePosition.row - _terminal.viewport().relativeScrollOffset(),
+        _currentMousePosition.column
+    };
+
     if (renderHyperlinks)
     {
-        auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
+        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
         if (cellAtMouse.hyperlink())
             cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
     }
@@ -257,7 +262,7 @@ uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
 
     if (renderHyperlinks)
     {
-        auto& cellAtMouse = _terminal.screen().at(_currentMousePosition);
+        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
         if (cellAtMouse.hyperlink())
             cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
     }
