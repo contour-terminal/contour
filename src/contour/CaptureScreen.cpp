@@ -219,9 +219,11 @@ namespace
             }
 
             auto const screenSizeReply = crispy::split(reply, ';');
+            if (screenSizeReply.size() != 3)
+                return nullopt;
+
             auto const columns = stoi(string(screenSizeReply.at(1)));
             auto const lines = stoi(string(screenSizeReply.at(2)));
-
             return tuple{columns, lines};
         }
     };
