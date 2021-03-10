@@ -67,7 +67,9 @@ namespace terminal {
 
 namespace {
     auto const VTParserTag = crispy::debugtag::make("vtparser.errors", "Logs terminal parser errors.");
+#if defined(LIBTERMINAL_LOG_TRACE)
     auto const VTParserTraceTag = crispy::debugtag::make("vtparser.trace", "Logs terminal parser instruction trace.");
+#endif
 }
 
 namespace // {{{ helpers
