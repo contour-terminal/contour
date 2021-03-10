@@ -1,0 +1,150 @@
+name: CodeChecker C++ Static Analysis
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/*.yml'
+      - '*.md'
+    branches:
+      - master
+      - codechecker
+      - feature/**
+      - fix/**
+      - improvement/**
+      - wip
+    pull_requets:
+      branches:
+        - master
+
+jobs:
+  ubuntu_2004:
+    name: "Ubuntu Linux 20.04"
+    runs-on: ubuntu-20.04
+    steps:
+      - name: "Check out repository"
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive
+      - name: "Install build dependencies"
+        run: |
+          cat /etc/apt/sources.list
+          sudo apt-get -qy update
+          sudo apt-get install -y   \
+            "g++-9"             \
+            build-essential     \
+            cmake               \
+            extra-cmake-modules \
+            libfontconfig1-dev  \
+            libfreetype6-dev    \
+            libharfbuzz-dev     \
+            libqt5gui5          \
+            qtbase5-dev
+      - name: "Check out repository Ericsson/CodeChecker"
+        uses: actions/checkout@v2
+        with:
+          repository: Ericsson/CodeChecker
+          path: CodeChecker
+      - name: "Install analysis dependencies"
+        run: |
+          sudo apt-get -qy update
+          sudo apt-get -y --no-install-recommends install \
+            build-essential \
+            curl            \
+            doxygen         \
+            gcc-multilib    \
+            python3-dev     \
+            python3-venv
+          curl -sL http://deb.nodesource.com/setup_12.x | sudo -E bash - 
+          curl -sL http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo add-apt-repository -y "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-12 main"
+          sudo apt-get -y --no-install-recommends install \
+            clang-12 \
+            clang-tidy-12 \
+            nodejs
+          sudo update-alternatives --install \
+            /usr/bin/clang clang /usr/bin/clang-12 1000 \
+            --slave /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-12
+          update-alternatives --query clang
+      - name: "Build and Package CodeChecker"
+        run: |
+          pushd CodeChecker
+          make venv
+          source "$GITHUB_WORKSPACE"/CodeChecker/venv/bin/activate
+          make standalone_package
+          deactivate
+          popd
+      - name: "Build Contour"
+        run: |
+          mkdir Build
+          pushd Build
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER="g++-9" \
+            -DYAML_BUILD_SHARED_LIBS=OFF \
+            -DYAML_CPP_BUILD_CONTRIB=OFF \
+            -DYAML_CPP_BUILD_TESTS=OFF \
+            -DYAML_CPP_BUILD_TOOLS=OFF \
+            -DYAML_CPP_INSTALL=OFF
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            log \
+            --build "cmake --build . -- -j3" \
+            --output "../logged_compilation.json"
+          popd
+      - name: "Perform static analysis (non-CTU for normal development)"
+        if: ${{ github.ref != 'refs/heads/master' || github.event_name == 'pull_request' }}
+        run: |
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            analyzers --detail
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            analyze \
+            logged_compilation.json \
+            --jobs $(nproc) \
+            --output "Results" \
+            \
+            --enable portability \
+            --enable security \
+            --enable sensitive \
+            --disable google \
+            --enable google-build-namespaces \
+          || true
+      - name: "Perform static analysis (CTU for pushes on master)"
+        if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+        run: |
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            analyzers --detail
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            analyze \
+            logged_compilation.json \
+            --jobs $(nproc) \
+            --output "Results" \
+            \
+            --enable portability \
+            --enable security \
+            --enable sensitive \
+            --disable google \
+            --enable google-build-namespaces \
+            \
+            --ctu \
+            --ctu-ast-mode load-from-pch \
+          || true
+      - name: "Convert static analysis results to HTML"
+        run: |
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            parse \
+            "Results" \
+            --export html \
+            --output "Results-HTML"
+      - name: "Upload results"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "CodeChecker Results"
+          path: "Results-HTML"
+          if-no-files-found: error
+      - name: "Upload analysis failure reproducers"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "CodeChecker analysis failures"
+          path: "Results/failed"
+          if-no-files-found: warn
