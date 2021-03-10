@@ -199,17 +199,15 @@ namespace
         optional<tuple<int, int>> screenSize(timeval* _timeout)
         {
             // Naive implementation. TODO: use select() to poll and time out properly.
-            // cout << "\033[18t"; // get line/column count from terminal
-            // cout.flush();
-            write("\033[16t");
-
-            if (wait(_timeout) <= 0)
-                return nullopt;
+            write("\033[18t");
 
             // Consume reply: `CSI 8 ; <LINES> ; <COLUMNS> t`
             string reply;
             for (;;)
             {
+                if (wait(_timeout) <= 0)
+                    return nullopt;
+
                 char ch{};
                 if (read(&ch, sizeof(ch)) != sizeof(ch))
                     return nullopt;
@@ -231,6 +229,7 @@ namespace
     auto constexpr ReplyPrefix = "\033]314;"sv; // DCS 314 ;
     auto constexpr ReplySuffix = "\033\\"sv;    // ST
 
+    // Reads a *single* response chunk.
     bool readCaptureChunk(TTY& _input, timeval* _timeout, string& _reply)
     {
         timeval timeout = *_timeout;
@@ -267,11 +266,11 @@ namespace
             }
             n++;
 
-            if (crispy::endsWith(string_view(_reply), ReplySuffix))
-                break;
-        }
+            if (!crispy::endsWith(string_view(_reply), ReplySuffix))
+                continue;
 
-        return true;
+            return true;
+        }
     }
 }
 
@@ -296,15 +295,11 @@ bool captureScreen(CaptureSettings const& _settings)
     auto const [numColumns, numLines] = screenSizeOpt.value();
 
     if (_settings.verbosityLevel > 0)
-        cout << fmt::format("Screen size: {}x{}. Capturing lines {} to file {}.\n",
+        cerr << fmt::format("Screen size: {}x{}. Capturing lines {} to file {}.\n",
                             numColumns, numLines,
                             _settings.logicalLines ? "logical" : "physical",
                             _settings.lineCount,
                             _settings.outputFile.data());
-
-    tty.write(fmt::format("\033[>{};{}t",
-                          _settings.logicalLines ? '1' : '0',
-                          _settings.lineCount));
 
     // request screen capture
     string reply;
@@ -314,9 +309,14 @@ bool captureScreen(CaptureSettings const& _settings)
     unique_ptr<ostream> customOutput;
     if (_settings.outputFile != "-"sv)
     {
-        customOutput = make_unique<ofstream>(_settings.outputFile.data());
+        //cerr << "Opening output stream: '" << _settings.outputFile << "'\n";
+        customOutput = make_unique<ofstream>(_settings.outputFile.data(), std::ios::trunc);
         output = *customOutput;
     }
+
+    tty.write(fmt::format("\033[>{};{}t",
+                          _settings.logicalLines ? '1' : '0',
+                          _settings.lineCount));
 
     while (true)
     {
@@ -325,14 +325,12 @@ bool captureScreen(CaptureSettings const& _settings)
 
         auto const payload = string_view(reply.data() + ReplyPrefix.size(),
                                          reply.size() - ReplyPrefix.size() - ReplySuffix.size());
-
         if (payload.empty())
-            break;
+            return true;
 
         output.get().write(payload.data(), payload.size());
         reply.clear();
     }
-    return true;
 }
 
 } // end namespace
