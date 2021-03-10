@@ -83,8 +83,11 @@ profiles:
         #
         # Default for all of these entries should be: "ask".
         permissions:
-            # Allows changing the font via `OSC 50 ; Pt ST` (this is the regular font face).
+            # Allows changing the font via `OSC 50 ; Pt ST`.
             change_font: ask
+            # Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.
+            # The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`
+            capture_buffer: ask
 
         # Font related configuration (font face, styles, size, rendering mode).
         font:

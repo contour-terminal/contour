@@ -437,6 +437,7 @@ class Line { // {{{
     Flags markedFlag() const noexcept { return marked() ? Line::Flags::Marked : Line::Flags::None; }
 
     std::string toUtf8() const;
+    std::string toUtf8Trimmed() const;
 
     void setText(std::string_view _u8string);
 
@@ -553,6 +554,11 @@ class Grid {
     /// Converts a relative line number into an absolute line number.
     int toAbsoluteLine(int _relativeLine) const noexcept;
 
+    /// Converts an absolute line number into a relative line number.
+    int toRelativeLine(int _absoluteLine) const noexcept;
+
+    int computeRelativeLineNumberFromBottom(int _n) const noexcept;
+
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept;
 
@@ -638,10 +644,7 @@ inline Line& Grid::lineAt(int _line) noexcept
 {
     assert(crispy::ascending(1 - historyLineCount(), _line, screenSize_.height));
 
-    if (_line > 0)
-        return *next(lines_.begin(), historyLineCount() + _line - 1);
-    else
-        return *next(lines_.begin(), -_line);
+    return *next(lines_.begin(), historyLineCount() + _line - 1);
 }
 
 inline Line const& Grid::lineAt(int _line) const noexcept
@@ -652,6 +655,11 @@ inline Line const& Grid::lineAt(int _line) const noexcept
 inline int Grid::toAbsoluteLine(int _relativeLine) const noexcept
 {
     return historyLineCount() + _relativeLine - 1;
+}
+
+inline int Grid::toRelativeLine(int _absoluteLine) const noexcept
+{
+    return _absoluteLine - historyLineCount();
 }
 
 inline Cell& Grid::at(Coordinate const& _coord) noexcept

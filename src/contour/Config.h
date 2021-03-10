@@ -70,6 +70,7 @@ struct TerminalProfile {
     int tabWidth;
 
     struct {
+        Permission captureBuffer = Permission::Ask;
         Permission changeFont = Permission::Ask;
     } permissions;
 

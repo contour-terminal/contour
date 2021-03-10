@@ -704,6 +704,27 @@ namespace impl // {{{ some command generator helpers
         return ApplyResult::Ok;
     }
 
+    ApplyResult CAPTURE(Sequence const& _seq, Screen& _screen)
+    {
+        // CSI Mode ; [; Count] t
+        //
+        // Mode: 0 = physical lines
+        //       1 = logical lines (unwrapped)
+        //
+        // Count: number of lines to capture from main page aera's bottom upwards
+        //        If omitted or 0, the main page area's line count will be used.
+
+        auto const logicalLines = _seq.param_or(0, 0);
+        if (logicalLines != 0 && logicalLines != 1)
+            return ApplyResult::Invalid;
+
+        auto const lineCount = _seq.param_or(1, _screen.size().height);
+
+        _screen.eventListener().requestCaptureBuffer(lineCount, logicalLines);
+
+        return ApplyResult::Ok;
+    }
+
     ApplyResult HYPERLINK(Sequence const& _seq, Screen& _screen)
     {
         auto const& value = _seq.intermediateCharacters();
@@ -784,6 +805,12 @@ namespace impl // {{{ some command generator helpers
                     break;
                 case 16:
                     _screen.requestPixelSize(RequestPixelSize::CellArea);
+                    break;
+                case 18:
+                    _screen.requestCharacterSize(RequestPixelSize::TextArea);
+                    break;
+                case 19:
+                    _screen.requestCharacterSize(RequestPixelSize::WindowArea);
                     break;
                 default:
                     return ApplyResult::Unsupported;
@@ -1427,6 +1454,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case SETXPROP: return ApplyResult::Unsupported;
         case SETCWD: return impl::SETCWD(_seq, screen_);
         case HYPERLINK: return impl::HYPERLINK(_seq, screen_);
+        case CAPTURE: return impl::CAPTURE(_seq, screen_);
         case COLORFG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultForegroundColor);
         case COLORBG: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::DefaultBackgroundColor);
         case COLORCURSOR: return impl::setOrRequestDynamicColor(_seq, screen_, DynamicColorName::TextCursorColor);

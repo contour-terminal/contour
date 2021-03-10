@@ -45,6 +45,7 @@ class Terminal : public ScreenEvents {
       public:
         virtual ~Events() = default;
 
+        virtual void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) = 0;
         virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
@@ -234,6 +235,7 @@ class Terminal : public ScreenEvents {
     }
 
   private:
+    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenType) override;

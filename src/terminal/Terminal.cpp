@@ -405,6 +405,11 @@ void Terminal::setWordDelimiters(string const& _wordDelimiters)
 }
 
 // {{{ ScreenEvents overrides
+void Terminal::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
+{
+    return eventListener_.requestCaptureBuffer(_absoluteStartLine, _lineCount);
+}
+
 optional<RGBColor> Terminal::requestDynamicColor(DynamicColorName _name)
 {
     return eventListener_.requestDynamicColor(_name);

@@ -14,6 +14,7 @@
 #include <contour/Config.h>
 #include <contour/Controller.h>
 #include <contour/TerminalWidget.h>
+#include <contour/CaptureScreen.h>
 
 #include <terminal/Parser.h>
 
@@ -27,9 +28,14 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
+#include <iomanip>
 #include <iomanip>
 #include <iostream>
+#include <iostream>
 #include <numeric>
+#include <string>
+#include <string_view>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -123,8 +129,8 @@ int main(int argc, char* argv[])
                     {
                         CLI::Option{"logical", CLI::Value{false}, "Tells the terminal to use logical lines for counting and capturing."},
                         CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond."},
-                        CLI::Option{"count", CLI::Value{0}, "The number of lines to capture"},
-                        CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to.", "FILE", CLI::Presence::Required},
+                        CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture"},
+                        CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
                     }
                 }
             }
@@ -152,6 +158,20 @@ int main(int argc, char* argv[])
         {
             std::cout << CLI::helpText(cliDef, helpStyle(), screenWidth());
             return EXIT_SUCCESS;
+        }
+
+        if (flags.get<bool>("contour.capture"))
+        {
+            auto captureSettings = contour::CaptureSettings{};
+            captureSettings.logicalLines = flags.get<bool>("contour.capture.logical");
+            captureSettings.timeout = flags.get<double>("contour.capture.timeout");
+            captureSettings.lineCount = flags.get<unsigned>("contour.capture.lines");
+            captureSettings.outputFile = flags.get<string>("contour.capture.output");
+
+            if (contour::captureScreen(captureSettings))
+                return EXIT_SUCCESS;
+            else
+                return EXIT_FAILURE;
         }
 
         if (flags.get<bool>("contour.parser-table"))

@@ -92,6 +92,11 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     terminal_.screen().setCellPixelSize(renderer_.cellSize());
 }
 
+void TerminalView::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
+{
+    events_.requestCaptureBuffer(_absoluteStartLine, _lineCount);
+}
+
 optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
 {
     switch (_name)

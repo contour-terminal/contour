@@ -13,6 +13,7 @@
  */
 #include <terminal/Screen.h>
 #include <terminal/Viewport.h>
+#include <crispy/escape.h>
 #include <catch2/catch.hpp>
 #include <string_view>
 
@@ -1693,6 +1694,50 @@ TEST_CASE("peek into history", "[screen]")
     // CHECK_THROWS(screen.at({2, 4}));
     // CHECK_THROWS(screen.at({2, 0}));
     // XXX currently not checked, as they're intentionally using assert() instead.
+}
+
+TEST_CASE("captureBuffer", "[screen]")
+{
+    auto screen = MockScreen{{5, 2}};
+
+    //           [...      history ...  ...][main page area]
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+
+    SECTION("lines: 0") {
+        screen.captureBuffer(0, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;\033\\");
+    }
+    SECTION("lines: 1") {
+        screen.captureBuffer(1, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;KLMNO\n\033\\\033]314;\033\\");
+    }
+    SECTION("lines: 2") {
+        screen.captureBuffer(2, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;FGHIJ\nKLMNO\n\033\\\033]314;\033\\");
+    }
+    SECTION("lines: 3") {
+        screen.captureBuffer(3, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\");
+    }
+    SECTION("lines: 4") {
+        screen.captureBuffer(4, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\");
+    }
+    SECTION("lines: 5") {
+        screen.captureBuffer(5, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\");
+    }
+    SECTION("lines: 5 (+1 overflow)") {
+        screen.captureBuffer(5, false);
+        INFO(crispy::escape(screen.replyData));
+        CHECK(screen.replyData == "\033]314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\");
+    }
 }
 
 TEST_CASE("render into history", "[screen]")

@@ -44,6 +44,7 @@ class TerminalView : private Terminal::Events {
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void screenUpdated() {}
+        virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
         virtual void setFontDef(FontDef const& /*_fontDef*/) {}
         virtual void copyToClipboard(std::string_view const& /*_data*/) {}
         virtual void dumpState() {}
@@ -139,6 +140,7 @@ class TerminalView : private Terminal::Events {
     constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
 
   private:
+    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenType) override;

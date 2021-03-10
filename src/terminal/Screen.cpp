@@ -51,6 +51,7 @@ using namespace crispy;
 using namespace std::string_view_literals;
 
 using std::accumulate;
+using std::clamp;
 using std::array;
 using std::cerr;
 using std::distance;
@@ -78,6 +79,7 @@ namespace // {{{ helper
 {
     class VTWriter {
       public:
+        // TODO: compare with old sgr value set instead to be more generic in reusing stuff
         using Writer = std::function<void(char const*, size_t)>;
 
         explicit VTWriter(Writer writer) : writer_{std::move(writer)} {}
@@ -157,6 +159,12 @@ namespace // {{{ helper
             }
         }
 
+        void sgr_rewind()
+        {
+            swap(lastSGR_, sgr_);
+            sgr_.clear();
+        }
+
         void sgr_add(GraphicsRendition m)
         {
             sgr_add(static_cast<unsigned>(m));
@@ -164,7 +172,8 @@ namespace // {{{ helper
 
         void setForegroundColor(Color const& _color)
         {
-            if (true) // _color != currentForegroundColor_)
+            //if (true) // _color != currentForegroundColor_)
+            if (_color != currentForegroundColor_)
             {
                 currentForegroundColor_ = _color;
                 if (holds_alternative<IndexedColor>(_color))
@@ -230,6 +239,7 @@ namespace // {{{ helper
 
       private:
         Writer writer_;
+        std::vector<unsigned> lastSGR_;
         std::vector<unsigned> sgr_;
         std::stringstream sstr;
         Color currentForegroundColor_ = DefaultColor{};
@@ -506,8 +516,9 @@ std::string Screen::screenshot(function<string(int)> const& _postLine) const
     auto result = std::stringstream{};
     auto writer = VTWriter(result);
 
-    for (int const row : crispy::times(1, size_.height))
+    for (int const absoluteRow : crispy::times(1, grid().historyLineCount() + size_.height))
     {
+        auto const row = absoluteRow - grid().historyLineCount();
         for (int const col : crispy::times(1, size_.width))
         {
             Cell const& cell = at({row, col});
@@ -831,6 +842,7 @@ void Screen::sendDeviceAttributes()
     auto const attrs = to_params(
         DeviceAttributes::AnsiColor |
         DeviceAttributes::AnsiTextLocator |
+        DeviceAttributes::CaptureScreenBuffer |
         DeviceAttributes::Columns132 |
         //TODO: DeviceAttributes::NationalReplacementCharacterSets |
         //TODO: DeviceAttributes::RectangularEditing |
@@ -1217,6 +1229,66 @@ void Screen::notify(string const& _title, string const& _content)
 {
     std::cout << "Screen.NOTIFY: title: '" << _title << "', content: '" << _content << "'\n";
     eventListener_.notify(_title, _content);
+}
+
+void Screen::captureBuffer(int _lineCount, bool _logicalLines)
+{
+    // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
+
+    auto capturedBuffer = std::string();
+    auto writer = VTWriter([&](auto buf, auto len) { capturedBuffer += string_view(buf, len); });
+
+    // TODO: when capturing _lineCount < screenSize.height, start at the lowest non-empty line.
+    auto const relativeStartLine = _logicalLines ? grid().computeRelativeLineNumberFromBottom(_lineCount)
+                                                 : size_.height - _lineCount + 1;
+    auto const startLine = clamp(1 - historyLineCount(), relativeStartLine, size_.height);
+
+    // dumpState();
+
+    auto const lineCount = size_.height - startLine + 1;
+
+    auto const trimSpaceRight = [](string& value)
+    {
+        while (!value.empty() && value.back() == ' ')
+            value.pop_back();
+    };
+
+    for (int const row : crispy::times(startLine, lineCount))
+    {
+        auto const& lineBuffer = grid().lineAt(row);
+
+        if (_logicalLines && lineBuffer.wrapped() && !capturedBuffer.empty())
+            capturedBuffer.pop_back();
+
+        if (!lineBuffer.blank())
+        {
+            for (int const col : crispy::times(1, size_.width))
+            {
+                Cell const& cell = at({row, col});
+                if (!cell.codepointCount())
+                    writer.write(U' ');
+                else
+                    for (char32_t const ch : cell.codepoints())
+                        writer.write(ch);
+            }
+            trimSpaceRight(capturedBuffer);
+        }
+
+        writer.write('\n');
+    }
+
+    while (crispy::endsWith(string_view(capturedBuffer), "\n\n"sv)) // TODO: unit test
+        capturedBuffer.pop_back();
+
+    auto constexpr PageSize = size_t{4096};
+    for (size_t i = 0; i < capturedBuffer.size(); i += PageSize)
+    {
+        auto const start = capturedBuffer.data() + i;
+        auto const count = min(PageSize, capturedBuffer.size() - i);
+        reply("\033]314;{}\033\\", string_view(start, count));
+    }
+
+    reply("\033]314;\033\\"); // mark the end
 }
 
 void Screen::cursorForwardTab(int _count)
@@ -1828,6 +1900,22 @@ void Screen::requestPixelSize(RequestPixelSize _area)
     }
 }
 
+void Screen::requestCharacterSize(RequestPixelSize _area) // TODO: rename RequestPixelSize to RequestArea?
+{
+    switch (_area)
+    {
+        case RequestPixelSize::TextArea:
+            reply("\033[8;{};{}t", size_.height, size_.width);
+            break;
+        case RequestPixelSize::WindowArea:
+            reply("\033[9;{};{}t", size_.height, size_.width);
+            break;
+        case RequestPixelSize::CellArea:
+            assert(!"Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
+            break;
+    }
+}
+
 void Screen::requestStatusString(RequestStatusString _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
@@ -1929,8 +2017,8 @@ void Screen::dumpState(std::string const& _message) const
 
     hline();
     cerr << screenshot([this](int _lineNo) -> string {
-        auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
-        return fmt::format("| {}: {}", absoluteLine, grid().lineAt(_lineNo).flags());
+        //auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
+        return fmt::format("| {:>4}: {}", _lineNo, grid().lineAt(_lineNo).flags());
     });
     hline();
 

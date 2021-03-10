@@ -23,6 +23,7 @@ CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_con
 set(contour_SRCS
     Actions.cpp Actions.h
     BackgroundBlur.cpp BackgroundBlur.h
+    CaptureScreen.cpp CaptureScreen.h
     Config.cpp Config.h
     Controller.cpp Controller.h
     FileChangeWatcher.cpp FileChangeWatcher.h
