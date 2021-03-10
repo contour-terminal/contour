@@ -247,7 +247,7 @@ namespace
             }
             else if (rv == 0)
             {
-                cerr << "VTE did not respond to CAPTURE `CSI > Ps ; Ps ; Ps t`.\n";
+                cerr << "VTE did not respond to CAPTURE `CSI > Ps ; Ps t`.\n";
                 return false;
             }
 
