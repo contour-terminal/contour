@@ -802,7 +802,12 @@ inline void Parser::processInput(char32_t _ch)
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
         handle(ActionClass::Event, a, _ch);
     else
-        eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
+    {
+        if (ch < 128)
+            eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})", state_, char(ch), static_cast<uint32_t>(ch)));
+        else
+            eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
+    }
 }
 
 inline void Parser::handle(ActionClass _actionClass, Action _action, char32_t _char)

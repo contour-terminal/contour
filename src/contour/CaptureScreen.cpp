@@ -102,20 +102,20 @@ namespace
             tio.c_lflag &= ~(ICANON | ECHO);
 
             // {{{ in case I want to do more with this
-            // // input flags
-            // tio.c_iflag &= ~IXON;     // Disable CTRL-S / CTRL-Q on output.
-            // tio.c_iflag &= ~IXOFF;    // Disable CTRL-S / CTRL-Q on input.
-            // tio.c_iflag &= ~ICRNL;    // Ensure CR isn't translated to NL.
-            // tio.c_iflag &= ~INLCR;    // Ensure NL isn't translated to CR.
-            // tio.c_iflag &= ~IGNCR;    // Ensure CR isn't ignored.
-            // tio.c_iflag &= ~IMAXBEL;  // Ensure beeping on full input buffer isn't enabled.
-            // tio.c_iflag &= ~ISTRIP;   // Ensure stripping of 8th bit on input isn't enabled.
-            //
-            // // output flags
-            // tio.c_oflag &= ~OPOST;   // Don't enable implementation defined output processing.
-            // tio.c_oflag &= ~ONLCR;   // Don't map NL to CR-NL.
-            // tio.c_oflag &= ~OCRNL;   // Don't map CR to NL.
-            // tio.c_oflag &= ~ONLRET;  // Don't output CR.
+            // input flags
+            tio.c_iflag &= ~IXON;     // Disable CTRL-S / CTRL-Q on output.
+            tio.c_iflag &= ~IXOFF;    // Disable CTRL-S / CTRL-Q on input.
+            tio.c_iflag &= ~ICRNL;    // Ensure CR isn't translated to NL.
+            tio.c_iflag &= ~INLCR;    // Ensure NL isn't translated to CR.
+            tio.c_iflag &= ~IGNCR;    // Ensure CR isn't ignored.
+            tio.c_iflag &= ~IMAXBEL;  // Ensure beeping on full input buffer isn't enabled.
+            tio.c_iflag &= ~ISTRIP;   // Ensure stripping of 8th bit on input isn't enabled.
+
+            // output flags
+            tio.c_oflag &= ~OPOST;   // Don't enable implementation defined output processing.
+            tio.c_oflag &= ~ONLCR;   // Don't map NL to CR-NL.
+            tio.c_oflag &= ~OCRNL;   // Don't map CR to NL.
+            tio.c_oflag &= ~ONLRET;  // Don't output CR.
             // }}}
 
             if (tcsetattr(fd, TCSANOW, &tio) < 0)
@@ -314,12 +314,9 @@ bool captureScreen(CaptureSettings const& _settings)
     unique_ptr<ostream> customOutput;
     if (_settings.outputFile != "-"sv)
     {
-        cout << "Writing to file.\n";
         customOutput = make_unique<ofstream>(_settings.outputFile.data());
         output = *customOutput;
     }
-    else
-        cerr << "Writing to stdout.\n";
 
     while (true)
     {
