@@ -43,7 +43,7 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
     contour version
     contour parser-table
     contour list-debug-tags
-    contour capture [logical] [timeout FLOAT] [count INT] output STRING
+    contour capture [logical] [timeout FLOAT] [lines INT] output STRING
 
   Detailed description:
 
@@ -58,7 +58,7 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
             [debug STRING]              Enables debug logging, using a comma seperated list of tags.
             [live-config]               Enables live config reloading. [default: false]
             [working-directory STRING]  Sets initial working directory. [default: .]
-            [PROGRAM ARGS...]           Executes given program instead of the configuration profided one.
+            [PROGRAM ARGS...]           Executes given program instead of the configuration provided one.
 
 ```
 
