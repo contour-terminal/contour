@@ -1,0 +1,13 @@
+{
+  "analyze": [
+    "--enable=portability",
+    "--enable=security",
+    "--enable=sensitive",
+    "--disable=google",
+    "--enable=google-build-namespaces",
+    "--skip=.github/codechecker_config/skipfile.txt"
+  ],
+  "parse": [
+    "--skip=.github/codechecker_config/skipfile.txt"
+  ]
+}

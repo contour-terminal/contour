@@ -1,0 +1,4 @@
+-/usr/include/*
++*/Build/3rdparty/libunicode/*
+-*/Build/3rdparty/*
+-*/Build/src/contour/contour_autogen/*
