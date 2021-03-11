@@ -97,52 +97,54 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
             analyzers --detail
+          cat ".github/codechecker_config/config.json"
           "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
             analyze \
-            logged_compilation.json \
+            "logged_compilation.json" \
+            --config ".github/codechecker_config/config.json" \
             --jobs $(nproc) \
             --output "Results" \
             \
-            --enable portability \
-            --enable security \
-            --enable sensitive \
-            --disable google \
-            --enable google-build-namespaces \
           || true
       - name: "Perform static analysis (CTU for pushes on master)"
         if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
         run: |
           "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
             analyzers --detail
+          cat ".github/codechecker_config/config.json"
           "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
             analyze \
-            logged_compilation.json \
+            "logged_compilation.json" \
+            --config ".github/codechecker_config/config.json" \
             --jobs $(nproc) \
             --output "Results" \
-            \
-            --enable portability \
-            --enable security \
-            --enable sensitive \
-            --disable google \
-            --enable google-build-namespaces \
             \
             --ctu \
             --ctu-ast-mode load-from-pch \
           || true
       - name: "Convert static analysis results to HTML"
         run: |
+          cat ".github/codechecker_config/config.json"
           "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
             parse \
             "Results" \
+            --config ".github/codechecker_config/config.json" \
             --export html \
             --output "Results-HTML"
-      - name: "Upload results"
+      - name: "Dump analysis results to CI log"
+        run: |
+          cat ".github/codechecker_config/config.json"
+          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+            parse \
+            "Results" \
+            --config ".github/codechecker_config/config.json"
+      - name: "Upload HTML results"
         uses: actions/upload-artifact@v2
         with:
           name: "CodeChecker Results"
           path: "Results-HTML"
           if-no-files-found: error
-      - name: "Upload analysis failure reproducers"
+      - name: "Upload analysis failure collections"
         uses: actions/upload-artifact@v2
         with:
           name: "CodeChecker analysis failures"
