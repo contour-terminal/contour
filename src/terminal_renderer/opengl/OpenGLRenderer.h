@@ -101,6 +101,8 @@ class OpenGLRenderer :
         }
     };
 
+    void clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format);
+
     // -------------------------------------------------------------------------------------------
     // private data members
     //
