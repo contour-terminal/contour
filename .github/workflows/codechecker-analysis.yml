@@ -14,7 +14,7 @@ on:
       - fix/**
       - improvement/**
       - wip
-    pull_requets:
+    pull_requests:
       branches:
         - master
 
@@ -56,7 +56,7 @@ jobs:
             gcc-multilib    \
             python3-dev     \
             python3-venv
-          curl -sL http://deb.nodesource.com/setup_12.x | sudo -E bash - 
+          curl -sL http://deb.nodesource.com/setup_12.x | sudo -E bash -
           curl -sL http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo add-apt-repository -y "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-12 main"
           sudo apt-get -y --no-install-recommends install \
