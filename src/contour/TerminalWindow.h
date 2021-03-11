@@ -28,6 +28,8 @@
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QTabWidget>
+#include <QtWidgets/QScrollBar>
+#include <QtWidgets/QScrollArea>
 
 #include <atomic>
 #include <fstream>
@@ -36,6 +38,7 @@
 namespace contour {
 
 class TerminalWidget;
+
 
 // XXX Maybe just now a main window and maybe later just a TerminalWindow.
 //
@@ -51,10 +54,16 @@ class TerminalWindow :
     TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath);
     ~TerminalWindow() override;
 
-    //bool event(QEvent* _event) override;
+    bool event(QEvent* _event) override;
     //bool focusNextPrevChild(bool) override;
+    void resizeEvent(QResizeEvent* _event) override;
 
   public Q_SLOTS:
+    void terminalBufferChanged(TerminalWidget*, terminal::ScreenType);
+    void onScrollBarValueChanged();
+    void terminalScreenUpdated(TerminalWidget* _terminalWidget);
+    void profileChanged(TerminalWidget* _terminalWidget);
+    void viewportChanged(TerminalWidget* _terminalWidget);
     void onTerminalClosed(TerminalWidget* _terminalWidget);
     void setBackgroundBlur(bool _enable);
 
@@ -64,13 +73,17 @@ class TerminalWindow :
 #endif
 
   private:
-    TerminalWidget* createTerminalWidget();
+    void createTerminalWidget();
+    QRect calculateWidgetGeometry();
+    void recalculateGeometry();
 
   private:
     config::Config config_;
     const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
+    QScrollArea* scrollArea_;
+    QScrollBar* scrollBar_ = nullptr;
     TerminalWidget* terminalWidget_;
 };
 

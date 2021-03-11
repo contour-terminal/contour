@@ -20,6 +20,14 @@
 
 namespace terminal::renderer {
 
+struct AtlasTextureInfo {
+    std::string atlasName;
+    unsigned atlasInstanceId;
+    Size size;
+    atlas::Format format;
+    atlas::Buffer buffer;
+};
+
 /**
  * Terminal render target interface.
  *
@@ -45,6 +53,8 @@ class RenderTarget
     virtual void execute() = 0;
 
     virtual void clearCache() = 0;
+
+    virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId) = 0;
 };
 
 } // end namespace

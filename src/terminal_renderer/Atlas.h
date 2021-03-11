@@ -529,6 +529,23 @@ class MetadataTextureAtlas {
 
 namespace fmt { // {{{
     template <>
+    struct formatter<terminal::renderer::atlas::Format> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::renderer::atlas::Format _format, FormatContext& ctx)
+        {
+            switch (_format)
+            {
+                case terminal::renderer::atlas::Format::RGBA: return format_to(ctx.out(), "RGBA");
+                case terminal::renderer::atlas::Format::RGB: return format_to(ctx.out(), "RGB");
+                case terminal::renderer::atlas::Format::Red: return format_to(ctx.out(), "Alpha");
+            }
+            return format_to(ctx.out(), "unknown");
+        }
+    };
+
+    template <>
     struct formatter<terminal::renderer::atlas::CreateAtlas> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }

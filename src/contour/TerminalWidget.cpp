@@ -29,9 +29,10 @@
 #include <terminal_renderer/opengl/OpenGLRenderer.h>
 
 #include <QtCore/QDebug>
-#include <QtCore/QMetaObject>
 #include <QtCore/QFileInfo>
+#include <QtCore/QMetaObject>
 #include <QtCore/QProcess>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtNetwork/QHostInfo>
 #include <QtGui/QClipboard>
@@ -40,24 +41,25 @@
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QMessageBox>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
 #endif
 
+#include <algorithm>
 #include <cstring>
+// #include <execution>
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
 
 using namespace std::string_literals;
 
-using std::cerr;
-
 using std::array;
+using std::cerr;
 using std::chrono::steady_clock;
+using std::copy;
 using std::endl;
 using std::exception;
 using std::get;
@@ -101,6 +103,14 @@ namespace {
     auto const WidgetTag = crispy::debugtag::make("terminal.widget", "Logs system widget related debug information.");
     auto const KeyboardTag = crispy::debugtag::make("keyboard", "Logs OS keyboard related debug information.");
 }
+
+#define CHECKED_GL(code) \
+    do { \
+        (code); \
+        GLenum err{}; \
+        while ((err = glGetError()) != GL_NO_ERROR) \
+            debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
+    } while (0)
 
 using actions::Action;
 
@@ -442,8 +452,6 @@ TerminalWidget::TerminalWidget(config::Config _config,
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
 
-    createScrollBar();
-
     updateTimer_.setSingleShot(true);
     connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWidget::blinkingCursorUpdate));
 
@@ -473,22 +481,6 @@ void TerminalWidget::statsSummary()
     for (auto const& [name, freq] : terminalMetrics_.ordered())
         std::cout << fmt::format("{:>10}: {}\n", freq, name);
 #endif
-}
-
-void TerminalWidget::createScrollBar()
-{
-    scrollBar_ = new QScrollBar(this);
-
-    scrollBar_->resize(scrollBar_->sizeHint().width(), contentsRect().height());
-    scrollBar_->setMinimum(0);
-    scrollBar_->setMaximum(0);
-    scrollBar_->setValue(0);
-    scrollBar_->setCursor(Qt::ArrowCursor);
-
-    connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&TerminalWidget::onScrollBarValueChanged));
-
-    if (config_.scrollbarPosition == config::ScrollBarPosition::Hidden)
-        scrollBar_->hide();
 }
 
 QSurfaceFormat TerminalWidget::surfaceFormat()
@@ -590,6 +582,8 @@ void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
+    createView();
+
     // {{{ some info
     static bool infoPrinted = false;
     if (!infoPrinted)
@@ -616,8 +610,7 @@ void TerminalWidget::initializeGL()
 
         GLint glslNumShaderVersions{};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
-#endif
+        CHECKED_GL( glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions) );
         if (glslNumShaderVersions > 0)
         {
             glslVersionMsg += " (";
@@ -630,15 +623,39 @@ void TerminalWidget::initializeGL()
                 }
             glslVersionMsg += ')';
         }
+#endif
         debuglog(WidgetTag).write(glslVersionMsg);
     }
     // }}}
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
-    glEnable(GL_DEBUG_OUTPUT);
-    glDebugMessageCallback(&glMessageCallback, this);
+    CHECKED_GL( glEnable(GL_DEBUG_OUTPUT) );
+    CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
 #endif
 
+    terminal::Screen& screen = terminalView_->terminal().screen();
+
+    screen.setTabWidth(profile().tabWidth);
+
+    // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
+    // hot reloading, because this value may have changed manually by an application already.
+    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    screen.setMaxImageSize(config_.maxImageSize);
+    screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
+    screen.setSixelCursorConformance(config_.sixelCursorConformance);
+
+    if (profile_.maximized)
+        window()->showMaximized();
+
+    if (profile_.fullscreen)
+    {
+        maximizedState_ = window()->isMaximized();
+        window()->showFullScreen();
+    }
+}
+
+void TerminalWidget::createView()
+{
     auto shell = profile().shell;
     shell.env["TERMINAL_NAME"] = "contour";
     shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
@@ -675,56 +692,22 @@ void TerminalWidget::initializeGL()
         )
     );
 
-    terminal::Screen& screen = terminalView_->terminal().screen();
-
-    screen.setTabWidth(profile().tabWidth);
-
-    // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
-    // hot reloading, because this value may have changed manually by an application already.
-    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
-    screen.setMaxImageSize(config_.maxImageSize);
-    screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    screen.setSixelCursorConformance(config_.sixelCursorConformance);
-
-    if (profile_.maximized)
-        window()->showMaximized();
-
-    if (profile_.fullscreen)
-    {
-        maximizedState_ = window()->isMaximized();
-        window()->showFullScreen();
-    }
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
+    QOpenGLWidget::resizeGL(_width, _height);
+
     debuglog(WidgetTag).write("width={}, height={}, scrollbarPos={}", _width, _height, config_.scrollbarPosition);
     if (_width == 0 || _height == 0)
         return;
 
-    scrollBar_->resize(scrollBar_->sizeHint().width(), contentsRect().height());
-    switch (config_.scrollbarPosition)
-    {
-        case config::ScrollBarPosition::Left:
-            scrollBar_->move(0, 0);
-            break;
-        case config::ScrollBarPosition::Right:
-            scrollBar_->move(size().width() - scrollBar_->sizeHint().width(), 0);
-            break;
-        case config::ScrollBarPosition::Hidden:
-            break;
-    }
-
-    auto const viewWidth = width() - scrollBar_->sizeHint().width();
-    auto const viewHeight = height();
-
-    debuglog(WidgetTag).write("widget: {}, view: {}, geometry: {}/{}",
+    debuglog(WidgetTag).write("widget: {}, geometry: {}/{}",
                               terminal::Size{_width, _height},
-                              terminal::Size{viewWidth, viewHeight},
                               terminal::Size{geometry().top(), geometry().left()},
                               terminal::Size{geometry().width(), geometry().height()});
 
-    terminalView_->resize(viewWidth, viewHeight);
+    terminalView_->resize(_width, _height);
     setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
 
     // if (setScreenDirty())
@@ -1233,7 +1216,7 @@ bool TerminalWidget::executeAction(Action const& _action)
 
     auto const postScroll = [this](bool _dirty) -> Result {
         if (_dirty)
-            updateScrollBarValue();
+            emit viewportChanged(this);
         return _dirty ? Result::Dirty : Result::Nothing;
     };
 
@@ -1521,10 +1504,10 @@ void TerminalWidget::activateProfile(string const& _name, config::TerminalProfil
     if (newProfile.fullscreen != window()->isFullScreen())
         toggleFullscreen();
 
-    updateScrollBarPosition();
-
     profile_ = std::move(newProfile);
     profileName_ = _name;
+
+    emit profileChanged(this);
 }
 
 string TerminalWidget::extractSelectionText()
@@ -1697,19 +1680,13 @@ void TerminalWidget::onSelectionComplete()
     }
 }
 
-void TerminalWidget::bufferChanged(terminal::ScreenType)
+void TerminalWidget::bufferChanged(terminal::ScreenType _type)
 {
-    post([this] ()
+    currentScreenType_ = _type;
+    post([this, _type] ()
     {
         setDefaultCursor();
-
-        if (terminalView_->terminal().screen().isPrimaryScreen())
-            scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
-        else
-            scrollBar_->setMaximum(0);
-
-        updateScrollBarPosition();
-        updateScrollBarValue();
+        emit terminalBufferChanged(this, _type);
     });
 
     if (setScreenDirty())
@@ -1728,10 +1705,9 @@ void TerminalWidget::screenUpdated()
     {
         post([this]()
         {
-            scrollBar_->setMaximum(terminalView_->terminal().screen().historyLineCount());
             if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
                 terminalView_->terminal().viewport().scrollToBottom();
-            updateScrollBarValue();
+            emit screenUpdated(this);
         });
     }
 
@@ -1739,47 +1715,11 @@ void TerminalWidget::screenUpdated()
         update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 }
 
-void TerminalWidget::updateScrollBarValue()
+void TerminalWidget::onScrollBarValueChanged(int _value)
 {
-    if (auto const s = terminalView_->terminal().viewport().absoluteScrollOffset(); s.has_value())
-        scrollBar_->setValue(s.value());
-    else
-        scrollBar_->setValue(scrollBar_->maximum());
-}
-
-void TerminalWidget::onScrollBarValueChanged()
-{
-    terminalView_->terminal().viewport().scrollToAbsolute(scrollBar_->value());
+    view()->terminal().viewport().scrollToAbsolute(_value);
     if (setScreenDirty())
         update();
-}
-
-void TerminalWidget::updateScrollBarPosition()
-{
-    if (view()->terminal().screen().isAlternateScreen())
-    {
-        if (config_.hideScrollbarInAltScreen)
-            scrollBar_->hide();
-        else
-            scrollBar_->show();
-    }
-    else
-    {
-        switch (config_.scrollbarPosition)
-        {
-            case config::ScrollBarPosition::Left:
-                scrollBar_->move(0, 0);
-                scrollBar_->show();
-                break;
-            case config::ScrollBarPosition::Right:
-                scrollBar_->move(size().width() - scrollBar_->sizeHint().width(), 0);
-                scrollBar_->show();
-                break;
-            case config::ScrollBarPosition::Hidden:
-                scrollBar_->hide();
-                break;
-        }
-    }
 }
 
 void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
@@ -1835,8 +1775,6 @@ QSize TerminalWidget::minimumSizeHint() const
 
 QSize TerminalWidget::sizeHint() const
 {
-    auto const scrollbarWidth = scrollBar_->isHidden() ? 0 : scrollBar_->sizeHint().width();
-
     auto const cellSize = terminalView_ ? terminalView_->renderer().gridMetrics().cellSize
                                         : terminal::Size{100, 100};
 
@@ -1846,13 +1784,12 @@ QSize TerminalWidget::sizeHint() const
     // auto const viewHeight = profile().terminalSize.height * gridMetrics().cellSize.height;
 
     debuglog(WidgetTag).write(
-        "Calling sizeHint: {}, SBW: {}, terminalSize: {}",
-        terminal::Size{viewWidth + scrollbarWidth, viewHeight},
-        scrollbarWidth,
+        "Calling sizeHint: {}, terminalSize: {}",
+        terminal::Size{viewWidth, viewHeight},
         profile().terminalSize
     );
 
-    return QSize(viewWidth + scrollbarWidth, viewHeight);
+    return QSize(viewWidth, viewHeight);
 }
 
 void TerminalWidget::setSize(terminal::Size _size)
@@ -1992,9 +1929,59 @@ void TerminalWidget::copyToClipboard(std::string_view const& _text)
 
 void TerminalWidget::dumpState()
 {
-    // TODO: log this to debuglog(...)?
+    auto const tmpDir = FileSystem::path(QStandardPaths::writableLocation(QStandardPaths::TempLocation).toStdString());
+    auto const targetDir = tmpDir / FileSystem::path("contour-debug");
+    FileSystem::create_directories(targetDir);
+    debuglog(WidgetTag).write("Dumping state into directory: {}", targetDir.generic_string());
+    // TODO: The above should be done from the outside and the targetDir being passed into this call.
+    // TODO: maybe zip this dir in the end.
+
+    // TODO: use this file store for everything that needs to be dumped.
     terminalView_->terminal().screen().dumpState("Dump screen state.");
-    //XXX terminalView_->renderer().dumpState(std::cout);
+    terminalView_->renderer().dumpState(std::cout);
+    terminal::renderer::RenderTarget& renderTarget = terminalView_->renderer().renderTarget();
+
+    for (auto const* allocator: {&renderTarget.monochromeAtlasAllocator(), &renderTarget.coloredAtlasAllocator(), &renderTarget.lcdAtlasAllocator()})
+    {
+        for (unsigned instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
+        {
+            auto const infoOpt = renderTarget.readAtlas(*allocator, instanceId);
+            if (!infoOpt.has_value())
+                continue;
+
+            terminal::renderer::AtlasTextureInfo const& info = infoOpt.value();
+            std::unique_ptr<QImage> image;
+            auto const elementCount = terminal::renderer::atlas::element_count(info.format);
+            string formatName = fmt::format("{}", allocator->format());
+            switch (info.format)
+            {
+                case terminal::renderer::atlas::Format::RGBA:
+                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_RGBA8888);
+                    break;
+                case terminal::renderer::atlas::Format::RGB:
+                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_RGB888);
+                    break;
+                case terminal::renderer::atlas::Format::Red:
+                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_Grayscale8);
+                    break;
+            }
+            assert(image);
+
+            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is inverse.
+            crispy::for_each(
+                // TODO: std::execution::seq,
+                crispy::times(info.size.height),
+                [&](int i) {
+                    uint8_t const* sourceLine = &info.buffer.data()[i * info.size.width * elementCount];
+                    copy(sourceLine, sourceLine + info.size.width * elementCount, image->scanLine(info.size.height - i - 1));
+                }
+            );
+
+            auto const imageFileName = fmt::format("atlas-{}-{}-{}.png", allocator->name(), formatName, instanceId);
+            auto const targetPath = targetDir / imageFileName;
+            image->save(QString::fromStdString(targetPath.generic_string()));
+        }
+    }
 }
 // }}}
 

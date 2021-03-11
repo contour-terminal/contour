@@ -56,6 +56,8 @@ class Renderer {
 
     Size cellSize() const noexcept { return gridMetrics_.cellSize; }
 
+    RenderTarget& renderTarget() const noexcept { return *renderTarget_; }
+
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setRenderSize(int _width, int _height);

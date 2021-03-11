@@ -25,6 +25,7 @@
 #include <QtGui/QOpenGLShaderProgram>
 
 #include <memory>
+#include <optional>
 
 namespace terminal::renderer::opengl {
 
@@ -62,6 +63,8 @@ class OpenGLRenderer :
     void execute() override;
 
     void clearCache() override;
+
+    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId) override;
 
   private:
     // private helper methods
