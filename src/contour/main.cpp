@@ -235,19 +235,28 @@ int main(int argc, char* argv[])
 
         if (auto const filterString = flags.get<string>("contour.terminal.debug"); !filterString.empty())
         {
-            auto const filters = crispy::split(filterString, ',');
-            crispy::logging_sink::for_debug().enable(true);
-            for (auto& tag: crispy::debugtag::store())
+            if (filterString == "all")
             {
-                tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
-                    if (filterPattern.back() != '*')
-                        return tag.name == filterPattern;
-                    return std::equal(
-                        begin(filterPattern),
-                        prev(end(filterPattern)),
-                        begin(tag.name)
-                    );
-                });
+                crispy::logging_sink::for_debug().enable(true);
+                for (auto& tag: crispy::debugtag::store())
+                    tag.enabled = true;
+            }
+            else
+            {
+                auto const filters = crispy::split(filterString, ',');
+                crispy::logging_sink::for_debug().enable(true);
+                for (auto& tag: crispy::debugtag::store())
+                {
+                    tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
+                        if (filterPattern.back() != '*')
+                            return tag.name == filterPattern;
+                        return std::equal(
+                            begin(filterPattern),
+                            prev(end(filterPattern)),
+                            begin(tag.name)
+                        );
+                    });
+                }
             }
         }
 

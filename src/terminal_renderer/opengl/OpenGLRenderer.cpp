@@ -359,6 +359,51 @@ unsigned OpenGLRenderer::maxTextureSize()
     return static_cast<unsigned>(value);
 }
 
+void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format)
+{
+    bindTexture2DArray(_textureId);
+
+    auto constexpr target = GL_TEXTURE_2D_ARRAY;
+    auto constexpr levelOfDetail = 0;
+    auto constexpr depth = 1;
+    auto constexpr type = GL_UNSIGNED_BYTE;
+    auto constexpr x0 = 0;
+    auto constexpr y0 = 0;
+    auto constexpr z0 = 0;
+
+    std::vector<uint8_t> stub;
+    stub.resize(_width * _height * atlas::element_count(_format));
+    auto t = stub.begin();
+    switch (_format)
+    {
+        case atlas::Format::Red:
+            for (auto i = 0u; i < _width * _height; ++i)
+                *t++ = 0x40;
+            break;
+        case atlas::Format::RGB:
+            for (auto i = 0u; i < _width * _height; ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0x00;
+                *t++ = 0x80;
+            }
+            break;
+        case atlas::Format::RGBA:
+            for (auto i = 0u; i < _width * _height; ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0x00;
+                *t++ = 0x80;
+                *t++ = 0x00;
+            }
+            break;
+    }
+    assert(t == stub.end());
+
+    glTexSubImage3D(target, levelOfDetail, x0, y0, z0, _width, _height, depth,
+                    glFormat(_format), type, stub.data());
+}
+
 void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
@@ -373,8 +418,12 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-#if 1
-    // pre-initialize texture for better debugging (qrenderdoc)
+    auto const key = AtlasKey{_param.atlasName, _param.atlas};
+    atlasMap_[key] = textureId;
+
+    clearTexture2DArray(textureId, _param.width, _param.height, _param.format);
+
+    // {{{ pre-initialize texture for better debugging (qrenderdoc)
     auto constexpr target = GL_TEXTURE_2D_ARRAY;
     auto constexpr levelOfDetail = 0;
     auto constexpr depth = 1;
@@ -414,10 +463,7 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 
     glTexSubImage3D(target, levelOfDetail, x0, y0, z0, _param.width, _param.height, depth,
                     glFormat(_param.format), type, stub.data());
-#endif
-
-    auto const key = AtlasKey{_param.atlasName, _param.atlas};
-    atlasMap_[key] = textureId;
+    // }}}
 }
 
 void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
