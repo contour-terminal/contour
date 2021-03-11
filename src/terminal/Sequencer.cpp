@@ -1396,7 +1396,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECDC: screen_.deleteColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECRM:
-            for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
+            crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
                 impl::setModeDEC(_seq, i, false, screen_);
             });
             break;
@@ -1413,7 +1413,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             else
                 return ApplyResult::Invalid;
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
-        case DECSM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
+        case DECSM: crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSTR: screen_.resetSoft(); break;
         case DECXCPR: screen_.reportExtendedCursorPosition(); break;
@@ -1427,7 +1427,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case ICH: screen_.insertCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
         case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
         case RM:
-            for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
+            crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
                 impl::setAnsiMode(_seq, i, false, screen_);
             });
             break;
@@ -1435,7 +1435,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case SETMARK: screen_.setMark(); break;
         case SGR: return impl::dispatchSGR(_seq, screen_);
-        case SM: for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setAnsiMode(_seq, i, true, screen_); }); break;
+        case SM: crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setAnsiMode(_seq, i, true, screen_); }); break;
         case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
         case TBC: return impl::TBC(_seq, screen_);
         case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;
