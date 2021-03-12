@@ -110,10 +110,10 @@ int main(int argc, char* argv[])
                     "Spawns a new terminal application.",
                     CLI::OptionList{
                         CLI::Option{"config", CLI::Value{contour::config::defaultConfigFilePath()}, "Path to configuration file to load at startup."},
-                        CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load."},
+                        CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load (overriding config)."},
                         CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma seperated list of tags."},
                         CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
-                        CLI::Option{"working-directory", CLI::Value{"."s}, "Sets initial working directory."},
+                        CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config)."},
                     },
                     CLI::CommandList{},
                     CLI::CommandSelect::Implicit,
@@ -294,8 +294,7 @@ int main(int argc, char* argv[])
         }
 
         if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
-            config.profile(profileName)->shell.workingDirectory =
-                FileSystem::path(wd);
+            config.profile(profileName)->shell.workingDirectory = FileSystem::path(wd);
 
         if (configFailures)
             return EXIT_FAILURE;
