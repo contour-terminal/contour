@@ -13,6 +13,7 @@
  */
 #include <contour/TerminalWidget.h>
 #include <contour/Actions.h>
+#include <contour/helper.h>
 
 #include <terminal/Color.h>
 #include <terminal/Metrics.h>
@@ -99,19 +100,6 @@ using namespace std::string_view_literals;
 
 namespace contour {
 
-namespace {
-    auto const WidgetTag = crispy::debugtag::make("terminal.widget", "Logs system widget related debug information.");
-    auto const KeyboardTag = crispy::debugtag::make("keyboard", "Logs OS keyboard related debug information.");
-}
-
-#define CHECKED_GL(code) \
-    do { \
-        (code); \
-        GLenum err{}; \
-        while ((err = glGetError()) != GL_NO_ERROR) \
-            debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
-    } while (0)
-
 using actions::Action;
 
 namespace // {{{
@@ -125,110 +113,7 @@ namespace // {{{
 #endif
     }
 
-    constexpr inline terminal::Modifier makeModifier(int _mods)
-    {
-        using terminal::Modifier;
-
-        Modifier mods{};
-
-        if (_mods & Qt::AltModifier)
-            mods |= Modifier::Alt;
-        if (_mods & Qt::ShiftModifier)
-            mods |= Modifier::Shift;
-#if defined(__APPLE__)
-        // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
-        //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
-        //      and the MetaModifier value corresponds to the Control keys."
-        if (_mods & Qt::MetaModifier)
-            mods |= Modifier::Control;
-        if (_mods & Qt::ControlModifier)
-            mods |= Modifier::Meta;
-#else
-        if (_mods & Qt::ControlModifier)
-            mods |= Modifier::Control;
-        if (_mods & Qt::MetaModifier)
-            mods |= Modifier::Meta;
-#endif
-
-        return mods;
-    }
-
-    constexpr terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
-    {
-        switch (_button)
-        {
-            case Qt::MouseButton::RightButton:
-                return terminal::MouseButton::Right;
-            case Qt::MiddleButton:
-                return terminal::MouseButton::Middle;
-            case Qt::LeftButton:
-                [[fallthrough]];
-            default: // d'oh
-                return terminal::MouseButton::Left;
-        }
-    }
-
     /// Maps Qt KeyInputEvent to VT input event for special keys.
-    optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardModifiers _mods)
-    {
-        using terminal::Key;
-        using terminal::InputEvent;
-        using terminal::KeyInputEvent;
-        using terminal::CharInputEvent;
-
-        static auto constexpr mapping = array{
-            pair{Qt::Key_Insert, Key::Insert},
-            pair{Qt::Key_Delete, Key::Delete},
-            pair{Qt::Key_Right, Key::RightArrow},
-            pair{Qt::Key_Left, Key::LeftArrow},
-            pair{Qt::Key_Down, Key::DownArrow},
-            pair{Qt::Key_Up, Key::UpArrow},
-            pair{Qt::Key_PageDown, Key::PageDown},
-            pair{Qt::Key_PageUp, Key::PageUp},
-            pair{Qt::Key_Home, Key::Home},
-            pair{Qt::Key_End, Key::End},
-            pair{Qt::Key_F1, Key::F1},
-            pair{Qt::Key_F2, Key::F2},
-            pair{Qt::Key_F3, Key::F3},
-            pair{Qt::Key_F4, Key::F4},
-            pair{Qt::Key_F5, Key::F5},
-            pair{Qt::Key_F6, Key::F6},
-            pair{Qt::Key_F7, Key::F7},
-            pair{Qt::Key_F8, Key::F8},
-            pair{Qt::Key_F9, Key::F9},
-            pair{Qt::Key_F10, Key::F10},
-            pair{Qt::Key_F11, Key::F11},
-            pair{Qt::Key_F12, Key::F12},
-            // todo: F13..F25
-            // TODO: NumPad
-            // pair{Qt::Key_0, Key::Numpad_0},
-            // pair{Qt::Key_1, Key::Numpad_1},
-            // pair{Qt::Key_2, Key::Numpad_2},
-            // pair{Qt::Key_3, Key::Numpad_3},
-            // pair{Qt::Key_4, Key::Numpad_4},
-            // pair{Qt::Key_5, Key::Numpad_5},
-            // pair{Qt::Key_6, Key::Numpad_6},
-            // pair{Qt::Key_7, Key::Numpad_7},
-            // pair{Qt::Key_8, Key::Numpad_8},
-            // pair{Qt::Key_9, Key::Numpad_9},
-            // pair{Qt::Key_Period, Key::Numpad_Decimal},
-            // pair{Qt::Key_Slash, Key::Numpad_Divide},
-            // pair{Qt::Key_Asterisk, Key::Numpad_Multiply},
-            // pair{Qt::Key_Minus, Key::Numpad_Subtract},
-            // pair{Qt::Key_Plus, Key::Numpad_Add},
-            // pair{Qt::Key_Enter, Key::Numpad_Enter},
-            // pair{Qt::Key_Equal, Key::Numpad_Equal},
-        };
-
-        if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key; }); i != end(mapping))
-            return { InputEvent{KeyInputEvent{i->second, makeModifier(_mods)}} };
-
-        if (_key == Qt::Key_Backtab)
-            return { InputEvent{CharInputEvent{'\t', makeModifier(_mods | Qt::ShiftModifier)}} };
-
-        return nullopt;
-    }
-
 #if 0 // !defined(NDEBUG)
     QDebug operator<<(QDebug str, QEvent const& ev) {
         static int eventEnumIndex = QEvent::staticMetaObject.indexOfEnumerator("Type");
@@ -377,30 +262,8 @@ namespace // {{{
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
+        debuglog(WidgetTag).write("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
-    }
-
-    template <typename F>
-    class FunctionCallEvent : public QEvent {
-      private:
-       using Fun = typename std::decay<F>::type;
-       Fun fun;
-      public:
-       FunctionCallEvent(Fun && fun) : QEvent(QEvent::None), fun(std::move(fun)) {}
-       FunctionCallEvent(Fun const& fun) : QEvent(QEvent::None), fun(fun) {}
-       ~FunctionCallEvent() { fun(); }
-    };
-
-    template <typename F>
-    void postToObject(QObject* obj, F fun)
-    {
-#if 0
-        // Qt >= 5.10
-        QMetaObject::invokeMethod(obj, std::forward<F>(fun));
-#else
-        // Qt < 5.10
-        QCoreApplication::postEvent(obj, new FunctionCallEvent<F>(std::forward<F>(fun)));
-#endif
     }
 } // }}}
 
@@ -415,7 +278,29 @@ TerminalWidget::TerminalWidget(config::Config _config,
     profile_{ *config_.profile(profileName_) },
     programPath_{ std::move(_programPath) },
     fonts_{ profile().fonts },
-    terminalView_{},
+    terminalView_{make_unique<terminal::view::TerminalView>(
+        now_,
+        *this,
+        profile().maxHistoryLineCount,
+        config_.wordDelimiters,
+        logicalDpiX(),
+        logicalDpiY(),
+        profile().fonts,
+        profile().cursorShape,
+        profile().cursorDisplay,
+        profile().cursorBlinkInterval,
+        profile().colors,
+        profile().backgroundOpacity,
+        profile().hyperlinkDecoration.normal,
+        profile().hyperlinkDecoration.hover,
+#if defined(_MSC_VER)
+        make_unique<terminal::ConPty>(profile().terminalSize),
+#else
+        make_unique<terminal::UnixPty>(profile().terminalSize),
+#endif
+        profile().shell,
+        nullptr // RenderTarget is set later, upon initializeGL
+    )},
     configFileChangeWatcher_{},
     updateTimer_(this)
 {
@@ -437,17 +322,12 @@ TerminalWidget::TerminalWidget(config::Config _config,
     }
 
     setMouseTracking(true);
-
-    // QPalette p = QApplication::palette();
-    // QColor backgroundColor(0x30, 0x30, 0x30, 0x80);
-    // backgroundColor.setAlphaF(0.3);
-    // p.setColor(QPalette::Window, backgroundColor);
-    // setPalette(p);
-
     setFormat(surfaceFormat());
 
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
+
+    setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
 
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
@@ -457,7 +337,9 @@ TerminalWidget::TerminalWidget(config::Config _config,
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
-    //TODO: connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
+    configureTerminal(*terminalView_, config_, profileName_);
+
+    updateGeometry();
 }
 
 TerminalWidget::~TerminalWidget()
@@ -572,17 +454,20 @@ void TerminalWidget::onFrameSwapped()
     }
 }
 
-void TerminalWidget::onScreenChanged(QScreen* _screen)
-{
-    // TODO: Update font size and window size based on new screen's contentScale().
-    (void) _screen;
-}
-
 void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
-    createView();
+    renderTarget_ = make_unique<terminal::renderer::opengl::OpenGLRenderer>(
+        *config::Config::loadShaderConfig(config::ShaderClass::Text),
+        *config::Config::loadShaderConfig(config::ShaderClass::Background),
+        width(),
+        height(),
+        0, // TODO left margin
+        0 // TODO bottom margin
+    );
+
+    terminalView_->setRenderTarget(*renderTarget_);
 
     // {{{ some info
     static bool infoPrinted = false;
@@ -610,7 +495,8 @@ void TerminalWidget::initializeGL()
 
         GLint glslNumShaderVersions{};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-        CHECKED_GL( glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions) );
+        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+        glGetError(); // consume possible OpenGL error.
         if (glslNumShaderVersions > 0)
         {
             glslVersionMsg += " (";
@@ -633,17 +519,6 @@ void TerminalWidget::initializeGL()
     CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
 #endif
 
-    terminal::Screen& screen = terminalView_->terminal().screen();
-
-    screen.setTabWidth(profile().tabWidth);
-
-    // Sixel-scrolling default is *only* loaded during startup and NOT reloading during config file
-    // hot reloading, because this value may have changed manually by an application already.
-    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
-    screen.setMaxImageSize(config_.maxImageSize);
-    screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    screen.setSixelCursorConformance(config_.sixelCursorConformance);
-
     if (profile_.maximized)
         window()->showMaximized();
 
@@ -654,64 +529,20 @@ void TerminalWidget::initializeGL()
     }
 }
 
-void TerminalWidget::createView()
-{
-    auto shell = profile().shell;
-    shell.env["TERMINAL_NAME"] = "contour";
-    shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
-    shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
-
-    terminalView_ = make_unique<terminal::view::TerminalView>(
-        now_,
-        *this,
-        profile().maxHistoryLineCount,
-        config_.wordDelimiters,
-        logicalDpiX(),
-        logicalDpiY(),
-        profile().fonts,
-        profile().cursorShape,
-        profile().cursorDisplay,
-        profile().cursorBlinkInterval,
-        profile().colors,
-        profile().backgroundOpacity,
-        profile().hyperlinkDecoration.normal,
-        profile().hyperlinkDecoration.hover,
-#if defined(_MSC_VER)
-        make_unique<terminal::ConPty>(profile().terminalSize),
-#else
-        make_unique<terminal::UnixPty>(profile().terminalSize),
-#endif
-        shell,
-        make_unique<terminal::renderer::opengl::OpenGLRenderer>(
-            *config::Config::loadShaderConfig(config::ShaderClass::Text),
-            *config::Config::loadShaderConfig(config::ShaderClass::Background),
-            width(),
-            height(),
-            0, // TODO left margin
-            0 // TODO bottom margin
-        )
-    );
-
-}
-
 void TerminalWidget::resizeGL(int _width, int _height)
 {
+    debuglog(WidgetTag).write("width={}, height={}", _width, _height);
     QOpenGLWidget::resizeGL(_width, _height);
 
-    debuglog(WidgetTag).write("width={}, height={}, scrollbarPos={}", _width, _height, config_.scrollbarPosition);
     if (_width == 0 || _height == 0)
         return;
 
-    debuglog(WidgetTag).write("widget: {}, geometry: {}/{}",
-                              terminal::Size{_width, _height},
-                              terminal::Size{geometry().top(), geometry().left()},
-                              terminal::Size{geometry().width(), geometry().height()});
+    // debuglog(WidgetTag).write("widget: {}, geometry: {}/{}",
+    //                           terminal::Size{_width, _height},
+    //                           terminal::Size{geometry().top(), geometry().left()},
+    //                           terminal::Size{geometry().width(), geometry().height()});
 
     terminalView_->resize(_width, _height);
-    setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
-
-    // if (setScreenDirty())
-    //     update();
 }
 
 void TerminalWidget::paintGL()
@@ -761,16 +592,34 @@ void TerminalWidget::paintGL()
     }
 }
 
-bool TerminalWidget::reloadConfigValues()
+bool TerminalWidget::resetConfig()
 {
-    return reloadConfigValues(profileName_);
+    auto const ec = config::createDefaultConfig(config_.backingFilePath);
+    if (ec)
+    {
+        cerr << fmt::format("Failed to load default config at {}; ({}) {}\n",
+                            config_.backingFilePath.string(),
+                            ec.category().name(),
+                            ec.message());
+        return false;
+    }
+
+    config::Config defaultConfig;
+    try
+    {
+        config::loadConfigFromFile(config_.backingFilePath);
+    }
+    catch (std::exception const& e)
+    {
+        debuglog(WidgetTag).write("Failed to load default config: {}", e.what());
+    }
+
+    return reloadConfig(defaultConfig, defaultConfig.defaultProfileName);
 }
 
-bool TerminalWidget::reloadConfigValues(std::string const& _profileName)
+bool TerminalWidget::reloadConfigWithProfile(std::string const& _profileName)
 {
-    auto filePath = config_.backingFilePath.string();
     auto newConfig = config::Config{};
-
     auto configFailures = int{0};
     auto const configLogger = [&](string const& _msg)
     {
@@ -780,7 +629,7 @@ bool TerminalWidget::reloadConfigValues(std::string const& _profileName)
 
     try
     {
-        loadConfigFromFile(newConfig, filePath);
+        loadConfigFromFile(newConfig, config_.backingFilePath.string());
     }
     catch (exception const& e)
     {
@@ -797,89 +646,21 @@ bool TerminalWidget::reloadConfigValues(std::string const& _profileName)
         return false;
     }
 
-    return reloadConfigValues(std::move(newConfig), _profileName);
+    return reloadConfig(std::move(newConfig), _profileName);
 }
 
-bool TerminalWidget::reloadConfigValues(config::Config _newConfig)
+bool TerminalWidget::reloadConfig(config::Config _newConfig, string const& _profileName)
 {
-    auto const profileName = profileName_;
-    return reloadConfigValues(std::move(_newConfig), profileName);
-}
-
-bool TerminalWidget::reloadConfigValues(config::Config _newConfig, string const& _profileName)
-{
-    debuglog(WidgetTag).write("Loading configuration from {} with profile {}",
+    debuglog(WidgetTag).write("Reloading configuration from {} with profile {}",
                               _newConfig.backingFilePath.string(),
                               _profileName);
 
-    terminalView_->terminal().setWordDelimiters(_newConfig.wordDelimiters);
-
-    terminalView_->terminal().screen().setMaxImageSize(_newConfig.maxImageSize);
-    terminalView_->terminal().screen().setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    terminalView_->terminal().screen().setSixelCursorConformance(config_.sixelCursorConformance);
+    configureTerminal(*terminalView_, _newConfig, _profileName);
 
     config_ = std::move(_newConfig);
-    if (config::TerminalProfile *profile = config_.profile(_profileName); profile != nullptr)
-        activateProfile(_profileName, *profile);
+    profileName_ = _profileName;
 
     return true;
-}
-
-constexpr inline bool isModifier(Qt::Key _key)
-{
-    switch (_key)
-    {
-        case Qt::Key_Alt:
-        case Qt::Key_Control:
-        case Qt::Key_Shift:
-        case Qt::Key_Meta:
-            return true;
-        default:
-            return false;
-    }
-}
-
-char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
-{
-    auto const value = static_cast<int>(_key);
-    if (value >= 'A' && value <= 'Z')
-    {
-        if (_mods & Qt::ShiftModifier)
-            return value;
-        else
-            return std::tolower(value);
-    }
-    return 0;
-}
-
-QKeySequence toKeySequence(QKeyEvent *_keyEvent)
-{
-    auto const mod = [](int _qtMod) constexpr -> int {
-        int res = 0;
-        if (_qtMod & Qt::AltModifier) res += Qt::ALT;
-        if (_qtMod & Qt::ShiftModifier) res += Qt::SHIFT;
-#if defined(__APPLE__)
-        // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
-        //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
-        //      and the MetaModifier value corresponds to the Control keys."
-        if (_qtMod & Qt::ControlModifier) res += Qt::META;
-        if (_qtMod & Qt::MetaModifier) res += Qt::CTRL;
-#else
-        if (_qtMod & Qt::ControlModifier) res += Qt::CTRL;
-        if (_qtMod & Qt::MetaModifier) res += Qt::META;
-#endif
-        return res;
-    }(_keyEvent->modifiers());
-
-    // only modifier but no key press?
-    if (isModifier(static_cast<Qt::Key>(_keyEvent->key())))
-        return QKeySequence();
-
-    // modifier AND key press?
-    if (_keyEvent->key() && mod)
-        return QKeySequence(int(_keyEvent->modifiers() | _keyEvent->key()));
-
-    return QKeySequence();
 }
 
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
@@ -1196,6 +977,8 @@ bool TerminalWidget::setFontSize(text::font_size _fontSize)
     terminalView_->setFontSize(_fontSize);
     profile().fonts.size = _fontSize;
 
+    setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
+
     return true;
 }
 
@@ -1298,11 +1081,11 @@ bool TerminalWidget::executeAction(Action const& _action)
             return postScroll(terminalView_->terminal().viewport().scrollToBottom());
         },
         [this](actions::CopyPreviousMarkRange) -> Result {
-            copyToClipboard(extractLastMarkRange());
+            copyToClipboard(terminalView_->terminal().extractLastMarkRange());
             return Result::Silently;
         },
         [this](actions::CopySelection) -> Result {
-            string const text = extractSelectionText();
+            string const text = terminalView_->terminal().extractSelectionText();
             if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
                 clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())));
             return Result::Silently;
@@ -1360,31 +1143,15 @@ bool TerminalWidget::executeAction(Action const& _action)
         },
         [this](actions::ReloadConfig const& action) -> Result {
             if (action.profileName.has_value())
-                return reloadConfigValues(action.profileName.value()) ? Result::Dirty : Result::Nothing;
+                return reloadConfigWithProfile(action.profileName.value()) ? Result::Dirty : Result::Nothing;
             else
-                return reloadConfigValues() ? Result::Dirty : Result::Nothing;
+                return reloadConfigWithProfile(profileName_) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::ResetConfig) -> Result {
-            auto const ec = config::createDefaultConfig(config_.backingFilePath);
-            if (ec)
-            {
-                cerr << fmt::format("Failed to load default config at {}; ({}) {}\n",
-                                    config_.backingFilePath.string(),
-                                    ec.category().name(),
-                                    ec.message());
+            if (resetConfig())
+                return Result::Dirty;
+            else
                 return Result::Silently;
-            }
-
-            config::Config defaultConfig;
-            try
-            {
-                config::loadConfigFromFile(config_.backingFilePath);
-            }
-            catch (std::exception const& e)
-            {
-                debuglog(WidgetTag).write("Failed to load default config: {}", e.what());
-            }
-            return reloadConfigValues(defaultConfig) ? Result::Dirty : Result::Nothing;
         },
         [this](actions::FollowHyperlink) -> Result {
             auto const _l = scoped_lock{terminalView_->terminal()};
@@ -1461,40 +1228,10 @@ void TerminalWidget::activateProfile(string const& _newProfileName)
 
 void TerminalWidget::activateProfile(string const& _name, config::TerminalProfile newProfile)
 {
-    if (newProfile.fonts != profile().fonts)
-    {
-        terminalView_->renderer().setFonts(newProfile.fonts);
-        terminalView_->updateFontMetrics();
-    }
-    else
-        setFontSize(newProfile.fonts.size);
-
-    auto const newScreenSize = terminal::Size{
-        size().width() / gridMetrics().cellSize.width,
-        size().height() / gridMetrics().cellSize.height
-    };
-
-    if (newScreenSize != terminalView_->terminal().screenSize())
-        terminalView_->setTerminalSize(newScreenSize);
-        // TODO: maybe update margin after this call?
-    terminalView_->terminal().screen().setMaxHistoryLineCount(newProfile.maxHistoryLineCount);
-
-    terminalView_->setColorProfile(newProfile.colors);
-
-    terminalView_->setHyperlinkDecoration(newProfile.hyperlinkDecoration.normal,
-                                          newProfile.hyperlinkDecoration.hover);
-
-    if (newProfile.cursorShape != profile().cursorShape)
-        terminalView_->setCursorShape(newProfile.cursorShape);
-
-    if (newProfile.cursorDisplay != profile().cursorDisplay)
-        terminalView_->terminal().setCursorDisplay(newProfile.cursorDisplay);
+    setMinimumSize(terminalView_->cellWidth() * 3, terminalView_->cellHeight() * 2);
 
     if (newProfile.backgroundBlur != profile().backgroundBlur)
         emit setBackgroundBlur(newProfile.backgroundBlur);
-
-    if (newProfile.tabWidth != profile().tabWidth)
-        terminalView_->terminal().screen().setTabWidth(newProfile.tabWidth);
 
     if (newProfile.maximized)
         window()->showMaximized();
@@ -1510,101 +1247,17 @@ void TerminalWidget::activateProfile(string const& _name, config::TerminalProfil
     emit profileChanged(this);
 }
 
-string TerminalWidget::extractSelectionText()
-{
-    using namespace terminal;
-    int lastColumn = 0;
-    string text;
-    string currentLine;
-
-    auto const trimRight = [](string& value)
-    {
-        while (!value.empty() && std::isspace(value.back()))
-            value.pop_back();
-    };
-
-    terminalView_->terminal().renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
-        auto const _lock = scoped_lock{ terminalView_->terminal() };
-        auto const isNewLine = _pos.column <= lastColumn;
-        auto const isLineWrapped = terminalView_->terminal().lineWrapped(_pos.row);
-        bool const touchesRightPage = _pos.row > 0
-            && terminalView_->terminal().isSelectedAbsolute({_pos.row - 1, gridMetrics().pageSize.width});
-        if (isNewLine && (!isLineWrapped || !touchesRightPage))
-        {
-            // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
-            trimRight(currentLine);
-            text += currentLine;
-            text += '\n';
-            currentLine.clear();
-        }
-        currentLine += _cell.toUtf8();
-        lastColumn = _pos.column;
-    });
-
-    trimRight(currentLine);
-    text += currentLine;
-
-    return text;
-}
-
-string TerminalWidget::extractLastMarkRange()
-{
-    using terminal::Coordinate;
-    using terminal::Cell;
-
-    auto const _l = std::lock_guard{terminalView_->terminal()};
-
-    auto const& screen = terminalView_->terminal().screen();
-    auto const colCount = screen.size().width;
-    auto const bottomLine = screen.historyLineCount() + screen.cursor().position.row - 1;
-
-    auto const marker1 = optional{bottomLine};
-
-    auto const marker0 = screen.findMarkerBackward(marker1.value());
-    if (!marker0.has_value())
-        return {};
-
-    // +1 each for offset change from 0 to 1 and because we only want to start at the line *after* the mark.
-    auto const firstLine = *marker0 - screen.historyLineCount() + 2;
-    auto const lastLine = *marker1 - screen.historyLineCount();
-
-    string text;
-
-    for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
-    {
-        for (auto colNum = 1; colNum < colCount; ++colNum)
-            text += screen.at({lineNum, colNum}).toUtf8();
-        text += '\n';
-    }
-
-    return text;
-}
-
 void TerminalWidget::spawnNewTerminal(std::string const& _profileName)
 {
-    // TODO: config option to either spawn new terminal via new process (default) or just as second window.
-    QString const program = QString::fromUtf8(programPath_.c_str());
-    QStringList args;
-
-    if (!config_.backingFilePath.empty())
-        args << "-c" << QString::fromStdString(config_.backingFilePath.generic_string());
-
-    if (!_profileName.empty())
-        args << "-p" << QString::fromStdString(_profileName);
-
-    auto const wd = [&]() -> QString {
-        auto const _l = scoped_lock{terminalView_->terminal()};
-        auto const url = QUrl(QString::fromUtf8(terminalView_->terminal().screen().currentWorkingDirectory().c_str()));
-        if (url.host() == QHostInfo::localHostName())
-            return url.path();
-        else
-            return QString();
-    }();
-
-    if (!wd.isEmpty())
-        args << "-w" << wd;
-
-    QProcess::startDetached(program, args);
+    ::contour::spawnNewTerminal(
+        programPath_,
+        config_.backingFilePath.generic_string(),
+        _profileName,
+        [terminal = &terminalView_->terminal()]() -> string {
+            auto const _l = scoped_lock{*terminal};
+            return terminal->screen().currentWorkingDirectory();
+        }()
+    );
 }
 
 float TerminalWidget::contentScale() const
@@ -1617,9 +1270,7 @@ float TerminalWidget::contentScale() const
 
 void TerminalWidget::onConfigReload(FileChangeWatcher::Event /*_event*/)
 {
-    post([this]() {
-        reloadConfigValues();
-    });
+    post([this]() { reloadConfigWithProfile(profileName_); });
 
     if (setScreenDirty())
         update();
@@ -1675,7 +1326,7 @@ void TerminalWidget::onSelectionComplete()
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
-        string const text = extractSelectionText();
+        string const text = terminalView_->terminal().extractSelectionText();
         clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
     }
 }
@@ -1762,34 +1413,27 @@ QSize TerminalWidget::minimumSizeHint() const
 {
     auto constexpr MinimumScreenSize = terminal::Size{1, 1};
 
-    auto const cellSize = terminalView_ ? terminalView_->renderer().gridMetrics().cellSize
-                                        : terminal::Size{10, 20};
+    auto const cellSize = gridMetrics().cellSize;
+    auto const viewSize = MinimumScreenSize * cellSize;
 
-    auto const w = MinimumScreenSize.width * cellSize.width;
-    auto const h = MinimumScreenSize.height * cellSize.height;
-    // auto const w = MinimumScreenSize.width * gridMetrics().cellSize.width;
-    // auto const h = MinimumScreenSize.height * gridMetrics().cellSize.height;
+    debuglog(WidgetTag).write("{}", viewSize);
 
-    return QSize(w, h);
+    return QSize(viewSize.width, viewSize.height);
 }
 
 QSize TerminalWidget::sizeHint() const
 {
-    auto const cellSize = terminalView_ ? terminalView_->renderer().gridMetrics().cellSize
-                                        : terminal::Size{100, 100};
-
-    auto const viewWidth = profile().terminalSize.width * cellSize.width;
-    auto const viewHeight = profile().terminalSize.height * cellSize.height;
-    // auto const viewWidth = profile().terminalSize.width * gridMetrics().cellSize.width;
-    // auto const viewHeight = profile().terminalSize.height * gridMetrics().cellSize.height;
+    auto const cellSize = terminalView_->renderer().gridMetrics().cellSize;
+    auto const viewSize = cellSize * profile().terminalSize;
 
     debuglog(WidgetTag).write(
-        "Calling sizeHint: {}, terminalSize: {}",
-        terminal::Size{viewWidth, viewHeight},
+        "hint: {}, cellSize: {}, terminalSize: {}",
+        viewSize,
+        cellSize,
         profile().terminalSize
     );
 
-    return QSize(viewWidth, viewHeight);
+    return QSize(viewSize.width, viewSize.height);
 }
 
 void TerminalWidget::setSize(terminal::Size _size)
@@ -1939,7 +1583,9 @@ void TerminalWidget::dumpState()
     // TODO: use this file store for everything that needs to be dumped.
     terminalView_->terminal().screen().dumpState("Dump screen state.");
     terminalView_->renderer().dumpState(std::cout);
-    terminal::renderer::RenderTarget& renderTarget = terminalView_->renderer().renderTarget();
+
+    assert(terminalView_->renderer().renderTarget() != nullptr);
+    terminal::renderer::RenderTarget& renderTarget = *terminalView_->renderer().renderTarget();
 
     for (auto const* allocator: {&renderTarget.monochromeAtlasAllocator(), &renderTarget.coloredAtlasAllocator(), &renderTarget.lcdAtlasAllocator()})
     {

@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Screen.h>
 
@@ -51,7 +52,7 @@ enum class Decorator {
 std::optional<Decorator> to_decorator(std::string const& _value);
 
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
-class DecorationRenderer {
+class DecorationRenderer : public Renderable {
   public:
     /// Constructs the decoration renderer.
     ///
@@ -59,12 +60,13 @@ class DecorationRenderer {
     /// @param _monochromeTextureAtlas
     /// @param _gridMetrics
     /// @param _colorProfile
-    DecorationRenderer(atlas::CommandListener& _commandListener,
-                       atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                       GridMetrics const& _gridMetrics,
+    DecorationRenderer(GridMetrics const& _gridMetrics,
                        ColorProfile const& _colorProfile,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void clearCache() override;
 
     void setColorProfile(ColorProfile const& _colorProfile);
 
@@ -80,8 +82,6 @@ class DecorationRenderer {
                           Coordinate const& _pos,
                           int _columnCount,
                           RGBColor const& _color);
-
-    void clearCache();
 
   private:
     using Atlas = atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
@@ -100,8 +100,7 @@ class DecorationRenderer {
 
     ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
 
-    atlas::CommandListener& commandListener_;
-    Atlas atlas_;
+    std::unique_ptr<Atlas> atlas_;
 };
 
 } // end namespace

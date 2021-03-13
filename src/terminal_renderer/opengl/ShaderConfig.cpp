@@ -26,8 +26,6 @@
 namespace terminal::renderer::opengl {
 
 namespace {
-    auto const OpenGLRendererTag = crispy::debugtag::make("renderer.opengl", "Logs OpenGL render target details.");
-
     template <size_t N>
     inline std::string s(std::array<uint8_t, N> const& data)
     {

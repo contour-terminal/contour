@@ -53,7 +53,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            renderer::Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
                            Process::ExecInfo const& _shell,
-                           unique_ptr<renderer::RenderTarget> _renderTarget) :
+                           renderer::RenderTarget* _renderTarget) :
     events_{ _events },
     renderer_{
         _pty->screenSize(),
@@ -64,7 +64,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _backgroundOpacity,
         _hyperlinkNormal,
         _hyperlinkHover,
-        move(_renderTarget)
+        _renderTarget
     },
     fontSize_{ _fontDescriptions.size },
     size_{
@@ -90,6 +90,11 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     terminal_.setCursorDisplay(_cursorDisplay);
     terminal_.setCursorShape(_cursorShape);
     terminal_.screen().setCellPixelSize(renderer_.cellSize());
+}
+
+void TerminalView::setRenderTarget(renderer::RenderTarget& _renderTarget)
+{
+    renderer_.setRenderTarget(_renderTarget);
 }
 
 void TerminalView::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
@@ -210,11 +215,6 @@ void TerminalView::resize(int _width, int _height)
         windowMargin_.left, windowMargin_.bottom,
         renderer_.cellSize()
     );
-}
-
-void TerminalView::setCursorShape(CursorShape _shape)
-{
-    terminal().setCursorShape(_shape);
 }
 
 bool TerminalView::setTerminalSize(Size _cells)

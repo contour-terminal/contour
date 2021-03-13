@@ -26,13 +26,9 @@ using std::string;
 
 namespace terminal::renderer {
 
-CursorRenderer::CursorRenderer(atlas::CommandListener& _commandListener,
-                               atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                               GridMetrics const& _gridMetrics,
+CursorRenderer::CursorRenderer(GridMetrics const& _gridMetrics,
                                CursorShape _shape,
                                RGBAColor _color) :
-    commandListener_{ _commandListener },
-    textureAtlas_{ _monochromeTextureAtlas },
     gridMetrics_{ _gridMetrics },
     shape_{ _shape },
     color_{
@@ -43,6 +39,12 @@ CursorRenderer::CursorRenderer(atlas::CommandListener& _commandListener,
     },
     columnWidth_{ 1 }
 {
+}
+
+void CursorRenderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    Renderable::setRenderTarget(_renderTarget);
+    clearCache();
 }
 
 void CursorRenderer::setShape(CursorShape _shape)
@@ -66,7 +68,7 @@ void CursorRenderer::setColor(RGBAColor const& _color)
 
 void CursorRenderer::clearCache()
 {
-    textureAtlas_.clear();
+    textureAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
 }
 
 void CursorRenderer::rebuild()
@@ -81,7 +83,7 @@ void CursorRenderer::rebuild()
         auto const height = gridMetrics_.cellSize.height;
         auto image = atlas::Buffer(width * height, 0xFFu);
 
-        textureAtlas_.insert(
+        textureAtlas_->insert(
             CursorShape::Block,
             width, height,
             width, height,
@@ -98,7 +100,7 @@ void CursorRenderer::rebuild()
             for (int x = 0; x < width; ++x)
                 image[(base_y + y) * width + x] = 0xFF;
 
-        textureAtlas_.insert(
+        textureAtlas_->insert(
             CursorShape::Underscore,
             width, height,
             width, height,
@@ -115,7 +117,7 @@ void CursorRenderer::rebuild()
             for (int y = 0; y < height; ++y)
                 image[y * width + x] = 0xFF;
 
-        textureAtlas_.insert(
+        textureAtlas_->insert(
             CursorShape::Bar,
             width, height,
             width, height,
@@ -134,7 +136,7 @@ void CursorRenderer::rebuild()
             for (int x = thickness; x <= innerWidth; ++x)
                 image[y * width + x] = 0;
 
-        textureAtlas_.insert(
+        textureAtlas_->insert(
             CursorShape::Rectangle,
             width, height,
             width, height,
@@ -145,13 +147,13 @@ void CursorRenderer::rebuild()
 
 optional<CursorRenderer::DataRef> CursorRenderer::getDataRef(CursorShape _shape)
 {
-    if (optional<DataRef> const dataRef = textureAtlas_.get(_shape); dataRef.has_value())
+    if (optional<DataRef> const dataRef = textureAtlas_->get(_shape); dataRef.has_value())
         return dataRef;
 
-    if (textureAtlas_.empty())
+    if (textureAtlas_->empty())
         rebuild();
 
-    if (optional<DataRef> const dataRef = textureAtlas_.get(_shape); dataRef.has_value())
+    if (optional<DataRef> const dataRef = textureAtlas_->get(_shape); dataRef.has_value())
         return dataRef;
 
     return nullopt;
@@ -172,7 +174,7 @@ void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
         auto const x = _pos.x;
         auto const y = _pos.y;
         auto constexpr z = 0;
-        commandListener_.renderTexture({textureInfo, x, y, z, color_});
+        textureScheduler().renderTexture({textureInfo, x, y, z, color_});
     }
 }
 

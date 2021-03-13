@@ -23,12 +23,15 @@
 namespace terminal::renderer {
 
 BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics,
-                                       RGBColor const& _defaultColor,
-                                       RenderTarget& _renderTarget) :
+                                       RGBColor const& _defaultColor) :
     gridMetrics_{ _gridMetrics },
-    defaultColor_{ _defaultColor },
-    renderTarget_{ _renderTarget }
+    defaultColor_{ _defaultColor }
 {
+}
+
+void BackgroundRenderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    Renderable::setRenderTarget(_renderTarget);
 }
 
 void BackgroundRenderer::renderCell(Coordinate const& _pos, RGBColor const& _color)
@@ -65,7 +68,7 @@ void BackgroundRenderer::renderCellRange()
 
     auto const pos = gridMetrics_.map(startColumn_, row_);
 
-    renderTarget_.renderRectangle(
+    renderTarget().renderRectangle(
         static_cast<unsigned>(pos.x),
         static_cast<unsigned>(pos.y),
         gridMetrics_.cellSize.width * columnCount_,

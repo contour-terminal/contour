@@ -220,6 +220,9 @@ class Terminal : public ScreenEvents {
     bool selectionAvailable() const noexcept { return !!selector_; }
     // }}}
 
+    std::string extractSelectionText() const;
+    std::string extractLastMarkRange() const;
+
   private:
     void flushInput();
     void screenUpdateThread();

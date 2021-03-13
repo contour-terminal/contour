@@ -29,7 +29,7 @@
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QTabWidget>
 #include <QtWidgets/QScrollBar>
-#include <QtWidgets/QScrollArea>
+#include <QtWidgets/QHBoxLayout>
 
 #include <atomic>
 #include <fstream>
@@ -45,18 +45,18 @@ class TerminalWidget;
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
 class TerminalWindow :
-    public QMainWindow, // QTabWidget
+    public QMainWindow,
     public terminal::view::TerminalView::Events
 {
     Q_OBJECT
 
   public:
     TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath);
-    ~TerminalWindow() override;
 
     bool event(QEvent* _event) override;
-    //bool focusNextPrevChild(bool) override;
     void resizeEvent(QResizeEvent* _event) override;
+
+    QSize sizeHint() const override;
 
   public Q_SLOTS:
     void terminalBufferChanged(TerminalWidget*, terminal::ScreenType);
@@ -67,24 +67,18 @@ class TerminalWindow :
     void onTerminalClosed(TerminalWidget* _terminalWidget);
     void setBackgroundBlur(bool _enable);
 
-#if 0 // XXX if parent is QTabWidget
-    void onTabChanged(int _index);
-    TerminalWidget* newTab();
-#endif
-
   private:
-    void createTerminalWidget();
-    QRect calculateWidgetGeometry();
-    void recalculateGeometry();
+    void updateScrollbarPosition();
 
-  private:
+    // data members
+    //
     config::Config config_;
     const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
-    QScrollArea* scrollArea_;
+    QHBoxLayout* layout_ = nullptr;
     QScrollBar* scrollBar_ = nullptr;
-    TerminalWidget* terminalWidget_;
+    TerminalWidget* terminalWidget_ = nullptr;
 };
 
 } // namespace contour

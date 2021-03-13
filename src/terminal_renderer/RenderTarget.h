@@ -57,4 +57,22 @@ class RenderTarget
     virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId) = 0;
 };
 
+class Renderable {
+  public:
+    virtual ~Renderable() = default;
+
+    virtual void clearCache() {}
+    virtual void setRenderTarget(RenderTarget& _renderTarget) { renderTarget_ = &_renderTarget; }
+    RenderTarget& renderTarget() { return *renderTarget_; }
+
+    atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return renderTarget_->monochromeAtlasAllocator(); }
+    atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return renderTarget_->coloredAtlasAllocator(); }
+    atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept { return renderTarget_->lcdAtlasAllocator(); }
+
+    atlas::CommandListener& textureScheduler() { return renderTarget_->textureScheduler(); }
+
+  protected:
+    RenderTarget* renderTarget_ = nullptr;
+};
+
 } // end namespace

@@ -100,7 +100,6 @@ class TerminalWidget :
 
   public Q_SLOTS:
     void onFrameSwapped();
-    void onScreenChanged(QScreen* _screen);
 
     void onScrollBarValueChanged(int _value);
 
@@ -116,18 +115,15 @@ class TerminalWidget :
     void toggleFullscreen();
 
     bool setFontSize(text::font_size _fontSize);
-    std::string extractSelectionText();
-    std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);
 
     void onScreenBufferChanged(terminal::ScreenType _type);
 
     float contentScale() const;
 
-    bool reloadConfigValues();
-    bool reloadConfigValues(std::string const& _profileName);
-    bool reloadConfigValues(config::Config _newConfig);
-    bool reloadConfigValues(config::Config _newConfig, std::string const& _profileName);
+    bool resetConfig();
+    bool reloadConfigWithProfile(std::string const& _profileName);
+    bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
 
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
 
@@ -230,6 +226,7 @@ class TerminalWidget :
     std::string programPath_;
     terminal::renderer::FontDescriptions fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
+    std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
     std::mutex screenUpdateLock_;

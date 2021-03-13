@@ -47,30 +47,28 @@ namespace {
     auto const TextRendererTag = crispy::debugtag::make("renderer.text", "Logs details about text rendering.");
 }
 
-TextRenderer::TextRenderer(atlas::CommandListener& _commandListener,
-                           atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
-                           atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                           atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
-                           GridMetrics const& _gridMetrics,
+TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
                            text::shaper& _textShaper,
                            FontDescriptions& _fontDescriptions,
                            FontKeys const& _fonts) :
     gridMetrics_{ _gridMetrics },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{ _textShaper },
-    commandListener_{ _commandListener },
-    monochromeAtlas_{ _monochromeAtlasAllocator },
-    colorAtlas_{ _colorAtlasAllocator },
-    lcdAtlas_{ _lcdAtlasAllocator }
+    textShaper_{ _textShaper }
 {
+}
+
+void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    Renderable::setRenderTarget(_renderTarget);
+    clearCache();
 }
 
 void TextRenderer::clearCache()
 {
-    monochromeAtlas_.clear();
-    colorAtlas_.clear();
-    lcdAtlas_.clear();
+    monochromeAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
+    colorAtlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
+    lcdAtlas_ = std::make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
 
     cacheKeyStorage_.clear();
     cache_.clear();
@@ -305,22 +303,22 @@ void TextRenderer::render(crispy::Point _pos,
 TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
 {
     if (textShaper_.has_color(_font))
-        return colorAtlas_;
+        return *colorAtlas_;
 
     switch (fontDescriptions_.renderMode)
     {
         case text::render_mode::lcd:
             // fallthrough; return lcdAtlas_;
-            return lcdAtlas_;
+            return *lcdAtlas_;
         case text::render_mode::color:
-            return colorAtlas_;
+            return *colorAtlas_;
         case text::render_mode::light:
         case text::render_mode::gray:
         case text::render_mode::bitmap:
-            return monochromeAtlas_;
+            return *monochromeAtlas_;
     }
 
-    return monochromeAtlas_;
+    return *monochromeAtlas_;
 }
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
@@ -424,17 +422,17 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
         if (colored)
-            return {1, colorAtlas_};
+            return {1, *colorAtlas_};
         switch (glyph.format)
         {
             case text::bitmap_format::rgba:
-                return {1, colorAtlas_};
+                return {1, *colorAtlas_};
             case text::bitmap_format::rgb:
-                return {2, lcdAtlas_};
+                return {2, *lcdAtlas_};
             case text::bitmap_format::alpha_mask:
-                return {0, monochromeAtlas_};
+                return {0, *monochromeAtlas_};
         }
-        return {0, monochromeAtlas_};
+        return {0, *monochromeAtlas_};
     }(); // }}}
 
     if (yOverflow < 0)
@@ -535,7 +533,7 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
         float(_color.blue()) / 255.0f,
         float(_color.alpha()) / 255.0f,
     };
-    commandListener_.renderTexture({_textureInfo, x, y, z, color});
+    textureScheduler().renderTexture({_textureInfo, x, y, z, color});
 }
 
 void TextRenderer::debugCache(std::ostream& _textOutput) const

@@ -26,10 +26,7 @@ using std::string;
 
 namespace terminal::renderer::opengl {
 
-namespace {
-    auto const OpenGLRendererTag = crispy::debugtag::make("renderer.opengl", "Logs OpenGL render target specific debugging information.");
-}
-
+#if !defined(NDEBUG)
 #define CHECKED_GL(code) \
     do { \
         (code); \
@@ -37,6 +34,9 @@ namespace {
         while ((err = glGetError()) != GL_NO_ERROR) \
             debuglog(OpenGLRendererTag).write("OpenGL error {} for call: {}", err, #code); \
     } while (0)
+#else
+#define CHECKED_GL(code) do { (code); } while (0)
+#endif
 
 namespace // {{{ helper
 {
@@ -407,9 +407,9 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
             for (auto i = 0u; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
-                *t++ = 0x00;
                 *t++ = 0x80;
                 *t++ = 0x00;
+                *t++ = 0x80;
             }
             break;
     }
@@ -417,8 +417,9 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
 
     //glTexSubImage2D(target, levelOfDetail, x0, y0, _width, _height, glFormat(_format), type, stub.data());
 
+    GLenum const glFmt = glFormat(_format);
     GLint constexpr UnusedParam = 0;
-    CHECKED_GL( glTexImage2D(target, levelOfDetail, glFormat(_format), _width, _height, UnusedParam, glFormat(_format), type, stub.data()) );
+    CHECKED_GL( glTexImage2D(target, levelOfDetail, glFmt, _width, _height, UnusedParam, glFmt, type, stub.data()) );
     // glTexSubImage2D(target, levelOfDetail, x0, y0, z0, _width, _height, depth,
     //                 glFormat(_format), type, stub.data());
 }
@@ -568,9 +569,8 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     output.buffer.resize(bufferSize);
     auto const glFmt = glFormat(_allocator.format());
 
-    glBindTexture(GL_TEXTURE_2D, textureId);
-
-    glGetTexImage(GL_TEXTURE_2D, 0, glFmt, GL_UNSIGNED_BYTE, &output.buffer[0]);
+    CHECKED_GL( glBindTexture(GL_TEXTURE_2D, textureId) );
+    CHECKED_GL( glGetTexImage(GL_TEXTURE_2D, 0, glFmt, GL_UNSIGNED_BYTE, &output.buffer[0]) );
 
     return output;
 }

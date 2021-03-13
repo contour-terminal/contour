@@ -14,7 +14,6 @@ scrollbar:
 
 # Inline image related default configuration and limits
 # -----------------------------------------------------
-#
 images:
     # Enable or disable sixel scrolling (SM/RM ?80 default)
     sixel_scrolling: true
@@ -118,6 +117,7 @@ profiles:
 
         # Tab width to move the cursor to the right when a HT control character is recieved.
         tab_width: 8
+
         # Terminal cursor display configuration
         cursor:
             # Supported shapes are:
@@ -292,31 +292,3 @@ input_mapping:
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Control],        key: O,             action: OpenFileManager }
-
-# Logging section
-logging:
-    # Log messages will go to the specified file.
-    # If no file was specified, then the terminal emulator will write to its own stdout instead.
-    # file: "/tmp/contour.log"
-
-    # Enable this option to log parser (syntax) errors in the VT sequence stream.
-    parse_errors: true
-
-    # Enable this option to log VT semantic errors, such as invalid parameters to some VT sequence.
-    invalid_output: true
-
-    # Enable this option to log VT sequences that were seen but are unsupported.
-    unsupported_output: true
-
-    # Enable this option to log raw VT sequence input.
-    raw_input: false
-
-    # Enable this option to log parsed VT sequence input.
-    trace_input: false
-
-    # Enable this option to log raw VT sequence output.
-    raw_output: false
-
-    # Enable this option to log parsed VT sequence output.
-    trace_output: false
-
