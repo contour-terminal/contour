@@ -140,6 +140,7 @@ class TerminalWidget :
     void setFontDef(terminal::FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
+    void doDumpState();
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
     void reply(std::string_view const& /*_reply*/) override;
     void onClosed() override;

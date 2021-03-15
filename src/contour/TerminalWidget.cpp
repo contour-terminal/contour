@@ -1573,6 +1573,12 @@ void TerminalWidget::copyToClipboard(std::string_view const& _text)
 
 void TerminalWidget::dumpState()
 {
+    post([this]() { doDumpState(); });
+}
+
+void TerminalWidget::doDumpState()
+{
+    makeCurrent();
     auto const tmpDir = FileSystem::path(QStandardPaths::writableLocation(QStandardPaths::TempLocation).toStdString());
     auto const targetDir = tmpDir / FileSystem::path("contour-debug");
     FileSystem::create_directories(targetDir);

@@ -565,12 +565,19 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     output.format = _allocator.format();
     output.size = Size{int(_allocator.width()), int(_allocator.height())};
 
-    auto const bufferSize = _allocator.width() * _allocator.height() * atlas::element_count(_allocator.format());
+    auto const bufferSize = _allocator.width() * _allocator.height() * 4;
     output.buffer.resize(bufferSize);
-    auto const glFmt = glFormat(_allocator.format());
+    output.format = atlas::Format::RGBA;
+    output.buffer.resize(_allocator.width() * _allocator.height() * 4);
 
-    CHECKED_GL( glBindTexture(GL_TEXTURE_2D, textureId) );
-    CHECKED_GL( glGetTexImage(GL_TEXTURE_2D, 0, glFmt, GL_UNSIGNED_BYTE, &output.buffer[0]) );
+    // Reading texture data to host CPU (including for RGB textures) only works via framebuffers
+    GLuint fbo;
+    CHECKED_GL( glGenFramebuffers(1, &fbo) );
+    CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, fbo) );
+    CHECKED_GL( glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0) );
+    CHECKED_GL( glReadPixels(0, 0, output.size.width, output.size.height, GL_RGBA, GL_UNSIGNED_BYTE, output.buffer.data()) );
+    CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, 0) );
+    CHECKED_GL( glDeleteFramebuffers(1, &fbo) );
 
     return output;
 }
