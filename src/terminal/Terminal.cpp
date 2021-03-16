@@ -35,6 +35,13 @@ namespace terminal {
 
 namespace {
     auto const KeyboardTag = crispy::debugtag::make("terminal.input", "Logs terminal input events.");
+
+    void trimSpaceRight(string& value)
+    {
+        while (!value.empty() && value.back() == ' ')
+            value.pop_back();
+    };
+
 }
 
 Terminal::Terminal(std::unique_ptr<Pty> _pty,
@@ -402,6 +409,70 @@ void Terminal::setCursorShape(CursorShape _shape)
 void Terminal::setWordDelimiters(string const& _wordDelimiters)
 {
     wordDelimiters_ = unicode::from_utf8(_wordDelimiters);
+}
+
+string Terminal::extractSelectionText() const
+{
+    using namespace terminal;
+    int lastColumn = 0;
+    string text;
+    string currentLine;
+
+    renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
+        auto const _lock = scoped_lock{ *this };
+        auto const isNewLine = _pos.column <= lastColumn;
+        auto const isLineWrapped = lineWrapped(_pos.row);
+        bool const touchesRightPage = _pos.row > 0
+            && isSelectedAbsolute({_pos.row - 1, screen_.size().width});
+        if (isNewLine && (!isLineWrapped || !touchesRightPage))
+        {
+            // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
+            trimSpaceRight(currentLine);
+            text += currentLine;
+            text += '\n';
+            currentLine.clear();
+        }
+        currentLine += _cell.toUtf8();
+        lastColumn = _pos.column;
+    });
+
+    trimSpaceRight(currentLine);
+    text += currentLine;
+
+    return text;
+}
+
+string Terminal::extractLastMarkRange() const
+{
+    using terminal::Coordinate;
+    using terminal::Cell;
+
+    auto const _l = std::lock_guard{*this};
+
+    auto const colCount = screen_.size().width;
+    auto const bottomLine = screen_.historyLineCount() + screen_.cursor().position.row - 1;
+
+    auto const marker1 = optional{bottomLine};
+
+    auto const marker0 = screen_.findMarkerBackward(marker1.value());
+    if (!marker0.has_value())
+        return {};
+
+    // +1 each for offset change from 0 to 1 and because we only want to start at the line *after* the mark.
+    auto const firstLine = *marker0 - screen_.historyLineCount() + 2;
+    auto const lastLine = *marker1 - screen_.historyLineCount();
+
+    string text;
+
+    for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
+    {
+        for (auto colNum = 1; colNum < colCount; ++colNum)
+            text += screen_.at({lineNum, colNum}).toUtf8();
+        trimSpaceRight(text);
+        text += '\n';
+    }
+
+    return text;
 }
 
 // {{{ ScreenEvents overrides

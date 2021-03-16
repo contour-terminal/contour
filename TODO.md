@@ -1,5 +1,11 @@
 # Milestone 0.2.0 checklist
 
+- [ ] move scrollbar into profile
+- [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
+- [ ] altlas debug output on laptop seems blank?
+- [ ] vim's wrap mode with multiline text seems to have rendering issues.
+- [ ] CI: build with parallel support (STL then requires tbb apparently)
+- [ ] `times()` helper type needs random access iterator category so that it can be used for parallel algorithms (try with `std::copy(std::execution::par, ...)`)
 - [ ] FIXME: `reset` resets screen size to 80x25, should remain actual one.
 - [ ] debuglog: filter by logging tags (in a somewhat performant way), so the debuglog (when enabled) is not flooding.
 - [ ] CopyLastMarkRange seems not to work (at least for double-line prompts in zsh/p10k)

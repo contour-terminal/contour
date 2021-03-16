@@ -1,7 +1,10 @@
 uniform float pixel_x;                        // 1.0 / lcdAtlas.width
-uniform sampler2DArray fs_monochromeTextures; // R
-uniform sampler2DArray fs_colorTextures;      // RGBA
-uniform sampler2DArray fs_lcdTexture;         // RGB
+uniform sampler2D fs_monochromeTextures; // R
+uniform sampler2D fs_colorTextures;      // RGBA
+uniform sampler2D fs_lcdTexture;         // RGB
+// uniform sampler2DArray fs_monochromeTextures; // R
+// uniform sampler2DArray fs_colorTextures;      // RGBA
+// uniform sampler2DArray fs_lcdTexture;         // RGB
 
 in vec4 fs_TexCoord;
 in vec4 fs_textColor;
@@ -16,12 +19,12 @@ const vec4 TEST_PIXEL = vec4(1.0, 0.0, 0.0, 1.0); // test pixel for debugging
 void renderGrayscaleGlyph()
 {
     // XXX monochrome glyph (RGB)
-    //vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xyz);
+    //vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xy);
     //fragColor = fs_textColor;
     //colorMask = alphaMap;
 
     // when only using the RED-channel
-    float v = texture(fs_monochromeTextures, fs_TexCoord.xyz).r;
+    float v = texture(fs_monochromeTextures, fs_TexCoord.xy).r;
     vec4 sampled = vec4(1.0, 1.0, 1.0, v);
     fragColor = sampled * fs_textColor;
 }
@@ -30,7 +33,7 @@ void renderGrayscaleGlyph()
 void renderColoredRGBA()
 {
     // colored image (RGBA)
-    vec4 v = texture(fs_colorTextures, fs_TexCoord.xyz);
+    vec4 v = texture(fs_colorTextures, fs_TexCoord.xy);
     //v = TEST_PIXEL;
     fragColor = v;
 }
@@ -40,7 +43,7 @@ void renderColoredRGBA()
 void renderLcdGlyphSimple()
 {
     // LCD glyph (RGB)
-    vec4 v = texture(fs_lcdTexture, fs_TexCoord.xyz); // .rgb ?
+    vec4 v = texture(fs_lcdTexture, fs_TexCoord.xy); // .rgb ?
 
     // float a = min(v.r, min(v.g, v.b));
     float a = (v.r + v.g + v.b) / 3.0;
@@ -106,11 +109,12 @@ vec3 lcdPixelShift(vec3 current, vec3 previous, float shift)
 void renderLcdGlyph()
 {
     float px = pixel_x;
-    vec3 pixelOffset = vec3(1.0, 0.0, 0.0) * px;
+    vec2 pixelOffset = vec2(1.0, 0.0) * px;
+    //vec3 pixelOffset = vec3(1.0, 0.0, 0.0) * px;
 
     // LCD glyph (RGB)
-    vec4 current  = texture(fs_lcdTexture, fs_TexCoord.xyz);
-    vec4 previous = texture(fs_lcdTexture, fs_TexCoord.xyz - pixelOffset);
+    vec4 current  = texture(fs_lcdTexture, fs_TexCoord.xy);
+    vec4 previous = texture(fs_lcdTexture, fs_TexCoord.xy - pixelOffset);
 
     // The text in a terminal does enforce fixed-width advances, and therefore
     // rendering a glyph should always start at a full pixel with no shift.

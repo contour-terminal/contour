@@ -55,24 +55,26 @@ optional<Decorator> to_decorator(std::string const& _value)
     return nullopt;
 }
 
-DecorationRenderer::DecorationRenderer(atlas::CommandListener& _commandListener,
-                                       atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                                       GridMetrics const& _gridMetrics,
+DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
                                        ColorProfile const& _colorProfile,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover) :
     gridMetrics_{ _gridMetrics },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
-    colorProfile_{ _colorProfile },
-    commandListener_{ _commandListener },
-    atlas_{ _monochromeTextureAtlas }
+    colorProfile_{ _colorProfile }
 {
+}
+
+void DecorationRenderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    Renderable::setRenderTarget(_renderTarget);
+    clearCache();
 }
 
 void DecorationRenderer::clearCache()
 {
-    atlas_.clear();
+    atlas_ = std::make_unique<Atlas>(monochromeAtlasAllocator());
 }
 
 void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
@@ -95,7 +97,7 @@ void DecorationRenderer::rebuild()
             for (int x = 0; x < width; ++x)
                 image[(height - y0 - y) * width + x] = 0xFF;
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::Underline,
             width, height,
             width, height,
@@ -119,7 +121,7 @@ void DecorationRenderer::rebuild()
             }
         }
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::DoubleUnderline,
             width, height,
             width, height,
@@ -142,7 +144,7 @@ void DecorationRenderer::rebuild()
                 image[(y + yi) * width + x] = 0xFF;
         }
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::CurlyUnderline,
             width, height,
             width, height,
@@ -161,7 +163,7 @@ void DecorationRenderer::rebuild()
                 if ((x / thickness) % 3 == 1)
                     image[(height - y0 - y) * width + x] = 0xFF;
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::DottedUnderline,
             width, height,
             width, height,
@@ -182,7 +184,7 @@ void DecorationRenderer::rebuild()
                 if (fabsf(float(x) / float(width) - 0.5f) >= 0.25f)
                     image[(height - y0 - y) * width + x] = 0xFF;
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::DashedUnderline,
             width, height,
             width, height,
@@ -211,7 +213,7 @@ void DecorationRenderer::rebuild()
                 image[y * width + (width - 1 - x)] = 0xFF;
             }
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::Framed,
             width, cellHeight,
             width, cellHeight,
@@ -227,7 +229,7 @@ void DecorationRenderer::rebuild()
             for (int x = 0; x < width; ++x)
                 image[y * width + x] = 0xFF;
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::Overline,
             width, cellHeight,
             width, cellHeight,
@@ -243,7 +245,7 @@ void DecorationRenderer::rebuild()
             for (int x = 0; x < width; ++x)
                 image[(height - y) * width + x] = 0xFF;
 
-        atlas_.insert(
+        atlas_->insert(
             Decorator::CrossedOut,
             width, height,
             width, height,
@@ -295,13 +297,13 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)
 {
-    if (optional<DataRef> const dataRef = atlas_.get(_decoration); dataRef.has_value())
+    if (optional<DataRef> const dataRef = atlas_->get(_decoration); dataRef.has_value())
         return dataRef;
 
-    if (atlas_.empty())
+    if (atlas_->empty())
         rebuild();
 
-    if (optional<DataRef> const dataRef = atlas_.get(_decoration); dataRef.has_value())
+    if (optional<DataRef> const dataRef = atlas_->get(_decoration); dataRef.has_value())
         return dataRef;
 
     return nullopt;
@@ -333,7 +335,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
         auto const advanceX = static_cast<int>(gridMetrics_.cellSize.width);
         for (int const i : crispy::times(_columnCount))
-            commandListener_.renderTexture({textureInfo, i * advanceX + x, y, z, color});
+            textureScheduler().renderTexture({textureInfo, i * advanceX + x, y, z, color});
     }
     else
     {

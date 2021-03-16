@@ -36,7 +36,7 @@ namespace terminal::renderer {
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class Renderer {
+class Renderer : public Renderable {
   public:
     /** Constructs a Renderer instances.
      *
@@ -52,9 +52,13 @@ class Renderer {
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
              Decorator _hyperlinkHover,
-             std::unique_ptr<RenderTarget> _renderTarget);
+             RenderTarget* _renderTarget);
 
     Size cellSize() const noexcept { return gridMetrics_.cellSize; }
+
+    void setRenderTarget(RenderTarget& _renderTarget);
+
+    RenderTarget* renderTarget() const noexcept { return renderTarget_; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
@@ -111,6 +115,17 @@ class Renderer {
 
     void dumpState(std::ostream& _textOutput) const;
 
+    std::array<std::reference_wrapper<Renderable>, 5> renderables()
+    {
+        return std::array<std::reference_wrapper<Renderable>, 5>{
+            backgroundRenderer_,
+            imageRenderer_,
+            textRenderer_,
+            decorationRenderer_,
+            cursorRenderer_
+        };
+    }
+
   private:
     /// Invoked internally by render() function.
     uint64_t renderInternalNoFlush(Terminal& _terminal,
@@ -136,7 +151,7 @@ class Renderer {
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
 
-    std::unique_ptr<RenderTarget> renderTarget_;
+    RenderTarget* renderTarget_ = nullptr;
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

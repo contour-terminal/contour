@@ -73,7 +73,7 @@ class TerminalView : private Terminal::Events {
                  renderer::Decorator _hyperlinkHover,
                  std::unique_ptr<Pty> _client,
                  Process::ExecInfo const& _shell,
-                 std::unique_ptr<renderer::RenderTarget> _renderTarget);
+                 renderer::RenderTarget* _renderTarget);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -81,9 +81,9 @@ class TerminalView : private Terminal::Events {
     TerminalView& operator=(TerminalView&&) = delete;
     ~TerminalView() = default;
 
-    int cellWidth() const noexcept { return gridMetrics().cellSize.width; }
-    int cellHeight() const noexcept { return gridMetrics().cellSize.height; }
-    Size cellSize() const noexcept { return gridMetrics().cellSize; }
+    void setRenderTarget(renderer::RenderTarget& _renderTarget);
+
+    Size size() const noexcept { return size_; }
 
     Size screenSize() const noexcept
     {
@@ -92,6 +92,10 @@ class TerminalView : private Terminal::Events {
             size_.height / gridMetrics().cellSize.height
         };
     }
+
+    int cellWidth() const noexcept { return gridMetrics().cellSize.width; }
+    int cellHeight() const noexcept { return gridMetrics().cellSize.height; }
+    Size cellSize() const noexcept { return gridMetrics().cellSize; }
 
     /// Resizes the terminal view to the given number of pixels.
     ///
@@ -104,7 +108,6 @@ class TerminalView : private Terminal::Events {
     void setFonts(FontDef const& _fonts);
     bool setFontSize(text::font_size  _fontSize);
     bool setTerminalSize(Size _cells);
-    void setCursorShape(CursorShape _shape);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setHyperlinkDecoration(renderer::Decorator _normal, renderer::Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
 

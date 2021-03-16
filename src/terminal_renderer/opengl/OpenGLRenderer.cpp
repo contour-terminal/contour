@@ -20,8 +20,23 @@
 #include <algorithm>
 
 using std::min;
+using std::optional;
+using std::nullopt;
+using std::string;
 
 namespace terminal::renderer::opengl {
+
+#if !defined(NDEBUG)
+#define CHECKED_GL(code) \
+    do { \
+        (code); \
+        GLenum err{}; \
+        while ((err = glGetError()) != GL_NO_ERROR) \
+            debuglog(OpenGLRendererTag).write("OpenGL error {} for call: {}", err, #code); \
+    } while (0)
+#else
+#define CHECKED_GL(code) do { (code); } while (0)
+#endif
 
 namespace // {{{ helper
 {
@@ -212,17 +227,17 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 
     assert(textProjectionLocation_ != -1);
 
-    glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+    CHECKED_GL( glEnable(GL_BLEND) );
+    CHECKED_GL( glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE) );
     //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
-    textShader_->bind();
-    textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId());
-    textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId());
-    textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId());
-    textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width()));
-    textShader_->release();
+    CHECKED_GL( textShader_->bind() );
+    CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId()) );
+    CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId()) );
+    CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId()) );
+    CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width())) );
+    CHECKED_GL( textShader_->release() );
 
     initializeRectRendering();
     initializeTextureRendering();
@@ -264,51 +279,51 @@ atlas::CommandListener& OpenGLRenderer::textureScheduler()
 
 void OpenGLRenderer::initializeRectRendering()
 {
-    glGenVertexArrays(1, &rectVAO_);
-    glBindVertexArray(rectVAO_);
+    CHECKED_GL( glGenVertexArrays(1, &rectVAO_) );
+    CHECKED_GL( glBindVertexArray(rectVAO_) );
 
-    glGenBuffers(1, &rectVBO_);
-    glBindBuffer(GL_ARRAY_BUFFER, rectVBO_);
-    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW);
+    CHECKED_GL( glGenBuffers(1, &rectVBO_) );
+    CHECKED_GL( glBindBuffer(GL_ARRAY_BUFFER, rectVBO_) );
+    CHECKED_GL( glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW) );
 
     auto constexpr BufferStride = 7 * sizeof(GLfloat);
     auto const VertexOffset = (void const*) (0 * sizeof(GLfloat));
     auto const ColorOffset = (void const*) (3 * sizeof(GLfloat));
 
     // 0 (vec3): vertex buffer
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset);
-    glEnableVertexAttribArray(0);
+    CHECKED_GL( glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset) );
+    CHECKED_GL( glEnableVertexAttribArray(0) );
 
     // 1 (vec4): color buffer
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset);
-    glEnableVertexAttribArray(1);
+    CHECKED_GL( glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset) );
+    CHECKED_GL( glEnableVertexAttribArray(1) );
 }
 
 void OpenGLRenderer::initializeTextureRendering()
 {
-    glGenVertexArrays(1, &vao_);
-    glBindVertexArray(vao_);
+    CHECKED_GL( glGenVertexArrays(1, &vao_) );
+    CHECKED_GL( glBindVertexArray(vao_) );
 
     auto constexpr BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
     auto constexpr VertexOffset = (void const*) 0;
     auto const TexCoordOffset = (void const*) (3 * sizeof(GLfloat));
     auto const ColorOffset = (void const*) (7 * sizeof(GLfloat));
 
-    glGenBuffers(1, &vbo_);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, 0/* sizeof(GLfloat) * 6 * 11 * 200 * 100*/, nullptr, GL_STREAM_DRAW);
+    CHECKED_GL( glGenBuffers(1, &vbo_) );
+    CHECKED_GL( glBindBuffer(GL_ARRAY_BUFFER, vbo_) );
+    CHECKED_GL( glBufferData(GL_ARRAY_BUFFER, 0/* sizeof(GLfloat) * 6 * 11 * 200 * 100*/, nullptr, GL_STREAM_DRAW) );
 
     // 0 (vec3): vertex buffer
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset);
-    glEnableVertexAttribArray(0);
+    CHECKED_GL( glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset) );
+    CHECKED_GL( glEnableVertexAttribArray(0) );
 
     // 1 (vec3): texture coordinates buffer
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, TexCoordOffset);
-    glEnableVertexAttribArray(1);
+    CHECKED_GL( glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, BufferStride, TexCoordOffset) );
+    CHECKED_GL( glEnableVertexAttribArray(1) );
 
     // 2 (vec4): color buffer
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset);
-    glEnableVertexAttribArray(2);
+    CHECKED_GL( glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, BufferStride, ColorOffset) );
+    CHECKED_GL( glEnableVertexAttribArray(2) );
 
     // setup EBO
     // glGenBuffers(1, &ebo_);
@@ -321,8 +336,8 @@ void OpenGLRenderer::initializeTextureRendering()
 
 OpenGLRenderer::~OpenGLRenderer()
 {
-    glDeleteVertexArrays(1, &rectVAO_);
-    glDeleteBuffers(1, &rectVBO_);
+    CHECKED_GL( glDeleteVertexArrays(1, &rectVAO_) );
+    CHECKED_GL( glDeleteBuffers(1, &rectVBO_) );
 }
 
 void OpenGLRenderer::initialize()
@@ -345,8 +360,8 @@ unsigned OpenGLRenderer::maxTextureDepth()
 {
     initialize();
 
-    GLint value;
-    glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value);
+    GLint value = {};
+    CHECKED_GL( glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value) );
     return static_cast<unsigned>(value);
 }
 
@@ -355,7 +370,7 @@ unsigned OpenGLRenderer::maxTextureSize()
     initialize();
 
     GLint value = {};
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value);
+    CHECKED_GL( glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value) );
     return static_cast<unsigned>(value);
 }
 
@@ -363,16 +378,16 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
 {
     bindTexture2DArray(_textureId);
 
-    auto constexpr target = GL_TEXTURE_2D_ARRAY;
+    auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
-    auto constexpr depth = 1;
+    //auto constexpr depth = 1;
     auto constexpr type = GL_UNSIGNED_BYTE;
-    auto constexpr x0 = 0;
-    auto constexpr y0 = 0;
-    auto constexpr z0 = 0;
+    //auto constexpr x0 = 0;
+    //auto constexpr y0 = 0;
+    //auto constexpr z0 = 0;
 
     std::vector<uint8_t> stub;
-    stub.resize(_width * _height * atlas::element_count(_format));
+    stub.resize(_width * _height * atlas::element_count(_format)); // {{{ fill stub
     auto t = stub.begin();
     switch (_format)
     {
@@ -392,78 +407,41 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
             for (auto i = 0u; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
-                *t++ = 0x00;
                 *t++ = 0x80;
                 *t++ = 0x00;
+                *t++ = 0x80;
             }
             break;
     }
-    assert(t == stub.end());
+    assert(t == stub.end()); // }}}
 
-    glTexSubImage3D(target, levelOfDetail, x0, y0, z0, _width, _height, depth,
-                    glFormat(_format), type, stub.data());
+    //glTexSubImage2D(target, levelOfDetail, x0, y0, _width, _height, glFormat(_format), type, stub.data());
+
+    GLenum const glFmt = glFormat(_format);
+    GLint constexpr UnusedParam = 0;
+    CHECKED_GL( glTexImage2D(target, levelOfDetail, glFmt, _width, _height, UnusedParam, glFmt, type, stub.data()) );
+    // glTexSubImage2D(target, levelOfDetail, x0, y0, z0, _width, _height, depth,
+    //                 glFormat(_format), type, stub.data());
 }
 
 void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
-    glGenTextures(1, &textureId);
+    CHECKED_GL( glGenTextures(1, &textureId) );
     bindTexture2DArray(textureId);
 
-    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, glFormatZ(_param.format), _param.width, _param.height, _param.depth);
+    //glTexStorage3D(GL_TEXTURE_2D, 1, glFormatZ(_param.format), _param.width, _param.height, _param.depth);
 
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST); // NEAREST, because LINEAR yields borders at the edges
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST) ); // NEAREST, because LINEAR yields borders at the edges
+    CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST) );
+    CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE) );
+    CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE) );
+    CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE) );
 
     auto const key = AtlasKey{_param.atlasName, _param.atlas};
     atlasMap_[key] = textureId;
 
     clearTexture2DArray(textureId, _param.width, _param.height, _param.format);
-
-    // {{{ pre-initialize texture for better debugging (qrenderdoc)
-    auto constexpr target = GL_TEXTURE_2D_ARRAY;
-    auto constexpr levelOfDetail = 0;
-    auto constexpr depth = 1;
-    auto constexpr type = GL_UNSIGNED_BYTE;
-    auto constexpr x0 = 0;
-    auto constexpr y0 = 0;
-    auto constexpr z0 = 0;
-
-    std::vector<uint8_t> stub;
-    stub.resize(_param.width * _param.height * atlas::element_count(_param.format));
-    auto t = stub.begin();
-    switch (_param.format)
-    {
-        case atlas::Format::Red:
-            for (auto i = 0u; i < _param.width * _param.height; ++i)
-                *t++ = 0x40;
-            break;
-        case atlas::Format::RGB:
-            for (auto i = 0u; i < _param.width * _param.height; ++i)
-            {
-                *t++ = 0x00;
-                *t++ = 0x00;
-                *t++ = 0x80;
-            }
-            break;
-        case atlas::Format::RGBA:
-            for (auto i = 0u; i < _param.width * _param.height; ++i)
-            {
-                *t++ = 0x00;
-                *t++ = 0x00;
-                *t++ = 0x80;
-                *t++ = 0x00;
-            }
-            break;
-    }
-    assert(t == stub.end());
-
-    glTexSubImage3D(target, levelOfDetail, x0, y0, z0, _param.width, _param.height, depth,
-                    glFormat(_param.format), type, stub.data());
-    // }}}
 }
 
 void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
@@ -475,13 +453,13 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     auto const textureId = atlasMap_[key];
     auto const x0 = texture.x;
     auto const y0 = texture.y;
-    auto const z0 = texture.z;
+    //auto const z0 = texture.z;
 
-    // cout << fmt::format("atlas::Renderer.uploadTexture({}): {}\n", textureId, _param);
+    //debuglog(OpenGLRendererTag).write("({}): {}", textureId, _param);
 
-    auto constexpr target = GL_TEXTURE_2D_ARRAY;
+    auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
-    auto constexpr depth = 1;
+    //auto constexpr depth = 1;
     auto constexpr type = GL_UNSIGNED_BYTE;
 
     bindTexture2DArray(textureId);
@@ -490,15 +468,16 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     {
         case atlas::Format::RGB:
         case atlas::Format::Red:
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            CHECKED_GL( glPixelStorei(GL_UNPACK_ALIGNMENT, 1) );
             break;
         case atlas::Format::RGBA:
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            CHECKED_GL( glPixelStorei(GL_UNPACK_ALIGNMENT, 4) );
             break;
     }
 
-    glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
-                    glFormat(_param.format), type, _param.data.data());
+    CHECKED_GL( glTexSubImage2D(target, levelOfDetail, x0, y0, texture.width, texture.height, glFormat(_param.format), type, _param.data.data()) );
+    // glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
+    //                 glFormat(_param.format), type, _param.data.data());
 }
 
 void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
@@ -509,7 +488,7 @@ void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
         GLuint const textureUnit = _param.texture.get().atlas;
         GLuint const textureId = it->second;
 
-        // cout << fmt::format("atlas::Renderer.renderTexture({}/{}): {}\n", textureUnit, textureId, _param);
+        //debuglog(OpenGLRendererTag).write("({}/{}): {}\n", textureUnit, textureId, _param);
 
         selectTextureUnit(textureUnit);
         bindTexture2DArray(textureId);
@@ -531,7 +510,7 @@ void OpenGLRenderer::bindTexture2DArray(GLuint _textureId)
 {
     if (currentTextureId_ != _textureId)
     {
-        glBindTexture(GL_TEXTURE_2D_ARRAY, _textureId);
+        glBindTexture(GL_TEXTURE_2D, _textureId);
         currentTextureId_ = _textureId;
     }
 }
@@ -571,6 +550,36 @@ void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, 
     };
 
     crispy::copy(vertices, back_inserter(rectBuffer_));
+}
+
+optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId)
+{
+    // NB: to get all atlas pages, call this from instance base id up to and including current
+    // instance id of the given allocator.
+
+    auto const textureId = atlasMap_.at(AtlasKey{_allocator.name(), _instanceId});
+
+    AtlasTextureInfo output{};
+    output.atlasName = _allocator.name();
+    output.atlasInstanceId = _instanceId;
+    output.format = _allocator.format();
+    output.size = Size{int(_allocator.width()), int(_allocator.height())};
+
+    auto const bufferSize = _allocator.width() * _allocator.height() * 4;
+    output.buffer.resize(bufferSize);
+    output.format = atlas::Format::RGBA;
+    output.buffer.resize(_allocator.width() * _allocator.height() * 4);
+
+    // Reading texture data to host CPU (including for RGB textures) only works via framebuffers
+    GLuint fbo;
+    CHECKED_GL( glGenFramebuffers(1, &fbo) );
+    CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, fbo) );
+    CHECKED_GL( glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0) );
+    CHECKED_GL( glReadPixels(0, 0, output.size.width, output.size.height, GL_RGBA, GL_UNSIGNED_BYTE, output.buffer.data()) );
+    CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, 0) );
+    CHECKED_GL( glDeleteFramebuffers(1, &fbo) );
+
+    return output;
 }
 
 void OpenGLRenderer::execute()
@@ -613,7 +622,8 @@ void OpenGLRenderer::execute()
 
 void OpenGLRenderer::executeRenderTextures()
 {
-    // std::cout << fmt::format("OpenGLRenderer::executeRenderTextures() upload={} render={}\n",
+    // debuglog(OpenGLRendererTag).write(
+    //     "OpenGLRenderer::executeRenderTextures() upload={} render={}",
     //     textureScheduler_->uploadTextures.size(),
     //     textureScheduler_->renderTextures.size()
     // );

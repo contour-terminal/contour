@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal_renderer/RenderTarget.h>
 #include <terminal/Screen.h>
 
 #include <memory>
@@ -22,16 +23,16 @@ namespace terminal::renderer {
 struct GridMetrics;
 class RenderTarget;
 
-class BackgroundRenderer {
+class BackgroundRenderer : public Renderable {
   public:
     /// Constructs the decoration renderer.
     ///
     /// @param _gridMetrics
     /// @param _defaultColor
     /// @param _renderTarget
-    BackgroundRenderer(GridMetrics const& _gridMetrics,
-                       RGBColor const& _defaultColor,
-                       RenderTarget& _renderTarget);
+    BackgroundRenderer(GridMetrics const& _gridMetrics, RGBColor const& _defaultColor);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
 
     void setDefaultColor(RGBColor const& _color) noexcept { defaultColor_ = _color; }
 
@@ -61,9 +62,6 @@ class BackgroundRenderer {
     int row_ = 0;
     int startColumn_ = 0;
     unsigned columnCount_ = 0;
-
-    // rendering
-    RenderTarget& renderTarget_;
 };
 
 } // end namespace

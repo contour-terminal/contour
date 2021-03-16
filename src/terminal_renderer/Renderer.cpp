@@ -78,50 +78,30 @@ Renderer::Renderer(Size const& _screenSize,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover,
-                   unique_ptr<RenderTarget> _renderTarget) :
+                   RenderTarget* _renderTarget) :
     textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
-    renderTarget_{ move(_renderTarget) },
-    backgroundRenderer_{
-        gridMetrics_,
-        _colorProfile.defaultBackground,
-        *renderTarget_
-    },
-    imageRenderer_{
-        renderTarget_->textureScheduler(),
-        renderTarget_->coloredAtlasAllocator(),
-        cellSize()
-    },
-    textRenderer_{
-        renderTarget_->textureScheduler(),
-        renderTarget_->monochromeAtlasAllocator(),
-        renderTarget_->coloredAtlasAllocator(),
-        renderTarget_->lcdAtlasAllocator(),
-        gridMetrics_,
-        *textShaper_,
-        fontDescriptions_,
-        fonts_
-    },
-    decorationRenderer_{
-        renderTarget_->textureScheduler(),
-        renderTarget_->monochromeAtlasAllocator(),
-        gridMetrics_,
-        _colorProfile,
-        _hyperlinkNormal,
-        _hyperlinkHover
-    },
-    cursorRenderer_{
-        renderTarget_->textureScheduler(),
-        renderTarget_->monochromeAtlasAllocator(),
-        gridMetrics_,
-        CursorShape::Block, // TODO: should not be hard-coded; actual value be passed via render(terminal, now);
-        _colorProfile.cursor
-    }
+    renderTarget_{ _renderTarget },
+    backgroundRenderer_{ gridMetrics_, _colorProfile.defaultBackground },
+    imageRenderer_{ cellSize() },
+    textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
+    decorationRenderer_{ gridMetrics_, _colorProfile, _hyperlinkNormal, _hyperlinkHover },
+    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorProfile.cursor }
+     // TODO: cursor shouldn't be hard-coded; actual value be passed via render(terminal, now);
 {
+}
+
+void Renderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    renderTarget_ = &_renderTarget;
+
+    // TODO: each Renderable needs an overload of setRenderTarget to (re-)create atlas's.
+    for (auto& renderable: renderables())
+        renderable.get().setRenderTarget(_renderTarget);
 }
 
 void Renderer::discardImage(Image const& _image)
@@ -148,10 +128,8 @@ void Renderer::clearCache()
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
     // either that, or only the render target is allowed to clear the actual atlas caches.
-    decorationRenderer_.clearCache();
-    cursorRenderer_.clearCache();
-    textRenderer_.clearCache();
-    imageRenderer_.clearCache();
+    for (auto& renderable: renderables())
+        renderable.get().clearCache();
 }
 
 void Renderer::setFonts(FontDescriptions _fontDescriptions)
@@ -176,7 +154,6 @@ void Renderer::updateFontMetrics()
 
     textRenderer_.updateFontMetrics();
     imageRenderer_.setCellSize(cellSize());
-    decorationRenderer_.clearCache();
 
     clearCache();
 }

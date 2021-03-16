@@ -89,19 +89,22 @@ class TerminalWidget :
     void activateProfile(std::string const& _name, config::TerminalProfile _newProfile);
 
     terminal::view::TerminalView* view() const noexcept { return terminalView_.get(); }
+    terminal::ScreenType screenType() const noexcept { return currentScreenType_; }
 
   Q_SIGNALS:
+    void terminalBufferChanged(TerminalWidget*, terminal::ScreenType);
+    void profileChanged(TerminalWidget*);
+    void screenUpdated(TerminalWidget*);
+    void viewportChanged(TerminalWidget*);
     void terminated(TerminalWidget*);
 
   public Q_SLOTS:
     void onFrameSwapped();
-    void onScreenChanged(QScreen* _screen);
 
-    void updateScrollBarValue();
-    void updateScrollBarPosition();
-    void onScrollBarValueChanged();
+    void onScrollBarValueChanged(int _value);
 
   private:
+    void createView();
     bool executeAction(actions::Action const& _action);
     bool executeAllActions(std::vector<actions::Action> const& _actions);
     bool executeInput(terminal::MouseEvent const& event);
@@ -112,18 +115,15 @@ class TerminalWidget :
     void toggleFullscreen();
 
     bool setFontSize(text::font_size _fontSize);
-    std::string extractSelectionText();
-    std::string extractLastMarkRange();
     void spawnNewTerminal(std::string const& _profileName);
 
     void onScreenBufferChanged(terminal::ScreenType _type);
 
     float contentScale() const;
 
-    bool reloadConfigValues();
-    bool reloadConfigValues(std::string const& _profileName);
-    bool reloadConfigValues(config::Config _newConfig);
-    bool reloadConfigValues(config::Config _newConfig, std::string const& _profileName);
+    bool resetConfig();
+    bool reloadConfigWithProfile(std::string const& _profileName);
+    bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
 
     void onConfigReload(FileChangeWatcher::Event /*_event*/);
 
@@ -133,8 +133,6 @@ class TerminalWidget :
     void updateCursor();
 
   private:
-    void createScrollBar();
-
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void screenUpdated() override;
@@ -142,6 +140,7 @@ class TerminalWidget :
     void setFontDef(terminal::FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
     void dumpState() override;
+    void doDumpState();
     void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) override;
     void reply(std::string_view const& /*_reply*/) override;
     void onClosed() override;
@@ -228,6 +227,7 @@ class TerminalWidget :
     std::string programPath_;
     terminal::renderer::FontDescriptions fonts_;
     std::unique_ptr<terminal::view::TerminalView> terminalView_;
+    std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
     QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
     std::mutex screenUpdateLock_;
@@ -252,7 +252,7 @@ class TerminalWidget :
         terminal::RGBAColor backgroundColor{};
     } renderStateCache_;
 
-    QScrollBar* scrollBar_ = nullptr;
+    terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
 };
 
 } // namespace contour

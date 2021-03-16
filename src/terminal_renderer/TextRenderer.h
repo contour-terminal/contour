@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Color.h>
 #include <terminal/Screen.h>
@@ -114,16 +115,15 @@ struct FontKeys {
 };
 
 /// Text Rendering Pipeline
-class TextRenderer {
+class TextRenderer : public Renderable {
   public:
-    TextRenderer(atlas::CommandListener& _commandListener,
-                 atlas::TextureAtlasAllocator& _monochromeAtlasAllocator,
-                 atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                 atlas::TextureAtlasAllocator& _lcdAtlasAllocator,
-                 GridMetrics const& _gridMetrics,
+    TextRenderer(GridMetrics const& _gridMetrics,
                  text::shaper& _textShaper,
                  FontDescriptions& _fontDescriptions,
                  FontKeys const& _fontKeys);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void clearCache() override;
 
     void updateFontMetrics();
 
@@ -134,7 +134,6 @@ class TextRenderer {
     void finish();
 
     void debugCache(std::ostream& _textOutput) const;
-    void clearCache();
 
   private:
     void reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color);
@@ -207,10 +206,9 @@ class TextRenderer {
     // target surface rendering
     //
     text::shaper& textShaper_;
-    atlas::CommandListener& commandListener_;
-    TextureAtlas monochromeAtlas_;
-    TextureAtlas colorAtlas_;
-    TextureAtlas lcdAtlas_;
+    std::unique_ptr<TextureAtlas> monochromeAtlas_;
+    std::unique_ptr<TextureAtlas> colorAtlas_;
+    std::unique_ptr<TextureAtlas> lcdAtlas_;
 };
 
 } // end namespace

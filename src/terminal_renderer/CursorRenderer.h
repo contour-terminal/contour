@@ -17,6 +17,7 @@
 #include <terminal/Sequencer.h> // CursorShape
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <crispy/point.h>
 
@@ -25,20 +26,20 @@
 namespace terminal::renderer {
 
 /// Takes care of rendering the text cursor.
-class CursorRenderer {
+class CursorRenderer : public Renderable {
   public:
-    CursorRenderer(atlas::CommandListener& _commandListener,
-                   atlas::TextureAtlasAllocator& _monochromeTextureAtlas,
-                   GridMetrics const& _gridMetrics,
+    CursorRenderer(GridMetrics const& _gridMetrics,
                    CursorShape _shape,
                    RGBAColor _color);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void clearCache() override;
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
     void setColor(RGBAColor const& _color);
 
     void render(crispy::Point _pos, int _columnWidth);
-    void clearCache();
 
   private:
     using TextureAtlas = atlas::MetadataTextureAtlas<CursorShape, int>;
@@ -48,8 +49,7 @@ class CursorRenderer {
     std::optional<DataRef> getDataRef(CursorShape _shape);
 
   private:
-    atlas::CommandListener& commandListener_;
-    TextureAtlas textureAtlas_;
+    std::unique_ptr<TextureAtlas> textureAtlas_;
     GridMetrics const& gridMetrics_;
 
     CursorShape shape_;

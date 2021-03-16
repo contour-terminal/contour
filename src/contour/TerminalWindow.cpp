@@ -15,6 +15,7 @@
 #include <contour/Actions.h>
 #include <contour/TerminalWidget.h>
 #include <contour/BackgroundBlur.h>
+#include <contour/helper.h>
 
 #include <qnamespace.h>
 #include <terminal/Metrics.h>
@@ -54,10 +55,6 @@ using namespace std::placeholders;
 
 namespace contour {
 
-namespace {
-    auto const WindowTag = crispy::debugtag::make("terminal.window", "Logs system window debug events.");
-}
-
 using actions::Action;
 
 TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath) :
@@ -66,83 +63,116 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
     profileName_{ std::move(_profileName) },
     programPath_{ std::move(_programPath) }
 {
-    // TODO: window frame's border should be the color of the window background?
+    // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
+
     // QPalette p = QApplication::palette();
     // QColor backgroundColor(0x30, 0x30, 0x30, 0x80);
     // backgroundColor.setAlphaF(0.3);
     // p.setColor(QPalette::Window, backgroundColor);
     // setPalette(p);
 
-    // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
-
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
 
-    // setTabBarAutoHide(true);
-    // connect(this, SIGNAL(currentChanged(int)), this, SLOT(onTabChanged(int)));
+    scrollBar_ = new QScrollBar(this);
+    scrollBar_->setMinimum(0);
+    scrollBar_->setMaximum(0);
+    scrollBar_->setValue(0);
+    scrollBar_->setCursor(Qt::ArrowCursor);
 
-    terminalWidget_ = createTerminalWidget();
-    setCentralWidget(terminalWidget_);
+    terminalWidget_ = new TerminalWidget(config_, liveConfig_, profileName_, programPath_);
+
+    connect(terminalWidget_, SIGNAL(terminated(TerminalWidget*)), this, SLOT(onTerminalClosed(TerminalWidget*)));
+    connect(terminalWidget_, SIGNAL(setBackgroundBlur(bool)), this, SLOT(setBackgroundBlur(bool)));
+    connect(terminalWidget_, SIGNAL(screenUpdated(TerminalWidget*)), this, SLOT(terminalScreenUpdated(TerminalWidget*)));
+    connect(terminalWidget_, SIGNAL(profileChanged(TerminalWidget*)), this, SLOT(profileChanged(TerminalWidget*)));
+    connect(terminalWidget_, SIGNAL(terminalBufferChanged(TerminalWidget*, terminal::ScreenType)), this, SLOT(terminalBufferChanged(TerminalWidget*, terminal::ScreenType)));
+    connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&TerminalWindow::onScrollBarValueChanged));
+
+    layout_ = new QHBoxLayout();
+    layout_->addWidget(terminalWidget_);
+    layout_->addWidget(scrollBar_);
+
+    // TODO: this mainWidget could become its own contour terminal class that handles
+    // therminal screen area as well as its scrollbar.
+    QWidget* mainWidget = new QWidget();
+    mainWidget->setLayout(layout_);
+    layout_->setMargin(0);
+    layout_->setSpacing(0);
+
+    setCentralWidget(mainWidget);
+
     terminalWidget_->setFocus();
 
     //statusBar()->showMessage("blurb");
 }
 
-TerminalWindow::~TerminalWindow()
+void TerminalWindow::updateScrollbarPosition()
 {
-}
+    //terminalWidget_->setGeometry(calculateWidgetGeometry());
+    debuglog(WindowTag).write("called with {}x{} in {}", width(), height(), terminalWidget_->screenType());
 
-TerminalWidget* TerminalWindow::createTerminalWidget()
-{
-    auto terminalWidget = new TerminalWidget(config_, liveConfig_, profileName_, programPath_);
-
-    connect(terminalWidget, SIGNAL(terminated(TerminalWidget*)), this, SLOT(onTerminalClosed(TerminalWidget*)));
-    connect(terminalWidget, SIGNAL(setBackgroundBlur(bool)), this, SLOT(setBackgroundBlur(bool)));
-
-    return terminalWidget;
-}
-
-#if 0
-TerminalWidget* TerminalWindow::newTab()
-{
-    auto terminalWidget = createTerminalWidget();
-
-    auto const title = fmt::format("terminal {}", count() + 1);
-    if (count() && currentIndex() < count())
-        insertTab(currentIndex() + 1, terminalWidget, title.c_str());
+    if (terminalWidget_->screenType() != terminal::ScreenType::Alternate || !config_.hideScrollbarInAltScreen)
+    {
+        switch (config_.scrollbarPosition)
+        {
+            case config::ScrollBarPosition::Right:
+                scrollBar_->show();
+                layout_->removeWidget(scrollBar_);
+                layout_->insertWidget(-1, scrollBar_);
+                break;
+            case config::ScrollBarPosition::Left:
+                scrollBar_->show();
+                layout_->removeWidget(scrollBar_);
+                layout_->insertWidget(0, scrollBar_);
+                break;
+            case config::ScrollBarPosition::Hidden:
+                layout_->removeWidget(scrollBar_);
+                break;
+        }
+        debuglog(WindowTag).write("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
+                terminalWidget_->pos().x(),
+                terminalWidget_->pos().y(),
+                terminalWidget_->width(),
+                terminalWidget_->height(),
+                scrollBar_->isVisible() ? "visible" : "invisible",
+                scrollBar_->pos().x(),
+                scrollBar_->pos().y(),
+                scrollBar_->width(),
+                scrollBar_->height(),
+                scrollBar_->value(), scrollBar_->maximum());
+    }
     else
-        addTab(terminalWidget, title.c_str());
-
-    setCurrentWidget(terminalWidget);
+    {
+        debuglog(WindowTag).write("resize terminal widget over full contents");
+        layout_->removeWidget(scrollBar_);
+        scrollBar_->hide();
+    }
 }
 
-void TerminalWindow::onTabChanged(int _index)
+void TerminalWindow::onScrollBarValueChanged()
 {
-    if (auto tab = widget(_index); tab != nullptr)
-        tab->setFocus();
+    if (scrollBar_->isSliderDown())
+        terminalWidget_->onScrollBarValueChanged(scrollBar_->value());
 }
 
-bool TerminalWindow::focusNextPrevChild(bool)
+QSize TerminalWindow::sizeHint() const
 {
-    return false;
+    auto result = QMainWindow::sizeHint();
+    debuglog(WindowTag).write("{}x{}; widget: {}x{}, SBW: {}",
+            result.width(),
+            result.height(),
+            terminalWidget_->sizeHint().width(),
+            terminalWidget_->sizeHint().height(),
+            scrollBar_->sizeHint().width()
+    );
+    return result;
 }
-#endif
 
 void TerminalWindow::onTerminalClosed(TerminalWidget* _terminalWidget)
 {
-#if 0
-    int index = indexOf(_terminalWidget);
-    debuglog(WindowTag).write("index: {}; title {}", index, _terminalWidget->view()->terminal().screen().windowTitle());
-    if (index != -1)
-        removeTab(index);
-
-    if (count() == 0)
-        close();
-#else
-    (void) _terminalWidget;
     debuglog(WindowTag).write("title {}", _terminalWidget->view()->terminal().screen().windowTitle());
     close();
-#endif
 }
 
 void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
@@ -150,10 +180,78 @@ void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
     WindowBackgroundBlur::setEnabled(winId(), _enable);
 }
 
-// bool TerminalWindow::event(QEvent* _event)
-// {
-//     //qDebug() << "TerminalWindow.event:" << _event->type();
-//     return QTabWidget::event(_event);
-// }
+void TerminalWindow::profileChanged(TerminalWidget*)
+{
+    updateScrollbarPosition();
+
+    if (terminalWidget_->view()->terminal().screen().isPrimaryScreen())
+    {
+        switch (config_.scrollbarPosition)
+        {
+            case config::ScrollBarPosition::Left:
+            case config::ScrollBarPosition::Right:
+                scrollBar_->show();
+                break;
+            case config::ScrollBarPosition::Hidden:
+                scrollBar_->hide();
+                break;
+        }
+    }
+    else
+    {
+        if (config_.hideScrollbarInAltScreen)
+            scrollBar_->hide();
+        else
+            scrollBar_->show();
+    }
+}
+
+void TerminalWindow::terminalBufferChanged(TerminalWidget* _terminalWidget, terminal::ScreenType _type)
+{
+    debuglog(WindowTag).write("Screen buffer type has changed.");
+    if (_type == terminal::ScreenType::Main)
+        scrollBar_->show();
+    else if (config_.hideScrollbarInAltScreen)
+        scrollBar_->hide();
+
+    updateScrollbarPosition();
+    viewportChanged(_terminalWidget);
+}
+
+void TerminalWindow::viewportChanged(TerminalWidget*)
+{
+    if (!scrollBar_->isVisible())
+        return;
+
+    scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
+    if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
+        scrollBar_->setValue(s.value());
+}
+
+void TerminalWindow::terminalScreenUpdated(TerminalWidget*)
+{
+    if (!scrollBar_->isVisible())
+        return;
+
+    scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
+
+    if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
+        scrollBar_->setValue(s.value());
+    else
+        scrollBar_->setValue(scrollBar_->maximum());
+}
+
+void TerminalWindow::resizeEvent(QResizeEvent* _event)
+{
+    debuglog(WindowTag).write("new size {}x{}", width(), height());
+    QMainWindow::resizeEvent(_event);
+    updateScrollbarPosition();
+}
+
+bool TerminalWindow::event(QEvent* _event)
+{
+    //qDebug() << "TerminalWindow.event:" << _event->type();
+    return QMainWindow::event(_event);
+}
 
 } // namespace contour

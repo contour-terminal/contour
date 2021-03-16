@@ -910,6 +910,10 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     else
         profile.shell.workingDirectory = FileSystem::current_path();
 
+    profile.shell.env["TERMINAL_NAME"] = "contour";
+    profile.shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
+    profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
+
     if (auto env = _node["environment"]; env)
     {
         for (auto i = env.begin(); i != env.end(); ++i)

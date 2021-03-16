@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Image.h>
 #include <terminal/Size.h>
@@ -26,14 +27,13 @@ namespace terminal::renderer {
 /// Image Rendering API.
 ///
 /// Can render any arbitrary RGBA image (for example Sixel Graphics images).
-class ImageRenderer
+class ImageRenderer : public Renderable
 {
   public:
-    ImageRenderer(
-         atlas::CommandListener& _commandListener,
-         atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-         Size const& _cellSize
-    );
+    explicit ImageRenderer(Size const& _cellSize);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(Size const& _cellSize);
@@ -74,8 +74,6 @@ class ImageRenderer
     using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
     using DataRef = TextureAtlas::DataRef;
 
-    void clearCache();
-
   private:
     std::optional<DataRef> getTextureInfo(ImageFragment const& _fragment);
 
@@ -83,8 +81,7 @@ class ImageRenderer
     ImagePool imagePool_;
     std::map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
     Size cellSize_;
-    atlas::CommandListener& commandListener_;
-    TextureAtlas atlas_;
+    std::unique_ptr<TextureAtlas> atlas_;
 };
 
 }

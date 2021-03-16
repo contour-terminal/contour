@@ -109,6 +109,13 @@ struct Config {
         return nullptr;
     }
 
+    TerminalProfile const* profile(std::string const& _name) const
+    {
+        if (auto i = profiles.find(_name); i != profiles.end())
+            return &i->second;
+        return nullptr;
+    }
+
     // selection
     std::string wordDelimiters;
 

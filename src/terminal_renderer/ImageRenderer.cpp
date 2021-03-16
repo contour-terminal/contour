@@ -25,14 +25,16 @@ using crispy::times;
 
 namespace terminal::renderer {
 
-ImageRenderer::ImageRenderer(atlas::CommandListener& _commandListener,
-                             atlas::TextureAtlasAllocator& _colorAtlasAllocator,
-                             Size const& _cellSize) :
+ImageRenderer::ImageRenderer(Size const& _cellSize) :
     imagePool_{},
-    cellSize_{ _cellSize },
-    commandListener_{ _commandListener },
-    atlas_{ _colorAtlasAllocator }
+    cellSize_{ _cellSize }
 {
+}
+
+void ImageRenderer::setRenderTarget(RenderTarget& _renderTarget)
+{
+    Renderable::setRenderTarget(_renderTarget);
+    clearCache();
 }
 
 void ImageRenderer::setCellSize(Size const& _cellSize)
@@ -54,7 +56,7 @@ void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& _fragme
         auto const x = _pos.x;
         auto const y = _pos.y;
         auto const z = 0;
-        commandListener_.renderTexture({textureInfo, x, y, z, color});
+        textureScheduler().renderTexture({textureInfo, x, y, z, color});
     }
 }
 
@@ -66,7 +68,7 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
         _fragment.rasterizedImage().cellSize()
     };
 
-    if (optional<DataRef> const info = atlas_.get(key); info.has_value())
+    if (optional<DataRef> const info = atlas_->get(key); info.has_value())
         return info;
 
     auto metadata = Metadata{}; // TODO: do we want/need to fill this?
@@ -75,14 +77,14 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
 
     // FIXME: remember if insertion failed already, don't repeat then? or how to deal with GPU atlas/GPU exhaustion?
 
-    auto handle = atlas_.insert(key,
-                         _fragment.rasterizedImage().cellSize().width,
-                         _fragment.rasterizedImage().cellSize().height,
-                         cellSize_.width,
-                         cellSize_.height,
-                         _fragment.data(),
-                         colored,
-                         metadata);
+    auto handle = atlas_->insert(key,
+                                 _fragment.rasterizedImage().cellSize().width,
+                                 _fragment.rasterizedImage().cellSize().height,
+                                 cellSize_.width,
+                                 cellSize_.height,
+                                 _fragment.data(),
+                                 colored,
+                                 metadata);
 
     // remember image fragment key so we can later on release the GPU memory when not needed anymore.
     if (handle)
@@ -98,7 +100,7 @@ void ImageRenderer::discardImage(Image::Id _imageId)
     {
         auto const& fragments = fragmentsIterator->second;
         for (ImageFragmentKey const& key : fragments)
-            atlas_.release(key);
+            atlas_->release(key);
 
         imageFragmentsInUse_.erase(fragmentsIterator);
     }
@@ -107,7 +109,7 @@ void ImageRenderer::discardImage(Image::Id _imageId)
 void ImageRenderer::clearCache()
 {
     imageFragmentsInUse_.clear();
-    atlas_.clear();
+    atlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
 }
 
 } // end namespace

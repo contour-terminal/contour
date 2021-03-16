@@ -13,15 +13,19 @@
  */
 #pragma once
 
-#include <memory>
-#include <string>
-#include <stdexcept>
+#include <crispy/debuglog.h>
 
 #include <fmt/format.h>
 
 #include <QOpenGLShaderProgram>
 
+#include <memory>
+#include <string>
+#include <stdexcept>
+
 namespace terminal::renderer::opengl {
+
+auto const inline OpenGLRendererTag = crispy::debugtag::make("renderer.opengl", "Logs OpenGL render target specific debugging information.");
 
 enum class ShaderClass {
     Background,
