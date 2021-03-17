@@ -23,7 +23,7 @@ namespace terminal {
 class ConPty : public Pty
 {
   public:
-    explicit ConPty(Size const& windowSize);
+    explicit ConPty(crispy::Size const& windowSize);
     ~ConPty() override;
 
     void close() override;
@@ -33,13 +33,13 @@ class ConPty : public Pty
 
     int read(char* buf, size_t size) override;
     int write(char const* buf, size_t size) override;
-    Size screenSize() const noexcept override;
-    void resizeScreen(Size _cells, std::optional<Size> _pixels = std::nullopt) override;
+    crispy::Size screenSize() const noexcept override;
+    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;
 
     HPCON master() const noexcept { return master_; }
 
   private:
-    Size size_;
+    crispy::Size size_;
     HPCON master_;
     HANDLE input_;
     HANDLE output_;

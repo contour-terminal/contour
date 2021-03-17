@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 
+using crispy::Size;
 using std::array;
 using std::scoped_lock;
 using std::chrono::steady_clock;

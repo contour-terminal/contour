@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
-#include <terminal/Size.h>
+#include <crispy/size.h>
 
 #include <memory>
 
@@ -23,7 +23,7 @@ namespace terminal::renderer {
 struct AtlasTextureInfo {
     std::string atlasName;
     unsigned atlasInstanceId;
-    Size size;
+    crispy::Size size;
     atlas::Format format;
     atlas::Buffer buffer;
 };

@@ -26,6 +26,7 @@
 #include <utility>
 
 using crispy::Comparison;
+using crispy::Size;
 
 using std::back_inserter;
 using std::fill_n;

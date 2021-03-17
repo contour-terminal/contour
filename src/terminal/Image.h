@@ -14,7 +14,8 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Size.h>
+#include <terminal/Coordinate.h>
+#include <crispy/size.h>
 
 #include <fmt/format.h>
 
@@ -51,7 +52,7 @@ class Image {
     ///
     /// @param _data      RGBA buffer data
     /// @param _pixelSize image dimensionss in pixels
-    Image(Id _id, ImageFormat _format, Data _data, Size _pixelSize) :
+    Image(Id _id, ImageFormat _format, Data _data, crispy::Size _pixelSize) :
         id_{ _id },
         format_{ _format },
         data_{ move(_data) },
@@ -66,7 +67,7 @@ class Image {
     constexpr Id id() const noexcept { return id_; }
     constexpr ImageFormat format() const noexcept { return format_; }
     Data const& data() const noexcept { return data_; }
-    constexpr Size size() const noexcept { return size_; }
+    constexpr crispy::Size size() const noexcept { return size_; }
     constexpr int width() const noexcept { return size_.width; }
     constexpr int height() const noexcept { return size_.height; }
 
@@ -74,7 +75,7 @@ class Image {
     Id const id_;
     ImageFormat const format_;
     Data const data_;
-    Size const size_;
+    crispy::Size const size_;
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
@@ -109,8 +110,8 @@ class RasterizedImage
                     ImageAlignment _alignmentPolicy,
                     ImageResize _resizePolicy,
                     RGBAColor _defaultColor,
-                    Size _cellSpan,
-                    Size _cellSize)
+                    crispy::Size _cellSpan,
+                    crispy::Size _cellSize)
       : image_{ std::move(_image) },
         alignmentPolicy_{ _alignmentPolicy },
         resizePolicy_{ _resizePolicy },
@@ -128,8 +129,8 @@ class RasterizedImage
     ImageAlignment alignmentPolicy() const noexcept { return alignmentPolicy_; }
     ImageResize resizePolicy() const noexcept { return resizePolicy_; }
     RGBAColor defaultColor() const noexcept { return defaultColor_; }
-    Size cellSpan() const noexcept { return cellSpan_; }
-    Size cellSize() const noexcept { return cellSize_; }
+    crispy::Size cellSpan() const noexcept { return cellSpan_; }
+    crispy::Size cellSize() const noexcept { return cellSize_; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p _pos of the rasterized image.
     Image::Data fragment(Coordinate _pos) const;
@@ -139,8 +140,8 @@ class RasterizedImage
     ImageAlignment const alignmentPolicy_;      //!< Alignment policy of the image inside the raster size.
     ImageResize const resizePolicy_;            //!< Image resize policy
     RGBAColor const defaultColor_;              //!< Default color to be applied at corners when needed.
-    Size const cellSpan_;                       //!< Number of grid cells to span the pixel image onto.
-    Size const cellSize_;                       //!< @returns number of pixels in X and Y dimension one grid cell has to fill.
+    crispy::Size const cellSpan_;               //!< Number of grid cells to span the pixel image onto.
+    crispy::Size const cellSize_;               //!< @returns number of pixels in X and Y dimension one grid cell has to fill.
 };
 
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
@@ -206,15 +207,15 @@ class ImagePool {
     ImagePool() : ImagePool([](auto) {}, 1) {}
 
     /// Creates an RGBA image of given size in pixels.
-    std::shared_ptr<Image const> create(ImageFormat _format, Size _pixelSize, Image::Data&& _data);
+    std::shared_ptr<Image const> create(ImageFormat _format, crispy::Size _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
     std::shared_ptr<RasterizedImage const> rasterize(std::shared_ptr<Image const> _image,
                                                      ImageAlignment _alignmentPolicy,
                                                      ImageResize _resizePolicy,
                                                      RGBAColor _defaultColor,
-                                                     Size _cellSpan,
-                                                     Size _cellSize);
+                                                     crispy::Size _cellSpan,
+                                                     crispy::Size _cellSize);
 
     // named image access
     //

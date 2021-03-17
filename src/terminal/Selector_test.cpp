@@ -15,6 +15,7 @@
 #include <terminal/Selector.h>
 #include <catch2/catch.hpp>
 
+using crispy::Size;
 using namespace std;
 using namespace std::placeholders;
 using namespace terminal;

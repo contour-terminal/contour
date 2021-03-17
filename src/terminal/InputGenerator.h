@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Sequencer.h> // MouseProtocol
+#include <terminal/Coordinate.h>
 
 #include <crispy/overloaded.h>
 
@@ -418,7 +419,7 @@ class InputGenerator {
     Sequence pendingSequence_{};
 
     std::set<MouseButton> currentlyPressedMouseButtons_{};
-    terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
+    Coordinate currentMousePosition_{0, 0}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType _value)

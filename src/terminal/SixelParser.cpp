@@ -12,9 +12,11 @@
  * limitations under the License.
  */
 #include <terminal/SixelParser.h>
+#include <terminal/Coordinate.h>
 
 #include <algorithm>
 
+using crispy::Size;
 using std::clamp;
 using std::fill;
 using std::max;

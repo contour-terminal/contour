@@ -25,6 +25,8 @@
 
 #include <iostream>
 
+using crispy::Size;
+
 using namespace std;
 using namespace std::chrono;
 using namespace std::placeholders;

@@ -14,15 +14,17 @@
 #pragma once
 
 #include <terminal/Charset.h>
+#include <terminal/Coordinate.h>
 #include <terminal/Color.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/range.h>
-#include <crispy/span.h>
 #include <crispy/indexed.h>
+#include <crispy/point.h>
+#include <crispy/range.h>
+#include <crispy/size.h>
+#include <crispy/span.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -517,11 +519,11 @@ class Grid {
   public:
     // TODO: Rename all "History" to "Scrollback"?
 
-    Grid(Size _screenSize, bool _reflowOnResize, std::optional<int> _maxHistoryLineCount);
+    Grid(crispy::Size _screenSize, bool _reflowOnResize, std::optional<int> _maxHistoryLineCount);
 
-    Grid() : Grid(Size{80, 25}, false, 0) {}
+    Grid() : Grid(crispy::Size{80, 25}, false, 0) {}
 
-    Size screenSize() const noexcept { return screenSize_; }
+    crispy::Size screenSize() const noexcept { return screenSize_; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
     ///
@@ -530,7 +532,7 @@ class Grid {
     /// @param _wrapPending         indicates whether a cursor wrap is pending before the next text write.
     ///
     /// @returns updated cursor position.
-    Coordinate resize(Size _screenSize, Coordinate _currentCursorPos, bool _wrapPending);
+    Coordinate resize(crispy::Size _screenSize, Coordinate _currentCursorPos, bool _wrapPending);
 
     std::optional<int> maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
     void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
@@ -609,7 +611,7 @@ class Grid {
     void appendNewLines(int _count, GraphicsAttributes _attr);
 
   private:
-    Size screenSize_;
+    crispy::Size screenSize_;
     bool reflowOnResize_;
     std::optional<int> maxHistoryLineCount_;
     Lines lines_;

@@ -15,8 +15,8 @@
 
 #include <terminal/InputGenerator.h>
 //#include <terminal/Screen.h>
-#include <terminal/Size.h>          // Coordinate
 
+#include <crispy/size.h>
 #include <crispy/utils.h>
 
 #include <fmt/format.h>

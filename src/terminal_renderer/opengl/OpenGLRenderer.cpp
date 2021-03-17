@@ -19,6 +19,7 @@
 
 #include <algorithm>
 
+using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;

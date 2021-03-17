@@ -23,9 +23,9 @@
 #include <terminal/ScreenEvents.h>
 #include <terminal/Sequencer.h>
 #include <terminal/VTType.h>
-#include <terminal/Size.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/size.h>
 #include <crispy/span.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
@@ -142,12 +142,12 @@ class Screen {
      * @param _logTrace whether or not to log VT sequences in trace mode.
      * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
-    Screen(Size const& _size,
+    Screen(crispy::Size const& _size,
            ScreenEvents& _eventListener,
            bool _logRaw = false,
            bool _logTrace = false,
            std::optional<int> _maxHistoryLineCount = std::nullopt,
-           Size _maxImageSize = Size{800, 600},
+           crispy::Size _maxImageSize = crispy::Size{800, 600},
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true
     );
@@ -160,9 +160,9 @@ class Screen {
     void setMaxImageColorRegisters(int _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
     void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
-    constexpr Size cellPixelSize() const noexcept { return cellPixelSize_; }
+    constexpr crispy::Size cellPixelSize() const noexcept { return cellPixelSize_; }
 
-    constexpr void setCellPixelSize(Size _cellPixelSize)
+    constexpr void setCellPixelSize(crispy::Size _cellPixelSize)
     {
         cellPixelSize_ = _cellPixelSize;
     }
@@ -292,7 +292,7 @@ class Screen {
     void singleShiftSelect(CharsetTable _table);
     void requestPixelSize(RequestPixelSize _area);
     void requestCharacterSize(RequestPixelSize _area);
-    void sixelImage(Size _pixelSize, Image::Data&& _rgba);
+    void sixelImage(crispy::Size _pixelSize, Image::Data&& _rgba);
     void requestStatusString(RequestStatusString _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
@@ -301,7 +301,7 @@ class Screen {
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
-    std::shared_ptr<Image const> uploadImage(ImageFormat _format, Size _imageSize, Image::Data&& _pixmap);
+    std::shared_ptr<Image const> uploadImage(ImageFormat _format, crispy::Size _imageSize, Image::Data&& _pixmap);
 
     /**
      * Renders an image onto the screen.
@@ -317,9 +317,9 @@ class Screen {
      */
     void renderImage(std::shared_ptr<Image const> const& _imageRef,
                      Coordinate _topLeft,
-                     Size _gridSize,
+                     crispy::Size _gridSize,
                      Coordinate _imageOffset,
-                     Size _imageSize,
+                     crispy::Size _imageSize,
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,
                      bool _autoScroll);
@@ -339,8 +339,8 @@ class Screen {
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
 
-    Size const& size() const noexcept { return size_; }
-    void resize(Size const& _newSize);
+    crispy::Size const& size() const noexcept { return size_; }
+    void resize(crispy::Size const& _newSize);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
     void resizeColumns(int _newColumnCount, bool _clear);
@@ -506,7 +506,7 @@ class Screen {
     void saveWindowTitle();
     void restoreWindowTitle();
 
-    void setMaxImageSize(Size _size) noexcept { sequencer_.setMaxImageSize(_size); }
+    void setMaxImageSize(crispy::Size _size) noexcept { sequencer_.setMaxImageSize(_size); }
 
     void scrollUp(int n) { scrollUp(n, margin_); }
     void scrollDown(int n) { scrollDown(n, margin_); }
@@ -608,7 +608,7 @@ class Screen {
     bool logTrace_ = false;
     bool focused_ = true;
 
-    Size cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
+    crispy::Size cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
 
     VTType terminalId_ = VTType::VT525;
 
@@ -623,7 +623,7 @@ class Screen {
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
 
-    Size size_;
+    crispy::Size size_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 

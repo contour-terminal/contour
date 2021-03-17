@@ -17,6 +17,7 @@
 #include <catch2/catch.hpp>
 #include <string_view>
 
+using crispy::Size;
 using namespace terminal;
 using namespace std;
 

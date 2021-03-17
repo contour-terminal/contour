@@ -18,8 +18,9 @@
 
 #include <terminal/Color.h>
 #include <terminal/Process.h>
-#include <terminal/Size.h>
 #include <terminal/Terminal.h>
+
+#include <crispy/size.h>
 
 #include <atomic>
 #include <chrono>
@@ -83,11 +84,11 @@ class TerminalView : private Terminal::Events {
 
     void setRenderTarget(renderer::RenderTarget& _renderTarget);
 
-    Size size() const noexcept { return size_; }
+    crispy::Size size() const noexcept { return size_; }
 
-    Size screenSize() const noexcept
+    crispy::Size screenSize() const noexcept
     {
-        return Size{
+        return crispy::Size{
             size_.width / gridMetrics().cellSize.width,
             size_.height / gridMetrics().cellSize.height
         };
@@ -95,7 +96,7 @@ class TerminalView : private Terminal::Events {
 
     int cellWidth() const noexcept { return gridMetrics().cellSize.width; }
     int cellHeight() const noexcept { return gridMetrics().cellSize.height; }
-    Size cellSize() const noexcept { return gridMetrics().cellSize; }
+    crispy::Size cellSize() const noexcept { return gridMetrics().cellSize; }
 
     /// Resizes the terminal view to the given number of pixels.
     ///
@@ -107,7 +108,7 @@ class TerminalView : private Terminal::Events {
     void updateFontMetrics();
     void setFonts(FontDef const& _fonts);
     bool setFontSize(text::font_size  _fontSize);
-    bool setTerminalSize(Size _cells);
+    bool setTerminalSize(crispy::Size _cells);
     void setBackgroundOpacity(terminal::Opacity _opacity) { renderer_.setBackgroundOpacity(_opacity); }
     void setHyperlinkDecoration(renderer::Decorator _normal, renderer::Decorator _hover) { renderer_.setHyperlinkDecoration(_normal, _hover); }
 
@@ -138,7 +139,7 @@ class TerminalView : private Terminal::Events {
         int bottom;
     };
 
-    WindowMargin computeMargin(Size const& ws, unsigned _width, unsigned _height) const noexcept;
+    WindowMargin computeMargin(crispy::Size const& ws, unsigned _width, unsigned _height) const noexcept;
 
     constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
 
@@ -170,7 +171,7 @@ class TerminalView : private Terminal::Events {
     renderer::Renderer renderer_;
 
     text::font_size fontSize_;
-    Size size_;                     // view size in pixels
+    crispy::Size size_;                     // view size in pixels
 
     Terminal terminal_;
     Process process_;

@@ -72,7 +72,7 @@ class Terminal : public ScreenEvents {
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              std::string const& _wordDelimiters = "",
-             Size _maxImageSize = Size{800, 600},
+             crispy::Size _maxImageSize = crispy::Size{800, 600},
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true);
     ~Terminal();
@@ -83,8 +83,8 @@ class Terminal : public ScreenEvents {
     /// Retrieves reference to the underlying PTY device.
     Pty& device() noexcept { return *pty_; }
 
-    Size screenSize() const noexcept { return pty_->screenSize(); }
-    void resizeScreen(Size _cells, std::optional<Size> _pixels);
+    crispy::Size screenSize() const noexcept { return pty_->screenSize(); }
+    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels);
 
     // {{{ input proxy
     // Sends given input event to connected slave.

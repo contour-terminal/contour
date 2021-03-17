@@ -17,6 +17,7 @@
 #include <string_view>
 #include <array>
 
+using crispy::Size;
 using namespace terminal;
 
 TEST_CASE("SixelParser.ground_000000", "[sixel]")

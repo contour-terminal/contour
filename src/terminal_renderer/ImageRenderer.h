@@ -17,8 +17,8 @@
 #include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Image.h>
-#include <terminal/Size.h>
 #include <crispy/point.h>
+#include <crispy/size.h>
 
 #include <vector>
 
@@ -30,13 +30,13 @@ namespace terminal::renderer {
 class ImageRenderer : public Renderable
 {
   public:
-    explicit ImageRenderer(Size const& _cellSize);
+    explicit ImageRenderer(crispy::Size const& _cellSize);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
-    void setCellSize(Size const& _cellSize);
+    void setCellSize(crispy::Size const& _cellSize);
 
     void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
 
@@ -46,7 +46,7 @@ class ImageRenderer : public Renderable
     struct ImageFragmentKey {
         Image::Id const imageId;
         Coordinate const offset;
-        Size const size;
+        crispy::Size const size;
 
         bool operator==(ImageFragmentKey const& b) const noexcept
         {
@@ -80,7 +80,7 @@ class ImageRenderer : public Renderable
   private:
     ImagePool imagePool_;
     std::map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
-    Size cellSize_;
+    crispy::Size cellSize_;
     std::unique_ptr<TextureAtlas> atlas_;
 };
 
