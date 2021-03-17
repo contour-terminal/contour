@@ -227,7 +227,7 @@ void DecorationRenderer::rebuild()
 
         for (int y = 0; y < thickness; ++y)
             for (int x = 0; x < width; ++x)
-                image[y * width + x] = 0xFF;
+                image[(cellHeight - y - 1) * width + x] = 0xFF;
 
         atlas_->insert(
             Decorator::Overline,
