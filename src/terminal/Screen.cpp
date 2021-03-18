@@ -294,6 +294,20 @@ Screen::Screen(Size const& _size,
     resetHard();
 }
 
+int Screen::numericCapability(capabilities::Code _cap) const
+{
+    using namespace capabilities::literals;
+
+    switch (_cap)
+    {
+        case "li"_tcap: return size_.height;
+        case "co"_tcap: return size_.width;
+        case "it"_tcap: return tabWidth_;
+        default:
+            return StaticDatabase::numericCapability(_cap);
+    }
+}
+
 void Screen::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
 {
     primaryGrid().setMaxHistoryLineCount(_maxHistoryLineCount);
@@ -1980,6 +1994,34 @@ void Screen::requestTabStops()
     dcs << "\033\\"sv; // ST
 
     reply(dcs.str());
+}
+
+namespace
+{
+    std::string asHex(std::string_view _value)
+    {
+        std::string output;
+        for (char const ch: _value)
+            output += fmt::format("{:02X}", unsigned(ch));
+        return output;
+    }
+}
+
+void Screen::requestCapability(capabilities::Code _code)
+{
+    if (booleanCapability(_code))
+        reply("\033P1+r{}\033\\", _code.hex());
+    else if (auto const value = numericCapability(_code); value >= 0)
+    {
+        auto hexValue = fmt::format("{:X}", value);
+        if (hexValue.size() % 2)
+            hexValue.insert(hexValue.begin(), '0');
+        reply("\033P1+r{}={}\033\\", _code.hex(), hexValue);
+    }
+    else if (auto const value = stringCapability(_code); !value.empty())
+        reply("\033P1+r{}={}\033\\", _code.hex(), asHex(value));
+    else
+        reply("\033P0+r{}\033\\", _code.hex());
 }
 
 void Screen::resetDynamicColor(DynamicColorName _name)

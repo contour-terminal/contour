@@ -301,6 +301,7 @@ constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VT
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTType::VT525, "STP", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, "DECSIXEL", "Sixel Graphics Image");
+constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTType::VT100, "XTGETTCAP", "Request Termcap/Terminfo String");
 
 // OSC
 constexpr inline auto SETTITLE      = detail::OSC(0, "SETINICON", "Change Window & Icon Title");
@@ -428,6 +429,7 @@ inline auto const& functions() noexcept
             STP,
             DECRQSS,
             DECSIXEL,
+            XTGETTCAP,
 
             // OSC
             SETICON,

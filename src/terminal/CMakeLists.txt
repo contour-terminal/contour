@@ -16,6 +16,7 @@ endif()
 
 set(terminal_HEADERS
     Charset.h
+    Capabilities.h
     Color.h
     Grid.h
     Hyperlink.h
@@ -38,6 +39,7 @@ set(terminal_HEADERS
 
 set(terminal_SOURCES
     Charset.cpp
+    Capabilities.cpp
     Color.cpp
     Grid.cpp
     Functions.cpp

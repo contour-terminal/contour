@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/Capabilities.h>
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
 #include <terminal/Grid.h>
@@ -131,7 +132,7 @@ struct Cursor
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-class Screen {
+class Screen : public capabilities::StaticDatabase {
   public:
     /**
      * Initializes the screen with the given screen size and callbaks.
@@ -151,6 +152,8 @@ class Screen {
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true
     );
+
+    int numericCapability(capabilities::Code _cap) const override;
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -263,6 +266,7 @@ class Screen {
     void reportExtendedCursorPosition();  // DECXCPR
     void selectConformanceLevel(VTType _level);
     void requestDynamicColor(DynamicColorName _name);
+    void requestCapability(capabilities::Code _code);
     void sendDeviceAttributes();
     void sendTerminalId();
 
