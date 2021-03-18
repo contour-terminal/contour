@@ -598,6 +598,9 @@ class Sequencer : public ParserEvents {
     RGBAColor backgroundColor_;
 };
 
+std::string to_string(AnsiMode _mode);
+std::string to_string(DECMode _mode);
+
 }  // namespace terminal
 
 namespace fmt { // {{{
