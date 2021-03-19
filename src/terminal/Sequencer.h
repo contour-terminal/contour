@@ -239,6 +239,8 @@ constexpr std::string_view to_code(AnsiMode m)
     return "";
 }
 
+std::string to_string(DECMode _mode);
+
 constexpr std::string_view to_code(DECMode m)
 {
     switch (m)
