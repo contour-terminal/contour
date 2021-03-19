@@ -131,7 +131,7 @@ struct Config {
     bool sixelScrolling = false;
     bool sixelCursorConformance = true;
     crispy::Size maxImageSize = {2000, 2000};
-    int maxImageColorRegisters = 256;
+    int maxImageColorRegisters = 4096;
 
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
     bool hideScrollbarInAltScreen = true;

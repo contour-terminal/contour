@@ -20,12 +20,17 @@
 using crispy::Size;
 using namespace terminal;
 
+SixelImageBuilder sixelImageBuilder(Size _size, RGBAColor _defaultColor)
+{
+    return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<ColorPalette>(16, 256));
+}
+
 TEST_CASE("SixelParser.ground_000000", "[sixel]")
 {
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = SixelImageBuilder{Size{4, 10}, defaultColor};
+    auto ib = sixelImageBuilder(Size{4, 10}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -50,7 +55,7 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
     auto constexpr pinColor = RGBColor{0x10, 0x20, 0x40};
 
-    auto ib = SixelImageBuilder{Size{2, 8}, defaultColor};
+    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -81,7 +86,7 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = SixelImageBuilder{Size{4, 10}, defaultColor};
+    auto ib = sixelImageBuilder(Size{4, 10}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -112,7 +117,7 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = SixelImageBuilder{Size{2, 8}, defaultColor};
+    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -143,7 +148,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = SixelImageBuilder{Size{2, 8}, defaultColor};
+    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -172,7 +177,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
 TEST_CASE("SixelParser.raster", "[sixel]")
 {
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
-    auto ib = SixelImageBuilder{Size{640, 480}, defaultColor};
+    auto ib = sixelImageBuilder(Size{640, 480}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -191,7 +196,7 @@ TEST_CASE("SixelParser.rep", "[sixel]")
 {
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
     auto constexpr pinColor = RGBColor{0x10, 0x20, 0x30};
-    auto ib = SixelImageBuilder{Size{14, 8}, defaultColor};
+    auto ib = sixelImageBuilder(Size{14, 8}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -226,7 +231,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     };
 
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
-    auto ib = SixelImageBuilder{Size{/*5, 7*/ 4, 6}, defaultColor};
+    auto ib = sixelImageBuilder(Size{/*5, 7*/ 4, 6}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;0;0");
@@ -260,7 +265,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
     };
 
     auto constexpr defaultColor = pinColors[0];
-    auto ib = SixelImageBuilder{Size{4, 6}, defaultColor};
+    auto ib = sixelImageBuilder(Size{4, 6}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;100;0");
@@ -295,7 +300,7 @@ TEST_CASE("SixelParser.newline", "[sixel]")
     };
 
     auto constexpr defaultColor = pinColors[0];
-    auto ib = SixelImageBuilder{Size{5, 13}, defaultColor};
+    auto ib = sixelImageBuilder(Size{5, 13}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;100;0");
