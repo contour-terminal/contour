@@ -193,6 +193,7 @@ enum class MouseButton {
     Left,
     Right,
     Middle,
+    Release, // Button was released and/or no button is pressed.
     WheelUp,
     WheelDown,
 };
@@ -486,6 +487,7 @@ namespace fmt { // {{{
                 case terminal::MouseButton::Left: return format_to(_ctx.out(), "Left");
                 case terminal::MouseButton::Right: return format_to(_ctx.out(), "Right");
                 case terminal::MouseButton::Middle: return format_to(_ctx.out(), "Middle");
+                case terminal::MouseButton::Release: return format_to(_ctx.out(), "Release");
                 case terminal::MouseButton::WheelUp: return format_to(_ctx.out(), "WheelUp");
                 case terminal::MouseButton::WheelDown: return format_to(_ctx.out(), "WheelDown");
             }

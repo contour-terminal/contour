@@ -46,12 +46,13 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
     return result;
 }
 
-inline auto split(std::string_view _text, char _delimiter) -> std::vector<std::string_view>
+template <typename T>
+constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
 {
-    std::vector<std::string_view> output{};
+    std::vector<std::basic_string_view<T>> output{};
     size_t a = 0;
     size_t b = 0;
-    while ((b = _text.find(_delimiter, a)) != std::string_view::npos)
+    while ((b = _text.find(_delimiter, a)) != std::basic_string_view<T>::npos)
     {
         output.emplace_back(_text.substr(a, b - a));
         a = b + 1;
@@ -61,6 +62,12 @@ inline auto split(std::string_view _text, char _delimiter) -> std::vector<std::s
         output.emplace_back(_text.substr(a));
 
     return output;
+}
+
+template <typename T>
+inline auto split(std::basic_string<T> const& _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+{
+    return split(std::basic_string_view<T>(_text), _delimiter);
 }
 
 inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(std::string_view const&  _text, char _delimiter)

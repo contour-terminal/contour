@@ -239,6 +239,8 @@ constexpr std::string_view to_code(AnsiMode m)
     return "";
 }
 
+std::string to_string(DECMode _mode);
+
 constexpr std::string_view to_code(DECMode m)
 {
     switch (m)
@@ -576,6 +578,7 @@ class Sequencer : public ParserEvents {
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& /*_seq*/);
 
     void flushBatchedSequences();
 
