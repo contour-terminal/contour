@@ -22,6 +22,7 @@
 #include <memory>
 #include <utility>
 
+using crispy::Size;
 using std::chrono::milliseconds;
 using std::chrono::steady_clock;
 using std::make_unique;

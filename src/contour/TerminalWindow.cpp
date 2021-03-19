@@ -91,7 +91,9 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 
     layout_ = new QHBoxLayout();
     layout_->addWidget(terminalWidget_);
-    layout_->addWidget(scrollBar_);
+
+    if (config_.scrollbarPosition != config::ScrollBarPosition::Hidden)
+        layout_->addWidget(scrollBar_);
 
     // TODO: this mainWidget could become its own contour terminal class that handles
     // therminal screen area as well as its scrollbar.

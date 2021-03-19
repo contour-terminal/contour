@@ -20,6 +20,7 @@
 using namespace terminal;
 using namespace std::string_view_literals;
 using std::string;
+using crispy::Size;
 
 namespace // {{{ helper
 {
@@ -109,7 +110,7 @@ TEST_CASE("Grid.reflow.shrink.wrappable", "[grid]")
     grid.lineAt(4).setWrappable(false);
     logGridText(grid, "initial");
 
-    grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize");
 
     // TODO: test output
@@ -123,7 +124,7 @@ TEST_CASE("Grid.reflow.shrink", "[grid]")
     // Shrink slowly from 5x2 to 4x2 to 3x2 to 2x2.
 
     // 4x2
-    grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize");
 
     CHECK(grid.historyLineCount() == 2);
@@ -135,7 +136,7 @@ TEST_CASE("Grid.reflow.shrink", "[grid]")
     CHECK(grid.renderTextLine(2) == "e   ");
 
     // 3x2
-    grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 3x2");
 
     CHECK(grid.historyLineCount() == 2);
@@ -147,7 +148,7 @@ TEST_CASE("Grid.reflow.shrink", "[grid]")
     CHECK(grid.renderTextLine(2) == "de ");
 
     // 2x2
-    grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.historyLineCount() == 4);
@@ -166,7 +167,7 @@ TEST_CASE("Grid.reflow", "[grid]")
     auto grid = setupGrid5x2();
 
     SECTION("resize 4x2") {
-        grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize");
 
         CHECK(grid.historyLineCount() == 2);
@@ -179,9 +180,9 @@ TEST_CASE("Grid.reflow", "[grid]")
     }
 
     SECTION("resize 3x2") {
-        grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 4x2");
-        grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == 2);
@@ -194,11 +195,11 @@ TEST_CASE("Grid.reflow", "[grid]")
     }
 
     SECTION("resize 2x2") {
-        grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 4x2");
-        grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 3x2");
-        grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 2x2");
 
         CHECK(grid.historyLineCount() == 4);
@@ -212,7 +213,7 @@ TEST_CASE("Grid.reflow", "[grid]")
         CHECK(grid.renderTextLine(2) == "e ");
 
         SECTION("regrow 3x2") {
-            grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+            (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
             logGridText(grid, "after regrow 3x2");
 
             CHECK(grid.historyLineCount() == 2);
@@ -224,7 +225,7 @@ TEST_CASE("Grid.reflow", "[grid]")
             CHECK(grid.renderTextLine(2) == "de ");
 
             SECTION("regrow 4x2") {
-                grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+                (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
                 logGridText(grid, "after regrow 4x2");
 
                 CHECK(grid.historyLineCount() == 2);
@@ -237,7 +238,7 @@ TEST_CASE("Grid.reflow", "[grid]")
             }
 
             SECTION("regrow 5x2") {
-                grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
+                (void) grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
                 logGridText(grid, "after regrow 5x2");
 
                 CHECK(grid.historyLineCount() == 0);
@@ -256,7 +257,7 @@ TEST_CASE("Grid.reflow.shrink_many", "[grid]")
     REQUIRE(grid.renderTextLine(1) == "ABCDE"sv);
     REQUIRE(grid.renderTextLine(2) == "abcde"sv);
 
-    grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.historyLineCount() == 4);
@@ -274,15 +275,15 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 {
     auto grid = setupGrid5x2();
 
-    grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 2x2");
 
     SECTION("smooth regrow 2->3->4->5") {
-        grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 3x2");
-        grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 4x2");
-        grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == 0);
@@ -292,7 +293,7 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
     }
 
     SECTION("hard regrow 2->5") {
-        grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == 0);
@@ -307,7 +308,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
     // Tests reflowing text upon shrink/grow across more than two (e.g. three) wrapped lines.
     auto grid = setupGrid8x2();
 
-    grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
+    (void) grid.resize(Size{2, 2}, Coordinate{1, 1}, false);
     logGridText(grid, "after resize 3x2");
 
     REQUIRE(grid.historyLineCount() == 6);
@@ -334,7 +335,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
     REQUIRE(grid.absoluteLineAt(7).wrapped());
 
     SECTION("grow from 2x2 to 8x2") {
-        grid.resize(Size{8, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{8, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == 0);
@@ -349,7 +350,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
 
     SECTION("grow from 2x2 to 3x2 to ... to 8x2") {
         // {{{ 3x2
-        grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{3, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 3x2");
 
         REQUIRE(grid.historyLineCount() == 4);
@@ -371,7 +372,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 4x2
-        grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{4, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 4x2");
 
         REQUIRE(grid.historyLineCount() == 2);
@@ -389,7 +390,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 5x2
-        grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{5, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 5x2");
 
         REQUIRE(grid.historyLineCount() == 2);
@@ -407,7 +408,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 7x2
-        grid.resize(Size{7, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{7, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 7x2");
 
         REQUIRE(grid.historyLineCount() == 2);
@@ -425,7 +426,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 8x2
-        grid.resize(Size{8, 2}, Coordinate{1, 1}, false);
+        (void) grid.resize(Size{8, 2}, Coordinate{1, 1}, false);
         logGridText(grid, "after resize 8x2");
 
         REQUIRE(grid.historyLineCount() == 0);

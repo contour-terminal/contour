@@ -15,6 +15,7 @@
 
 #include <Windows.h>
 
+using crispy::Size;
 using namespace std;
 
 namespace {

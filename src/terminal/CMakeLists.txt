@@ -34,7 +34,6 @@ set(terminal_HEADERS
     Terminal.h
     Viewport.h
     VTType.h
-    Size.h
 )
 
 set(terminal_SOURCES
@@ -92,7 +91,6 @@ if(LIBTERMINAL_TESTING)
         Grid_test.cpp
         Parser_test.cpp
         Screen_test.cpp
-        Size_test.cpp
         SixelParser_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)

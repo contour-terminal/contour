@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/Size.h>
-
 #include <crispy/point.h>
+#include <crispy/size.h>
+#include <terminal/Coordinate.h>
 
 #include <fmt/format.h>
 
@@ -24,8 +24,8 @@ namespace terminal::renderer {
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
-    Size pageSize;      // page size in column- and line count
-    Size cellSize;      // grid cell size in pixels
+    crispy::Size pageSize;  // page size in column- and line count
+    crispy::Size cellSize;  // grid cell size in pixels
 
     int baseline;           // glyph's baseline position relative to cell bottom.
 

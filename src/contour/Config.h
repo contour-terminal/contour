@@ -23,10 +23,10 @@
 #include <terminal/Color.h>
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h>                 // CursorDisplay
-#include <terminal/Size.h>
 
 #include <text_shaper/font.h>
 
+#include <crispy/size.h>
 #include <crispy/stdfs.h>
 
 #include <QKeySequence>
@@ -59,7 +59,7 @@ struct TerminalProfile {
     bool maximized = false;
     bool fullscreen = false;
 
-    terminal::Size terminalSize;
+    crispy::Size terminalSize;
 
     std::optional<int> maxHistoryLineCount;
     int historyScrollMultiplier;
@@ -130,7 +130,7 @@ struct Config {
 
     bool sixelScrolling = false;
     bool sixelCursorConformance = true;
-    terminal::Size maxImageSize = {2000, 2000};
+    crispy::Size maxImageSize = {2000, 2000};
     int maxImageColorRegisters = 256;
 
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;

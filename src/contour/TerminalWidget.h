@@ -210,8 +210,8 @@ class TerminalWidget :
     }
 
     void statsSummary();
-    void doResize(terminal::Size _size);
-    void setSize(terminal::Size _size);
+    void doResize(crispy::Size _size);
+    void setSize(crispy::Size _size);
 
     config::TerminalProfile const& profile() const { return profile_; }
     config::TerminalProfile& profile() { return profile_; }

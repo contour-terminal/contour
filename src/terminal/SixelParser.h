@@ -14,10 +14,11 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Size.h>                  // Size, Coordinate
+#include <terminal/Coordinate.h>
 #include <terminal/ParserExtension.h>
 
 #include <crispy/range.h>
+#include <crispy/size.h>
 
 #include <array>
 #include <memory>
@@ -65,7 +66,7 @@ class SixelParser : public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(int _pan, int _pad, Size const& _imageSize) = 0;
+        virtual void setRaster(int _pan, int _pad, crispy::Size const& _imageSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t _sixel) = 0;
@@ -154,21 +155,21 @@ class SixelImageBuilder : public SixelParser::Events
   public:
     using Buffer = std::vector<uint8_t>;
 
-    SixelImageBuilder(Size const& _maxSize,
+    SixelImageBuilder(crispy::Size const& _maxSize,
                       int _aspectVertical,
                       int _aspectHorizontal,
                       RGBAColor _backgroundColor,
                       std::shared_ptr<ColorPalette> _colorPalette);
 
-    SixelImageBuilder(Size const& _maxSize, RGBAColor _backgroundColor)
+    SixelImageBuilder(crispy::Size const& _maxSize, RGBAColor _backgroundColor)
         : SixelImageBuilder(_maxSize, 1, 1, _backgroundColor, std::make_shared<ColorPalette>()) {}
 
-    SixelImageBuilder(Size const& _maxSize, RGBAColor _backgroundColor, std::shared_ptr<ColorPalette> _colorPalette) :
+    SixelImageBuilder(crispy::Size const& _maxSize, RGBAColor _backgroundColor, std::shared_ptr<ColorPalette> _colorPalette) :
         SixelImageBuilder(_maxSize, 1, 1, _backgroundColor, std::move(_colorPalette)) {}
 
-    Size const& maxSize() const noexcept { return maxSize_; }
+    crispy::Size const& maxSize() const noexcept { return maxSize_; }
 
-    Size const& size() const noexcept { return size_; }
+    crispy::Size const& size() const noexcept { return size_; }
     int aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
     int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
     RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
@@ -184,7 +185,7 @@ class SixelImageBuilder : public SixelParser::Events
     void useColor(int _index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(int _pan, int _pad, Size const& _imageSize) override;
+    void setRaster(int _pan, int _pad, crispy::Size const& _imageSize) override;
     void render(int8_t _sixel) override;
 
     Coordinate const& sixelCursor() const noexcept { return sixelCursor_; }
@@ -193,9 +194,9 @@ class SixelImageBuilder : public SixelParser::Events
     void write(Coordinate const& _coord, RGBColor const& _value) noexcept;
 
   private:
-    Size const maxSize_;
+    crispy::Size const maxSize_;
     std::shared_ptr<ColorPalette> colors_;
-    Size size_;
+    crispy::Size size_;
     Buffer buffer_; /// RGBA buffer
     Coordinate sixelCursor_;
     int currentColor_;

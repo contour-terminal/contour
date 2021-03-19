@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <memory>
 
+using crispy::Size;
 using std::copy;
 using std::min;
 using std::move;

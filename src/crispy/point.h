@@ -13,12 +13,14 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 #include <ostream>
 
 namespace crispy
 {
 
-struct [[nodiscard]] Point // {{{
+struct [[nodiscard]] Point
 {
     int x;
     int y;
@@ -41,12 +43,6 @@ constexpr void swap(Point& a, Point& b) noexcept
     Point const c = a;
     a = b;
     b = c;
-}
-
-// Prints Point as human readable text to given stream (used for debugging & unit testing).
-inline std::ostream& operator<<(std::ostream& _os, Point const& _coord)
-{
-    return _os << "{" << _coord.x << ", " << _coord.y << "}";
 }
 
 constexpr inline int compare(Point const& a, Point const& b) noexcept
@@ -86,60 +82,21 @@ constexpr inline bool operator!=(Point const& a, Point const& b) noexcept
 {
     return !(a == b);
 }
-// }}}
 
-struct [[nodiscard]] Size // {{{
-{
-    int width;
-	int height;
+}
 
-    /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
-    struct iterator {
-      private:
-        int width;
-        int next;
-        Point coord{0, 0};
-
-        constexpr Point makePoint(int offset) noexcept
+namespace fmt {
+    template <>
+    struct formatter<crispy::Point> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
         {
-            return Point{
-                offset / width,
-                offset % width
-            };
+            return ctx.begin();
         }
-
-      public:
-        constexpr iterator(int _width, int _next) noexcept :
-            width{ _width },
-            next{ _next },
-            coord{ makePoint(_next) }
+        template <typename FormatContext>
+        auto format(crispy::Point coord, FormatContext& ctx)
         {
+            return format_to(ctx.out(), "({}, {})", coord.x, coord.y);
         }
-
-        constexpr Point operator*() const noexcept { return coord; }
-
-        constexpr iterator& operator++() noexcept
-        {
-            coord = makePoint(++next);
-            return *this;
-        }
-
-        constexpr iterator& operator++(int) noexcept
-        {
-            ++*this;
-            return *this;
-        }
-
-        constexpr bool operator==(iterator const& other) const noexcept { return next == other.next; }
-        constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
     };
-
-    constexpr iterator begin() const noexcept { return iterator{width, 0}; }
-    constexpr iterator end() const noexcept { return iterator{width, width * height}; }
-
-    constexpr iterator begin() noexcept { return iterator{width, 0}; }
-    constexpr iterator end() noexcept { return iterator{width, width * height}; }
-};
-// }}}
-
 }

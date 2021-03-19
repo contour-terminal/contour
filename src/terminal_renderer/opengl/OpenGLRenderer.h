@@ -16,8 +16,6 @@
 #include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/Atlas.h>
 
-#include <terminal/Size.h>
-
 #include <crispy/debuglog.h>
 
 #include <QtGui/QMatrix4x4>

@@ -15,13 +15,13 @@
 
 #include <terminal/InputGenerator.h>
 
-#include <terminal/Size.h>
 #include <terminal/VTType.h>
 
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
 #include <crispy/debuglog.h>
+#include <crispy/size.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
@@ -327,7 +327,7 @@ void Screen::resizeColumns(int _newColumnCount, bool _clear)
 void Screen::resize(Size const& _newSize)
 {
     cursor_.position = grid().resize(_newSize, cursor_.position, wrapPending_);
-    backgroundGrid().resize(_newSize, cursor_.position, false);
+    (void) backgroundGrid().resize(_newSize, cursor_.position, false);
 
     // update wrap-pending
     if (_newSize.width > size_.width)
@@ -1806,9 +1806,9 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
         crispy::for_each(
             LIBTERMINAL_EXECUTION_COMMA(par)
             Size{columnsToBeRendered, linesToBeRendered},
-            [&](Coordinate const& offset) {
+            [&](Point const& offset) {
                 at(_topLeft + offset).setImage(
-                    ImageFragment{rasterizedImage, offset},
+                    ImageFragment{rasterizedImage, Coordinate(offset)},
                     currentHyperlink_
                 );
             }

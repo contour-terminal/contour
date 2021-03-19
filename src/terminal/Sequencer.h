@@ -18,6 +18,7 @@
 #include <terminal/ParserExtension.h>
 #include <terminal/Functions.h>
 #include <terminal/SixelParser.h>
+#include <crispy/size.h>
 
 #include <memory>
 #include <string>
@@ -332,7 +333,7 @@ namespace XtSmGraphics
         ReadLimit = 4
     };
 
-    using Value = std::variant<std::monostate, int, Size>;
+    using Value = std::variant<std::monostate, int, crispy::Size>;
 };
 
 /// TBC - Tab Clear
@@ -373,7 +374,7 @@ enum class RequestStatusString {
 /// DECSIXEL - Sixel Graphics Image.
 struct SixelImage { // TODO: this struct is only used internally in Sequencer, make it private
     /// Size in pixels for this image
-    Size size;
+    crispy::Size size;
 
     /// RGBA buffer of the image to be rendered
     Image::Data rgba;
@@ -528,18 +529,18 @@ class Sequencer : public ParserEvents {
   public:
     /// Constructs the sequencer stage.
     Sequencer(Screen& _screen,
-              Size _maxImageSize,
+              crispy::Size _maxImageSize,
               RGBAColor _backgroundColor,
               std::shared_ptr<ColorPalette> _imageColorPalette);
 
     /// Constructs a very primitive Sequencer, SHOULD be used for testing only.
     Sequencer(Screen& _screen)
         : Sequencer(_screen,
-                    Size{800, 600},
+                    crispy::Size{800, 600},
                     RGBAColor{},
                     std::make_shared<ColorPalette>()) {}
 
-    void setMaxImageSize(Size _value) { maxImageSize_ = _value; }
+    void setMaxImageSize(crispy::Size _value) { maxImageSize_ = _value; }
     void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
@@ -592,10 +593,13 @@ class Sequencer : public ParserEvents {
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
     std::shared_ptr<ColorPalette> imageColorPalette_;
     bool usePrivateColorRegisters_ = false;
-    Size maxImageSize_;
+    crispy::Size maxImageSize_;
     int maxImageRegisterCount_;
     RGBAColor backgroundColor_;
 };
+
+std::string to_string(AnsiMode _mode);
+std::string to_string(DECMode _mode);
 
 }  // namespace terminal
 

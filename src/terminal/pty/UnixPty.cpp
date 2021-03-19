@@ -36,6 +36,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+using crispy::Size;
 using std::runtime_error;
 using std::numeric_limits;
 using namespace std::string_literals;

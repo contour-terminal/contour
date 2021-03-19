@@ -18,10 +18,13 @@
 
 #include <array>
 
+using crispy::Size;
+using crispy::times;
+
+using std::array;
 using std::array;
 using std::nullopt;
 using std::optional;
-using crispy::times;
 
 namespace terminal::renderer {
 

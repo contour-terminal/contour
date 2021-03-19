@@ -57,6 +57,7 @@
 
 using namespace std::string_literals;
 
+using crispy::Size;
 using std::array;
 using std::cerr;
 using std::chrono::steady_clock;
@@ -1393,7 +1394,7 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
 
         auto const width = _width / gridMetrics().cellSize.width;
         auto const height = _height / gridMetrics().cellSize.height;
-        auto const newScreenSize = terminal::Size{width, height};
+        auto const newScreenSize = Size{width, height};
         post([this, newScreenSize]() { setSize(newScreenSize); });
     }
     else
@@ -1404,14 +1405,14 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
         if (!_height)
             _height = profile().terminalSize.height;
 
-        auto const newScreenSize = terminal::Size{_width, _height};
+        auto const newScreenSize = Size{_width, _height};
         post([this, newScreenSize]() { setSize(newScreenSize); });
     }
 }
 
 QSize TerminalWidget::minimumSizeHint() const
 {
-    auto constexpr MinimumScreenSize = terminal::Size{1, 1};
+    auto constexpr MinimumScreenSize = Size{1, 1};
 
     auto const cellSize = gridMetrics().cellSize;
     auto const viewSize = MinimumScreenSize * cellSize;
@@ -1436,7 +1437,7 @@ QSize TerminalWidget::sizeHint() const
     return QSize(viewSize.width, viewSize.height);
 }
 
-void TerminalWidget::setSize(terminal::Size _size)
+void TerminalWidget::setSize(Size _size)
 {
     debuglog(WidgetTag).write("Calling setSize with {}", _size);
 

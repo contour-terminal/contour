@@ -24,6 +24,8 @@
 
 #include <terminal/Terminal.h>
 
+#include <crispy/size.h>
+
 #include <fmt/format.h>
 
 #include <chrono>
@@ -44,7 +46,7 @@ class Renderer : public Renderable {
      * @p _colorProfile user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
-    Renderer(Size const& _screenSize,
+    Renderer(crispy::Size const& _screenSize,
              int _logicalDpiX,
              int _logicalDpiY,
              FontDescriptions const& _fontDescriptions,
@@ -54,7 +56,7 @@ class Renderer : public Renderable {
              Decorator _hyperlinkHover,
              RenderTarget* _renderTarget);
 
-    Size cellSize() const noexcept { return gridMetrics_.cellSize; }
+    crispy::Size cellSize() const noexcept { return gridMetrics_.cellSize; }
 
     void setRenderTarget(RenderTarget& _renderTarget);
 
@@ -76,7 +78,7 @@ class Renderer : public Renderable {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    void setScreenSize(Size const& _screenSize) noexcept
+    void setScreenSize(crispy::Size const& _screenSize) noexcept
     {
         gridMetrics_.pageSize = _screenSize;
     }
