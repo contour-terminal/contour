@@ -290,6 +290,7 @@ string to_string(MouseButton _button)
         case MouseButton::Left: return "Left"s;
         case MouseButton::Right: return "Right"s;
         case MouseButton::Middle: return "Middle"s;
+        case MouseButton::Release: return "Release"s;
         case MouseButton::WheelUp: return "WheelUp"s;
         case MouseButton::WheelDown: return "WheelDown"s;
     }
@@ -508,6 +509,8 @@ namespace
                 return 1;
             case MouseButton::Right:
                 return 2;
+            case MouseButton::Release:
+                return 3;
             case MouseButton::WheelUp:
                 return 4;
             case MouseButton::WheelDown:
@@ -741,7 +744,7 @@ bool InputGenerator::generate(MouseMoveEvent const& _mouse)
             bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
                               || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
             if (report)
-                return generateMouse(MouseButton::Left,
+                return generateMouse(MouseButton::Release, // what about dragging?
                                      _mouse.modifier,
                                      _mouse.row,
                                      _mouse.column,
