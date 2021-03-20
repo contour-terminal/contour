@@ -129,8 +129,6 @@ class ColorPalette
   public:
     ColorPalette(int _size, int _maxSize);
 
-    ColorPalette() : ColorPalette(16, 256) {}
-
     void reset();
 
     int size() const noexcept { return static_cast<int>(palette_.size()); }
@@ -160,12 +158,6 @@ class SixelImageBuilder : public SixelParser::Events
                       int _aspectHorizontal,
                       RGBAColor _backgroundColor,
                       std::shared_ptr<ColorPalette> _colorPalette);
-
-    SixelImageBuilder(crispy::Size const& _maxSize, RGBAColor _backgroundColor)
-        : SixelImageBuilder(_maxSize, 1, 1, _backgroundColor, std::make_shared<ColorPalette>()) {}
-
-    SixelImageBuilder(crispy::Size const& _maxSize, RGBAColor _backgroundColor, std::shared_ptr<ColorPalette> _colorPalette) :
-        SixelImageBuilder(_maxSize, 1, 1, _backgroundColor, std::move(_colorPalette)) {}
 
     crispy::Size const& maxSize() const noexcept { return maxSize_; }
 

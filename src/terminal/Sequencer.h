@@ -535,13 +535,6 @@ class Sequencer : public ParserEvents {
               RGBAColor _backgroundColor,
               std::shared_ptr<ColorPalette> _imageColorPalette);
 
-    /// Constructs a very primitive Sequencer, SHOULD be used for testing only.
-    Sequencer(Screen& _screen)
-        : Sequencer(_screen,
-                    crispy::Size{800, 600},
-                    RGBAColor{},
-                    std::make_shared<ColorPalette>()) {}
-
     void setMaxImageSize(crispy::Size _value) { maxImageSize_ = _value; }
     void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }

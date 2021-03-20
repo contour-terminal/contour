@@ -274,7 +274,7 @@ Screen::Screen(Size const& _size,
     logTrace_{ _logTrace },
     modes_{},
     maxImageColorRegisters_{ _maxImageColorRegisters },
-    imageColorPalette_(make_shared<ColorPalette>(16, maxImageColorRegisters_)),
+    imageColorPalette_(make_shared<ColorPalette>(maxImageColorRegisters_, maxImageColorRegisters_)),
     imagePool_{
         [this](Image const* _image) { eventListener_.discardImage(*_image); },
         1

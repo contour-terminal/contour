@@ -41,6 +41,7 @@
 
 using crispy::Size;
 using std::array;
+using std::clamp;
 using std::distance;
 using std::get;
 using std::holds_alternative;
@@ -1160,7 +1161,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             ? RGBAColor{0, 0, 0, 0}
             : backgroundColor_,
         usePrivateColorRegisters_
-            ? make_shared<ColorPalette>(maxImageRegisterCount_, min(maxImageRegisterCount_, 4096))
+            ? make_shared<ColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
             : imageColorPalette_
     );
 
