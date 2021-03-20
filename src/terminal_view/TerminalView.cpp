@@ -145,7 +145,7 @@ bool TerminalView::alive() const
 
 void TerminalView::updateFontMetrics()
 {
-    auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
+    auto const newMargin = computeMargin(screenSize(), size_);
 
     debuglog(ViewTag).write("with font size {}, adjusting margin from {}x{} to {}x{}\n",
                             fontSize_,
@@ -159,7 +159,7 @@ void TerminalView::updateFontMetrics()
 
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_.width, size_.height);
+    resize(size_);
 }
 
 bool TerminalView::setFontSize(text::font_size _fontSize)
@@ -167,39 +167,37 @@ bool TerminalView::setFontSize(text::font_size _fontSize)
     if (!renderer_.setFontSize(_fontSize))
         return false;
 
-    auto const newMargin = computeMargin(screenSize(), size_.width, size_.height);
+    auto const newMargin = computeMargin(screenSize(), size_);
     windowMargin_ = newMargin;
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_.width, size_.height);
+    resize(size_);
     return true;
 }
 
-TerminalView::WindowMargin TerminalView::computeMargin(Size const& ws,
-                                                       [[maybe_unused]] unsigned _width,
-                                                       unsigned _height) const noexcept
+TerminalView::WindowMargin TerminalView::computeMargin(Size _charCells, Size _pixels) const noexcept
 {
-    auto const usedHeight = static_cast<int>(ws.height * gridMetrics().cellSize.height);
-    auto const freeHeight = static_cast<int>(_height - usedHeight);
+    auto const usedHeight = static_cast<int>(_charCells.height * gridMetrics().cellSize.height);
+    auto const freeHeight = static_cast<int>(_pixels.height - usedHeight);
     auto const bottomMargin = freeHeight;
 
-    //auto const usedWidth = ws.columns * regularFont_.maxAdvance();
-    //auto const freeWidth = _width - usedWidth;
+    //auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();
+    //auto const freeWidth = _pixels.width - usedWidth;
     auto constexpr leftMargin = 0;
 
     return {leftMargin, bottomMargin};
 };
 
-void TerminalView::resize(int _width, int _height)
+void TerminalView::resize(Size _size)
 {
-    size_ = Size{_width, _height};
+    size_ = _size;
 
     auto const newScreenSize = screenSize();
 
-    windowMargin_ = computeMargin(newScreenSize, _width, _height);
+    windowMargin_ = computeMargin(newScreenSize, size_);
 
-    renderer_.setRenderSize(_width, _height);
+    renderer_.setRenderSize(_size);
     renderer_.setScreenSize(newScreenSize);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
     //renderer_.clearCache();

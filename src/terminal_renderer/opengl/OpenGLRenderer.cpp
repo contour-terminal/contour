@@ -177,11 +177,14 @@ struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
-                               int _width,
-                               int _height,
+                               Size _size,
                                int _leftMargin,
                                int _bottomMargin) :
-    projectionMatrix_{ },
+    size_{ _size },
+    projectionMatrix_{ortho(
+        0.0f, float(_size.width),      // left, right
+        0.0f, float(_size.height)      // bottom, top
+    )},
     leftMargin_{ _leftMargin },
     bottomMargin_{ _bottomMargin },
     textShader_{ createShader(_textShaderConfig) },
@@ -224,7 +227,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 {
     initialize();
 
-    setRenderSize(_width, _height);
+    setRenderSize(_size);
 
     assert(textProjectionLocation_ != -1);
 
@@ -244,11 +247,12 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     initializeTextureRendering();
 }
 
-void OpenGLRenderer::setRenderSize(int _width, int _height)
+void OpenGLRenderer::setRenderSize(Size _size)
 {
+    size_ = _size;
     projectionMatrix_ = ortho(
-        0.0f, float(_width),      // left, right
-        0.0f, float(_height)      // bottom, top
+        0.0f, float(size_.width),      // left, right
+        0.0f, float(size_.height)      // bottom, top
     );
 }
 

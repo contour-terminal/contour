@@ -159,9 +159,9 @@ void Renderer::updateFontMetrics()
     clearCache();
 }
 
-void Renderer::setRenderSize(int _width, int _height)
+void Renderer::setRenderSize(Size _size)
 {
-    renderTarget_->setRenderSize(_width, _height);
+    renderTarget_->setRenderSize(_size);
 }
 
 void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)

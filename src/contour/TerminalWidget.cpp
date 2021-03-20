@@ -462,8 +462,7 @@ void TerminalWidget::initializeGL()
     renderTarget_ = make_unique<terminal::renderer::opengl::OpenGLRenderer>(
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
-        width(),
-        height(),
+        Size{width(), height()},
         0, // TODO left margin
         0 // TODO bottom margin
     );
@@ -532,18 +531,18 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-    debuglog(WidgetTag).write("width={}, height={}", _width, _height);
+    debuglog(WidgetTag).write("resizing to {}", Size{_width, _height});
     QOpenGLWidget::resizeGL(_width, _height);
 
     if (_width == 0 || _height == 0)
         return;
 
     // debuglog(WidgetTag).write("widget: {}, geometry: {}/{}",
-    //                           terminal::Size{_width, _height},
-    //                           terminal::Size{geometry().top(), geometry().left()},
-    //                           terminal::Size{geometry().width(), geometry().height()});
+    //                           Size{_width, _height},
+    //                           Size{geometry().top(), geometry().left()},
+    //                           Size{geometry().width(), geometry().height()});
 
-    terminalView_->resize(_width, _height);
+    terminalView_->resize(Size{_width, _height});
 }
 
 void TerminalWidget::paintGL()

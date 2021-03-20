@@ -64,7 +64,7 @@ class Renderer : public Renderable {
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setRenderSize(int _width, int _height);
+    void setRenderSize(crispy::Size _size);
     bool setFontSize(text::font_size _fontSize);
     void updateFontMetrics();
 

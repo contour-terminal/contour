@@ -38,7 +38,7 @@ class RenderTarget
   public:
     virtual ~RenderTarget() = default;
 
-    virtual void setRenderSize(int _width, int _height) = 0;
+    virtual void setRenderSize(crispy::Size _size) = 0;
     virtual void setMargin(int _left, int _bottom) = 0;
 
     virtual atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;

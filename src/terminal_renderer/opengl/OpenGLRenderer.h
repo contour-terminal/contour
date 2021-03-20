@@ -39,14 +39,13 @@ class OpenGLRenderer :
   public:
     OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                    ShaderConfig const& _rectShaderConfig,
-                   int _width,
-                   int _height,
+                   crispy::Size _size,
                    int _leftMargin,
                    int _bottomMargin);
 
     ~OpenGLRenderer() override;
 
-    void setRenderSize(int _width, int _height) override;
+    void setRenderSize(crispy::Size _size) override;
     void setMargin(int _left, int _bottom) noexcept override;
 
     atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
@@ -108,6 +107,7 @@ class OpenGLRenderer :
     // private data members
     //
     bool initialized_ = false;
+    crispy::Size size_;
     QMatrix4x4 projectionMatrix_;
 
     int leftMargin_ = 0;
