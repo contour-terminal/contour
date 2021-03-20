@@ -26,6 +26,7 @@
 #endif
 
 #include <crispy/debuglog.h>
+#include <crispy/stdfs.h>
 
 #include <terminal_renderer/opengl/OpenGLRenderer.h>
 
@@ -54,6 +55,8 @@
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 using namespace std::string_literals;
 
@@ -80,6 +83,8 @@ using std::runtime_error;
 using std::scoped_lock;
 using std::string;
 using std::string_view;
+using std::tuple;
+using std::vector;
 
 using namespace std::string_view_literals;
 
@@ -1590,6 +1595,55 @@ void TerminalWidget::doDumpState()
     terminalView_->terminal().screen().dumpState("Dump screen state.");
     terminalView_->renderer().dumpState(std::cout);
 
+    enum class ImageBufferFormat { RGBA, RGB, Alpha };
+
+    auto screenshotSaver = [](FileSystem::path const& _filename, ImageBufferFormat _format) {
+        auto const [qImageFormat, elementCount] = [&]() -> tuple<QImage::Format, int> {
+            switch (_format) {
+                case ImageBufferFormat::RGBA: return tuple{QImage::Format_RGBA8888, 4};
+                case ImageBufferFormat::RGB: return tuple{QImage::Format_RGB888, 3};
+                case ImageBufferFormat::Alpha: return tuple{QImage::Format_Grayscale8, 1};
+            }
+            return tuple{QImage::Format_Grayscale8, 1};
+        }();
+
+        // That's a little workaround for MacOS/X's C++ Clang compiler.
+        auto const theImageFormat = qImageFormat;
+        auto const theElementCount = elementCount;
+
+        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, Size _size) {
+            auto image = make_unique<QImage>(_size.width, _size.height, theImageFormat);
+            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is inverse.
+            crispy::for_each(
+                // TODO: std::execution::seq,
+                crispy::times(_size.height),
+                [&_buffer, &image, theElementCount, _size](int i) {
+                    uint8_t const* sourceLine = &_buffer.data()[i * _size.width * theElementCount];
+                    copy(sourceLine, sourceLine + _size.width * theElementCount, image->scanLine(_size.height - i - 1));
+                }
+            );
+            image->save(QString::fromStdString(_filename.generic_string()));
+        };
+    };
+
+    auto const atlasScreenshotSaver = [&screenshotSaver, &targetDir](std::string const& _allocatorName,
+                                                                     unsigned _instanceId,
+                                                                     vector<uint8_t> const& _buffer,
+                                                                     Size _size) {
+        return [&screenshotSaver, &targetDir, &_buffer, _size, _allocatorName, _instanceId](ImageBufferFormat _format) {
+            auto const formatText = [&]() {
+                switch (_format) {
+                    case ImageBufferFormat::RGBA: return "rgba"sv;
+                    case ImageBufferFormat::RGB: return "rgb"sv;
+                    case ImageBufferFormat::Alpha: return "alpha"sv;
+                }
+                return "unknown"sv;
+            }();
+            auto const fileName = targetDir / fmt::format("atlas-{}-{}-{}.png", _allocatorName, formatText, _instanceId);
+            return screenshotSaver(fileName, _format)(_buffer, _size);
+        };
+    };
+
     assert(terminalView_->renderer().renderTarget() != nullptr);
     terminal::renderer::RenderTarget& renderTarget = *terminalView_->renderer().renderTarget();
 
@@ -1597,43 +1651,28 @@ void TerminalWidget::doDumpState()
     {
         for (unsigned instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
         {
-            auto const infoOpt = renderTarget.readAtlas(*allocator, instanceId);
+            auto infoOpt = renderTarget.readAtlas(*allocator, instanceId);
             if (!infoOpt.has_value())
                 continue;
 
-            terminal::renderer::AtlasTextureInfo const& info = infoOpt.value();
-            std::unique_ptr<QImage> image;
-            auto const elementCount = terminal::renderer::atlas::element_count(info.format);
-            string formatName = fmt::format("{}", allocator->format());
+            terminal::renderer::AtlasTextureInfo& info = infoOpt.value();
+            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), instanceId, info.buffer, info.size);
             switch (info.format)
             {
                 case terminal::renderer::atlas::Format::RGBA:
-                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_RGBA8888);
+                    saveScreenshot(ImageBufferFormat::RGBA);
                     break;
                 case terminal::renderer::atlas::Format::RGB:
-                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_RGB888);
+                    saveScreenshot(ImageBufferFormat::RGB);
                     break;
                 case terminal::renderer::atlas::Format::Red:
-                    image = make_unique<QImage>(info.size.width, info.size.height, QImage::Format_Grayscale8);
+                    saveScreenshot(ImageBufferFormat::Alpha);
                     break;
             }
-            assert(image);
-
-            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is inverse.
-            crispy::for_each(
-                // TODO: std::execution::seq,
-                crispy::times(info.size.height),
-                [&](int i) {
-                    uint8_t const* sourceLine = &info.buffer.data()[i * info.size.width * elementCount];
-                    copy(sourceLine, sourceLine + info.size.width * elementCount, image->scanLine(info.size.height - i - 1));
-                }
-            );
-
-            auto const imageFileName = fmt::format("atlas-{}-{}-{}.png", allocator->name(), formatName, instanceId);
-            auto const targetPath = targetDir / imageFileName;
-            image->save(QString::fromStdString(targetPath.generic_string()));
         }
     }
+
+    renderTarget.scheduleScreenshot(screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA));
 }
 // }}}
 

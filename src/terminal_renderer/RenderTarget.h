@@ -15,6 +15,7 @@
 
 #include <terminal_renderer/Atlas.h>
 #include <crispy/size.h>
+#include <crispy/stdfs.h>
 
 #include <memory>
 
@@ -49,6 +50,9 @@ class RenderTarget
 
     virtual void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
                                  float _r, float _g, float _b, float _a) = 0;
+
+    using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, crispy::Size /*_pixelSize*/)>;
+    virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
 
     virtual void execute() = 0;
 

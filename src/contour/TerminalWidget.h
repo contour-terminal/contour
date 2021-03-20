@@ -253,6 +253,7 @@ class TerminalWidget :
     } renderStateCache_;
 
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
+    bool takeScreenshot_ = false;
 };
 
 } // namespace contour

@@ -54,6 +54,8 @@ class OpenGLRenderer :
 
     atlas::CommandListener& textureScheduler() override;
 
+    void scheduleScreenshot(ScreenshotCallback _callback) override;
+
     void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
                          float _r, float _g, float _b, float _a) override;
 
@@ -136,6 +138,8 @@ class OpenGLRenderer :
     GLint rectProjectionLocation_;
     GLuint rectVAO_;
     GLuint rectVBO_;
+
+    std::optional<ScreenshotCallback> pendingScreenshotCallback_;
 };
 
 } // end namespace

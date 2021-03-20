@@ -18,12 +18,14 @@
 #include <crispy/algorithm.h>
 
 #include <algorithm>
+#include <vector>
 
 using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;
 using std::string;
+using std::vector;
 
 namespace terminal::renderer::opengl {
 
@@ -567,11 +569,7 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     AtlasTextureInfo output{};
     output.atlasName = _allocator.name();
     output.atlasInstanceId = _instanceId;
-    output.format = _allocator.format();
     output.size = Size{int(_allocator.width()), int(_allocator.height())};
-
-    auto const bufferSize = _allocator.width() * _allocator.height() * 4;
-    output.buffer.resize(bufferSize);
     output.format = atlas::Format::RGBA;
     output.buffer.resize(_allocator.width() * _allocator.height() * 4);
 
@@ -585,6 +583,11 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     CHECKED_GL( glDeleteFramebuffers(1, &fbo) );
 
     return output;
+}
+
+void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback _callback)
+{
+    pendingScreenshotCallback_ = std::move(_callback);
 }
 
 void OpenGLRenderer::execute()
@@ -623,6 +626,18 @@ void OpenGLRenderer::execute()
     executeRenderTextures();
 
     textShader_->release();
+
+    if (pendingScreenshotCallback_)
+    {
+        vector<uint8_t> buffer;
+        buffer.resize(size_.width * size_.height * 4);
+        debuglog(OpenGLRendererTag).write("Capture screenshot ({}).", size_);
+
+        CHECKED_GL( glReadPixels(0, 0, size_.width, size_.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+
+        pendingScreenshotCallback_.value()(buffer, size_);
+        pendingScreenshotCallback_.reset();
+    }
 }
 
 void OpenGLRenderer::executeRenderTextures()
