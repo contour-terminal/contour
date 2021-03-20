@@ -12,6 +12,7 @@
 /.clangd/
 /compile_commands.json
 /.vimspector.json
+/.cache/
 
 # CMake (CTest)
 /Testing/
