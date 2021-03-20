@@ -6,6 +6,7 @@ find_package(OpenGL REQUIRED)
 option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
+option(CONTOUR_SCROLLBAR "Enables scrollbar support." ON)
 
 # {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
@@ -55,6 +56,10 @@ endif()
 
 if(CONTOUR_VT_METRICS)
     target_compile_definitions(contour PRIVATE CONTOUR_VT_METRICS)
+endif()
+
+if(CONTOUR_SCROLLBAR)
+    target_compile_definitions(contour PRIVATE CONTOUR_SCROLLBAR)
 endif()
 
 if(WIN32)
