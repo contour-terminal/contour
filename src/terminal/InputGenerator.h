@@ -392,6 +392,9 @@ class InputGenerator {
 
     enum class MouseEventType { Press, Drag, Release };
 
+    /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
+    void reset();
+
   private:
     bool generateMouse(MouseButton _button,
                        Modifier _modifier,

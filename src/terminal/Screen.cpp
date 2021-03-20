@@ -690,6 +690,8 @@ void Screen::resetHard()
     };
 
     currentHyperlink_ = {};
+
+    eventListener_.hardReset();
 }
 
 void Screen::moveCursorTo(Coordinate to)

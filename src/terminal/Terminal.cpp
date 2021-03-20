@@ -617,6 +617,12 @@ void Terminal::useApplicationCursorKeys(bool _enable)
     inputGenerator_.setCursorKeysMode(keyMode);
 }
 
+void Terminal::hardReset()
+{
+    // NB: Screen was already reset.
+    inputGenerator_.reset();
+}
+
 void Terminal::discardImage(Image const& _image)
 {
     eventListener_.discardImage(_image);
