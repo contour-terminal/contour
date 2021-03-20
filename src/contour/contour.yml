@@ -18,7 +18,7 @@ images:
     # Enable or disable sixel scrolling (SM/RM ?80 default)
     sixel_scrolling: true
     # Configures the maximum number of color registers available when rendering Sixel graphics.
-    sixel_register_count: 256
+    sixel_register_count: 4096
     # If enabled, the ANSI text cursor is placed at the position of the sixel graphics cursor after
     # image rendering, otherwise (if disabled) the cursor is placed underneath the image.
     sixel_cursor_conformance: true
