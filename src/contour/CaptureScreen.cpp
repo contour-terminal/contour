@@ -282,7 +282,7 @@ bool captureScreen(CaptureSettings const& _settings)
     if (!tty.configured)
         return false;
 
-    auto constexpr MicrosPerSecond = 1000000;
+    auto constexpr MicrosPerSecond = 1'000'000;
     auto const timeoutMicros = int(_settings.timeout * MicrosPerSecond);
     auto timeout = timeval{};
     timeout.tv_sec = timeoutMicros / MicrosPerSecond;
