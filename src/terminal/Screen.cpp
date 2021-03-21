@@ -2023,7 +2023,7 @@ void Screen::requestCapability(capabilities::Code _code)
     else if (auto const value = stringCapability(_code); !value.empty())
         reply("\033P1+r{}={}\033\\", _code.hex(), asHex(value));
     else
-        reply("\033P0+r{}\033\\", _code.hex());
+        reply("\033P0+r\033\\");
 }
 
 void Screen::resetDynamicColor(DynamicColorName _name)
