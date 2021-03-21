@@ -68,6 +68,7 @@ class ScreenEvents {
     virtual void setMouseWheelMode(InputGenerator::MouseWheelMode) {}
     virtual void setWindowTitle(std::string_view const& /*_title*/) {}
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
+    virtual void hardReset() {}
 
     // Invoked by screen buffer when an image is not being referenced by any grid cell anymore.
     virtual void discardImage(Image const&) {}

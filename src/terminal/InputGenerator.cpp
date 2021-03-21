@@ -297,6 +297,21 @@ string to_string(MouseButton _button)
     return ""; // should never be reached
 }
 
+void InputGenerator::reset()
+{
+    cursorKeysMode_ = KeyMode::Normal;
+    numpadKeysMode_ = KeyMode::Normal;
+    bracketedPaste_ = false;
+    generateFocusEvents_ = false;
+    mouseProtocol_ = std::nullopt;
+    mouseTransport_ = MouseTransport::Default;
+    mouseWheelMode_ = MouseWheelMode::Default;
+
+    // pendingSequence_ = {};
+    // currentlyPressedMouseButtons_ = {};
+    // currentMousePosition_ = {0, 0}; // current mouse position
+}
+
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
     // cerr << fmt::format("InputGenerator.setCursorKeysMode: {}\n", _mode);

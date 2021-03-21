@@ -264,6 +264,7 @@ class Terminal : public ScreenEvents {
     void setWindowTitle(std::string_view const& _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void useApplicationCursorKeys(bool _enabled) override;
+    void hardReset() override;
     void discardImage(Image const&) override;
 
   private:
