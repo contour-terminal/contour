@@ -74,11 +74,13 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
 
+#if defined(CONTOUR_SCROLLBAR)
     scrollBar_ = new QScrollBar(this);
     scrollBar_->setMinimum(0);
     scrollBar_->setMaximum(0);
     scrollBar_->setValue(0);
     scrollBar_->setCursor(Qt::ArrowCursor);
+#endif
 
     terminalWidget_ = new TerminalWidget(config_, liveConfig_, profileName_, programPath_);
 
@@ -87,6 +89,8 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
     connect(terminalWidget_, SIGNAL(screenUpdated(TerminalWidget*)), this, SLOT(terminalScreenUpdated(TerminalWidget*)));
     connect(terminalWidget_, SIGNAL(profileChanged(TerminalWidget*)), this, SLOT(profileChanged(TerminalWidget*)));
     connect(terminalWidget_, SIGNAL(terminalBufferChanged(TerminalWidget*, terminal::ScreenType)), this, SLOT(terminalBufferChanged(TerminalWidget*, terminal::ScreenType)));
+
+#if defined(CONTOUR_SCROLLBAR)
     connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&TerminalWindow::onScrollBarValueChanged));
 
     layout_ = new QHBoxLayout();
@@ -101,8 +105,11 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
     mainWidget->setLayout(layout_);
     layout_->setMargin(0);
     layout_->setSpacing(0);
-
+    layout_->setContentsMargins(0, 0, 0, 0);
     setCentralWidget(mainWidget);
+#else
+    setCentralWidget(terminalWidget_);
+#endif
 
     terminalWidget_->setFocus();
 
@@ -111,6 +118,7 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 
 void TerminalWindow::updateScrollbarPosition()
 {
+#if defined(CONTOUR_SCROLLBAR)
     //terminalWidget_->setGeometry(calculateWidgetGeometry());
     debuglog(WindowTag).write("called with {}x{} in {}", width(), height(), terminalWidget_->screenType());
 
@@ -150,17 +158,21 @@ void TerminalWindow::updateScrollbarPosition()
         layout_->removeWidget(scrollBar_);
         scrollBar_->hide();
     }
+#endif
 }
 
 void TerminalWindow::onScrollBarValueChanged()
 {
+#if defined(CONTOUR_SCROLLBAR)
     if (scrollBar_->isSliderDown())
         terminalWidget_->onScrollBarValueChanged(scrollBar_->value());
+#endif
 }
 
 QSize TerminalWindow::sizeHint() const
 {
     auto result = QMainWindow::sizeHint();
+#if defined(CONTOUR_SCROLLBAR)
     debuglog(WindowTag).write("{}x{}; widget: {}x{}, SBW: {}",
             result.width(),
             result.height(),
@@ -168,6 +180,7 @@ QSize TerminalWindow::sizeHint() const
             terminalWidget_->sizeHint().height(),
             scrollBar_->sizeHint().width()
     );
+#endif
     return result;
 }
 
@@ -184,6 +197,7 @@ void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
 
 void TerminalWindow::profileChanged(TerminalWidget*)
 {
+#if defined(CONTOUR_SCROLLBAR)
     updateScrollbarPosition();
 
     if (terminalWidget_->view()->terminal().screen().isPrimaryScreen())
@@ -206,15 +220,18 @@ void TerminalWindow::profileChanged(TerminalWidget*)
         else
             scrollBar_->show();
     }
+#endif
 }
 
 void TerminalWindow::terminalBufferChanged(TerminalWidget* _terminalWidget, terminal::ScreenType _type)
 {
-    debuglog(WindowTag).write("Screen buffer type has changed.");
+    debuglog(WindowTag).write("Screen buffer type has changed to {}.", _type);
+#if defined(CONTOUR_SCROLLBAR)
     if (_type == terminal::ScreenType::Main)
         scrollBar_->show();
     else if (config_.hideScrollbarInAltScreen)
         scrollBar_->hide();
+#endif
 
     updateScrollbarPosition();
     viewportChanged(_terminalWidget);
@@ -222,16 +239,19 @@ void TerminalWindow::terminalBufferChanged(TerminalWidget* _terminalWidget, term
 
 void TerminalWindow::viewportChanged(TerminalWidget*)
 {
+#if defined(CONTOUR_SCROLLBAR)
     if (!scrollBar_->isVisible())
         return;
 
     scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
     if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
         scrollBar_->setValue(s.value());
+#endif
 }
 
 void TerminalWindow::terminalScreenUpdated(TerminalWidget*)
 {
+#if defined(CONTOUR_SCROLLBAR)
     if (!scrollBar_->isVisible())
         return;
 
@@ -241,6 +261,7 @@ void TerminalWindow::terminalScreenUpdated(TerminalWidget*)
         scrollBar_->setValue(s.value());
     else
         scrollBar_->setValue(scrollBar_->maximum());
+#endif
 }
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)

@@ -18,12 +18,14 @@
 #include <crispy/algorithm.h>
 
 #include <algorithm>
+#include <vector>
 
 using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;
 using std::string;
+using std::vector;
 
 namespace terminal::renderer::opengl {
 
@@ -177,11 +179,14 @@ struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
-                               int _width,
-                               int _height,
+                               Size _size,
                                int _leftMargin,
                                int _bottomMargin) :
-    projectionMatrix_{ },
+    size_{ _size },
+    projectionMatrix_{ortho(
+        0.0f, float(_size.width),      // left, right
+        0.0f, float(_size.height)      // bottom, top
+    )},
     leftMargin_{ _leftMargin },
     bottomMargin_{ _bottomMargin },
     textShader_{ createShader(_textShaderConfig) },
@@ -224,7 +229,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
 {
     initialize();
 
-    setRenderSize(_width, _height);
+    setRenderSize(_size);
 
     assert(textProjectionLocation_ != -1);
 
@@ -244,11 +249,12 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     initializeTextureRendering();
 }
 
-void OpenGLRenderer::setRenderSize(int _width, int _height)
+void OpenGLRenderer::setRenderSize(Size _size)
 {
+    size_ = _size;
     projectionMatrix_ = ortho(
-        0.0f, float(_width),      // left, right
-        0.0f, float(_height)      // bottom, top
+        0.0f, float(size_.width),      // left, right
+        0.0f, float(size_.height)      // bottom, top
     );
 }
 
@@ -563,11 +569,7 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     AtlasTextureInfo output{};
     output.atlasName = _allocator.name();
     output.atlasInstanceId = _instanceId;
-    output.format = _allocator.format();
     output.size = Size{int(_allocator.width()), int(_allocator.height())};
-
-    auto const bufferSize = _allocator.width() * _allocator.height() * 4;
-    output.buffer.resize(bufferSize);
     output.format = atlas::Format::RGBA;
     output.buffer.resize(_allocator.width() * _allocator.height() * 4);
 
@@ -581,6 +583,11 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     CHECKED_GL( glDeleteFramebuffers(1, &fbo) );
 
     return output;
+}
+
+void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback _callback)
+{
+    pendingScreenshotCallback_ = std::move(_callback);
 }
 
 void OpenGLRenderer::execute()
@@ -619,6 +626,18 @@ void OpenGLRenderer::execute()
     executeRenderTextures();
 
     textShader_->release();
+
+    if (pendingScreenshotCallback_)
+    {
+        vector<uint8_t> buffer;
+        buffer.resize(size_.width * size_.height * 4);
+        debuglog(OpenGLRendererTag).write("Capture screenshot ({}).", size_);
+
+        CHECKED_GL( glReadPixels(0, 0, size_.width, size_.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+
+        pendingScreenshotCallback_.value()(buffer, size_);
+        pendingScreenshotCallback_.reset();
+    }
 }
 
 void OpenGLRenderer::executeRenderTextures()

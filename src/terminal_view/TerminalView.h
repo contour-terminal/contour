@@ -88,10 +88,7 @@ class TerminalView : private Terminal::Events {
 
     crispy::Size screenSize() const noexcept
     {
-        return crispy::Size{
-            size_.width / gridMetrics().cellSize.width,
-            size_.height / gridMetrics().cellSize.height
-        };
+        return size_ / gridMetrics().cellSize;
     }
 
     int cellWidth() const noexcept { return gridMetrics().cellSize.width; }
@@ -103,7 +100,7 @@ class TerminalView : private Terminal::Events {
     /// It also computes the appropricate number of text lines and character columns
     /// and resizes the internal screen buffer as well as informs the connected
     /// PTY slave about the window resize event.
-    void resize(int _width, int _height);
+    void resize(crispy::Size _size);
 
     void updateFontMetrics();
     void setFonts(FontDef const& _fonts);
@@ -139,7 +136,7 @@ class TerminalView : private Terminal::Events {
         int bottom;
     };
 
-    WindowMargin computeMargin(crispy::Size const& ws, unsigned _width, unsigned _height) const noexcept;
+    WindowMargin computeMargin(crispy::Size _charCells, crispy::Size _pixels) const noexcept;
 
     constexpr WindowMargin const& windowMargin() const noexcept { return windowMargin_; }
 

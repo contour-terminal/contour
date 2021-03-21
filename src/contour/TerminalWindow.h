@@ -28,8 +28,11 @@
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QTabWidget>
-#include <QtWidgets/QScrollBar>
 #include <QtWidgets/QHBoxLayout>
+
+#if defined(CONTOUR_SCROLLBAR)
+#include <QtWidgets/QScrollBar>
+#endif
 
 #include <atomic>
 #include <fstream>
@@ -76,8 +79,12 @@ class TerminalWindow :
     const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
+
+#if defined(CONTOUR_SCROLLBAR)
     QHBoxLayout* layout_ = nullptr;
     QScrollBar* scrollBar_ = nullptr;
+#endif
+
     TerminalWidget* terminalWidget_ = nullptr;
 };
 
