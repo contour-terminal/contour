@@ -6,8 +6,8 @@ find_package(Threads)
 include(FilesystemResolver)
 
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
-option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" OFF)
-option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" OFF)
+option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" ON)
+option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 option(LIBTERMINAL_EXECUTION_PAR "Builds with parallel execution where possible [default: OFF]" OFF)
 
 if(MSVC)
