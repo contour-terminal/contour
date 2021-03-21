@@ -138,9 +138,9 @@ void spawnNewTerminal(std::string const& _programPath,
                       std::string const& _profileName,
                       std::string const& _cwdUrl);
 
-auto const inline KeyboardTag = crispy::debugtag::make("keyboard", "Logs OS keyboard related debug information.");
-auto const inline WindowTag = crispy::debugtag::make("terminal.window", "Logs system window debug events.");
-auto const inline WidgetTag = crispy::debugtag::make("terminal.widget", "Logs system widget related debug information.");
+auto const inline KeyboardTag = crispy::debugtag::make("system.keyboard", "Logs OS keyboard related debug information.");
+auto const inline WindowTag = crispy::debugtag::make("system.window", "Logs system window debug events.");
+auto const inline WidgetTag = crispy::debugtag::make("system.widget", "Logs system widget related debug information.");
 
 #define CHECKED_GL(code) \
     do { \

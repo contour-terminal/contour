@@ -16,6 +16,7 @@
 #include <terminal/Functions.h>
 #include <terminal/SixelParser.h>
 #include <terminal/Screen.h>
+#include <terminal/logging.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/base64.h>
@@ -66,13 +67,6 @@ using namespace std::string_view_literals;
 #define CONTOUR_SYNCHRONIZED_OUTPUT 1
 
 namespace terminal {
-
-namespace {
-    auto const VTParserTag = crispy::debugtag::make("vtparser.errors", "Logs terminal parser errors.");
-#if defined(LIBTERMINAL_LOG_TRACE)
-    auto const VTParserTraceTag = crispy::debugtag::make("vtparser.trace", "Logs terminal parser instruction trace.");
-#endif
-}
 
 namespace // {{{ helpers
 {

@@ -34,10 +34,6 @@ using std::unique_ptr;
 
 namespace terminal::view {
 
-namespace {
-    auto const ViewTag = crispy::debugtag::make("terminal.view", "Logs render target independent terminal view event.");
-}
-
 TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
@@ -144,18 +140,9 @@ bool TerminalView::alive() const
 
 void TerminalView::updateFontMetrics()
 {
-    auto const newMargin = computeMargin(screenSize(), size_);
-
-    debuglog(ViewTag).write("with font size {}, adjusting margin from {}x{} to {}x{}\n",
-                            fontSize_,
-                            windowMargin_.left, windowMargin_.bottom,
-                            newMargin.left, newMargin.bottom);
-
-    windowMargin_ = newMargin;
+    windowMargin_ = computeMargin(screenSize(), size_);
     renderer_.updateFontMetrics();
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
-    debuglog(ViewTag).write("Loading grid metrics: {}", renderer_.gridMetrics());
-
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
     resize(size_);
@@ -166,8 +153,7 @@ bool TerminalView::setFontSize(text::font_size _fontSize)
     if (!renderer_.setFontSize(_fontSize))
         return false;
 
-    auto const newMargin = computeMargin(screenSize(), size_);
-    windowMargin_ = newMargin;
+    windowMargin_ = computeMargin(screenSize(), size_);
     renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
 
     // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
@@ -206,19 +192,10 @@ void TerminalView::resize(Size _size)
         terminal_.resizeScreen(newScreenSize, newScreenSize * cellSize());
         terminal_.clearSelection();
     }
-
-    debuglog(ViewTag).write("Resized to pixelSize: {}, screenSize: {}, margin: {}x{}, cellSize: {}",
-        size_,
-        newScreenSize,
-        windowMargin_.left, windowMargin_.bottom,
-        renderer_.cellSize()
-    );
 }
 
 bool TerminalView::setTerminalSize(Size _cells)
 {
-    debuglog(ViewTag).write("Setting terminal size from {} to {}\n", terminal_.screenSize(), _cells);
-
     if (terminal_.screenSize() == _cells)
         return false;
 

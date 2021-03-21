@@ -11,10 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/InputGenerator.h>
 #include <terminal/Terminal.h>
 
 #include <terminal/ControlCode.h>
+#include <terminal/InputGenerator.h>
+#include <terminal/logging.h>
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
@@ -36,14 +37,11 @@ using std::move;
 namespace terminal {
 
 namespace {
-    auto const KeyboardTag = crispy::debugtag::make("terminal.input", "Logs terminal input events.");
-
     void trimSpaceRight(string& value)
     {
         while (!value.empty() && value.back() == ' ')
             value.pop_back();
     };
-
 }
 
 Terminal::Terminal(std::unique_ptr<Pty> _pty,

@@ -14,8 +14,8 @@
 #include <terminal/Screen.h>
 
 #include <terminal/InputGenerator.h>
-
 #include <terminal/VTType.h>
+#include <terminal/logging.h>
 
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
@@ -516,12 +516,6 @@ void Screen::fail(std::string const& _message) const
     dumpState(_message);
     assert(false);
 }
-
-#if defined(LIBTERMINAL_LOG_RAW)
-namespace {
-    auto const ScreenRawOutputTag = crispy::debugtag::make("terminal.output", "Logs raw writes to the terminal screen.");
-}
-#endif
 
 void Screen::write(char const * _data, size_t _size)
 {
