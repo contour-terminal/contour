@@ -1486,11 +1486,15 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECSCPP:
             if (auto const columnCount = _seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {
+                // EXTENSION: only 80 and 132 are specced, but we allow any.
                 screen_.resizeColumns(columnCount, false);
                 return ApplyResult::Ok;
             }
             else
                 return ApplyResult::Invalid;
+        case DECSNLS:
+            screen_.resize(Size{screen_.size().height, _seq.param(0)});
+            return ApplyResult::Ok;
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSM: crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
