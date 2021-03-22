@@ -659,6 +659,9 @@ class Screen : public capabilities::StaticDatabase {
     ColumnIterator lastColumn_;
     Coordinate lastCursorPosition_;
 
+    CursorDisplay cursorDisplay_ = CursorDisplay::Steady;
+    CursorShape cursorShape_ = CursorShape::Block;
+
     std::string currentWorkingDirectory_ = {};
 
     // Hyperlink related

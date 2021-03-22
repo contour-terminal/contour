@@ -567,7 +567,7 @@ void Terminal::setBracketedPaste(bool _enabled)
 
 void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 {
-    setCursorDisplay(_display);
+    cursorDisplay_ = _display;
     cursorShape_ = _shape;
 }
 

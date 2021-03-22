@@ -77,6 +77,103 @@ namespace terminal {
 
 namespace // {{{ helper
 {
+    std::string vtSequenceParameterString(GraphicsAttributes const& _sgr)
+    {
+        std::string output;
+
+        auto const sgrSep = [&]() { if (!output.empty()) output += ';'; };
+        auto const sgrAdd = [&](unsigned _value) { sgrSep(); output += std::to_string(_value); };
+        auto const sgrAddStr = [&](string_view _value) { sgrSep(); output += _value; };
+        auto const sgrAddSub = [&](unsigned _value) { output += std::to_string(_value); };
+
+        if (holds_alternative<IndexedColor>(_sgr.foregroundColor))
+        {
+            auto const colorValue = get<IndexedColor>(_sgr.foregroundColor);
+            if (static_cast<unsigned>(colorValue) < 8)
+                sgrAdd(30 + static_cast<unsigned>(colorValue));
+            else
+            {
+                sgrAdd(38);
+                sgrAddSub(5);
+                sgrAddSub(static_cast<unsigned>(colorValue));
+            }
+        }
+        else if (holds_alternative<DefaultColor>(_sgr.foregroundColor))
+            sgrAdd(39);
+        else if (holds_alternative<BrightColor>(_sgr.foregroundColor))
+            sgrAdd(90 + static_cast<unsigned>(get<BrightColor>(_sgr.foregroundColor)));
+        else if (holds_alternative<RGBColor>(_sgr.foregroundColor))
+        {
+            auto const& rgb = get<RGBColor>(_sgr.foregroundColor);
+            sgrAdd(38);
+            sgrAddSub(2);
+            sgrAddSub(static_cast<unsigned>(rgb.red));
+            sgrAddSub(static_cast<unsigned>(rgb.green));
+            sgrAddSub(static_cast<unsigned>(rgb.blue));
+        }
+
+        if (holds_alternative<IndexedColor>(_sgr.backgroundColor))
+        {
+            auto const colorValue = get<IndexedColor>(_sgr.backgroundColor);
+            if (static_cast<unsigned>(colorValue) < 8)
+                sgrAdd(40 + static_cast<unsigned>(colorValue));
+            else
+            {
+                sgrAdd(48);
+                sgrAddSub(5);
+                sgrAddSub(static_cast<unsigned>(colorValue));
+            }
+        }
+        else if (holds_alternative<DefaultColor>(_sgr.backgroundColor))
+            sgrAdd(49);
+        else if (holds_alternative<BrightColor>(_sgr.backgroundColor))
+            sgrAdd(100 + static_cast<unsigned>(get<BrightColor>(_sgr.backgroundColor)));
+        else if (holds_alternative<RGBColor>(_sgr.backgroundColor))
+        {
+            auto const& rgb = get<RGBColor>(_sgr.backgroundColor);
+            sgrAdd(48);
+            sgrAddSub(2);
+            sgrAddSub(static_cast<unsigned>(rgb.red));
+            sgrAddSub(static_cast<unsigned>(rgb.green));
+            sgrAddSub(static_cast<unsigned>(rgb.blue));
+        }
+
+        if (holds_alternative<RGBColor>(_sgr.underlineColor))
+        {
+            auto const& rgb = get<RGBColor>(_sgr.underlineColor);
+            sgrAdd(58);
+            sgrAddSub(2);
+            sgrAddSub(static_cast<unsigned>(rgb.red));
+            sgrAddSub(static_cast<unsigned>(rgb.green));
+            sgrAddSub(static_cast<unsigned>(rgb.blue));
+        }
+
+        // TODO: _sgr.styles;
+        auto constexpr masks = array{
+            pair{CharacterStyleMask::Bold, "1"sv},
+            pair{CharacterStyleMask::Faint, "2"sv},
+            pair{CharacterStyleMask::Italic, "3"sv},
+            pair{CharacterStyleMask::Underline, "4"sv},
+            pair{CharacterStyleMask::Blinking, "5"sv},
+            pair{CharacterStyleMask::Inverse, "7"sv},
+            pair{CharacterStyleMask::Hidden, "8"sv},
+            pair{CharacterStyleMask::CrossedOut, "9"sv},
+            pair{CharacterStyleMask::DoublyUnderlined, "4:2"sv},
+            pair{CharacterStyleMask::CurlyUnderlined, "4:3"sv},
+            pair{CharacterStyleMask::DottedUnderline, "4:4"sv},
+            pair{CharacterStyleMask::DashedUnderline, "4:5"sv},
+            pair{CharacterStyleMask::Framed, "51"sv},
+            // TODO(impl or completely remove): pair{CharacterStyleMask::Encircled, ""sv},
+            pair{CharacterStyleMask::Overline, "53"sv},
+        };
+
+        for (auto const& mask: masks)
+            if (_sgr.styles & mask.first)
+                sgrAddStr(mask.second);
+
+        return output;
+    }
+
     class VTWriter {
       public:
         // TODO: compare with old sgr value set instead to be more generic in reusing stuff
@@ -1408,6 +1505,9 @@ void Screen::setUnderlineColor(Color const& _color)
 
 void Screen::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 {
+    cursorDisplay_ = _display;
+    cursorShape_ = _shape;
+
     eventListener_.setCursorStyle(_display, _shape);
 }
 
@@ -1936,7 +2036,7 @@ void Screen::requestStatusString(RequestStatusString _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
     // or DCS 0 $ r Pt ST for invalid requests.
-    auto const [status, response] = [&](RequestStatusString _value) -> pair<bool, string> {
+    auto const response = [&](RequestStatusString _value) -> optional<string> {
         switch (_value)
         {
             case RequestStatusString::DECSCL:
@@ -1958,17 +2058,52 @@ void Screen::requestStatusString(RequestStatusString _value)
                 auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
                 auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
 
-                return {true, fmt::format("{};{}", level, c1t)};
+                return fmt::format("{};{}\"p", level, c1t);
             }
-            default:
-                return {false, ""};
+            case RequestStatusString::DECSCUSR: // Set cursor style (DECSCUSR), VT520
+            {
+                int const blinkingOrSteady = cursorDisplay_ == CursorDisplay::Steady  ? 1 : 0;
+                int const shape = [&]() {
+                    switch (cursorShape_)
+                    {
+                        case CursorShape::Block: return 1;
+                        case CursorShape::Underscore: return 3;
+                        case CursorShape::Bar: return 5;
+                        case CursorShape::Rectangle: return 7;
+                    }
+                    return 1;
+                }();
+                return fmt::format("{} q", shape + blinkingOrSteady);
+            }
+            case RequestStatusString::DECSLPP:
+                // Ps >= 2 4  -> Resize to Ps lines (DECSLPP), VT340 and VT420.
+                // xterm adapts this by resizing its window.
+                if (size_.height >= 24)
+                    return fmt::format("{}t", size_.height);
+                debuglog(ScreenRawOutputTag).write("Requesting device status for {} not with line count < 24 is undefined.");
+                return nullopt;
+            case RequestStatusString::DECSTBM:
+                return fmt::format("{};{}r", margin_.vertical.from, margin_.vertical.to);
+            case RequestStatusString::DECSLRM:
+                return fmt::format("{};{}s", margin_.horizontal.from, margin_.horizontal.to);
+            case RequestStatusString::DECSCPP:
+                // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
+                return fmt::format("{}|$", size_.width);
+            case RequestStatusString::DECSNLS:
+                return fmt::format("{}*|", size_.height);
+            case RequestStatusString::SGR:
+                return fmt::format("0;{}m", vtSequenceParameterString(cursor_.graphicsRendition));
+            case RequestStatusString::DECSCA: // TODO
+                debuglog(ScreenRawOutputTag).write("Requesting device status for {} not implemented yet.", _value);
+                break;
         }
+        return nullopt;
     }(_value);
 
     reply(
         "\033P{}$r{}\033\\",
-        status ? 1 : 0,
-        response,
+        response.has_value() ? 1 : 0,
+        response.value_or(""),
         "\"p"
     );
 }

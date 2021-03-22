@@ -88,8 +88,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     colorProfile_{_colorProfile},
     defaultColorProfile_{_colorProfile}
 {
-    terminal_.setCursorDisplay(_cursorDisplay);
-    terminal_.setCursorShape(_cursorShape);
+    terminal_.screen().setCursorStyle(_cursorDisplay, _cursorShape);
     terminal_.screen().setCellPixelSize(renderer_.cellSize());
 }
 
