@@ -2140,6 +2140,13 @@ namespace
 
 void Screen::requestCapability(capabilities::Code _code)
 {
+    if (!respondToTCapQuery_)
+    {
+        debuglog(ScreenRawOutputTag).write("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
+        return;
+    }
+
+    debuglog(ScreenRawOutputTag).write("Requesting terminal capability: {}", _code);
     if (booleanCapability(_code))
         reply("\033P1+r{}\033\\", _code.hex());
     else if (auto const value = numericCapability(_code); value >= 0)

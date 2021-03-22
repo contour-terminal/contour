@@ -5,6 +5,12 @@ word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 
 default_profile: main
 
+# Section of experimental features.
+# All experimental features are disabled by default and must be explicitely enabled here.
+experimental:
+    # Enables experimental support for termcap/terminfo queries
+    tcap: false
+
 # visual scrollbar support
 scrollbar:
     # scroll bar position: Left, Right, Hidden (ignore-case)

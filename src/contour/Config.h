@@ -34,6 +34,7 @@
 #include <chrono>
 #include <system_error>
 #include <optional>
+#include <set>
 #include <string>
 #include <variant>
 #include <unordered_map>
@@ -135,6 +136,8 @@ struct Config {
 
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
     bool hideScrollbarInAltScreen = true;
+
+    std::set<std::string> experimentalFeatures;
 };
 
 std::optional<std::string> readConfigFile(std::string const& _filename);

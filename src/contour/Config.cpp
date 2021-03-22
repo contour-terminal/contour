@@ -1060,6 +1060,29 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     softLoadValue(doc, "word_delimiters", _config.wordDelimiters);
 
+    auto constexpr KnownExperimentalFeatures = array{
+        "tcap"sv
+    };
+
+    if (auto experimental = doc["experimental"]; experimental.IsMap())
+    {
+        for (auto const& x: experimental)
+        {
+            auto const key = x.first.as<string>();
+            if (crispy::count(KnownExperimentalFeatures, key) == 0)
+            {
+                debuglog(ConfigTag).write("Unknown experimental feature tag: {}.", key);
+                continue;
+            }
+
+            if (!x.second.as<bool>())
+                continue;
+
+            debuglog(ConfigTag).write("Enabling experimental feature {}.", key);
+            _config.experimentalFeatures.insert(key);
+        }
+    }
+
     if (auto images = doc["images"]; images)
     {
         softLoadValue(images, "sixel_scrolling", _config.sixelScrolling);

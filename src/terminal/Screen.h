@@ -163,6 +163,8 @@ class Screen : public capabilities::StaticDatabase {
     void setMaxImageColorRegisters(int _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
     void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
+    void setRespondToTCapQuery(bool _enable) { respondToTCapQuery_ = _enable; }
+
     constexpr crispy::Size cellPixelSize() const noexcept { return cellPixelSize_; }
 
     constexpr void setCellPixelSize(crispy::Size _cellPixelSize)
@@ -668,6 +670,10 @@ class Screen : public capabilities::StaticDatabase {
     //
     HyperlinkRef currentHyperlink_ = {};
     std::unordered_map<std::string, HyperlinkRef> hyperlinks_; // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
+
+    // experimental features
+    //
+    bool respondToTCapQuery_ = false;
 };
 
 }  // namespace terminal

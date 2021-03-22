@@ -130,8 +130,11 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
     terminal::Terminal& terminal = _terminalView.terminal();
     terminal::Screen& screen = terminal.screen();
     config::TerminalProfile const* profile = _newConfig.profile(_profileName);
+    auto const _l = scoped_lock{terminal};
 
     terminal.setWordDelimiters(_newConfig.wordDelimiters);
+
+    terminal.screen().setRespondToTCapQuery(_newConfig.experimentalFeatures.count("tcap"));
 
     screen.setSixelCursorConformance(_newConfig.sixelCursorConformance);
     screen.setMaxImageColorRegisters(_newConfig.maxImageColorRegisters);

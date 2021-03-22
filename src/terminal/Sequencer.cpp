@@ -1080,6 +1080,12 @@ void Sequencer::hook(char _finalChar)
     instructionCounter_++;
     sequence_.setCategory(FunctionCategory::DCS);
     sequence_.setFinalChar(_finalChar);
+
+#if defined(LIBTERMINAL_LOG_TRACE)
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
+#endif
+
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
         switch (funcSpec->id())
