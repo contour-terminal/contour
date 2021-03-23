@@ -629,15 +629,30 @@ void OpenGLRenderer::execute()
 
     if (pendingScreenshotCallback_)
     {
+        Size bufferSize = renderBufferSize();
         vector<uint8_t> buffer;
-        buffer.resize(size_.width * size_.height * 4);
-        debuglog(OpenGLRendererTag).write("Capture screenshot ({}).", size_);
+        buffer.resize(bufferSize.width * bufferSize.height * 4);
 
-        CHECKED_GL( glReadPixels(0, 0, size_.width, size_.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+        debuglog(OpenGLRendererTag).write("Capture screenshot ({}/{}).", bufferSize, size_);
 
-        pendingScreenshotCallback_.value()(buffer, size_);
+        CHECKED_GL( glReadPixels(0, 0, bufferSize.width, bufferSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+
+        pendingScreenshotCallback_.value()(buffer, bufferSize);
         pendingScreenshotCallback_.reset();
     }
+}
+
+Size OpenGLRenderer::renderBufferSize()
+{
+#if 0
+    return size_;
+#else
+    auto width = GLint(size_.width);
+    auto height = GLint(size_.height);
+    CHECKED_GL( glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width) );
+    CHECKED_GL( glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height) );
+    return Size{width, height};
+#endif
 }
 
 void OpenGLRenderer::executeRenderTextures()

@@ -74,6 +74,7 @@ class OpenGLRenderer :
     unsigned maxTextureDepth();
     unsigned maxTextureSize();
     unsigned maxTextureUnits();
+    crispy::Size renderBufferSize();
 
     void selectTextureUnit(unsigned _id);
     void bindTexture2DArray(GLuint _textureId);
