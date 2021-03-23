@@ -22,16 +22,30 @@ jobs:
   ubuntu_2004:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
+    env:
+      # The version of LLVM to use. Needed to set the appropriate clang-XX
+      # binaries.
+      LLVM_VER: 13
+      # Defined if the version above represents the latest available version.
+      # (This is needed because the LLVM nightly PPA doesn't tag the latest
+      # rolling version.)
+      LLVM_LATEST: "yes"
+      CODECHECKER_CONFIG: .github/codechecker_config/config.json
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v2
         with:
           submodules: recursive
+      - name: "Set Contour CI variables"
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: "${{ github.event.repository.name }}"
       - name: "Install build dependencies"
         run: |
           cat /etc/apt/sources.list
           sudo apt-get -qy update
-          sudo apt-get install -y   \
+          sudo apt-get install -y \
             "g++-9"             \
             build-essential     \
             cmake               \
@@ -47,32 +61,41 @@ jobs:
           repository: Ericsson/CodeChecker
           path: CodeChecker
       - name: "Install analysis dependencies"
+        id: anal_deps
         run: |
+          export DISTRO_FANCYNAME="$(lsb_release -c | awk '{ print $2 }')"
           sudo apt-get -qy update
           sudo apt-get -y --no-install-recommends install \
             build-essential \
             curl            \
-            doxygen         \
             gcc-multilib    \
             python3-dev     \
             python3-venv
-          curl -sL http://deb.nodesource.com/setup_12.x | sudo -E bash -
           curl -sL http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo add-apt-repository -y "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-12 main"
+          if [[ ! -z "$LLVM_LATEST" ]]
+          then
+            sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME main"
+          else
+            sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME-$LLVM_VER main"
+          fi
           sudo apt-get -y --no-install-recommends install \
-            clang-12 \
-            clang-tidy-12 \
-            nodejs
-          sudo update-alternatives --install \
-            /usr/bin/clang clang /usr/bin/clang-12 1000 \
-            --slave /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-12
+            clang-$LLVM_VER      \
+            clang-tidy-$LLVM_VER
+          sudo update-alternatives --install                   \
+            /usr/bin/clang clang /usr/bin/clang-$LLVM_VER 1000 \
+            --slave                                            \
+              /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-$LLVM_VER
           update-alternatives --query clang
+          echo "::set-output name=LLVM_REAL_VERSION::$(clang --version | head -n 1 | cut -d' ' -f3-)"
       - name: "Build and Package CodeChecker"
+        id: codechecker
         run: |
-          pushd CodeChecker
+          cat "$CODECHECKER_CONFIG"
+          pushd CodeChecker/analyzer
           make venv
-          source "$GITHUB_WORKSPACE"/CodeChecker/venv/bin/activate
+          source venv/bin/activate
           make standalone_package
+          echo "::set-output name=CODECHECKER_PATH::$(readlink -f ./build/CodeChecker/bin)"
           deactivate
           popd
       - name: "Build Contour"
@@ -87,7 +110,7 @@ jobs:
             -DYAML_CPP_BUILD_TESTS=OFF \
             -DYAML_CPP_BUILD_TOOLS=OFF \
             -DYAML_CPP_INSTALL=OFF
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             log \
             --build "cmake --build . -- -j3" \
             --output "../logged_compilation.json"
@@ -95,13 +118,12 @@ jobs:
       - name: "Perform static analysis (non-CTU for normal development)"
         if: ${{ github.ref != 'refs/heads/master' || github.event_name == 'pull_request' }}
         run: |
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             analyzers --detail
-          cat ".github/codechecker_config/config.json"
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             analyze \
             "logged_compilation.json" \
-            --config ".github/codechecker_config/config.json" \
+            --config "$CODECHECKER_CONFIG" \
             --jobs $(nproc) \
             --output "Results" \
             \
@@ -109,13 +131,12 @@ jobs:
       - name: "Perform static analysis (CTU for pushes on master)"
         if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
         run: |
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             analyzers --detail
-          cat ".github/codechecker_config/config.json"
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             analyze \
             "logged_compilation.json" \
-            --config ".github/codechecker_config/config.json" \
+            --config "$CODECHECKER_CONFIG" \
             --jobs $(nproc) \
             --output "Results" \
             \
@@ -124,29 +145,27 @@ jobs:
           || true
       - name: "Convert static analysis results to HTML"
         run: |
-          cat ".github/codechecker_config/config.json"
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             parse \
             "Results" \
-            --config ".github/codechecker_config/config.json" \
+            --config "$CODECHECKER_CONFIG" \
             --export html \
             --output "Results-HTML"
       - name: "Dump analysis results to CI log"
         run: |
-          cat ".github/codechecker_config/config.json"
-          "$GITHUB_WORKSPACE"/CodeChecker/build/CodeChecker/bin/CodeChecker \
+          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             parse \
             "Results" \
-            --config ".github/codechecker_config/config.json"
+            --config "$CODECHECKER_CONFIG"
       - name: "Upload HTML results"
         uses: actions/upload-artifact@v2
         with:
-          name: "CodeChecker Results"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-html"
           path: "Results-HTML"
           if-no-files-found: error
       - name: "Upload analysis failure collections"
         uses: actions/upload-artifact@v2
         with:
-          name: "CodeChecker analysis failures"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-failures.zip"
           path: "Results/failed"
-          if-no-files-found: warn
+          if-no-files-found: ignore
