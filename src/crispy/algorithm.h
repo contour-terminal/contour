@@ -61,4 +61,10 @@ void for_each(ExecutionPolicy _ep, Container && _container, Fn && _fn)
     std::for_each(_ep, begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
+template <typename Container, typename T>
+auto count(Container&& _container, T&& _value)
+{
+    return std::count(begin(_container), end(_container), std::forward<T>(_value));
+}
+
 } // end namespace
