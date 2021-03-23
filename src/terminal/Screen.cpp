@@ -2074,7 +2074,9 @@ void Screen::requestStatusString(RequestStatusString _value)
                 // xterm adapts this by resizing its window.
                 if (size_.height >= 24)
                     return fmt::format("{}t", size_.height);
+#if defined(LIBTERMINAL_LOG_RAW)
                 debuglog(ScreenRawOutputTag).write("Requesting device status for {} not with line count < 24 is undefined.");
+#endif
                 return nullopt;
             case RequestStatusString::DECSTBM:
                 return fmt::format("{};{}r", margin_.vertical.from, margin_.vertical.to);
@@ -2088,7 +2090,9 @@ void Screen::requestStatusString(RequestStatusString _value)
             case RequestStatusString::SGR:
                 return fmt::format("0;{}m", vtSequenceParameterString(cursor_.graphicsRendition));
             case RequestStatusString::DECSCA: // TODO
+#if defined(LIBTERMINAL_LOG_RAW)
                 debuglog(ScreenRawOutputTag).write("Requesting device status for {} not implemented yet.", _value);
+#endif
                 break;
         }
         return nullopt;
@@ -2142,11 +2146,15 @@ void Screen::requestCapability(capabilities::Code _code)
 {
     if (!respondToTCapQuery_)
     {
+#if defined(LIBTERMINAL_LOG_RAW)
         debuglog(ScreenRawOutputTag).write("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
+#endif
         return;
     }
 
+#if defined(LIBTERMINAL_LOG_RAW)
     debuglog(ScreenRawOutputTag).write("Requesting terminal capability: {}", _code);
+#endif
     if (booleanCapability(_code))
         reply("\033P1+r{}\033\\", _code.hex());
     else if (auto const value = numericCapability(_code); value >= 0)
