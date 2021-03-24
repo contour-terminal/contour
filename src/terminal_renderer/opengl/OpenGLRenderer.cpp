@@ -16,6 +16,7 @@
 #include <terminal_renderer/Atlas.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/utils.h>
 
 #include <algorithm>
 #include <vector>
@@ -177,6 +178,19 @@ struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
     }
 };
 
+template <typename T, typename Fn>
+inline void bound(T& _bindable, Fn&& _callable) noexcept
+{
+    _bindable.bind();
+    try {
+        _callable();
+    } catch (...) {
+        _bindable.release();
+        throw;
+    }
+    _bindable.release();
+}
+
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
                                Size _size,
@@ -238,12 +252,12 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
-    CHECKED_GL( textShader_->bind() );
-    CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId()) );
-    CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId()) );
-    CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId()) );
-    CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width())) );
-    CHECKED_GL( textShader_->release() );
+    bound(*textShader_, [&]() noexcept {
+        CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId()) );
+        CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId()) );
+        CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId()) );
+        CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width())) );
+    });
 
     initializeRectRendering();
     initializeTextureRendering();
@@ -602,30 +616,26 @@ void OpenGLRenderer::execute()
     //
     if (!rectBuffer_.empty())
     {
-        rectShader_->bind();
-        rectShader_->setUniformValue(rectProjectionLocation_, projectionMatrix_);
+        bound(*rectShader_, [&]() noexcept {
+            rectShader_->setUniformValue(rectProjectionLocation_, projectionMatrix_);
 
-        glBindVertexArray(rectVAO_);
-        glBindBuffer(GL_ARRAY_BUFFER, rectVBO_);
-        glBufferData(GL_ARRAY_BUFFER, rectBuffer_.size() * sizeof(GLfloat), rectBuffer_.data(), GL_STREAM_DRAW);
+            glBindVertexArray(rectVAO_);
+            glBindBuffer(GL_ARRAY_BUFFER, rectVBO_);
+            glBufferData(GL_ARRAY_BUFFER, rectBuffer_.size() * sizeof(GLfloat), rectBuffer_.data(), GL_STREAM_DRAW);
 
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(rectBuffer_.size() / 7));
-
-        rectShader_->release();
-        glBindVertexArray(0);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(rectBuffer_.size() / 7));
+            glBindVertexArray(0);
+        });
         rectBuffer_.clear();
     }
 
     // render textures
     //
-    textShader_->bind();
-
-    // TODO: only upload when it actually DOES change
-    textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
-
-    executeRenderTextures();
-
-    textShader_->release();
+    bound(*textShader_, [&]() noexcept {
+        // TODO: only upload when it actually DOES change
+        textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
+        executeRenderTextures();
+    });
 
     if (pendingScreenshotCallback_)
     {
