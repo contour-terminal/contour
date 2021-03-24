@@ -13,20 +13,17 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
-    add_compile_options(-Wall)
-    add_compile_options(-Wextra)
-elseif(DEFINED MSVC)
-    add_definitions(-DNOMINMAX)
-    add_definitions(-D_USE_MATH_DEFINES)
-endif()
-
 option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
 
 include(EnableCcache)
 include(ClangTidy)
 include(CIncludeMe)
 find_package(Threads)
+
+if(DEFINED MSVC)
+    add_definitions(-DNOMINMAX)
+    add_definitions(-D_USE_MATH_DEFINES)
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -68,15 +65,7 @@ ThirdPartiesAdd_range_v3()
 ThirdPartiesAdd_yaml_cpp()
 
 # ----------------------------------------------------------------------------
-add_subdirectory(src/crispy)
-add_subdirectory(src/text_shaper)
-add_subdirectory(src/terminal)
-
-if(CONTOUR_FRONTEND_GUI)
-    add_subdirectory(src/terminal_renderer)
-endif()
-
-add_subdirectory(src/contour)
+add_subdirectory(src)
 
 if(CONTOUR_EXAMPLES)
     add_subdirectory(examples)
