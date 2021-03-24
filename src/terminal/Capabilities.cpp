@@ -35,6 +35,7 @@ using String = Cap<std::string_view>;
 
 namespace {
     constexpr inline auto booleanCaps = std::array{
+        Boolean{ "Su"_tcap, "Su"sv, true },  // supports extended underline styling (such as undercurl)
         Boolean{ "am"_tcap, "sm"sv, true },  // terminal has automatic margins
         Boolean{ "ut"_tcap, "bce"sv, true },  // screen erased with background color
         Boolean{ "cc"_tcap, "ccc"sv, true },  // terminal can re-define existing colors
