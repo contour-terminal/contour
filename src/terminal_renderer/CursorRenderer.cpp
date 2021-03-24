@@ -50,10 +50,7 @@ void CursorRenderer::setRenderTarget(RenderTarget& _renderTarget)
 void CursorRenderer::setShape(CursorShape _shape)
 {
     if (_shape != shape_)
-    {
         shape_ = _shape;
-        rebuild();
-    }
 }
 
 void CursorRenderer::setColor(RGBAColor const& _color)
