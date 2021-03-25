@@ -562,8 +562,7 @@ bool InputGenerator::generateMouse(MouseButton _button,
                                    Modifier _modifier,
                                    int _row,
                                    int _column,
-                                   MouseEventType _eventType
-)
+                                   MouseEventType _eventType)
 {
     if (!mouseProtocol_.has_value())
         return false;
@@ -749,24 +748,26 @@ bool InputGenerator::generate(MouseReleaseEvent const& _mouse)
 
 bool InputGenerator::generate(MouseMoveEvent const& _mouse)
 {
-    if (currentMousePosition_ != _mouse.coordinates())
-    {
-        currentMousePosition_ = {_mouse.row, _mouse.column};
+    if (!mouseProtocol_.has_value())
+        return false;
 
-        if (mouseProtocol_.has_value())
-        {
-            bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
-            bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
-                              || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
-            if (report)
-                return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
-                                                    : MouseButton::Release,
-                                     _mouse.modifier,
-                                     _mouse.row,
-                                     _mouse.column,
-                                     MouseEventType::Drag);
-        }
-    }
+    if (currentMousePosition_ == _mouse.coordinates())
+        return true;
+
+    currentMousePosition_ = {_mouse.row, _mouse.column};
+
+    bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
+
+    bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
+                      || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
+
+    if (report)
+        return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
+                                            : MouseButton::Release,
+                             _mouse.modifier,
+                             _mouse.row,
+                             _mouse.column,
+                             MouseEventType::Drag);
 
     return false;
 }
