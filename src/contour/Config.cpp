@@ -332,21 +332,6 @@ inline auto mapAction(std::string_view _name)
 	return pair{_name, Action{T{}}};
 }
 
-optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
-{
-    using terminal::Modifier;
-    auto const key = toUpper(_key);
-    if (key == "ALT")
-        return Modifier::Key::Alt;
-    if (key == "CONTROL")
-        return Modifier::Key::Control;
-    if (key == "SHIFT")
-        return Modifier::Key::Shift;
-    if (key == "META")
-        return Modifier::Key::Meta;
-    return nullopt;
-}
-
 optional<terminal::Key> parseKey(string const& _name)
 {
     using terminal::Key;
@@ -450,6 +435,48 @@ optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
     return nullopt;
 }
 
+optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
+{
+    using terminal::Modifier;
+    auto const key = toUpper(_key);
+    if (key == "ALT")
+        return Modifier::Key::Alt;
+    if (key == "CONTROL")
+        return Modifier::Key::Control;
+    if (key == "SHIFT")
+        return Modifier::Key::Shift;
+    if (key == "META")
+        return Modifier::Key::Meta;
+    return nullopt;
+}
+
+optional<terminal::Modifier> parseModifier(YAML::Node const& _node)
+{
+    using terminal::Modifier;
+    if (!_node)
+        return Modifier::None;
+    else if (_node.IsScalar())
+        return parseModifierKey(_node.as<string>());
+    else if (_node.IsSequence())
+    {
+        terminal::Modifier mods;
+        for (size_t i = 0; i < _node.size(); ++i)
+        {
+            if (!_node[i].IsScalar())
+                return nullopt;
+
+            auto const mod = parseModifierKey(_node[i].as<string>());
+            if (!mod)
+                return nullopt;
+
+            mods |= *mod;
+        }
+        return mods;
+    }
+    else
+        return nullopt;
+};
+
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
@@ -505,29 +532,6 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         }
 
 		return action;
-	};
-
-	auto const parseModifier = [&](YAML::Node const& _node) -> optional<terminal::Modifier> {
-		if (!_node)
-			return Modifier::None;
-		else if (_node.IsScalar())
-			return parseModifierKey(_node.as<string>());
-		else if (_node.IsSequence())
-		{
-			terminal::Modifier mods;
-			for (size_t i = 0; i < _node.size(); ++i)
-			{
-				if (!_node[i].IsScalar())
-					return nullopt;
-				else if (auto const mod = parseModifierKey(_node[i].as<string>()); mod)
-					mods |= *mod;
-				else
-					return nullopt;
-			}
-			return mods;
-		}
-		else
-			return nullopt;
 	};
 
     auto const parseMouseEvent = [](YAML::Node const& _node, Modifier _mods) -> pair<optional<MousePressEvent>, bool> {
@@ -1059,6 +1063,9 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     YAML::Node doc = YAML::LoadFile(_fileName.string());
 
     softLoadValue(doc, "word_delimiters", _config.wordDelimiters);
+
+    if (auto opt = parseModifier(doc["bypass_mouse_protocol_modifier"]); opt.has_value())
+        _config.bypassMouseProtocolModifier = opt.value();
 
     auto constexpr KnownExperimentalFeatures = array{
         "tcap"sv

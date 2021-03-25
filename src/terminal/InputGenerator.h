@@ -64,6 +64,11 @@ class Modifier {
         return *this;
     }
 
+    bool contains(Modifier const& _other) const noexcept
+    {
+        return (mask_ & _other.mask_) == _other.mask_;
+    }
+
     constexpr void enable(Key _key) noexcept
     {
         mask_ |= _key;
@@ -440,6 +445,31 @@ inline std::string to_string(InputGenerator::MouseEventType _value)
 }  // namespace terminal
 
 namespace fmt { // {{{
+    template <>
+    struct formatter<terminal::Modifier> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::Modifier _modifier, FormatContext& _ctx)
+        {
+            std::string s;
+            auto const advance = [&](bool _cond, std::string_view _text) {
+                if (!_cond)
+                    return;
+                if (!s.empty())
+                    s += ',';
+                s += _text;
+            };
+            advance(_modifier.alt(), "Alt");
+            advance(_modifier.shift(), "Shift");
+            advance(_modifier.control(), "Control");
+            advance(_modifier.meta(), "Meta");
+            if (s.empty())
+                s = "None";
+            return format_to(_ctx.out(), "{}", s);
+        }
+    };
+
     template <>
     struct formatter<terminal::InputGenerator::MouseWheelMode> {
         template <typename ParseContext>

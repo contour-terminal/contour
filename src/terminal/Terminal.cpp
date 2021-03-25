@@ -50,6 +50,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
                    string const& _wordDelimiters,
+                   Modifier _mouseProtocolBypassModifier,
                    Size _maxImageSize,
                    int _maxImageColorRegisters,
                    bool _sixelCursorConformance
@@ -64,6 +65,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
     lastCursorBlink_{ _now },
     startTime_{ _now },
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
+    mouseProtocolBypassModifier_{ _mouseProtocolBypassModifier },
     inputGenerator_{},
     screen_{
         pty_->screenSize(),
@@ -146,11 +148,13 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
 {
     // TODO: anything else? logging?
 
+    respectMouseProtocol_ = !(_mousePress.modifier.any() && _mousePress.modifier.contains(mouseProtocolBypassModifier_));
+
     MousePressEvent const withPosition{_mousePress.button,
                                        _mousePress.modifier,
                                        currentMousePosition_.row,
                                        currentMousePosition_.column};
-    if (inputGenerator_.generate(withPosition))
+    if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
@@ -158,48 +162,44 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
         return true;
     }
 
-    if (_mousePress.button == MouseButton::Left)
+    if (_mousePress.button != MouseButton::Left)
+        return false;
+
+    double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
+    lastClick_ = _now;
+    speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
+    leftMouseButtonPressed_ = true;
+
+    Selector::Mode const selectionMode = [](unsigned _speedClicks, Modifier _modifier) {
+        if (_speedClicks == 3)
+            return Selector::Mode::FullLine;
+        else if (_modifier.contains(Modifier::Control))
+            return Selector::Mode::Rectangular;
+        else if (_speedClicks == 2)
+            return Selector::Mode::LinearWordWise;
+        else
+            return Selector::Mode::Linear;
+    }(speedClicks_, _mousePress.modifier);
+
+    changes_++;
+    if (!selectionAvailable()
+        || selector()->state() == Selector::State::Waiting
+        || speedClicks_ >= 2)
     {
-        double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
-        lastClick_ = _now;
-        speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
-        leftMouseButtonPressed_ = true;
+        setSelector(make_unique<Selector>(
+            selectionMode,
+            wordDelimiters_,
+            screen_,
+            absoluteCoordinate(currentMousePosition_)
+        ));
 
-        if (_mousePress.modifier == Modifier::None || _mousePress.modifier == Modifier::Control)
-        {
-            Selector::Mode const selectionMode = [](unsigned _speedClicks, Modifier _modifier) {
-                if (_speedClicks == 3)
-                    return Selector::Mode::FullLine;
-                else if (_modifier == Modifier::Control)
-                    return Selector::Mode::Rectangular;
-                else if (_speedClicks == 2)
-                    return Selector::Mode::LinearWordWise;
-                else
-                    return Selector::Mode::Linear;
-            }(speedClicks_, _mousePress.modifier);
-
-            changes_++;
-            if (!selectionAvailable()
-                || selector()->state() == Selector::State::Waiting
-                || speedClicks_ >= 2)
-            {
-                setSelector(make_unique<Selector>(
-                    selectionMode,
-                    wordDelimiters_,
-                    screen_,
-                    absoluteCoordinate(currentMousePosition_)
-                ));
-
-                if (selectionMode != Selector::Mode::Linear)
-                    selector()->extend(absoluteCoordinate(currentMousePosition_));
-            }
-            else if (selector()->state() == Selector::State::Complete)
-                clearSelection();
-
-            return true;
-        }
+        if (selectionMode != Selector::Mode::Linear)
+            selector()->extend(absoluteCoordinate(currentMousePosition_));
     }
-    return false;
+    else if (selector()->state() == Selector::State::Complete)
+        clearSelection();
+
+    return true;
 }
 
 void Terminal::clearSelection()
@@ -211,21 +211,22 @@ void Terminal::clearSelection()
 
 bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
 {
-    if (_mouseMove.coordinates() == currentMousePosition_)
-        // Do not handle mouse-move events in sub-cell dimensions.
-        return false;
-
     auto const newPosition = _mouseMove.coordinates();
+    bool const positionChanged = newPosition != currentMousePosition_;
 
     currentMousePosition_ = newPosition;
 
-    if (inputGenerator_.generate(_mouseMove))
+    // Do not handle mouse-move events in sub-cell dimensions.
+    if (respectMouseProtocol_ && inputGenerator_.generate(_mouseMove))
     {
         flushInput();
         return true;
     }
 
     speedClicks_ = 0;
+
+    if (!positionChanged)
+        return true;
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
@@ -255,11 +256,12 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
                                          _mouseRelease.modifier,
                                          currentMousePosition_.row,
                                          currentMousePosition_.column};
-    if (inputGenerator_.generate(withPosition))
+    if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
     {
         flushInput();
         return true;
     }
+    respectMouseProtocol_ = true;
 
     if (_mouseRelease.button == MouseButton::Left)
     {

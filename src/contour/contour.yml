@@ -18,6 +18,13 @@ scrollbar:
     # whether or not to hide the scrollbar when in alt-screen.
     hide_in_alt_screen: true
 
+# This keyboard modifier can be used to bypass the terminal's mouse protocol,
+# which can be used to select screen content even if the an application
+# mouse protocol has been activated (Default: Shift).
+#
+# The same modifier values apply as with input modifiers (see below).
+bypass_mouse_protocol_modifier: Shift
+
 # Inline image related default configuration and limits
 # -----------------------------------------------------
 images:

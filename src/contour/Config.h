@@ -119,6 +119,7 @@ struct Config {
 
     // selection
     std::string wordDelimiters;
+    terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
 
     // input mapping
     std::map<QKeySequence, std::vector<actions::Action>> keyMappings;

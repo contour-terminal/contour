@@ -72,6 +72,7 @@ class Terminal : public ScreenEvents {
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              std::string const& _wordDelimiters = "",
+             Modifier _mouseProtocolBypassModifier = Modifier::Shift,
              crispy::Size _maxImageSize = crispy::Size{800, 600},
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true);
@@ -85,6 +86,8 @@ class Terminal : public ScreenEvents {
 
     crispy::Size screenSize() const noexcept { return pty_->screenSize(); }
     void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels);
+
+    void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
 
     // {{{ input proxy
     // Sends given input event to connected slave.
@@ -291,6 +294,8 @@ class Terminal : public ScreenEvents {
     unsigned int speedClicks_ = 0;
 
     terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
+    Modifier mouseProtocolBypassModifier_ = Modifier::Shift;
+    bool respectMouseProtocol_ = true; // shift-click can disable that, button release sets it back to true
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
     InputGenerator inputGenerator_;

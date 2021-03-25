@@ -62,6 +62,7 @@ class TerminalView : private Terminal::Events {
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
+                 Modifier _mouseProtocolSuppressModifier,
                  int _logicalDpiX,
                  int _logicalDpiY,
                  renderer::FontDescriptions const& _fontDescriptions,

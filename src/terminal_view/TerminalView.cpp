@@ -38,6 +38,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
+                           Modifier _mouseProtocolSuppressModifier,
                            int _logicalDpiX,
                            int _logicalDpiY,
                            renderer::FontDescriptions const& _fontDescriptions,
@@ -74,7 +75,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _maxHistoryLineCount,
         _cursorBlinkInterval,
         _now,
-        _wordDelimiters
+        _wordDelimiters,
+        _mouseProtocolSuppressModifier
     ),
     process_{ _shell, terminal_.device() },
     processExitWatcher_{ [this]() {

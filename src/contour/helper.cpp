@@ -133,6 +133,7 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
     auto const _l = scoped_lock{terminal};
 
     terminal.setWordDelimiters(_newConfig.wordDelimiters);
+    terminal.setMouseProtocolBypassModifier(_newConfig.bypassMouseProtocolModifier);
 
     terminal.screen().setRespondToTCapQuery(_newConfig.experimentalFeatures.count("tcap"));
 
