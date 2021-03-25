@@ -21,6 +21,7 @@
 #include <iterator>
 #include <numeric>
 #include <string>
+#include <string_view>
 
 namespace crispy {
 
@@ -31,7 +32,7 @@ inline std::string escape(uint8_t ch)
         case '\\':
             return "\\\\";
         case 0x1B:
-            return "\\033";
+            return "\\e";
         case '\t':
             return "\\t";
         case '\r':
@@ -44,7 +45,7 @@ inline std::string escape(uint8_t ch)
             if (std::isprint(static_cast<char>(ch)))
                 return fmt::format("{}", static_cast<char>(ch));
             else
-                return fmt::format("\\x{:02X}", static_cast<uint8_t>(ch) & 0xFF);
+                return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
@@ -59,7 +60,7 @@ inline std::string escape(T begin, T end)
     // return result;
 }
 
-inline std::string escape(std::string const& s)
+inline std::string escape(std::string_view s)
 {
     return escape(begin(s), end(s));
 }
