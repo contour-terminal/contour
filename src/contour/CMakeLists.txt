@@ -105,6 +105,27 @@ if(CONTOUR_SANITIZE AND NOT MSVC)
     target_link_libraries(contour ubsan)
 endif()
 
+if(NOT(WIN32))
+    set(terminfo_file "contour.terminfo")
+    set(terminfo_basedir "${CMAKE_CURRENT_BINARY_DIR}/terminfo")
+    set_source_files_properties("${terminfo_file}" PROPERTIES GENERATED TRUE)
+    find_program(TIC tic REQUIRED)
+    if(${TIC-NOTFOUND})
+        message(FATAL_ERROR "Executable tic not found.")
+    else()
+        message(STATUS "Executable tic found (${TIC}).")
+    endif()
+    add_custom_command(
+        TARGET contour POST_BUILD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND contour terminfo output ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
+        DEPENDS "${terminfo_file}"
+        COMMENT "Compiling ${terminfo_file}"
+        BYPRODUCTS "${terminfo_file}"
+        VERBATIM
+    )
+endif()
+
 # ====================================================================================
 # INSTALLER
 # ====================================================================================
@@ -153,6 +174,7 @@ if(WIN32)
             PATTERN "*.dll"
     )
 elseif(APPLE)
+    include(GNUInstallDirs)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
 
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
@@ -184,6 +206,7 @@ elseif(APPLE)
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
+    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
 
     #add_custom_target(Docs SOURCES README.md LICENSE.txt)
     #TODO: install(TARGETS Docs ...)
@@ -232,6 +255,7 @@ else()
     install(TARGETS contour DESTINATION bin)
     install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
     install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATADIR}/pixmaps" RENAME "contour.png")
+    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
     # TODO: install Changelog.md to /usr/share/doc/contour/Changelog.md(.gz)?
 endif()
 

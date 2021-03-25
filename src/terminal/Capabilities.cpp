@@ -12,6 +12,11 @@
  * limitations under the License.
  */
 #include <terminal/Capabilities.h>
+#include <crispy/escape.h>
+#include <sstream>
+#include <range/v3/action/sort.hpp>
+#include <range/v3/action/transform.hpp>
+#include <range/v3/algorithm/copy.hpp>
 
 using std::string_view;
 using std::string;
@@ -29,14 +34,28 @@ struct Cap
     T value;
 };
 
+template <typename T> constexpr bool operator<(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name < b.name; }
+template <typename T> constexpr bool operator>(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name > b.name; }
+template <typename T> constexpr bool operator<=(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name <= b.name; }
+template <typename T> constexpr bool operator>=(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name >= b.name; }
+template <typename T> constexpr bool operator==(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name == b.name; }
+template <typename T> constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name == b.name; }
+
 using Boolean = Cap<bool>;
 using Numeric = Cap<int>;
 using String = Cap<std::string_view>;
 
-namespace {
-    constexpr inline auto booleanCaps = std::array{
+namespace
+{
+    template <typename T, typename... Ts>
+    constexpr auto defineCapabilities(T _element, Ts... _elements)
+    {
+        return std::array<T, 1 + sizeof...(Ts)>({_element, _elements...});
+    }
+
+    constexpr inline auto booleanCaps = defineCapabilities(
         Boolean{ "Su"_tcap, "Su"sv, true },  // supports extended underline styling (such as undercurl)
-        Boolean{ "am"_tcap, "sm"sv, true },  // terminal has automatic margins
+        Boolean{ "am"_tcap, "am"sv, true },  // terminal has automatic margins
         Boolean{ "ut"_tcap, "bce"sv, true },  // screen erased with background color
         Boolean{ "cc"_tcap, "ccc"sv, true },  // terminal can re-define existing colors
         Boolean{ "xn"_tcap, "xenl"sv, true },  // newline ignored after 80 cols (concept)
@@ -46,18 +65,18 @@ namespace {
         Boolean{ "NP"_tcap, "npc"sv, true },  // pad character does not exist
         Boolean{ "5i"_tcap, "mc5i"sv, true },  // printer will not echo on screen
         Boolean{ "YD"_tcap, "xvpa"sv, true },  // only positive motion for vpa/mvpa caps
-        // NB: The tcap name "truecol" is made up. I didn't find a well accepted one.
-        Boolean{ "Tc"_tcap, "truecol"sv, true },  // RGB color support (introduced by Tmux in 2016)
-    };
+        Boolean{ "Tc"_tcap, "Tc"sv, true }  // RGB color support (introduced by Tmux in 2016)
+    );
 
-    constexpr inline auto numericalCaps = std::array{
+    constexpr inline auto numericalCaps = defineCapabilities(
         Numeric{ "co"_tcap, "cols"sv, 80 },   // number of columns in a line
         Numeric{ "it"_tcap, "it"sv, 8 },    // tabs initially every # spaces
         Numeric{ "Co"_tcap, "colors"sv, 256 },  // maximum number of colors on screen
-        Numeric{ "pa"_tcap, "pairs"sv, 65536 },// maximum number of color-pairs on the screen
-    };
+        Numeric{ "pa"_tcap, "pairs"sv, 65536 }// maximum number of color-pairs on the screen
+    );
 
-    constexpr inline auto stringCaps = std::array{
+    constexpr auto inline Undefined = Code{};
+    constexpr inline auto stringCaps = defineCapabilities(
         String{ "TN"_tcap, ""sv, "xterm-256color"sv }, // termcap/terminfo name (xterm extension)
         String{ "ac"_tcap, "acsc"sv, "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based on vt100
         String{ "bl"_tcap, "bel"sv, "^G"sv }, // The audible bell character
@@ -155,15 +174,151 @@ namespace {
         String{ "ae"_tcap, "rmacs"sv,"" "\E(B"sv }, // end alternate character set (P)
 
         // non-standard: used by NeoVIM
-        String{ {}, "setrgbf"sv, "\E[38:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbf: Set RGB foreground color
-        String{ {}, "setrgbb"sv, "\E[48:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbb: Set RGB background color
+        String{ Undefined, "setrgbf"sv, "\E[38:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbf: Set RGB foreground color
+        String{ Undefined, "setrgbb"sv, "\E[48:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbb: Set RGB background color
 
         // Inputs (TODO: WIP!)
-        String{ "ku"_tcap, "kcuu1"sv, "\EOA"sv }, // app: cursor up
-        String{ "kr"_tcap, "kcuf1"sv, "\EOC"sv }, // app: cursor right
+	    String{ "*4"_tcap, "kDC"sv, "\E[3;2~"sv },
+	    String{ Undefined, "kDC3"sv, "\E[3;3~"sv },
+	    String{ Undefined, "kDC4"sv, "\E[3;4~"sv },
+	    String{ Undefined, "kDC5"sv, "\E[3;5~"sv },
+	    String{ Undefined, "kDC6"sv, "\E[3;6~"sv },
+	    String{ Undefined, "kDC7"sv, "\E[3;7~"sv },
+	    String{ Undefined, "kDN"sv, "\E[1;2B"sv },
+	    String{ Undefined, "kDN3"sv, "\E[1;3B"sv },
+	    String{ Undefined, "kDN4"sv, "\E[1;4B"sv },
+	    String{ Undefined, "kDN5"sv, "\E[1;5B"sv },
+	    String{ Undefined, "kDN6"sv, "\E[1;6B"sv },
+	    String{ Undefined, "kDN7"sv, "\E[1;7B"sv },
+	    String{ "*7"_tcap, "kEND"sv, "\E[1;2F"sv },
+	    String{ Undefined, "kEND3"sv, "\E[1;3F"sv },
+	    String{ Undefined, "kEND4"sv, "\E[1;4F"sv },
+	    String{ Undefined, "kEND5"sv, "\E[1;5F"sv },
+	    String{ Undefined, "kEND6"sv, "\E[1;6F"sv },
+	    String{ Undefined, "kEND7"sv, "\E[1;7F"sv },
+	    String{ "#2"_tcap, "kHOM"sv, "\E[1;2H"sv },
+	    String{ Undefined, "kHOM3"sv, "\E[1;3H"sv },
+	    String{ Undefined, "kHOM4"sv, "\E[1;4H"sv },
+	    String{ Undefined, "kHOM5"sv, "\E[1;5H"sv },
+	    String{ Undefined, "kHOM6"sv, "\E[1;6H"sv },
+	    String{ Undefined, "kHOM7"sv, "\E[1;7H"sv },
+	    String{ "#3"_tcap, "kIC"sv, "\E[2;2~"sv },
+	    String{ Undefined, "kIC3"sv, "\E[2;3~"sv },
+	    String{ Undefined, "kIC4"sv, "\E[2;4~"sv },
+	    String{ Undefined, "kIC5"sv, "\E[2;5~"sv },
+	    String{ Undefined, "kIC6"sv, "\E[2;6~"sv },
+	    String{ Undefined, "kIC7"sv, "\E[2;7~"sv },
+	    String{ "#4"_tcap, "kLFT"sv, "\E[1;2D"sv },
+	    String{ Undefined, "kLFT3"sv, "\E[1;3D"sv },
+	    String{ Undefined, "kLFT4"sv, "\E[1;4D"sv },
+	    String{ Undefined, "kLFT5"sv, "\E[1;5D"sv },
+	    String{ Undefined, "kLFT6"sv, "\E[1;6D"sv },
+	    String{ Undefined, "kLFT7"sv, "\E[1;7D"sv },
+	    String{ "%c"_tcap, "kNXT"sv, "\E[6;2~"sv },
+	    String{ Undefined, "kNXT3"sv, "\E[6;3~"sv },
+	    String{ Undefined, "kNXT4"sv, "\E[6;4~"sv },
+	    String{ Undefined, "kNXT5"sv, "\E[6;5~"sv },
+	    String{ Undefined, "kNXT6"sv, "\E[6;6~"sv },
+	    String{ Undefined, "kNXT7"sv, "\E[6;7~"sv },
+	    String{ "%e"_tcap, "kPRV"sv, "\E[5;2~"sv },
+	    String{ Undefined, "kPRV3"sv, "\E[5;3~"sv },
+	    String{ Undefined, "kPRV4"sv, "\E[5;4~"sv },
+	    String{ Undefined, "kPRV5"sv, "\E[5;5~"sv },
+	    String{ Undefined, "kPRV6"sv, "\E[5;6~"sv },
+	    String{ Undefined, "kPRV7"sv, "\E[5;7~"sv },
+	    String{ "%i"_tcap, "kRIT"sv, "\E[1;2C"sv },
+	    String{ Undefined, "kRIT3"sv, "\E[1;3C"sv },
+	    String{ Undefined, "kRIT4"sv, "\E[1;4C"sv },
+	    String{ Undefined, "kRIT5"sv, "\E[1;5C"sv },
+	    String{ Undefined, "kRIT6"sv, "\E[1;6C"sv },
+	    String{ Undefined, "kRIT7"sv, "\E[1;7C"sv },
+	    String{ Undefined, "kUP"sv, "\E[1;2A"sv },
+	    String{ Undefined, "kUP3"sv, "\E[1;3A"sv },
+	    String{ Undefined, "kUP4"sv, "\E[1;4A"sv },
+	    String{ Undefined, "kUP5"sv, "\E[1;5A"sv },
+	    String{ Undefined, "kUP6"sv, "\E[1;6A"sv },
+	    String{ Undefined, "kUP7"sv, "\E[1;7A"sv },
+	    String{ "K1"_tcap, "ka1"sv, ""sv }, // upper left of keypad
+	    String{ "K3"_tcap, "ka3"sv, ""sv }, // upper right of keypad
+	    String{ "K4"_tcap, "kc1"sv, ""sv }, // center of keypad
+	    String{ "K5"_tcap, "kc3"sv, ""sv }, // lower right of keypad
         String{ "kl"_tcap, "kcub1"sv, "\EOD"sv }, // app: cursor left
         String{ "kd"_tcap, "kcud1"sv, "\EOB"sv }, // app: cursor left
-    };
+        String{ "kr"_tcap, "kcuf1"sv, "\EOC"sv }, // app: cursor right
+        String{ "ku"_tcap, "kcuu1"sv, "\EOA"sv }, // app: cursor up
+	    String{ "kD"_tcap, "kdch1"sv, "\E[3~"sv },
+	    String{ "@7"_tcap, "kend"sv, "\EOF"sv },
+	    String{ "k1"_tcap, "kf1"sv, "\EOP"sv },
+	    String{ "k;"_tcap, "kf10"sv, "\E[21~"sv },
+	    String{ "F1"_tcap, "kf11"sv, "\E[23~"sv },
+	    String{ "F2"_tcap, "kf12"sv, "\E[24~"sv },
+	    String{ "F3"_tcap, "kf13"sv, "\E[1;2P"sv },
+	    String{ "F4"_tcap, "kf14"sv, "\E[1;2Q"sv },
+	    String{ "F5"_tcap, "kf15"sv, "\E[1;2R"sv },
+	    String{ "F6"_tcap, "kf16"sv, "\E[1;2S"sv },
+	    String{ "F7"_tcap, "kf17"sv, "\E[15;2~"sv },
+	    String{ "F8"_tcap, "kf18"sv, "\E[17;2~"sv },
+	    String{ "F9"_tcap, "kf19"sv, "\E[18;2~"sv },
+	    String{ "k2"_tcap, "kf2"sv, "\EOQ"sv },
+	    String{ "FA"_tcap, "kf20"sv, "\E[19;2~"sv },
+	    String{ "FB"_tcap, "kf21"sv, "\E[20;2~"sv },
+	    String{ "FC"_tcap, "kf22"sv, "\E[21;2~"sv },
+	    String{ "FD"_tcap, "kf23"sv, "\E[23;2~"sv },
+	    String{ "FE"_tcap, "kf24"sv, "\E[24;2~"sv },
+	    String{ "FF"_tcap, "kf25"sv, "\E[1;5P"sv },
+	    String{ "FG"_tcap, "kf26"sv, "\E[1;5Q"sv },
+	    String{ "FH"_tcap, "kf27"sv, "\E[1;5R"sv },
+	    String{ "FI"_tcap, "kf28"sv, "\E[1;5S"sv },
+	    String{ "FJ"_tcap, "kf29"sv, "\E[15;5~"sv },
+	    String{ "k3"_tcap, "kf3"sv, "\EOR"sv },
+	    String{ "FK"_tcap, "kf30"sv, "\E[17;5~"sv },
+	    String{ "FL"_tcap, "kf31"sv, "\E[18;5~"sv },
+	    String{ "FM"_tcap, "kf32"sv, "\E[19;5~"sv },
+	    String{ "FN"_tcap, "kf33"sv, "\E[20;5~"sv },
+	    String{ "FO"_tcap, "kf34"sv, "\E[21;5~"sv },
+	    String{ "FP"_tcap, "kf35"sv, "\E[23;5~"sv },
+	    String{ "FQ"_tcap, "kf36"sv, "\E[24;5~"sv },
+	    String{ "FR"_tcap, "kf37"sv, "\E[1;6P"sv },
+	    String{ "FS"_tcap, "kf38"sv, "\E[1;6Q"sv },
+	    String{ "FT"_tcap, "kf39"sv, "\E[1;6R"sv },
+	    String{ "k4"_tcap, "kf4"sv, "\EOS"sv },
+	    String{ "FU"_tcap, "kf40"sv, "\E[1;6S"sv },
+	    String{ "FV"_tcap, "kf41"sv, "\E[15;6~"sv },
+	    String{ "FW"_tcap, "kf42"sv, "\E[17;6~"sv },
+	    String{ "FX"_tcap, "kf43"sv, "\E[18;6~"sv },
+	    String{ "FY"_tcap, "kf44"sv, "\E[19;6~"sv },
+	    String{ "FZ"_tcap, "kf45"sv, "\E[20;6~"sv },
+	    String{ "Fa"_tcap, "kf46"sv, "\E[21;6~"sv },
+	    String{ "Fb"_tcap, "kf47"sv, "\E[23;6~"sv },
+	    String{ "Fc"_tcap, "kf48"sv, "\E[24;6~"sv },
+	    String{ "Fd"_tcap, "kf49"sv, "\E[1;3P"sv },
+	    String{ "k5"_tcap, "kf5"sv, "\E[15~"sv },
+	    String{ "Fe"_tcap, "kf50"sv, "\E[1;3Q"sv },
+	    String{ "Ff"_tcap, "kf51"sv, "\E[1;3R"sv },
+	    String{ "Fg"_tcap, "kf52"sv, "\E[1;3S"sv },
+	    String{ "Fh"_tcap, "kf53"sv, "\E[15;3~"sv },
+	    String{ "Fi"_tcap, "kf54"sv, "\E[17;3~"sv },
+	    String{ "Fj"_tcap, "kf55"sv, "\E[18;3~"sv },
+	    String{ "Fk"_tcap, "kf56"sv, "\E[19;3~"sv },
+	    String{ "Fl"_tcap, "kf57"sv, "\E[20;3~"sv },
+	    String{ "Fm"_tcap, "kf58"sv, "\E[21;3~"sv },
+	    String{ "Fn"_tcap, "kf59"sv, "\E[23;3~"sv },
+	    String{ "k6"_tcap, "kf6"sv, "\E[17~"sv },
+	    String{ "Fo"_tcap, "kf60"sv, "\E[24;3~"sv },
+	    String{ "Fp"_tcap, "kf61"sv, "\E[1;4P"sv },
+	    String{ "Fq"_tcap, "kf62"sv, "\E[1;4Q"sv },
+	    String{ "Fr"_tcap, "kf63"sv, "\E[1;4R"sv },
+	    String{ "k7"_tcap, "kf7"sv, "\E[18~"sv },
+	    String{ "k8"_tcap, "kf8"sv, "\E[19~"sv },
+	    String{ "k9"_tcap, "kf9"sv, "\E[20~"sv },
+	    String{ "%1"_tcap, "khlp"sv, ""sv },
+	    String{ "kh"_tcap, "khome"sv, "\EOH"sv },
+	    String{ "kI"_tcap, "kich1"sv, "\E[2~"sv },
+	    String{ "Km"_tcap, "kmous"sv, "\E[M"sv },
+	    String{ "kN"_tcap, "knp"sv, "\E[6~"sv },
+	    String{ "kP"_tcap, "kpp"sv, "\E[5~"sv },
+	    String{ "&8"_tcap, "kund"sv, ""sv }
+    );
 }
 
 bool StaticDatabase::booleanCapability(Code _cap) const
@@ -195,7 +350,29 @@ string_view StaticDatabase::stringCapability(Code _cap) const
 
 string StaticDatabase::terminfo() const
 {
-    return ""; // TODO
+    using namespace ranges;
+
+    auto booleans = copy(booleanCaps);
+    auto numbers = copy(numericalCaps);
+    auto strings = copy(stringCaps);
+
+    std::stringstream output;
+
+    output << "contour-latest|xterm-contour|ContourTTY,\n";
+
+    for (auto const& cap: move(booleans) | actions::sort)
+        if (!cap.name.empty() && cap.value)
+            output << "    " << cap.name << ",\n";
+
+    for (auto const& cap: move(numbers) | actions::sort)
+        if (!cap.name.empty())
+            output << "    " << cap.name << "#" << cap.value << ",\n";
+
+    for (auto const& cap: move(strings) | actions::sort)
+        if (!cap.name.empty())
+            output << "    " << cap.name << "=" << crispy::escape(cap.value) << ",\n";
+
+    return output.str();
 }
 
 }

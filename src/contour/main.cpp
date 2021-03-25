@@ -11,11 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "terminal/Capabilities.h"
 #include <contour/Config.h>
 #include <contour/Controller.h>
 #include <contour/TerminalWidget.h>
 #include <contour/CaptureScreen.h>
 
+#include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
 
 #include <crispy/CLI.h>
@@ -91,15 +93,6 @@ int main(int argc, char* argv[])
         // auto const TBC = "\033[g";
         // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
-        QCoreApplication::setApplicationName("contour");
-        QCoreApplication::setOrganizationName("contour");
-        QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
-        QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-        QApplication app(argc, argv);
-
-        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
-
         auto const cliDef = CLI::Command{
             "contour",
             "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/christianparpart/contour/ ;-)",
@@ -123,6 +116,13 @@ int main(int argc, char* argv[])
                 CLI::Command{"version", "Shows The version and exits."},
                 CLI::Command{"parser-table", "Dumps parser table"},
                 CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
+                CLI::Command{
+                    "terminfo",
+                    "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
+                    {
+                        CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
+                    }
+                },
                 CLI::Command{
                     "capture",
                     "Captures the screen buffer of the currently running terminal.",
@@ -157,6 +157,20 @@ int main(int argc, char* argv[])
         if (flags.get<bool>("contour.help"))
         {
             std::cout << CLI::helpText(cliDef, helpStyle(), screenWidth());
+            return EXIT_SUCCESS;
+        }
+
+        if (flags.get<bool>("contour.terminfo"))
+        {
+            auto const& outputFileName = flags.get<string>("contour.terminfo.output");
+            auto ownedOutput = unique_ptr<std::ostream>{};
+            std::ostream* out = &std::cout;
+            if (outputFileName != "-")
+            {
+                ownedOutput = make_unique<std::ofstream>(outputFileName);
+                out = ownedOutput.get();
+            }
+            *out << terminal::capabilities::StaticDatabase{}.terminfo();
             return EXIT_SUCCESS;
         }
 
@@ -310,6 +324,15 @@ int main(int argc, char* argv[])
             for (size_t i = 1; i < flags.verbatim.size(); ++i)
                  shell.arguments.push_back(string(flags.verbatim.at(i)));
         }
+
+        QCoreApplication::setApplicationName("contour");
+        QCoreApplication::setOrganizationName("contour");
+        QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
+        QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+
+        QApplication app(argc, argv);
+
+        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
 
         contour::Controller controller(argv[0], config, liveConfig, profileName);
         controller.start();
