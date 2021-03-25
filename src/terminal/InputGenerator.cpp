@@ -759,7 +759,8 @@ bool InputGenerator::generate(MouseMoveEvent const& _mouse)
             bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
                               || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
             if (report)
-                return generateMouse(MouseButton::Release, // what about dragging?
+                return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
+                                                    : MouseButton::Release,
                                      _mouse.modifier,
                                      _mouse.row,
                                      _mouse.column,
