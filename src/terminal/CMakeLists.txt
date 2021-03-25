@@ -55,7 +55,7 @@ set(terminal_SOURCES
     VTType.cpp
 )
 
-set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only Threads::Threads)
+set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3 Threads::Threads)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
     list(APPEND terminal_SOURCES pty/UnixPty.cpp)

@@ -1,4 +1,4 @@
-macro(contour_add_fmtlib)
+macro(contour_add_fmtlib) # {{{
     # To download fmtlib at configure time we need a small trick: because
     # ExternalProject runs at build time, we create a fake minimal project and
     # build it. This will download and extract the sources.
@@ -37,9 +37,42 @@ ExternalProject_Add(fmtlib
     endif()
 
     add_subdirectory("${fmtlib_source_dir}" "${fmtlib_binary_dir}" EXCLUDE_FROM_ALL)
-endmacro()
+endmacro() # }}}
 
-macro(contour_add_yaml_cpp)
+include(ExternalProject)
+macro(contour_add_range_v3) # {{{
+    set(prefix "${CMAKE_BINARY_DIR}/deps")
+    set(RANGE_V3_INCLUDE_DIR "${prefix}/include")
+
+    ExternalProject_Add(range-v3-project
+        PREFIX "${prefix}"
+        DOWNLOAD_DIR "${CMAKE_SOURCE_DIR}/deps/downloads"
+        DOWNLOAD_NAME range-v3-0.11.0.tar.gz
+        URL https://github.com/ericniebler/range-v3/archive/0.11.0.tar.gz
+        URL_HASH SHA256=376376615dbba43d3bef75aa590931431ecb49eb36d07bb726a19f680c75e20c
+        CMAKE_COMMAND ${RANGE_V3_CMAKE_COMMAND}
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+                   -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                   -DBUILD_TESTING=OFF
+                   -DRANGES_CXX_STD=${CMAKE_CXX_STANDARD}
+                   -DRANGE_V3_DOCS=OFF
+                   -DRANGE_V3_EXAMPLES=OFF
+                   -DRANGE_V3_TESTS=OFF
+                   -DRANGES_BUILD_CALENDAR_EXAMPLE=OFF
+                   -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        BUILD_BYPRODUCTS "${RANGE_V3_INCLUDE_DIR}/range/v3/all.hpp"
+    )
+
+    add_library(range-v3 INTERFACE IMPORTED)
+    file(MAKE_DIRECTORY ${RANGE_V3_INCLUDE_DIR})  # Must exist.
+    set_target_properties(range-v3 PROPERTIES
+        INTERFACE_COMPILE_OPTIONS "\$<\$<CXX_COMPILER_ID:MSVC>:/permissive->"
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${RANGE_V3_INCLUDE_DIR}
+        INTERFACE_INCLUDE_DIRECTORIES ${RANGE_V3_INCLUDE_DIR})
+    add_dependencies(range-v3 range-v3-project)
+endmacro() # }}}
+
+macro(contour_add_yaml_cpp) # {{{
     # Same trick as in fmtlib.
     set(yaml-cpp_download_dir "${3rdparty_prefix}/yaml-cpp/yaml-cpp-download")
     set(yaml-cpp_source_dir "${3rdparty_prefix}/yaml-cpp/yaml-cpp-src")
@@ -118,9 +151,9 @@ ExternalProject_Add(yaml-cpp
     endif()
     add_subdirectory("${yaml-cpp_source_dir}" "${yaml-cpp_binary_dir}" EXCLUDE_FROM_ALL)
     add_library(yaml-cpp::yaml-cpp ALIAS yaml-cpp)
-endmacro()
+endmacro() # }}}
 
-macro(contour_add_libunicode)
+macro(contour_add_libunicode) # {{{
     # Same trick as in fmtlib.
     set(libunicode_download_dir "${3rdparty_prefix}/libunicode/libunicode-download")
     set(libunicode_source_dir "${3rdparty_prefix}/libunicode/libunicode-src")
@@ -196,7 +229,7 @@ ExternalProject_Add(libunicode
         endif()
     endif()
     add_subdirectory("${libunicode_source_dir}" "${libunicode_binary_dir}" EXCLUDE_FROM_ALL)
-endmacro()
+endmacro() # }}}
 
 macro(contour_add_catch2)
     file(DOWNLOAD http://raw.githubusercontent.com/catchorg/Catch2/v${CONTOUR_EMBEDDED_CATCH2_VERSION}/single_include/catch2/catch.hpp
