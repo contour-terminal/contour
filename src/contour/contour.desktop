@@ -5,7 +5,7 @@
 [Desktop Entry]
 Type=Application
 TryExec=contour
-Exec=contour
+Exec=/usr/bin/contour
 Icon=contour
 Terminal=false
 Categories=Qt;System;TerminalEmulator;
