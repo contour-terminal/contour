@@ -11,11 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "terminal/Capabilities.h"
+#include <contour/CaptureScreen.h>
+
+#if defined(CONTOUR_FRONTEND_GUI)
 #include <contour/Config.h>
 #include <contour/Controller.h>
 #include <contour/TerminalWidget.h>
-#include <contour/CaptureScreen.h>
+#endif
 
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
@@ -25,8 +27,10 @@
 #include <crispy/indexed.h>
 #include <crispy/utils.h>
 
+#if defined(CONTOUR_FRONTEND_GUI)
 #include <QtWidgets/QApplication>
 #include <QSurfaceFormat>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -78,26 +82,187 @@ int screenWidth()
     return DefaultWidth;
 }
 
-int main(int argc, char* argv[])
+#if defined(CONTOUR_FRONTEND_GUI) // {{{
+int terminalGUI(int argc, char* argv[], CLI::FlagStore const& _flags)
 {
     auto configFailures = int{0};
     auto const configLogger = [&](string const& _msg)
     {
-        cerr << "Configuration failure. " << _msg << '\n';
+        cerr << "Configuration failure. " << _msg << endl;
         ++configFailures;
     };
 
+    if (auto const filterString = _flags.get<string>("contour.terminal.debug"); !filterString.empty())
+    {
+        if (filterString == "all")
+        {
+            crispy::logging_sink::for_debug().enable(true);
+            for (auto& tag: crispy::debugtag::store())
+                tag.enabled = true;
+        }
+        else
+        {
+            auto const filters = crispy::split(filterString, ',');
+            crispy::logging_sink::for_debug().enable(true);
+            for (auto& tag: crispy::debugtag::store())
+            {
+                tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
+                    if (filterPattern.back() != '*')
+                        return tag.name == filterPattern;
+                    return std::equal(
+                        begin(filterPattern),
+                        prev(end(filterPattern)),
+                        begin(tag.name)
+                    );
+                });
+            }
+        }
+    }
+
+    auto const configPath = QString::fromStdString(_flags.get<string>("contour.terminal.config"));
+
+    auto config =
+        configPath.isEmpty() ? contour::config::loadConfig()
+                             : contour::config::loadConfigFromFile(configPath.toStdString());
+
+    string const profileName = [&]() {
+        if (auto profile = _flags.get<string>("contour.terminal.profile"); !profile.empty())
+            return profile;
+
+        if (!config.defaultProfileName.empty())
+            return config.defaultProfileName;
+
+        if (config.profiles.size() == 1)
+            return config.profiles.begin()->first;
+
+        return ""s;
+    }();
+
+    if (!config.profile(profileName))
+    {
+        auto const s = accumulate(
+            begin(config.profiles),
+            end(config.profiles),
+            ""s,
+            [](string const& acc, auto const& profile) -> string {
+                return acc.empty() ? profile.first
+                                   : fmt::format("{}, {}", acc, profile.first);
+            }
+        );
+        configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
+    }
+
+    if (auto const wd = _flags.get<string>("contour.terminal.working-directory"); !wd.empty())
+        config.profile(profileName)->shell.workingDirectory = FileSystem::path(wd);
+
+    if (configFailures)
+        return EXIT_FAILURE;
+
+    bool const liveConfig = _flags.get<bool>("contour.terminal.live-config");
+
+    // Possibly override shell to be executed
+    if (!_flags.verbatim.empty())
+    {
+        auto& shell = config.profile(profileName)->shell;
+        shell.program = _flags.verbatim.front();
+        shell.arguments.clear();
+        for (size_t i = 1; i < _flags.verbatim.size(); ++i)
+             shell.arguments.push_back(string(_flags.verbatim.at(i)));
+    }
+
+    QCoreApplication::setApplicationName("contour");
+    QCoreApplication::setOrganizationName("contour");
+    QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
+    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+
+    QApplication app(argc, argv);
+
+    QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
+
+    contour::Controller controller(argv[0], config, liveConfig, profileName);
+    controller.start();
+
+    // auto const HTS = "\033H";
+    // auto const TBC = "\033[g";
+    // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
+
+    auto const rv = app.exec();
+
+    controller.exit();
+    controller.wait();
+
+    // printf("\r%s", TBC);
+    return rv;
+}
+#endif // }}}
+
+// customize debuglog transform to shorten the file_name output a bit
+void customizeDebugLog()
+{
+    crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
+    {
+        auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+        auto const fileName = string(srcIndex != string_view::npos
+            ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+            : string(_msg.location().file_name()));
+
+        auto result = string{};
+
+        for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
+        {
+            if (i != 0)
+                result += "        ";
+            else
+                result += fmt::format("[{}:{}:{}] ",
+                                      fileName,
+                                      _msg.location().line(),
+                                      _msg.location().function_name());
+
+            result += line;
+            result += '\n';
+        }
+
+        return result;
+    });
+}
+
+void listDebugTags()
+{
+    auto tags = crispy::debugtag::store();
+    sort(
+        begin(tags),
+        end(tags),
+        [](crispy::debugtag::tag_info const& a, crispy::debugtag::tag_info const& b) {
+           return a.name < b.name;
+        }
+    );
+    auto const maxNameLength = std::accumulate(
+        begin(tags),
+        end(tags),
+        size_t{0},
+        [&](auto _acc, auto const& _tag) { return max(_acc, _tag.name.size()); }
+    );
+    auto const column1Length = maxNameLength + 2u;
+    for (auto const& tag: tags)
+    {
+        std::cout
+            << left << setw(int(column1Length)) << tag.name
+            << "; " << tag.description << '\n';
+    }
+}
+
+int main(int argc, char* argv[])
+{
     try
     {
-        // auto const HTS = "\033H";
-        // auto const TBC = "\033[g";
-        // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
+        customizeDebugLog();
 
         auto const cliDef = CLI::Command{
             "contour",
             "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/christianparpart/contour/ ;-)",
             CLI::OptionList{},
             CLI::CommandList{
+#if defined(CONTOUR_FRONTEND_GUI)
                 CLI::Command{
                     "terminal",
                     "Spawns a new terminal application.",
@@ -112,6 +277,7 @@ int main(int argc, char* argv[])
                     CLI::CommandSelect::Implicit,
                     CLI::Verbatim{"PROGRAM ARGS...", "Executes given program instead of the configuration profided one."}
                 },
+#endif
                 CLI::Command{"help", "Shows this help and exits."},
                 CLI::Command{"version", "Shows The version and exits."},
                 CLI::Command{"parser-table", "Dumps parser table"},
@@ -194,160 +360,23 @@ int main(int argc, char* argv[])
             return EXIT_SUCCESS;
         }
 
-        // customize debuglog transform to shorten the file_name output a bit
-        crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
-        {
-            auto const srcIndex = string_view(_msg.location().file_name()).find("src");
-            auto const fileName = string(srcIndex != string_view::npos
-                ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
-                : string(_msg.location().file_name()));
-
-            auto result = string{};
-
-            for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
-            {
-                if (i != 0)
-                    result += "        ";
-                else
-                    result += fmt::format("[{}:{}:{}] ",
-                                          fileName,
-                                          _msg.location().line(),
-                                          _msg.location().function_name());
-
-                result += line;
-                result += '\n';
-            }
-
-            return result;
-        });
-
         if (flags.get<bool>("contour.list-debug-tags"))
         {
-            auto tags = crispy::debugtag::store();
-            sort(
-                begin(tags),
-                end(tags),
-                [](crispy::debugtag::tag_info const& a, crispy::debugtag::tag_info const& b) {
-                   return a.name < b.name;
-                }
-            );
-            auto const maxNameLength = std::accumulate(
-                begin(tags),
-                end(tags),
-                size_t{0},
-                [&](auto _acc, auto const& _tag) { return max(_acc, _tag.name.size()); }
-            );
-            auto const column1Length = maxNameLength + 2u;
-            for (auto const& tag: tags)
-            {
-                std::cout
-                    << left << setw(int(column1Length)) << tag.name
-                    << "; " << tag.description << '\n';
-            }
+            listDebugTags();
             return EXIT_SUCCESS;
         }
 
-        if (auto const filterString = flags.get<string>("contour.terminal.debug"); !filterString.empty())
-        {
-            if (filterString == "all")
-            {
-                crispy::logging_sink::for_debug().enable(true);
-                for (auto& tag: crispy::debugtag::store())
-                    tag.enabled = true;
-            }
-            else
-            {
-                auto const filters = crispy::split(filterString, ',');
-                crispy::logging_sink::for_debug().enable(true);
-                for (auto& tag: crispy::debugtag::store())
-                {
-                    tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
-                        if (filterPattern.back() != '*')
-                            return tag.name == filterPattern;
-                        return std::equal(
-                            begin(filterPattern),
-                            prev(end(filterPattern)),
-                            begin(tag.name)
-                        );
-                    });
-                }
-            }
-        }
+#if defined(CONTOUR_FRONTEND_GUI)
+        if (flags.get<bool>("contour.terminal"))
+            return terminalGUI(argc, argv, flags);
+#endif
 
-        auto const configPath = QString::fromStdString(flags.get<string>("contour.terminal.config"));
-
-        auto config =
-            configPath.isEmpty() ? contour::config::loadConfig()
-                                 : contour::config::loadConfigFromFile(configPath.toStdString());
-
-        string const profileName = [&]() {
-            if (auto profile = flags.get<string>("contour.terminal.profile"); !profile.empty())
-                return profile;
-
-            if (!config.defaultProfileName.empty())
-                return config.defaultProfileName;
-
-            if (config.profiles.size() == 1)
-                return config.profiles.begin()->first;
-
-            return ""s;
-        }();
-
-        if (!config.profile(profileName))
-        {
-            auto const s = accumulate(
-                begin(config.profiles),
-                end(config.profiles),
-                ""s,
-                [](string const& acc, auto const& profile) -> string {
-                    return acc.empty() ? profile.first
-                                       : fmt::format("{}, {}", acc, profile.first);
-                }
-            );
-            configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
-        }
-
-        if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
-            config.profile(profileName)->shell.workingDirectory = FileSystem::path(wd);
-
-        if (configFailures)
-            return EXIT_FAILURE;
-
-        bool const liveConfig = flags.get<bool>("contour.terminal.live-config");
-
-        // Possibly override shell to be executed
-        if (!flags.verbatim.empty())
-        {
-            auto& shell = config.profile(profileName)->shell;
-            shell.program = flags.verbatim.front();
-            shell.arguments.clear();
-            for (size_t i = 1; i < flags.verbatim.size(); ++i)
-                 shell.arguments.push_back(string(flags.verbatim.at(i)));
-        }
-
-        QCoreApplication::setApplicationName("contour");
-        QCoreApplication::setOrganizationName("contour");
-        QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
-        QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-        QApplication app(argc, argv);
-
-        QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
-
-        contour::Controller controller(argv[0], config, liveConfig, profileName);
-        controller.start();
-
-        auto const rv = app.exec();
-
-        controller.exit();
-        controller.wait();
-
-        // printf("\r%s", TBC);
-        return rv;
+        std::cerr << fmt::format("Usage error.\n");
+        return EXIT_FAILURE;
     }
     catch (exception const& e)
     {
-        configLogger(fmt::format("Unhandled error caught. {}", e.what()));
+        std::cerr << fmt::format("Unhandled error caught. {}", e.what());
         return EXIT_FAILURE;
     }
 }
