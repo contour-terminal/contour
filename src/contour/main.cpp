@@ -298,6 +298,13 @@ int main(int argc, char* argv[])
                         CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture"},
                         CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
                     }
+                },
+                CLI::Command{
+                    "profile",
+                    "Profile configuration for the current terminal.",
+                    {
+                        CLI::Option{"set", CLI::Value{""s}, "Changes the terminal profile of the currently attached terminal to the given value.", "NAME", CLI::Presence::Required}
+                    }
                 }
             }
         };
@@ -352,6 +359,14 @@ int main(int argc, char* argv[])
                 return EXIT_SUCCESS;
             else
                 return EXIT_FAILURE;
+        }
+
+        if (flags.get<bool>("contour.profile"))
+        {
+            auto const profileName = flags.get<string>("contour.profile.set");
+            std::cout << fmt::format("\033P$p{}\033\\", profileName);
+            std::cout.flush();
+            return EXIT_SUCCESS;
         }
 
         if (flags.get<bool>("contour.parser-table"))
