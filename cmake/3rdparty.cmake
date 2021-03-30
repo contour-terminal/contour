@@ -41,12 +41,12 @@ endmacro() # }}}
 
 include(ExternalProject)
 macro(contour_add_range_v3) # {{{
-    set(prefix "${CMAKE_BINARY_DIR}/deps")
+    set(prefix "${3rdparty_prefix}/range-v3")
     set(RANGE_V3_INCLUDE_DIR "${prefix}/include")
 
     ExternalProject_Add(range-v3-project
         PREFIX "${prefix}"
-        DOWNLOAD_DIR "${CMAKE_SOURCE_DIR}/deps/downloads"
+        DOWNLOAD_DIR "${prefix}/downloads"
         DOWNLOAD_NAME range-v3-0.11.0.tar.gz
         URL https://github.com/ericniebler/range-v3/archive/0.11.0.tar.gz
         URL_HASH SHA256=376376615dbba43d3bef75aa590931431ecb49eb36d07bb726a19f680c75e20c
@@ -60,7 +60,7 @@ macro(contour_add_range_v3) # {{{
                    -DRANGE_V3_TESTS=OFF
                    -DRANGES_BUILD_CALENDAR_EXAMPLE=OFF
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        BUILD_BYPRODUCTS "${RANGE_V3_INCLUDE_DIR}/range/v3/all.hpp"
+        BUILD_BYPRODUCTS "${prefix}/range/v3/all.hpp"
     )
 
     add_library(range-v3 INTERFACE IMPORTED)
