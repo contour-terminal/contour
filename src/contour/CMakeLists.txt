@@ -5,7 +5,6 @@ find_package(OpenGL REQUIRED)
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
-option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 
