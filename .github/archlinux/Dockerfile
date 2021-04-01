@@ -1,4 +1,4 @@
-FROM lopsided/archlinux:latest
+FROM archlinux/archlinux:latest
 
 WORKDIR /app
 
