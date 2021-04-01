@@ -45,52 +45,83 @@ namespace detail
     // clang-format on
 } // namespace detail
 
+struct EncoderState
+{
+    int modulo = 0;
+    uint8_t pending[3];
+};
+
+template <typename Alphabet, typename Sink>
+constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _state, Sink&& _sink)
+{
+    _state.pending[_state.modulo] = _byte;
+    if (++_state.modulo != 3)
+        return;
+
+    _state.modulo = 0;
+    uint8_t const* input = _state.pending;
+    char const out[4] = { alphabet[(input[0] >> 2) & 0x3F],
+                          alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+                          alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
+                          alphabet[input[2] & 0x3F] };
+    _sink(std::string_view(out, 4));
+}
+
+template <typename Alphabet, typename Sink>
+constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _sink)
+{
+    if (_state.modulo == 0)
+        return;
+
+    auto const* input = _state.pending;
+
+    switch (_state.modulo)
+    {
+    case 2: {
+        char const out[4] = { alphabet[(input[0] >> 2) & 0x3F],
+                              alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+                              alphabet[((input[1] & 0x0F) << 2)],
+                              '=' };
+        _sink(std::string_view { out });
+    }
+    break;
+    case 1: {
+        char const out[4] = {
+            alphabet[(input[0] >> 2) & 0x3F], alphabet[((input[0] & 0x03) << 4)], '=', '='
+        };
+        _sink(std::string_view { out });
+    }
+    break;
+    case 0: break;
+    }
+}
+
+template <typename Sink>
+constexpr void encode(uint8_t _byte, EncoderState& _state, Sink&& _sink)
+{
+    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                "abcdefghijklmnopqrstuvwxyz"
+                                "0123456789+/";
+    return encode(_byte, alphabet, _state, std::forward<Sink>(_sink));
+    // return encode(_byte, detail::indexmap, _state, std::forward<Sink>(_sink));
+}
+
+template <typename Sink>
+constexpr void finish(EncoderState& _state, Sink&& _sink)
+{
+    finish(detail::indexmap, _state, std::forward<Sink>(_sink));
+}
+
 template <typename Iterator, typename Alphabet>
 std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 {
-    int const inputLength = static_cast<int>(std::distance(begin, end));
-    int const outputLength = ((inputLength + 2) / 3 * 4) + 1;
-
     std::string output;
-    output.resize(static_cast<unsigned>(outputLength));
+    output.reserve(((std::distance(begin, end) + 2) / 3 * 4) + 1);
 
-    auto i = 0;
-    auto const e = inputLength - 2;
-    auto const input = begin;
-    auto out = output.begin();
-
-    while (i < e)
-    {
-        *out++ = alphabet[(input[i] >> 2) & 0x3F];
-
-        *out++ = alphabet[((input[i] & 0x03) << 4) | ((uint8_t) (input[i + 1] & 0xF0) >> 4)];
-
-        *out++ = alphabet[((input[i + 1] & 0x0F) << 2) | ((uint8_t) (input[i + 2] & 0xC0) >> 6)];
-
-        *out++ = alphabet[input[i + 2] & 0x3F];
-
-        i += 3;
-    }
-
-    if (i < inputLength)
-    {
-        *out++ = alphabet[(input[i] >> 2) & 0x3F];
-
-        if (i == (inputLength - 1))
-        {
-            *out++ = alphabet[((input[i] & 0x03) << 4)];
-            *out++ = '=';
-        }
-        else
-        {
-            *out++ = alphabet[((input[i] & 0x03) << 4) | ((uint8_t) (input[i + 1] & 0xF0) >> 4)];
-            *out++ = alphabet[((input[i + 1] & 0x0F) << 2)];
-        }
-        *out++ = '=';
-    }
-
-    auto const outlen = std::distance(output.begin(), out);
-    output.resize(static_cast<unsigned>(outlen));
+    EncoderState state {};
+    for (auto i = begin; i != end; ++i)
+        encode(*i, alphabet, state, [&](std::string_view _data) { output += _data; });
+    finish(alphabet, state, [&](std::string_view _data) { output += _data; });
 
     return output;
 }
@@ -104,9 +135,9 @@ std::string encode(Iterator begin, Iterator end)
     return encode(begin, end, alphabet);
 }
 
-inline std::string encode(const std::string_view& value)
+inline std::string encode(std::string_view _value)
 {
-    return encode(value.begin(), value.end());
+    return encode(_value.begin(), _value.end());
 }
 
 template <typename Iterator, typename IndexTable>
