@@ -565,15 +565,28 @@ namespace // {{{ helpers
         return stylizer(style);
     }
 
-    string_view wordWrapped(string_view _text, unsigned _margin, unsigned _cursor)
+    string_view wordWrapped(string_view _text, int _margin, int _cursor, bool* _trimLeadingWhitespaces)
     {
-        auto const unwrappedLength = _cursor + _text.size();
+        auto const linefeed = _text.find('\n');
+        if (linefeed != string_view::npos)
+        {
+            auto i = linefeed - 1; // Position before the found LF and trim off right whitespaces.
+            while (i > 0 && _text[i] == ' ')
+                --i;
+            *_trimLeadingWhitespaces = false;
+            return _text.substr(0, i + 1);
+        }
+
+        *_trimLeadingWhitespaces = true;
+
+        auto const unwrappedLength = _cursor + int(_text.size());
         if (unwrappedLength <= _margin)
             return _text;
 
         // Cut string at right margin, then shift left until we've hit a whitespace character.
-        auto i = _margin - _cursor + 1;
-        while (i > 0 && _text[i] != ' ')
+        auto const rightMargin = _margin - _cursor + 1;
+        auto i = rightMargin;
+        while (i > 0 && (_text[i] != ' ' && _text[i] != '\n'))
             --i;
 
         return _text.substr(0, i);
@@ -583,12 +596,14 @@ namespace // {{{ helpers
     {
         string output;
         size_t i = 0;
+        bool trimLeadingWhitespaces = true;
         for (;;)
         {
-            while (i < _text.size() && _text[i] == ' ')
+            auto const trimChar = trimLeadingWhitespaces ? ' ' : '\n';
+            while (i < _text.size() && _text[i] == trimChar)
                 ++i; // skip leading whitespaces
 
-            auto const chunk = wordWrapped(_text.substr(i), _margin, *_cursor);
+            auto const chunk = wordWrapped(_text.substr(i), _margin, *_cursor, &trimLeadingWhitespaces);
 
             output += chunk;
             *_cursor += static_cast<unsigned>(chunk.size());
