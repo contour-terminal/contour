@@ -35,4 +35,12 @@
 # Linux/KDE
 .directory
 
+# debian: dpkg-buildpackage intermediates
 /debian/files
+/debian/tmp/
+/debian/.debhelper/
+/debian/contour.substvars
+/debian/contour/
+/configure-stamp
+/build-stamp
+/install-stamp
