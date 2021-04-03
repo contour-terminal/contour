@@ -96,7 +96,7 @@ elseif(APPLE)
     )
 endif()
 
-target_link_libraries(contour terminal yaml-cpp::yaml-cpp)
+target_link_libraries(contour terminal yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(contour ${Boost_LIBRARIES})
