@@ -1,0 +1,164 @@
+include(FetchContent)
+
+if(NOT FETCHCONTENT_BASE_DIR STREQUAL "")
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}/3rdparty")
+endif()
+
+set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+#set(FETCHCONTENT_FULLY_DISCONNECTED ON)
+
+set(3rdparty_DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/_downloads" CACHE FILEPATH "3rdparty download directory.")
+
+macro(ThirdPartiesAdd_fmtlib)
+    set(3rdparty_fmtlib_VERSION "7.1.3" CACHE STRING "fmtlib version")
+    set(3rdparty_fmtlib_CHECKSUM "SHA256=5cae7072042b3043e12d53d50ef404bbb76949dad1de368d7f993a15c8c05ecc" CACHE STRING "fmtlib checksum")
+    FetchContent_Declare(
+        fmtlib
+        URL "https://github.com/fmtlib/fmt/archive/refs/tags/${3rdparty_fmtlib_VERSION}.tar.gz"
+        URL_HASH "${3rdparty_fmtlib_CHECKSUM}"
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
+    )
+    FetchContent_MakeAvailable(fmtlib)
+endmacro()
+
+macro(ThirdPartiesAdd_Catch2)
+    set(3rdparty_Catch2_VERSION "2.13.4" CACHE STRING "Embedded catch2 version")
+    set(3rdparty_Catch2_CHECKSUM "SHA256=e7eb70b3d0ac2ed7dcf14563ad808740c29e628edde99e973adad373a2b5e4df" CACHE STRING "Embedded catch2 checksum")
+    set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+    set(CATCH_BUILD_EXTRA_TESTS OFF CACHE INTERNAL "")
+    set(CATCH_BUILD_TESTING OFF CACHE INTERNAL "")
+    set(CATCH_ENABLE_WERROR OFF CACHE INTERNAL "")
+    set(CATCH_INSTALL_DOCS OFF CACHE INTERNAL "")
+    set(CATCH_INSTALL_HELPERS OFF CACHE INTERNAL "")
+    FetchContent_Declare(
+        Catch2
+        URL "https://github.com/catchorg/Catch2/archive/refs/tags/v${3rdparty_Catch2_VERSION}.tar.gz"
+        URL_HASH "${3rdparty_Catch2_CHECKSUM}"
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+    )
+    FetchContent_MakeAvailable(Catch2)
+endmacro()
+
+macro(ThirdPartiesAdd_range_v3)
+    set(3rdparty_range_v3_VERSION "0.11.0" CACHE STRING "Embedded range-v3 version")
+    set(3rdparty_range_v3_CHECKSUM "MD5=97ab1653f3aa5f9e3d8200ee2a4911d3" CACHE STRING "Embedded range-v3 hash")
+    FetchContent_Declare(
+        range-v3
+        URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+        URL_HASH "${3rdparty_range_v3_CHECKSUM}"
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+    )
+    FetchContent_MakeAvailable(range-v3)
+endmacro()
+
+# {{{ yaml-cpp
+macro(ThirdPartiesAdd_yaml_cpp)
+    set(3rdparty_yaml_cpp_VERSION "0.6.3" CACHE STRING "Embedded yaml-cpp version")
+    set(3rdparty_yaml_cpp_CHECKSUM "MD5=b45bf1089a382e81f6b661062c10d0c2" CACHE STRING "Embedded yaml-cpp checksum")
+    #set(yaml_cpp_patch "${CMAKE_CURRENT_SOURCE_DIR}/cmake/yaml-cpp.patch")
+    set(yaml_cpp_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/yaml-cpp.patch")
+    if(NOT EXISTS "${yaml_cpp_patch}")
+        file(WRITE "${yaml_cpp_patch}"
+[[--- CMakeLists.txt	2021-03-03 08:33:57.271688830 +0100
++++ CMakeLists.txt.new	2021-03-03 09:32:34.817113397 +0100
+@@ -15,8 +15,8 @@
+ ### Project options
+ ###
+ ## Project stuff
+-option(YAML_CPP_BUILD_TESTS "Enable testing" ON)
+-option(YAML_CPP_BUILD_TOOLS "Enable parse tools" ON)
++option(YAML_CPP_BUILD_TESTS "Enable testing" OFF)
++option(YAML_CPP_BUILD_TOOLS "Enable parse tools" OFF)
+ option(YAML_CPP_BUILD_CONTRIB "Enable contrib stuff in library" ON)
+ option(YAML_CPP_INSTALL "Enable generation of install target" ON)
+
+@@ -259,7 +259,7 @@
+ endif()
+
+ if (NOT CMAKE_VERSION VERSION_LESS 2.8.12)
+-    target_include_directories(yaml-cpp
++  target_include_directories(yaml-cpp SYSTEM
+         PUBLIC $<BUILD_INTERFACE:${YAML_CPP_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:${INCLUDE_INSTALL_ROOT_DIR}>
+         PRIVATE $<BUILD_INTERFACE:${YAML_CPP_SOURCE_DIR}/src>)
+]])
+    endif()
+    set(YAML_CPP_BUILD_CONTRIB OFF CACHE INTERNAL "")
+    set(YAML_CPP_BUILD_TESTS OFF CACHE INTERNAL "")
+    set(YAML_CPP_BUILD_TOOLS OFF CACHE INTERNAL "")
+    set(YAML_CPP_INSTALL OFF CACHE INTERNAL "")
+    FetchContent_Declare(
+        yaml-cpp
+        URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+        URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+        # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
+        # PATCH_COMMAND patch "${yaml_cpp_patch}"
+    )
+    FetchContent_MakeAvailable(yaml-cpp)
+endmacro()
+# }}}
+
+# {{{ libunicode
+macro(ThirdPartiesAdd_libunicode)
+    set(3rdparty_libunicode_VERSION "a440d093e3ef57c03a10ea73dd499794e2726a02" CACHE STRING "libunicode: commit hash")
+    set(3rdparty_libunicode_CHECKSUM "SHA256=318e04e8b0601bd38f36242ea846b5e9bcfb6ef2679feccdf46c97fa677158d1" CACHE STRING "libunicode: download checksum")
+    # XXX: temporary patch until libunicode gets rid of sumbodules.
+    set(libunicode_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/libunicode.patch")
+    if(NOT EXISTS "${libunicode_patch}")
+        file(WRITE "${libunicode_patch}" [[
+--- CMakeLists.txt	2021-03-03 08:40:11.184332244 +0100
++++ CMakeLists.txt.new	2021-03-03 08:49:06.336734764 +0100
+@@ -48,18 +48,6 @@
+ # ----------------------------------------------------------------------------
+ # 3rdparty dependencies
+
+-if(LIBUNICODE_EMBEDDED_FMTLIB)
+-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/fmt" EXCLUDE_FROM_ALL)
+-    add_definitions(-DFMT_USE_WINDOWS_H=0)
+-else()
+-    # master project must provide its own fmtlib
+-endif()
+-
+-if(LIBUNICODE_TESTING AND LIBUNICODE_EMBEDDED_CATCH2)
+-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
+-else()
+-    # master project must provide its own fmtlib
+-endif()
+
+ add_subdirectory(src/unicode)
+ add_subdirectory(src/tools)
+]])
+    endif()
+    FetchContent_Declare(
+        libunicode
+        URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+        URL_HASH "${3rdparty_libunicode_CHECKSUM}"
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+        # same here
+        #PATCH_COMMAND patch "${libunicode_patch}"
+    )
+    FetchContent_MakeAvailable(libunicode)
+endmacro()
+# }}}
+
+macro(ThirdPartiesDownload Name TargetFile URL Checksum)
+    include(ExternalProject)
+    ExternalProject_Add(
+        "${name}"
+        URL "${URL}"
+        URL_HASH "${Checksum}"
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND ""
+        INSTALL_COMMAND ""
+        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+        DOWNLOAD_NAME "${TargetFile}"
+    )
+endmacro()
+
