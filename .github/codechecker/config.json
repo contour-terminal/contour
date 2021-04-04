@@ -5,9 +5,9 @@
     "--enable=sensitive",
     "--disable=google",
     "--enable=google-build-namespaces",
-    "--skip=.github/codechecker_config/skipfile.txt"
+    "--skip=.github/codechecker/skipfile.txt"
   ],
   "parse": [
-    "--skip=.github/codechecker_config/skipfile.txt"
+    "--skip=.github/codechecker/skipfile.txt"
   ]
 }

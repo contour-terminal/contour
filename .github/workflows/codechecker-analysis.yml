@@ -30,7 +30,8 @@ jobs:
       # (This is needed because the LLVM nightly PPA doesn't tag the latest
       # rolling version.)
       LLVM_LATEST: "yes"
-      CODECHECKER_CONFIG: .github/codechecker_config/config.json
+
+      CODECHECKER_CONFIG: .github/codechecker/config.json
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v2
@@ -42,6 +43,7 @@ jobs:
         env:
           REPOSITORY: "${{ github.event.repository.name }}"
       - name: "Install build dependencies"
+        # Note: Keep this in sync with that in build.yml!
         run: |
           cat /etc/apt/sources.list
           sudo apt-get -qy update
@@ -86,7 +88,7 @@ jobs:
             --slave                                            \
               /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-$LLVM_VER
           update-alternatives --query clang
-          echo "::set-output name=LLVM_REAL_VERSION::$(clang --version | head -n 1 | cut -d' ' -f3-)"
+          echo "::set-output name=LLVM_REAL_VERSION::$(clang --version | head -n 1 | cut -d' ' -f4-)"
       - name: "Build and Package CodeChecker"
         id: codechecker
         run: |
@@ -95,8 +97,10 @@ jobs:
           make venv
           source venv/bin/activate
           make standalone_package
-          echo "::set-output name=CODECHECKER_PATH::$(readlink -f ./build/CodeChecker/bin)"
           deactivate
+          echo "::set-output name=CODECHECKER_PATH::$(readlink -f ./build/CodeChecker/bin)"
+          echo "::set-output name=CODECHECKER_VERSION::$(./build/CodeChecker/bin/CodeChecker analyzer-version | grep 'Base package' | cut -d'|' -f 2 | tr -d ' ')"
+          echo "::set-output name=CODECHECKER_GITSEVEN::$(./build/CodeChecker/bin/CodeChecker analyzer-version | grep 'Git commit' | cut -d'|' -f 2 | cut -c 2-8)"
           popd
       - name: "Build Contour"
         run: |
@@ -160,12 +164,12 @@ jobs:
       - name: "Upload HTML results"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-html"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.CODECHECKER_VERSION }}+${{ steps.codechecker.outputs.CODECHECKER_GITSEVEN }}-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-results"
           path: "Results-HTML"
           if-no-files-found: error
       - name: "Upload analysis failure collections"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-failures.zip"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.CODECHECKER_VERSION }}+${{ steps.codechecker.outputs.CODECHECKER_GITSEVEN }}-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-failure-zips"
           path: "Results/failed"
           if-no-files-found: ignore
