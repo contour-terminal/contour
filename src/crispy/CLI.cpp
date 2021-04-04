@@ -378,6 +378,7 @@ namespace // {{{ helper
     {
         // Command := NAME Option* Section*
         auto const _commandScope = ScopedCommand{_context, _command};
+        _context.output.values[namePrefix(_context)] = Value{true};
 
         parseOptionList(_context);
 

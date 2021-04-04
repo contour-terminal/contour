@@ -3,14 +3,14 @@ include(FilesystemResolver)
 find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 find_package(OpenGL REQUIRED)
 
-option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
-option(CONTOUR_SCROLLBAR "Enables scrollbar support." ON)
+option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
+option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 
 # {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
-if(CONTOUR_BLUR_PLATFORM_KWIN)
+if(CONTOUR_FRONTEND_GUI AND CONTOUR_BLUR_PLATFORM_KWIN)
     set(KF5_MIN_VERSION "5.12.0")
     find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
     set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
@@ -22,18 +22,23 @@ endif()
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
 set(contour_SRCS
-    Actions.cpp Actions.h
-    BackgroundBlur.cpp BackgroundBlur.h
     CaptureScreen.cpp CaptureScreen.h
-    Config.cpp Config.h
-    Controller.cpp Controller.h
-    FileChangeWatcher.cpp FileChangeWatcher.h
-    TerminalWindow.cpp TerminalWindow.h
-    TerminalWidget.cpp TerminalWidget.h
-    helper.cpp helper.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
 )
+
+if(CONTOUR_FRONTEND_GUI)
+    list(APPEND contour_SRCS
+        Config.cpp Config.h
+        Actions.cpp Actions.h
+        Controller.cpp Controller.h
+        BackgroundBlur.cpp BackgroundBlur.h
+        FileChangeWatcher.cpp FileChangeWatcher.h
+        TerminalWindow.cpp TerminalWindow.h
+        TerminalWidget.cpp TerminalWidget.h
+        helper.cpp helper.h
+    )
+endif()
 
 if(WIN32)
     list(APPEND contour_SRCS contour.rc)
@@ -56,6 +61,10 @@ endif()
 
 if(CONTOUR_VT_METRICS)
     target_compile_definitions(contour PRIVATE CONTOUR_VT_METRICS)
+endif()
+
+if(CONTOUR_FRONTEND_GUI)
+    target_compile_definitions(contour PRIVATE CONTOUR_FRONTEND_GUI)
 endif()
 
 if(CONTOUR_SCROLLBAR)
@@ -87,14 +96,18 @@ elseif(APPLE)
     )
 endif()
 
-target_link_libraries(contour terminal_view terminal_renderer_opengl yaml-cpp::yaml-cpp Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
+target_link_libraries(contour terminal yaml-cpp)
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(contour ${Boost_LIBRARIES})
 endif()
-if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
-	target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
-    target_link_libraries(contour KF5::WindowSystem)
+
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour terminal_view terminal_renderer_opengl Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
+    if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
+        target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
+        target_link_libraries(contour KF5::WindowSystem)
+    endif()
 endif()
 
 if(CONTOUR_SANITIZE AND NOT MSVC)
