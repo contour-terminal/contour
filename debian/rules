@@ -13,14 +13,18 @@ configure-stamp:
 		-DCMAKE_INSTALL_PREFIX="/usr" \
 		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
 		-DCMAKE_CXX_COMPILER="g++-9" \
-		-DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-		-DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-		-DYAML_CPP_INSTALL=OFF \
+		\
 		-DCONTOUR_EXAMPLES=OFF \
+		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+		\
+		-D3rdparty_DOWNLOAD_DIR="$(shell pwd)/_3rdparty" \
+		-DFETCHCONTENT_QUIET=OFF \
+		-DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+		\
 		-DCRISPY_TESTING=ON \
 		-DLIBTERMINAL_TESTING=ON \
 		-DLIBUNICODE_TESTING=ON \
-		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+		\
 		-B ${BUILDDIR}
 	touch $@
 
@@ -28,7 +32,6 @@ build: build-stamp
 build-stamp: configure-stamp
 	dh_testdir
 	$(MAKE) -C ${BUILDDIR} -j3
-	${BUILDDIR}/3rdparty/libunicode/src/unicode/unicode_test
 	${BUILDDIR}/src/crispy/crispy_test
 	${BUILDDIR}/src/terminal/terminal_test
 	touch $@

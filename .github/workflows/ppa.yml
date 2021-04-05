@@ -1,0 +1,65 @@
+name: PPA Upload
+
+on:
+  push:
+    paths-ignore:
+    - 'docs/**'
+    - '.github/ISSUE_TEMPLATE/**'
+    - '.github/*.yml'
+    - 'TODO.md'
+    branches:
+    - master
+    # TEMPORARILY DISABLED
+    # - feature/**
+    # - fix/**
+    # - improvement/**
+    # - wip
+
+jobs:
+  ubuntu_ppa:
+    name: Creating PPA snapshot
+    runs-on: ubuntu-18.04
+    env:
+      GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+    steps:
+      - name: Configure GPG Key
+        run: |
+          set -ex
+          mkdir -p ~/.gnupg
+          chmod 0700 ~/.gnupg
+          printf "$GPG_SIGNING_KEY" | base64 --decode > ~/.gnupg/private.key
+          gpg --import ~/.gnupg/private.key
+          gpg --list-secret-keys
+          gpg --list-keys
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install dependencies"
+        run: |
+          set -ex
+          cat /etc/apt/sources.list
+          sudo apt -q update
+          sudo apt install -y "g++-9" cmake \
+                  libfreetype6-dev \
+                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
+                  libfontconfig1-dev libharfbuzz-dev \
+                  debhelper devscripts dpkg-dev
+      - name: "create debian package"
+        run: |
+          set -ex
+          env | sort
+          # ex: GITHUB_REF="refs/heads/improvement/ppa"
+          BRANCH="$(echo "${GITHUB_REF}" | sed -e "s,refs/heads/,," | sed -e "s,/,-,g")" # result: "improvement/ppa"
+          VERSION="${{ steps.set_vars.outputs.version }}"
+          INCR="${{ steps.set_vars.outputs.RUN_ID }}"
+          pparepo="christianparpart"
+          packagename="contour"
+          debversion="${VERSION}"
+          versionsuffix="snapshot-${INCR}"
+          #./scripts/mkdebchangelog.sh "${debversion}" "${versionsuffix}"
+          exec ./scripts/release-ppa.sh "${VERSION}" "${INCR}"
+

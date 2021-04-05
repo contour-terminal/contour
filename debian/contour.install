@@ -1,3 +1,4 @@
 debian/tmp/usr/bin/contour
 debian/tmp/usr/share/applications/contour.desktop
 debian/tmp/usr/share/pixmaps/contour.png
+debian/tmp/usr/share/terminfo/c/contour-latest

@@ -1,0 +1,13 @@
+
+[contour]
+fqdn			= ppa.launchpad.net
+method			= ftp
+incoming		= ~christianparpart/contour
+login			= anonymous
+
+[contour-dev]
+fqdn			= ppa.launchpad.net
+method			= ftp
+incoming		= ~christianparpart/contour-dev
+login			= anonymous
+

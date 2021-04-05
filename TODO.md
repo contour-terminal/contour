@@ -1,3 +1,5 @@
+- [ ] contour-cli deb package (without terminal GUI)
+  config font resize buggy ;(
 # Milestone 0.2.0 checklist
 
 - [ ] move scrollbar into profile

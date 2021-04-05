@@ -5,17 +5,23 @@ Maintainer: Christian Parpart <christian@parpart.family>
 Build-Depends:
   cmake,
   debhelper,
-  make,
+  extra-cmake-modules,
   g++-9,
+  libc6-dev,
+  libfontconfig1-dev,
+  libfreetype-dev,
+  libharfbuzz-dev,
   libkf5windowsystem-dev,
   libqt5opengl5-dev,
+  make,
+  ncurses-bin,
   pkg-config,
   qtbase5-dev,
 Standards-Version: 3.9.3
 
 Package: contour
 Architecture: any
-Section: httpd
+Section: x11
 Priority: optional
 Description: Contour terminal emulator.
   A GPU accelerated modern terminal emulator.
@@ -23,6 +29,8 @@ Homepage: https://github.com/christianparpart/contour/
 Recommends:
   xdg-utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
+  libc6,
+  libfontconfig1,
   libfreetype6,
   libharfbuzz0b,
   libkf5windowsystem5,
