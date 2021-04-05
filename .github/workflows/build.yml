@@ -12,7 +12,6 @@ on:
     - feature/**
     - fix/**
     - improvement/**
-    - wip
   pull_request:
     branches:
     - master

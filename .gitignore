@@ -1,24 +1,32 @@
 # Visual Studio Code
-/.vscode/
-/build/
-/release/
+.vscode
+.vscode/**
+build
+build/**
+release
+release/**
 
 # Visual Studio
-/.vs/
-/out/
-/CMakeSettings.json
+.vs
+.vs/**
+out
+out/**
+CMakeSettings.json
 
 # VIM: code completion / IntelliSense
-/.clangd/
-/compile_commands.json
-/.vimspector.json
-/.cache/
+.clangd
+.clangd/**
+.cache
+.cache/**
+compile_commands.json
+.vimspector.json
 
 # CMake (CTest)
 /Testing/
 
 # This is a workspace-local sandbox directory with test files not to be included in Git.
-/sandbox/
+sandbox
+sandbox/**
 
 # Never add any log files.
 *.log
@@ -36,11 +44,11 @@
 .directory
 
 # debian: dpkg-buildpackage intermediates
-/debian/files
-/debian/tmp/
-/debian/.debhelper/
-/debian/contour.substvars
-/debian/contour/
-/configure-stamp
-/build-stamp
-/install-stamp
+debian/files
+debian/tmp/**
+debian/.debhelper/**
+debian/contour.substvars
+debian/contour/**
+configure-stamp
+build-stamp
+install-stamp
