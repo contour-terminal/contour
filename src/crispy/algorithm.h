@@ -26,7 +26,7 @@ auto find_if(Container && _container, Pred && _pred)
 }
 
 template <typename Container, typename Fn>
-bool any_of(Container && _container, Fn && _fn)
+constexpr bool any_of(Container && _container, Fn && _fn)
 {
     return std::any_of(begin(_container), end(_container), std::forward<Fn>(_fn));
 }
