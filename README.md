@@ -27,10 +27,11 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
 - ✅ Synchronized rendering (via `DECSM 2026` / `DECRM 2026`)
-- ✅ Conditionally block text reflow (via `DECSM 2027` / `DECRM 2027`)
+- ✅ Text reflow (configurable via `DECSM 2027` / `DECRM 2027`)
 - ✅ Clickable hyperlinks via OSC 8
 - ✅ Clipboard setting via OSC 52
 - ✅ Sixel inline images
+- ✅ Terminal page buffer capture VT extension to quickly extract contents.
 
 ## CLI - Command Line Interface
 
