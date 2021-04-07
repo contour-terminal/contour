@@ -130,7 +130,6 @@ jobs:
             --config "$CODECHECKER_CONFIG" \
             --jobs $(nproc) \
             --output "Results" \
-            \
           || true
       - name: "Perform static analysis (CTU for pushes on master)"
         if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
@@ -156,11 +155,14 @@ jobs:
             --export html \
             --output "Results-HTML"
       - name: "Dump analysis results to CI log"
+        # Ignore the exit status of the parse command - the fact that we have
+        # reports will be obvious from the arfect and the CI output.
         run: |
           "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             parse \
             "Results" \
-            --config "$CODECHECKER_CONFIG"
+            --config "$CODECHECKER_CONFIG" \
+          || true
       - name: "Upload HTML results"
         uses: actions/upload-artifact@v2
         with:
