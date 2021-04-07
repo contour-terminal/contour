@@ -27,13 +27,8 @@ jobs:
     - name: "install dependencies"
       run: |
         set -ex
-        cat /etc/apt/sources.list
         sudo apt -q update
-        sudo apt install -y "g++-9" \
-                build-essential cmake \
-                libfreetype6-dev \
-                qtbase5-dev libqt5gui5 extra-cmake-modules \
-                libfontconfig1-dev libharfbuzz-dev
+        sudo ./scripts/install-deps.sh
     - name: "create build directory"
       run: mkdir build
     - name: "cmake"
@@ -65,13 +60,8 @@ jobs:
     - name: "install dependencies"
       run: |
         set -ex
-        cat /etc/apt/sources.list
         sudo apt -q update
-        sudo apt install -y "g++-9" "g++-10" \
-                libfreetype6-dev \
-                qtbase5-dev libqt5gui5 cmake extra-cmake-modules libkf5windowsystem-dev \
-                libfontconfig1-dev libharfbuzz-dev \
-                debhelper dpkg-dev
+        sudo ./scripts/install-deps.sh
     - name: "create build directory"
       run: mkdir build
     - name: "cmake"
@@ -132,13 +122,8 @@ jobs:
     - name: "install dependencies"
       run: |
         set -ex
-        cat /etc/apt/sources.list
         sudo apt -q update
-        sudo apt install -y "g++-9" libboost-all-dev \
-                cmake \
-                libfreetype6-dev \
-                qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                libfontconfig1-dev libharfbuzz-dev
+        sudo ./scripts/install-deps.sh
     - name: "Get specific version CMake, v3.18.3"
       uses: lukka/get-cmake@v3.18.3
     - name: "create build directory"
@@ -148,7 +133,7 @@ jobs:
         cd build && cmake .. \
           -DUSE_BOOST_FILESYSTEM=ON \
           -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-8 \
           -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
           -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
           -DYAML_CPP_INSTALL=OFF
@@ -204,7 +189,7 @@ jobs:
       run: |
         set -ex
         #brew update
-        brew install freetype fontconfig qt5 harfbuzz boost pkg-config
+        ./scripts/install-deps.sh
     - name: "Create build directory"
       run: mkdir build
     - name: "Generate build files"

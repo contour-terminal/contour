@@ -32,7 +32,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
             OUTPUT_VARIABLE git_branch
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             OUTPUT_STRIP_TRAILING_WHITESPACE)
-        string(REGEX MATCH "^(.*)\\/(.*)$$" _ ${git_branch})
+        string(REGEX MATCH "^(.*)\\/(.*)$$" _ "${git_branch}")
         set(THE_GIT_BRANCH "${CMAKE_MATCH_2}")
         message(STATUS "[Version] Git branch: ${THE_GIT_BRANCH}")
 

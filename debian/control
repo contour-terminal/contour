@@ -6,10 +6,10 @@ Build-Depends:
   cmake,
   debhelper,
   extra-cmake-modules,
-  g++-9,
+  g++,
   libc6-dev,
   libfontconfig1-dev,
-  libfreetype-dev,
+  libfreetype6-dev,
   libharfbuzz-dev,
   libkf5windowsystem-dev,
   libqt5opengl5-dev,
@@ -18,6 +18,16 @@ Build-Depends:
   pkg-config,
   qtbase5-dev,
 Standards-Version: 3.9.3
+
+Package: contour-terminfo
+Architecture: any
+Section: x11
+Priority: optional
+Description: terminfo file for Contour terminal emulator.
+  A GPU accelerated modern terminal emulator.
+Homepage: https://github.com/christianparpart/contour/
+Depends: ${shlibs:Depends}, ${misc:Depends},
+  ncurses-bin,
 
 Package: contour
 Architecture: any
@@ -29,6 +39,7 @@ Homepage: https://github.com/christianparpart/contour/
 Recommends:
   xdg-utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
+  contour-terminfo,
   libc6,
   libfontconfig1,
   libfreetype6,

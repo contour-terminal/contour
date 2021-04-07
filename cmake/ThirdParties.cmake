@@ -1,56 +1,102 @@
-include(FetchContent)
+set(THIRDPARTIES_HAS_FETCHCONTENT ON)
+# if(${CMAKE_VERSION} VERSION_LESS 3.11)
+#     set(THIRDPARTIES_HAS_FETCHCONTENT OFF)
+# endif()
+
+if(THIRDPARTIES_HAS_FETCHCONTENT)
+    include(FetchContent)
+    set(FETCHCONTENT_QUIET OFF)
+else()
+    include(DownloadProject)
+endif()
 
 if(NOT FETCHCONTENT_BASE_DIR STREQUAL "")
     set(FETCHCONTENT_BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}/3rdparty")
 endif()
 
-set(FETCHCONTENT_QUIET OFF)
-
 set(3rdparty_DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/_downloads" CACHE FILEPATH "3rdparty download directory.")
+message(STATUS "base dir: ${FETCHCONTENT_BASE_DIR}")
+message(STATUS "dnld dir: ${3rdparty_DOWNLOAD_DIR}")
 
 macro(ThirdPartiesAdd_fmtlib)
     set(3rdparty_fmtlib_VERSION "7.1.3" CACHE STRING "fmtlib version")
     set(3rdparty_fmtlib_CHECKSUM "SHA256=5cae7072042b3043e12d53d50ef404bbb76949dad1de368d7f993a15c8c05ecc" CACHE STRING "fmtlib checksum")
-    FetchContent_Declare(
-        fmtlib
-        URL "https://github.com/fmtlib/fmt/archive/refs/tags/${3rdparty_fmtlib_VERSION}.tar.gz"
-        URL_HASH "${3rdparty_fmtlib_CHECKSUM}"
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
-    )
-    FetchContent_MakeAvailable(fmtlib)
+    set(3rdparty_fmtlib_URL "https://github.com/fmtlib/fmt/archive/refs/tags/${3rdparty_fmtlib_VERSION}.tar.gz")
+    if(THIRDPARTIES_HAS_FETCHCONTENT)
+        FetchContent_Declare(
+            fmtlib
+            URL "${3rdparty_fmtlib_URL}"
+            URL_HASH "${3rdparty_fmtlib_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
+        )
+        FetchContent_MakeAvailable(fmtlib)
+    else()
+        download_project(
+            PROJ fmtlib
+            URL "${3rdparty_fmtlib_URL}"
+            URL_HASH "${3rdparty_fmtlib_CHECKSUM}"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/fmtlib-${3rdparty_fmtlib_VERSION}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
+            UPDATE_DISCONNECTED 1
+        )
+    endif()
 endmacro()
 
 macro(ThirdPartiesAdd_Catch2)
     set(3rdparty_Catch2_VERSION "2.13.4" CACHE STRING "Embedded catch2 version")
     set(3rdparty_Catch2_CHECKSUM "SHA256=e7eb70b3d0ac2ed7dcf14563ad808740c29e628edde99e973adad373a2b5e4df" CACHE STRING "Embedded catch2 checksum")
+    set(3rdparty_Catch2_URL "https://github.com/catchorg/Catch2/archive/refs/tags/v${3rdparty_Catch2_VERSION}.tar.gz")
     set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")
     set(CATCH_BUILD_EXTRA_TESTS OFF CACHE INTERNAL "")
     set(CATCH_BUILD_TESTING OFF CACHE INTERNAL "")
     set(CATCH_ENABLE_WERROR OFF CACHE INTERNAL "")
     set(CATCH_INSTALL_DOCS OFF CACHE INTERNAL "")
     set(CATCH_INSTALL_HELPERS OFF CACHE INTERNAL "")
-    FetchContent_Declare(
-        Catch2
-        URL "https://github.com/catchorg/Catch2/archive/refs/tags/v${3rdparty_Catch2_VERSION}.tar.gz"
-        URL_HASH "${3rdparty_Catch2_CHECKSUM}"
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
-    )
-    FetchContent_MakeAvailable(Catch2)
+    if(THIRDPARTIES_HAS_FETCHCONTENT)
+        FetchContent_Declare(
+            Catch2
+            URL "${3rdparty_Catch2_URL}"
+            URL_HASH "${3rdparty_Catch2_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        download_project(
+            PROJ Catch2
+            URL "${3rdparty_Catch2_URL}"
+            URL_HASH "${3rdparty_Catch2_CHECKSUM}"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/Catch2-${3rdparty_Catch2_VERSION}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+        )
+    endif()
 endmacro()
 
 macro(ThirdPartiesAdd_range_v3)
     set(3rdparty_range_v3_VERSION "0.11.0" CACHE STRING "Embedded range-v3 version")
     set(3rdparty_range_v3_CHECKSUM "MD5=97ab1653f3aa5f9e3d8200ee2a4911d3" CACHE STRING "Embedded range-v3 hash")
-    FetchContent_Declare(
-        range-v3
-        URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
-        URL_HASH "${3rdparty_range_v3_CHECKSUM}"
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
-    )
-    FetchContent_MakeAvailable(range-v3)
+    if(THIRDPARTIES_HAS_FETCHCONTENT)
+        FetchContent_Declare(
+            range-v3
+            URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+            URL_HASH "${3rdparty_range_v3_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+        )
+        FetchContent_MakeAvailable(range-v3)
+    else()
+        download_project(
+            PROJ range-v3
+            URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+            URL_HASH "${3rdparty_range_v3_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/range-v3-${3rdparty_range_v3_VERSION}"
+        )
+    endif()
 endmacro()
 
 # {{{ yaml-cpp
@@ -89,16 +135,29 @@ macro(ThirdPartiesAdd_yaml_cpp)
     set(YAML_CPP_BUILD_TESTS OFF CACHE INTERNAL "")
     set(YAML_CPP_BUILD_TOOLS OFF CACHE INTERNAL "")
     set(YAML_CPP_INSTALL OFF CACHE INTERNAL "")
-    FetchContent_Declare(
-        yaml-cpp
-        URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
-        URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
-        # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
-        # PATCH_COMMAND patch "${yaml_cpp_patch}"
-    )
-    FetchContent_MakeAvailable(yaml-cpp)
+    if(THIRDPARTIES_HAS_FETCHCONTENT)
+        FetchContent_Declare(
+            yaml-cpp
+            URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
+            # PATCH_COMMAND patch "${yaml_cpp_patch}"
+        )
+        FetchContent_MakeAvailable(yaml-cpp)
+    else()
+        download_project(
+            PROJ yaml-cpp
+            URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/yaml-cpp-${3rdparty_range_v3_VERSION}"
+            # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
+            # PATCH_COMMAND patch "${yaml_cpp_patch}"
+        )
+    endif()
 endmacro()
 # }}}
 
@@ -133,30 +192,29 @@ macro(ThirdPartiesAdd_libunicode)
  add_subdirectory(src/tools)
 ]])
     endif()
-    FetchContent_Declare(
-        libunicode
-        URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
-        URL_HASH "${3rdparty_libunicode_CHECKSUM}"
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
-        # same here
-        #PATCH_COMMAND patch "${libunicode_patch}"
-    )
-    FetchContent_MakeAvailable(libunicode)
+    if(THIRDPARTIES_HAS_FETCHCONTENT)
+        FetchContent_Declare(
+            libunicode
+            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+            URL_HASH "${3rdparty_libunicode_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            # same here
+            #PATCH_COMMAND patch "${libunicode_patch}"
+        )
+        FetchContent_MakeAvailable(libunicode)
+    else()
+        download_project(
+            PROJ libunicode
+            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+            URL_HASH "${3rdparty_libunicode_CHECKSUM}"
+            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/libunicode-${3rdparty_libunicode_VERSION}"
+            # same here
+            #PATCH_COMMAND patch "${libunicode_patch}"
+        )
+    endif()
 endmacro()
 # }}}
-
-macro(ThirdPartiesDownload Name TargetFile URL Checksum)
-    include(ExternalProject)
-    ExternalProject_Add(
-        "${name}"
-        URL "${URL}"
-        URL_HASH "${Checksum}"
-        CONFIGURE_COMMAND ""
-        BUILD_COMMAND ""
-        INSTALL_COMMAND ""
-        DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-        DOWNLOAD_NAME "${TargetFile}"
-    )
-endmacro()
 

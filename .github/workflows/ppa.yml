@@ -9,11 +9,7 @@ on:
     - 'TODO.md'
     branches:
     - master
-    # TEMPORARILY DISABLED
-    # - feature/**
-    # - fix/**
-    # - improvement/**
-    # - wip
+    - improvement/ppa
 
 jobs:
   ubuntu_ppa:
@@ -43,11 +39,8 @@ jobs:
           set -ex
           cat /etc/apt/sources.list
           sudo apt -q update
-          sudo apt install -y "g++-9" cmake \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev \
-                  debhelper devscripts dpkg-dev
+          sudo ./scripts/install-deps.sh
+          sudo apt install debhelper devscripts dpkg-dev
       - name: "create debian package"
         run: |
           set -ex

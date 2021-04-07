@@ -31,13 +31,15 @@ function main()
 
     einfo "Prepare source directory for branch ${BRANCH}"
     git clone -b "${BRANCH}" https://github.com/christianparpart/contour.git ${SRCDIR}
+    cd "${SRCDIR}"
 
     # {{{ set source dir related properties
     local COMMIT_HASH=$(git rev-parse --short=8 HEAD)
     local COMMIT_DATE=$(date +%Y-%m-%d-%H-%M -d @$(git show --format=%at HEAD | head -n 1))
     local VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
     local SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
-    if [[ "${BRANCH}" = "master" ]]; then
+    if [[ "${BRANCH}" = "master" ]]
+    then
        SUFFIX="";
        VERSION_STRING="${VERSION}"
     else
@@ -54,14 +56,21 @@ function main()
     einfo "Prepare source tarball."
     local debversion="$VERSION~develop-$COMMIT_DATE-$COMMIT_HASH"
     local TARFILE="../contour_${debversion}.orig.tar.gz"
-    if [[ ! -e "${TARFILE}" ]]; then
+    if [[ ! -e "${TARFILE}" ]]
+    then
         mv -v "${SRCDIR}/debian" "${BASEDIR}/debian" # but without debian/ dir
         tar --exclude-vcs --exclude-vcs-ignores -czf "${TARFILE}" .
         mv "${BASEDIR}/debian" "${SRCDIR}/debian"
     fi
     einfo "debversion: ${debversion}"
 
-    for distribution in ${DISTRIBUTIONS[*]}; do
+    for distribution in ${DISTRIBUTIONS[*]}
+    do
+        if [[ "${distribution}" = "bionic" ]]; then
+            # g++ would default to version 7 and that's not good enough
+            sed -i -e 's/g++,/g++-8,/' debian/control
+        fi
+
         einfo "${SETMARK}Preparing upload for distribution: ${distribution}"
         einfo "- Updating /debian/changelog."
         local versionsuffix=0ubuntu1~${distribution}
@@ -78,7 +87,9 @@ function main()
         einfo "- Upload the package to the PPA."
         dput ppa:christianparpart/contour-dev ../contour_${debversion}-${versionsuffix}_source.changes
 
-        git restore debian/changelog
+        git status
+        git diff | cat
+        git reset --hard HEAD
     done
 }
 

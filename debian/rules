@@ -8,11 +8,10 @@ BUILDDIR = release
 configure: configure-stamp
 configure-stamp:
 	mkdir -p ${BUILDDIR}
-	cmake . \
+	cd "${BUILDDIR}" && cmake .. \
 		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 		-DCMAKE_INSTALL_PREFIX="/usr" \
 		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
-		-DCMAKE_CXX_COMPILER="g++-9" \
 		\
 		-DCONTOUR_EXAMPLES=OFF \
 		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
@@ -23,9 +22,7 @@ configure-stamp:
 		\
 		-DCRISPY_TESTING=ON \
 		-DLIBTERMINAL_TESTING=ON \
-		-DLIBUNICODE_TESTING=ON \
-		\
-		-B ${BUILDDIR}
+		-DLIBUNICODE_TESTING=ON
 	touch $@
 
 build: build-stamp
