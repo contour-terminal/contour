@@ -4,9 +4,10 @@ on:
   push:
     paths-ignore:
     - 'docs/**'
-    - '.github/ISSUE_TEMPLATE/**'
-    - '.github/*.yml'
-    - 'TODO.md'
+    - '.github/**'
+    - 'docs/**'
+    - '*.md'
+    - '.*'
     branches:
     - master
     - improvement/ppa
