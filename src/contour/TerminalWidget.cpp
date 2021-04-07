@@ -522,7 +522,7 @@ void TerminalWidget::initializeGL()
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
     CHECKED_GL( glEnable(GL_DEBUG_OUTPUT) );
-    CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
+    // CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
 #endif
 
     if (profile_.maximized)
