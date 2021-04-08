@@ -1,0 +1,189 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include <crispy/App.h>
+#include <crispy/debuglog.h>
+#include <crispy/utils.h>
+
+#include <algorithm>
+#include <iomanip>
+#include <numeric>
+#include <optional>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
+
+using std::bind;
+using std::max;
+using std::exception;
+using std::left;
+using std::nullopt;
+using std::optional;
+using std::setw;
+using std::string;
+using std::string_view;
+
+namespace CLI = crispy::cli;
+
+namespace crispy {
+
+namespace // {{{ helper
+{ CLI::HelpStyle helpStyle()
+    {
+        auto style = CLI::HelpStyle{};
+
+        style.optionStyle = CLI::OptionStyle::Natural;
+
+#if !defined(_WIN32)
+        if (!isatty(STDOUT_FILENO))
+        {
+            style.colors.reset();
+            style.hyperlink = false;
+        }
+#endif
+
+         return style;
+    }
+
+    int screenWidth()
+    {
+        constexpr auto DefaultWidth = 80;
+
+#if !defined(_WIN32)
+        auto ws = winsize{};
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
+            return ws.ws_col;
+#endif
+
+        return DefaultWidth;
+    }
+
+    void customizeDebugLog()
+    {
+        crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
+        {
+            auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+            auto const fileName = string(srcIndex != string_view::npos
+                ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                : string(_msg.location().file_name()));
+
+            auto result = string{};
+
+            for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
+            {
+                if (i != 0)
+                    result += "        ";
+                else
+                    result += fmt::format("[{}:{}:{}] ",
+                                          fileName,
+                                          _msg.location().line(),
+                                          _msg.location().function_name());
+
+                result += line;
+                result += '\n';
+            }
+
+            return result;
+        });
+    }
+} // }}}
+
+App::App(std::string _appName, std::string _appTitle, std::string _appVersion) :
+    appName_{ std::move(_appName) },
+    appTitle_{ std::move(_appTitle) },
+    appVersion_{ std::move(_appVersion) }
+{
+    link(appName_ + ".help", bind(&App::helpAction, this));
+    link(appName_ + ".version", bind(&App::versionAction, this));
+}
+
+void App::link(std::string _command, std::function<int()> _handler)
+{
+    handlers_[move(_command)] = move(_handler);
+}
+
+void App::listDebugTags()
+{
+    auto tags = crispy::debugtag::store();
+    sort(
+        begin(tags),
+        end(tags),
+        [](crispy::debugtag::tag_info const& a, crispy::debugtag::tag_info const& b) {
+           return a.name < b.name;
+        }
+    );
+    auto const maxNameLength = std::accumulate(
+        begin(tags),
+        end(tags),
+        size_t{0},
+        [&](auto _acc, auto const& _tag) { return max(_acc, _tag.name.size()); }
+    );
+    auto const column1Length = maxNameLength + 2u;
+    for (auto const& tag: tags)
+    {
+        std::cout
+            << left << setw(int(column1Length)) << tag.name
+            << "; " << tag.description << '\n';
+    }
+}
+
+int App::helpAction()
+{
+    std::cout << CLI::helpText(syntax_.value(), helpStyle(), screenWidth());
+    return EXIT_SUCCESS;
+}
+
+int App::versionAction()
+{
+    std::cout << fmt::format("{} {}\n\n", appTitle_, appVersion_);
+    return EXIT_SUCCESS;
+}
+
+// customize debuglog transform to shorten the file_name output a bit
+int App::run(int argc, char const* argv[])
+{
+    try
+    {
+        customizeDebugLog();
+
+        syntax_ = parameterDefinition();
+
+        optional<CLI::FlagStore> flagsOpt = CLI::parse(syntax_.value(), argc, argv);
+        if (!flagsOpt.has_value())
+        {
+            std::cerr << "Failed to parse command line parameters.\n";
+            return EXIT_FAILURE;
+        }
+        flags_ = std::move(flagsOpt.value());
+
+        // std::cout << fmt::format("Flags: {}\n", parameters().values.size());
+        // for (auto const & [k, v] : parameters().values)
+        //     std::cout << fmt::format(" - {}: {}\n", k, v);
+
+        for (auto const& [name, handler]: handlers_)
+            if (parameters().get<bool>(name))
+                return handler();
+
+        std::cerr << fmt::format("Usage error.\n");
+        return EXIT_FAILURE;
+    }
+    catch (exception const& e)
+    {
+        std::cerr << fmt::format("Unhandled error caught. {}", e.what());
+        return EXIT_FAILURE;
+    }
+}
+
+}

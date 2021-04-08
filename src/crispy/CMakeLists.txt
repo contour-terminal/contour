@@ -4,7 +4,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/FilesystemResolver.cmake")
 # crispy::core
 
 set(crispy_SOURCES
-    CLI.h CLI.cpp
+    App.cpp App.h
+    CLI.cpp CLI.h
     Comparison.h
     algorithm.h
     base64.h
