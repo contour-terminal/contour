@@ -11,16 +11,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/ContourGuiApp.h>
+#pragma once
 
-int main(int argc, char const* argv[])
+#include <crispy/App.h>
+
+namespace contour {
+
+/// Contour TUI application.
+///
+/// TODO: provide special installable targets in debian packageS (cmake and PPA)
+class ContourApp : public crispy::App
 {
-#if defined(CONTOUR_FRONTEND_GUI)
-    contour::ContourGuiApp app;
-#else
-    contour::ContourApp app;
-#endif
+  public:
+    ContourApp();
 
-    return app.run(argc, argv);
+    crispy::cli::Command parameterDefinition() const override;
+
+  private:
+    int captureAction();
+    int listDebugTagsAction();
+    int parserTableAction();
+    int profileAction();
+    int terminfoAction();
+};
+
 }
-

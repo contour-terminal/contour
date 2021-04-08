@@ -29,13 +29,15 @@ set(contour_SRCS
 
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND contour_SRCS
-        Config.cpp Config.h
         Actions.cpp Actions.h
-        Controller.cpp Controller.h
         BackgroundBlur.cpp BackgroundBlur.h
+        Config.cpp Config.h
+        ContourApp.cpp ContourApp.h
+        ContourGuiApp.cpp ContourGuiApp.h
+        Controller.cpp Controller.h
         FileChangeWatcher.cpp FileChangeWatcher.h
-        TerminalWindow.cpp TerminalWindow.h
         TerminalWidget.cpp TerminalWidget.h
+        TerminalWindow.cpp TerminalWindow.h
         helper.cpp helper.h
     )
 endif()

@@ -11,16 +11,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/ContourGuiApp.h>
+#pragma once
 
-int main(int argc, char const* argv[])
+#include <contour/ContourApp.h>
+
+namespace contour {
+
+/// Extends ContourApp with terminal GUI capability.
+class ContourGuiApp : public ContourApp
 {
-#if defined(CONTOUR_FRONTEND_GUI)
-    contour::ContourGuiApp app;
-#else
-    contour::ContourApp app;
-#endif
+  public:
+    ContourGuiApp();
 
-    return app.run(argc, argv);
+    int run(int argc, char const* argv[]) override;
+    crispy::cli::Command parameterDefinition() const override;
+
+  private:
+    int argc_ = 0;
+    char const** argv_ = nullptr;
+    int terminalGuiAction();
+};
+
 }
-
