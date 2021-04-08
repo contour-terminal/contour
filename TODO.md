@@ -1,6 +1,8 @@
-- [ ] contour-cli deb package (without terminal GUI)
-  config font resize buggy ;(
 # Milestone 0.2.0 checklist
+
+- [ ] contour-cli deb package (without terminal GUI)
+- [ ] BUG: config font resize buggy ;(
+- [ ] BUG: in cursor-line (maybe below empty?) the last word is bold, but only the last word. even on `cat` or `sh`.
 
 - [ ] move scrollbar into profile
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
