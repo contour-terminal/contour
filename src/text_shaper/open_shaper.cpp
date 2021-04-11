@@ -465,7 +465,7 @@ namespace // {{{ helper
 
             if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size, _dpi.x, _dpi.y); ec != FT_Err_Ok)
             {
-                debuglog(FontFallbackTag).write("Failed to FT_Set_Pixel_Sizes: {}\n", ftErrorStr(ec));
+                debuglog(FontFallbackTag).write("Failed to FT_Set_Char_Size: {}\n", ftErrorStr(ec));
             }
         }
 
