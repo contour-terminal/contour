@@ -11,17 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(CONTOUR_FRONTEND_GUI)
-    #include <contour/ContourGuiApp.h>
-    using ContourApp = contour::ContourGuiApp;
-#else
-    #include <contour/ContourApp.h>
-    using ContourApp = contour::ContourApp;
-#endif
+#include <contour/ContourApp.h>
 
 int main(int argc, char const* argv[])
 {
-    ContourApp app;
+    contour::ContourApp app;
     return app.run(argc, argv);
 }
 

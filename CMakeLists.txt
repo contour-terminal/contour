@@ -64,10 +64,10 @@ ThirdPartiesAdd_yaml_cpp()
 
 # ----------------------------------------------------------------------------
 add_subdirectory(src/crispy)
-add_subdirectory(src/text_shaper)
 add_subdirectory(src/terminal)
 
 if(CONTOUR_FRONTEND_GUI)
+    add_subdirectory(src/text_shaper)
     add_subdirectory(src/terminal_renderer)
     add_subdirectory(src/terminal_view)
     add_subdirectory(src/terminal_renderer/opengl)

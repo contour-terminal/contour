@@ -40,8 +40,7 @@ jobs:
           set -ex
           cat /etc/apt/sources.list
           sudo apt -q update
-          sudo ./scripts/install-deps.sh
-          sudo apt install debhelper devscripts dpkg-dev
+          sudo apt install git g++ ncurses-bin cmake debhelper devscripts dpkg-dev # minimal version of dependencies for non-GUI build
       - name: "create debian package"
         run: |
           set -ex

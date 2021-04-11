@@ -3,37 +3,27 @@
 
 export DH_VERBOSE=1
 
-# DEB_BUILD_OPTIONS, supported flags are:
-#
-# - nogui    Disables terminal GUI in contour executable, suitable for server-side headless use.
-#
-DEB_BUILD_OPTIONS =
-
 BUILDDIR = release
-
-CMAKE_FLAGS =
-ifneq (,$(filter nogui,$(DEB_BUILD_OPTIONS)))
-	CMAKE_FLAGS += -DCONTOUR_FRONTEND_GUI=OFF
-endif
 
 configure: configure-stamp
 configure-stamp:
 	mkdir -p ${BUILDDIR}
-	cd "${BUILDDIR}" && cmake .. ${CMAKE_FLAGS} \
+	cd "${BUILDDIR}" && cmake .. \
 		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 		-DCMAKE_INSTALL_PREFIX="/usr" \
 		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
 		\
 		-DCONTOUR_EXAMPLES=OFF \
-		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+		-DCONTOUR_FRONTEND_CLI=ON \
+		-DCONTOUR_FRONTEND_GUI=OFF \
 		\
 		-D3rdparty_DOWNLOAD_DIR="$(shell pwd)/_3rdparty" \
 		-DFETCHCONTENT_QUIET=OFF \
 		-DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
 		\
 		-DCRISPY_TESTING=ON \
-		-DLIBTERMINAL_TESTING=ON \
-		-DLIBUNICODE_TESTING=ON
+		-DLIBTERMINAL_TESTING=OFF \
+		-DLIBUNICODE_TESTING=OFF
 	touch $@
 
 build: build-stamp
@@ -42,6 +32,8 @@ build-stamp: configure-stamp
 	$(MAKE) -C ${BUILDDIR} -j3
 	${BUILDDIR}/src/crispy/crispy_test
 	${BUILDDIR}/src/terminal/terminal_test
+	# XXX Rename to retain the same frontend name, `contour`.
+	mv -vf ${BUILDDIR}/src/contour/contourcli ${BUILDDIR}/src/contour/contour
 	touch $@
 
 install: install-stamp

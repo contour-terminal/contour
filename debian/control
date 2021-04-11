@@ -7,7 +7,6 @@ Build-Depends:
   debhelper,
   extra-cmake-modules,
   g++,
-  libc6-dev,
   libfontconfig1-dev,
   libfreetype6-dev,
   libharfbuzz-dev,
@@ -36,11 +35,11 @@ Priority: optional
 Description: Contour terminal emulator.
   A GPU accelerated modern terminal emulator.
 Homepage: https://github.com/christianparpart/contour/
+Conflicts: contour-cli
 Recommends:
   xdg-utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
   contour-terminfo,
-  libc6,
   libfontconfig1,
   libfreetype6,
   libharfbuzz0b,

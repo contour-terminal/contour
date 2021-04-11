@@ -1,0 +1,23 @@
+Source: contour-cli
+Section: x11
+Priority: optional
+Maintainer: Christian Parpart <christian@parpart.family>
+Build-Depends:
+  cmake,
+  debhelper,
+  g++,
+  make,
+  ncurses-bin,
+  pkg-config,
+Standards-Version: 3.9.3
+
+Package: contour-cli
+Architecture: any
+Section: x11
+Priority: optional
+Conflicts: contour
+Description: Contour terminal emulator (headless client without GUI)
+Homepage: https://github.com/christianparpart/contour/
+Recommends:
+Depends: ${shlibs:Depends}, ${misc:Depends},
+  contour-terminfo,

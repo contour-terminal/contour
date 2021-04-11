@@ -1,8 +1,5 @@
 include(FilesystemResolver)
 
-find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
-find_package(OpenGL REQUIRED)
-
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
@@ -19,60 +16,78 @@ if(CONTOUR_FRONTEND_GUI AND CONTOUR_BLUR_PLATFORM_KWIN)
 endif()
 # }}}
 
-CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
-
-set(contour_SRCS
+# {{{ ContourCLI
+add_library(libContourCLI
     CaptureScreen.cpp CaptureScreen.h
-    main.cpp
-    "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
+    ContourApp.cpp ContourApp.h
 )
-
-if(CONTOUR_FRONTEND_GUI)
-    list(APPEND contour_SRCS
-        Actions.cpp Actions.h
-        BackgroundBlur.cpp BackgroundBlur.h
-        Config.cpp Config.h
-        ContourApp.cpp ContourApp.h
-        ContourGuiApp.cpp ContourGuiApp.h
-        Controller.cpp Controller.h
-        FileChangeWatcher.cpp FileChangeWatcher.h
-        TerminalWidget.cpp TerminalWidget.h
-        TerminalWindow.cpp TerminalWindow.h
-        helper.cpp helper.h
-    )
-endif()
-
-if(WIN32)
-    list(APPEND contour_SRCS contour.rc)
-endif()
-
-add_executable(contour ${contour_SRCS})
-target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_definitions(contour PRIVATE
+target_link_libraries(libContourCLI terminal)
+target_include_directories(libContourCLI PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_include_directories(libContourCLI PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(libContourCLI PUBLIC
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
     CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
-set_target_properties(contour PROPERTIES AUTOMOC ON)
+# }}}
 
-if(CONTOUR_PERF_STATS)
-    target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
-endif()
-
-if(CONTOUR_VT_METRICS)
-    target_compile_definitions(contour PRIVATE CONTOUR_VT_METRICS)
-endif()
-
+# {{{ ContourGUI
 if(CONTOUR_FRONTEND_GUI)
-    target_compile_definitions(contour PRIVATE CONTOUR_FRONTEND_GUI)
-endif()
+    find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
+    find_package(OpenGL REQUIRED)
 
-if(CONTOUR_SCROLLBAR)
-    target_compile_definitions(contour PRIVATE CONTOUR_SCROLLBAR)
-endif()
+    CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
 
+    add_library(libContourGUI
+        Actions.cpp Actions.h
+        BackgroundBlur.cpp BackgroundBlur.h
+        Config.cpp Config.h
+        ContourGuiApp.cpp ContourGuiApp.h
+        Controller.cpp Controller.h
+        FileChangeWatcher.cpp FileChangeWatcher.h
+        TerminalWidget.cpp TerminalWidget.h
+        TerminalWindow.cpp TerminalWindow.h
+        helper.cpp helper.h
+        "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
+    )
+    set_target_properties(libContourGUI PROPERTIES AUTOMOC ON)
+    target_include_directories(libContourGUI PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+    target_include_directories(libContourGUI PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
+    if(CONTOUR_PERF_STATS)
+        target_compile_definitions(libContourGUI PUBLIC CONTOUR_PERF_STATS)
+    endif()
+    if(CONTOUR_VT_METRICS)
+        target_compile_definitions(libContourGUI PUBLIC CONTOUR_VT_METRICS)
+    endif()
+    if(CONTOUR_SCROLLBAR)
+        target_compile_definitions(libContourGUI PUBLIC CONTOUR_SCROLLBAR)
+    endif()
+    target_link_libraries(libContourGUI libContourCLI yaml-cpp terminal terminal_view terminal_renderer_opengl Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
+    if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
+        target_compile_definitions(libContourGUI PUBLIC CONTOUR_BLUR_PLATFORM_KWIN)
+        target_link_libraries(libContourGUI KF5::WindowSystem)
+    endif()
+    if(Boost_FILESYSTEM_FOUND)
+        target_include_directories(libContourGUI PRIVATE ${Boost_INCLUDE_DIRS})
+        target_link_libraries(libContourGUI ${Boost_LIBRARIES})
+    endif()
+endif()
+# }}}
+
+# {{{ contour executable
+set(contour_SRCS main.cpp)
+if(WIN32)
+    list(APPEND contour_SRCS contour.rc)
+endif()
+add_executable(contour ${contour_SRCS})
+if(CONTOUR_FRONTEND_GUI)
+    target_link_libraries(contour libContourGUI)
+    target_compile_definitions(contour PUBLIC CONTOUR_FRONTEND_GUI)
+else()
+    target_link_libraries(contour libContourCLI)
+endif()
 if(WIN32)
     if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
         set_target_properties(contour PROPERTIES
@@ -98,20 +113,6 @@ elseif(APPLE)
     )
 endif()
 
-target_link_libraries(contour terminal yaml-cpp)
-if(Boost_FILESYSTEM_FOUND)
-    target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
-    target_link_libraries(contour ${Boost_LIBRARIES})
-endif()
-
-if(CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour terminal_view terminal_renderer_opengl Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
-    if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
-        target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
-        target_link_libraries(contour KF5::WindowSystem)
-    endif()
-endif()
-
 if(CONTOUR_SANITIZE AND NOT MSVC)
     add_compile_options(-fsanitize=address)
     #add_compile_options(-fsanitize=pointer-compare) # cannot be enabled with -fsanitize=thread
@@ -119,7 +120,9 @@ if(CONTOUR_SANITIZE AND NOT MSVC)
     add_compile_options(-fsanitize=undefined)
     target_link_libraries(contour ubsan)
 endif()
+# }}}
 
+# {{{ create terminfo file
 if(NOT(WIN32))
     set(terminfo_file "contour.terminfo")
     set(terminfo_basedir "${CMAKE_CURRENT_BINARY_DIR}/terminfo")
@@ -140,6 +143,7 @@ if(NOT(WIN32))
         VERBATIM
     )
 endif()
+# }}}
 
 # ====================================================================================
 # INSTALLER

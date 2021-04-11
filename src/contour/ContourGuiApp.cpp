@@ -13,22 +13,20 @@
  */
 #include <contour/ContourGuiApp.h>
 
-#if defined(CONTOUR_FRONTEND_GUI)
 #include <contour/Config.h>
 #include <contour/Controller.h>
 #include <contour/TerminalWidget.h>
-#endif
 
-#if defined(CONTOUR_FRONTEND_GUI)
 #include <QtWidgets/QApplication>
 #include <QSurfaceFormat>
-#endif
 
 #include <iostream>
 
 using std::bind;
 using std::cerr;
 using std::prev;
+using std::begin;
+using std::end;
 using std::string;
 using std::string_view;
 
