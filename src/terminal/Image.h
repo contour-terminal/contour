@@ -61,8 +61,8 @@ class Image {
 
     Image(Image const&) = delete;
     Image& operator=(Image const&) = delete;
-    Image(Image&&) = delete;
-    Image& operator=(Image&&) = delete;
+    Image(Image&&) = default;
+    Image& operator=(Image&&) = default;
 
     constexpr Id id() const noexcept { return id_; }
     constexpr ImageFormat format() const noexcept { return format_; }
@@ -72,10 +72,10 @@ class Image {
     constexpr Height height() const noexcept { return size_.height; }
 
   private:
-    Id const id_;
-    ImageFormat const format_;
-    Data const data_;
-    ImageSize const size_;
+    Id id_;
+    ImageFormat format_;
+    Data data_;
+    ImageSize size_;
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
@@ -197,6 +197,7 @@ inline bool operator<(ImageFragment const& a, ImageFragment const& b) noexcept
 class ImagePool {
   public:
     using OnImageRemove = std::function<void(Image const*)>;
+
     ImagePool(OnImageRemove _onImageRemove, Image::Id _nextImageId) :
         nextImageId_{ _nextImageId },
         images_{},
