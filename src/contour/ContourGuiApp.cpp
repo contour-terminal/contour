@@ -167,7 +167,12 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     QCoreApplication::setApplicationName("contour");
     QCoreApplication::setOrganizationName("contour");
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+
+    // NB: High DPI scaling should be enabled, but that sadly also applies to QOpenGLWidget
+    // which makes the text look pixelated on HighDPI screens. We want to apply HighDPI
+    // manually in QOpenGLWidget.
+    //QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
+    QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
 
     QApplication app(argc, (char**) argv);
 
