@@ -51,7 +51,7 @@ precmd_hook_contour()
 preexec_hook_contour()
 {
     # Enables text reflow for the main page area again, so that a window resize will reflow again.
-    print "\e[?2027h" >$TTY
+    print -n "\e[?2027h" >$TTY
 }
 
 add-zsh-hook precmd precmd_hook_contour
