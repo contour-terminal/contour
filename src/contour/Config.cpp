@@ -311,6 +311,17 @@ void createFileIfNotExists(FileSystem::path const& _path)
                                             ec.message())};
 }
 
+std::string createDefaultConfig()
+{
+    ostringstream out;
+    out.write(
+        (char const*) contour::default_config_yaml.data(),
+        contour::default_config_yaml.size()
+    );
+
+    return out.str();
+}
+
 error_code createDefaultConfig(FileSystem::path const& _path)
 {
     FileSystemError ec;
@@ -318,10 +329,7 @@ error_code createDefaultConfig(FileSystem::path const& _path)
     if (ec)
         return ec;
 
-    ofstream{_path.string(), ios::binary | ios::trunc}.write(
-        (char const*) contour::default_config_yaml.data(),
-        contour::default_config_yaml.size()
-    );
+    ofstream{_path.string(), ios::binary | ios::trunc} << createDefaultConfig();
 
     return error_code{};
 }

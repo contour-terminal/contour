@@ -20,11 +20,13 @@ endif()
 # }}}
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
+CIncludeMe(shell-integration.zsh "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h" "shell_integration_zsh" "contour")
 
 set(contour_SRCS
     CaptureScreen.cpp CaptureScreen.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h"
 )
 
 if(CONTOUR_FRONTEND_GUI)
@@ -133,7 +135,7 @@ if(NOT(WIN32))
     add_custom_command(
         TARGET contour POST_BUILD
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND contour terminfo output ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
+        COMMAND contour generate terminfo output ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
         DEPENDS "${terminfo_file}"
         COMMENT "Compiling ${terminfo_file}"
         BYPRODUCTS "${terminfo_file}"

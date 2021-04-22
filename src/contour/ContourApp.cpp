@@ -11,8 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/ContourApp.h>
 #include <contour/CaptureScreen.h>
+#include <contour/Config.h>
+#include <contour/ContourApp.h>
+
+#include "shell_integration_zsh.h"
 
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
@@ -44,20 +47,57 @@ ContourApp::ContourApp() :
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));
     link("contour.parser-table", bind(&ContourApp::parserTableAction, this));
-    link("contour.terminfo", bind(&ContourApp::terminfoAction, this));
+    link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
+    link("contour.generate.config", bind(&ContourApp::configAction, this));
+    link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
 }
 
-int ContourApp::terminfoAction()
+template <typename Callback>
+auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, Callback _callback)
 {
-    auto const& outputFileName = parameters().get<string>("contour.terminfo.output");
-    auto ownedOutput = unique_ptr<std::ostream>{};
     std::ostream* out = &cout;
+
+    auto const& outputFileName = _flags.get<string>(_name); // TODO: support string_view
+    auto ownedOutput = unique_ptr<std::ostream>{};
     if (outputFileName != "-")
     {
         ownedOutput = make_unique<std::ofstream>(outputFileName);
         out = ownedOutput.get();
     }
-    *out << terminal::capabilities::StaticDatabase{}.terminfo();
+
+    return _callback(*out);
+}
+
+int ContourApp::integrationAction()
+{
+    return withOutput(parameters(), "contour.generate.integration.output", [&](auto& _stream) {
+        auto const shell = parameters().get<string>("contour.generate.integration.shell");
+        if (shell == "zsh")
+        {
+            _stream.write((char const*) shell_integration_zsh.data(), shell_integration_zsh.size());
+            return EXIT_SUCCESS;
+        }
+        else
+        {
+            std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n", shell);
+            return EXIT_FAILURE;
+        }
+    });
+}
+
+int ContourApp::configAction()
+{
+    withOutput(parameters(), "contour.generate.config.output", [](auto& _stream) {
+        _stream << config::createDefaultConfig();
+    });
+    return EXIT_SUCCESS;
+}
+
+int ContourApp::terminfoAction()
+{
+    withOutput(parameters(), "contour.generate.terminfo.output", [](auto& _stream) {
+        _stream << terminal::capabilities::StaticDatabase{}.terminfo();
+    });
     return EXIT_SUCCESS;
 }
 
@@ -107,10 +147,56 @@ crispy::cli::Command ContourApp::parameterDefinition() const
             CLI::Command{"parser-table", "Dumps parser table"},
             CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
             CLI::Command{
-                "terminfo",
-                "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
-                {
-                    CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
+                "generate",
+                "Generation utilities.",
+                CLI::OptionList{},
+                CLI::CommandList{
+                    CLI::Command{
+                        "terminfo",
+                        "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
+                        {
+                            CLI::Option{
+                                "output",
+                                CLI::Value{""s},
+                                "Output file name to store the screen capture to. If - (dash) is given, the output will be written to standard output.",
+                                "FILE",
+                                CLI::Presence::Required
+                            },
+                        }
+                    },
+                    CLI::Command{
+                        "config",
+                        "Generates configuration file with the default configuration.",
+                        CLI::OptionList{
+                            CLI::Option{
+                                "output",
+                                CLI::Value{""s},
+                                "Output file name to store the config file to. If - (dash) is given, the output will be written to standard output.",
+                                "FILE",
+                                CLI::Presence::Required
+                            },
+                        }
+                    },
+                    CLI::Command{
+                        "integration",
+                        "Generates shell integration script.",
+                        CLI::OptionList{
+                            CLI::Option{
+                                "shell",
+                                CLI::Value{""s},
+                                "Shell name to create the integration for. Currently only zsh is supported.",
+                                "SHELL",
+                                CLI::Presence::Required
+                            },
+                            CLI::Option{
+                                "output",
+                                CLI::Value{""s},
+                                "Output file name to store the shell integration file to. If - (dash) is given, the output will be written to standard output.",
+                                "FILE",
+                                CLI::Presence::Required
+                            },
+                        }
+                    }
                 }
             },
             CLI::Command{

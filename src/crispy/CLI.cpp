@@ -680,9 +680,10 @@ namespace // {{{ helpers
     {
         // NOTE: We asume that cursor position is at first column!
         auto const stylize = stylizer(_style);
-        bool const isSubCommand = !_parents.empty();
+        bool const hasParentCommand = !_parents.empty();
+        bool const isLeafCommand = _command.children.empty();
 
-        if (isSubCommand || !_command.options.empty() || _command.verbatim.has_value()) // {{{ print command sequence
+        if (isLeafCommand || !_command.options.empty() || _command.verbatim.has_value()) // {{{ print command sequence
         {
             _os << indent(1);
             for (Command const* parent : _parents)
@@ -699,7 +700,7 @@ namespace // {{{ helpers
 
             _os << "\n";
 
-            if (isSubCommand)
+            if (hasParentCommand)
             {
                 int cursor = 1;
                 _os << indent(2, &cursor);
@@ -868,7 +869,8 @@ string usageText(Command const& _command, HelpStyle const& _style, int _margin, 
         stringstream sstr;
         for (Command const& subcmd : _command.children)
             sstr << usageText(subcmd, _style, _margin, prefixStr);
-        sstr << '\n';
+        if (_command.children.empty())
+            sstr << '\n';
         return sstr.str();
     }
 }
@@ -883,6 +885,7 @@ string helpText(Command const& _command, HelpStyle const& _style, int _margin)
 
     output << "  " << stylize("Usage:", HelpElement::Header) << "\n\n";
     output << usageText(_command, _style, _margin, indent(1));
+    output << '\n';
 
     auto constexpr DescriptionHeader = string_view{"Detailed description:"};
 

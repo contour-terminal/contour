@@ -33,6 +33,8 @@ class ContourApp : public crispy::App
     int parserTableAction();
     int profileAction();
     int terminfoAction();
+    int configAction();
+    int integrationAction();
 };
 
 }
