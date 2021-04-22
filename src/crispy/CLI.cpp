@@ -680,9 +680,10 @@ namespace // {{{ helpers
     {
         // NOTE: We asume that cursor position is at first column!
         auto const stylize = stylizer(_style);
-        bool const isSubCommand = !_parents.empty();
+        bool const hasParentCommand = !_parents.empty();
+        bool const isLeafCommand = _command.children.empty();
 
-        if (isSubCommand || !_command.options.empty() || _command.verbatim.has_value()) // {{{ print command sequence
+        if (isLeafCommand || !_command.options.empty() || _command.verbatim.has_value()) // {{{ print command sequence
         {
             _os << indent(1);
             for (Command const* parent : _parents)
@@ -699,7 +700,7 @@ namespace // {{{ helpers
 
             _os << "\n";
 
-            if (isSubCommand)
+            if (hasParentCommand)
             {
                 int cursor = 1;
                 _os << indent(2, &cursor);
