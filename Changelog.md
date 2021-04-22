@@ -30,7 +30,7 @@
 - Adds VT sequence to capture the current screen buffer `CSI > LineMode ; StartLine ; LineCount t` giving the respone back on stdin via `OSC 314 ; <screen buffer> ST`, and feature detection via `DA1` number `314`.
 - Adds VT sequence `DECSNLS` for setting number of lines to display.
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
-- Adds new CLI command: `contour profile set NAME` to change the profile on the fly.
+- Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 
 ### 0.1.1 (2020-12-31)
 

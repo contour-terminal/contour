@@ -42,7 +42,7 @@ ContourApp::ContourApp() :
 {
     link("contour.capture", bind(&ContourApp::captureAction, this));
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
-    link("contour.profile", bind(&ContourApp::profileAction, this));
+    link("contour.set.profile", bind(&ContourApp::profileAction, this));
     link("contour.parser-table", bind(&ContourApp::parserTableAction, this));
     link("contour.terminfo", bind(&ContourApp::terminfoAction, this));
 }
@@ -89,7 +89,8 @@ int ContourApp::listDebugTagsAction()
 
 int ContourApp::profileAction()
 {
-    auto const profileName = parameters().get<string>("contour.profile.set");
+    auto const profileName = parameters().get<string>("contour.set.profile.to");
+    // TODO: guard `profileName` value against invalid input.
     cout << fmt::format("\033P$p{}\033\\", profileName);
     return EXIT_SUCCESS;
 }
@@ -123,10 +124,17 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                 }
             },
             CLI::Command{
-                "profile",
-                "Profile configuration for the current terminal.",
-                {
-                    CLI::Option{"set", CLI::Value{""s}, "Changes the terminal profile of the currently attached terminal to the given value.", "NAME", CLI::Presence::Required}
+                "set",
+                "Sets various aspects of the connected terminal.",
+                CLI::OptionList{},
+                CLI::CommandList{
+                    CLI::Command{
+                        "profile",
+                        "Changes the terminal profile of the currently attached terminal to the given value.",
+                        CLI::OptionList{
+                            CLI::Option{"to", CLI::Value{""s}, "Profile name to activate in the currently connected terminal."}
+                        }
+                    }
                 }
             }
         }
