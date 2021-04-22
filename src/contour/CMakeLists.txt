@@ -20,11 +20,13 @@ endif()
 # }}}
 
 CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
+CIncludeMe(shell-integration.zsh "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h" "shell_integration_zsh" "contour")
 
 set(contour_SRCS
     CaptureScreen.cpp CaptureScreen.h
     main.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h"
 )
 
 if(CONTOUR_FRONTEND_GUI)

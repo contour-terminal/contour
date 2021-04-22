@@ -33,6 +33,7 @@
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.
 - Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.
+- Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now).
 
 ### 0.1.1 (2020-12-31)
 
