@@ -44,12 +44,12 @@ ContourApp::ContourApp() :
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));
     link("contour.parser-table", bind(&ContourApp::parserTableAction, this));
-    link("contour.terminfo", bind(&ContourApp::terminfoAction, this));
+    link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
 }
 
 int ContourApp::terminfoAction()
 {
-    auto const& outputFileName = parameters().get<string>("contour.terminfo.output");
+    auto const& outputFileName = parameters().get<string>("contour.generate.terminfo.output");
     auto ownedOutput = unique_ptr<std::ostream>{};
     std::ostream* out = &cout;
     if (outputFileName != "-")
@@ -107,10 +107,23 @@ crispy::cli::Command ContourApp::parameterDefinition() const
             CLI::Command{"parser-table", "Dumps parser table"},
             CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
             CLI::Command{
-                "terminfo",
-                "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
-                {
-                    CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
+                "generate",
+                "Generation utilities.",
+                CLI::OptionList{},
+                CLI::CommandList{
+                    CLI::Command{
+                        "terminfo",
+                        "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
+                        {
+                            CLI::Option{
+                                "output",
+                                CLI::Value{""s},
+                                "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.",
+                                "FILE",
+                                CLI::Presence::Required
+                            },
+                        }
+                    }
                 }
             },
             CLI::Command{
