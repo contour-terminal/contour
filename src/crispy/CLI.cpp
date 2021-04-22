@@ -868,7 +868,8 @@ string usageText(Command const& _command, HelpStyle const& _style, int _margin, 
         stringstream sstr;
         for (Command const& subcmd : _command.children)
             sstr << usageText(subcmd, _style, _margin, prefixStr);
-        sstr << '\n';
+        if (_command.children.empty())
+            sstr << '\n';
         return sstr.str();
     }
 }
@@ -883,6 +884,7 @@ string helpText(Command const& _command, HelpStyle const& _style, int _margin)
 
     output << "  " << stylize("Usage:", HelpElement::Header) << "\n\n";
     output << usageText(_command, _style, _margin, indent(1));
+    output << '\n';
 
     auto constexpr DescriptionHeader = string_view{"Detailed description:"};
 
