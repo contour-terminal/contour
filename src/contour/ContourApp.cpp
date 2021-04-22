@@ -11,8 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/ContourApp.h>
 #include <contour/CaptureScreen.h>
+#include <contour/Config.h>
+#include <contour/ContourApp.h>
 
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
@@ -45,6 +46,21 @@ ContourApp::ContourApp() :
     link("contour.set.profile", bind(&ContourApp::profileAction, this));
     link("contour.parser-table", bind(&ContourApp::parserTableAction, this));
     link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
+    link("contour.generate.config", bind(&ContourApp::configAction, this));
+}
+
+int ContourApp::configAction()
+{
+    std::ostream* out = &cout;
+    auto const& outputFileName = parameters().get<string>("contour.generate.config.output");
+    auto ownedOutput = unique_ptr<std::ostream>{};
+    if (outputFileName != "-")
+    {
+        ownedOutput = make_unique<std::ofstream>(outputFileName);
+        out = ownedOutput.get();
+    }
+    *out << config::createDefaultConfig();
+    return EXIT_SUCCESS;
 }
 
 int ContourApp::terminfoAction()
@@ -118,7 +134,20 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                             CLI::Option{
                                 "output",
                                 CLI::Value{""s},
-                                "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.",
+                                "Output file name to store the screen capture to. If - (dash) is given, the output will be written to standard output.",
+                                "FILE",
+                                CLI::Presence::Required
+                            },
+                        }
+                    },
+                    CLI::Command{
+                        "config",
+                        "Generates configuration file with the default configuration.",
+                        CLI::OptionList{
+                            CLI::Option{
+                                "output",
+                                CLI::Value{""s},
+                                "Output file name to store the config file to. If - (dash) is given, the output will be written to standard output.",
                                 "FILE",
                                 CLI::Presence::Required
                             },

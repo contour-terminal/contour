@@ -32,6 +32,7 @@
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.
+- Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.
 
 ### 0.1.1 (2020-12-31)
 
