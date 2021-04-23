@@ -14,20 +14,13 @@
 # * limitations under the License.
 # */
 
-# Changes to a new profile.
-vt_set_profile()
-{
-    local name="${1}"
-    echo -ne "\eP\$p${name}\e\\"
-}
-
 # Example hook to change profile based on directory.
 # update_profile()
 # {
 #     case "$PWD" in
-#         "$HOME"/work*) vt_set_profile work ;;
-#         "$HOME"/projects*) vt_set_profile main ;;
-#         *) vt_set_profile mobile ;;
+#         "$HOME"/work*) contour set profile to work ;;
+#         "$HOME"/projects*) contour set profile to main ;;
+#         *) contour set profile to mobile ;;
 #     esac
 # }
 

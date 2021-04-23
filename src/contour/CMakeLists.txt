@@ -223,6 +223,7 @@ elseif(APPLE)
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
+    install(FILES "shell-integration.zsh" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
 
     #add_custom_target(Docs SOURCES README.md LICENSE.txt)
@@ -272,6 +273,7 @@ else()
     install(TARGETS contour DESTINATION bin)
     install(FILES "contour.desktop" DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
     install(FILES "res/images/contour-logo-256.png" DESTINATION "${CMAKE_INSTALL_DATADIR}/pixmaps" RENAME "contour.png")
+    install(FILES "shell-integration.zsh" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
     # TODO: install Changelog.md to /usr/share/doc/contour/Changelog.md(.gz)?
 endif()
