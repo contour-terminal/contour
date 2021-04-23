@@ -82,6 +82,21 @@ void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
     colorProfile_ = _colorProfile;
 }
 
+namespace
+{
+    constexpr bool pointVisibleInCircle(int x, int y, int r)
+    {
+        return x*x + y*y <= r*r;
+        // return -1.0f <= x && x <= +1.0f
+        //     && -1.0f <= y && y <= +1.0f;
+    }
+
+    constexpr double normalize(int _actual, int _max)
+    {
+        return double(_actual) / double(_max);
+    }
+}
+
 void DecorationRenderer::rebuild()
 {
     auto const width = gridMetrics_.cellSize.width;
@@ -152,16 +167,32 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
-        auto const height = y0 + thickness;
+        auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
+        auto const diameter = radius * 2;
+        auto const y0 = max(0, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
+        auto const height = y0 + radius;
         auto image = atlas::Buffer(width * height, 0);
 
-        for (int y = 1; y <= thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                if ((x / thickness) % 3 == 1)
-                    image[(height - y0 - y) * width + x] = 0xFF;
+        auto const numberOfCircles = int(ceil(double(width) / double(diameter) / 3.0));
+
+        auto const xOffsetStart = radius;
+        for (int circle = 0; circle < numberOfCircles; ++circle)
+        {
+            auto const bitmapStartX = xOffsetStart + circle * diameter * 3;
+
+            for (int y = -radius; y <= radius; ++y)
+            {
+                for (int x = -radius; x <= radius; ++x)
+                {
+                    if (pointVisibleInCircle(x, y, radius))
+                    {
+                        auto const bitmapX = bitmapStartX + x;
+                        auto const bitmapY = (height - y0 - (y));
+                        image[bitmapY * width + bitmapX] = 0xFF;
+                    }
+                }
+            }
+        }
 
         atlas_->insert(
             Decorator::DottedUnderline,
