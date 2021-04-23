@@ -135,7 +135,7 @@ if(NOT(WIN32))
     add_custom_command(
         TARGET contour POST_BUILD
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
-        COMMAND contour generate terminfo output ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/contour generate terminfo to ${terminfo_file} && ${TIC} -x -o "${terminfo_basedir}" "${terminfo_file}"
         DEPENDS "${terminfo_file}"
         COMMENT "Compiling ${terminfo_file}"
         BYPRODUCTS "${terminfo_file}"
