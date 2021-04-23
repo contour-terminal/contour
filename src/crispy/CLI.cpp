@@ -604,7 +604,7 @@ namespace // {{{ helpers
     string printParam(optional<HelpStyle::ColorMap> const& _colors,
                       OptionStyle _optionStyle,
                       string_view _name,
-                      string const& _placeholder,
+                      string_view _placeholder,
                       Presence _presense)
     {
         auto const colorize = colorizer(_colors);
@@ -637,16 +637,21 @@ namespace // {{{ helpers
                        OptionStyle _optionStyle)
     {
         // TODO: make use of _option.placeholder
+        auto const placeholder = [](Option const& _option, string_view _type) -> string_view
+        {
+            return !_option.placeholder.empty() ? _option.placeholder : _type;
+        };
+
         if (holds_alternative<bool>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, "", _option.presence);
+            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, ""), _option.presence);
         else if (holds_alternative<int>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, "INT", _option.presence);
+            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "INT"), _option.presence);
         else if (holds_alternative<unsigned int>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, "UINT", _option.presence);
+            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "UINT"), _option.presence);
         else if (holds_alternative<double>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, "FLOAT", _option.presence);
+            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "FLOAT"), _option.presence);
         else
-            return printParam(_colors, _optionStyle, _option.name, "STRING", _option.presence);
+            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "STRING"), _option.presence);
     }
 
     string printOption(Option const& _option,

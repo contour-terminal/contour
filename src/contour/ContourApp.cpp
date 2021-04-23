@@ -204,8 +204,8 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                 "Captures the screen buffer of the currently running terminal.",
                 {
                     CLI::Option{"logical", CLI::Value{false}, "Tells the terminal to use logical lines for counting and capturing."},
-                    CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond."},
-                    CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture"},
+                    CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond.", "SECONDS"},
+                    CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture", "COUNT"},
                     CLI::Option{"to", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
                 }
             },
@@ -218,7 +218,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                         "profile",
                         "Changes the terminal profile of the currently attached terminal to the given value.",
                         CLI::OptionList{
-                            CLI::Option{"to", CLI::Value{""s}, "Profile name to activate in the currently connected terminal."}
+                            CLI::Option{"to", CLI::Value{""s}, "Profile name to activate in the currently connected terminal.", "NAME"}
                         }
                     }
                 }
