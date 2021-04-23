@@ -70,7 +70,7 @@ auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, 
 
 int ContourApp::integrationAction()
 {
-    return withOutput(parameters(), "contour.generate.integration.output", [&](auto& _stream) {
+    return withOutput(parameters(), "contour.generate.integration.to", [&](auto& _stream) {
         auto const shell = parameters().get<string>("contour.generate.integration.shell");
         if (shell == "zsh")
         {
@@ -87,7 +87,7 @@ int ContourApp::integrationAction()
 
 int ContourApp::configAction()
 {
-    withOutput(parameters(), "contour.generate.config.output", [](auto& _stream) {
+    withOutput(parameters(), "contour.generate.config.to", [](auto& _stream) {
         _stream << config::createDefaultConfig();
     });
     return EXIT_SUCCESS;
@@ -95,7 +95,7 @@ int ContourApp::configAction()
 
 int ContourApp::terminfoAction()
 {
-    withOutput(parameters(), "contour.generate.terminfo.output", [](auto& _stream) {
+    withOutput(parameters(), "contour.generate.terminfo.to", [](auto& _stream) {
         _stream << terminal::capabilities::StaticDatabase{}.terminfo();
     });
     return EXIT_SUCCESS;
@@ -107,7 +107,7 @@ int ContourApp::captureAction()
     captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
     captureSettings.lineCount = parameters().get<unsigned>("contour.capture.lines");
-    captureSettings.outputFile = parameters().get<string>("contour.capture.output");
+    captureSettings.outputFile = parameters().get<string>("contour.capture.to");
 
     if (contour::captureScreen(captureSettings))
         return EXIT_SUCCESS;
@@ -156,7 +156,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                         "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
                         {
                             CLI::Option{
-                                "output",
+                                "to",
                                 CLI::Value{""s},
                                 "Output file name to store the screen capture to. If - (dash) is given, the output will be written to standard output.",
                                 "FILE",
@@ -169,7 +169,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                         "Generates configuration file with the default configuration.",
                         CLI::OptionList{
                             CLI::Option{
-                                "output",
+                                "to",
                                 CLI::Value{""s},
                                 "Output file name to store the config file to. If - (dash) is given, the output will be written to standard output.",
                                 "FILE",
@@ -189,7 +189,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                                 CLI::Presence::Required
                             },
                             CLI::Option{
-                                "output",
+                                "to",
                                 CLI::Value{""s},
                                 "Output file name to store the shell integration file to. If - (dash) is given, the output will be written to standard output.",
                                 "FILE",
@@ -206,7 +206,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                     CLI::Option{"logical", CLI::Value{false}, "Tells the terminal to use logical lines for counting and capturing."},
                     CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond."},
                     CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture"},
-                    CLI::Option{"output", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
+                    CLI::Option{"to", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
                 }
             },
             CLI::Command{

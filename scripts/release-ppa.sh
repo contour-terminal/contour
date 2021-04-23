@@ -53,6 +53,10 @@ function main()
     cmake -D3rdparty_DOWNLOAD_DIR="${DISTDIR}" -B "${BINDIR}" -S "${SRCDIR}"
     cp -rvp "${DISTDIR}" "${SRCDIR}/_3rdparty"
 
+    # Also preserve the expected version information, because
+    # the Ubuntu PPA server's won't have git information anymore.
+    cp -vp "${BINDIR}/version.txt" "${SRCDIR}"
+
     einfo "Prepare source tarball."
     local debversion="$VERSION~develop-$COMMIT_DATE-$COMMIT_HASH"
     local TARFILE="../contour_${debversion}.orig.tar.gz"
