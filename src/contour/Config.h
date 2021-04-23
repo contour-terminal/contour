@@ -130,9 +130,9 @@ struct Config {
     ShaderConfig backgroundShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Background);
     ShaderConfig textShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Text);
 
-    bool sixelScrolling = false;
+    bool sixelScrolling = true;
     bool sixelCursorConformance = true;
-    crispy::Size maxImageSize = {2000, 2000};
+    crispy::Size maxImageSize = {1280, 720};
     int maxImageColorRegisters = 4096;
 
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;

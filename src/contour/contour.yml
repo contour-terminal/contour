@@ -36,9 +36,9 @@ images:
     # image rendering, otherwise (if disabled) the cursor is placed underneath the image.
     sixel_cursor_conformance: true
     # maximum width in pixels of an image to be accepted
-    max_width: 800
+    max_width: 1280
     # maximum height in pixels of an image to be accepted
-    max_height: 600
+    max_height: 720
 
 # Terminal Profiles
 # -----------------
