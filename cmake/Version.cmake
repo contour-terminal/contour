@@ -18,6 +18,7 @@
 # 3.) /Changelog.md with the first line's version number and optional (suffix) string
 #
 function(GetVersionInformation VersionTripleVar VersionStringVar)
+    # 1.) /version.txt file
     if(EXISTS "${CMAKE_SOURCE_DIR}/version.txt")
         file(READ "${CMAKE_SOURCE_DIR}/version.txt" version_text)
         string(STRIP "${version_text}" version_text)
@@ -27,6 +28,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         set(THE_SOURCE "${CMAKE_SOURCE_DIR}/version.txt")
     endif()
 
+    # 2.) /.git directory with the output of `git describe ...`)
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/.git"))
         execute_process(COMMAND git describe --all
             OUTPUT_VARIABLE git_branch
@@ -58,6 +60,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         set(THE_SOURCE "git & ${CMAKE_SOURCE_DIR}/Changelog.md")
     endif()
 
+    # 3.) /Changelog.md with the first line's version number and optional (suffix) string
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/Changelog.md"))
         file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
         # extract and construct version triple
