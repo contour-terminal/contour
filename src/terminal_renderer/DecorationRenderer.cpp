@@ -169,8 +169,8 @@ void DecorationRenderer::rebuild()
     { // {{{ dotted underline
         auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const diameter = radius * 2;
-        auto const y0 = max(0, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
-        auto const height = y0 + radius;
+        auto const y0 = max(radius, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
+        auto const height = 1 + y0 + radius;
         auto image = atlas::Buffer(width * height, 0);
 
         auto const numberOfCircles = int(ceil(double(width) / double(diameter) / 3.0));
@@ -187,8 +187,8 @@ void DecorationRenderer::rebuild()
                     if (pointVisibleInCircle(x, y, radius))
                     {
                         auto const bitmapX = bitmapStartX + x;
-                        auto const bitmapY = (height - y0 - (y));
-                        image[bitmapY * width + bitmapX] = 0xFF;
+                        auto const bitmapY = (height - 1 - y0 - (y));
+                        image.at(bitmapY * width + bitmapX) = 0xFF;
                     }
                 }
             }
