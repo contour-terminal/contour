@@ -307,6 +307,15 @@ class Screen : public capabilities::StaticDatabase {
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
+    void setMaxImageSize(crispy::Size _effective, crispy::Size _limit)
+    {
+        maxImageSize_ = _effective;
+        maxImageSizeLimit_ = _limit;
+    }
+
+    crispy::Size maxImageSize() const noexcept { return maxImageSize_; }
+    crispy::Size maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
+
     std::shared_ptr<Image const> uploadImage(ImageFormat _format, crispy::Size _imageSize, Image::Data&& _pixmap);
 
     /**
@@ -622,6 +631,8 @@ class Screen : public capabilities::StaticDatabase {
     std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 
     int maxImageColorRegisters_;
+    crispy::Size maxImageSize_;
+    crispy::Size maxImageSizeLimit_;
     std::shared_ptr<ColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 

@@ -371,6 +371,8 @@ Screen::Screen(Size const& _size,
     logTrace_{ _logTrace },
     modes_{},
     maxImageColorRegisters_{ _maxImageColorRegisters },
+    maxImageSize_{ _maxImageSize },
+    maxImageSizeLimit_{ _maxImageSize },
     imageColorPalette_(make_shared<ColorPalette>(maxImageColorRegisters_, maxImageColorRegisters_)),
     imagePool_{
         [this](Image const* _image) { eventListener_.discardImage(*_image); },
@@ -2225,6 +2227,11 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
     using Item = XtSmGraphics::Item;
     using Action = XtSmGraphics::Action;
 
+    constexpr auto SixelItem = 1;
+
+    constexpr auto Success = 0;
+    constexpr auto Failure = 3;
+
     switch (_item)
     {
         case Item::NumberOfColorRegisters:
@@ -2233,20 +2240,20 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                 case Action::Read:
                 {
                     auto const value = imageColorPalette_->size();
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::ReadLimit:
                 {
                     auto const value = imageColorPalette_->maxSize();
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::ResetToDefault:
                 {
                     auto const value = 256; // TODO: read the configuration's default here
                     imageColorPalette_->setSize(value);
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::SetToValue:
@@ -2254,13 +2261,13 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                     visit(overloaded{
                         [&](int _number) {
                             imageColorPalette_->setSize(_number);
-                            reply("\033[?{};{};{}S", 1, 0, _number);
+                            reply("\033[?{};{};{}S", SixelItem, Success, _number);
                         },
                         [&](Size) {
-                            reply("\033[?{};{};{}S", 1, 3, 0);
+                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                         },
                         [&](monostate) {
-                            reply("\033[?{};{};{}S", 1, 3, 0);
+                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                         },
                     }, _value);
                     break;
@@ -2268,7 +2275,32 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
             }
             break;
 
-        case Item::SixelGraphicsGeometry: // XXX Do we want/need to implement you?
+        case Item::SixelGraphicsGeometry:
+            switch (_action)
+            {
+                case Action::Read:
+                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSize_.width, maxImageSize_.height);
+                    break;
+                case Action::ReadLimit:
+                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSizeLimit_.width, maxImageSizeLimit_.height);
+                    break;
+                case Action::ResetToDefault:
+                    // The limit is the default at the same time.
+                    maxImageSize_ = maxImageSizeLimit_;
+                    break;
+                case Action::SetToValue:
+                    if (holds_alternative<Size>(_value))
+                    {
+                        auto size = get<Size>(_value);
+                        size.width = min(size.width, maxImageSize_.width);
+                        size.height = min(size.height, maxImageSize_.height);
+                        maxImageSize_ = size;
+                        // No reply.
+                    }
+                    break;
+            }
+            break;
+
         case Item::ReGISGraphicsGeometry: // Surely, we don't do ReGIS just yet. :-)
             break;
     }
