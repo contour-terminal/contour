@@ -29,6 +29,7 @@
 - Adds VT sequence `CSI 18 t` and `CSI 19 t` for getting screen character size. Responds with `CSI 8 ; <columns> ; <rows> t` and  `CSI 9 ; <columns> ; <rows> t` respectively.
 - Adds VT sequence to capture the current screen buffer `CSI > LineMode ; StartLine ; LineCount t` giving the respone back on stdin via `OSC 314 ; <screen buffer> ST`, and feature detection via `DA1` number `314`.
 - Adds VT sequence `DECSNLS` for setting number of lines to display.
+- Adds VT sequence `CSI Ps b` (`REP`) for repeating the last graphical character `Ps` times.
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.

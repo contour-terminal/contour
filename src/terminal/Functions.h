@@ -285,6 +285,7 @@ constexpr inline auto HPR         = detail::CSI(std::nullopt, 1, 1, std::nullopt
 constexpr inline auto HVP         = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'f', VTType::VT100, "HVP", "Horizontal and vertical position");
 constexpr inline auto ICH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, '@', VTType::VT420, "ICH", "Insert character");
 constexpr inline auto IL          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'L', VTType::VT100, "IL",  "Insert lines");
+constexpr inline auto REP         = detail::CSI(std::nullopt, 1, 1, std::nullopt, 'b', VTType::VT100, "REP", "Repeat the preceding graphic character Ps times");
 constexpr inline auto RM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'l', VTType::VT100, "RM",  "Reset mode");
 constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT100, "SCOSC", "Save Cursor");
 constexpr inline auto SD          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'T', VTType::VT100, "SD",  "Scroll down (pan up)");
@@ -416,6 +417,7 @@ inline auto const& functions() noexcept
             HVP,
             ICH,
             IL,
+            REP,
             RM,
             SCOSC,
             SD,
@@ -575,6 +577,7 @@ constexpr bool isBatchable(FunctionDefinition const& _function)
         case HVP:
         case ICH:
         case IL:
+        case REP:
         case SCOSC:
         case SD:
         case SETMARK:

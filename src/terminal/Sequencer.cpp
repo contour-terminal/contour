@@ -33,6 +33,7 @@
 #include <iostream>             // error logging
 #include <cassert>
 #include <cstdlib>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <sstream>
@@ -983,6 +984,7 @@ void Sequencer::print(char32_t _char)
         batchedSequences_.emplace_back(_char);
     else
     {
+        precedingGraphicCharacter_ = _char;
         instructionCounter_++;
         screen_.writeText(_char);
     }
@@ -1509,6 +1511,16 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case HVP: screen_.moveCursorTo(Coordinate{_seq.param_or(0, Sequence::Parameter{1}), _seq.param_or(1, Sequence::Parameter{1})}); break; // YES, it's like a CUP!
         case ICH: screen_.insertCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
         case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case REP:
+            if (precedingGraphicCharacter_)
+            {
+                auto const requestedCount = _seq.param(0);
+                auto const availableColumns = screen_.margin().horizontal.to - screen_.cursor().position.column + 1;
+                auto const effectiveCount = min(requestedCount, availableColumns);
+                for (int i = 0; i < effectiveCount; i++)
+                    screen_.writeText(precedingGraphicCharacter_);
+            }
+            break;
         case RM:
             crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
                 impl::setAnsiMode(_seq, i, false, screen_);

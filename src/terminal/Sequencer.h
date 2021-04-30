@@ -581,6 +581,7 @@ class Sequencer : public ParserEvents {
     Sequence sequence_{};
     Screen& screen_;
     bool batching_ = false;
+    char32_t precedingGraphicCharacter_ = {};
     int64_t instructionCounter_ = 0;
     using Batchable = std::variant<char32_t, Sequence, SixelImage>;
     std::vector<Batchable> batchedSequences_;
