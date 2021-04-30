@@ -8,6 +8,7 @@
 - Fixes VT sequence `DECRQPSR` for `DECTABSR`.
 - Fixes keyboard keys for `F1`..`F4` when pressed with and without modifiers.
 - Fixes OSC 8 hyperlink rendering when scrolled.
+- Fixes SGR 1 (bold) wrongly applied on indexed background colors.
 - Preserve active profile when reloading config, and forces redraw after config reload.
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
 - Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter `--live-config`.

@@ -173,9 +173,9 @@ struct GraphicsAttributes {
 
         return (styles & CharacterStyleMask::Inverse) == 0
             ? std::pair{ apply(_colorProfile, foregroundColor, fgColorTarget, bright) * opacity,
-                    apply(_colorProfile, backgroundColor, bgColorTarget, bright) }
+                         apply(_colorProfile, backgroundColor, bgColorTarget, false) }
             : std::pair{ apply(_colorProfile, backgroundColor, bgColorTarget, bright) * opacity,
-                    apply(_colorProfile, foregroundColor, fgColorTarget, bright) };
+                         apply(_colorProfile, foregroundColor, fgColorTarget, false) };
     }
 };
 
