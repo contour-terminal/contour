@@ -163,8 +163,8 @@ endmacro()
 
 # {{{ libunicode
 macro(ThirdPartiesAdd_libunicode)
-    set(3rdparty_libunicode_VERSION "a440d093e3ef57c03a10ea73dd499794e2726a02" CACHE STRING "libunicode: commit hash")
-    set(3rdparty_libunicode_CHECKSUM "SHA256=318e04e8b0601bd38f36242ea846b5e9bcfb6ef2679feccdf46c97fa677158d1" CACHE STRING "libunicode: download checksum")
+    set(3rdparty_libunicode_VERSION "7a2a4f2fa9e1c0af9378819160592a8435275d01" CACHE STRING "libunicode: commit hash")
+    set(3rdparty_libunicode_CHECKSUM "SHA256=e06861556d9651a7fa411aadd099c49ed36717a4a00a2dc62a57160da3b1e1b0" CACHE STRING "libunicode: download checksum")
     # XXX: temporary patch until libunicode gets rid of sumbodules.
     set(libunicode_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/libunicode.patch")
     if(NOT EXISTS "${libunicode_patch}")
@@ -195,10 +195,11 @@ macro(ThirdPartiesAdd_libunicode)
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
             libunicode
-            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.tar.gz"
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            UPDATE_DISCONNECTED 0
             # same here
             #PATCH_COMMAND patch "${libunicode_patch}"
         )
