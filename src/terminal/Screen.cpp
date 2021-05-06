@@ -551,10 +551,12 @@ void Screen::writeText(char32_t _char)
         _char < 127 ? cursor_.charsets.map(static_cast<char>(_char))
                     : _char == 0x7F ? ' ' : _char;
 
+    auto const lastChar = consecutiveTextWrite && !lastColumn_->empty()
+        ? lastColumn_->codepoint(lastColumn_->codepointCount() - 1)
+        : char32_t{0};
+
     bool const insertToPrev =
-        consecutiveTextWrite
-        && !lastColumn_->empty()
-        && unicode::grapheme_segmenter::nonbreakable(lastColumn_->codepoint(lastColumn_->codepointCount() - 1), ch);
+        lastChar && unicode::grapheme_segmenter::nonbreakable(lastChar, ch);
 
     if (!insertToPrev)
         writeCharToCurrentAndAdvance(ch);
