@@ -15,6 +15,7 @@
 
 #include <unicode/ucd.h>
 #include <text_shaper/font.h>
+#include <crispy/point.h>
 #include <crispy/span.h>
 
 #include <cstdint>
@@ -62,8 +63,8 @@ std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, int _
 struct glyph_position
 {
     glyph_key glyph;
-    int x;
-    int y;
+    crispy::Point offset;
+    crispy::Point advance;
 };
 
 using shape_result = std::vector<glyph_position>;
@@ -130,7 +131,14 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(text::glyph_position const& _gpos, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}+{}+{})", _gpos.glyph.index.value, _gpos.x, _gpos.y);
+            return format_to(
+                ctx.out(),
+                "({}+{}+{}|{}+{})",
+                _gpos.glyph.index.value,
+                _gpos.offset.x,
+                _gpos.offset.y,
+                _gpos.advance.x,
+                _gpos.advance.y);
         }
     };
 

@@ -296,7 +296,14 @@ void TextRenderer::render(crispy::Point _pos,
                           get<1>(*ti).get(), // Metadata
                           gpos);
         }
-        pen.x = pen.x + advanceX; // only advance horizontally, as we're (guess what) a terminal. :-)
+
+        if (gpos.advance.x)
+        {
+            // Only advance horizontally, as we're (guess what) a terminal. :-)
+            // Only advance in fixed-width steps.
+            // Only advance iff there harfbuzz told us to.
+            pen.x += advanceX;
+        }
     }
 }
 
@@ -459,6 +466,16 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     metrics.bearing.x = glyph.left;
     metrics.bearing.y = glyph.top;
 
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+                                        targetAtlas.allocator().name(),
+                                        _id.index,
+                                        colored ? "emoji" : "text",
+                                        ratio,
+                                        yOverflow < 0 ? yOverflow : 0,
+                                        yMin < 0 ? yMin : 0,
+                                        glyph);
+
     return targetAtlas.insert(_id,
                               glyph.width,
                               glyph.height,
@@ -481,7 +498,7 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
     {
         auto const x = _pos.x
                      + _glyphMetrics.bearing.x
-                     + _glyphPos.x
+                     + _glyphPos.offset.x
                      ;
 
         auto const y = _pos.y;
@@ -492,12 +509,12 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
     {
         auto const x = _pos.x
                      + _glyphMetrics.bearing.x
-                     + _glyphPos.x
+                     + _glyphPos.offset.x
                      ;
 
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
         auto const y = _pos.y                       // bottom left
-                     + _glyphPos.y                  // -> harfbuzz adjustment
+                     + _glyphPos.offset.y           // -> harfbuzz adjustment
                      + gridMetrics_.baseline        // -> baseline
                      + _glyphMetrics.bearing.y      // -> bitmap top
                      - _glyphMetrics.bitmapSize.y   // -> bitmap height
@@ -512,7 +529,7 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                                         x, y,
                                         _pos.x(), _pos.y(),
                                         _textureInfo.width, _textureInfo.height,
-                                        _glyphPos.x, _glyphPos.y,
+                                        _glyphPos.offset.x, _glyphPos.offset.y,
                                         textShaper_.metrics(_glyphPos.glyph.font).baseline(),
                                         _glyph.descender);
 #endif

@@ -657,8 +657,10 @@ bool tryShape(font_key _font,
     {
         glyph_position gpos{};
         gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
-        gpos.x = int(pos[i].x_offset / 64.0f);
-        gpos.y = int(pos[i].y_offset / 64.0f);
+        gpos.offset.x = int(pos[i].x_offset / 64.0f); // gpos.offset.(x,y) ?
+        gpos.offset.y = int(pos[i].y_offset / 64.0f);
+        gpos.advance.x = int(pos[i].x_advance / 64.0f);
+        gpos.advance.y = int(pos[i].y_advance / 64.0f);
         _result.emplace_back(gpos);
     }
     return crispy::none_of(_result, glyphMissing);
@@ -679,7 +681,7 @@ void open_shaper::shape(font_key _font,
         auto logMessage = debuglog(TextShapingTag);
         logMessage.write("Shaping codepoints:");
         for (auto [i, codepoint] : crispy::indexed(_codepoints))
-            logMessage.write(" U+{:x}", static_cast<unsigned>(codepoint));
+            logMessage.write(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
         logMessage.write("\n");
         logMessage.write("Using font: key={}, path=\"{}\"\n", _font, fontInfo.path);
     }
