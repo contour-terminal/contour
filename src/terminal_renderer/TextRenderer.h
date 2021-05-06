@@ -203,6 +203,19 @@ class TextRenderer : public Renderable {
     std::unordered_map<CacheKey, int64_t> cacheHits_;
 #endif
 
+    std::unordered_map<text::glyph_key, text::bitmap_format> glyphToTextureMapping_;
+
+    TextureAtlas* atlasForBitmapFormat(text::bitmap_format _format)
+    {
+        switch (_format)
+        {
+            case text::bitmap_format::alpha_mask: return monochromeAtlas_.get();
+            case text::bitmap_format::rgba: return colorAtlas_.get();
+            case text::bitmap_format::rgb: return lcdAtlas_.get();
+            default: return nullptr; // Should NEVER EVER happen.
+        }
+    }
+
     // target surface rendering
     //
     text::shaper& textShaper_;

@@ -323,13 +323,12 @@ TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
 
 optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
 {
-    auto font = _id.font;
-    auto const colored = textShaper_.has_color(font);
-    TextureAtlas& lookupAtlas = atlasForFont(font);
-    // TODO: what if lookupAtlas != targetAtlas. the lookup should be decoupled
+    if (auto i = glyphToTextureMapping_.find(_id); i != glyphToTextureMapping_.end())
+        if (TextureAtlas* ta = atlasForBitmapFormat(i->second); ta != nullptr)
+            if (optional<DataRef> const dataRef = ta->get(_id); dataRef.has_value())
+                return dataRef;
 
-    if (optional<DataRef> const dataRef = lookupAtlas.get(_id); dataRef.has_value())
-        return dataRef;
+    bool const colored = textShaper_.has_color(_id.font);
 
     auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
     if (!theGlyphOpt.has_value())
@@ -419,11 +418,11 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                                         yMin < 0 ? yMin : 0,
                                         glyph);
 
-    auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
+    auto && [userFormat, targetAtlas] = [this](bool _colorFont, text::bitmap_format _glyphFormat) -> pair<int, TextureAtlas&> { // {{{
         // this format ID is used by the fragment shader to select the right texture atlas
-        if (colored)
+        if (_colorFont)
             return {1, *colorAtlas_};
-        switch (glyph.format)
+        switch (_glyphFormat)
         {
             case text::bitmap_format::rgba:
                 return {1, *colorAtlas_};
@@ -433,7 +432,9 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                 return {0, *monochromeAtlas_};
         }
         return {0, *monochromeAtlas_};
-    }(); // }}}
+    }(colored, glyph.format); // }}}
+
+    glyphToTextureMapping_[_id] = glyph.format;
 
     if (yOverflow < 0)
     {
@@ -451,8 +452,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount));
     }
-
-    assert(&lookupAtlas == &targetAtlas);
 
     GlyphMetrics metrics{};
     metrics.bitmapSize.x = glyph.width;
