@@ -70,7 +70,7 @@ constexpr int area(Size size) noexcept
 
 constexpr bool operator<(Size a, Size b) noexcept
 {
-    return area(a) < area(b);
+    return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
 constexpr bool operator==(Size const& _a, Size const& _b) noexcept
