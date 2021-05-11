@@ -28,11 +28,11 @@ using crispy::Size;
 
 namespace terminal::renderer::atlas {
 
-TextureAtlasAllocator::TextureAtlasAllocator(unsigned _instanceBaseId,
-                                             unsigned _maxInstances,
-                                             unsigned _depth,
-                                             unsigned _width,
-                                             unsigned _height,
+TextureAtlasAllocator::TextureAtlasAllocator(int _instanceBaseId,
+                                             int _maxInstances,
+                                             int _depth,
+                                             int _width,
+                                             int _height,
                                              Format _format,
                                              AtlasBackend& _atlasBackend,
                                              string _name) :
@@ -51,7 +51,7 @@ TextureAtlasAllocator::TextureAtlasAllocator(unsigned _instanceBaseId,
 
 TextureAtlasAllocator::~TextureAtlasAllocator()
 {
-    for (unsigned id = instanceBaseId_; id <= currentInstanceId_; ++id)
+    for (int id = instanceBaseId_; id <= currentInstanceId_; ++id)
         atlasBackend_.destroyAtlas(DestroyAtlas{id, name_});
 }
 
@@ -65,13 +65,13 @@ void TextureAtlasAllocator::clear()
     discarded_.clear();
 }
 
-TextureInfo const* TextureAtlasAllocator::insert(unsigned _width,
-                                                 unsigned _height,
-                                                 unsigned _targetWidth,
-                                                 unsigned _targetHeight,
+TextureInfo const* TextureAtlasAllocator::insert(int _width,
+                                                 int _height,
+                                                 int _targetWidth,
+                                                 int _targetHeight,
                                                  Format _format,
                                                  Buffer&& _data,
-                                                 unsigned _user)
+                                                 int _user)
 {
     // check free-map first
     if (auto i = discarded_.find(Size{_width, _height}); i != end(discarded_))
@@ -144,12 +144,12 @@ void TextureAtlasAllocator::release(TextureInfo const& _info)
     }
 }
 
-TextureInfo const& TextureAtlasAllocator::appendTextureInfo(unsigned _width,
-                                                            unsigned _height,
-                                                            unsigned _targetWidth,
-                                                            unsigned _targetHeight,
+TextureInfo const& TextureAtlasAllocator::appendTextureInfo(int _width,
+                                                            int _height,
+                                                            int _targetWidth,
+                                                            int _targetHeight,
                                                             Offset _offset,
-                                                            unsigned _user)
+                                                            int _user)
 {
     textureInfos_.emplace_back(TextureInfo{
         _offset.i,

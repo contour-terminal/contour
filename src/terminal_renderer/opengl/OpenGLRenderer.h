@@ -56,14 +56,14 @@ class OpenGLRenderer :
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
 
-    void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+    void renderRectangle(int _x, int _y, int _width, int _height,
                          float _r, float _g, float _b, float _a) override;
 
     void execute() override;
 
     void clearCache() override;
 
-    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId) override;
+    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, int _instanceId) override;
 
   private:
     // private helper methods
@@ -71,13 +71,13 @@ class OpenGLRenderer :
     void initialize();
     void initializeTextureRendering();
     void initializeRectRendering();
-    unsigned maxTextureDepth();
-    unsigned maxTextureSize();
-    unsigned maxTextureUnits();
+    int maxTextureDepth();
+    int maxTextureSize();
+    int maxTextureUnits();
     crispy::Size renderBufferSize();
 
-    void selectTextureUnit(unsigned _id);
-    void bindTexture2DArray(GLuint _textureId);
+    void selectTextureUnit(int _id);
+    void bindTexture2DArray(int _textureId);
 
     void executeRenderTextures();
     void createAtlas(atlas::CreateAtlas const& _param);
@@ -85,13 +85,13 @@ class OpenGLRenderer :
     void renderTexture(atlas::RenderTexture const& _param);
     void destroyAtlas(atlas::DestroyAtlas const& _param);
 
-    void executeRenderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
+    void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
     // private helper types
     //
     struct AtlasKey {
         std::reference_wrapper<std::string const> name;
-        unsigned atlasTexture;
+        int atlasTexture;
 
         bool operator<(AtlasKey const& _rhs) const noexcept
         {
@@ -104,7 +104,7 @@ class OpenGLRenderer :
         }
     };
 
-    void clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format);
+    void clearTexture2DArray(GLuint _textureId, int _width, int _height, atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -125,8 +125,8 @@ class OpenGLRenderer :
     GLuint vbo_{};              // Buffer containing the vertex coordinates
     //TODO: GLuint ebo_{};
     std::map<AtlasKey, GLuint> atlasMap_; // maps atlas IDs to texture IDs
-    GLuint currentActiveTexture_ = std::numeric_limits<GLuint>::max();
-    GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
+    int currentActiveTexture_ = std::numeric_limits<int>::max();
+    int currentTextureId_ = std::numeric_limits<int>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
     atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
     atlas::TextureAtlasAllocator coloredAtlasAllocator_;

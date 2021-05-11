@@ -44,17 +44,17 @@ constexpr int element_count(Format _format) noexcept
 }
 
 struct CreateAtlas {
-    unsigned atlas;
+    int atlas;
     std::reference_wrapper<std::string const> atlasName;
-    unsigned width;
-    unsigned height;
-    unsigned depth;
+    int width;
+    int height;
+    int depth;
     Format format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
 };
 
 struct DestroyAtlas {
     // ID of the atlas to release the resources on the GPU for.
-    unsigned atlas;
+    int atlas;
     std::reference_wrapper<std::string const> atlasName;
 };
 
@@ -64,20 +64,20 @@ struct TextureInfo {
     TextureInfo(TextureInfo const&) = delete;
     TextureInfo& operator=(TextureInfo const&) = delete;
 
-    unsigned atlas;                 // for example 0 for GL_TEXTURE0
+    int atlas;                      // for example 0 for GL_TEXTURE0
     std::reference_wrapper<std::string const> atlasName;
-    unsigned x;                     // target x-coordinate into the 3D texture
-    unsigned y;                     // target y-coordinate into the 3D texture
-    unsigned z;                     // target y-coordinate into the 3D texture
-    unsigned width;                 // width of sub-image in pixels
-    unsigned height;                // height of sub-image in pixels
-    unsigned targetWidth;           // width of the sub-image when being rendered
-    unsigned targetHeight;          // height of the sub-image when being rendered
+    int x;                          // target x-coordinate into the 3D texture
+    int y;                          // target y-coordinate into the 3D texture
+    int z;                          // target y-coordinate into the 3D texture
+    int width;                      // width of sub-image in pixels
+    int height;                     // height of sub-image in pixels
+    int targetWidth;                // width of the sub-image when being rendered
+    int targetHeight;               // height of the sub-image when being rendered
     float relativeX;
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
     float relativeHeight;           // height relative to Atlas::height_
-    unsigned user;                  // some user defined value, in my case, whether or not this texture is colored or monochrome
+    int user;                       // some user defined value, in my case, whether or not this texture is colored or monochrome
 };
 
 struct UploadTexture {
@@ -88,10 +88,10 @@ struct UploadTexture {
 
 struct RenderTexture {
     std::reference_wrapper<TextureInfo const> texture;
-    int x;                      // window x coordinate to render the texture to
-    int y;                      // window y coordinate to render the texture to
-    int z;                      // window z coordinate to render the texture to
-    std::array<float, 4> color; // optional; a color being associated with this texture
+    int x;                          // window x coordinate to render the texture to
+    int y;                          // window y coordinate to render the texture to
+    int z;                          // window z coordinate to render the texture to
+    std::array<float, 4> color;     // optional; a color being associated with this texture
 };
 
 /// Generic listener API to events from an Atlas.
@@ -127,7 +127,7 @@ class AtlasBackend {
  */
 class TextureAtlasAllocator {
   private:
-    struct Offset { unsigned i, x, y, z; };
+    struct Offset { int i, x, y, z; };
 
   public:
     /**
@@ -142,11 +142,11 @@ class TextureAtlasAllocator {
      * @param _format   an arbitrary user defined number that defines the storage format for this texture,
      *                  such as GL_R8 or GL_RBGA8 when using OpenGL
      */
-    TextureAtlasAllocator(unsigned _instanceBaseId,
-                          unsigned _maxInstances,
-                          unsigned _depth,
-                          unsigned _width,
-                          unsigned _height,
+    TextureAtlasAllocator(int _instanceBaseId,
+                          int _maxInstances,
+                          int _depth,
+                          int _width,
+                          int _height,
                           Format _format, // such as GL_R8 or GL_RGBA8
                           AtlasBackend& _listener,
                           std::string _name = {});
@@ -159,27 +159,27 @@ class TextureAtlasAllocator {
     ~TextureAtlasAllocator();
 
     std::string const& name() const noexcept { return name_; }
-    constexpr unsigned maxInstances() const noexcept { return maxInstances_; }
-    constexpr unsigned depth() const noexcept { return depth_; }
-    constexpr unsigned width() const noexcept { return width_; }
-    constexpr unsigned height() const noexcept { return height_; }
+    constexpr int maxInstances() const noexcept { return maxInstances_; }
+    constexpr int depth() const noexcept { return depth_; }
+    constexpr int width() const noexcept { return width_; }
+    constexpr int height() const noexcept { return height_; }
     constexpr Format format() const noexcept { return format_; }
 
-    constexpr unsigned instanceBaseId() const noexcept { return instanceBaseId_; }
+    constexpr int instanceBaseId() const noexcept { return instanceBaseId_; }
 
     /// @return number of internally used 3D texture atlases.
-    constexpr unsigned currentInstance() const noexcept { return currentInstanceId_; }
+    constexpr int currentInstance() const noexcept { return currentInstanceId_; }
 
     /// @return number of 2D text atlases in use in current 3D texture atlas.
-    constexpr unsigned currentZ() const noexcept { return currentZ_; }
+    constexpr int currentZ() const noexcept { return currentZ_; }
 
     /// @return current X offset into the current 3D texture atlas.
-    constexpr unsigned currentX() const noexcept { return currentX_; }
+    constexpr int currentX() const noexcept { return currentX_; }
 
     /// @return current Y offset into the current 3D texture atlas.
-    constexpr unsigned currentY() const noexcept { return currentY_; }
+    constexpr int currentY() const noexcept { return currentY_; }
 
-    constexpr unsigned maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
+    constexpr int maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
 
     void clear();
 
@@ -199,13 +199,13 @@ class TextureAtlasAllocator {
     /// @param _user     user defined data that is supplied along with TexCoord's 4th component
     ///
     /// @return index to the created TextureInfo or std::nullopt if failed.
-    TextureInfo const* insert(unsigned _width,
-                              unsigned _height,
-                              unsigned _targetWidth,
-                              unsigned _targetHeight,
+    TextureInfo const* insert(int _width,
+                              int _height,
+                              int _targetWidth,
+                              int _targetHeight,
                               Format _format,
                               Buffer&& _data,
-                              unsigned _user = 0);
+                              int _user = 0);
 
     void release(TextureInfo const& _info);
 
@@ -266,31 +266,31 @@ class TextureAtlasAllocator {
         });
     }
 
-    TextureInfo const& appendTextureInfo(unsigned _width,
-                                         unsigned _height,
-                                         unsigned _targetWidth,
-                                         unsigned _targetHeight,
+    TextureInfo const& appendTextureInfo(int _width,
+                                         int _height,
+                                         int _targetWidth,
+                                         int _targetHeight,
                                          Offset _offset,
-                                         unsigned _user);
+                                         int _user);
 
 
     // private data fields
     //
-    unsigned const instanceBaseId_;     // default value to assign to first instance, and incrementing from that point for further instances.
-    unsigned const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
-    unsigned const depth_;              // atlas total depth
-    unsigned const width_;              // atlas total width
-    unsigned const height_;             // atlas total height
-    Format const format_;               // internal storage format, such as GL_R8 or GL_RGBA8
+    int const instanceBaseId_;     // default value to assign to first instance, and incrementing from that point for further instances.
+    int const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
+    int const depth_;              // atlas total depth
+    int const width_;              // atlas total width
+    int const height_;             // atlas total height
+    Format const format_;          // internal storage format, such as GL_R8 or GL_RGBA8
 
-    std::string const name_;            // atlas human readable name (only for debugging)
-    AtlasBackend& atlasBackend_;        // atlas event listener (used to perform allocation/modification actions)
+    std::string const name_;       // atlas human readable name (only for debugging)
+    AtlasBackend& atlasBackend_;   // atlas event listener (used to perform allocation/modification actions)
 
-    unsigned currentInstanceId_;        // (OpenGL) texture count already in use
-    unsigned currentZ_ = 0;             // index to current atlas that is being filled
-    unsigned currentX_ = 0;             // current X-offset to start drawing to
-    unsigned currentY_ = 0;             // current Y-offset to start drawing to
-    unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
+    int currentInstanceId_;        // (OpenGL) texture count already in use
+    int currentZ_ = 0;             // index to current atlas that is being filled
+    int currentX_ = 0;             // current X-offset to start drawing to
+    int currentY_ = 0;             // current Y-offset to start drawing to
+    int maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
     std::map<crispy::Size, std::vector<Offset>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
 
@@ -311,10 +311,10 @@ class MetadataTextureAtlas {
     MetadataTextureAtlas& operator=(MetadataTextureAtlas&&) = delete; // TODO
 
     //std::string const& name() const noexcept { return name_; }
-    constexpr unsigned maxInstances() const noexcept { return atlas_.maxInstances(); }
-    constexpr unsigned depth() const noexcept { return atlas_.depth(); }
-    constexpr unsigned width() const noexcept { return atlas_.width(); }
-    constexpr unsigned height() const noexcept { return atlas_.height(); }
+    constexpr int maxInstances() const noexcept { return atlas_.maxInstances(); }
+    constexpr int depth() const noexcept { return atlas_.depth(); }
+    constexpr int width() const noexcept { return atlas_.width(); }
+    constexpr int height() const noexcept { return atlas_.height(); }
 
     /// @return number of textures stored in this texture atlas.
     constexpr size_t size() const noexcept { return allocations_.size(); }
@@ -355,12 +355,12 @@ class MetadataTextureAtlas {
     ///
     /// @return index to the corresponding DataRef or std::nullopt if failed.
     std::optional<DataRef> insert(Key const& _id,
-                                  unsigned _width,
-                                  unsigned _height,
-                                  unsigned _targetWidth,
-                                  unsigned _targetHeight,
+                                  int _width,
+                                  int _height,
+                                  int _targetWidth,
+                                  int _targetHeight,
                                   Buffer&& _data,
-                                  unsigned _user = 0,
+                                  int _user = 0,
                                   Metadata _metadata = {})
     {
         assert(allocations_.find(_id) == allocations_.end());

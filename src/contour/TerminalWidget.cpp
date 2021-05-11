@@ -76,7 +76,6 @@ using std::max;
 using std::move;
 using std::nullopt;
 using std::ofstream;
-using std::optional;
 using std::pair;
 using std::ref;
 using std::runtime_error;
@@ -1647,7 +1646,7 @@ void TerminalWidget::doDumpState()
 
     for (auto const* allocator: renderTarget.allAtlasAllocators())
     {
-        for (unsigned instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
+        for (auto instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
         {
             auto infoOpt = renderTarget.readAtlas(*allocator, instanceId);
             if (!infoOpt.has_value())

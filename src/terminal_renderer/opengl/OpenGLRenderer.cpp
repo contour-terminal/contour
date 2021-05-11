@@ -83,9 +83,9 @@ namespace // {{{ helper
     }
 } // }}}
 
-constexpr unsigned MaxInstanceCount = 1;
-constexpr unsigned MaxMonochromeTextureSize = 1024;
-constexpr unsigned MaxColorTextureSize = 2048;
+constexpr int MaxInstanceCount = 1;
+constexpr int MaxMonochromeTextureSize = 1024;
+constexpr int MaxColorTextureSize = 2048;
 
 struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 {
@@ -179,7 +179,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 };
 
 template <typename T, typename Fn>
-inline void bound(T& _bindable, Fn&& _callable) noexcept
+inline void bound(T& _bindable, Fn&& _callable)
 {
     _bindable.bind();
     try {
@@ -252,7 +252,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
-    bound(*textShader_, [&]() noexcept {
+    bound(*textShader_, [&]() {
         CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId()) );
         CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId()) );
         CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId()) );
@@ -377,25 +377,25 @@ void OpenGLRenderer::clearCache()
     lcdAtlasAllocator_.clear();
 }
 
-unsigned OpenGLRenderer::maxTextureDepth()
+int OpenGLRenderer::maxTextureDepth()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value) );
-    return static_cast<unsigned>(value);
+    return static_cast<int>(value);
 }
 
-unsigned OpenGLRenderer::maxTextureSize()
+int OpenGLRenderer::maxTextureSize()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value) );
-    return static_cast<unsigned>(value);
+    return static_cast<int>(value);
 }
 
-void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format)
+void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, int _width, int _height, atlas::Format _format)
 {
     bindTexture2DArray(_textureId);
 
@@ -413,11 +413,11 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
     switch (_format)
     {
         case atlas::Format::Red:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
                 *t++ = 0x40;
             break;
         case atlas::Format::RGB:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
                 *t++ = 0x00;
@@ -425,7 +425,7 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
             }
             break;
         case atlas::Format::RGBA:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
                 *t++ = 0x80;
@@ -527,7 +527,7 @@ void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
     }
 }
 
-void OpenGLRenderer::bindTexture2DArray(GLuint _textureId)
+void OpenGLRenderer::bindTexture2DArray(int _textureId)
 {
     if (currentTextureId_ != _textureId)
     {
@@ -536,16 +536,16 @@ void OpenGLRenderer::bindTexture2DArray(GLuint _textureId)
     }
 }
 
-void OpenGLRenderer::selectTextureUnit(unsigned _id)
+void OpenGLRenderer::selectTextureUnit(int _id)
 {
     if (currentActiveTexture_ != _id)
     {
-        glActiveTexture(GL_TEXTURE0 + _id);
+        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + _id));
         currentActiveTexture_ = _id;
     }
 }
 
-void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+void OpenGLRenderer::renderRectangle(int _x, int _y, int _width, int _height,
                                      float _r, float _g, float _b, float _a)
 {
     GLfloat const x = _x;
@@ -573,7 +573,7 @@ void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, 
     crispy::copy(vertices, back_inserter(rectBuffer_));
 }
 
-optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId)
+optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, int _instanceId)
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
@@ -616,7 +616,7 @@ void OpenGLRenderer::execute()
     //
     if (!rectBuffer_.empty())
     {
-        bound(*rectShader_, [&]() noexcept {
+        bound(*rectShader_, [&]() {
             rectShader_->setUniformValue(rectProjectionLocation_, projectionMatrix_);
 
             glBindVertexArray(rectVAO_);
@@ -631,7 +631,7 @@ void OpenGLRenderer::execute()
 
     // render textures
     //
-    bound(*textShader_, [&]() noexcept {
+    bound(*textShader_, [&]() {
         // TODO: only upload when it actually DOES change
         textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
         executeRenderTextures();
@@ -714,8 +714,8 @@ void OpenGLRenderer::executeRenderTextures()
 
     // reset execution state
     textureScheduler_->reset();
-    currentActiveTexture_ = std::numeric_limits<GLuint>::max();
-    currentTextureId_ = std::numeric_limits<GLuint>::max();
+    currentActiveTexture_ = std::numeric_limits<int>::max();
+    currentTextureId_ = std::numeric_limits<int>::max();
 }
 
 } // end namespace
