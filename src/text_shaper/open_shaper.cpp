@@ -114,14 +114,30 @@ namespace // {{{ helper
     {
         switch (_weight)
         {
+            case font_weight::thin:
+                return FC_WEIGHT_THIN;
+            case font_weight::extra_light:
+                return FC_WEIGHT_EXTRALIGHT;
+            case font_weight::light:
+                return FC_WEIGHT_LIGHT;
+            case font_weight::demilight:
+                return FC_WEIGHT_DEMILIGHT;
+            case font_weight::book:
+                return FC_WEIGHT_BOOK;
+            case font_weight::normal:
+                return FC_WEIGHT_NORMAL;
+            case font_weight::medium:
+                return FC_WEIGHT_MEDIUM;
+            case font_weight::demibold:
+                return FC_WEIGHT_DEMIBOLD;
             case font_weight::bold:
                 return FC_WEIGHT_BOLD;
             case font_weight::extra_bold:
                 return FC_WEIGHT_EXTRABOLD;
-            case font_weight::thin:
-                return FC_WEIGHT_LIGHT;
-            case font_weight::normal:
-                return FC_WEIGHT_NORMAL;
+            case font_weight::black:
+                return FC_WEIGHT_BLACK;
+            case font_weight::extra_black:
+                return FC_WEIGHT_EXTRABLACK;
         }
         return FC_WEIGHT_NORMAL;
     }
@@ -189,6 +205,7 @@ namespace // {{{ helper
         }
     }
 
+#if 0
     char const* fcWeightStr(int _value)
     {
         switch (_value)
@@ -286,6 +303,7 @@ namespace // {{{ helper
 
         return output;
     }
+#endif
 
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
@@ -533,8 +551,8 @@ struct open_shaper::Private // {{{
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        fontPathSizeToKeys.emplace(pair{FontPathAndSize{_path, _fontSize}, key});
         debuglog(FontFallbackTag).write("Loading font: key={}, path=\"{}\" size={} dpi={} {}", key, _path, _fontSize, dpi_, metrics(key));
+        fontPathSizeToKeys.emplace(pair{FontPathAndSize{move(_path), _fontSize}, key});
         return key;
     }
 
@@ -557,8 +575,6 @@ struct open_shaper::Private // {{{
     explicit Private(vec2 _dpi) :
         ft_{},
         dpi_{ _dpi },
-        fonts_(),
-        glyphs_(),
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey_{}
     {
