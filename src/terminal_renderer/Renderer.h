@@ -53,14 +53,11 @@ class Renderer : public Renderable {
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
-             Decorator _hyperlinkHover,
-             RenderTarget* _renderTarget);
+             Decorator _hyperlinkHover);
 
     crispy::Size cellSize() const noexcept { return gridMetrics_.cellSize; }
 
     void setRenderTarget(RenderTarget& _renderTarget);
-
-    RenderTarget* renderTarget() const noexcept { return renderTarget_; }
 
     void setColorProfile(ColorProfile const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
@@ -152,8 +149,6 @@ class Renderer : public Renderable {
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
-
-    RenderTarget* renderTarget_ = nullptr;
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

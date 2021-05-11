@@ -305,8 +305,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
 #else
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
-        profile().shell,
-        nullptr // RenderTarget is set later, upon initializeGL
+        profile().shell
     )},
     configFileChangeWatcher_{},
     updateTimer_(this)
@@ -1645,8 +1644,7 @@ void TerminalWidget::doDumpState()
         };
     };
 
-    assert(terminalView_->renderer().renderTarget() != nullptr);
-    terminal::renderer::RenderTarget& renderTarget = *terminalView_->renderer().renderTarget();
+    terminal::renderer::RenderTarget& renderTarget = terminalView_->renderer().renderTarget();
 
     for (auto const* allocator: {&renderTarget.monochromeAtlasAllocator(), &renderTarget.coloredAtlasAllocator(), &renderTarget.lcdAtlasAllocator()})
     {

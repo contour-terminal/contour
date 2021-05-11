@@ -50,8 +50,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            renderer::Decorator _hyperlinkNormal,
                            renderer::Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
-                           Process::ExecInfo const& _shell,
-                           renderer::RenderTarget* _renderTarget) :
+                           Process::ExecInfo const& _shell) :
     events_{ _events },
     renderer_{
         _pty->screenSize(),
@@ -61,8 +60,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _colorProfile,
         _backgroundOpacity,
         _hyperlinkNormal,
-        _hyperlinkHover,
-        _renderTarget
+        _hyperlinkHover
     },
     fontSize_{ _fontDescriptions.size },
     size_{

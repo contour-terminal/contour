@@ -74,8 +74,7 @@ class TerminalView : private Terminal::Events {
                  renderer::Decorator _hyperlinkNormal,
                  renderer::Decorator _hyperlinkHover,
                  std::unique_ptr<Pty> _client,
-                 Process::ExecInfo const& _shell,
-                 renderer::RenderTarget* _renderTarget);
+                 Process::ExecInfo const& _shell);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;

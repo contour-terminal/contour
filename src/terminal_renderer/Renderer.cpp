@@ -29,6 +29,7 @@ using std::chrono::steady_clock;
 using std::make_unique;
 using std::move;
 using std::optional;
+using std::reference_wrapper;
 using std::tuple;
 using std::unique_ptr;
 
@@ -78,15 +79,13 @@ Renderer::Renderer(Size const& _screenSize,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
-                   Decorator _hyperlinkHover,
-                   RenderTarget* _renderTarget) :
+                   Decorator _hyperlinkHover) :
     textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
     colorProfile_{ _colorProfile },
     backgroundOpacity_{ _backgroundOpacity },
-    renderTarget_{ _renderTarget },
     backgroundRenderer_{ gridMetrics_, _colorProfile.defaultBackground },
     imageRenderer_{ cellSize() },
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
@@ -99,9 +98,9 @@ Renderer::Renderer(Size const& _screenSize,
 void Renderer::setRenderTarget(RenderTarget& _renderTarget)
 {
     renderTarget_ = &_renderTarget;
+    Renderable::setRenderTarget(_renderTarget);
 
-    // TODO: each Renderable needs an overload of setRenderTarget to (re-)create atlas's.
-    for (auto& renderable: renderables())
+    for (reference_wrapper<Renderable>& renderable: renderables())
         renderable.get().setRenderTarget(_renderTarget);
 }
 
@@ -125,7 +124,7 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
-    renderTarget_->clearCache();
+    renderTarget().clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
     // either that, or only the render target is allowed to clear the actual atlas caches.
@@ -161,7 +160,7 @@ void Renderer::updateFontMetrics()
 
 void Renderer::setRenderSize(Size _size)
 {
-    renderTarget_->setRenderSize(_size);
+    renderTarget().setRenderSize(_size);
 }
 
 void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
@@ -194,7 +193,7 @@ uint64_t Renderer::render(Terminal& _terminal,
     textRenderer_.flushPendingSegments();
     textRenderer_.finish();
 
-    renderTarget_->execute();
+    renderTarget().execute();
 
     return changes;
 }
