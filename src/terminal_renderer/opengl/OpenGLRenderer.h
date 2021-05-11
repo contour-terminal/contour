@@ -52,7 +52,7 @@ class OpenGLRenderer :
     atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
     atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
 
-    atlas::CommandListener& textureScheduler() override;
+    atlas::AtlasBackend& textureScheduler() override;
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
 

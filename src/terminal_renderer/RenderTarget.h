@@ -46,7 +46,7 @@ class RenderTarget
     virtual atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept = 0;
     virtual atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept = 0;
 
-    virtual atlas::CommandListener& textureScheduler() = 0;
+    virtual atlas::AtlasBackend& textureScheduler() = 0;
 
     virtual void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
                                  float _r, float _g, float _b, float _a) = 0;
@@ -73,7 +73,7 @@ class Renderable {
     atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return renderTarget_->coloredAtlasAllocator(); }
     atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept { return renderTarget_->lcdAtlasAllocator(); }
 
-    atlas::CommandListener& textureScheduler() { return renderTarget_->textureScheduler(); }
+    atlas::AtlasBackend& textureScheduler() { return renderTarget_->textureScheduler(); }
 
   protected:
     RenderTarget* renderTarget_ = nullptr;

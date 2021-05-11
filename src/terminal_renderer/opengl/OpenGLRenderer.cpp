@@ -87,10 +87,10 @@ constexpr unsigned MaxInstanceCount = 1;
 constexpr unsigned MaxMonochromeTextureSize = 1024;
 constexpr unsigned MaxColorTextureSize = 2048;
 
-struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
+struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 {
     using CreateAtlas = atlas::CreateAtlas;
-    using UploadTexture= atlas::UploadTexture;
+    using UploadTexture = atlas::UploadTexture;
     using RenderTexture = atlas::RenderTexture;
     using DestroyAtlas = atlas::DestroyAtlas;
 
@@ -293,7 +293,7 @@ atlas::TextureAtlasAllocator& OpenGLRenderer::lcdAtlasAllocator() noexcept
     return lcdAtlasAllocator_;
 }
 
-atlas::CommandListener& OpenGLRenderer::textureScheduler()
+atlas::AtlasBackend& OpenGLRenderer::textureScheduler()
 {
     return *textureScheduler_;
 }

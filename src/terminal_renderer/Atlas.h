@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/size.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -93,11 +95,13 @@ struct RenderTexture {
 };
 
 /// Generic listener API to events from an Atlas.
+/// AtlasBackend interface, performs the actual atlas operations, such as
+/// texture creation, upload, render, and destruction.
 ///
-/// One prominent user is the scheduler in the Renderer.
-class CommandListener {
+/// @see OpenGLRenderer
+class AtlasBackend {
   public:
-    virtual ~CommandListener() = default;
+    virtual ~AtlasBackend() = default;
 
     /// Creates a new (3D) texture atlas.
     virtual void createAtlas(CreateAtlas const&) = 0;
@@ -123,14 +127,6 @@ class CommandListener {
  */
 class TextureAtlasAllocator {
   private:
-    struct Size {
-        unsigned width, height;
-
-        bool operator==(Size rhs) const noexcept { return width == rhs.width && height == rhs.height; };
-        bool operator!=(Size rhs) const noexcept { return !(*this == rhs); };
-        bool operator<(Size rhs) const noexcept { return width < rhs.width || (width == rhs.width && height < rhs.height); };
-    };
-
     struct Offset { unsigned i, x, y, z; };
 
   public:
@@ -152,7 +148,7 @@ class TextureAtlasAllocator {
                           unsigned _width,
                           unsigned _height,
                           Format _format, // such as GL_R8 or GL_RGBA8
-                          CommandListener& _listener,
+                          AtlasBackend& _listener,
                           std::string _name = {});
 
     TextureAtlasAllocator(TextureAtlasAllocator const&) = delete;
@@ -260,7 +256,7 @@ class TextureAtlasAllocator {
 
     void notifyCreateAtlas()
     {
-        commandListener_.createAtlas({
+        atlasBackend_.createAtlas({
             currentInstanceId_,
             name_,
             width_,
@@ -288,7 +284,7 @@ class TextureAtlasAllocator {
     Format const format_;               // internal storage format, such as GL_R8 or GL_RGBA8
 
     std::string const name_;            // atlas human readable name (only for debugging)
-    CommandListener& commandListener_;  // atlas event listener (used to perform allocation/modification actions)
+    AtlasBackend& atlasBackend_;        // atlas event listener (used to perform allocation/modification actions)
 
     unsigned currentInstanceId_;        // (OpenGL) texture count already in use
     unsigned currentZ_ = 0;             // index to current atlas that is being filled
@@ -296,7 +292,7 @@ class TextureAtlasAllocator {
     unsigned currentY_ = 0;             // current Y-offset to start drawing to
     unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
-    std::map<Size, std::vector<Offset>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
+    std::map<crispy::Size, std::vector<Offset>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
 
     std::list<TextureInfo> textureInfos_;
 };

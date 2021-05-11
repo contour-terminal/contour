@@ -24,6 +24,7 @@
 #include <vector>
 
 using namespace std;
+using crispy::Size;
 
 namespace terminal::renderer::atlas {
 
@@ -33,7 +34,7 @@ TextureAtlasAllocator::TextureAtlasAllocator(unsigned _instanceBaseId,
                                              unsigned _width,
                                              unsigned _height,
                                              Format _format,
-                                             CommandListener& _listener,
+                                             AtlasBackend& _atlasBackend,
                                              string _name) :
     instanceBaseId_{ _instanceBaseId },
     maxInstances_{ _maxInstances },
@@ -42,7 +43,7 @@ TextureAtlasAllocator::TextureAtlasAllocator(unsigned _instanceBaseId,
     height_{ _height },
     format_{ _format },
     name_{ std::move(_name) },
-    commandListener_{ _listener },
+    atlasBackend_{ _atlasBackend },
     currentInstanceId_{ instanceBaseId_ }
 {
     notifyCreateAtlas();
@@ -51,7 +52,7 @@ TextureAtlasAllocator::TextureAtlasAllocator(unsigned _instanceBaseId,
 TextureAtlasAllocator::~TextureAtlasAllocator()
 {
     for (unsigned id = instanceBaseId_; id <= currentInstanceId_; ++id)
-        commandListener_.destroyAtlas(DestroyAtlas{id, name_});
+        atlasBackend_.destroyAtlas(DestroyAtlas{id, name_});
 }
 
 void TextureAtlasAllocator::clear()
@@ -86,7 +87,7 @@ TextureInfo const* TextureAtlasAllocator::insert(unsigned _width,
             if (discardsForGivenSize.empty())
                 discarded_.erase(i);
 
-            commandListener_.uploadTexture(UploadTexture{
+            atlasBackend_.uploadTexture(UploadTexture{
                 std::ref(info),
                 std::move(_data),
                 _format
@@ -108,7 +109,8 @@ TextureInfo const* TextureAtlasAllocator::insert(unsigned _width,
     if (currentY_ + _height > height_ + VerticalGap && !advanceZ())
         return nullptr;
 
-    TextureInfo const& info = appendTextureInfo(_width, _height, _targetWidth, _targetHeight,
+    TextureInfo const& info = appendTextureInfo(_width, _height,
+                                                _targetWidth, _targetHeight,
                                                 Offset{currentInstanceId_, currentX_, currentY_, currentZ_},
                                                 _user);
 
@@ -117,7 +119,7 @@ TextureInfo const* TextureAtlasAllocator::insert(unsigned _width,
     if (_height > maxTextureHeightInCurrentRow_)
         maxTextureHeightInCurrentRow_ = _height;
 
-    commandListener_.uploadTexture(UploadTexture{
+    atlasBackend_.uploadTexture(UploadTexture{
         std::ref(info),
         std::move(_data),
         _format
