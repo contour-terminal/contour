@@ -1645,7 +1645,7 @@ void TerminalWidget::doDumpState()
 
     terminal::renderer::RenderTarget& renderTarget = terminalView_->renderer().renderTarget();
 
-    for (auto const* allocator: {&renderTarget.monochromeAtlasAllocator(), &renderTarget.coloredAtlasAllocator(), &renderTarget.lcdAtlasAllocator()})
+    for (auto const* allocator: renderTarget.allAtlasAllocators())
     {
         for (unsigned instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
         {

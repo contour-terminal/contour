@@ -17,6 +17,7 @@
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 
+#include <array>
 #include <memory>
 
 namespace terminal::renderer {
@@ -45,6 +46,15 @@ class RenderTarget
     virtual atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;
     virtual atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept = 0;
     virtual atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept = 0;
+
+    std::array<atlas::TextureAtlasAllocator*, 3> allAtlasAllocators() noexcept
+    {
+        return {
+            &monochromeAtlasAllocator(),
+            &coloredAtlasAllocator(),
+            &lcdAtlasAllocator()
+        };
+    }
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
