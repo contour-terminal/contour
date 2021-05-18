@@ -16,6 +16,7 @@
 #include <unicode/ucd.h>
 #include <text_shaper/font.h>
 #include <crispy/point.h>
+#include <crispy/size.h>
 #include <crispy/span.h>
 
 #include <cstdint>
@@ -50,15 +51,13 @@ constexpr int pixel_size(bitmap_format _format) noexcept
 struct rasterized_glyph
 {
     glyph_index index;
-    int width;
-    int height;
-    int top;                        // vertical disposition to bitmap's top edge
-    int left;                       // horizontal disposition to bitmap's left edge
+    crispy::Size size;      // Glyph bitmap size in pixels.
+    crispy::Point position; // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, int _width, int _height);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Size _newSize);
 
 struct glyph_position
 {
@@ -151,12 +150,10 @@ namespace fmt { // {{{
         {
             return format_to(
                 ctx.out(),
-                "rasterized_glyph({}, {}x{}+{}+{}, {})",
+                "rasterized_glyph({}, {}+{}, {})",
                 _glyph.index.value,
-                _glyph.width,
-                _glyph.height,
-                _glyph.top,
-                _glyph.left,
+                _glyph.size,
+                _glyph.position,
                 _glyph.format
             );
         }

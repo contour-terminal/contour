@@ -456,7 +456,7 @@ namespace // {{{ helper
         return best;
     }
 
-    optional<FtFacePtr> loadFace(string const& _path, font_size _fontSize, vec2 _dpi, FT_Library _ft)
+    optional<FtFacePtr> loadFace(string const& _path, font_size _fontSize, crispy::Point _dpi, FT_Library _ft)
     {
         FT_Face ftFace = nullptr;
         auto ftErrorCode = FT_New_Face(_ft, _path.c_str(), 0, &ftFace);
@@ -516,7 +516,7 @@ struct FontInfo
 struct open_shaper::Private // {{{
 {
     FT_Library ft_;
-    vec2 dpi_;
+    crispy::Point dpi_;
     std::unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
     std::unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
@@ -572,7 +572,7 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    explicit Private(vec2 _dpi) :
+    explicit Private(crispy::Point _dpi) :
         ft_{},
         dpi_{ _dpi },
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
@@ -599,7 +599,7 @@ struct open_shaper::Private // {{{
     }
 }; // }}}
 
-open_shaper::open_shaper(vec2 _dpi) : d(new Private(_dpi), [](Private* p) { delete p; })
+open_shaper::open_shaper(crispy::Point _dpi) : d(new Private(_dpi), [](Private* p) { delete p; })
 {
 }
 
@@ -771,17 +771,17 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     }
 
     rasterized_glyph output{};
-    output.width = static_cast<int>(ftFace->glyph->bitmap.width);
-    output.height = static_cast<int>(ftFace->glyph->bitmap.rows);
-    output.left = ftFace->glyph->bitmap_left;
-    output.top = ftFace->glyph->bitmap_top;
+    output.size.width = static_cast<int>(ftFace->glyph->bitmap.width);
+    output.size.height = static_cast<int>(ftFace->glyph->bitmap.rows);
+    output.position.x = ftFace->glyph->bitmap_left;
+    output.position.y = ftFace->glyph->bitmap_top;
 
     switch (ftFace->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
         {
-            auto const width = output.width;
-            auto const height = output.height;
+            auto const width = output.size.width;
+            auto const height = output.size.height;
 
             // convert mono to gray
             FT_Bitmap ftBitmap;
@@ -807,13 +807,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         case FT_PIXEL_MODE_GRAY:
         {
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(output.height * output.width);
+            output.bitmap.resize(output.size.height * output.size.width);
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto i = 0; i < output.height; ++i)
-                for (auto j = 0; j < output.width; ++j)
-                    output.bitmap[i * output.width + j] = s[(output.height - 1 - i) * pitch + j];
+            for (auto i = 0; i < output.size.height; ++i)
+                for (auto j = 0; j < output.size.width; ++j)
+                    output.bitmap[i * output.size.width + j] = s[(output.size.height - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD:
@@ -823,7 +823,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(width * height);
-            output.width /= 3;
+            output.size.width /= 3;
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto s = ftFace->glyph->bitmap.buffer;
@@ -834,8 +834,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         }
         case FT_PIXEL_MODE_BGRA:
         {
-            auto const width = output.width;
-            auto const height = output.height;
+            auto const width = output.size.width;
+            auto const height = output.size.height;
 
             output.format = bitmap_format::rgba;
             output.bitmap.resize(height * width * 4);

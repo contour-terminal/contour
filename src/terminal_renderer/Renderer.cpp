@@ -72,15 +72,14 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     return output;
 }
 
-Renderer::Renderer(Size const& _screenSize,
-                   int _logicalDpiX,
-                   int _logicalDpiY,
+Renderer::Renderer(Size _screenSize,
+                   crispy::Point _logicalDpi,
                    FontDescriptions const& _fontDescriptions,
                    terminal::ColorProfile _colorProfile,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover) :
-    textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
+    textShaper_{ make_unique<text::open_shaper>(_logicalDpi) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },

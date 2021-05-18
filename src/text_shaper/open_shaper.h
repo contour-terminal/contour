@@ -26,7 +26,7 @@ namespace text {
  */
 class open_shaper : public shaper {
   public:
-    explicit open_shaper(vec2 _dpi);
+    explicit open_shaper(crispy::Point _dpi);
 
     std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
 

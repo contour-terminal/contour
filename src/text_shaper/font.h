@@ -14,18 +14,13 @@
 #pragma once
 
 #include <crispy/FNV.h>
+#include <crispy/point.h>
 
 #include <fmt/format.h>
 
 #include <string>
 
 namespace text {
-
-struct vec2
-{
-    int x;
-    int y;
-};
 
 enum class font_weight
 {
@@ -210,17 +205,6 @@ namespace std { // {{{
 } // }}}
 
 namespace fmt { // {{{
-    template <>
-    struct formatter<text::vec2> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::vec2 _value, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "({}, {})", _value.x, _value.y);
-        }
-    };
-
     template <>
     struct formatter<text::font_weight> {
         template <typename ParseContext>

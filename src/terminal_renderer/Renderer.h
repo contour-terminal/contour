@@ -46,9 +46,8 @@ class Renderer : public Renderable {
      * @p _colorProfile user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
-    Renderer(crispy::Size const& _screenSize,
-             int _logicalDpiX,
-             int _logicalDpiY,
+    Renderer(crispy::Size _screenSize,
+             crispy::Point _logicalDpi,
              FontDescriptions const& _fontDescriptions,
              ColorProfile _colorProfile,
              Opacity _backgroundOpacity,

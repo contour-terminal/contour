@@ -20,6 +20,7 @@
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
 
+#include <crispy/point.h>
 #include <crispy/size.h>
 
 #include <atomic>
@@ -63,8 +64,7 @@ class TerminalView : private Terminal::Events {
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,
                  Modifier _mouseProtocolSuppressModifier,
-                 int _logicalDpiX,
-                 int _logicalDpiY,
+                 crispy::Point _logicalDpi,
                  renderer::FontDescriptions const& _fontDescriptions,
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,

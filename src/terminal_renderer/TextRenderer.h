@@ -24,6 +24,7 @@
 
 #include <crispy/FNV.h>
 #include <crispy/point.h>
+#include <crispy/size.h>
 
 #include <unicode/run_segmenter.h>
 
@@ -155,8 +156,8 @@ class TextRenderer : public Renderable {
     // rendering
     //
     struct GlyphMetrics {
-        text::vec2 bitmapSize;        // glyph size in pixels
-        text::vec2 bearing;           // offset baseline and left to top and left of the glyph's bitmap
+        crispy::Size bitmapSize;    // glyph size in pixels
+        crispy::Point bearing;      // offset baseline and left to top and left of the glyph's bitmap
     };
     friend struct fmt::formatter<GlyphMetrics>;
 

@@ -365,17 +365,17 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         auto const cellSize = gridMetrics_.cellSize;
 
         if (numCells > 1 && // XXX for now, only if emoji glyph
-                (glyph.width > cellSize.width * numCells
-              || glyph.height > cellSize.height))
+                (glyph.size.width > cellSize.width * numCells
+              || glyph.size.height > cellSize.height))
         {
-            auto [scaled, factor] = text::scale(glyph, cellSize.width * numCells, cellSize.height);
+            auto const newSize = crispy::Size{cellSize.width * numCells, cellSize.height};
+            auto [scaled, factor] = text::scale(glyph, newSize);
 
-            glyph.width = scaled.width;
-            glyph.height = scaled.height; // TODO: there shall be only one with'x'height.
+            glyph.size = scaled.size; // TODO: there shall be only one with'x'height.
 
             // center the image in the middle of the cell
-            glyph.top = gridMetrics_.cellSize.height - gridMetrics_.baseline;
-            glyph.left = (gridMetrics_.cellSize.width * numCells - glyph.width) / 2;
+            glyph.position.y = gridMetrics_.cellSize.height - gridMetrics_.baseline;
+            glyph.position.x = (gridMetrics_.cellSize.width * numCells - glyph.size.width) / 2;
 
             // (old way)
             // glyph.metrics.bearing.x /= factor;
@@ -407,13 +407,13 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     }
     // }}}
 
-    auto const yMax = gridMetrics_.baseline + glyph.top;
-    auto const yMin = yMax - glyph.height;
+    auto const yMax = gridMetrics_.baseline + glyph.position.y;
+    auto const yMin = yMax - glyph.size.height;
 
     auto const ratio = !colored
                      ? 1.0f
-                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.width),
-                           float(gridMetrics_.cellSize.height) / float(glyph.height));
+                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.size.width),
+                           float(gridMetrics_.cellSize.height) / float(glyph.size.height));
 
     auto const yOverflow = gridMetrics_.cellSize.height - yMax;
     if (crispy::logging_sink::for_debug().enabled())
@@ -446,25 +446,23 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     if (yOverflow < 0)
     {
         debuglog(TextRendererTag).write("Cropping {} overflowing bitmap rows.", -yOverflow);
-        glyph.height += yOverflow;
-        glyph.top += yOverflow;
+        glyph.size.height += yOverflow;
+        glyph.position.y += yOverflow;
     }
 
     if (yMin < 0)
     {
         auto const rowCount = -yMin;
-        auto const pixelCount = rowCount * glyph.width * text::pixel_size(glyph.format);
+        auto const pixelCount = rowCount * glyph.size.width * text::pixel_size(glyph.format);
         debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.height += yMin;
+        glyph.size.height += yMin;
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount));
     }
 
     GlyphMetrics metrics{};
-    metrics.bitmapSize.x = glyph.width;
-    metrics.bitmapSize.y = glyph.height;
-    metrics.bearing.x = glyph.left;
-    metrics.bearing.y = glyph.top;
+    metrics.bitmapSize = glyph.size;
+    metrics.bearing = glyph.position;
 
     if (crispy::logging_sink::for_debug().enabled())
         debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
@@ -477,10 +475,10 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                                         glyph);
 
     return targetAtlas.insert(_id,
-                              glyph.width,
-                              glyph.height,
-                              unsigned(ceilf(float(glyph.width) * ratio)),
-                              unsigned(ceilf(float(glyph.height) * ratio)),
+                              glyph.size.width,
+                              glyph.size.height,
+                              unsigned(ceilf(float(glyph.size.width) * ratio)),
+                              unsigned(ceilf(float(glyph.size.height) * ratio)),
                               move(glyph.bitmap),
                               userFormat,
                               metrics);
@@ -513,11 +511,11 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                      ;
 
         // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
-        auto const y = _pos.y                       // bottom left
-                     + _glyphPos.offset.y           // -> harfbuzz adjustment
-                     + gridMetrics_.baseline        // -> baseline
-                     + _glyphMetrics.bearing.y      // -> bitmap top
-                     - _glyphMetrics.bitmapSize.y   // -> bitmap height
+        auto const y = _pos.y                           // bottom left
+                     + _glyphPos.offset.y               // -> harfbuzz adjustment
+                     + gridMetrics_.baseline            // -> baseline
+                     + _glyphMetrics.bearing.y          // -> bitmap top
+                     - _glyphMetrics.bitmapSize.height  // -> bitmap height
                      ;
 
         renderTexture(crispy::Point{x, y}, _color, _textureInfo);
