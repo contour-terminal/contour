@@ -22,11 +22,13 @@
 
 #include <algorithm>
 #include <vector>
+#include <utility>
 
 using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;
+using std::pair;
 using std::string;
 using std::vector;
 
@@ -105,7 +107,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 
     std::vector<CreateAtlas> createAtlases;
     std::vector<UploadTexture> uploadTextures;
-    std::unordered_map<int, RenderBatch> renderBatches;
+    std::unordered_map<AtlasKey, RenderBatch> renderBatches;
     int renderTextureCount = 0;
 
     std::vector<DestroyAtlas> destroyAtlases;
@@ -123,11 +125,11 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     void renderTexture(RenderTexture const& _render) override
     {
         // This is factored out of renderTexture() to make sure it's not writing to anything else
-        addRenderTexture(_render, renderBatches[_render.texture.get().atlas]);
+        addRenderTextureToBatch(_render, renderBatches[AtlasKey{_render.texture.get().atlas}]);
         renderTextureCount++;
     }
 
-    void addRenderTexture(RenderTexture const& _render, RenderBatch& _batch) const
+    static void addRenderTextureToBatch(RenderTexture const& _render, RenderBatch& _batch)
     {
         // Vertices
         GLfloat const x = _render.x;
@@ -171,14 +173,6 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     void destroyAtlas(DestroyAtlas const& _atlas) override
     {
         destroyAtlases.push_back(_atlas);
-    }
-
-    size_t size() const noexcept
-    {
-        return createAtlases.size()
-             + uploadTextures.size()
-             + renderTextureCount
-             + destroyAtlases.size();
     }
 
     void reset()
@@ -414,9 +408,9 @@ int OpenGLRenderer::maxTextureSize()
     return static_cast<int>(value);
 }
 
-void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, int _width, int _height, atlas::Format _format)
+void OpenGLRenderer::clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format)
 {
-    bindTexture2DArray(_textureId);
+    bindTexture(_textureId);
 
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
@@ -468,7 +462,7 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
     CHECKED_GL( glGenTextures(1, &textureId) );
-    bindTexture2DArray(textureId);
+    bindTexture(textureId);
 
     //glTexStorage3D(GL_TEXTURE_2D, 1, glFormatZ(_param.format), _param.width, _param.height, _param.depth);
 
@@ -478,10 +472,9 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE) );
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE) );
 
-    auto const key = AtlasKey{_param.atlas};
-    atlasMap_[key] = textureId;
+    clearTextureAtlas(textureId, _param.width, _param.height, _param.format);
 
-    clearTexture2DArray(textureId, _param.width, _param.height, _param.format);
+    atlasMap_.insert(pair{AtlasKey{_param.atlas}, textureId});
 }
 
 void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
@@ -502,7 +495,7 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     //auto constexpr depth = 1;
     auto constexpr type = GL_UNSIGNED_BYTE;
 
-    bindTexture2DArray(textureId);
+    bindTexture(textureId);
 
     switch (_param.format)
     {
@@ -520,19 +513,13 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     //                 glFormat(_param.format), type, _param.data.data());
 }
 
-void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
+GLuint OpenGLRenderer::textureAtlasID(AtlasKey _atlasID) const noexcept
 {
-    auto const key = AtlasKey{_param.texture.get().atlas};
-    if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
-    {
-        GLuint const textureUnit = _param.texture.get().atlas;
-        GLuint const textureId = it->second;
+    auto const it = atlasMap_.find(_atlasID);
+    if (it == atlasMap_.end())
+        return 0;
 
-        //debuglog(OpenGLRendererTag).write("({}/{}): {}\n", textureUnit, textureId, _param);
-
-        selectTextureUnit(textureUnit);
-        bindTexture2DArray(textureId);
-    }
+    return it->second;
 }
 
 void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
@@ -546,21 +533,12 @@ void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
     }
 }
 
-void OpenGLRenderer::bindTexture2DArray(int _textureId)
+void OpenGLRenderer::bindTexture(GLuint _textureId)
 {
     if (currentTextureId_ != _textureId)
     {
         glBindTexture(GL_TEXTURE_2D, _textureId);
         currentTextureId_ = _textureId;
-    }
-}
-
-void OpenGLRenderer::selectTextureUnit(int _id)
-{
-    if (currentActiveTexture_ != _id)
-    {
-        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + _id));
-        currentActiveTexture_ = _id;
     }
 }
 
@@ -700,28 +678,32 @@ void OpenGLRenderer::executeRenderTextures()
     for (auto const& params : textureScheduler_->uploadTextures)
         uploadTexture(params);
 
-    for (auto const& batch: textureScheduler_->renderBatches | ranges::views::values)
+    for (auto && [atlasID, batch]: textureScheduler_->renderBatches)
     {
-        for (auto const& params : batch.renderTextures)
-            renderTexture(params);
+        if (currentActiveTexture_ != atlasID.atlasTexture)
+        {
+            glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + atlasID.atlasTexture));
+            currentActiveTexture_ = atlasID.atlasTexture;
+        }
+        bindTexture(textureAtlasID(atlasID));
 
         // upload vertices and render (iff there is anything to render)
-        if (!batch.renderTextures.empty())
-        {
-            glBindVertexArray(vao_);
+        if (batch.renderTextures.empty())
+            continue;
 
-            // upload buffer
-            glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-            glBufferData(GL_ARRAY_BUFFER,
-                         batch.buffer.size() * sizeof(GLfloat),
-                         batch.buffer.data(),
-                         GL_STREAM_DRAW);
-            glDrawArrays(GL_TRIANGLES, 0, batch.renderTextures.size() * 6);
+        glBindVertexArray(vao_);
 
-            // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
-            //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
-            //       fixed GL_TEXTURE0. - will this be noticable faster?
-        }
+        // upload buffer
+        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+        glBufferData(GL_ARRAY_BUFFER,
+                     batch.buffer.size() * sizeof(GLfloat),
+                     batch.buffer.data(),
+                     GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, batch.renderTextures.size() * 6);
+
+        // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
+        //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
+        //       fixed GL_TEXTURE0. - will this be noticable faster?
     }
 
     // destroy any pending atlases that were meant to be destroyed

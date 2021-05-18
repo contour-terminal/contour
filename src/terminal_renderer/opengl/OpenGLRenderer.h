@@ -29,6 +29,15 @@ namespace terminal::renderer::opengl {
 
 struct ShaderConfig;
 
+struct AtlasKey
+{
+    // This value is being used as the texture unit offset internally (GL_TEXTURE0 + $atlasTexture).
+    int atlasTexture;
+
+    constexpr bool operator<(AtlasKey const& _rhs) const noexcept { return atlasTexture < _rhs.atlasTexture; }
+    constexpr bool operator==(AtlasKey const& _rhs) const noexcept { return atlasTexture == _rhs.atlasTexture; }
+};
+
 class OpenGLRenderer :
     public RenderTarget,
     public QOpenGLExtraFunctions
@@ -76,9 +85,6 @@ class OpenGLRenderer :
     int maxTextureUnits();
     crispy::Size renderBufferSize();
 
-    void selectTextureUnit(int _id);
-    void bindTexture2DArray(int _textureId);
-
     void executeRenderTextures();
     void createAtlas(atlas::CreateAtlas const& _param);
     void uploadTexture(atlas::UploadTexture const& _param);
@@ -87,18 +93,9 @@ class OpenGLRenderer :
 
     void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
-    // private helper types
-    //
-    struct AtlasKey {
-        int atlasTexture;
-
-        bool operator<(AtlasKey const& _rhs) const noexcept
-        {
-            return atlasTexture < _rhs.atlasTexture;
-        }
-    };
-
-    void clearTexture2DArray(GLuint _textureId, int _width, int _height, atlas::Format _format);
+    void bindTexture(GLuint _textureId);
+    GLuint textureAtlasID(AtlasKey _atlasID) const noexcept;
+    void clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -120,7 +117,7 @@ class OpenGLRenderer :
     //TODO: GLuint ebo_{};
     std::map<AtlasKey, GLuint> atlasMap_; // maps atlas IDs to texture IDs
     int currentActiveTexture_ = std::numeric_limits<int>::max();
-    int currentTextureId_ = std::numeric_limits<int>::max();
+    GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
     atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
     atlas::TextureAtlasAllocator coloredAtlasAllocator_;
@@ -138,3 +135,15 @@ class OpenGLRenderer :
 };
 
 } // end namespace
+
+namespace std
+{
+    template<>
+    struct hash<terminal::renderer::opengl::AtlasKey>
+    {
+        constexpr size_t operator()(terminal::renderer::opengl::AtlasKey _key) const noexcept
+        {
+            return _key.atlasTexture;
+        }
+    };
+}
