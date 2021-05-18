@@ -14,6 +14,7 @@
 #pragma once
 
 #include <crispy/size.h>
+#include <crispy/debuglog.h>
 
 #include <fmt/format.h>
 
@@ -28,6 +29,8 @@
 #include <vector>
 
 namespace terminal::renderer::atlas {
+
+auto const inline AtlasTag = crispy::debugtag::make("renderer.atlas", "Logs details about texture atlas.");
 
 using Buffer = std::vector<uint8_t>;
 enum class Format { Red, RGB, RGBA };
@@ -45,7 +48,6 @@ constexpr int element_count(Format _format) noexcept
 
 struct CreateAtlas {
     int atlas;
-    std::reference_wrapper<std::string const> atlasName;
     int width;
     int height;
     int depth;
@@ -55,7 +57,6 @@ struct CreateAtlas {
 struct DestroyAtlas {
     // ID of the atlas to release the resources on the GPU for.
     int atlas;
-    std::reference_wrapper<std::string const> atlasName;
 };
 
 struct TextureInfo {
@@ -143,12 +144,12 @@ class TextureAtlasAllocator {
      *                  such as GL_R8 or GL_RBGA8 when using OpenGL
      */
     TextureAtlasAllocator(int _instanceBaseId,
-                          int _maxInstances,
-                          int _depth,
                           int _width,
                           int _height,
+                          int _depth,
+                          int _maxInstances,
                           Format _format, // such as GL_R8 or GL_RGBA8
-                          AtlasBackend& _listener,
+                          AtlasBackend& _backend,
                           std::string _name = {});
 
     TextureAtlasAllocator(TextureAtlasAllocator const&) = delete;
@@ -210,55 +211,57 @@ class TextureAtlasAllocator {
     void release(TextureInfo const& _info);
 
   private:
+    constexpr Offset offset() const noexcept
+    {
+        return Offset{currentInstanceId_, currentX_, currentY_, currentZ_};
+    }
+
+    constexpr std::optional<Offset> getOffsetAndAdvance(int _width, int _height);
+
     constexpr bool advanceY()
     {
-        if (currentY_ + maxTextureHeightInCurrentRow_ <= height_)
-        {
-            currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
-            currentX_ = 0;
-            maxTextureHeightInCurrentRow_ = 0;
-            return true;
-        }
-        else
+        if (not(currentY_ + maxTextureHeightInCurrentRow_ + VerticalGap + 1 < height_))
             return advanceZ();
+
+        currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
+        currentX_ = 0;
+        maxTextureHeightInCurrentRow_ = 0;
+        return true;
     }
 
     constexpr bool advanceZ()
     {
-        if (currentZ_ < depth_)
-        {
-            currentZ_++;
-            currentY_ = 0;
-            currentX_ = 0;
-            maxTextureHeightInCurrentRow_ = 0;
-            return true;
-        }
-        else
+        if (not(currentZ_ + 1 < depth_))
             return advanceInstance();
+
+        currentZ_++;
+        currentY_ = 0;
+        currentX_ = 0;
+        maxTextureHeightInCurrentRow_ = 0;
+        debuglog(AtlasTag).write("Advance Z to {}.", currentZ_);
+        return true;
     }
 
     constexpr bool advanceInstance()
     {
-        if (currentInstanceId_ < instanceBaseId_ + maxInstances_)
-        {
-            currentInstanceId_++;
-            currentZ_ = 0;
-            currentY_ = 0;
-            currentX_ = 0;
-            maxTextureHeightInCurrentRow_ = 0;
-
-            notifyCreateAtlas();
-            return true;
-        }
-        else
+        if (not(currentInstanceId_ + 1 < instanceBaseId_ + maxInstances_))
             return false;
+
+        currentInstanceId_++;
+        currentZ_ = 0;
+        currentY_ = 0;
+        currentX_ = 0;
+        maxTextureHeightInCurrentRow_ = 0;
+
+        debuglog(AtlasTag).write("Advance instance to {}.", currentInstanceId_);
+        notifyCreateAtlas();
+        return true;
     }
 
     void notifyCreateAtlas()
     {
         atlasBackend_.createAtlas({
             currentInstanceId_,
-            name_,
             width_,
             height_,
             depth_,
@@ -404,10 +407,10 @@ class MetadataTextureAtlas {
   private:
     TextureAtlasAllocator& atlas_;
 
-    std::map<Key, TextureInfo const*> allocations_ = {};
+    std::unordered_map<Key, TextureInfo const*> allocations_ = {};
 
     // conditionally transform void to int as I can't conditionally enable/disable this member var.
-    std::map<
+    std::unordered_map<
         Key,
         std::conditional_t<std::is_same_v<Metadata, void>, int, Metadata>
     > metadata_ = {};
@@ -441,7 +444,7 @@ namespace fmt { // {{{
         auto format(terminal::renderer::atlas::CreateAtlas const& _cmd, FormatContext& ctx)
         {
             return format_to(ctx.out(), "<atlas:{}, dim:{}x{}, depth:{}, format:{}>",
-                _cmd.atlasName.get(),
+                _cmd.atlas,
                 _cmd.width,
                 _cmd.height,
                 _cmd.depth,
@@ -508,10 +511,7 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::renderer::atlas::DestroyAtlas const& _cmd, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "<atlas: {}, id:{}>",
-                _cmd.atlasName.get(),
-                _cmd.atlas
-            );
+            return format_to(ctx.out(), "<atlas: {}>", _cmd.atlas);
         }
     };
 
@@ -522,10 +522,9 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::renderer::atlas::TextureAtlasAllocator const& _atlas, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "TextureAtlasAllocator<instance: {}/{}, dim: {}x{}x{}, at: {}x{}x{}, rowHeight:{}>",
-                _atlas.currentInstance(), _atlas.maxInstances(),
-                _atlas.width(), _atlas.height(), _atlas.depth(),
-                _atlas.currentX(), _atlas.currentY(), _atlas.currentZ(),
+            return format_to(ctx.out(), "TextureAtlasAllocator<cursor: {}/{}/{}/{} ({}x{}x{}x{}), rowHeight:{}>",
+                _atlas.currentX(), _atlas.currentY(), _atlas.currentZ(), _atlas.currentInstance(),
+                _atlas.width(), _atlas.height(), _atlas.depth(), _atlas.maxInstances(),
                 _atlas.maxTextureHeightInCurrentRow()
             );
         }

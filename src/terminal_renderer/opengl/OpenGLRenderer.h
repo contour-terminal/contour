@@ -90,17 +90,11 @@ class OpenGLRenderer :
     // private helper types
     //
     struct AtlasKey {
-        std::reference_wrapper<std::string const> name;
         int atlasTexture;
 
         bool operator<(AtlasKey const& _rhs) const noexcept
         {
-            if (name.get() < _rhs.name.get())
-                return true;
-            else if (name.get() == _rhs.name.get())
-                return atlasTexture < _rhs.atlasTexture;
-            else
-                return false;
+            return atlasTexture < _rhs.atlasTexture;
         }
     };
 

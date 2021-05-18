@@ -13,6 +13,8 @@
  */
 #include <terminal_renderer/Atlas.h>
 
+#include <crispy/debuglog.h>
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -29,10 +31,10 @@ using crispy::Size;
 namespace terminal::renderer::atlas {
 
 TextureAtlasAllocator::TextureAtlasAllocator(int _instanceBaseId,
-                                             int _maxInstances,
-                                             int _depth,
                                              int _width,
                                              int _height,
+                                             int _depth,
+                                             int _maxInstances,
                                              Format _format,
                                              AtlasBackend& _atlasBackend,
                                              string _name) :
@@ -52,7 +54,7 @@ TextureAtlasAllocator::TextureAtlasAllocator(int _instanceBaseId,
 TextureAtlasAllocator::~TextureAtlasAllocator()
 {
     for (int id = instanceBaseId_; id <= currentInstanceId_; ++id)
-        atlasBackend_.destroyAtlas(DestroyAtlas{id, name_});
+        atlasBackend_.destroyAtlas(DestroyAtlas{id});
 }
 
 void TextureAtlasAllocator::clear()
@@ -63,6 +65,46 @@ void TextureAtlasAllocator::clear()
     currentY_ = 0;
     maxTextureHeightInCurrentRow_ = 0;
     discarded_.clear();
+}
+
+constexpr optional<TextureAtlasAllocator::Offset> TextureAtlasAllocator::getOffsetAndAdvance(int _width, int _height)
+{
+    // Dimensions that must fit : {X, Y}
+    // Dimensions to extend to  : {X, Y, Z, I}
+
+    if (not(currentX_ + HorizontalGap + _width < width_))
+    {
+        currentX_ = 0;
+        currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
+        if (not(currentY_ + _height < height_))
+        {
+            currentY_ = 0;
+            maxTextureHeightInCurrentRow_ = 0;
+            currentZ_++;
+
+            if (not(currentZ_ < depth_))
+            {
+                currentZ_ = 0;
+
+                if (not(currentInstanceId_ + 1 < instanceBaseId_ + maxInstances_))
+                {
+                    currentX_ = width_;
+                    currentY_ = height_;
+                    currentZ_ = depth_;
+                    return nullopt;
+                }
+                currentInstanceId_++;
+                notifyCreateAtlas();
+            }
+        }
+    }
+
+    // TODO: current{X/Y/Z/I} should be called next{X/Y/Z/I}.
+
+    auto const result = offset();
+    currentX_ += _width + HorizontalGap;
+    maxTextureHeightInCurrentRow_ = max(maxTextureHeightInCurrentRow_, _height);
+    return result;
 }
 
 TextureInfo const* TextureAtlasAllocator::insert(int _width,
@@ -101,6 +143,7 @@ TextureInfo const* TextureAtlasAllocator::insert(int _width,
     if (_height > height_ || _width > width_)
         return nullptr;
 
+#if 0
     // ensure we have enough width space in current row
     if (currentX_ + _width >= width_ + HorizontalGap && !advanceY())
         return nullptr;
@@ -109,15 +152,21 @@ TextureInfo const* TextureAtlasAllocator::insert(int _width,
     if (currentY_ + _height > height_ + VerticalGap && !advanceZ())
         return nullptr;
 
-    TextureInfo const& info = appendTextureInfo(_width, _height,
-                                                _targetWidth, _targetHeight,
-                                                Offset{currentInstanceId_, currentX_, currentY_, currentZ_},
-                                                _user);
-
+    auto const targetOffset = offset();
     currentX_ = std::min(currentX_ + _width + HorizontalGap, width_);
-
     if (_height > maxTextureHeightInCurrentRow_)
         maxTextureHeightInCurrentRow_ = _height;
+#else
+    auto const offsetOpt = getOffsetAndAdvance(_width, _height);
+    if (!offsetOpt.has_value())
+        return nullptr;
+    auto const targetOffset = offsetOpt.value();
+#endif
+
+    TextureInfo const& info = appendTextureInfo(_width, _height,
+                                                _targetWidth, _targetHeight,
+                                                targetOffset,
+                                                _user);
 
     atlasBackend_.uploadTexture(UploadTexture{
         std::ref(info),
@@ -125,6 +174,7 @@ TextureInfo const* TextureAtlasAllocator::insert(int _width,
         _format
     });
 
+    //debuglog(AtlasTag).write("Insert texture into atlas. {}", info);
     return &info;
 }
 

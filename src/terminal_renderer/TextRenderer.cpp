@@ -457,7 +457,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.size.height += yMin;
         auto& data = glyph.bitmap;
-        data.erase(begin(data), next(begin(data), pixelCount));
+        assert(pixelCount >= 0);
+        data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
     }
 
     GlyphMetrics metrics{};

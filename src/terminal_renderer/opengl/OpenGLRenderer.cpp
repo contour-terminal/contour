@@ -18,6 +18,8 @@
 #include <crispy/algorithm.h>
 #include <crispy/utils.h>
 
+#include <range/v3/view.hpp>
+
 #include <algorithm>
 #include <vector>
 
@@ -83,9 +85,10 @@ namespace // {{{ helper
     }
 } // }}}
 
-constexpr int MaxInstanceCount = 1;
 constexpr int MaxMonochromeTextureSize = 1024;
 constexpr int MaxColorTextureSize = 2048;
+constexpr int MaxAtlasDepth = 1;
+constexpr int MaxInstanceCount = 24;
 
 struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 {
@@ -94,11 +97,17 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     using RenderTexture = atlas::RenderTexture;
     using DestroyAtlas = atlas::DestroyAtlas;
 
+    struct RenderBatch
+    {
+        std::vector<RenderTexture> renderTextures;
+        std::vector<GLfloat> buffer;
+    };
+
     std::vector<CreateAtlas> createAtlases;
     std::vector<UploadTexture> uploadTextures;
-    std::vector<RenderTexture> renderTextures;
-    std::vector<GLfloat> buffer;
-    GLsizei vertexCount = 0;
+    std::unordered_map<int, RenderBatch> renderBatches;
+    int renderTextureCount = 0;
+
     std::vector<DestroyAtlas> destroyAtlases;
 
     void createAtlas(CreateAtlas const& _atlas) override
@@ -113,8 +122,13 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 
     void renderTexture(RenderTexture const& _render) override
     {
-        renderTextures.emplace_back(_render);
+        // This is factored out of renderTexture() to make sure it's not writing to anything else
+        addRenderTexture(_render, renderBatches[_render.texture.get().atlas]);
+        renderTextureCount++;
+    }
 
+    void addRenderTexture(RenderTexture const& _render, RenderBatch& _batch) const
+    {
         // Vertices
         GLfloat const x = _render.x;
         GLfloat const y = _render.y;
@@ -150,8 +164,8 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
             x + r, y + s, z,  rx + w, ry + h, i, u,  cr, cg, cb, ca, // right top
         };
 
-        crispy::copy(vertices, back_inserter(buffer));
-        vertexCount += 6;
+        _batch.renderTextures.emplace_back(_render);
+        crispy::copy(vertices, back_inserter(_batch.buffer));
     }
 
     void destroyAtlas(DestroyAtlas const& _atlas) override
@@ -163,7 +177,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     {
         return createAtlases.size()
              + uploadTextures.size()
-             + renderTextures.size()
+             + renderTextureCount
              + destroyAtlases.size();
     }
 
@@ -171,10 +185,15 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     {
         createAtlases.clear();
         uploadTextures.clear();
-        renderTextures.clear();
         destroyAtlases.clear();
-        buffer.clear();
-        vertexCount = 0;
+
+        // Don't simply do renderBatch.clear() to reuse already allocated memory in future render calls.
+        for (auto& renderBatch: renderBatches)
+        {
+            renderBatch.second.renderTextures.clear();
+            renderBatch.second.buffer.clear();
+        }
+        renderTextureCount = 0;
     }
 };
 
@@ -209,30 +228,30 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     textureScheduler_{std::make_unique<TextureScheduler>()},
     monochromeAtlasAllocator_{
         0,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
         min(MaxMonochromeTextureSize, maxTextureSize()),
         min(MaxMonochromeTextureSize, maxTextureSize()),
+        MaxAtlasDepth, // maxTextureSize() / maxTextureDepth(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
         atlas::Format::Red,
         *textureScheduler_,
         "monochromeAtlas"
     },
     coloredAtlasAllocator_{
         1,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
         min(MaxColorTextureSize, maxTextureSize()),
         min(MaxColorTextureSize, maxTextureSize()),
+        MaxAtlasDepth, // maxTextureSize() / maxTextureDepth(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
         atlas::Format::RGBA,
         *textureScheduler_,
         "colorAtlas"
     },
     lcdAtlasAllocator_{
         2,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
         min(MaxColorTextureSize, maxTextureSize()),
         min(MaxColorTextureSize, maxTextureSize()),
+        MaxAtlasDepth, // maxTextureSize() / maxTextureDepth(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
         atlas::Format::RGB,
         *textureScheduler_,
         "lcdAtlas"
@@ -459,7 +478,7 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE) );
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE) );
 
-    auto const key = AtlasKey{_param.atlasName, _param.atlas};
+    auto const key = AtlasKey{_param.atlas};
     atlasMap_[key] = textureId;
 
     clearTexture2DArray(textureId, _param.width, _param.height, _param.format);
@@ -468,7 +487,7 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
 {
     auto const& texture = _param.texture.get();
-    auto const key = AtlasKey{texture.atlasName, texture.atlas};
+    auto const key = AtlasKey{texture.atlas};
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
     assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
     auto const textureId = atlasMap_[key];
@@ -503,7 +522,7 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
 
 void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
 {
-    auto const key = AtlasKey{_param.texture.get().atlasName, _param.texture.get().atlas};
+    auto const key = AtlasKey{_param.texture.get().atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
     {
         GLuint const textureUnit = _param.texture.get().atlas;
@@ -518,7 +537,7 @@ void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
 
 void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
 {
-    auto const key = AtlasKey{_param.atlasName.get(), _param.atlas};
+    auto const key = AtlasKey{_param.atlas};
     if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
     {
         GLuint const textureId = it->second;
@@ -578,7 +597,7 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
 
-    auto const textureId = atlasMap_.at(AtlasKey{_allocator.name(), _instanceId});
+    auto const textureId = atlasMap_.at(AtlasKey{_instanceId});
 
     AtlasTextureInfo output{};
     output.atlasName = _allocator.name();
@@ -681,31 +700,28 @@ void OpenGLRenderer::executeRenderTextures()
     for (auto const& params : textureScheduler_->uploadTextures)
         uploadTexture(params);
 
-    // order and prepare texture geometry
-    sort(textureScheduler_->renderTextures.begin(),
-         textureScheduler_->renderTextures.end(),
-         [](auto const& a, auto const& b) { return a.texture.get().atlas < b.texture.get().atlas; });
-
-    for (auto const& params : textureScheduler_->renderTextures)
-        renderTexture(params);
-
-    // upload vertices and render (iff there is anything to render)
-    if (!textureScheduler_->renderTextures.empty())
+    for (auto const& batch: textureScheduler_->renderBatches | ranges::views::values)
     {
-        glBindVertexArray(vao_);
+        for (auto const& params : batch.renderTextures)
+            renderTexture(params);
 
-        // upload buffer
-        glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-        glBufferData(GL_ARRAY_BUFFER,
-                     textureScheduler_->buffer.size() * sizeof(GLfloat),
-                     textureScheduler_->buffer.data(),
-                     GL_STREAM_DRAW);
+        // upload vertices and render (iff there is anything to render)
+        if (!batch.renderTextures.empty())
+        {
+            glBindVertexArray(vao_);
 
-        glDrawArrays(GL_TRIANGLES, 0, textureScheduler_->vertexCount);
+            // upload buffer
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+            glBufferData(GL_ARRAY_BUFFER,
+                         batch.buffer.size() * sizeof(GLfloat),
+                         batch.buffer.data(),
+                         GL_STREAM_DRAW);
+            glDrawArrays(GL_TRIANGLES, 0, batch.renderTextures.size() * 6);
 
-        // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
-        //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
-        //       fixed GL_TEXTURE0. - will this be noticable faster?
+            // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
+            //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
+            //       fixed GL_TEXTURE0. - will this be noticable faster?
+        }
     }
 
     // destroy any pending atlases that were meant to be destroyed
