@@ -46,12 +46,19 @@ constexpr int element_count(Format _format) noexcept
     return 0;
 }
 
+struct AtlasID
+{
+    int value;
+
+    constexpr bool operator<(AtlasID const& _rhs) const noexcept { return value < _rhs.value; }
+    constexpr bool operator==(AtlasID const& _rhs) const noexcept { return value == _rhs.value; }
+};
+
 struct CreateAtlas {
-    int atlas;
-    int width;
-    int height;
-    int depth;
+    AtlasID atlas;
+    crispy::Size size;
     Format format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
+    int user;
 };
 
 struct DestroyAtlas {
@@ -65,15 +72,11 @@ struct TextureInfo {
     TextureInfo(TextureInfo const&) = delete;
     TextureInfo& operator=(TextureInfo const&) = delete;
 
-    int atlas;                      // for example 0 for GL_TEXTURE0
+    AtlasID atlas;                  // for example 0 for GL_TEXTURE0
     std::reference_wrapper<std::string const> atlasName;
-    int x;                          // target x-coordinate into the 3D texture
-    int y;                          // target y-coordinate into the 3D texture
-    int z;                          // target y-coordinate into the 3D texture
-    int width;                      // width of sub-image in pixels
-    int height;                     // height of sub-image in pixels
-    int targetWidth;                // width of the sub-image when being rendered
-    int targetHeight;               // height of the sub-image when being rendered
+    crispy::Point offset;           // Offset into the 2D texture atlas.
+    crispy::Size bitmapSize;        // width/height of sub-image in pixels
+    crispy::Size targetSize;        // width/height of sub-image when being rendered
     float relativeX;
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
@@ -105,16 +108,16 @@ class AtlasBackend {
     virtual ~AtlasBackend() = default;
 
     /// Creates a new (3D) texture atlas.
-    virtual void createAtlas(CreateAtlas const&) = 0;
+    virtual AtlasID createAtlas(crispy::Size _size, Format _textureFormat, int _user) = 0;
 
     /// Uploads given texture to the atlas.
-    virtual void uploadTexture(UploadTexture const&) = 0;
+    virtual void uploadTexture(UploadTexture _texture) = 0;
 
     /// Renders given texture from the atlas with the given target position parameters.
-    virtual void renderTexture(RenderTexture const&) = 0;
+    virtual void renderTexture(RenderTexture _texture) = 0;
 
     /// Destroys the given (3D) texture atlas.
-    virtual void destroyAtlas(DestroyAtlas const&) = 0;
+    virtual void destroyAtlas(AtlasID _atlasID) = 0;
 };
 
 /**
@@ -127,30 +130,27 @@ class AtlasBackend {
  * @param Metadata some optionally accessible metadata that is attached with each texture.
  */
 class TextureAtlasAllocator {
-  private:
-    struct Offset { int i, x, y, z; };
-
   public:
+    struct Cursor {
+        AtlasID atlas;
+        crispy::Point position;
+    };
+
     /**
      * Constructs a texture atlas with given limits.
      *
-     * @param _instanceBaseId any arbitrary number that the first instance ID will be assigned.
-     *                         This is the base for any further
      * @param _maxInstances maximum number of OpenGL 3D textures
-     * @param _depth    maximum 3D depth (z-value)
-     * @param _width    atlas texture width
-     * @param _height   atlas texture height
-     * @param _format   an arbitrary user defined number that defines the storage format for this texture,
-     *                  such as GL_R8 or GL_RBGA8 when using OpenGL
+     * @param _width        atlas texture width
+     * @param _height       atlas texture height
+     * @param _format       an arbitrary user defined number that defines the storage format for this texture,
+     *                      such as GL_R8 or GL_RBGA8 when using OpenGL
      */
-    TextureAtlasAllocator(int _instanceBaseId,
-                          int _width,
-                          int _height,
-                          int _depth,
+    TextureAtlasAllocator(AtlasBackend& _backend,
+                          crispy::Size _atlasTextureSize,
                           int _maxInstances,
                           Format _format, // such as GL_R8 or GL_RGBA8
-                          AtlasBackend& _backend,
-                          std::string _name = {});
+                          int _user,
+                          std::string _name);
 
     TextureAtlasAllocator(TextureAtlasAllocator const&) = delete;
     TextureAtlasAllocator& operator=(TextureAtlasAllocator const&) = delete;
@@ -159,26 +159,22 @@ class TextureAtlasAllocator {
 
     ~TextureAtlasAllocator();
 
+    constexpr int user() const noexcept { return user_; }
     std::string const& name() const noexcept { return name_; }
     constexpr int maxInstances() const noexcept { return maxInstances_; }
-    constexpr int depth() const noexcept { return depth_; }
-    constexpr int width() const noexcept { return width_; }
-    constexpr int height() const noexcept { return height_; }
+    constexpr crispy::Size size() const noexcept { return size_; }
     constexpr Format format() const noexcept { return format_; }
 
-    constexpr int instanceBaseId() const noexcept { return instanceBaseId_; }
+    std::vector<AtlasID> const& activeAtlasTextures() const noexcept { return atlasIDs_; }
 
     /// @return number of internally used 3D texture atlases.
-    constexpr int currentInstance() const noexcept { return currentInstanceId_; }
-
-    /// @return number of 2D text atlases in use in current 3D texture atlas.
-    constexpr int currentZ() const noexcept { return currentZ_; }
+    constexpr AtlasID currentInstance() const noexcept { return cursor_.atlas; }
 
     /// @return current X offset into the current 3D texture atlas.
-    constexpr int currentX() const noexcept { return currentX_; }
+    constexpr int currentX() const noexcept { return cursor_.position.x; }
 
     /// @return current Y offset into the current 3D texture atlas.
-    constexpr int currentY() const noexcept { return currentY_; }
+    constexpr int currentY() const noexcept { return cursor_.position.y; }
 
     constexpr int maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
 
@@ -200,102 +196,59 @@ class TextureAtlasAllocator {
     /// @param _user     user defined data that is supplied along with TexCoord's 4th component
     ///
     /// @return index to the created TextureInfo or std::nullopt if failed.
-    TextureInfo const* insert(int _width,
-                              int _height,
-                              int _targetWidth,
-                              int _targetHeight,
+    TextureInfo const* insert(crispy::Size _bitmapSize,
+                              crispy::Size _targetSize,
                               Format _format,
-                              Buffer&& _data,
+                              Buffer _data,
                               int _user = 0);
 
+    /// Releases a given texture area the atlas for future reallocations.
     void release(TextureInfo const& _info);
 
+    constexpr Cursor cursor() const noexcept { return cursor_; }
+
   private:
-    constexpr Offset offset() const noexcept
+    std::optional<Cursor> getOffsetAndAdvance(crispy::Size _bitmapSize);
+
+    void getOrCreateNewAtlas()
     {
-        return Offset{currentInstanceId_, currentX_, currentY_, currentZ_};
+        if (unusedAtlasIDs_.empty())
+        {
+            cursor_.atlas = atlasBackend_.createAtlas(size_, format_, user_);
+        }
+        else
+        {
+            cursor_.atlas = unusedAtlasIDs_.back();
+            unusedAtlasIDs_.pop_back();
+        }
+        atlasIDs_.push_back(cursor_.atlas);
+        cursor_.position.x = 0;
+        cursor_.position.y = 0;
     }
 
-    constexpr std::optional<Offset> getOffsetAndAdvance(int _width, int _height);
-
-    constexpr bool advanceY()
-    {
-        if (not(currentY_ + maxTextureHeightInCurrentRow_ + VerticalGap + 1 < height_))
-            return advanceZ();
-
-        currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
-        currentX_ = 0;
-        maxTextureHeightInCurrentRow_ = 0;
-        return true;
-    }
-
-    constexpr bool advanceZ()
-    {
-        if (not(currentZ_ + 1 < depth_))
-            return advanceInstance();
-
-        currentZ_++;
-        currentY_ = 0;
-        currentX_ = 0;
-        maxTextureHeightInCurrentRow_ = 0;
-        debuglog(AtlasTag).write("Advance Z to {}.", currentZ_);
-        return true;
-    }
-
-    constexpr bool advanceInstance()
-    {
-        if (not(currentInstanceId_ + 1 < instanceBaseId_ + maxInstances_))
-            return false;
-
-        currentInstanceId_++;
-        currentZ_ = 0;
-        currentY_ = 0;
-        currentX_ = 0;
-        maxTextureHeightInCurrentRow_ = 0;
-
-        debuglog(AtlasTag).write("Advance instance to {}.", currentInstanceId_);
-        notifyCreateAtlas();
-        return true;
-    }
-
-    void notifyCreateAtlas()
-    {
-        atlasBackend_.createAtlas({
-            currentInstanceId_,
-            width_,
-            height_,
-            depth_,
-            format_
-        });
-    }
-
-    TextureInfo const& appendTextureInfo(int _width,
-                                         int _height,
-                                         int _targetWidth,
-                                         int _targetHeight,
-                                         Offset _offset,
+    TextureInfo const& appendTextureInfo(crispy::Size _bitmapSize,
+                                         crispy::Size _targetSize,
+                                         Cursor _offset,
                                          int _user);
 
 
     // private data fields
     //
-    int const instanceBaseId_;     // default value to assign to first instance, and incrementing from that point for further instances.
-    int const maxInstances_;       // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
-    int const depth_;              // atlas total depth
-    int const width_;              // atlas total width
-    int const height_;             // atlas total height
+    AtlasBackend& atlasBackend_;   // atlas event listener (used to perform allocation/modification actions)
+    size_t const maxInstances_;    // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
+    crispy::Size size_;            // total atlas texture size in pixels
     Format const format_;          // internal storage format, such as GL_R8 or GL_RGBA8
 
+    int const user_;               // user-defined arbitrary data that relates to this atlas.
     std::string const name_;       // atlas human readable name (only for debugging)
-    AtlasBackend& atlasBackend_;   // atlas event listener (used to perform allocation/modification actions)
 
-    int currentInstanceId_;        // (OpenGL) texture count already in use
-    int currentZ_ = 0;             // index to current atlas that is being filled
-    int currentX_ = 0;             // current X-offset to start drawing to
-    int currentY_ = 0;             // current Y-offset to start drawing to
+    Cursor cursor_;                // current texture ID and cursor for the next sub texture
     int maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
-    std::map<crispy::Size, std::vector<Offset>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
+    // TODO: make this an unordered_map
+    std::map<crispy::Size, std::vector<Cursor>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
+    std::vector<AtlasID> atlasIDs_;
+    std::vector<AtlasID> unusedAtlasIDs_;
 
     std::list<TextureInfo> textureInfos_;
 };
@@ -315,12 +268,10 @@ class MetadataTextureAtlas {
 
     //std::string const& name() const noexcept { return name_; }
     constexpr int maxInstances() const noexcept { return atlas_.maxInstances(); }
-    constexpr int depth() const noexcept { return atlas_.depth(); }
-    constexpr int width() const noexcept { return atlas_.width(); }
-    constexpr int height() const noexcept { return atlas_.height(); }
+    constexpr crispy::Size size() const noexcept { return atlas_.size(); }
 
     /// @return number of textures stored in this texture atlas.
-    constexpr size_t size() const noexcept { return allocations_.size(); }
+    //TODO: (do we need you?) constexpr size_t allocationCount() const noexcept { return allocations_.size(); }
 
     /// @return boolean indicating whether or not this atlas is empty (has no textures present).
     constexpr bool empty() const noexcept { return allocations_.size() == 0; }
@@ -358,18 +309,19 @@ class MetadataTextureAtlas {
     ///
     /// @return index to the corresponding DataRef or std::nullopt if failed.
     std::optional<DataRef> insert(Key const& _id,
-                                  int _width,
-                                  int _height,
-                                  int _targetWidth,
-                                  int _targetHeight,
+                                  crispy::Size _bitmapSize,
+                                  crispy::Size _targetSize,
                                   Buffer&& _data,
                                   int _user = 0,
                                   Metadata _metadata = {})
     {
         assert(allocations_.find(_id) == allocations_.end());
 
-        TextureInfo const* textureInfo = atlas_.insert(_width, _height, _targetWidth, _targetHeight,
-                                                       atlas_.format(), std::move(_data), _user);
+        TextureInfo const* textureInfo = atlas_.insert(_bitmapSize,
+                                                       _targetSize,
+                                                       atlas_.format(),
+                                                       std::move(_data),
+                                                       _user);
         if (!textureInfo)
             return std::nullopt;
 
@@ -418,6 +370,18 @@ class MetadataTextureAtlas {
 
 } // end namespace
 
+namespace std
+{
+    template<>
+    struct hash<terminal::renderer::atlas::AtlasID>
+    {
+        constexpr size_t operator()(terminal::renderer::atlas::AtlasID _atlasID) const noexcept
+        {
+            return static_cast<size_t>(_atlasID.value);
+        }
+    };
+}
+
 namespace fmt { // {{{
     template <>
     struct formatter<terminal::renderer::atlas::Format> {
@@ -443,11 +407,9 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::renderer::atlas::CreateAtlas const& _cmd, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "<atlas:{}, dim:{}x{}, depth:{}, format:{}>",
+            return format_to(ctx.out(), "<atlas:{}, dim:{}, format:{}>",
                 _cmd.atlas,
-                _cmd.width,
-                _cmd.height,
-                _cmd.depth,
+                _cmd.size,
                 _cmd.format
             );
         }
@@ -462,13 +424,12 @@ namespace fmt { // {{{
         {
             return format_to(ctx.out(), "<{}; {}x{}/{}x{}; {}/{}/{}>",
                 info.atlasName.get(),
-                info.width,
-                info.height,
-                info.targetWidth,
-                info.targetHeight,
-                info.x,
-                info.y,
-                info.z
+                info.bitmapSize.width,
+                info.bitmapSize.height,
+                info.targetSize.width,
+                info.targetSize.height,
+                info.offset.x,
+                info.offset.y
             );
         }
     };
@@ -505,13 +466,13 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<terminal::renderer::atlas::DestroyAtlas> {
+    struct formatter<terminal::renderer::atlas::AtlasID> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::renderer::atlas::DestroyAtlas const& _cmd, FormatContext& ctx)
+        auto format(terminal::renderer::atlas::AtlasID const& _atlasID, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "<atlas: {}>", _cmd.atlas);
+            return format_to(ctx.out(), "{}", _atlasID.value);
         }
     };
 
@@ -522,9 +483,11 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::renderer::atlas::TextureAtlasAllocator const& _atlas, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "TextureAtlasAllocator<cursor: {}/{}/{}/{} ({}x{}x{}x{}), rowHeight:{}>",
-                _atlas.currentX(), _atlas.currentY(), _atlas.currentZ(), _atlas.currentInstance(),
-                _atlas.width(), _atlas.height(), _atlas.depth(), _atlas.maxInstances(),
+            return format_to(ctx.out(), "TextureAtlasAllocator<cursor: {}/{} ({}x{}), rowHeight:{}>",
+                _atlas.cursor().atlas,
+                _atlas.cursor().position,
+                _atlas.size(),
+                _atlas.maxInstances(),
                 _atlas.maxTextureHeightInCurrentRow()
             );
         }

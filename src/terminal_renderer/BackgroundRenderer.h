@@ -44,7 +44,7 @@ class BackgroundRenderer : public Renderable {
     /// Queues up a render with given background
     void renderCell(Coordinate const& _pos, RGBColor const& _color);
 
-    void renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count);
+    void renderOnce(Coordinate const& _pos, RGBColor const& _color, int _count);
 
     void renderPendingCells();
     void finish();
@@ -61,7 +61,7 @@ class BackgroundRenderer : public Renderable {
     RGBColor color_{};
     int row_ = 0;
     int startColumn_ = 0;
-    unsigned columnCount_ = 0;
+    int columnCount_ = 0;
 };
 
 } // end namespace

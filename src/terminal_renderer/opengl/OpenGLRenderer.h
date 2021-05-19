@@ -29,16 +29,7 @@ namespace terminal::renderer::opengl {
 
 struct ShaderConfig;
 
-struct AtlasKey
-{
-    // This value is being used as the texture unit offset internally (GL_TEXTURE0 + $atlasTexture).
-    int atlasTexture;
-
-    constexpr bool operator<(AtlasKey const& _rhs) const noexcept { return atlasTexture < _rhs.atlasTexture; }
-    constexpr bool operator==(AtlasKey const& _rhs) const noexcept { return atlasTexture == _rhs.atlasTexture; }
-};
-
-class OpenGLRenderer :
+class OpenGLRenderer final :
     public RenderTarget,
     public QOpenGLExtraFunctions
 {
@@ -72,7 +63,7 @@ class OpenGLRenderer :
 
     void clearCache() override;
 
-    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, int _instanceId) override;
+    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) override;
 
   private:
     // private helper methods
@@ -85,16 +76,19 @@ class OpenGLRenderer :
     int maxTextureUnits();
     crispy::Size renderBufferSize();
 
+    crispy::Size colorTextureSizeHint();
+    crispy::Size monochromeTextureSizeHint();
+
     void executeRenderTextures();
     void createAtlas(atlas::CreateAtlas const& _param);
     void uploadTexture(atlas::UploadTexture const& _param);
     void renderTexture(atlas::RenderTexture const& _param);
-    void destroyAtlas(atlas::DestroyAtlas const& _param);
+    void destroyAtlas(atlas::AtlasID _atlasID);
 
     void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
     void bindTexture(GLuint _textureId);
-    GLuint textureAtlasID(AtlasKey _atlasID) const noexcept;
+    GLuint textureAtlasID(atlas::AtlasID _atlasID) const noexcept;
     void clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
@@ -115,8 +109,7 @@ class OpenGLRenderer :
     GLuint vao_{};              // Vertex Array Object, covering all buffer objects
     GLuint vbo_{};              // Buffer containing the vertex coordinates
     //TODO: GLuint ebo_{};
-    std::map<AtlasKey, GLuint> atlasMap_; // maps atlas IDs to texture IDs
-    int currentActiveTexture_ = std::numeric_limits<int>::max();
+    std::unordered_map<atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
     atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
@@ -136,14 +129,3 @@ class OpenGLRenderer :
 
 } // end namespace
 
-namespace std
-{
-    template<>
-    struct hash<terminal::renderer::opengl::AtlasKey>
-    {
-        constexpr size_t operator()(terminal::renderer::opengl::AtlasKey _key) const noexcept
-        {
-            return _key.atlasTexture;
-        }
-    };
-}

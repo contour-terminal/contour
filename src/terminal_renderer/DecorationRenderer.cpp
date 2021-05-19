@@ -24,6 +24,8 @@
 #include <optional>
 #include <utility>
 
+using crispy::Size;
+
 using std::array;
 using std::get;
 using std::max;
@@ -114,8 +116,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Underline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -138,8 +140,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DoubleUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -161,8 +163,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::CurlyUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -196,8 +198,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DottedUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -217,8 +219,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DashedUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -246,8 +248,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Framed,
-            width, cellHeight,
-            width, cellHeight,
+            Size{width, cellHeight},
+            Size{width, cellHeight},
             move(image)
         );
     } // }}}
@@ -262,8 +264,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Overline,
-            width, cellHeight,
-            width, cellHeight,
+            Size{width, cellHeight},
+            Size{width, cellHeight},
             move(image)
         );
     } // }}}
@@ -278,8 +280,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::CrossedOut,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}

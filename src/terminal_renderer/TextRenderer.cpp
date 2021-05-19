@@ -476,10 +476,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                                         glyph);
 
     return targetAtlas.insert(_id,
-                              glyph.size.width,
-                              glyph.size.height,
-                              unsigned(ceilf(float(glyph.size.width) * ratio)),
-                              unsigned(ceilf(float(glyph.size.height) * ratio)),
+                              glyph.size,
+                              glyph.size * ratio,
                               move(glyph.bitmap),
                               userFormat,
                               metrics);

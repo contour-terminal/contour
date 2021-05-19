@@ -148,8 +148,8 @@ void main()
     switch (textureSelector)
     {
         case 2:
-            // renderLcdGlyphSimple();
-            renderLcdGlyph();
+            renderLcdGlyphSimple();
+            // renderLcdGlyph();
             break;
         case 1:
             renderColoredRGBA();

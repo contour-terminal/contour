@@ -25,103 +25,94 @@
 #include <type_traits>
 #include <vector>
 
-using namespace std;
+using crispy::Point;
 using crispy::Size;
+
+using namespace std;
 
 namespace terminal::renderer::atlas {
 
-TextureAtlasAllocator::TextureAtlasAllocator(int _instanceBaseId,
-                                             int _width,
-                                             int _height,
-                                             int _depth,
+TextureAtlasAllocator::TextureAtlasAllocator(AtlasBackend& _atlasBackend,
+                                             Size _atlasTextureSize,
                                              int _maxInstances,
                                              Format _format,
-                                             AtlasBackend& _atlasBackend,
+                                             int _user,
                                              string _name) :
-    instanceBaseId_{ _instanceBaseId },
-    maxInstances_{ _maxInstances },
-    depth_{ _depth },
-    width_{ _width },
-    height_{ _height },
-    format_{ _format },
-    name_{ std::move(_name) },
     atlasBackend_{ _atlasBackend },
-    currentInstanceId_{ instanceBaseId_ }
+    maxInstances_{ static_cast<size_t>(_maxInstances) },
+    size_{ _atlasTextureSize },
+    format_{ _format },
+    user_{ _user },
+    name_{ std::move(_name) }
 {
-    notifyCreateAtlas();
+    getOrCreateNewAtlas();
 }
 
 TextureAtlasAllocator::~TextureAtlasAllocator()
 {
-    for (int id = instanceBaseId_; id <= currentInstanceId_; ++id)
-        atlasBackend_.destroyAtlas(DestroyAtlas{id});
+    for (auto && atlasID: atlasIDs_)
+        atlasBackend_.destroyAtlas(atlasID);
+    for (auto && atlasID: unusedAtlasIDs_)
+        atlasBackend_.destroyAtlas(atlasID);
 }
 
 void TextureAtlasAllocator::clear()
 {
-    currentInstanceId_ = instanceBaseId_;
-    currentZ_ = 0;
-    currentX_ = 0;
-    currentY_ = 0;
     maxTextureHeightInCurrentRow_ = 0;
     discarded_.clear();
+
+    unusedAtlasIDs_.insert(
+        unusedAtlasIDs_.end(),
+        atlasIDs_.begin(),
+        prev(atlasIDs_.end()));
+    atlasIDs_.clear();
+    atlasIDs_.push_back(cursor_.atlas);
+
+    cursor_.position.x = 0;
+    cursor_.position.y = 0;
 }
 
-constexpr optional<TextureAtlasAllocator::Offset> TextureAtlasAllocator::getOffsetAndAdvance(int _width, int _height)
+optional<TextureAtlasAllocator::Cursor> TextureAtlasAllocator::getOffsetAndAdvance(crispy::Size _size)
 {
-    // Dimensions that must fit : {X, Y}
-    // Dimensions to extend to  : {X, Y, Z, I}
-
-    if (not(currentX_ + HorizontalGap + _width < width_))
+    if (not(cursor_.position.x + HorizontalGap + _size.width < size_.width))
     {
-        currentX_ = 0;
-        currentY_ += maxTextureHeightInCurrentRow_ + VerticalGap;
-        if (not(currentY_ + _height < height_))
+        cursor_.position.x = 0;
+        cursor_.position.y += maxTextureHeightInCurrentRow_ + VerticalGap;
+        if (not(cursor_.position.y + _size.height < size_.height))
         {
-            currentY_ = 0;
+            cursor_.position.y = 0;
             maxTextureHeightInCurrentRow_ = 0;
-            currentZ_++;
 
-            if (not(currentZ_ < depth_))
+            if (not(atlasIDs_.size() + 1 < maxInstances_))
             {
-                currentZ_ = 0;
-
-                if (not(currentInstanceId_ + 1 < instanceBaseId_ + maxInstances_))
-                {
-                    currentX_ = width_;
-                    currentY_ = height_;
-                    currentZ_ = depth_;
-                    return nullopt;
-                }
-                currentInstanceId_++;
-                notifyCreateAtlas();
+                cursor_.position.x = size_.width;
+                cursor_.position.y = size_.height;
+                return nullopt;
             }
+            getOrCreateNewAtlas();
         }
     }
 
-    // TODO: current{X/Y/Z/I} should be called next{X/Y/Z/I}.
-
-    auto const result = offset();
-    currentX_ += _width + HorizontalGap;
-    maxTextureHeightInCurrentRow_ = max(maxTextureHeightInCurrentRow_, _height);
+    auto const result = cursor_;
+    cursor_.position.x += _size.width + HorizontalGap;
+    maxTextureHeightInCurrentRow_ = max(maxTextureHeightInCurrentRow_, _size.height);
     return result;
 }
 
-TextureInfo const* TextureAtlasAllocator::insert(int _width,
-                                                 int _height,
-                                                 int _targetWidth,
-                                                 int _targetHeight,
+TextureInfo const* TextureAtlasAllocator::insert(crispy::Size _bitmapSize,
+                                                 crispy::Size _targetSize,
                                                  Format _format,
-                                                 Buffer&& _data,
+                                                 Buffer _data,
                                                  int _user)
 {
     // check free-map first
-    if (auto i = discarded_.find(Size{_width, _height}); i != end(discarded_))
+    if (auto i = discarded_.find(_bitmapSize); i != end(discarded_))
     {
-        std::vector<Offset>& discardsForGivenSize = i->second;
+        std::vector<Cursor>& discardsForGivenSize = i->second;
         if (!discardsForGivenSize.empty())
         {
-            TextureInfo const& info = appendTextureInfo(_width, _height, _targetWidth, _targetHeight,
+            TextureInfo const& info = appendTextureInfo(_bitmapSize,
+                                                        _targetSize,
                                                         discardsForGivenSize.back(),
                                                         _user);
 
@@ -140,32 +131,16 @@ TextureInfo const* TextureAtlasAllocator::insert(int _width,
     }
 
     // fail early if to-be-inserted texture is too large to fit a single page in the whole atlas
-    if (_height > height_ || _width > width_)
+    if (_bitmapSize.height > size_.height || _bitmapSize.width > size_.width)
         return nullptr;
 
-#if 0
-    // ensure we have enough width space in current row
-    if (currentX_ + _width >= width_ + HorizontalGap && !advanceY())
+    auto const targetOffset = getOffsetAndAdvance(_bitmapSize);
+    if (!targetOffset.has_value())
         return nullptr;
 
-    // ensure we have enoguh height space in current row
-    if (currentY_ + _height > height_ + VerticalGap && !advanceZ())
-        return nullptr;
-
-    auto const targetOffset = offset();
-    currentX_ = std::min(currentX_ + _width + HorizontalGap, width_);
-    if (_height > maxTextureHeightInCurrentRow_)
-        maxTextureHeightInCurrentRow_ = _height;
-#else
-    auto const offsetOpt = getOffsetAndAdvance(_width, _height);
-    if (!offsetOpt.has_value())
-        return nullptr;
-    auto const targetOffset = offsetOpt.value();
-#endif
-
-    TextureInfo const& info = appendTextureInfo(_width, _height,
-                                                _targetWidth, _targetHeight,
-                                                targetOffset,
+    TextureInfo const& info = appendTextureInfo(_bitmapSize,
+                                                _targetSize,
+                                                *targetOffset,
                                                 _user);
 
     atlasBackend_.uploadTexture(UploadTexture{
@@ -188,33 +163,27 @@ void TextureAtlasAllocator::release(TextureInfo const& _info)
 
     if (i != end(textureInfos_))
     {
-        std::vector<Offset>& discardsForGivenSize = discarded_[Size{_info.width, _info.height}];
-        discardsForGivenSize.emplace_back(Offset{_info.atlas, _info.x, _info.y, _info.z});
+        std::vector<Cursor>& discardsForGivenSize = discarded_[_info.bitmapSize];
+        discardsForGivenSize.emplace_back(Cursor{_info.atlas, _info.offset});
         textureInfos_.erase(i);
     }
 }
 
-TextureInfo const& TextureAtlasAllocator::appendTextureInfo(int _width,
-                                                            int _height,
-                                                            int _targetWidth,
-                                                            int _targetHeight,
-                                                            Offset _offset,
+TextureInfo const& TextureAtlasAllocator::appendTextureInfo(crispy::Size _bitmapSize,
+                                                            crispy::Size _targetSize,
+                                                            Cursor _offset,
                                                             int _user)
 {
     textureInfos_.emplace_back(TextureInfo{
-        _offset.i,
+        _offset.atlas,
         name_,
-        _offset.x,
-        _offset.y,
-        _offset.z,
-        _width,
-        _height,
-        _targetWidth,
-        _targetHeight,
-        static_cast<float>(_offset.x) / static_cast<float>(width_),
-        static_cast<float>(_offset.y) / static_cast<float>(height_),
-        static_cast<float>(_width) / static_cast<float>(width_),
-        static_cast<float>(_height) / static_cast<float>(height_),
+        _offset.position,
+        _bitmapSize,
+        _targetSize,
+        static_cast<float>(_offset.position.x) / static_cast<float>(size_.width),
+        static_cast<float>(_offset.position.y) / static_cast<float>(size_.height),
+        static_cast<float>(_bitmapSize.width) / static_cast<float>(size_.width),
+        static_cast<float>(_bitmapSize.height) / static_cast<float>(size_.height),
         _user
     });
 

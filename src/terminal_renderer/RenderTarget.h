@@ -68,7 +68,7 @@ class RenderTarget
 
     virtual void clearCache() = 0;
 
-    virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, int _instanceId) = 0;
+    virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) = 0;
 };
 
 class Renderable {

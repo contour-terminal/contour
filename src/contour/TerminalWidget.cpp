@@ -58,6 +58,9 @@
 #include <tuple>
 #include <vector>
 
+// Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
+// #define CONTOUR_DEBUG_OPENGL 1
+
 using namespace std::string_literals;
 
 using crispy::Size;
@@ -132,7 +135,7 @@ namespace // {{{
     }
 #endif
 
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     void glMessageCallback(
         GLenum _source,
         GLenum _type,
@@ -517,9 +520,9 @@ void TerminalWidget::initializeGL()
     }
     // }}}
 
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     CHECKED_GL( glEnable(GL_DEBUG_OUTPUT) );
-    // CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
+    CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
 #endif
 
     if (profile_.maximized)
@@ -1646,14 +1649,14 @@ void TerminalWidget::doDumpState()
 
     for (auto const* allocator: renderTarget.allAtlasAllocators())
     {
-        for (auto instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
+        for (auto const atlasID: allocator->activeAtlasTextures())
         {
-            auto infoOpt = renderTarget.readAtlas(*allocator, instanceId);
+            auto infoOpt = renderTarget.readAtlas(*allocator, atlasID);
             if (!infoOpt.has_value())
                 continue;
 
             terminal::renderer::AtlasTextureInfo& info = infoOpt.value();
-            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), instanceId, info.buffer, info.size);
+            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), atlasID.value, info.buffer, info.size);
             switch (info.format)
             {
                 case terminal::renderer::atlas::Format::RGBA:

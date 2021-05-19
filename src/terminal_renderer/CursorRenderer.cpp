@@ -24,6 +24,8 @@ using std::optional;
 using std::runtime_error;
 using std::string;
 
+using crispy::Size;
+
 namespace terminal::renderer {
 
 CursorRenderer::CursorRenderer(GridMetrics const& _gridMetrics,
@@ -82,8 +84,8 @@ void CursorRenderer::rebuild()
 
         textureAtlas_->insert(
             CursorShape::Block,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -99,8 +101,8 @@ void CursorRenderer::rebuild()
 
         textureAtlas_->insert(
             CursorShape::Underscore,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -116,8 +118,8 @@ void CursorRenderer::rebuild()
 
         textureAtlas_->insert(
             CursorShape::Bar,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -135,8 +137,8 @@ void CursorRenderer::rebuild()
 
         textureAtlas_->insert(
             CursorShape::Rectangle,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
