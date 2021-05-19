@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <utility>
 
 namespace crispy {
@@ -104,6 +105,14 @@ constexpr Size operator*(Size _a, Size _b) noexcept
     return Size{
         _a.width * _b.width,
         _a.height * _b.height
+    };
+}
+
+inline Size operator*(Size _a, double _scalar) noexcept
+{
+    return Size{
+        int(ceil(double(_a.width) * _scalar)),
+        int(ceil(double(_a.height) * _scalar))
     };
 }
 
