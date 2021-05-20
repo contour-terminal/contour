@@ -58,13 +58,13 @@ optional<Decorator> to_decorator(std::string const& _value)
 }
 
 DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
-                                       ColorProfile const& _colorProfile,
+                                       ColorPalette const& _colorPalette,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover) :
     gridMetrics_{ _gridMetrics },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
-    colorProfile_{ _colorProfile }
+    colorPalette_{ _colorPalette }
 {
 }
 
@@ -79,9 +79,9 @@ void DecorationRenderer::clearCache()
     atlas_ = std::make_unique<Atlas>(monochromeAtlasAllocator());
 }
 
-void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
+void DecorationRenderer::setColorPalette(ColorPalette const& _colorPalette)
 {
-    colorProfile_ = _colorProfile;
+    colorPalette_ = _colorPalette;
 }
 
 namespace
@@ -294,8 +294,8 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
     if (_cell.hyperlink())
     {
         auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                            ? colorProfile_.hyperlinkDecoration.hover
-                            : colorProfile_.hyperlinkDecoration.normal;
+                            ? colorPalette_.hyperlinkDecoration.hover
+                            : colorPalette_.hyperlinkDecoration.normal;
         auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
                             ? hyperlinkHover_
                             : hyperlinkNormal_;
@@ -313,7 +313,7 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
 
         for (auto const& mapping : underlineMappings)
             if (_cell.attributes().styles & mapping.first)
-                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
     }
 
     auto constexpr supplementalMappings = array{
@@ -325,7 +325,7 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
 
     for (auto const& mapping : supplementalMappings)
         if (_cell.attributes().styles & mapping.first)
-            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)

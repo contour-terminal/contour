@@ -633,7 +633,7 @@ class Screen : public capabilities::StaticDatabase {
     int maxImageColorRegisters_;
     crispy::Size maxImageSize_;
     crispy::Size maxImageSizeLimit_;
-    std::shared_ptr<ColorPalette> imageColorPalette_;
+    std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 
     Sequencer sequencer_;

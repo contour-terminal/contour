@@ -59,16 +59,16 @@ class DecorationRenderer : public Renderable {
     /// @param _commandListener
     /// @param _monochromeTextureAtlas
     /// @param _gridMetrics
-    /// @param _colorProfile
+    /// @param _colorPalette
     DecorationRenderer(GridMetrics const& _gridMetrics,
-                       ColorProfile const& _colorProfile,
+                       ColorPalette const& _colorPalette,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
-    void setColorProfile(ColorProfile const& _colorProfile);
+    void setColorPalette(ColorPalette const& _colorPalette);
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
@@ -98,7 +98,7 @@ class DecorationRenderer : public Renderable {
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
 
-    ColorProfile colorProfile_; // TODO: make const&, maybe reference_wrapper<>?
+    ColorPalette colorPalette_; // TODO: make const&, maybe reference_wrapper<>?
 
     std::unique_ptr<Atlas> atlas_;
 };

@@ -69,7 +69,7 @@ class TerminalView : private Terminal::Events {
                  CursorShape _cursorShape,
                  CursorDisplay _cursorDisplay,
                  std::chrono::milliseconds _cursorBlinkInterval,
-                 terminal::ColorProfile _colorProfile,
+                 terminal::ColorPalette _colorPalette,
                  terminal::Opacity _backgroundOpacity,
                  renderer::Decorator _hyperlinkNormal,
                  renderer::Decorator _hyperlinkHover,
@@ -129,7 +129,7 @@ class TerminalView : private Terminal::Events {
     renderer::Renderer const& renderer() const noexcept { return renderer_; }
     renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
 
-    void setColorProfile(terminal::ColorProfile const& _colors);
+    void setColorPalette(terminal::ColorPalette const& _colors);
 
     struct WindowMargin {
         int left;
@@ -174,8 +174,8 @@ class TerminalView : private Terminal::Events {
     Process process_;
     std::thread processExitWatcher_;
 
-    ColorProfile colorProfile_;
-    ColorProfile defaultColorProfile_;
+    ColorPalette colorPalette_;
+    ColorPalette defaultColorPalette_;
 };
 
 } // namespace terminal::view

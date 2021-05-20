@@ -143,7 +143,7 @@ constexpr bool operator!=(RGBAColor const& a, RGBAColor const& b) noexcept
 
 using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
 
-struct ColorProfile {
+struct ColorPalette {
     using Palette = std::array<RGBColor, 256>;
 
     RGBColor const& normalColor(size_t _index) const noexcept {
@@ -241,7 +241,7 @@ constexpr Opacity& operator--(Opacity& _value) noexcept {
     return _value;
 }
 
-RGBColor const& apply(ColorProfile const& _colorProfile, Color const& _color, ColorTarget _target, bool _bright) noexcept;
+RGBColor const& apply(ColorPalette const& _colorPalette, Color const& _color, ColorTarget _target, bool _bright) noexcept;
 
 constexpr bool operator==(Color const& a, Color const& b) noexcept
 {

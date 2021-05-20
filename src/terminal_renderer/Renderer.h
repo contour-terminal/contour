@@ -43,13 +43,13 @@ class Renderer : public Renderable {
     /** Constructs a Renderer instances.
      *
      * @p _fonts reference to the set of loaded fonts to be used for rendering text.
-     * @p _colorProfile user-configurable color profile to use to map terminal colors to.
+     * @p _colorPalette user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     Renderer(crispy::Size _screenSize,
              crispy::Point _logicalDpi,
              FontDescriptions const& _fontDescriptions,
-             ColorProfile _colorProfile,
+             ColorPalette _colorPalette,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
              Decorator _hyperlinkHover);
@@ -58,7 +58,7 @@ class Renderer : public Renderable {
 
     void setRenderTarget(RenderTarget& _renderTarget);
 
-    void setColorProfile(ColorProfile const& _colors);
+    void setColorPalette(ColorPalette const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setRenderSize(crispy::Size _size);
     bool setFontSize(text::font_size _fontSize);
@@ -143,7 +143,7 @@ class Renderer : public Renderable {
 
     GridMetrics gridMetrics_;
 
-    ColorProfile colorProfile_;
+    ColorPalette colorPalette_;
     Opacity backgroundOpacity_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.

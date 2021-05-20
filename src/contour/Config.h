@@ -75,7 +75,7 @@ struct TerminalProfile {
         Permission changeFont = Permission::Ask;
     } permissions;
 
-    terminal::ColorProfile colors;
+    terminal::ColorPalette colors;
 
     terminal::CursorShape cursorShape;
     terminal::CursorDisplay cursorDisplay;
@@ -99,7 +99,7 @@ struct Config {
 
     std::optional<FileSystem::path> logFilePath;
 
-    std::unordered_map<std::string, terminal::ColorProfile> colorschemes;
+    std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;
 

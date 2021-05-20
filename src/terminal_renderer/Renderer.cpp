@@ -75,7 +75,7 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
 Renderer::Renderer(Size _screenSize,
                    crispy::Point _logicalDpi,
                    FontDescriptions const& _fontDescriptions,
-                   terminal::ColorProfile _colorProfile,
+                   terminal::ColorPalette _colorPalette,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover) :
@@ -83,13 +83,13 @@ Renderer::Renderer(Size _screenSize,
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
-    colorProfile_{ _colorProfile },
+    colorPalette_{ _colorPalette },
     backgroundOpacity_{ _backgroundOpacity },
-    backgroundRenderer_{ gridMetrics_, _colorProfile.defaultBackground },
+    backgroundRenderer_{ gridMetrics_, _colorPalette.defaultBackground },
     imageRenderer_{ cellSize() },
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
-    decorationRenderer_{ gridMetrics_, _colorProfile, _hyperlinkNormal, _hyperlinkHover },
-    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorProfile.cursor }
+    decorationRenderer_{ gridMetrics_, _colorPalette, _hyperlinkNormal, _hyperlinkHover },
+    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorPalette.cursor }
      // TODO: cursor shouldn't be hard-coded; actual value be passed via render(terminal, now);
 {
 }
@@ -167,12 +167,12 @@ void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
     backgroundOpacity_ = _opacity;
 }
 
-void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
+void Renderer::setColorPalette(terminal::ColorPalette const& _colors)
 {
-    colorProfile_ = _colors;
+    colorPalette_ = _colors;
     backgroundRenderer_.setDefaultColor(_colors.defaultBackground);
-    decorationRenderer_.setColorProfile(_colors);
-    cursorRenderer_.setColor(RGBAColor(colorProfile_.cursor));
+    decorationRenderer_.setColorPalette(_colors);
+    cursorRenderer_.setColor(RGBAColor(colorPalette_.cursor));
 }
 
 uint64_t Renderer::render(Terminal& _terminal,
@@ -271,20 +271,20 @@ void Renderer::renderCursor(Terminal const& _terminal)
     }
 }
 
-tuple<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, Cell const& _cell, bool _reverseVideo, bool _selected)
+tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = _cell.attributes().makeColors(_colorProfile, _reverseVideo);
+    auto const [fg, bg] = _cell.attributes().makeColors(_colorPalette, _reverseVideo);
     if (!_selected)
         return tuple{fg, bg};
 
-    auto const a = _colorProfile.selectionForeground.value_or(bg);
-    auto const b = _colorProfile.selectionBackground.value_or(fg);
+    auto const a = _colorPalette.selectionForeground.value_or(bg);
+    auto const b = _colorPalette.selectionBackground.value_or(fg);
     return tuple{a, b};
 }
 
 void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = makeColors(colorProfile_, _cell, _reverseVideo, _selected);
+    auto const [fg, bg] = makeColors(colorPalette_, _cell, _reverseVideo, _selected);
 
     backgroundRenderer_.renderCell(_pos, bg);
     decorationRenderer_.renderCell(_pos, _cell);

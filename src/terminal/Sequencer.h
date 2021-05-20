@@ -533,7 +533,7 @@ class Sequencer : public ParserEvents {
     Sequencer(Screen& _screen,
               crispy::Size _maxImageSize,
               RGBAColor _backgroundColor,
-              std::shared_ptr<ColorPalette> _imageColorPalette);
+              std::shared_ptr<SixelColorPalette> _imageColorPalette);
 
     void setMaxImageSize(crispy::Size _value) { maxImageSize_ = _value; }
     void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
@@ -588,7 +588,7 @@ class Sequencer : public ParserEvents {
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
-    std::shared_ptr<ColorPalette> imageColorPalette_;
+    std::shared_ptr<SixelColorPalette> imageColorPalette_;
     bool usePrivateColorRegisters_ = false;
     crispy::Size maxImageSize_;
     int maxImageRegisterCount_;

@@ -627,9 +627,9 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
     return config;
 }
 
-terminal::ColorProfile loadColorScheme(YAML::Node const& _node)
+terminal::ColorPalette loadColorScheme(YAML::Node const& _node)
 {
-    auto colors = terminal::ColorProfile{};
+    auto colors = terminal::ColorPalette{};
 
     using terminal::RGBColor;
     if (auto def = _node["default"]; def)
@@ -878,7 +878,7 @@ void softLoadFont(YAML::Node const& _node, string_view _key, text::font_descript
 }
 
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
-                                    unordered_map<string, terminal::ColorProfile> const& _colorschemes)
+                                    unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
     auto profile = TerminalProfile{};
 

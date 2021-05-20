@@ -124,10 +124,10 @@ class SixelParser : public ParserExtension
     OnFinalize finalizer_;
 };
 
-class ColorPalette
+class SixelColorPalette
 {
   public:
-    ColorPalette(int _size, int _maxSize);
+    SixelColorPalette(int _size, int _maxSize);
 
     void reset();
 
@@ -157,7 +157,7 @@ class SixelImageBuilder : public SixelParser::Events
                       int _aspectVertical,
                       int _aspectHorizontal,
                       RGBAColor _backgroundColor,
-                      std::shared_ptr<ColorPalette> _colorPalette);
+                      std::shared_ptr<SixelColorPalette> _colorPalette);
 
     crispy::Size const& maxSize() const noexcept { return maxSize_; }
 
@@ -187,7 +187,7 @@ class SixelImageBuilder : public SixelParser::Events
 
   private:
     crispy::Size const maxSize_;
-    std::shared_ptr<ColorPalette> colors_;
+    std::shared_ptr<SixelColorPalette> colors_;
     crispy::Size size_;
     Buffer buffer_; /// RGBA buffer
     Coordinate sixelCursor_;

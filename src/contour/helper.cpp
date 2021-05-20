@@ -157,7 +157,7 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
     screen.setMaxHistoryLineCount(profile->maxHistoryLineCount);
     terminal.setCursorDisplay(profile->cursorDisplay);
     terminal.setCursorShape(profile->cursorShape);
-    _terminalView.setColorProfile(profile->colors);
+    _terminalView.setColorPalette(profile->colors);
     _terminalView.setHyperlinkDecoration(profile->hyperlinkDecoration.normal,
                                          profile->hyperlinkDecoration.hover);
 }

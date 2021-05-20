@@ -44,7 +44,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            milliseconds _cursorBlinkInterval,
-                           terminal::ColorProfile _colorProfile,
+                           terminal::ColorPalette _colorPalette,
                            terminal::Opacity _backgroundOpacity,
                            renderer::Decorator _hyperlinkNormal,
                            renderer::Decorator _hyperlinkHover,
@@ -55,7 +55,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _pty->screenSize(),
         _logicalDpi,
         _fontDescriptions,
-        _colorProfile,
+        _colorPalette,
         _backgroundOpacity,
         _hyperlinkNormal,
         _hyperlinkHover
@@ -79,8 +79,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         (void) process_.wait();
         terminal_.device().close();
     } },
-    colorProfile_{_colorProfile},
-    defaultColorProfile_{_colorProfile}
+    colorPalette_{_colorPalette},
+    defaultColorPalette_{_colorPalette}
 {
     terminal_.screen().setCursorStyle(_cursorDisplay, _cursorShape);
     terminal_.screen().setCellPixelSize(renderer_.cellSize());
@@ -101,34 +101,34 @@ optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
     switch (_name)
     {
         case DynamicColorName::DefaultForegroundColor:
-            return colorProfile_.defaultForeground;
+            return colorPalette_.defaultForeground;
         case DynamicColorName::DefaultBackgroundColor:
-            return colorProfile_.defaultBackground;
+            return colorPalette_.defaultBackground;
         case DynamicColorName::TextCursorColor:
-            return colorProfile_.cursor;
+            return colorPalette_.cursor;
         case DynamicColorName::MouseForegroundColor:
-            return colorProfile_.mouseForeground;
+            return colorPalette_.mouseForeground;
         case DynamicColorName::MouseBackgroundColor:
-            return colorProfile_.mouseBackground;
+            return colorPalette_.mouseBackground;
         case DynamicColorName::HighlightForegroundColor:
-            if (colorProfile_.selectionForeground.has_value())
-                return colorProfile_.selectionForeground.value();
+            if (colorPalette_.selectionForeground.has_value())
+                return colorPalette_.selectionForeground.value();
             else
                 return nullopt;
         case DynamicColorName::HighlightBackgroundColor:
-            if (colorProfile_.selectionBackground.has_value())
-                return colorProfile_.selectionBackground.value();
+            if (colorPalette_.selectionBackground.has_value())
+                return colorPalette_.selectionBackground.value();
             else
                 return nullopt;
     }
     return nullopt; // should never happen
 }
 
-void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
+void TerminalView::setColorPalette(terminal::ColorPalette const& _colors)
 {
-    colorProfile_ = _colors;
-    defaultColorProfile_ = _colors;
-    renderer_.setColorProfile(colorProfile_);
+    colorPalette_ = _colors;
+    defaultColorPalette_ = _colors;
+    renderer_.setColorPalette(colorPalette_);
 }
 
 bool TerminalView::alive() const
@@ -303,25 +303,25 @@ void TerminalView::resetDynamicColor(DynamicColorName _name)
     switch (_name)
     {
         case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = defaultColorProfile_.defaultForeground;
+            colorPalette_.defaultForeground = defaultColorPalette_.defaultForeground;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = defaultColorProfile_.defaultBackground;
+            colorPalette_.defaultBackground = defaultColorPalette_.defaultBackground;
             break;
         case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = defaultColorProfile_.cursor;
+            colorPalette_.cursor = defaultColorPalette_.cursor;
             break;
         case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = defaultColorProfile_.mouseForeground;
+            colorPalette_.mouseForeground = defaultColorPalette_.mouseForeground;
             break;
         case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
+            colorPalette_.mouseBackground = defaultColorPalette_.mouseBackground;
             break;
         case DynamicColorName::HighlightForegroundColor:
-            colorProfile_.selectionForeground = defaultColorProfile_.selectionForeground;
+            colorPalette_.selectionForeground = defaultColorPalette_.selectionForeground;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selectionBackground = defaultColorProfile_.selectionBackground;
+            colorPalette_.selectionBackground = defaultColorPalette_.selectionBackground;
             break;
     }
 }
@@ -336,25 +336,25 @@ void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _valu
     switch (_name)
     {
         case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = _value;
+            colorPalette_.defaultForeground = _value;
             break;
         case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = _value;
+            colorPalette_.defaultBackground = _value;
             break;
         case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = _value;
+            colorPalette_.cursor = _value;
             break;
         case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = _value;
+            colorPalette_.mouseForeground = _value;
             break;
         case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = _value;
+            colorPalette_.mouseBackground = _value;
             break;
         case DynamicColorName::HighlightForegroundColor:
-            colorProfile_.selectionForeground = _value;
+            colorPalette_.selectionForeground = _value;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selectionBackground = _value;
+            colorPalette_.selectionBackground = _value;
             break;
     }
 }

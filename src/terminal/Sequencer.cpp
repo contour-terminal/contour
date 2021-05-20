@@ -965,7 +965,7 @@ string Sequence::text() const
 Sequencer::Sequencer(Screen& _screen,
                      Size _maxImageSize,
                      RGBAColor _backgroundColor,
-                     shared_ptr<ColorPalette> _imageColorPalette) :
+                     shared_ptr<SixelColorPalette> _imageColorPalette) :
     screen_{ _screen },
     imageColorPalette_{ std::move(_imageColorPalette) },
     maxImageSize_{ _maxImageSize },
@@ -1163,7 +1163,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             ? RGBAColor{0, 0, 0, 0}
             : backgroundColor_,
         usePrivateColorRegisters_
-            ? make_shared<ColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
+            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
             : imageColorPalette_
     );
 
