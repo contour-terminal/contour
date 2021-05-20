@@ -74,16 +74,16 @@ void TextureAtlasAllocator::clear()
 
 optional<TextureAtlasAllocator::Cursor> TextureAtlasAllocator::getOffsetAndAdvance(crispy::Size _size)
 {
-    if (not(cursor_.position.x + HorizontalGap + _size.width < size_.width))
+    if (!(cursor_.position.x + HorizontalGap + _size.width < size_.width))
     {
         cursor_.position.x = 0;
         cursor_.position.y += maxTextureHeightInCurrentRow_ + VerticalGap;
-        if (not(cursor_.position.y + _size.height < size_.height))
+        if (!(cursor_.position.y + _size.height < size_.height))
         {
             cursor_.position.y = 0;
             maxTextureHeightInCurrentRow_ = 0;
 
-            if (not(atlasIDs_.size() + 1 < maxInstances_))
+            if (!(atlasIDs_.size() + 1 < maxInstances_))
             {
                 cursor_.position.x = size_.width;
                 cursor_.position.y = size_.height;

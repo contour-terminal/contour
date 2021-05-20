@@ -56,7 +56,7 @@ constexpr inline bool split(std::basic_string_view<T> _text,
     size_t b = 0;
     while ((b = _text.find(_delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        if (not(_callback(_text.substr(a, b - a))))
+        if (!(_callback(_text.substr(a, b - a))))
             return false;
 
         a = b + 1;

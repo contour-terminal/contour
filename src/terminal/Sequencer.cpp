@@ -614,7 +614,7 @@ namespace impl // {{{ some command generator helpers
                 if (index < 0)
                 {
                     index = crispy::to_integer<10>(value).value_or(-1);
-                    if (not(0 <= index && index < 0xFF))
+                    if (!(0 <= index && index < 0xFF))
                         return false;
                 }
                 else if (value == "?"sv)
