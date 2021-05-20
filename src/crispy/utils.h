@@ -47,21 +47,32 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
     return result;
 }
 
-template <typename T>
-constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+template <typename T, typename Callback>
+constexpr inline bool split(std::basic_string_view<T> _text,
+                            T _delimiter,
+                            Callback&& _callback)
 {
-    std::vector<std::basic_string_view<T>> output{};
     size_t a = 0;
     size_t b = 0;
     while ((b = _text.find(_delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        output.emplace_back(_text.substr(a, b - a));
+        if (not(_callback(_text.substr(a, b - a))))
+            return false;
+
         a = b + 1;
     }
 
     if (a < _text.size())
-        output.emplace_back(_text.substr(a));
+        return _callback(_text.substr(a));
 
+    return true;
+}
+
+template <typename T>
+constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+{
+    std::vector<std::basic_string_view<T>> output{};
+    split(_text, _delimiter, [&](auto value) { output.emplace_back(value); return true; });
     return output;
 }
 
