@@ -121,7 +121,11 @@ namespace // {{{ helper
             case font_weight::light:
                 return FC_WEIGHT_LIGHT;
             case font_weight::demilight:
+#if defined(FC_WEIGHT_DEMILIGHT)
                 return FC_WEIGHT_DEMILIGHT;
+#else
+                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
+#endif
             case font_weight::book:
                 return FC_WEIGHT_BOOK;
             case font_weight::normal:
