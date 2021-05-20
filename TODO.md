@@ -1,8 +1,9 @@
 # Milestone 0.2.0 checklist
 
+- [ ] bold / italic: config should inherit family from regular and adapt bold/italic style
+- [ ] resizeing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
+- [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)
-- [ ] BUG: config font resize buggy ;(
-- [ ] BUG: in cursor-line (maybe below empty?) the last word is bold, but only the last word. even on `cat` or `sh`.
 
 - [ ] move scrollbar into profile
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
@@ -134,4 +135,3 @@
 - FEATURE: respect aspect ratio of colored (emoji) glyph (y-offset / bearing)?
 - FEATURE: mouse shift-clicks for selecting text even if terminal app has enabled mouse tracking
 - FEATURE: proper windows font loading; either get fontconfig to work on windows, or use Windows APIs for that - https://docs.microsoft.com/en-us/windows/win32/directwrite/custom-font-sets-win10
-
