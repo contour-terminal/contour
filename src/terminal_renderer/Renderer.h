@@ -49,7 +49,7 @@ class Renderer : public Renderable {
     Renderer(crispy::Size _screenSize,
              crispy::Point _logicalDpi,
              FontDescriptions const& _fontDescriptions,
-             ColorPalette _colorPalette,
+             ColorPalette const& _colorPalette,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
              Decorator _hyperlinkHover);
@@ -58,7 +58,6 @@ class Renderer : public Renderable {
 
     void setRenderTarget(RenderTarget& _renderTarget);
 
-    void setColorPalette(ColorPalette const& _colors);
     void setBackgroundOpacity(terminal::Opacity _opacity);
     void setRenderSize(crispy::Size _size);
     bool setFontSize(text::font_size _fontSize);
@@ -143,7 +142,7 @@ class Renderer : public Renderable {
 
     GridMetrics gridMetrics_;
 
-    ColorPalette colorPalette_;
+    ColorPalette const& colorPalette_;
     Opacity backgroundOpacity_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.

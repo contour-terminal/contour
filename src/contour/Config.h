@@ -75,7 +75,7 @@ struct TerminalProfile {
         Permission changeFont = Permission::Ask;
     } permissions;
 
-    terminal::ColorPalette colors;
+    terminal::ColorPalette colors{};
 
     terminal::CursorShape cursorShape;
     terminal::CursorDisplay cursorDisplay;

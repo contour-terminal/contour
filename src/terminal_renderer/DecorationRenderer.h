@@ -68,8 +68,6 @@ class DecorationRenderer : public Renderable {
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
-    void setColorPalette(ColorPalette const& _colorPalette);
-
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
         hyperlinkNormal_  = _normal;
@@ -98,7 +96,7 @@ class DecorationRenderer : public Renderable {
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
 
-    ColorPalette colorPalette_; // TODO: make const&, maybe reference_wrapper<>?
+    ColorPalette const& colorPalette_;
 
     std::unique_ptr<Atlas> atlas_;
 };

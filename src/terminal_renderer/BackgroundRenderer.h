@@ -34,8 +34,6 @@ class BackgroundRenderer : public Renderable {
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
 
-    void setDefaultColor(RGBColor const& _color) noexcept { defaultColor_ = _color; }
-
     constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
 
     // TODO: pass background color directly (instead of whole grid cell),
@@ -52,9 +50,9 @@ class BackgroundRenderer : public Renderable {
   private:
     void renderCellRange();
 
-  private:
+    // private data
     GridMetrics const& gridMetrics_;
-    RGBColor defaultColor_;
+    RGBColor const& defaultColor_;
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
 
     // input state

@@ -79,11 +79,6 @@ void DecorationRenderer::clearCache()
     atlas_ = std::make_unique<Atlas>(monochromeAtlasAllocator());
 }
 
-void DecorationRenderer::setColorPalette(ColorPalette const& _colorPalette)
-{
-    colorPalette_ = _colorPalette;
-}
-
 namespace
 {
     constexpr bool pointVisibleInCircle(int x, int y, int r)

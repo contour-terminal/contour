@@ -364,12 +364,16 @@ Screen::Screen(Size const& _size,
                optional<int> _maxHistoryLineCount,
                Size _maxImageSize,
                int _maxImageColorRegisters,
-               bool _sixelCursorConformance
+               bool _sixelCursorConformance,
+               ColorPalette _colorPalette
 ) :
     eventListener_{ _eventListener },
     logRaw_{ _logRaw },
     logTrace_{ _logTrace },
     modes_{},
+    savedModes_{},
+    defaultColorPalette_{ _colorPalette },
+    colorPalette_{ _colorPalette },
     maxImageColorRegisters_{ _maxImageColorRegisters },
     maxImageSize_{ _maxImageSize },
     maxImageSizeLimit_{ _maxImageSize },
@@ -1980,7 +1984,35 @@ void Screen::restoreWindowTitle()
 
 void Screen::requestDynamicColor(DynamicColorName _name)
 {
-    if (auto const color = eventListener_.requestDynamicColor(_name); color.has_value())
+    auto const color = [&]() -> optional<RGBColor>
+    {
+        switch (_name)
+        {
+            case DynamicColorName::DefaultForegroundColor:
+                return colorPalette_.defaultForeground;
+            case DynamicColorName::DefaultBackgroundColor:
+                return colorPalette_.defaultBackground;
+            case DynamicColorName::TextCursorColor:
+                return colorPalette_.cursor;
+            case DynamicColorName::MouseForegroundColor:
+                return colorPalette_.mouseForeground;
+            case DynamicColorName::MouseBackgroundColor:
+                return colorPalette_.mouseBackground;
+            case DynamicColorName::HighlightForegroundColor:
+                if (colorPalette_.selectionForeground.has_value())
+                    return colorPalette_.selectionForeground.value();
+                else
+                    return nullopt;
+            case DynamicColorName::HighlightBackgroundColor:
+                if (colorPalette_.selectionBackground.has_value())
+                    return colorPalette_.selectionBackground.value();
+                else
+                    return nullopt;
+        }
+        return nullopt; // should never happen
+    }();
+
+    if (color.has_value())
     {
         reply(
             "\033]{};{}\x07",
@@ -2177,12 +2209,58 @@ void Screen::requestCapability(capabilities::Code _code)
 
 void Screen::resetDynamicColor(DynamicColorName _name)
 {
-    eventListener_.resetDynamicColor(_name);
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorPalette_.defaultForeground = defaultColorPalette_.defaultForeground;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorPalette_.defaultBackground = defaultColorPalette_.defaultBackground;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorPalette_.cursor = defaultColorPalette_.cursor;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorPalette_.mouseForeground = defaultColorPalette_.mouseForeground;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorPalette_.mouseBackground = defaultColorPalette_.mouseBackground;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            colorPalette_.selectionForeground = defaultColorPalette_.selectionForeground;
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorPalette_.selectionBackground = defaultColorPalette_.selectionBackground;
+            break;
+    }
 }
 
-void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
+void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
 {
-    eventListener_.setDynamicColor(_name, _color);
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorPalette_.defaultForeground = _value;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorPalette_.defaultBackground = _value;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorPalette_.cursor = _value;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorPalette_.mouseForeground = _value;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorPalette_.mouseBackground = _value;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            colorPalette_.selectionForeground = _value;
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorPalette_.selectionBackground = _value;
+            break;
+    }
 }
 
 void Screen::dumpState()

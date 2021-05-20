@@ -345,8 +345,9 @@ TerminalWidget::TerminalWidget(config::Config _config,
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
     configureTerminal(*terminalView_, config_, profileName_);
-
     updateGeometry();
+
+    terminalView_->terminal().start();
 }
 
 TerminalWidget::~TerminalWidget()
@@ -533,6 +534,8 @@ void TerminalWidget::initializeGL()
         maximizedState_ = window()->isMaximized();
         window()->showFullScreen();
     }
+
+    initialized_ = true;
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
@@ -1357,6 +1360,8 @@ void TerminalWidget::screenUpdated()
     // for (auto const& command : _commands)
     //     terminalMetrics_(command);
 #endif
+    if (!initialized_.load())
+        return;
 
     if (terminalView_->terminal().screen().isPrimaryScreen())
     {

@@ -142,7 +142,6 @@ class TerminalView : private Terminal::Events {
 
   private:
     void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
-    std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenType) override;
     void screenUpdated() override;
@@ -154,9 +153,7 @@ class TerminalView : private Terminal::Events {
     void reply(std::string_view const& /*_response*/) override;
     void onClosed() override;
     void onSelectionComplete() override;
-    void resetDynamicColor(DynamicColorName /*_name*/) override;
     void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
-    void setDynamicColor(DynamicColorName, RGBColor const&) override;
     void setWindowTitle(std::string_view const& /*_title*/) override;
     void setTerminalProfile(std::string const& /*_configProfileName*/) override;
     void discardImage(Image const& /*_image*/) override;
@@ -165,8 +162,6 @@ class TerminalView : private Terminal::Events {
     Events& events_;
     WindowMargin windowMargin_;
 
-    renderer::Renderer renderer_;
-
     text::font_size fontSize_;
     crispy::Size size_;                     // view size in pixels
 
@@ -174,8 +169,7 @@ class TerminalView : private Terminal::Events {
     Process process_;
     std::thread processExitWatcher_;
 
-    ColorPalette colorPalette_;
-    ColorPalette defaultColorPalette_;
+    renderer::Renderer renderer_;
 };
 
 } // namespace terminal::view

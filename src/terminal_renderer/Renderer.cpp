@@ -75,7 +75,7 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
 Renderer::Renderer(Size _screenSize,
                    crispy::Point _logicalDpi,
                    FontDescriptions const& _fontDescriptions,
-                   terminal::ColorPalette _colorPalette,
+                   terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover) :
@@ -90,7 +90,6 @@ Renderer::Renderer(Size _screenSize,
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
     decorationRenderer_{ gridMetrics_, _colorPalette, _hyperlinkNormal, _hyperlinkHover },
     cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorPalette.cursor }
-     // TODO: cursor shouldn't be hard-coded; actual value be passed via render(terminal, now);
 {
 }
 
@@ -165,14 +164,6 @@ void Renderer::setRenderSize(Size _size)
 void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
 {
     backgroundOpacity_ = _opacity;
-}
-
-void Renderer::setColorPalette(terminal::ColorPalette const& _colors)
-{
-    colorPalette_ = _colors;
-    backgroundRenderer_.setDefaultColor(_colors.defaultBackground);
-    decorationRenderer_.setColorPalette(_colors);
-    cursorRenderer_.setColor(RGBAColor(colorPalette_.cursor));
 }
 
 uint64_t Renderer::render(Terminal& _terminal,

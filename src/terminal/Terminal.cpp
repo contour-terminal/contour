@@ -53,7 +53,8 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    Modifier _mouseProtocolBypassModifier,
                    Size _maxImageSize,
                    int _maxImageColorRegisters,
-                   bool _sixelCursorConformance
+                   bool _sixelCursorConformance,
+                   ColorPalette _colorPalette
 ) :
     changes_{ 0 },
     eventListener_{ _eventListener },
@@ -75,16 +76,23 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
         _maxHistoryLineCount,
         _maxImageSize,
         _maxImageColorRegisters,
-        _sixelCursorConformance
+        _sixelCursorConformance,
+        _colorPalette
     },
-    screenUpdateThread_{ [this]() { screenUpdateThread(); } },
+    screenUpdateThread_{},
     viewport_{ screen_ }
 {
 }
 
 Terminal::~Terminal()
 {
-    screenUpdateThread_.join();
+    if (screenUpdateThread_)
+        screenUpdateThread_->join();
+}
+
+void Terminal::start()
+{
+    screenUpdateThread_ = make_unique<std::thread>(bind(&Terminal::screenUpdateThread, this));
 }
 
 void Terminal::screenUpdateThread()
@@ -483,11 +491,6 @@ void Terminal::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
     return eventListener_.requestCaptureBuffer(_absoluteStartLine, _lineCount);
 }
 
-optional<RGBColor> Terminal::requestDynamicColor(DynamicColorName _name)
-{
-    return eventListener_.requestDynamicColor(_name);
-}
-
 void Terminal::bell()
 {
     eventListener_.bell();
@@ -545,11 +548,6 @@ void Terminal::reply(string_view const& _reply)
     eventListener_.reply(_reply);
 }
 
-void Terminal::resetDynamicColor(DynamicColorName _name)
-{
-    eventListener_.resetDynamicColor(_name);
-}
-
 void Terminal::resizeWindow(int _width, int _height, bool _unitInPixels)
 {
     eventListener_.resizeWindow(_width, _height, _unitInPixels);
@@ -574,11 +572,6 @@ void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 void Terminal::setCursorVisibility(bool _visible)
 {
     cursorVisibility_ = _visible;
-}
-
-void Terminal::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
-{
-    eventListener_.setDynamicColor(_name, _color);
 }
 
 void Terminal::setGenerateFocusEvents(bool _enabled)

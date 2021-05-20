@@ -30,15 +30,10 @@ namespace terminal::renderer {
 
 CursorRenderer::CursorRenderer(GridMetrics const& _gridMetrics,
                                CursorShape _shape,
-                               RGBAColor _color) :
+                               RGBColor const& _color) :
     gridMetrics_{ _gridMetrics },
     shape_{ _shape },
-    color_{
-        float(_color.red()) / 255.0f,
-        float(_color.green()) / 255.0f,
-        float(_color.blue()) / 255.0f,
-        float(_color.alpha()) / 255.0f,
-    },
+    color_{ _color },
     columnWidth_{ 1 }
 {
 }
@@ -53,16 +48,6 @@ void CursorRenderer::setShape(CursorShape _shape)
 {
     if (_shape != shape_)
         shape_ = _shape;
-}
-
-void CursorRenderer::setColor(RGBAColor const& _color)
-{
-    color_ = array{
-        float(_color.red()) / 255.0f,
-        float(_color.green()) / 255.0f,
-        float(_color.blue()) / 255.0f,
-        float(_color.alpha()) / 255.0f,
-    };
 }
 
 void CursorRenderer::clearCache()
@@ -160,9 +145,8 @@ optional<CursorRenderer::DataRef> CursorRenderer::getDataRef(CursorShape _shape)
 
 void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
 {
-    if (columnWidth_ != _columnWidth)
+    if (columnWidth_ != _columnWidth) // TODO we should optimize here by keying for (shape, columnWidth).
     {
-        // XXX we could optimize here  by keying for (shape, columnWidth) and just cache them all, but that's a minor.
         columnWidth_ = _columnWidth;
         rebuild();
     }
@@ -173,8 +157,18 @@ void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
         auto const x = _pos.x;
         auto const y = _pos.y;
         auto constexpr z = 0;
-        textureScheduler().renderTexture({textureInfo, x, y, z, color_});
+        textureScheduler().renderTexture({textureInfo, x, y, z, color()});
     }
+}
+
+std::array<float, 4> CursorRenderer::color() const noexcept
+{
+    return {
+        float(color_.red) / 255.0f,
+        float(color_.green) / 255.0f,
+        float(color_.blue) / 255.0f,
+        1.0f
+    };
 }
 
 } // namespace terminal::view
