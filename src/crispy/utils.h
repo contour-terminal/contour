@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -133,6 +134,63 @@ bool endsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _pref
             return false;
 
     return true;
+}
+
+template <std::size_t Base = 10, typename T = unsigned, typename C>
+constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
+{
+    static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16, "Only base-2/8/10/16 supported.");
+    static_assert(std::is_integral_v<T>, "T must be an integral type.");
+    static_assert(std::is_integral_v<C>, "C must be an integral type.");
+
+    if (_text.empty())
+        return std::nullopt;
+
+    auto value = T{0};
+
+    for (auto const ch: _text)
+    {
+        value *= Base;
+        switch (Base)
+        {
+            case 2:
+                if ('0' <= ch && ch <= '1')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 8:
+                if ('0' <= ch && ch <= '7')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 10:
+                if ('0' <= ch && ch <= '9')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 16:
+                if ('0' <= ch && ch <= '9')
+                    value += ch - '0';
+                else if ('a' <= ch && ch <= 'f')
+                    value += 10 + ch - 'a';
+                else if (ch >= 'A' && ch <= 'F')
+                    value += 10 + ch - 'A';
+                else
+                    return std::nullopt;
+                break;
+        }
+    }
+
+    return value;
+}
+
+template <std::size_t Base = 10, typename T = unsigned, typename C>
+constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
+{
+    return to_integer<Base, T, C>(std::basic_string_view<C>(_text));
 }
 
 struct finally {
