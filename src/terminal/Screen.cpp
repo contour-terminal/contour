@@ -756,6 +756,7 @@ void Screen::resetSoft()
     setLeftRightMargin(1, size().width); // DECRLM
 
     currentHyperlink_ = {};
+    colorPalette_ = defaultColorPalette_;
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -790,6 +791,7 @@ void Screen::resetHard()
     };
 
     currentHyperlink_ = {};
+    colorPalette_ = defaultColorPalette_;
 
     eventListener_.hardReset();
 }

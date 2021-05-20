@@ -2290,6 +2290,20 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
     CHECK_FALSE(screen.isModeEnabled(DECMode::MouseProtocolHighlightTracking));
 }
 
+TEST_CASE("OSC.4")
+{
+    auto screen = MockScreen{{2, 2}};
+
+    SECTION("query") {
+        screen.write("\e]4;1;?");
+        INFO(screen.replyData);
+    }
+
+    SECTION("set") {
+        screen.write("\e]4;1;rgb:ab/cd/ef");
+    }
+}
+
 // TODO: resize test (should be in Grid_test.cpp?)
 TEST_CASE("resize", "[screen]")
 {

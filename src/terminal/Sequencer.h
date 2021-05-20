@@ -542,10 +542,6 @@ class Sequencer : public ParserEvents {
     int64_t instructionCounter() const noexcept { return instructionCounter_; }
     void resetInstructionCounter() noexcept { instructionCounter_ = 0; }
 
-    // helper methods
-    //
-    static std::optional<RGBColor> parseColor(std::string_view const& _value);
-
     // ParserEvents
     //
     void error(std::string_view const& _errorString) override;

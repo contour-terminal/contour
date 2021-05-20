@@ -31,6 +31,8 @@
 - Adds VT sequence to capture the current screen buffer `CSI > LineMode ; StartLine ; LineCount t` giving the respone back on stdin via `OSC 314 ; <screen buffer> ST`, and feature detection via `DA1` number `314`.
 - Adds VT sequence `DECSNLS` for setting number of lines to display.
 - Adds VT sequence `CSI Ps b` (`REP`) for repeating the last graphical character `Ps` times.
+- Adds VT sequence `OSC 4 ; INDEX ; COLOR ST` for setting or querying color palette (if COLOR is `?` instead of a color spec).
+- Adds VT sequence `OSC 104 ; INDEX ST` for resetting color palette entry or complete palette (if no (index is given).
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.
