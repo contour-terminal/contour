@@ -26,6 +26,7 @@
 #include <map>
 #include <optional>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace terminal::renderer::atlas {
