@@ -179,8 +179,6 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     backgroundRenderer_.renderPendingCells();
     backgroundRenderer_.finish();
-
-    textRenderer_.flushPendingSegments();
     textRenderer_.finish();
 
     renderTarget().execute();

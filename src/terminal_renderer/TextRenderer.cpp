@@ -32,6 +32,7 @@ using unicode::out;
 
 using std::array;
 using std::get;
+using std::make_unique;
 using std::max;
 using std::move;
 using std::nullopt;
@@ -40,6 +41,8 @@ using std::pair;
 using std::u32string;
 using std::u32string_view;
 using std::vector;
+
+using namespace std::placeholders;
 
 namespace terminal::renderer {
 
@@ -54,7 +57,14 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     gridMetrics_{ _gridMetrics },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{ _textShaper }
+    textShaper_{ _textShaper },
+    textRenderingEngine_(make_unique<StandardTextShaper>(
+        gridMetrics_,
+        textShaper_,
+        fontDescriptions_,
+        fonts_,
+        std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+    ))
 {
 }
 
@@ -66,16 +76,11 @@ void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
 
 void TextRenderer::clearCache()
 {
-    monochromeAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
-    colorAtlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
-    lcdAtlas_ = std::make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
+    monochromeAtlas_ = make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
+    colorAtlas_ = make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
+    lcdAtlas_ = make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
 
-    cacheKeyStorage_.clear();
-    cache_.clear();
-
-#if !defined(NDEBUG)
-    cacheHits_.clear();
-#endif
+    textRenderingEngine_->clearCache();
 }
 
 void TextRenderer::updateFontMetrics()
@@ -83,210 +88,43 @@ void TextRenderer::updateFontMetrics()
     clearCache();
 }
 
-void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color)
-{
-    row_ = _pos.row;
-    startColumn_ = _pos.column;
-    characterStyleMask_ = _styles;
-    color_ = _color;
-    codepoints_.clear();
-    clusters_.clear();
-    clusterOffset_ = 0;
-}
-
-void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] int _column)
-{
-    for (size_t const i: times(_cell.codepointCount()))
-    {
-        codepoints_.emplace_back(_cell.codepoint(i));
-        clusters_.emplace_back(clusterOffset_);
-    }
-    ++clusterOffset_;
-}
-
 void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color)
 {
-    constexpr char32_t SP = 0x20;
-
-    bool const emptyCell = _cell.empty() || _cell.codepoint(0) == SP;
-
-    switch (state_)
+    if (row_ != _pos.row)
     {
-        case State::Empty:
-            if (!emptyCell)
-            {
-                state_ = State::Filling;
-                reset(_pos, _cell.attributes().styles, _color);
-                extend(_cell, _pos.column);
-            }
-            break;
-        case State::Filling:
-        {
-            //if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
-            bool const sameLine = _pos.row == row_;
-            bool const sameSGR = _cell.attributes().styles == characterStyleMask_ && _color == color_;
-
-            // Do not perform multi-column text shaping when under rendering pressure.
-            // This usually only happens in bandwidth heavy commands (such as cat), where
-            // ligature rendering isn't that important anyways?
-            // Performing multi-column text shaping under pressure would cause the cache to be
-            // filled up needlessly with half printed words. We mitigate that by shaping cell-wise
-            // in such cases.
-
-            if (!pressure_ && !emptyCell && sameLine && sameSGR)
-                extend(_cell, _pos.column);
-            else
-            {
-                flushPendingSegments();
-                if (emptyCell)
-                    state_ = State::Empty;
-                else // i.o.w.: cell attributes OR row number changed
-                {
-                    reset(_pos, _cell.attributes().styles, _color);
-                    extend(_cell, _pos.column);
-                }
-            }
-            break;
-        }
-    }
-}
-
-void TextRenderer::flushPendingSegments()
-{
-    if (codepoints_.empty())
-        return;
-
-    render(
-        gridMetrics_.map(startColumn_, row_),
-        cachedGlyphPositions(),
-        color_
-    );
-}
-
-text::shape_result const& TextRenderer::cachedGlyphPositions()
-{
-    auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    if (auto const cached = cache_.find(CacheKey{codepoints, characterStyleMask_}); cached != cache_.end())
-    {
-#if !defined(NDEBUG)
-        cacheHits_[cached->first]++;
-#endif
-        return cached->second;
+        row_ = _pos.row;
+        textRenderingEngine_->endLine();
     }
 
-    cacheKeyStorage_.emplace_back(u32string{codepoints});
-    auto const cacheKeyFromStorage = CacheKey{ cacheKeyStorage_.back(), characterStyleMask_ };
+    auto const style = [&](CharacterStyleMask const& mask) constexpr -> TextStyle {
+        if (mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+            return TextStyle::BoldItalic;
+        if (mask & CharacterStyleMask::Mask::Bold)
+            return TextStyle::Bold;
+        if (mask & CharacterStyleMask::Mask::Italic)
+            return TextStyle::Italic;
+        return TextStyle::Regular;
+    }(_cell.attributes().styles);
 
-#if !defined(NDEBUG)
-    cacheHits_[cacheKeyFromStorage] = 0;
-#endif
+    auto const codepoints = crispy::span(_cell.codepoints().data(), _cell.codepoints().size());
 
-    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
-}
-
-text::shape_result TextRenderer::requestGlyphPositions()
-{
-    text::shape_result glyphPositions;
-    unicode::run_segmenter::range run;
-    auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
-    while (rs.consume(out(run)))
-        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
-
-    return glyphPositions;
-}
-
-text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
-{
-    if ((characterStyleMask_ & CharacterStyleMask::Hidden))
-        return {};
-
-    // auto const weight = characterStyleMask_ & CharacterStyleMask::Bold
-    //     ? text::font_weight::bold
-    //     : text::font_weight::normal;
-    //
-    // auto const slant = characterStyleMask_ & CharacterStyleMask::Italic
-    //     ? text::font_slant::italic
-    //     : text::font_slant::normal;
-
-    if (characterStyleMask_ & CharacterStyleMask::Blinking)
-    {
-        // TODO: update textshaper's shader to blink (requires current clock knowledge)
-    }
-
-    bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-
-    auto font = [&]() -> text::font_key {
-        if (isEmojiPresentation)
-            return fonts_.emoji;
-        if (characterStyleMask_ & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
-            return fonts_.boldItalic;
-        if (characterStyleMask_ & CharacterStyleMask::Mask::Bold)
-            return fonts_.bold;
-        if (characterStyleMask_ & CharacterStyleMask::Mask::Italic)
-            return fonts_.italic;
-
-        return fonts_.regular;
-    }();
-
-    // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
-    auto const count = static_cast<int>(_run.end - _run.start);
-    auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
-    auto const clusters = crispy::span(clusters_.data() + _run.start, count);
-    // XXX auto const clusterGap = -static_cast<int>(clusters_[0]);
-
-    text::shape_result gpos;
-    textShaper_.shape(
-        font,
-        codepoints,
-        clusters,
-        std::get<unicode::Script>(_run.properties),
-        gpos
-    );
-
-    if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
-    {
-        auto msg = debuglog(TextRendererTag);
-        msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
-        msg.write("  (presentation: {}/{})",
-                isEmojiPresentation ? "emoji" : "text",
-                get<unicode::PresentationStyle>(_run.properties));
-
-        msg.write(" (");
-        for (auto const [i, codepoint] : crispy::indexed(codepoints))
-        {
-            if (i)
-                msg.write(" ");
-            msg.write("U+{:04X}", unsigned(codepoint));
-        }
-        msg.write(")\n");
-
-        // A single shape run always uses the same font,
-        // so it is sufficient to just print that.
-        // auto const& font = gpos.front().glyph.font;
-        // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
-
-        msg.write("with metrics:");
-        for (text::glyph_position const& gp : gpos)
-            msg.write(" {}", gp);
-    }
-
-    return gpos;
+    textRenderingEngine_->appendCell(codepoints, style, _color);
 }
 
 void TextRenderer::finish()
 {
-    state_ = State::Empty;
-    codepoints_.clear();
+    textRenderingEngine_->endFrame();
+    row_ = 1;
 }
 
-void TextRenderer::render(crispy::Point _pos,
-                          text::shape_result const& _glyphPositions,
-                          RGBAColor const& _color)
+void TextRenderer::renderRun(crispy::Point _pos,
+                             crispy::span<text::glyph_position const> _glyphPositions,
+                             RGBColor _color)
 {
     crispy::Point pen = _pos;
     auto const advanceX = gridMetrics_.cellSize.width;
 
-    for (text::glyph_position const& gpos : _glyphPositions)
+    for (text::glyph_position const& gpos: _glyphPositions)
     {
         if (optional<DataRef> const ti = getTextureInfo(gpos.glyph); ti.has_value())
         {
@@ -553,25 +391,210 @@ void TextRenderer::debugCache(std::ostream& _textOutput) const
 {
     std::map<u32string, CacheKey> orderedKeys;
 
-    for (auto && [key, val] : cache_)
-    {
-        (void) val;
-        orderedKeys[u32string(key.text)] = key;
-    }
-
     _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
     for (auto && [word, key] : orderedKeys)
     {
         auto const vword = u32string_view(word);
-#if !defined(NDEBUG)
-        auto hits = int64_t{};
-        if (auto i = cacheHits_.find(key); i != cacheHits_.end())
-            hits = i->second;
-        _textOutput << fmt::format("{:>5} : {}\n", hits, unicode::convert_to<char>(vword));
-#else
         _textOutput << fmt::format("  {}\n", unicode::convert_to<char>(vword));
-#endif
     }
 }
+
+// {{{ StandardTextShaper
+StandardTextShaper::StandardTextShaper(GridMetrics const& _gridMetrics,
+                                       text::shaper& _textShaper,
+                                       FontDescriptions const& _fontDescriptions,
+                                       FontKeys const& _fonts,
+                                       RenderGlyphs _renderGlyphs):
+    gridMetrics_{ _gridMetrics },
+    fontDescriptions_{ _fontDescriptions },
+    fonts_{ _fonts },
+    textShaper_{ _textShaper },
+    renderGlyphs_{ std::move(_renderGlyphs) }
+{
+}
+
+void StandardTextShaper::clearCache()
+{
+    cacheKeyStorage_.clear();
+    cache_.clear();
+}
+
+void StandardTextShaper::reset(Coordinate _pos, TextStyle _style, RGBColor _color)
+{
+    currentLine_ = _pos.row;
+    startColumn_ = _pos.column;
+    style_ = _style;
+    color_ = _color;
+    clusterOffset_ = 0;
+    codepoints_.clear();
+    clusters_.clear();
+}
+
+void StandardTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
+                                    TextStyle _style,
+                                    RGBColor _color)
+{
+    constexpr char32_t SP = 0x20;
+    bool const emptyCell = _codepoints.empty() || _codepoints.front() == SP;
+
+    switch (state_)
+    {
+        case State::Empty:
+            if (!emptyCell)
+            {
+                state_ = State::Filling;
+                reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
+                extend(_codepoints);
+            }
+            break;
+        case State::Filling:
+        {
+            bool const sameFont = _style == style_ && _color == color_;
+
+            if (!emptyCell && sameFont)
+                extend(_codepoints);
+            else
+            {
+                flushPendingSegments();
+                if (emptyCell)
+                    state_ = State::Empty;
+                else // i.o.w.: cell attributes OR row number changed
+                {
+                    reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
+                    extend(_codepoints);
+                }
+            }
+            break;
+        }
+    }
+    clusterOffset_++;
+}
+
+void StandardTextShaper::extend(crispy::span<char32_t const> _codepoints)
+{
+    for (char32_t const codepoint: _codepoints)
+    {
+        codepoints_.emplace_back(codepoint);
+        clusters_.emplace_back(clusterOffset_);
+    }
+}
+
+void StandardTextShaper::endLine()
+{
+    flushPendingSegments();
+    reset(Coordinate{currentLine_ + 1, 1}, style_, color_);
+}
+
+void StandardTextShaper::endFrame()
+{
+    if (!codepoints_.empty())
+        // Last line wasn't finished via endLine(), so flush now.
+        flushPendingSegments();
+
+    auto constexpr TopLeft = Coordinate{1, 1};
+    auto constexpr DefaultColor = RGBColor{};
+
+    reset(TopLeft, TextStyle::Invalid, DefaultColor);
+    state_ = State::Empty;
+}
+
+void StandardTextShaper::flushPendingSegments()
+{
+    text::shape_result const& glyphPositions = cachedGlyphPositions();
+    crispy::Point const point = gridMetrics_.map(Coordinate{currentLine_, startColumn_});
+
+    renderGlyphs_(point, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+}
+
+text::shape_result const& StandardTextShaper::cachedGlyphPositions()
+{
+    auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
+    if (auto const cached = cache_.find(TextCacheKey{codepoints, style_}); cached != cache_.end())
+        return cached->second;
+
+    cacheKeyStorage_.emplace_back(u32string{codepoints});
+    auto const cacheKeyFromStorage = TextCacheKey{ cacheKeyStorage_.back(), style_ };
+
+    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
+}
+
+text::shape_result StandardTextShaper::requestGlyphPositions()
+{
+    text::shape_result glyphPositions;
+    unicode::run_segmenter::range run;
+    auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
+    while (rs.consume(out(run)))
+        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
+
+    return glyphPositions;
+}
+
+text::shape_result StandardTextShaper::shapeRun(unicode::run_segmenter::range const& _run)
+{
+    bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
+
+    auto const font = [&]() -> text::font_key {
+        if (isEmojiPresentation)
+            return fonts_.emoji;
+        switch (style_)
+        {
+            case TextStyle::Invalid:
+            case TextStyle::Regular:
+                break;
+            case TextStyle::Bold:
+                return fonts_.bold;
+            case TextStyle::Italic:
+                return fonts_.italic;
+            case TextStyle::BoldItalic:
+                return fonts_.boldItalic;
+        }
+        return fonts_.regular;
+    }();
+
+    // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
+    auto const count = static_cast<int>(_run.end - _run.start);
+    auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
+    auto const clusters = crispy::span(clusters_.data() + _run.start, count);
+    // XXX auto const clusterGap = -static_cast<int>(clusters_[0]);
+
+    text::shape_result gpos;
+    textShaper_.shape(
+        font,
+        codepoints,
+        clusters,
+        std::get<unicode::Script>(_run.properties),
+        gpos
+    );
+
+    if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
+    {
+        auto msg = debuglog(TextRendererTag);
+        msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
+        msg.write("  (presentation: {}/{})",
+                isEmojiPresentation ? "emoji" : "text",
+                get<unicode::PresentationStyle>(_run.properties));
+
+        msg.write(" (");
+        for (auto const [i, codepoint] : crispy::indexed(codepoints))
+        {
+            if (i)
+                msg.write(" ");
+            msg.write("U+{:04X}", unsigned(codepoint));
+        }
+        msg.write(")\n");
+
+        // A single shape run always uses the same font,
+        // so it is sufficient to just print that.
+        // auto const& font = gpos.front().glyph.font;
+        // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
+
+        msg.write("with metrics:");
+        for (text::glyph_position const& gp : gpos)
+            msg.write(" {}", gp);
+    }
+
+    return gpos;
+}
+// }}}
 
 } // end namespace
