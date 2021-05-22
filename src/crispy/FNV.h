@@ -41,6 +41,14 @@ class FNV {
         return (*this)((*this)(_memory, _value), _moreValues...);
     }
 
+    template <typename... V>
+    constexpr U operator()(U _memory, std::basic_string_view<T> _str, V... _moreValues) const noexcept
+    {
+        for (auto const ch : _str)
+            _memory = (*this)(_memory, ch);
+        return (*this)(_memory, _moreValues...);
+    }
+
     /// Builds the FNV hash between [_begin, _end)
     constexpr U operator()(U _memory, std::basic_string_view<T> _str) const noexcept
     {
