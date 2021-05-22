@@ -686,6 +686,23 @@ bool tryShape(font_key _font,
     return crispy::none_of(_result, glyphMissing);
 }
 
+optional<glyph_position> open_shaper::shape(font_key _font,
+                                            char32_t _codepoint)
+{
+    FontInfo& fontInfo = d->fonts_.at(_font);
+
+    glyph_index glyphIndex{ FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
+    if (!glyphIndex.value)
+        return nullopt;
+
+    glyph_position gpos{};
+    gpos.glyph = glyph_key{_font, fontInfo.size, glyphIndex};
+    gpos.advance.x = this->metrics(_font).advance;
+    gpos.offset = crispy::Point{}; // TODO (load from glyph metrics. needed?)
+
+    return gpos;
+}
+
 void open_shaper::shape(font_key _font,
                         u32string_view _codepoints,
                         crispy::span<int> _clusters,

@@ -38,6 +38,9 @@ class open_shaper : public shaper {
                unicode::Script _script,
                shape_result& _result) override;
 
+    std::optional<glyph_position> shape(font_key _font,
+                                        char32_t _codepoint) override;
+
     std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
 
     bool has_color(font_key _font) const override;

@@ -108,6 +108,9 @@ class shaper {
                        unicode::Script _script,
                        shape_result& _result) = 0;
 
+    virtual std::optional<glyph_position> shape(font_key _font,
+                                                char32_t _codepoint) = 0;
+
     /**
      * Rasterizes (renders) the glyph using the given render mode.
      *
