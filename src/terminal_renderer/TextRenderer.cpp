@@ -96,8 +96,9 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
         textRenderingEngine_->endLine();
     }
 
-    auto const style = [&](CharacterStyleMask const& mask) constexpr -> TextStyle {
-        if (mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+    auto const style = [&](auto mask) constexpr -> TextStyle {
+        if ((mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+                == (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
             return TextStyle::BoldItalic;
         if (mask & CharacterStyleMask::Mask::Bold)
             return TextStyle::Bold;
@@ -539,8 +540,9 @@ text::shape_result StandardTextShaper::shapeRun(unicode::run_segmenter::range co
         switch (style_)
         {
             case TextStyle::Invalid:
-            case TextStyle::Regular:
                 break;
+            case TextStyle::Regular:
+                return fonts_.regular;
             case TextStyle::Bold:
                 return fonts_.bold;
             case TextStyle::Italic:
