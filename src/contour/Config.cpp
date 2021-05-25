@@ -710,164 +710,31 @@ terminal::ColorPalette loadColorScheme(YAML::Node const& _node)
     return colors;
 }
 
-optional<tuple<optional<text::font_weight>, optional<text::font_slant>>> parseFontStyle(YAML::Node const& _node)
-{
-    if (!_node.IsScalar())
-        return nullopt;
-
-    auto const name = _node.as<string>();
-
-#if 0
-    // TODO: tokenize => find weight, find slant; ensure validity (no multiple weights/slants)
-    auto constexpr mappings = array{
-        pair{""sv, tuple{text::font_weight::normal, text::font_slant::normal}},
-        pair{"regular"sv, tuple{text::font_weight::normal, text::font_slant::normal}},
-        pair{"bold"sv, tuple{text::font_weight::bold, text::font_slant::normal}},
-        pair{"italic"sv, tuple{text::font_weight::normal, text::font_slant::italic}},
-        pair{"bold italic"sv, tuple{text::font_weight::bold, text::font_slant::italic}}
-    };
-
-    for (auto const& mapping: mappings)
-        if (name == mapping.first)
-            return mapping.second;
-
-    return nullopt;
-#else
-
-    auto const tokens = crispy::split(name, ' ');
-    size_t i = 0;
-
-    auto const currentToken = [&]() {
-        return i < tokens.size() ? tokens[i] : ""sv;
-    };
-    auto const nextToken = [&]() {
-        if (i < tokens.size())
-            ++i;
-    };
-    auto const tokensAvailable = [&]() {
-        return tokens.size() - i;
-    };
-
-    // StylePattern ::= [Weight] [Slant]
-    // Weight := Thin
-    //         | Regular
-    //         | Bold
-    //         | Extra Bold
-    //         | Black
-    //         | Extra Black
-    // Slant := Roman | Italic | Oblique
-
-    bool extraPending = false;
-    if (currentToken() == "extra")
-    {
-        extraPending = true;
-        nextToken();
-    }
-
-    auto constexpr static weightMappings = array<tuple<string_view, text::font_weight, optional<text::font_weight>>, 9>{
-        tuple{"thin"sv,  text::font_weight::thin, nullopt},
-        tuple{"light"sv,  text::font_weight::thin, optional{text::font_weight::extra_light}},
-        tuple{"demolight"sv,  text::font_weight::demilight, nullopt},
-        tuple{"book"sv,  text::font_weight::book, nullopt},
-        tuple{"normal"sv,  text::font_weight::normal, nullopt},
-        tuple{"medium"sv,  text::font_weight::normal, nullopt},
-        tuple{"demibold"sv,  text::font_weight::demibold, nullopt},
-        tuple{"bold"sv,  text::font_weight::bold, optional{text::font_weight::extra_bold}},
-        tuple{"black"sv, text::font_weight::black, optional{text::font_weight::extra_black}},
-    };
-
-    optional<text::font_weight> weight;
-    for (auto const& mapping : weightMappings)
-    {
-        if (currentToken() == get<0>(mapping))
-        {
-            if (extraPending && !get<2>(mapping).has_value())
-                return nullopt; // "Extra" specified to a weight that does not have a "Extra" variant."
-            weight = extraPending ? get<2>(mapping).value()
-                                  : get<1>(mapping);
-            nextToken();
-            break;
-        }
-    }
-
-    if (extraPending)
-        return nullopt; // "extra" keyword without a weight.
-
-    auto constexpr static slantMappings = array{
-        pair{"roman"sv, text::font_slant::normal},
-        pair{"italic"sv, text::font_slant::italic},
-        pair{"oblique"sv, text::font_slant::oblique},
-    };
-
-    optional<text::font_slant> slant;
-    for (auto const& mapping : slantMappings)
-    {
-        if (currentToken() == mapping.first)
-        {
-            slant = mapping.second;
-            nextToken();
-            break;
-        }
-    }
-
-    if (tokensAvailable() != 0)
-        return nullopt; // superfluous tokens
-
-    return nullopt;
-#endif
-}
-
-void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store, string_view _default)
+void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store)
 {
     auto node = _node[string(_key)];
     if (!node)
+        return;
+
+    if (node.IsScalar())
     {
-        _store = text::font_description::parse(_default);
-    }
-    else if (node.IsScalar())
-    {
-        _store = text::font_description::parse(node.as<string>());
+        _store.familyName = node.as<string>();
     }
     else if (node.IsMap())
     {
         if (node["family"].IsScalar())
             _store.familyName = node["family"].as<string>();
 
-        if (auto const styleOpt = parseFontStyle(node["style"]); styleOpt.has_value())
+        if (node["slant"].IsScalar())
         {
-            auto const [weight, slant] = styleOpt.value();
-            _store.weight = weight.value_or(_store.weight);
-            _store.slant = slant.value_or(_store.slant);
+            if (auto const p = text::make_font_slant(node["slant"].as<string>()))
+                _store.slant = p.value();
         }
 
-        if (node["features"].IsSequence())
+        if (node["weight"].IsScalar())
         {
-            // TODO: array of strings into _store.features
-        }
-    }
-}
-
-void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store, text::font_description const& _default)
-{
-    auto node = _node[string(_key)];
-    if (!node)
-    {
-        _store = _default;
-    }
-    else if (node.IsScalar())
-    {
-        _store = text::font_description::parse(node.as<string>());
-    }
-    else if (node.IsMap())
-    {
-        if (node["family"].IsScalar())
-            _store.familyName = node["family"].as<string>();
-
-        if (auto const styleOpt = parseFontStyle(node["style"]); styleOpt.has_value())
-        {
-            auto const [weight, slant] = styleOpt.value();
-            _store.weight = weight.value_or(_store.weight);
-            _store.slant = slant.value_or(_store.slant);
+            if (auto const p = text::make_font_weight(node["weight"].as<string>()))
+                _store.weight = p.value();
         }
 
         if (node["features"].IsSequence())
@@ -967,29 +834,27 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         bool onlyMonospace = true;
         softLoadValue(fonts, "only_monospace", onlyMonospace, true);
 
-        text::font_description const& defaultFontFamily = profile.fonts.regular;
+        profile.fonts.regular.familyName = "regular";
         profile.fonts.regular.spacing = text::font_spacing::mono;
         profile.fonts.regular.force_spacing = onlyMonospace;
-        softLoadFont(fonts, "regular", profile.fonts.regular, "monospace");
+        softLoadFont(fonts, "regular", profile.fonts.regular);
 
-        profile.fonts.bold.spacing = text::font_spacing::mono;
+        profile.fonts.bold = profile.fonts.regular;
         profile.fonts.bold.weight = text::font_weight::bold;
-        profile.fonts.bold.force_spacing = onlyMonospace;
-        softLoadFont(fonts, "bold", profile.fonts.bold, defaultFontFamily);
+        softLoadFont(fonts, "bold", profile.fonts.bold);
 
-        profile.fonts.italic.spacing = text::font_spacing::mono;
+        profile.fonts.italic = profile.fonts.regular;
         profile.fonts.italic.slant = text::font_slant::italic;
-        profile.fonts.italic.force_spacing = onlyMonospace;
-        softLoadFont(fonts, "italic", profile.fonts.italic, defaultFontFamily);
+        softLoadFont(fonts, "italic", profile.fonts.italic);
 
-        profile.fonts.boldItalic.spacing = text::font_spacing::mono;
+        profile.fonts.boldItalic = profile.fonts.regular;
         profile.fonts.boldItalic.weight = text::font_weight::bold;
         profile.fonts.boldItalic.slant = text::font_slant::italic;
-        profile.fonts.boldItalic.force_spacing = onlyMonospace;
-        softLoadFont(fonts, "bold_italic", profile.fonts.boldItalic, defaultFontFamily);
+        softLoadFont(fonts, "bold_italic", profile.fonts.boldItalic);
 
+        profile.fonts.emoji.familyName = "emoji";
         profile.fonts.emoji.spacing = text::font_spacing::mono;
-        softLoadFont(fonts, "emoji", profile.fonts.emoji, "emoji");
+        softLoadFont(fonts, "emoji", profile.fonts.emoji);
 
         string renderModeStr;
         softLoadValue(fonts, "render_mode", renderModeStr);
