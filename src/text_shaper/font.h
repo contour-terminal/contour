@@ -18,9 +18,26 @@
 
 #include <fmt/format.h>
 
+#include <array>
 #include <string>
+#include <utility>
 
 namespace text {
+
+namespace detail
+{
+    template <typename T>
+    constexpr std::optional<T> try_match(
+        std::string_view _text,
+        std::initializer_list<std::pair<std::string_view, T>> _mappings)
+    {
+        for (auto const& mapping: _mappings)
+            if (mapping.first == _text) // TODO: improvable (ignore case, '_' can be one or many ' ')
+                return mapping.second;
+
+        return std::nullopt;
+    }
+}
 
 enum class font_weight
 {
@@ -38,6 +55,26 @@ enum class font_weight
     extra_black, // aka. ultrablack
 };
 
+constexpr std::optional<font_weight> make_font_weight(std::string_view _text)
+{
+    using namespace std::string_view_literals;
+    using std::pair;
+    return detail::try_match(_text, {
+        pair{ "thin"sv, font_weight::thin },
+        pair{ "extra light"sv, font_weight::extra_light },
+        pair{ "light"sv, font_weight::light },
+        pair{ "demilight"sv, font_weight::demilight },
+        pair{ "book"sv, font_weight::book },
+        pair{ "normal"sv, font_weight::normal },
+        pair{ "medium"sv, font_weight::medium },
+        pair{ "demibold"sv, font_weight::demibold },
+        pair{ "bold"sv, font_weight::bold },
+        pair{ "extra bold"sv, font_weight::extra_black },
+        pair{ "black"sv, font_weight::black },
+        pair{ "extra black"sv, font_weight::extra_black }
+    });
+}
+
 enum class font_slant
 {
     normal,
@@ -45,11 +82,32 @@ enum class font_slant
     oblique
 };
 
+constexpr std::optional<font_slant> make_font_slant(std::string_view _text)
+{
+    using namespace std::string_view_literals;
+    using std::pair;
+    return detail::try_match(_text, {
+        pair{ "thin"sv, font_slant::normal },
+        pair{ "italic"sv, font_slant::italic },
+        pair{ "oblique"sv, font_slant::oblique }
+    });
+}
+
 enum class font_spacing
 {
     proportional,
     mono
 };
+
+constexpr std::optional<font_spacing> make_font_spacing(std::string_view _text)
+{
+    using namespace std::string_view_literals;
+    using std::pair;
+    return detail::try_match(_text, {
+        pair{ "proportional"sv, font_spacing::proportional },
+        pair{ "mono"sv, font_spacing::mono }
+    });
+}
 
 struct font_description
 {
