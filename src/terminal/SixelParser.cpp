@@ -73,8 +73,8 @@ constexpr inline std::array<RGBColor, 16> defaultColors = {
     rgb(204, 204, 204), // 15: gray 75%
 };
 
-// {{{ ColorPalette
-ColorPalette::ColorPalette(int _size, int _maxSize) :
+// {{{ SixelColorPalette
+SixelColorPalette::SixelColorPalette(int _size, int _maxSize) :
     palette_{},
     maxSize_{_maxSize}
 {
@@ -84,23 +84,23 @@ ColorPalette::ColorPalette(int _size, int _maxSize) :
     reset();
 }
 
-void ColorPalette::reset()
+void SixelColorPalette::reset()
 {
     for (size_t i = 0; i < min(static_cast<size_t>(size()), defaultColors.size()); ++i)
         palette_[i] = defaultColors[i];
 }
 
-void ColorPalette::setSize(int _newSize)
+void SixelColorPalette::setSize(int _newSize)
 {
     palette_.resize(static_cast<size_t>(max(0, min(_newSize, maxSize_))));
 }
 
-void ColorPalette::setMaxSize(int _value)
+void SixelColorPalette::setMaxSize(int _value)
 {
     maxSize_ = _value;
 }
 
-void ColorPalette::setColor(int _index, RGBColor const& _color)
+void SixelColorPalette::setColor(int _index, RGBColor const& _color)
 {
     if (_index < maxSize_)
     {
@@ -112,7 +112,7 @@ void ColorPalette::setColor(int _index, RGBColor const& _color)
     }
 }
 
-RGBColor ColorPalette::at(int _index) const noexcept
+RGBColor SixelColorPalette::at(int _index) const noexcept
 {
     return palette_[_index % palette_.size()];
 }
@@ -314,7 +314,7 @@ SixelImageBuilder::SixelImageBuilder(Size const& _maxSize,
                                      int _aspectVertical,
                                      int _aspectHorizontal,
                                      RGBAColor _backgroundColor,
-                                     std::shared_ptr<ColorPalette> _colorPalette) :
+                                     std::shared_ptr<SixelColorPalette> _colorPalette) :
     maxSize_{ _maxSize },
     colors_{ std::move(_colorPalette) },
     size_{ _maxSize },

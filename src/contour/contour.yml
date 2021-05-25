@@ -120,13 +120,33 @@ profiles:
             render_mode: gray
 
             # Font family to use for displaying text.
-            regular: "monospace"
+            #
+            # A font can be either described in detail as below or as a
+            # simple string value (e.g. "monospace" with teh appropriate
+            # weight/slant applied automatically).
+            regular:
+                # Font family defines the font family name, such as:
+                # Fira Code", "Courier New", or "monospace" (default).
+                family: "monospace"
 
-            # if bold/italic/bold_italic are not explicitely specified, the regular font with
-            # the respective style will be used.
-            #bold: "Hack:style=bold"
-            #italic: "Hack:style=italic"
-            #bold_italic: "Hack:style=bold italic"
+                # Font weight can be one of:
+                #   thin, extra_light, light, demilight, book, normal,
+                #   medium, demibold, bold, extra_bold, black, extra_black.
+                weight: regular
+
+                # Font slant can be one of: normal, italic, oblique.
+                slant: normal
+
+            # If bold/italic/bold_italic are not explicitely specified, the regular font with
+            # the respective weight and slant will be used.
+            #bold: "Hack"
+            #italic: "Hack"
+            #bold_italic: "Hack"
+
+            # This is a special font to be used for displaying unicode symbols
+            # that are to be rendered in emoji presentation.
+            # Defaults to "emoji".
+            emoji: "emoji"
 
         # Tab width to move the cursor to the right when a HT control character is recieved.
         tab_width: 8

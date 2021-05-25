@@ -254,6 +254,7 @@ class TerminalWidget :
 
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
     bool takeScreenshot_ = false;
+    std::atomic<bool> initialized_ = false;
 };
 
 } // namespace contour

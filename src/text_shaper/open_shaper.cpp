@@ -114,14 +114,34 @@ namespace // {{{ helper
     {
         switch (_weight)
         {
+            case font_weight::thin:
+                return FC_WEIGHT_THIN;
+            case font_weight::extra_light:
+                return FC_WEIGHT_EXTRALIGHT;
+            case font_weight::light:
+                return FC_WEIGHT_LIGHT;
+            case font_weight::demilight:
+#if defined(FC_WEIGHT_DEMILIGHT)
+                return FC_WEIGHT_DEMILIGHT;
+#else
+                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
+#endif
+            case font_weight::book:
+                return FC_WEIGHT_BOOK;
+            case font_weight::normal:
+                return FC_WEIGHT_NORMAL;
+            case font_weight::medium:
+                return FC_WEIGHT_MEDIUM;
+            case font_weight::demibold:
+                return FC_WEIGHT_DEMIBOLD;
             case font_weight::bold:
                 return FC_WEIGHT_BOLD;
             case font_weight::extra_bold:
                 return FC_WEIGHT_EXTRABOLD;
-            case font_weight::thin:
-                return FC_WEIGHT_LIGHT;
-            case font_weight::normal:
-                return FC_WEIGHT_NORMAL;
+            case font_weight::black:
+                return FC_WEIGHT_BLACK;
+            case font_weight::extra_black:
+                return FC_WEIGHT_EXTRABLACK;
         }
         return FC_WEIGHT_NORMAL;
     }
@@ -189,6 +209,7 @@ namespace // {{{ helper
         }
     }
 
+#if 0
     char const* fcWeightStr(int _value)
     {
         switch (_value)
@@ -286,6 +307,7 @@ namespace // {{{ helper
 
         return output;
     }
+#endif
 
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
@@ -438,7 +460,7 @@ namespace // {{{ helper
         return best;
     }
 
-    optional<FtFacePtr> loadFace(string const& _path, font_size _fontSize, vec2 _dpi, FT_Library _ft)
+    optional<FtFacePtr> loadFace(string const& _path, font_size _fontSize, crispy::Point _dpi, FT_Library _ft)
     {
         FT_Face ftFace = nullptr;
         auto ftErrorCode = FT_New_Face(_ft, _path.c_str(), 0, &ftFace);
@@ -498,7 +520,7 @@ struct FontInfo
 struct open_shaper::Private // {{{
 {
     FT_Library ft_;
-    vec2 dpi_;
+    crispy::Point dpi_;
     std::unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
     std::unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
@@ -533,8 +555,8 @@ struct open_shaper::Private // {{{
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        fontPathSizeToKeys.emplace(pair{FontPathAndSize{_path, _fontSize}, key});
         debuglog(FontFallbackTag).write("Loading font: key={}, path=\"{}\" size={} dpi={} {}", key, _path, _fontSize, dpi_, metrics(key));
+        fontPathSizeToKeys.emplace(pair{FontPathAndSize{move(_path), _fontSize}, key});
         return key;
     }
 
@@ -554,11 +576,9 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    explicit Private(vec2 _dpi) :
+    explicit Private(crispy::Point _dpi) :
         ft_{},
         dpi_{ _dpi },
-        fonts_(),
-        glyphs_(),
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey_{}
     {
@@ -583,7 +603,7 @@ struct open_shaper::Private // {{{
     }
 }; // }}}
 
-open_shaper::open_shaper(vec2 _dpi) : d(new Private(_dpi), [](Private* p) { delete p; })
+open_shaper::open_shaper(crispy::Point _dpi) : d(new Private(_dpi), [](Private* p) { delete p; })
 {
 }
 
@@ -657,11 +677,30 @@ bool tryShape(font_key _font,
     {
         glyph_position gpos{};
         gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
-        gpos.x = int(pos[i].x_offset / 64.0f);
-        gpos.y = int(pos[i].y_offset / 64.0f);
+        gpos.offset.x = int(pos[i].x_offset / 64.0f); // gpos.offset.(x,y) ?
+        gpos.offset.y = int(pos[i].y_offset / 64.0f);
+        gpos.advance.x = int(pos[i].x_advance / 64.0f);
+        gpos.advance.y = int(pos[i].y_advance / 64.0f);
         _result.emplace_back(gpos);
     }
     return crispy::none_of(_result, glyphMissing);
+}
+
+optional<glyph_position> open_shaper::shape(font_key _font,
+                                            char32_t _codepoint)
+{
+    FontInfo& fontInfo = d->fonts_.at(_font);
+
+    glyph_index glyphIndex{ FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
+    if (!glyphIndex.value)
+        return nullopt;
+
+    glyph_position gpos{};
+    gpos.glyph = glyph_key{_font, fontInfo.size, glyphIndex};
+    gpos.advance.x = this->metrics(_font).advance;
+    gpos.offset = crispy::Point{}; // TODO (load from glyph metrics. needed?)
+
+    return gpos;
 }
 
 void open_shaper::shape(font_key _font,
@@ -679,7 +718,7 @@ void open_shaper::shape(font_key _font,
         auto logMessage = debuglog(TextShapingTag);
         logMessage.write("Shaping codepoints:");
         for (auto [i, codepoint] : crispy::indexed(_codepoints))
-            logMessage.write(" U+{:x}", static_cast<unsigned>(codepoint));
+            logMessage.write(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
         logMessage.write("\n");
         logMessage.write("Using font: key={}, path=\"{}\"\n", _font, fontInfo.path);
     }
@@ -753,17 +792,17 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     }
 
     rasterized_glyph output{};
-    output.width = static_cast<int>(ftFace->glyph->bitmap.width);
-    output.height = static_cast<int>(ftFace->glyph->bitmap.rows);
-    output.left = ftFace->glyph->bitmap_left;
-    output.top = ftFace->glyph->bitmap_top;
+    output.size.width = static_cast<int>(ftFace->glyph->bitmap.width);
+    output.size.height = static_cast<int>(ftFace->glyph->bitmap.rows);
+    output.position.x = ftFace->glyph->bitmap_left;
+    output.position.y = ftFace->glyph->bitmap_top;
 
     switch (ftFace->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
         {
-            auto const width = output.width;
-            auto const height = output.height;
+            auto const width = output.size.width;
+            auto const height = output.size.height;
 
             // convert mono to gray
             FT_Bitmap ftBitmap;
@@ -789,13 +828,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         case FT_PIXEL_MODE_GRAY:
         {
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(output.height * output.width);
+            output.bitmap.resize(output.size.height * output.size.width);
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto i = 0; i < output.height; ++i)
-                for (auto j = 0; j < output.width; ++j)
-                    output.bitmap[i * output.width + j] = s[(output.height - 1 - i) * pitch + j];
+            for (auto i = 0; i < output.size.height; ++i)
+                for (auto j = 0; j < output.size.width; ++j)
+                    output.bitmap[i * output.size.width + j] = s[(output.size.height - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD:
@@ -805,7 +844,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(width * height);
-            output.width /= 3;
+            output.size.width /= 3;
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto s = ftFace->glyph->bitmap.buffer;
@@ -816,8 +855,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         }
         case FT_PIXEL_MODE_BGRA:
         {
-            auto const width = output.width;
-            auto const height = output.height;
+            auto const width = output.size.width;
+            auto const height = output.size.height;
 
             output.format = bitmap_format::rgba;
             output.bitmap.resize(height * width * 4);

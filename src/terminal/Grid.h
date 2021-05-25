@@ -142,7 +142,7 @@ struct GraphicsAttributes {
     Color underlineColor{DefaultColor{}};
     CharacterStyleMask styles{};
 
-    RGBColor getUnderlineColor(ColorProfile const& _colorProfile) const noexcept
+    RGBColor getUnderlineColor(ColorPalette const& _colorPalette) const noexcept
     {
         float const opacity = [=]() {
             if (styles & CharacterStyleMask::Faint)
@@ -152,10 +152,10 @@ struct GraphicsAttributes {
         }();
 
         bool const bright = (styles & CharacterStyleMask::Bold) != 0;
-        return apply(_colorProfile, underlineColor, ColorTarget::Foreground, bright) * opacity;
+        return apply(_colorPalette, underlineColor, ColorTarget::Foreground, bright) * opacity;
     }
 
-    std::pair<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, bool _reverseVideo) const noexcept
+    std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
     {
         float const opacity = [=]() { // TODO: don't make opacity dependant on Faint-attribute.
             if (styles & CharacterStyleMask::Faint)
@@ -172,10 +172,10 @@ struct GraphicsAttributes {
                 : std::pair{ ColorTarget::Foreground, ColorTarget::Background };
 
         return (styles & CharacterStyleMask::Inverse) == 0
-            ? std::pair{ apply(_colorProfile, foregroundColor, fgColorTarget, bright) * opacity,
-                         apply(_colorProfile, backgroundColor, bgColorTarget, false) }
-            : std::pair{ apply(_colorProfile, backgroundColor, bgColorTarget, bright) * opacity,
-                         apply(_colorProfile, foregroundColor, fgColorTarget, false) };
+            ? std::pair{ apply(_colorPalette, foregroundColor, fgColorTarget, bright) * opacity,
+                         apply(_colorPalette, backgroundColor, bgColorTarget, false) }
+            : std::pair{ apply(_colorPalette, backgroundColor, bgColorTarget, bright) * opacity,
+                         apply(_colorPalette, foregroundColor, fgColorTarget, false) };
     }
 };
 

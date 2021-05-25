@@ -17,33 +17,18 @@
 #include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Image.h>
+#include <crispy/FNV.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <memory>
 #include <vector>
+#include <unordered_map>
 
-namespace terminal::renderer {
-
-/// Image Rendering API.
-///
-/// Can render any arbitrary RGBA image (for example Sixel Graphics images).
-class ImageRenderer : public Renderable
+namespace terminal::renderer
 {
-  public:
-    explicit ImageRenderer(crispy::Size const& _cellSize);
-
-    void setRenderTarget(RenderTarget& _renderTarget) override;
-    void clearCache() override;
-
-    /// Reconfigures the slicing properties of existing images.
-    void setCellSize(crispy::Size const& _cellSize);
-
-    void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
-
-    /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some GPU caches.
-    void discardImage(Image::Id _imageId);
-
-    struct ImageFragmentKey {
+    struct ImageFragmentKey
+    {
         Image::Id const imageId;
         Coordinate const offset;
         crispy::Size const size;
@@ -66,20 +51,58 @@ class ImageRenderer : public Renderable
                 || (imageId == b.imageId && offset < b.offset);
         }
     };
+}
 
-    struct Metadata {
-        // TODO: do we want/need anything here?
+namespace std
+{
+    template<>
+    struct hash<terminal::renderer::ImageFragmentKey>
+    {
+        constexpr size_t operator()(terminal::renderer::ImageFragmentKey const& _key) const noexcept
+        {
+            using FNV = crispy::FNV<uint64_t>;
+            return FNV{}(FNV{}.basis(),
+                         _key.imageId,
+                         _key.offset.row,
+                         _key.offset.column,
+                         _key.size.width,
+                         _key.size.height);
+        }
     };
+}
 
+namespace terminal::renderer {
+
+/// Image Rendering API.
+///
+/// Can render any arbitrary RGBA image (for example Sixel Graphics images).
+class ImageRenderer : public Renderable
+{
+  public:
+    explicit ImageRenderer(crispy::Size const& _cellSize);
+
+    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void clearCache() override;
+
+    /// Reconfigures the slicing properties of existing images.
+    void setCellSize(crispy::Size const& _cellSize);
+
+    void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
+
+    /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some GPU caches.
+    void discardImage(Image::Id _imageId);
+
+    struct Metadata {}; // TODO: do we want/need anything here?
     using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
     using DataRef = TextureAtlas::DataRef;
 
   private:
     std::optional<DataRef> getTextureInfo(ImageFragment const& _fragment);
 
-  private:
+    // private data
+    //
     ImagePool imagePool_;
-    std::map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
+    std::unordered_map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
     crispy::Size cellSize_;
     std::unique_ptr<TextureAtlas> atlas_;
 };

@@ -197,6 +197,28 @@ namespace impl // {{{ some command generator helpers
         return ApplyResult::Invalid;
 	}
 
+    optional<RGBColor> parseColor(string_view const& _value)
+    {
+        try
+        {
+            // "rgb:RR/GG/BB"
+            //  0123456789a
+            if (_value.size() == 12 && _value.substr(0, 4) == "rgb:" && _value[6] == '/' && _value[9] == '/')
+            {
+                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(4, 2));
+                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(7, 2));
+                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(10, 2));
+                return RGBColor{*r, *g, *b};
+            }
+            return std::nullopt;
+        }
+        catch (...)
+        {
+            // that will be a formatting error in stoul() then.
+            return std::nullopt;
+        }
+    }
+
     Color parseColor(Sequence const& _seq, size_t* pi)
 	{
         // We are at parameter index `i`.
@@ -565,12 +587,85 @@ namespace impl // {{{ some command generator helpers
         auto const& value = _seq.intermediateCharacters();
         if (value == "?")
             _screen.requestDynamicColor(_name);
-        else if (auto color = Sequencer::parseColor(value); color.has_value())
+        else if (auto color = parseColor(value); color.has_value())
             _screen.setDynamicColor(_name, color.value());
         else
             return ApplyResult::Invalid;
 
         return ApplyResult::Ok;
+    }
+
+    bool queryOrSetColorPalette(string_view _text,
+                                std::function<void(uint8_t)> _queryColor,
+                                std::function<void(uint8_t, RGBColor)> _setColor)
+    {
+        // Sequence := [Param (';' Param)*]
+        // Param    := Index ';' Query | Set
+        // Index    := DIGIT+
+        // Query    := ?'
+        // Set      := 'rgb:' Hex8 '/' Hex8 '/' Hex8
+        // Hex8     := [0-9A-Za-z] [0-9A-Za-z]
+        // DIGIT    := [0-9]
+        int index = -1;
+        return crispy::split(
+            _text,
+            ';',
+            [&](string_view value) {
+                if (index < 0)
+                {
+                    index = crispy::to_integer<10>(value).value_or(-1);
+                    if (!(0 <= index && index < 0xFF))
+                        return false;
+                }
+                else if (value == "?"sv)
+                {
+                    _queryColor(index);
+                    index = -1;
+                }
+                else if (auto const color = parseColor(value))
+                {
+                    _setColor(index, color.value());
+                    index = -1;
+                }
+                else
+                    return false;
+
+                return true;
+            }
+        );
+    }
+
+    ApplyResult RCOLPAL(Sequence const& _seq, Screen& _screen)
+    {
+        if (_seq.intermediateCharacters().empty())
+        {
+            _screen.colorPalette() = _screen.defaultColorPalette();
+            return ApplyResult::Ok;
+        }
+
+        auto const index = crispy::to_integer<10, uint8_t>(_seq.intermediateCharacters());
+        if (!index.has_value())
+            return ApplyResult::Invalid;
+
+        _screen.colorPalette().palette[*index] = _screen.defaultColorPalette().palette[*index];
+
+        return ApplyResult::Ok;
+    }
+
+    ApplyResult SETCOLPAL(Sequence const& _seq, Screen& _screen)
+    {
+        bool const ok = queryOrSetColorPalette(
+            _seq.intermediateCharacters(),
+            [&](uint8_t index) {
+                auto const color = _screen.colorPalette().palette.at(index);
+                _screen.reply("\e]4;rgb:{:02x}/{:02x}/{:02x}\\", color.red, color.green, color.blue);
+            },
+            [&](uint8_t index, RGBColor color) {
+                _screen.colorPalette().palette.at(index) = color;
+            }
+        );
+
+        return ok ? ApplyResult::Ok : ApplyResult::Invalid;
     }
 
     int toInt(string_view _value)
@@ -965,7 +1060,7 @@ string Sequence::text() const
 Sequencer::Sequencer(Screen& _screen,
                      Size _maxImageSize,
                      RGBAColor _backgroundColor,
-                     shared_ptr<ColorPalette> _imageColorPalette) :
+                     shared_ptr<SixelColorPalette> _imageColorPalette) :
     screen_{ _screen },
     imageColorPalette_{ std::move(_imageColorPalette) },
     maxImageSize_{ _maxImageSize },
@@ -1163,7 +1258,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             ? RGBAColor{0, 0, 0, 0}
             : backgroundColor_,
         usePrivateColorRegisters_
-            ? make_shared<ColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
+            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
             : imageColorPalette_
     );
 
@@ -1549,6 +1644,8 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             return ApplyResult::Unsupported;
         case SETWINTITLE: screen_.setWindowTitle(_seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
+        case SETCOLPAL: return impl::SETCOLPAL(_seq, screen_);
+        case RCOLPAL: return impl::RCOLPAL(_seq, screen_);
         case SETCWD: return impl::SETCWD(_seq, screen_);
         case HYPERLINK: return impl::HYPERLINK(_seq, screen_);
         case CAPTURE: return impl::CAPTURE(_seq, screen_);
@@ -1573,32 +1670,6 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         default: return ApplyResult::Unsupported;
     }
     return ApplyResult::Ok;
-}
-
-std::optional<RGBColor> Sequencer::parseColor(std::string_view const& _value)
-{
-    try
-    {
-        // "rgb:RRRR/GGGG/BBBB"
-        if (_value.size() == 18 && _value.substr(0, 4) == "rgb:" && _value[8] == '/' && _value[13] == '/')
-        {
-            auto const r = crispy::strntoul(_value.data() + 4, 4, nullptr, 16);
-            auto const g = crispy::strntoul(_value.data() + 9, 4, nullptr, 16);
-            auto const b = crispy::strntoul(_value.data() + 14, 4, nullptr, 16);
-
-            return RGBColor{
-                static_cast<uint8_t>(r & 0xFF),
-                static_cast<uint8_t>(g & 0xFF),
-                static_cast<uint8_t>(b & 0xFF)
-            };
-        }
-        return std::nullopt;
-    }
-    catch (...)
-    {
-        // that will be a formatting error in stoul() then.
-        return std::nullopt;
-    }
 }
 
 std::string to_string(AnsiMode _mode)

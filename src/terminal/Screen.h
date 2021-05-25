@@ -150,7 +150,8 @@ class Screen : public capabilities::StaticDatabase {
            std::optional<int> _maxHistoryLineCount = std::nullopt,
            crispy::Size _maxImageSize = crispy::Size{800, 600},
            int _maxImageColorRegisters = 256,
-           bool _sixelCursorConformance = true
+           bool _sixelCursorConformance = true,
+           ColorPalette _colorPalette = {}
     );
 
     int numericCapability(capabilities::Code _cap) const override;
@@ -306,6 +307,15 @@ class Screen : public capabilities::StaticDatabase {
     void dumpState();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
+
+    void setMaxImageSize(crispy::Size _effective, crispy::Size _limit)
+    {
+        maxImageSize_ = _effective;
+        maxImageSizeLimit_ = _limit;
+    }
+
+    crispy::Size maxImageSize() const noexcept { return maxImageSize_; }
+    crispy::Size maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
 
     std::shared_ptr<Image const> uploadImage(ImageFormat _format, crispy::Size _imageSize, Image::Data&& _pixmap);
 
@@ -555,6 +565,12 @@ class Screen : public capabilities::StaticDatabase {
     int toRelativeLine(int _absoluteLine) const noexcept { return activeGrid_->toRelativeLine(_absoluteLine); }
     Coordinate toRelative(Coordinate _coord) const noexcept { return {activeGrid_->toRelativeLine(_coord.row), _coord.column}; }
 
+    ColorPalette& colorPalette() noexcept { return colorPalette_; }
+    ColorPalette const& colorPalette() const noexcept { return colorPalette_; }
+
+    ColorPalette& defaultColorPalette() noexcept { return defaultColorPalette_; }
+    ColorPalette const& defaultColorPalette() const noexcept { return defaultColorPalette_; }
+
   private:
     void setBuffer(ScreenType _type);
 
@@ -621,8 +637,13 @@ class Screen : public capabilities::StaticDatabase {
     Modes modes_;
     std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 
+    ColorPalette defaultColorPalette_;
+    ColorPalette colorPalette_;
+
     int maxImageColorRegisters_;
-    std::shared_ptr<ColorPalette> imageColorPalette_;
+    crispy::Size maxImageSize_;
+    crispy::Size maxImageSizeLimit_;
+    std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 
     Sequencer sequencer_;

@@ -52,6 +52,16 @@ else()
     set(CONTOUR_CODE_COVERAGE_ENABLED OFF)
 endif()
 
+if(SANITIZE)
+	string(TOLOWER "${SANITIZE}" san)
+	if (san STREQUAL "address")
+        message(STATUS "Enabling ${san} sanitizer.")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
+    else()
+        message(STATUS "No sanitizer enabled.")
+	endif()
+endif()
+
 # ----------------------------------------------------------------------------
 # 3rdparty dependencies
 include(ThirdParties)

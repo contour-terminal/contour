@@ -22,7 +22,7 @@ using namespace terminal;
 
 SixelImageBuilder sixelImageBuilder(Size _size, RGBAColor _defaultColor)
 {
-    return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<ColorPalette>(16, 256));
+    return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
 }
 
 TEST_CASE("SixelParser.ground_000000", "[sixel]")

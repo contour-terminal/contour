@@ -15,6 +15,8 @@
 
 #include <unicode/ucd.h>
 #include <text_shaper/font.h>
+#include <crispy/point.h>
+#include <crispy/size.h>
 #include <crispy/span.h>
 
 #include <cstdint>
@@ -49,21 +51,19 @@ constexpr int pixel_size(bitmap_format _format) noexcept
 struct rasterized_glyph
 {
     glyph_index index;
-    int width;
-    int height;
-    int top;                        // vertical disposition to bitmap's top edge
-    int left;                       // horizontal disposition to bitmap's left edge
+    crispy::Size size;      // Glyph bitmap size in pixels.
+    crispy::Point position; // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, int _width, int _height);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Size _newSize);
 
 struct glyph_position
 {
     glyph_key glyph;
-    int x;
-    int y;
+    crispy::Point offset;
+    crispy::Point advance;
 };
 
 using shape_result = std::vector<glyph_position>;
@@ -108,6 +108,9 @@ class shaper {
                        unicode::Script _script,
                        shape_result& _result) = 0;
 
+    virtual std::optional<glyph_position> shape(font_key _font,
+                                                char32_t _codepoint) = 0;
+
     /**
      * Rasterizes (renders) the glyph using the given render mode.
      *
@@ -130,7 +133,14 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(text::glyph_position const& _gpos, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}+{}+{})", _gpos.glyph.index.value, _gpos.x, _gpos.y);
+            return format_to(
+                ctx.out(),
+                "({}+{}+{}|{}+{})",
+                _gpos.glyph.index.value,
+                _gpos.offset.x,
+                _gpos.offset.y,
+                _gpos.advance.x,
+                _gpos.advance.y);
         }
     };
 
@@ -143,12 +153,10 @@ namespace fmt { // {{{
         {
             return format_to(
                 ctx.out(),
-                "rasterized_glyph({}, {}x{}+{}+{}, {})",
+                "rasterized_glyph({}, {}+{}, {})",
                 _glyph.index.value,
-                _glyph.width,
-                _glyph.height,
-                _glyph.top,
-                _glyph.left,
+                _glyph.size,
+                _glyph.position,
                 _glyph.format
             );
         }

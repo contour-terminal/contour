@@ -81,10 +81,8 @@ optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment con
     // FIXME: remember if insertion failed already, don't repeat then? or how to deal with GPU atlas/GPU exhaustion?
 
     auto handle = atlas_->insert(key,
-                                 _fragment.rasterizedImage().cellSize().width,
-                                 _fragment.rasterizedImage().cellSize().height,
-                                 cellSize_.width,
-                                 cellSize_.height,
+                                 _fragment.rasterizedImage().cellSize(),
+                                 cellSize_,
                                  _fragment.data(),
                                  colored,
                                  metadata);

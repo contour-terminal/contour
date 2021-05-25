@@ -24,6 +24,8 @@
 #include <optional>
 #include <utility>
 
+using crispy::Size;
+
 using std::array;
 using std::get;
 using std::max;
@@ -56,13 +58,13 @@ optional<Decorator> to_decorator(std::string const& _value)
 }
 
 DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
-                                       ColorProfile const& _colorProfile,
+                                       ColorPalette const& _colorPalette,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover) :
     gridMetrics_{ _gridMetrics },
     hyperlinkNormal_{ _hyperlinkNormal },
     hyperlinkHover_{ _hyperlinkHover },
-    colorProfile_{ _colorProfile }
+    colorPalette_{ _colorPalette }
 {
 }
 
@@ -75,11 +77,6 @@ void DecorationRenderer::setRenderTarget(RenderTarget& _renderTarget)
 void DecorationRenderer::clearCache()
 {
     atlas_ = std::make_unique<Atlas>(monochromeAtlasAllocator());
-}
-
-void DecorationRenderer::setColorProfile(ColorProfile const& _colorProfile)
-{
-    colorProfile_ = _colorProfile;
 }
 
 namespace
@@ -114,8 +111,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Underline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -138,8 +135,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DoubleUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -161,16 +158,16 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::CurlyUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
     { // {{{ dotted underline
         auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const diameter = radius * 2;
-        auto const y0 = max(0, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
-        auto const height = y0 + radius;
+        auto const y0 = max(radius, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
+        auto const height = 1 + y0 + radius;
         auto image = atlas::Buffer(width * height, 0);
 
         auto const numberOfCircles = int(ceil(double(width) / double(diameter) / 3.0));
@@ -187,8 +184,8 @@ void DecorationRenderer::rebuild()
                     if (pointVisibleInCircle(x, y, radius))
                     {
                         auto const bitmapX = bitmapStartX + x;
-                        auto const bitmapY = (height - y0 - (y));
-                        image[bitmapY * width + bitmapX] = 0xFF;
+                        auto const bitmapY = (height - 1 - y0 - (y));
+                        image.at(bitmapY * width + bitmapX) = 0xFF;
                     }
                 }
             }
@@ -196,8 +193,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DottedUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -217,8 +214,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DashedUnderline,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -246,8 +243,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Framed,
-            width, cellHeight,
-            width, cellHeight,
+            Size{width, cellHeight},
+            Size{width, cellHeight},
             move(image)
         );
     } // }}}
@@ -262,8 +259,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::Overline,
-            width, cellHeight,
-            width, cellHeight,
+            Size{width, cellHeight},
+            Size{width, cellHeight},
             move(image)
         );
     } // }}}
@@ -278,8 +275,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::CrossedOut,
-            width, height,
-            width, height,
+            Size{width, height},
+            Size{width, height},
             move(image)
         );
     } // }}}
@@ -292,8 +289,8 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
     if (_cell.hyperlink())
     {
         auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                            ? colorProfile_.hyperlinkDecoration.hover
-                            : colorProfile_.hyperlinkDecoration.normal;
+                            ? colorPalette_.hyperlinkDecoration.hover
+                            : colorPalette_.hyperlinkDecoration.normal;
         auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
                             ? hyperlinkHover_
                             : hyperlinkNormal_;
@@ -311,7 +308,7 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
 
         for (auto const& mapping : underlineMappings)
             if (_cell.attributes().styles & mapping.first)
-                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
     }
 
     auto constexpr supplementalMappings = array{
@@ -323,7 +320,7 @@ void DecorationRenderer::renderCell(Coordinate const& _pos,
 
     for (auto const& mapping : supplementalMappings)
         if (_cell.attributes().styles & mapping.first)
-            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorProfile_));
+            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)

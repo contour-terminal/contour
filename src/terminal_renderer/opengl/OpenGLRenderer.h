@@ -29,7 +29,7 @@ namespace terminal::renderer::opengl {
 
 struct ShaderConfig;
 
-class OpenGLRenderer :
+class OpenGLRenderer final :
     public RenderTarget,
     public QOpenGLExtraFunctions
 {
@@ -52,18 +52,18 @@ class OpenGLRenderer :
     atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
     atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
 
-    atlas::CommandListener& textureScheduler() override;
+    atlas::AtlasBackend& textureScheduler() override;
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
 
-    void renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+    void renderRectangle(int _x, int _y, int _width, int _height,
                          float _r, float _g, float _b, float _a) override;
 
     void execute() override;
 
     void clearCache() override;
 
-    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId) override;
+    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) override;
 
   private:
     // private helper methods
@@ -71,40 +71,25 @@ class OpenGLRenderer :
     void initialize();
     void initializeTextureRendering();
     void initializeRectRendering();
-    unsigned maxTextureDepth();
-    unsigned maxTextureSize();
-    unsigned maxTextureUnits();
+    int maxTextureDepth();
+    int maxTextureSize();
+    int maxTextureUnits();
     crispy::Size renderBufferSize();
 
-    void selectTextureUnit(unsigned _id);
-    void bindTexture2DArray(GLuint _textureId);
+    crispy::Size colorTextureSizeHint();
+    crispy::Size monochromeTextureSizeHint();
 
     void executeRenderTextures();
     void createAtlas(atlas::CreateAtlas const& _param);
     void uploadTexture(atlas::UploadTexture const& _param);
     void renderTexture(atlas::RenderTexture const& _param);
-    void destroyAtlas(atlas::DestroyAtlas const& _param);
+    void destroyAtlas(atlas::AtlasID _atlasID);
 
-    void executeRenderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
+    void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
-    // private helper types
-    //
-    struct AtlasKey {
-        std::reference_wrapper<std::string const> name;
-        unsigned atlasTexture;
-
-        bool operator<(AtlasKey const& _rhs) const noexcept
-        {
-            if (name.get() < _rhs.name.get())
-                return true;
-            else if (name.get() == _rhs.name.get())
-                return atlasTexture < _rhs.atlasTexture;
-            else
-                return false;
-        }
-    };
-
-    void clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format);
+    void bindTexture(GLuint _textureId);
+    GLuint textureAtlasID(atlas::AtlasID _atlasID) const noexcept;
+    void clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -124,8 +109,7 @@ class OpenGLRenderer :
     GLuint vao_{};              // Vertex Array Object, covering all buffer objects
     GLuint vbo_{};              // Buffer containing the vertex coordinates
     //TODO: GLuint ebo_{};
-    std::map<AtlasKey, GLuint> atlasMap_; // maps atlas IDs to texture IDs
-    GLuint currentActiveTexture_ = std::numeric_limits<GLuint>::max();
+    std::unordered_map<atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
     atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
@@ -144,3 +128,4 @@ class OpenGLRenderer :
 };
 
 } // end namespace
+

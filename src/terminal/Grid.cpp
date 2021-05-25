@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <tuple>
 #include <utility>
 
@@ -107,23 +108,20 @@ Line::Line(int _numCols, std::string_view const& _s, Flags _flags) :
 
 string Line::toUtf8() const
 {
-    string s;
-    s.resize(size() * 4);
-    auto t = s.data();
+    std::stringstream sstr;
     for (Cell const& cell : crispy::range(begin(), next(begin(), size())))
     {
         if (cell.codepointCount() == 0)
         {
-            *t++ = ' '; // NB: empty cells are represented as space.
+            sstr << ' ';
         }
         else
         {
             for (char32_t codepoint : cell.codepoints())
-                t = unicode::encoder<char>{}(codepoint, t);
+                sstr << unicode::convert_to<char>(codepoint);
         }
     }
-    s.resize(std::distance(s.data(), t));
-    return s;
+    return sstr.str();
 }
 
 string Line::toUtf8Trimmed() const

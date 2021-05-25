@@ -44,7 +44,6 @@ class ScreenEvents {
     virtual ~ScreenEvents() = default;
 
     virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
-    virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
     virtual void bell() {}
     virtual void bufferChanged(ScreenType) {}
     virtual void scrollbackBufferCleared() {}
@@ -55,13 +54,11 @@ class ScreenEvents {
     virtual void dumpState() {}
     virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
     virtual void reply(std::string_view const& /*_response*/) {}
-    virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
     virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
     virtual void setApplicationkeypadMode(bool /*_enabled*/) {}
     virtual void setBracketedPaste(bool /*_enabled*/) {}
     virtual void setCursorStyle(CursorDisplay, CursorShape) {}
     virtual void setCursorVisibility(bool /*_visible*/) {}
-    virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
     virtual void setGenerateFocusEvents(bool /*_enabled*/) {}
     virtual void setMouseProtocol(MouseProtocol, bool) {}
     virtual void setMouseTransport(MouseTransport) {}

@@ -29,6 +29,7 @@ using std::chrono::steady_clock;
 using std::make_unique;
 using std::move;
 using std::optional;
+using std::reference_wrapper;
 using std::tuple;
 using std::unique_ptr;
 
@@ -71,37 +72,33 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     return output;
 }
 
-Renderer::Renderer(Size const& _screenSize,
-                   int _logicalDpiX,
-                   int _logicalDpiY,
+Renderer::Renderer(Size _screenSize,
+                   crispy::Point _logicalDpi,
                    FontDescriptions const& _fontDescriptions,
-                   terminal::ColorProfile _colorProfile,
+                   terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
-                   Decorator _hyperlinkHover,
-                   RenderTarget* _renderTarget) :
-    textShaper_{ make_unique<text::open_shaper>(text::vec2{_logicalDpiX, _logicalDpiY}) },
+                   Decorator _hyperlinkHover) :
+    textShaper_{ make_unique<text::open_shaper>(_logicalDpi) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
-    colorProfile_{ _colorProfile },
+    colorPalette_{ _colorPalette },
     backgroundOpacity_{ _backgroundOpacity },
-    renderTarget_{ _renderTarget },
-    backgroundRenderer_{ gridMetrics_, _colorProfile.defaultBackground },
+    backgroundRenderer_{ gridMetrics_, _colorPalette.defaultBackground },
     imageRenderer_{ cellSize() },
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
-    decorationRenderer_{ gridMetrics_, _colorProfile, _hyperlinkNormal, _hyperlinkHover },
-    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorProfile.cursor }
-     // TODO: cursor shouldn't be hard-coded; actual value be passed via render(terminal, now);
+    decorationRenderer_{ gridMetrics_, _colorPalette, _hyperlinkNormal, _hyperlinkHover },
+    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorPalette.cursor }
 {
 }
 
 void Renderer::setRenderTarget(RenderTarget& _renderTarget)
 {
     renderTarget_ = &_renderTarget;
+    Renderable::setRenderTarget(_renderTarget);
 
-    // TODO: each Renderable needs an overload of setRenderTarget to (re-)create atlas's.
-    for (auto& renderable: renderables())
+    for (reference_wrapper<Renderable>& renderable: renderables())
         renderable.get().setRenderTarget(_renderTarget);
 }
 
@@ -125,7 +122,7 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
-    renderTarget_->clearCache();
+    renderTarget().clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
     // either that, or only the render target is allowed to clear the actual atlas caches.
@@ -161,20 +158,12 @@ void Renderer::updateFontMetrics()
 
 void Renderer::setRenderSize(Size _size)
 {
-    renderTarget_->setRenderSize(_size);
+    renderTarget().setRenderSize(_size);
 }
 
 void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
 {
     backgroundOpacity_ = _opacity;
-}
-
-void Renderer::setColorProfile(terminal::ColorProfile const& _colors)
-{
-    colorProfile_ = _colors;
-    backgroundRenderer_.setDefaultColor(_colors.defaultBackground);
-    decorationRenderer_.setColorProfile(_colors);
-    cursorRenderer_.setColor(RGBAColor(colorProfile_.cursor));
 }
 
 uint64_t Renderer::render(Terminal& _terminal,
@@ -190,11 +179,9 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     backgroundRenderer_.renderPendingCells();
     backgroundRenderer_.finish();
-
-    textRenderer_.flushPendingSegments();
     textRenderer_.finish();
 
-    renderTarget_->execute();
+    renderTarget().execute();
 
     return changes;
 }
@@ -273,20 +260,20 @@ void Renderer::renderCursor(Terminal const& _terminal)
     }
 }
 
-tuple<RGBColor, RGBColor> makeColors(ColorProfile const& _colorProfile, Cell const& _cell, bool _reverseVideo, bool _selected)
+tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = _cell.attributes().makeColors(_colorProfile, _reverseVideo);
+    auto const [fg, bg] = _cell.attributes().makeColors(_colorPalette, _reverseVideo);
     if (!_selected)
         return tuple{fg, bg};
 
-    auto const a = _colorProfile.selectionForeground.value_or(bg);
-    auto const b = _colorProfile.selectionBackground.value_or(fg);
+    auto const a = _colorPalette.selectionForeground.value_or(bg);
+    auto const b = _colorPalette.selectionBackground.value_or(fg);
     return tuple{a, b};
 }
 
 void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = makeColors(colorProfile_, _cell, _reverseVideo, _selected);
+    auto const [fg, bg] = makeColors(colorPalette_, _cell, _reverseVideo, _selected);
 
     backgroundRenderer_.renderCell(_pos, bg);
     decorationRenderer_.renderCell(_pos, _cell);

@@ -32,6 +32,7 @@ using unicode::out;
 
 using std::array;
 using std::get;
+using std::make_unique;
 using std::max;
 using std::move;
 using std::nullopt;
@@ -40,6 +41,8 @@ using std::pair;
 using std::u32string;
 using std::u32string_view;
 using std::vector;
+
+using namespace std::placeholders;
 
 namespace terminal::renderer {
 
@@ -54,7 +57,14 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     gridMetrics_{ _gridMetrics },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{ _textShaper }
+    textShaper_{ _textShaper },
+    textRenderingEngine_(make_unique<StandardTextShaper>(
+        gridMetrics_,
+        textShaper_,
+        fontDescriptions_,
+        fonts_,
+        std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+    ))
 {
 }
 
@@ -66,16 +76,11 @@ void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
 
 void TextRenderer::clearCache()
 {
-    monochromeAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
-    colorAtlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
-    lcdAtlas_ = std::make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
+    monochromeAtlas_ = make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
+    colorAtlas_ = make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
+    lcdAtlas_ = make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
 
-    cacheKeyStorage_.clear();
-    cache_.clear();
-
-#if !defined(NDEBUG)
-    cacheHits_.clear();
-#endif
+    textRenderingEngine_->clearCache();
 }
 
 void TextRenderer::updateFontMetrics()
@@ -83,32 +88,355 @@ void TextRenderer::updateFontMetrics()
     clearCache();
 }
 
-void TextRenderer::reset(Coordinate const& _pos, CharacterStyleMask const& _styles, RGBColor const& _color)
-{
-    row_ = _pos.row;
-    startColumn_ = _pos.column;
-    characterStyleMask_ = _styles;
-    color_ = _color;
-    codepoints_.clear();
-    clusters_.clear();
-    clusterOffset_ = 0;
-}
-
-void TextRenderer::extend(Cell const& _cell, [[maybe_unused]] int _column)
-{
-    for (size_t const i: times(_cell.codepointCount()))
-    {
-        codepoints_.emplace_back(_cell.codepoint(i));
-        clusters_.emplace_back(clusterOffset_);
-    }
-    ++clusterOffset_;
-}
-
 void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color)
 {
-    constexpr char32_t SP = 0x20;
+    if (row_ != _pos.row)
+    {
+        row_ = _pos.row;
+        textRenderingEngine_->endLine();
+    }
 
-    bool const emptyCell = _cell.empty() || _cell.codepoint(0) == SP;
+    auto const style = [&](auto mask) constexpr -> TextStyle {
+        if ((mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+                == (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+            return TextStyle::BoldItalic;
+        if (mask & CharacterStyleMask::Mask::Bold)
+            return TextStyle::Bold;
+        if (mask & CharacterStyleMask::Mask::Italic)
+            return TextStyle::Italic;
+        return TextStyle::Regular;
+    }(_cell.attributes().styles);
+
+    auto const codepoints = crispy::span(_cell.codepoints().data(), _cell.codepoints().size());
+
+    textRenderingEngine_->appendCell(codepoints, style, _color);
+}
+
+void TextRenderer::finish()
+{
+    textRenderingEngine_->endFrame();
+    row_ = 1;
+}
+
+void TextRenderer::renderRun(crispy::Point _pos,
+                             crispy::span<text::glyph_position const> _glyphPositions,
+                             RGBColor _color)
+{
+    crispy::Point pen = _pos;
+    auto const advanceX = gridMetrics_.cellSize.width;
+
+    for (text::glyph_position const& gpos: _glyphPositions)
+    {
+        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph); ti.has_value())
+        {
+            renderTexture(pen,
+                          _color,
+                          get<0>(*ti).get(), // TextureInfo
+                          get<1>(*ti).get(), // Metadata
+                          gpos);
+        }
+
+        if (gpos.advance.x)
+        {
+            // Only advance horizontally, as we're (guess what) a terminal. :-)
+            // Only advance in fixed-width steps.
+            // Only advance iff there harfbuzz told us to.
+            pen.x += advanceX;
+        }
+    }
+}
+
+TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
+{
+    if (textShaper_.has_color(_font))
+        return *colorAtlas_;
+
+    switch (fontDescriptions_.renderMode)
+    {
+        case text::render_mode::lcd:
+            // fallthrough; return lcdAtlas_;
+            return *lcdAtlas_;
+        case text::render_mode::color:
+            return *colorAtlas_;
+        case text::render_mode::light:
+        case text::render_mode::gray:
+        case text::render_mode::bitmap:
+            return *monochromeAtlas_;
+    }
+
+    return *monochromeAtlas_;
+}
+
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
+{
+    if (auto i = glyphToTextureMapping_.find(_id); i != glyphToTextureMapping_.end())
+        if (TextureAtlas* ta = atlasForBitmapFormat(i->second); ta != nullptr)
+            if (optional<DataRef> const dataRef = ta->get(_id); dataRef.has_value())
+                return dataRef;
+
+    bool const colored = textShaper_.has_color(_id.font);
+
+    auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
+    if (!theGlyphOpt.has_value())
+        return nullopt;
+
+    text::rasterized_glyph& glyph = theGlyphOpt.value();
+    auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
+    // FIXME: this `2` is a hack of my bad knowledge. FIXME.
+    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
+
+    debuglog(TextRendererTag).write("Glyph metrics: {}", glyph);
+    // auto const xMax = glyph.left + glyph.width;
+    // if (xMax > gridMetrics_.cellSize.width * numCells)
+    // {
+    //     debuglog(TextRendererTag).write("Glyph width {}+{}={} exceeds cell width {}.",
+    //                                     glyph.left,
+    //                                     glyph.width,
+    //                                     xMax,
+    //                                     gridMetrics_.cellSize.width * numCells);
+    // }
+
+    // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
+    if (glyph.format == text::bitmap_format::rgba)
+    {
+        assert(colored && "RGBA should be only used on colored (i.e. emoji) fonts.");
+        assert(numCells >= 2);
+        auto const cellSize = gridMetrics_.cellSize;
+
+        if (numCells > 1 && // XXX for now, only if emoji glyph
+                (glyph.size.width > cellSize.width * numCells
+              || glyph.size.height > cellSize.height))
+        {
+            auto const newSize = crispy::Size{cellSize.width * numCells, cellSize.height};
+            auto [scaled, factor] = text::scale(glyph, newSize);
+
+            glyph.size = scaled.size; // TODO: there shall be only one with'x'height.
+
+            // center the image in the middle of the cell
+            glyph.position.y = gridMetrics_.cellSize.height - gridMetrics_.baseline;
+            glyph.position.x = (gridMetrics_.cellSize.width * numCells - glyph.size.width) / 2;
+
+            // (old way)
+            // glyph.metrics.bearing.x /= factor;
+            // glyph.metrics.bearing.y /= factor;
+
+            glyph.bitmap = move(scaled.bitmap);
+
+            // XXX currently commented out because it's not used.
+            // TODO: But it should be used for cutting the image off the right edge with unnecessary
+            // transparent pixels.
+            //
+            // int const rightEdge = [&]() {
+            //     auto rightEdge = std::numeric_limits<int>::max();
+            //     for (int x = glyph.bitmap.width - 1; x >= 0; --x) {
+            //         for (int y = 0; y < glyph.bitmap.height; ++y)
+            //         {
+            //             auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
+            //             if (pixel[3] > 20)
+            //                 rightEdge = x;
+            //         }
+            //         if (rightEdge != std::numeric_limits<int>::max())
+            //             break;
+            //     }
+            //     return rightEdge;
+            // }();
+            // if (rightEdge != std::numeric_limits<int>::max())
+            //     debuglog(TextRendererTag).write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
+        }
+    }
+    // }}}
+
+    auto const yMax = gridMetrics_.baseline + glyph.position.y;
+    auto const yMin = yMax - glyph.size.height;
+
+    auto const ratio = !colored
+                     ? 1.0f
+                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.size.width),
+                           float(gridMetrics_.cellSize.height) / float(glyph.size.height));
+
+    auto const yOverflow = gridMetrics_.cellSize.height - yMax;
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog(TextRendererTag).write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+                                        _id.index,
+                                        colored ? "emoji" : "text",
+                                        ratio,
+                                        yOverflow < 0 ? yOverflow : 0,
+                                        yMin < 0 ? yMin : 0,
+                                        glyph);
+
+    auto && [userFormat, targetAtlas] = [this](bool _colorFont, text::bitmap_format _glyphFormat) -> pair<int, TextureAtlas&> { // {{{
+        // this format ID is used by the fragment shader to select the right texture atlas
+        if (_colorFont)
+            return {1, *colorAtlas_};
+        switch (_glyphFormat)
+        {
+            case text::bitmap_format::rgba:
+                return {1, *colorAtlas_};
+            case text::bitmap_format::rgb:
+                return {2, *lcdAtlas_};
+            case text::bitmap_format::alpha_mask:
+                return {0, *monochromeAtlas_};
+        }
+        return {0, *monochromeAtlas_};
+    }(colored, glyph.format); // }}}
+
+    glyphToTextureMapping_[_id] = glyph.format;
+
+    if (yOverflow < 0)
+    {
+        debuglog(TextRendererTag).write("Cropping {} overflowing bitmap rows.", -yOverflow);
+        glyph.size.height += yOverflow;
+        glyph.position.y += yOverflow;
+    }
+
+    if (yMin < 0)
+    {
+        auto const rowCount = -yMin;
+        auto const pixelCount = rowCount * glyph.size.width * text::pixel_size(glyph.format);
+        debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
+        glyph.size.height += yMin;
+        auto& data = glyph.bitmap;
+        assert(pixelCount >= 0);
+        data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
+    }
+
+    GlyphMetrics metrics{};
+    metrics.bitmapSize = glyph.size;
+    metrics.bearing = glyph.position;
+
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+                                        targetAtlas.allocator().name(),
+                                        _id.index,
+                                        colored ? "emoji" : "text",
+                                        ratio,
+                                        yOverflow < 0 ? yOverflow : 0,
+                                        yMin < 0 ? yMin : 0,
+                                        glyph);
+
+    return targetAtlas.insert(_id,
+                              glyph.size,
+                              glyph.size * ratio,
+                              move(glyph.bitmap),
+                              userFormat,
+                              metrics);
+}
+
+void TextRenderer::renderTexture(crispy::Point const& _pos,
+                                 RGBAColor const& _color,
+                                 atlas::TextureInfo const& _textureInfo,
+                                 GlyphMetrics const& _glyphMetrics,
+                                 text::glyph_position const& _glyphPos)
+{
+    auto const colored = textShaper_.has_color(_glyphPos.glyph.font);
+
+    if (colored)
+    {
+        auto const x = _pos.x
+                     + _glyphMetrics.bearing.x
+                     + _glyphPos.offset.x
+                     ;
+
+        auto const y = _pos.y;
+
+        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
+    }
+    else
+    {
+        auto const x = _pos.x
+                     + _glyphMetrics.bearing.x
+                     + _glyphPos.offset.x
+                     ;
+
+        // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
+        auto const y = _pos.y                           // bottom left
+                     + _glyphPos.offset.y               // -> harfbuzz adjustment
+                     + gridMetrics_.baseline            // -> baseline
+                     + _glyphMetrics.bearing.y          // -> bitmap top
+                     - _glyphMetrics.bitmapSize.height  // -> bitmap height
+                     ;
+
+        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
+    }
+
+#if 0
+    if (crispy::logging_sink::for_debug().enabled())
+        debuglog(TextRendererTag).write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
+                                        x, y,
+                                        _pos.x(), _pos.y(),
+                                        _textureInfo.width, _textureInfo.height,
+                                        _glyphPos.offset.x, _glyphPos.offset.y,
+                                        textShaper_.metrics(_glyphPos.glyph.font).baseline(),
+                                        _glyph.descender);
+#endif
+}
+
+void TextRenderer::renderTexture(crispy::Point const& _pos,
+                                 RGBAColor const& _color,
+                                 atlas::TextureInfo const& _textureInfo)
+{
+    // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
+    auto const x = _pos.x;
+    auto const y = _pos.y;
+    auto const z = 0;
+    auto const color = array{
+        float(_color.red()) / 255.0f,
+        float(_color.green()) / 255.0f,
+        float(_color.blue()) / 255.0f,
+        float(_color.alpha()) / 255.0f,
+    };
+    textureScheduler().renderTexture({_textureInfo, x, y, z, color});
+}
+
+void TextRenderer::debugCache(std::ostream& _textOutput) const
+{
+    std::map<u32string, CacheKey> orderedKeys;
+
+    _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
+    for (auto && [word, key] : orderedKeys)
+    {
+        auto const vword = u32string_view(word);
+        _textOutput << fmt::format("  {}\n", unicode::convert_to<char>(vword));
+    }
+}
+
+// {{{ StandardTextShaper
+StandardTextShaper::StandardTextShaper(GridMetrics const& _gridMetrics,
+                                       text::shaper& _textShaper,
+                                       FontDescriptions const& _fontDescriptions,
+                                       FontKeys const& _fonts,
+                                       RenderGlyphs _renderGlyphs):
+    gridMetrics_{ _gridMetrics },
+    fontDescriptions_{ _fontDescriptions },
+    fonts_{ _fonts },
+    textShaper_{ _textShaper },
+    renderGlyphs_{ std::move(_renderGlyphs) }
+{
+}
+
+void StandardTextShaper::clearCache()
+{
+    cacheKeyStorage_.clear();
+    cache_.clear();
+}
+
+void StandardTextShaper::reset(Coordinate _pos, TextStyle _style, RGBColor _color)
+{
+    currentLine_ = _pos.row;
+    startColumn_ = _pos.column;
+    style_ = _style;
+    color_ = _color;
+    clusterOffset_ = 0;
+    codepoints_.clear();
+    clusters_.clear();
+}
+
+void StandardTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
+                                    TextStyle _style,
+                                    RGBColor _color)
+{
+    constexpr char32_t SP = 0x20;
+    bool const emptyCell = _codepoints.empty() || _codepoints.front() == SP;
 
     switch (state_)
     {
@@ -116,25 +444,16 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
             if (!emptyCell)
             {
                 state_ = State::Filling;
-                reset(_pos, _cell.attributes().styles, _color);
-                extend(_cell, _pos.column);
+                reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
+                extend(_codepoints);
             }
             break;
         case State::Filling:
         {
-            //if (!_cell.empty() && row_ == _pos.row && attributes_ == _cell.attributes() && _cell.codepoint(0) != SP)
-            bool const sameLine = _pos.row == row_;
-            bool const sameSGR = _cell.attributes().styles == characterStyleMask_ && _color == color_;
+            bool const sameFont = _style == style_ && _color == color_;
 
-            // Do not perform multi-column text shaping when under rendering pressure.
-            // This usually only happens in bandwidth heavy commands (such as cat), where
-            // ligature rendering isn't that important anyways?
-            // Performing multi-column text shaping under pressure would cause the cache to be
-            // filled up needlessly with half printed words. We mitigate that by shaping cell-wise
-            // in such cases.
-
-            if (!pressure_ && !emptyCell && sameLine && sameSGR)
-                extend(_cell, _pos.column);
+            if (!emptyCell && sameFont)
+                extend(_codepoints);
             else
             {
                 flushPendingSegments();
@@ -142,49 +461,65 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
                     state_ = State::Empty;
                 else // i.o.w.: cell attributes OR row number changed
                 {
-                    reset(_pos, _cell.attributes().styles, _color);
-                    extend(_cell, _pos.column);
+                    reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
+                    extend(_codepoints);
                 }
             }
             break;
         }
     }
+    clusterOffset_++;
 }
 
-void TextRenderer::flushPendingSegments()
+void StandardTextShaper::extend(crispy::span<char32_t const> _codepoints)
 {
-    if (codepoints_.empty())
-        return;
-
-    render(
-        gridMetrics_.map(startColumn_, row_),
-        cachedGlyphPositions(),
-        color_
-    );
+    for (char32_t const codepoint: _codepoints)
+    {
+        codepoints_.emplace_back(codepoint);
+        clusters_.emplace_back(clusterOffset_);
+    }
 }
 
-text::shape_result const& TextRenderer::cachedGlyphPositions()
+void StandardTextShaper::endLine()
+{
+    flushPendingSegments();
+    reset(Coordinate{currentLine_ + 1, 1}, style_, color_);
+}
+
+void StandardTextShaper::endFrame()
+{
+    if (!codepoints_.empty())
+        // Last line wasn't finished via endLine(), so flush now.
+        flushPendingSegments();
+
+    auto constexpr TopLeft = Coordinate{1, 1};
+    auto constexpr DefaultColor = RGBColor{};
+
+    reset(TopLeft, TextStyle::Invalid, DefaultColor);
+    state_ = State::Empty;
+}
+
+void StandardTextShaper::flushPendingSegments()
+{
+    text::shape_result const& glyphPositions = cachedGlyphPositions();
+    crispy::Point const point = gridMetrics_.map(Coordinate{currentLine_, startColumn_});
+
+    renderGlyphs_(point, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+}
+
+text::shape_result const& StandardTextShaper::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    if (auto const cached = cache_.find(CacheKey{codepoints, characterStyleMask_}); cached != cache_.end())
-    {
-#if !defined(NDEBUG)
-        cacheHits_[cached->first]++;
-#endif
+    if (auto const cached = cache_.find(TextCacheKey{codepoints, style_}); cached != cache_.end())
         return cached->second;
-    }
 
     cacheKeyStorage_.emplace_back(u32string{codepoints});
-    auto const cacheKeyFromStorage = CacheKey{ cacheKeyStorage_.back(), characterStyleMask_ };
-
-#if !defined(NDEBUG)
-    cacheHits_[cacheKeyFromStorage] = 0;
-#endif
+    auto const cacheKeyFromStorage = TextCacheKey{ cacheKeyStorage_.back(), style_ };
 
     return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
-text::shape_result TextRenderer::requestGlyphPositions()
+text::shape_result StandardTextShaper::requestGlyphPositions()
 {
     text::shape_result glyphPositions;
     unicode::run_segmenter::range run;
@@ -195,36 +530,26 @@ text::shape_result TextRenderer::requestGlyphPositions()
     return glyphPositions;
 }
 
-text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
+text::shape_result StandardTextShaper::shapeRun(unicode::run_segmenter::range const& _run)
 {
-    if ((characterStyleMask_ & CharacterStyleMask::Hidden))
-        return {};
-
-    // auto const weight = characterStyleMask_ & CharacterStyleMask::Bold
-    //     ? text::font_weight::bold
-    //     : text::font_weight::normal;
-    //
-    // auto const slant = characterStyleMask_ & CharacterStyleMask::Italic
-    //     ? text::font_slant::italic
-    //     : text::font_slant::normal;
-
-    if (characterStyleMask_ & CharacterStyleMask::Blinking)
-    {
-        // TODO: update textshaper's shader to blink (requires current clock knowledge)
-    }
-
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
-    auto font = [&]() -> text::font_key {
+    auto const font = [&]() -> text::font_key {
         if (isEmojiPresentation)
             return fonts_.emoji;
-        if (characterStyleMask_ & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
-            return fonts_.boldItalic;
-        if (characterStyleMask_ & CharacterStyleMask::Mask::Bold)
-            return fonts_.bold;
-        if (characterStyleMask_ & CharacterStyleMask::Mask::Italic)
-            return fonts_.italic;
-
+        switch (style_)
+        {
+            case TextStyle::Invalid:
+                break;
+            case TextStyle::Regular:
+                return fonts_.regular;
+            case TextStyle::Bold:
+                return fonts_.bold;
+            case TextStyle::Italic:
+                return fonts_.italic;
+            case TextStyle::BoldItalic:
+                return fonts_.boldItalic;
+        }
         return fonts_.regular;
     }();
 
@@ -272,293 +597,6 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
 
     return gpos;
 }
-
-void TextRenderer::finish()
-{
-    state_ = State::Empty;
-    codepoints_.clear();
-}
-
-void TextRenderer::render(crispy::Point _pos,
-                          text::shape_result const& _glyphPositions,
-                          RGBAColor const& _color)
-{
-    crispy::Point pen = _pos;
-    auto const advanceX = gridMetrics_.cellSize.width;
-
-    for (text::glyph_position const& gpos : _glyphPositions)
-    {
-        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph); ti.has_value())
-        {
-            renderTexture(pen,
-                          _color,
-                          get<0>(*ti).get(), // TextureInfo
-                          get<1>(*ti).get(), // Metadata
-                          gpos);
-        }
-        pen.x = pen.x + advanceX; // only advance horizontally, as we're (guess what) a terminal. :-)
-    }
-}
-
-TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
-{
-    if (textShaper_.has_color(_font))
-        return *colorAtlas_;
-
-    switch (fontDescriptions_.renderMode)
-    {
-        case text::render_mode::lcd:
-            // fallthrough; return lcdAtlas_;
-            return *lcdAtlas_;
-        case text::render_mode::color:
-            return *colorAtlas_;
-        case text::render_mode::light:
-        case text::render_mode::gray:
-        case text::render_mode::bitmap:
-            return *monochromeAtlas_;
-    }
-
-    return *monochromeAtlas_;
-}
-
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
-{
-    auto font = _id.font;
-    auto const colored = textShaper_.has_color(font);
-    TextureAtlas& lookupAtlas = atlasForFont(font);
-    // TODO: what if lookupAtlas != targetAtlas. the lookup should be decoupled
-
-    if (optional<DataRef> const dataRef = lookupAtlas.get(_id); dataRef.has_value())
-        return dataRef;
-
-    auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
-    if (!theGlyphOpt.has_value())
-        return nullopt;
-
-    text::rasterized_glyph& glyph = theGlyphOpt.value();
-    auto const numCells = colored ? 2 : 1; // is this the only case - with colored := Emoji presentation?
-    // FIXME: this `2` is a hack of my bad knowledge. FIXME.
-    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
-
-    debuglog(TextRendererTag).write("Glyph metrics: {}", glyph);
-    // auto const xMax = glyph.left + glyph.width;
-    // if (xMax > gridMetrics_.cellSize.width * numCells)
-    // {
-    //     debuglog(TextRendererTag).write("Glyph width {}+{}={} exceeds cell width {}.",
-    //                                     glyph.left,
-    //                                     glyph.width,
-    //                                     xMax,
-    //                                     gridMetrics_.cellSize.width * numCells);
-    // }
-
-    // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
-    if (glyph.format == text::bitmap_format::rgba)
-    {
-        assert(colored && "RGBA should be only used on colored (i.e. emoji) fonts.");
-        assert(numCells >= 2);
-        auto const cellSize = gridMetrics_.cellSize;
-
-        if (numCells > 1 && // XXX for now, only if emoji glyph
-                (glyph.width > cellSize.width * numCells
-              || glyph.height > cellSize.height))
-        {
-            auto [scaled, factor] = text::scale(glyph, cellSize.width * numCells, cellSize.height);
-
-            glyph.width = scaled.width;
-            glyph.height = scaled.height; // TODO: there shall be only one with'x'height.
-
-            // center the image in the middle of the cell
-            glyph.top = gridMetrics_.cellSize.height - gridMetrics_.baseline;
-            glyph.left = (gridMetrics_.cellSize.width * numCells - glyph.width) / 2;
-
-            // (old way)
-            // glyph.metrics.bearing.x /= factor;
-            // glyph.metrics.bearing.y /= factor;
-
-            glyph.bitmap = move(scaled.bitmap);
-
-            // XXX currently commented out because it's not used.
-            // TODO: But it should be used for cutting the image off the right edge with unnecessary
-            // transparent pixels.
-            //
-            // int const rightEdge = [&]() {
-            //     auto rightEdge = std::numeric_limits<int>::max();
-            //     for (int x = glyph.bitmap.width - 1; x >= 0; --x) {
-            //         for (int y = 0; y < glyph.bitmap.height; ++y)
-            //         {
-            //             auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
-            //             if (pixel[3] > 20)
-            //                 rightEdge = x;
-            //         }
-            //         if (rightEdge != std::numeric_limits<int>::max())
-            //             break;
-            //     }
-            //     return rightEdge;
-            // }();
-            // if (rightEdge != std::numeric_limits<int>::max())
-            //     debuglog(TextRendererTag).write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
-        }
-    }
-    // }}}
-
-    auto const yMax = gridMetrics_.baseline + glyph.top;
-    auto const yMin = yMax - glyph.height;
-
-    auto const ratio = !colored
-                     ? 1.0f
-                     : max(float(gridMetrics_.cellSize.width * numCells) / float(glyph.width),
-                           float(gridMetrics_.cellSize.height) / float(glyph.height));
-
-    auto const yOverflow = gridMetrics_.cellSize.height - yMax;
-    if (crispy::logging_sink::for_debug().enabled())
-        debuglog(TextRendererTag).write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
-                                        _id.index,
-                                        colored ? "emoji" : "text",
-                                        ratio,
-                                        yOverflow < 0 ? yOverflow : 0,
-                                        yMin < 0 ? yMin : 0,
-                                        glyph);
-
-    auto && [userFormat, targetAtlas] = [&]() -> pair<int, TextureAtlas&> { // {{{
-        // this format ID is used by the fragment shader to select the right texture atlas
-        if (colored)
-            return {1, *colorAtlas_};
-        switch (glyph.format)
-        {
-            case text::bitmap_format::rgba:
-                return {1, *colorAtlas_};
-            case text::bitmap_format::rgb:
-                return {2, *lcdAtlas_};
-            case text::bitmap_format::alpha_mask:
-                return {0, *monochromeAtlas_};
-        }
-        return {0, *monochromeAtlas_};
-    }(); // }}}
-
-    if (yOverflow < 0)
-    {
-        debuglog(TextRendererTag).write("Cropping {} overflowing bitmap rows.", -yOverflow);
-        glyph.height += yOverflow;
-        glyph.top += yOverflow;
-    }
-
-    if (yMin < 0)
-    {
-        auto const rowCount = -yMin;
-        auto const pixelCount = rowCount * glyph.width * text::pixel_size(glyph.format);
-        debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.height += yMin;
-        auto& data = glyph.bitmap;
-        data.erase(begin(data), next(begin(data), pixelCount));
-    }
-
-    assert(&lookupAtlas == &targetAtlas);
-
-    GlyphMetrics metrics{};
-    metrics.bitmapSize.x = glyph.width;
-    metrics.bitmapSize.y = glyph.height;
-    metrics.bearing.x = glyph.left;
-    metrics.bearing.y = glyph.top;
-
-    return targetAtlas.insert(_id,
-                              glyph.width,
-                              glyph.height,
-                              unsigned(ceilf(float(glyph.width) * ratio)),
-                              unsigned(ceilf(float(glyph.height) * ratio)),
-                              move(glyph.bitmap),
-                              userFormat,
-                              metrics);
-}
-
-void TextRenderer::renderTexture(crispy::Point const& _pos,
-                                 RGBAColor const& _color,
-                                 atlas::TextureInfo const& _textureInfo,
-                                 GlyphMetrics const& _glyphMetrics,
-                                 text::glyph_position const& _glyphPos)
-{
-    auto const colored = textShaper_.has_color(_glyphPos.glyph.font);
-
-    if (colored)
-    {
-        auto const x = _pos.x
-                     + _glyphMetrics.bearing.x
-                     + _glyphPos.x
-                     ;
-
-        auto const y = _pos.y;
-
-        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
-    }
-    else
-    {
-        auto const x = _pos.x
-                     + _glyphMetrics.bearing.x
-                     + _glyphPos.x
-                     ;
-
-        // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
-        auto const y = _pos.y                       // bottom left
-                     + _glyphPos.y                  // -> harfbuzz adjustment
-                     + gridMetrics_.baseline        // -> baseline
-                     + _glyphMetrics.bearing.y      // -> bitmap top
-                     - _glyphMetrics.bitmapSize.y   // -> bitmap height
-                     ;
-
-        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
-    }
-
-#if 0
-    if (crispy::logging_sink::for_debug().enabled())
-        debuglog(TextRendererTag).write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
-                                        x, y,
-                                        _pos.x(), _pos.y(),
-                                        _textureInfo.width, _textureInfo.height,
-                                        _glyphPos.x, _glyphPos.y,
-                                        textShaper_.metrics(_glyphPos.glyph.font).baseline(),
-                                        _glyph.descender);
-#endif
-}
-
-void TextRenderer::renderTexture(crispy::Point const& _pos,
-                                 RGBAColor const& _color,
-                                 atlas::TextureInfo const& _textureInfo)
-{
-    // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-    auto const x = _pos.x;
-    auto const y = _pos.y;
-    auto const z = 0;
-    auto const color = array{
-        float(_color.red()) / 255.0f,
-        float(_color.green()) / 255.0f,
-        float(_color.blue()) / 255.0f,
-        float(_color.alpha()) / 255.0f,
-    };
-    textureScheduler().renderTexture({_textureInfo, x, y, z, color});
-}
-
-void TextRenderer::debugCache(std::ostream& _textOutput) const
-{
-    std::map<u32string, CacheKey> orderedKeys;
-
-    for (auto && [key, val] : cache_)
-    {
-        (void) val;
-        orderedKeys[u32string(key.text)] = key;
-    }
-
-    _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
-    for (auto && [word, key] : orderedKeys)
-    {
-        auto const vword = u32string_view(word);
-#if !defined(NDEBUG)
-        auto hits = int64_t{};
-        if (auto i = cacheHits_.find(key); i != cacheHits_.end())
-            hits = i->second;
-        _textOutput << fmt::format("{:>5} : {}\n", hits, unicode::convert_to<char>(vword));
-#else
-        _textOutput << fmt::format("  {}\n", unicode::convert_to<char>(vword));
-#endif
-    }
-}
+// }}}
 
 } // end namespace

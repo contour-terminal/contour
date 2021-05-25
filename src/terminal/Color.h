@@ -143,44 +143,11 @@ constexpr bool operator!=(RGBAColor const& a, RGBAColor const& b) noexcept
 
 using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
 
-struct ColorProfile {
+struct ColorPalette
+{
     using Palette = std::array<RGBColor, 256>;
 
-    RGBColor const& normalColor(size_t _index) const noexcept {
-        assert(_index < 8);
-        return palette.at(_index);
-    }
-
-    RGBColor const& brightColor(size_t _index) const noexcept {
-        assert(_index < 8);
-        return palette.at(_index + 8);
-    }
-
-    RGBColor const& dimColor(size_t _index) const {
-        assert(_index < 8);
-        return palette.at(_index); // TODO
-    }
-
-    RGBColor const& indexedColor(size_t _index) const noexcept {
-        assert(_index < 256);
-        return palette.at(_index);
-    }
-
-    RGBColor defaultForeground = 0xD0D0D0;
-    RGBColor defaultBackground = 0x000000;
-    std::optional<RGBColor> selectionForeground = std::nullopt;
-    std::optional<RGBColor> selectionBackground = std::nullopt;
-	RGBColor cursor = 0x707020;
-
-    RGBColor mouseForeground = 0x800000;
-    RGBColor mouseBackground = 0x808000;
-
-    struct {
-        RGBColor normal = 0x0070F0;
-        RGBColor hover = 0xFF0000;
-    } hyperlinkDecoration;
-
-    Palette palette = []() {
+    Palette palette = []() constexpr {
         Palette colors;
 
         // normal colors
@@ -219,6 +186,40 @@ struct ColorProfile {
 
         return colors;
     }();
+
+    RGBColor const& normalColor(size_t _index) const noexcept {
+        assert(_index < 8);
+        return palette.at(_index);
+    }
+
+    RGBColor const& brightColor(size_t _index) const noexcept {
+        assert(_index < 8);
+        return palette.at(_index + 8);
+    }
+
+    RGBColor const& dimColor(size_t _index) const {
+        assert(_index < 8);
+        return palette.at(_index); // TODO
+    }
+
+    RGBColor const& indexedColor(size_t _index) const noexcept {
+        assert(_index < 256);
+        return palette.at(_index);
+    }
+
+    RGBColor defaultForeground = 0xD0D0D0;
+    RGBColor defaultBackground = 0x000000;
+    std::optional<RGBColor> selectionForeground = std::nullopt;
+    std::optional<RGBColor> selectionBackground = std::nullopt;
+	RGBColor cursor = 0x707020;
+
+    RGBColor mouseForeground = 0x800000;
+    RGBColor mouseBackground = 0x808000;
+
+    struct {
+        RGBColor normal = 0x0070F0;
+        RGBColor hover = 0xFF0000;
+    } hyperlinkDecoration;
 };
 
 enum class ColorTarget {
@@ -241,7 +242,7 @@ constexpr Opacity& operator--(Opacity& _value) noexcept {
     return _value;
 }
 
-RGBColor const& apply(ColorProfile const& _colorProfile, Color const& _color, ColorTarget _target, bool _bright) noexcept;
+RGBColor const& apply(ColorPalette const& _colorPalette, Color const& _color, ColorTarget _target, bool _bright) noexcept;
 
 constexpr bool operator==(Color const& a, Color const& b) noexcept
 {

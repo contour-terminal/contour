@@ -364,14 +364,20 @@ Screen::Screen(Size const& _size,
                optional<int> _maxHistoryLineCount,
                Size _maxImageSize,
                int _maxImageColorRegisters,
-               bool _sixelCursorConformance
+               bool _sixelCursorConformance,
+               ColorPalette _colorPalette
 ) :
     eventListener_{ _eventListener },
     logRaw_{ _logRaw },
     logTrace_{ _logTrace },
     modes_{},
+    savedModes_{},
+    defaultColorPalette_{ _colorPalette },
+    colorPalette_{ _colorPalette },
     maxImageColorRegisters_{ _maxImageColorRegisters },
-    imageColorPalette_(make_shared<ColorPalette>(maxImageColorRegisters_, maxImageColorRegisters_)),
+    maxImageSize_{ _maxImageSize },
+    maxImageSizeLimit_{ _maxImageSize },
+    imageColorPalette_(make_shared<SixelColorPalette>(maxImageColorRegisters_, maxImageColorRegisters_)),
     imagePool_{
         [this](Image const* _image) { eventListener_.discardImage(*_image); },
         1
@@ -545,14 +551,17 @@ void Screen::writeText(char32_t _char)
             currentLine_->setWrapped(true);
     }
 
-    auto const ch =
+    char32_t const ch =
         _char < 127 ? cursor_.charsets.map(static_cast<char>(_char))
                     : _char == 0x7F ? ' ' : _char;
 
+    char32_t const lastChar =
+        consecutiveTextWrite && !lastColumn_->empty()
+            ? lastColumn_->codepoint(lastColumn_->codepointCount() - 1)
+            : char32_t{0};
+
     bool const insertToPrev =
-        consecutiveTextWrite
-        && !lastColumn_->empty()
-        && unicode::grapheme_segmenter::nonbreakable(lastColumn_->codepoint(lastColumn_->codepointCount() - 1), ch);
+        lastChar && unicode::grapheme_segmenter::nonbreakable(lastChar, ch);
 
     if (!insertToPrev)
         writeCharToCurrentAndAdvance(ch);
@@ -747,6 +756,7 @@ void Screen::resetSoft()
     setLeftRightMargin(1, size().width); // DECRLM
 
     currentHyperlink_ = {};
+    colorPalette_ = defaultColorPalette_;
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -781,6 +791,7 @@ void Screen::resetHard()
     };
 
     currentHyperlink_ = {};
+    colorPalette_ = defaultColorPalette_;
 
     eventListener_.hardReset();
 }
@@ -1975,7 +1986,35 @@ void Screen::restoreWindowTitle()
 
 void Screen::requestDynamicColor(DynamicColorName _name)
 {
-    if (auto const color = eventListener_.requestDynamicColor(_name); color.has_value())
+    auto const color = [&]() -> optional<RGBColor>
+    {
+        switch (_name)
+        {
+            case DynamicColorName::DefaultForegroundColor:
+                return colorPalette_.defaultForeground;
+            case DynamicColorName::DefaultBackgroundColor:
+                return colorPalette_.defaultBackground;
+            case DynamicColorName::TextCursorColor:
+                return colorPalette_.cursor;
+            case DynamicColorName::MouseForegroundColor:
+                return colorPalette_.mouseForeground;
+            case DynamicColorName::MouseBackgroundColor:
+                return colorPalette_.mouseBackground;
+            case DynamicColorName::HighlightForegroundColor:
+                if (colorPalette_.selectionForeground.has_value())
+                    return colorPalette_.selectionForeground.value();
+                else
+                    return nullopt;
+            case DynamicColorName::HighlightBackgroundColor:
+                if (colorPalette_.selectionBackground.has_value())
+                    return colorPalette_.selectionBackground.value();
+                else
+                    return nullopt;
+        }
+        return nullopt; // should never happen
+    }();
+
+    if (color.has_value())
     {
         reply(
             "\033]{};{}\x07",
@@ -2172,12 +2211,58 @@ void Screen::requestCapability(capabilities::Code _code)
 
 void Screen::resetDynamicColor(DynamicColorName _name)
 {
-    eventListener_.resetDynamicColor(_name);
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorPalette_.defaultForeground = defaultColorPalette_.defaultForeground;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorPalette_.defaultBackground = defaultColorPalette_.defaultBackground;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorPalette_.cursor = defaultColorPalette_.cursor;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorPalette_.mouseForeground = defaultColorPalette_.mouseForeground;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorPalette_.mouseBackground = defaultColorPalette_.mouseBackground;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            colorPalette_.selectionForeground = defaultColorPalette_.selectionForeground;
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorPalette_.selectionBackground = defaultColorPalette_.selectionBackground;
+            break;
+    }
 }
 
-void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _color)
+void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
 {
-    eventListener_.setDynamicColor(_name, _color);
+    switch (_name)
+    {
+        case DynamicColorName::DefaultForegroundColor:
+            colorPalette_.defaultForeground = _value;
+            break;
+        case DynamicColorName::DefaultBackgroundColor:
+            colorPalette_.defaultBackground = _value;
+            break;
+        case DynamicColorName::TextCursorColor:
+            colorPalette_.cursor = _value;
+            break;
+        case DynamicColorName::MouseForegroundColor:
+            colorPalette_.mouseForeground = _value;
+            break;
+        case DynamicColorName::MouseBackgroundColor:
+            colorPalette_.mouseBackground = _value;
+            break;
+        case DynamicColorName::HighlightForegroundColor:
+            colorPalette_.selectionForeground = _value;
+            break;
+        case DynamicColorName::HighlightBackgroundColor:
+            colorPalette_.selectionBackground = _value;
+            break;
+    }
 }
 
 void Screen::dumpState()
@@ -2225,6 +2310,11 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
     using Item = XtSmGraphics::Item;
     using Action = XtSmGraphics::Action;
 
+    constexpr auto SixelItem = 1;
+
+    constexpr auto Success = 0;
+    constexpr auto Failure = 3;
+
     switch (_item)
     {
         case Item::NumberOfColorRegisters:
@@ -2233,20 +2323,20 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                 case Action::Read:
                 {
                     auto const value = imageColorPalette_->size();
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::ReadLimit:
                 {
                     auto const value = imageColorPalette_->maxSize();
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::ResetToDefault:
                 {
                     auto const value = 256; // TODO: read the configuration's default here
                     imageColorPalette_->setSize(value);
-                    reply("\033[?{};{};{}S", 1, 0, value);
+                    reply("\033[?{};{};{}S", SixelItem, Success, value);
                     break;
                 }
                 case Action::SetToValue:
@@ -2254,13 +2344,13 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                     visit(overloaded{
                         [&](int _number) {
                             imageColorPalette_->setSize(_number);
-                            reply("\033[?{};{};{}S", 1, 0, _number);
+                            reply("\033[?{};{};{}S", SixelItem, Success, _number);
                         },
                         [&](Size) {
-                            reply("\033[?{};{};{}S", 1, 3, 0);
+                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                         },
                         [&](monostate) {
-                            reply("\033[?{};{};{}S", 1, 3, 0);
+                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                         },
                     }, _value);
                     break;
@@ -2268,7 +2358,32 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
             }
             break;
 
-        case Item::SixelGraphicsGeometry: // XXX Do we want/need to implement you?
+        case Item::SixelGraphicsGeometry:
+            switch (_action)
+            {
+                case Action::Read:
+                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSize_.width, maxImageSize_.height);
+                    break;
+                case Action::ReadLimit:
+                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSizeLimit_.width, maxImageSizeLimit_.height);
+                    break;
+                case Action::ResetToDefault:
+                    // The limit is the default at the same time.
+                    maxImageSize_ = maxImageSizeLimit_;
+                    break;
+                case Action::SetToValue:
+                    if (holds_alternative<Size>(_value))
+                    {
+                        auto size = get<Size>(_value);
+                        size.width = min(size.width, maxImageSize_.width);
+                        size.height = min(size.height, maxImageSize_.height);
+                        maxImageSize_ = size;
+                        // No reply.
+                    }
+                    break;
+            }
+            break;
+
         case Item::ReGISGraphicsGeometry: // Surely, we don't do ReGIS just yet. :-)
             break;
     }

@@ -139,7 +139,7 @@ string to_string(Color const& c)
     return "?";
 }
 
-RGBColor const& apply(ColorProfile const& _profile, Color const& _color, ColorTarget _target, bool _bright) noexcept
+RGBColor const& apply(ColorPalette const& _profile, Color const& _color, ColorTarget _target, bool _bright) noexcept
 {
     return visit(
         overloaded{

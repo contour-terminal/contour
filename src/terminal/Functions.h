@@ -311,6 +311,7 @@ constexpr inline auto SETTITLE      = detail::OSC(0, "SETINICON", "Change Window
 constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Icon Title");
 constexpr inline auto SETWINTITLE   = detail::OSC(2, "SETWINTITLE", "Change Window Title");
 constexpr inline auto SETXPROP      = detail::OSC(3, "SETXPROP", "Set X11 property");
+constexpr inline auto SETCOLPAL     = detail::OSC(4, "SETCOLPAL", "Set/Query color palette");
 // TODO: Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
 // TODO: Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
 // TODO: Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
@@ -326,6 +327,7 @@ constexpr inline auto SETFONT       = detail::OSC(50, "SETFONT", "Get or set fon
 constexpr inline auto SETFONTALL    = detail::OSC(60, "SETFONTALL", "Get or set all font faces, styles, size.");
 // printf "\033]52;c;$(printf "%s" "blabla" | base64)\a"
 constexpr inline auto CLIPBOARD     = detail::OSC(52, "CLIPBOARD", "Clipboard management.");
+constexpr inline auto RCOLPAL       = detail::OSC(104, "RCOLPAL", "Reset color full palette or entry");
 constexpr inline auto COLORSPECIAL  = detail::OSC(106, "COLORSPECIAL", "Enable/disable Special Color Number c.");
 constexpr inline auto RCOLORFG      = detail::OSC(110, "RCOLORFG", "Reset VT100 text foreground color.");
 constexpr inline auto RCOLORBG      = detail::OSC(111, "RCOLORBG", "Reset VT100 text background color.");
@@ -442,6 +444,7 @@ inline auto const& functions() noexcept
             SETTITLE,
             SETWINTITLE,
             SETXPROP,
+            SETCOLPAL,
             SETCWD,
             HYPERLINK,
             COLORFG,
@@ -452,6 +455,7 @@ inline auto const& functions() noexcept
             SETFONT,
             SETFONTALL,
             CLIPBOARD,
+            RCOLPAL,
             COLORSPECIAL,
             RCOLORFG,
             RCOLORBG,

@@ -1,4 +1,5 @@
 add_library(terminal_renderer STATIC
+    Atlas.cpp Atlas.h
     BackgroundRenderer.cpp BackgroundRenderer.h
     CursorRenderer.cpp CursorRenderer.h
     DecorationRenderer.cpp DecorationRenderer.h

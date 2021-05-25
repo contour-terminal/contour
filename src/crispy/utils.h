@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -46,21 +47,32 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
     return result;
 }
 
-template <typename T>
-constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+template <typename T, typename Callback>
+constexpr inline bool split(std::basic_string_view<T> _text,
+                            T _delimiter,
+                            Callback&& _callback)
 {
-    std::vector<std::basic_string_view<T>> output{};
     size_t a = 0;
     size_t b = 0;
     while ((b = _text.find(_delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        output.emplace_back(_text.substr(a, b - a));
+        if (!(_callback(_text.substr(a, b - a))))
+            return false;
+
         a = b + 1;
     }
 
     if (a < _text.size())
-        output.emplace_back(_text.substr(a));
+        return _callback(_text.substr(a));
 
+    return true;
+}
+
+template <typename T>
+constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+{
+    std::vector<std::basic_string_view<T>> output{};
+    split(_text, _delimiter, [&](auto value) { output.emplace_back(value); return true; });
     return output;
 }
 
@@ -133,6 +145,63 @@ bool endsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _pref
             return false;
 
     return true;
+}
+
+template <std::size_t Base = 10, typename T = unsigned, typename C>
+constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
+{
+    static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16, "Only base-2/8/10/16 supported.");
+    static_assert(std::is_integral_v<T>, "T must be an integral type.");
+    static_assert(std::is_integral_v<C>, "C must be an integral type.");
+
+    if (_text.empty())
+        return std::nullopt;
+
+    auto value = T{0};
+
+    for (auto const ch: _text)
+    {
+        value *= Base;
+        switch (Base)
+        {
+            case 2:
+                if ('0' <= ch && ch <= '1')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 8:
+                if ('0' <= ch && ch <= '7')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 10:
+                if ('0' <= ch && ch <= '9')
+                    value += ch - '0';
+                else
+                    return std::nullopt;
+                break;
+            case 16:
+                if ('0' <= ch && ch <= '9')
+                    value += ch - '0';
+                else if ('a' <= ch && ch <= 'f')
+                    value += 10 + ch - 'a';
+                else if (ch >= 'A' && ch <= 'F')
+                    value += 10 + ch - 'A';
+                else
+                    return std::nullopt;
+                break;
+        }
+    }
+
+    return value;
+}
+
+template <std::size_t Base = 10, typename T = unsigned, typename C>
+constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
+{
+    return to_integer<Base, T, C>(std::basic_string_view<C>(_text));
 }
 
 struct finally {

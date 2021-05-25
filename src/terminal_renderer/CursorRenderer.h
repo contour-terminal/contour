@@ -30,14 +30,13 @@ class CursorRenderer : public Renderable {
   public:
     CursorRenderer(GridMetrics const& _gridMetrics,
                    CursorShape _shape,
-                   RGBAColor _color);
+                   RGBColor const& _color);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
-    void setColor(RGBAColor const& _color);
 
     void render(crispy::Point _pos, int _columnWidth);
 
@@ -48,12 +47,14 @@ class CursorRenderer : public Renderable {
     void rebuild();
     std::optional<DataRef> getDataRef(CursorShape _shape);
 
+    std::array<float, 4> color() const noexcept;
+
   private:
     std::unique_ptr<TextureAtlas> textureAtlas_;
     GridMetrics const& gridMetrics_;
 
     CursorShape shape_;
-    std::array<float, 4> color_;
+    RGBColor const& color_;
     int columnWidth_;
 };
 

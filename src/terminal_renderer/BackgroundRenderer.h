@@ -34,8 +34,6 @@ class BackgroundRenderer : public Renderable {
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
 
-    void setDefaultColor(RGBColor const& _color) noexcept { defaultColor_ = _color; }
-
     constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
 
     // TODO: pass background color directly (instead of whole grid cell),
@@ -44,7 +42,7 @@ class BackgroundRenderer : public Renderable {
     /// Queues up a render with given background
     void renderCell(Coordinate const& _pos, RGBColor const& _color);
 
-    void renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count);
+    void renderOnce(Coordinate const& _pos, RGBColor const& _color, int _count);
 
     void renderPendingCells();
     void finish();
@@ -52,16 +50,16 @@ class BackgroundRenderer : public Renderable {
   private:
     void renderCellRange();
 
-  private:
+    // private data
     GridMetrics const& gridMetrics_;
-    RGBColor defaultColor_;
+    RGBColor const& defaultColor_;
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
 
     // input state
     RGBColor color_{};
     int row_ = 0;
     int startColumn_ = 0;
-    unsigned columnCount_ = 0;
+    int columnCount_ = 0;
 };
 
 } // end namespace

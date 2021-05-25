@@ -18,13 +18,17 @@
 #include <crispy/algorithm.h>
 #include <crispy/utils.h>
 
+#include <range/v3/all.hpp>
+
 #include <algorithm>
 #include <vector>
+#include <utility>
 
 using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;
+using std::pair;
 using std::string;
 using std::vector;
 
@@ -44,20 +48,6 @@ namespace terminal::renderer::opengl {
 
 namespace // {{{ helper
 {
-    constexpr int glFormatZ(atlas::Format _f)
-    {
-        switch (_f)
-        {
-            case atlas::Format::Red:
-                return GL_R8;
-            case atlas::Format::RGB:
-                return GL_RGB8;
-            case atlas::Format::RGBA:
-                return GL_RGBA8;
-        }
-        return GL_R8; // just in case
-    }
-
     int glFormat(atlas::Format _format)
     {
         switch (_format)
@@ -83,52 +73,84 @@ namespace // {{{ helper
     }
 } // }}}
 
-constexpr unsigned MaxInstanceCount = 1;
-constexpr unsigned MaxMonochromeTextureSize = 1024;
-constexpr unsigned MaxColorTextureSize = 2048;
+constexpr int MaxMonochromeTextureSize = 1024;
+constexpr int MaxColorTextureSize = 2048;
+constexpr int MaxInstanceCount = 24;
 
-struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
+struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 {
-    using CreateAtlas = atlas::CreateAtlas;
-    using UploadTexture= atlas::UploadTexture;
-    using RenderTexture = atlas::RenderTexture;
-    using DestroyAtlas = atlas::DestroyAtlas;
-
-    std::vector<CreateAtlas> createAtlases;
-    std::vector<UploadTexture> uploadTextures;
-    std::vector<RenderTexture> renderTextures;
-    std::vector<GLfloat> buffer;
-    GLsizei vertexCount = 0;
-    std::vector<DestroyAtlas> destroyAtlases;
-
-    void createAtlas(CreateAtlas const& _atlas) override
+    struct RenderBatch
     {
-        createAtlases.emplace_back(_atlas);
+        std::vector<atlas::RenderTexture> renderTextures;
+        std::vector<GLfloat> buffer;
+        int user = 0;
+
+        void clear()
+        {
+            renderTextures.clear();
+            buffer.clear();
+        }
+    };
+
+    std::vector<atlas::CreateAtlas> createAtlases;
+    std::vector<atlas::UploadTexture> uploadTextures;
+    std::vector<RenderBatch> renderBatches;
+    std::vector<atlas::AtlasID> destroyAtlases;
+
+    std::list<int> atlasIDs_;
+    std::list<int> unusedAtlasIDs_;
+    int nextAtlasID_ = 0;
+
+    atlas::AtlasID allocateAtlasID(int _user)
+    {
+        // The allocated atlas ID is not the OpenGL texture ID but
+        // an internal one that is used to reference into renderBatches, but
+        // can be used to map to OpenGL texture IDs.
+
+        auto const id = atlas::AtlasID{nextAtlasID_++};
+        atlasIDs_.push_back(id.value);
+        if (renderBatches.size() <= static_cast<size_t>(id.value))
+            renderBatches.resize(id.value + 10);
+
+        renderBatches[id.value].user = _user;
+
+        return id;
     }
 
-    void uploadTexture(UploadTexture const& _texture) override
+    atlas::AtlasID createAtlas(Size _size, atlas::Format _format, int _user) override
     {
-        uploadTextures.emplace_back(_texture);
+        auto const id = allocateAtlasID(_user);
+        createAtlases.emplace_back(atlas::CreateAtlas{id, _size, _format, _user});
+        return id;
     }
 
-    void renderTexture(RenderTexture const& _render) override
+    void uploadTexture(atlas::UploadTexture _texture) override
     {
-        renderTextures.emplace_back(_render);
+        uploadTextures.emplace_back(std::move(_texture));
+    }
 
+    void renderTexture(atlas::RenderTexture _render) override
+    {
+        // This is factored out of renderTexture() to make sure it's not writing to anything else
+        addRenderTextureToBatch(_render, renderBatches.at(_render.texture.get().atlas.value));
+    }
+
+    static void addRenderTextureToBatch(atlas::RenderTexture _render, RenderBatch& _batch)
+    {
         // Vertices
         GLfloat const x = _render.x;
         GLfloat const y = _render.y;
         GLfloat const z = _render.z;
       //GLfloat const w = _render.w;
-        GLfloat const r = _render.texture.get().targetWidth;
-        GLfloat const s = _render.texture.get().targetHeight;
+        GLfloat const r = _render.texture.get().targetSize.width;
+        GLfloat const s = _render.texture.get().targetSize.height;
 
         // TexCoords
         GLfloat const rx = _render.texture.get().relativeX;
         GLfloat const ry = _render.texture.get().relativeY;
         GLfloat const w = _render.texture.get().relativeWidth;
         GLfloat const h = _render.texture.get().relativeHeight;
-        GLfloat const i = _render.texture.get().z;
+        GLfloat const i = 0; // _render.texture.get().z;
         GLfloat const u = _render.texture.get().user;
 
         // color
@@ -148,38 +170,25 @@ struct OpenGLRenderer::TextureScheduler : public atlas::CommandListener
             x,     y + s, z,  rx,     ry + h, i, u,  cr, cg, cb, ca, // left top
             x + r, y,     z,  rx + w, ry,     i, u,  cr, cg, cb, ca, // right bottom
             x + r, y + s, z,  rx + w, ry + h, i, u,  cr, cg, cb, ca, // right top
+
+            // buffer contains
+            // - 3 vertex coordinates (XYZ)
+            // - 4 texture coordinates (XYIU), I is unused currently, U selects which texture to use
+            // - 4 color values (RGBA)
         };
 
-        crispy::copy(vertices, back_inserter(buffer));
-        vertexCount += 6;
+        _batch.renderTextures.emplace_back(_render);
+        crispy::copy(vertices, back_inserter(_batch.buffer));
     }
 
-    void destroyAtlas(DestroyAtlas const& _atlas) override
+    void destroyAtlas(atlas::AtlasID _atlas) override
     {
         destroyAtlases.push_back(_atlas);
-    }
-
-    size_t size() const noexcept
-    {
-        return createAtlases.size()
-             + uploadTextures.size()
-             + renderTextures.size()
-             + destroyAtlases.size();
-    }
-
-    void reset()
-    {
-        createAtlases.clear();
-        uploadTextures.clear();
-        renderTextures.clear();
-        destroyAtlases.clear();
-        buffer.clear();
-        vertexCount = 0;
     }
 };
 
 template <typename T, typename Fn>
-inline void bound(T& _bindable, Fn&& _callable) noexcept
+inline void bound(T& _bindable, Fn&& _callable)
 {
     _bindable.bind();
     try {
@@ -208,34 +217,28 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     // texture
     textureScheduler_{std::make_unique<TextureScheduler>()},
     monochromeAtlasAllocator_{
-        0,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
-        min(MaxMonochromeTextureSize, maxTextureSize()),
-        min(MaxMonochromeTextureSize, maxTextureSize()),
-        atlas::Format::Red,
         *textureScheduler_,
-        "monochromeAtlas"
+        monochromeTextureSizeHint(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
+        atlas::Format::Red,
+        0,
+        "monochromeAtlas",
     },
     coloredAtlasAllocator_{
-        1,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
-        min(MaxColorTextureSize, maxTextureSize()),
-        min(MaxColorTextureSize, maxTextureSize()),
-        atlas::Format::RGBA,
         *textureScheduler_,
+        colorTextureSizeHint(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
+        atlas::Format::RGBA,
+        1,
         "colorAtlas"
     },
     lcdAtlasAllocator_{
-        2,
-        MaxInstanceCount,
-        maxTextureSize() / maxTextureDepth(),
-        min(MaxColorTextureSize, maxTextureSize()),
-        min(MaxColorTextureSize, maxTextureSize()),
-        atlas::Format::RGB,
         *textureScheduler_,
-        "lcdAtlas"
+        colorTextureSizeHint(),
+        MaxInstanceCount, // TODO: better runtime compute with max(x,y)
+        atlas::Format::RGB,
+        2,
+        "lcdAtlas",
     },
     // rect
     rectShader_{ createShader(_rectShaderConfig) },
@@ -252,15 +255,31 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
     //glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // //glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
-    bound(*textShader_, [&]() noexcept {
-        CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.instanceBaseId()) );
-        CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.instanceBaseId()) );
-        CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.instanceBaseId()) );
-        CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.width())) );
+    bound(*textShader_, [&]() {
+        CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.user()) );
+        CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.user()) );
+        CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.user()) );
+        CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.size().width)) );
     });
 
     initializeRectRendering();
     initializeTextureRendering();
+}
+
+crispy::Size OpenGLRenderer::colorTextureSizeHint()
+{
+    return Size{
+        min(MaxColorTextureSize, maxTextureSize()),
+        min(MaxColorTextureSize, maxTextureSize())
+    };
+}
+
+crispy::Size OpenGLRenderer::monochromeTextureSizeHint()
+{
+    return Size{
+        min(MaxMonochromeTextureSize, maxTextureSize()),
+        min(MaxMonochromeTextureSize, maxTextureSize())
+    };
 }
 
 void OpenGLRenderer::setRenderSize(Size _size)
@@ -293,7 +312,7 @@ atlas::TextureAtlasAllocator& OpenGLRenderer::lcdAtlasAllocator() noexcept
     return lcdAtlasAllocator_;
 }
 
-atlas::CommandListener& OpenGLRenderer::textureScheduler()
+atlas::AtlasBackend& OpenGLRenderer::textureScheduler()
 {
     return *textureScheduler_;
 }
@@ -377,27 +396,27 @@ void OpenGLRenderer::clearCache()
     lcdAtlasAllocator_.clear();
 }
 
-unsigned OpenGLRenderer::maxTextureDepth()
+int OpenGLRenderer::maxTextureDepth()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value) );
-    return static_cast<unsigned>(value);
+    return static_cast<int>(value);
 }
 
-unsigned OpenGLRenderer::maxTextureSize()
+int OpenGLRenderer::maxTextureSize()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value) );
-    return static_cast<unsigned>(value);
+    return static_cast<int>(value);
 }
 
-void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format)
+void OpenGLRenderer::clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format)
 {
-    bindTexture2DArray(_textureId);
+    bindTexture(_textureId);
 
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
@@ -413,11 +432,11 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
     switch (_format)
     {
         case atlas::Format::Red:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
                 *t++ = 0x40;
             break;
         case atlas::Format::RGB:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
                 *t++ = 0x00;
@@ -425,7 +444,7 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
             }
             break;
         case atlas::Format::RGBA:
-            for (auto i = 0u; i < _width * _height; ++i)
+            for (auto i = 0; i < _width * _height; ++i)
             {
                 *t++ = 0x00;
                 *t++ = 0x80;
@@ -436,22 +455,16 @@ void OpenGLRenderer::clearTexture2DArray(GLuint _textureId, unsigned _width, uns
     }
     assert(t == stub.end()); // }}}
 
-    //glTexSubImage2D(target, levelOfDetail, x0, y0, _width, _height, glFormat(_format), type, stub.data());
-
     GLenum const glFmt = glFormat(_format);
     GLint constexpr UnusedParam = 0;
     CHECKED_GL( glTexImage2D(target, levelOfDetail, glFmt, _width, _height, UnusedParam, glFmt, type, stub.data()) );
-    // glTexSubImage2D(target, levelOfDetail, x0, y0, z0, _width, _height, depth,
-    //                 glFormat(_format), type, stub.data());
 }
 
 void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
 {
     GLuint textureId{};
     CHECKED_GL( glGenTextures(1, &textureId) );
-    bindTexture2DArray(textureId);
-
-    //glTexStorage3D(GL_TEXTURE_2D, 1, glFormatZ(_param.format), _param.width, _param.height, _param.depth);
+    bindTexture(textureId);
 
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST) ); // NEAREST, because LINEAR yields borders at the edges
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST) );
@@ -459,21 +472,20 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE) );
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE) );
 
-    auto const key = AtlasKey{_param.atlasName, _param.atlas};
-    atlasMap_[key] = textureId;
+    clearTextureAtlas(textureId, _param.size.width, _param.size.height, _param.format);
 
-    clearTexture2DArray(textureId, _param.width, _param.height, _param.format);
+    atlasMap_.insert(pair{_param.atlas, textureId});
 }
 
 void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
 {
     auto const& texture = _param.texture.get();
-    auto const key = AtlasKey{texture.atlasName, texture.atlas};
+    auto const key = texture.atlas;
     [[maybe_unused]] auto const textureIdIter = atlasMap_.find(key);
     assert(textureIdIter != atlasMap_.end() && "Texture ID not found in atlas map!");
-    auto const textureId = atlasMap_[key];
-    auto const x0 = texture.x;
-    auto const y0 = texture.y;
+    auto const textureId = atlasMap_.at(key);
+    auto const x0 = texture.offset.x;
+    auto const y0 = texture.offset.y;
     //auto const z0 = texture.z;
 
     //debuglog(OpenGLRendererTag).write("({}): {}", textureId, _param);
@@ -483,7 +495,7 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     //auto constexpr depth = 1;
     auto constexpr type = GL_UNSIGNED_BYTE;
 
-    bindTexture2DArray(textureId);
+    bindTexture(textureId);
 
     switch (_param.format)
     {
@@ -496,30 +508,21 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
             break;
     }
 
-    CHECKED_GL( glTexSubImage2D(target, levelOfDetail, x0, y0, texture.width, texture.height, glFormat(_param.format), type, _param.data.data()) );
-    // glTexSubImage3D(target, levelOfDetail, x0, y0, z0, texture.width, texture.height, depth,
-    //                 glFormat(_param.format), type, _param.data.data());
+    CHECKED_GL( glTexSubImage2D(target, levelOfDetail, x0, y0, texture.bitmapSize.width, texture.bitmapSize.height, glFormat(_param.format), type, _param.data.data()) );
 }
 
-void OpenGLRenderer::renderTexture(atlas::RenderTexture const& _param)
+GLuint OpenGLRenderer::textureAtlasID(atlas::AtlasID _atlasID) const noexcept
 {
-    auto const key = AtlasKey{_param.texture.get().atlasName, _param.texture.get().atlas};
-    if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
-    {
-        GLuint const textureUnit = _param.texture.get().atlas;
-        GLuint const textureId = it->second;
+    auto const it = atlasMap_.find(_atlasID);
+    if (it == atlasMap_.end())
+        return 0;
 
-        //debuglog(OpenGLRendererTag).write("({}/{}): {}\n", textureUnit, textureId, _param);
-
-        selectTextureUnit(textureUnit);
-        bindTexture2DArray(textureId);
-    }
+    return it->second;
 }
 
-void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
+void OpenGLRenderer::destroyAtlas(atlas::AtlasID _atlasID)
 {
-    auto const key = AtlasKey{_param.atlasName.get(), _param.atlas};
-    if (auto const it = atlasMap_.find(key); it != atlasMap_.end())
+    if (auto const it = atlasMap_.find(_atlasID); it != atlasMap_.end())
     {
         GLuint const textureId = it->second;
         atlasMap_.erase(it);
@@ -527,7 +530,7 @@ void OpenGLRenderer::destroyAtlas(atlas::DestroyAtlas const& _param)
     }
 }
 
-void OpenGLRenderer::bindTexture2DArray(GLuint _textureId)
+void OpenGLRenderer::bindTexture(GLuint _textureId)
 {
     if (currentTextureId_ != _textureId)
     {
@@ -536,16 +539,7 @@ void OpenGLRenderer::bindTexture2DArray(GLuint _textureId)
     }
 }
 
-void OpenGLRenderer::selectTextureUnit(unsigned _id)
-{
-    if (currentActiveTexture_ != _id)
-    {
-        glActiveTexture(GL_TEXTURE0 + _id);
-        currentActiveTexture_ = _id;
-    }
-}
-
-void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height,
+void OpenGLRenderer::renderRectangle(int _x, int _y, int _width, int _height,
                                      float _r, float _g, float _b, float _a)
 {
     GLfloat const x = _x;
@@ -573,19 +567,19 @@ void OpenGLRenderer::renderRectangle(unsigned _x, unsigned _y, unsigned _width, 
     crispy::copy(vertices, back_inserter(rectBuffer_));
 }
 
-optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, unsigned _instanceId)
+optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceID)
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
 
-    auto const textureId = atlasMap_.at(AtlasKey{_allocator.name(), _instanceId});
+    auto const textureId = textureAtlasID(_instanceID);
 
     AtlasTextureInfo output{};
     output.atlasName = _allocator.name();
-    output.atlasInstanceId = _instanceId;
-    output.size = Size{int(_allocator.width()), int(_allocator.height())};
+    output.atlasInstanceId = _instanceID.value;
+    output.size = _allocator.size();
     output.format = atlas::Format::RGBA;
-    output.buffer.resize(_allocator.width() * _allocator.height() * 4);
+    output.buffer.resize(_allocator.size().width * _allocator.size().height * 4);
 
     // Reading texture data to host CPU (including for RGB textures) only works via framebuffers
     GLuint fbo;
@@ -616,7 +610,7 @@ void OpenGLRenderer::execute()
     //
     if (!rectBuffer_.empty())
     {
-        bound(*rectShader_, [&]() noexcept {
+        bound(*rectShader_, [&]() {
             rectShader_->setUniformValue(rectProjectionLocation_, projectionMatrix_);
 
             glBindVertexArray(rectVAO_);
@@ -631,7 +625,7 @@ void OpenGLRenderer::execute()
 
     // render textures
     //
-    bound(*textShader_, [&]() noexcept {
+    bound(*textShader_, [&]() {
         // TODO: only upload when it actually DOES change
         textShader_->setUniformValue(textProjectionLocation_, projectionMatrix_);
         executeRenderTextures();
@@ -667,6 +661,8 @@ Size OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::executeRenderTextures()
 {
+    currentTextureId_ = std::numeric_limits<int>::max();
+
     // debuglog(OpenGLRendererTag).write(
     //     "OpenGLRenderer::executeRenderTextures() upload={} render={}",
     //     textureScheduler_->uploadTextures.size(),
@@ -674,48 +670,41 @@ void OpenGLRenderer::executeRenderTextures()
     // );
 
     // potentially create new atlases
-    for (auto const& params : textureScheduler_->createAtlases)
+    for (auto const& params: textureScheduler_->createAtlases)
         createAtlas(params);
+    textureScheduler_->createAtlases.clear();
 
     // potentially upload any new textures
-    for (auto const& params : textureScheduler_->uploadTextures)
+    for (auto const& params: textureScheduler_->uploadTextures)
         uploadTexture(params);
+    textureScheduler_->uploadTextures.clear();
 
-    // order and prepare texture geometry
-    sort(textureScheduler_->renderTextures.begin(),
-         textureScheduler_->renderTextures.end(),
-         [](auto const& a, auto const& b) { return a.texture.get().atlas < b.texture.get().atlas; });
-
-    for (auto const& params : textureScheduler_->renderTextures)
-        renderTexture(params);
-
-    // upload vertices and render (iff there is anything to render)
-    if (!textureScheduler_->renderTextures.empty())
+    // upload vertices and render
+    for (size_t i = 0; i < textureScheduler_->renderBatches.size(); ++i)
     {
+        auto& batch = textureScheduler_->renderBatches[i];
+        if (batch.renderTextures.empty())
+            continue;
+
+        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + batch.user));
+        bindTexture(textureAtlasID(atlas::AtlasID{static_cast<int>(i)}));
         glBindVertexArray(vao_);
 
         // upload buffer
         glBindBuffer(GL_ARRAY_BUFFER, vbo_);
         glBufferData(GL_ARRAY_BUFFER,
-                     textureScheduler_->buffer.size() * sizeof(GLfloat),
-                     textureScheduler_->buffer.data(),
+                     batch.buffer.size() * sizeof(GLfloat),
+                     batch.buffer.data(),
                      GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, batch.renderTextures.size() * 6);
 
-        glDrawArrays(GL_TRIANGLES, 0, textureScheduler_->vertexCount);
-
-        // TODO: Instead of on glDrawArrays (and many if's in the shader for each GL_TEXTUREi),
-        //       make a loop over each GL_TEXTUREi and draw a sub range of the vertices and a
-        //       fixed GL_TEXTURE0. - will this be noticable faster?
+        batch.clear();
     }
 
     // destroy any pending atlases that were meant to be destroyed
-    for (auto const& params : textureScheduler_->destroyAtlases)
+    for (auto const& params: textureScheduler_->destroyAtlases)
         destroyAtlas(params);
-
-    // reset execution state
-    textureScheduler_->reset();
-    currentActiveTexture_ = std::numeric_limits<GLuint>::max();
-    currentTextureId_ = std::numeric_limits<GLuint>::max();
+    textureScheduler_->destroyAtlases.clear();
 }
 
 } // end namespace

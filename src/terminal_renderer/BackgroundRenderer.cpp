@@ -49,7 +49,7 @@ void BackgroundRenderer::renderCell(Coordinate const& _pos, RGBColor const& _col
     }
 }
 
-void BackgroundRenderer::renderOnce(Coordinate const& _pos, RGBColor const& _color, unsigned _count)
+void BackgroundRenderer::renderOnce(Coordinate const& _pos, RGBColor const& _color, int _count)
 {
     renderPendingCells();
 
@@ -69,8 +69,8 @@ void BackgroundRenderer::renderCellRange()
     auto const pos = gridMetrics_.map(startColumn_, row_);
 
     renderTarget().renderRectangle(
-        static_cast<unsigned>(pos.x),
-        static_cast<unsigned>(pos.y),
+        pos.x,
+        pos.y,
         gridMetrics_.cellSize.width * columnCount_,
         gridMetrics_.cellSize.height,
         static_cast<float>(color_.red) / 255.0f,

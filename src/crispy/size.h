@@ -4,6 +4,7 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <utility>
 
 namespace crispy {
@@ -70,7 +71,7 @@ constexpr int area(Size size) noexcept
 
 constexpr bool operator<(Size a, Size b) noexcept
 {
-    return area(a) < area(b);
+    return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
 constexpr bool operator==(Size const& _a, Size const& _b) noexcept
@@ -104,6 +105,14 @@ constexpr Size operator*(Size _a, Size _b) noexcept
     return Size{
         _a.width * _b.width,
         _a.height * _b.height
+    };
+}
+
+inline Size operator*(Size _a, double _scalar) noexcept
+{
+    return Size{
+        int(ceil(double(_a.width) * _scalar)),
+        int(ceil(double(_a.height) * _scalar))
     };
 }
 

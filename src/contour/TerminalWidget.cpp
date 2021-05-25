@@ -58,6 +58,9 @@
 #include <tuple>
 #include <vector>
 
+// Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
+// #define CONTOUR_DEBUG_OPENGL 1
+
 using namespace std::string_literals;
 
 using crispy::Size;
@@ -76,7 +79,6 @@ using std::max;
 using std::move;
 using std::nullopt;
 using std::ofstream;
-using std::optional;
 using std::pair;
 using std::ref;
 using std::runtime_error;
@@ -133,7 +135,7 @@ namespace // {{{
     }
 #endif
 
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     void glMessageCallback(
         GLenum _source,
         GLenum _type,
@@ -290,8 +292,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
         config_.bypassMouseProtocolModifier,
-        logicalDpiX(),
-        logicalDpiY(),
+        crispy::Point{ logicalDpiX(), logicalDpiY() },
         profile().fonts,
         profile().cursorShape,
         profile().cursorDisplay,
@@ -305,8 +306,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
 #else
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
-        profile().shell,
-        nullptr // RenderTarget is set later, upon initializeGL
+        profile().shell
     )},
     configFileChangeWatcher_{},
     updateTimer_(this)
@@ -345,8 +345,9 @@ TerminalWidget::TerminalWidget(config::Config _config,
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
     configureTerminal(*terminalView_, config_, profileName_);
-
     updateGeometry();
+
+    terminalView_->terminal().start();
 }
 
 TerminalWidget::~TerminalWidget()
@@ -520,9 +521,9 @@ void TerminalWidget::initializeGL()
     }
     // }}}
 
-#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT)
+#if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     CHECKED_GL( glEnable(GL_DEBUG_OUTPUT) );
-    // CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
+    CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
 #endif
 
     if (profile_.maximized)
@@ -533,6 +534,8 @@ void TerminalWidget::initializeGL()
         maximizedState_ = window()->isMaximized();
         window()->showFullScreen();
     }
+
+    initialized_ = true;
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
@@ -1357,6 +1360,8 @@ void TerminalWidget::screenUpdated()
     // for (auto const& command : _commands)
     //     terminalMetrics_(command);
 #endif
+    if (!initialized_.load())
+        return;
 
     if (terminalView_->terminal().screen().isPrimaryScreen())
     {
@@ -1645,19 +1650,18 @@ void TerminalWidget::doDumpState()
         };
     };
 
-    assert(terminalView_->renderer().renderTarget() != nullptr);
-    terminal::renderer::RenderTarget& renderTarget = *terminalView_->renderer().renderTarget();
+    terminal::renderer::RenderTarget& renderTarget = terminalView_->renderer().renderTarget();
 
-    for (auto const* allocator: {&renderTarget.monochromeAtlasAllocator(), &renderTarget.coloredAtlasAllocator(), &renderTarget.lcdAtlasAllocator()})
+    for (auto const* allocator: renderTarget.allAtlasAllocators())
     {
-        for (unsigned instanceId = allocator->instanceBaseId(); instanceId <= allocator->currentInstance(); ++instanceId)
+        for (auto const atlasID: allocator->activeAtlasTextures())
         {
-            auto infoOpt = renderTarget.readAtlas(*allocator, instanceId);
+            auto infoOpt = renderTarget.readAtlas(*allocator, atlasID);
             if (!infoOpt.has_value())
                 continue;
 
             terminal::renderer::AtlasTextureInfo& info = infoOpt.value();
-            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), instanceId, info.buffer, info.size);
+            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), atlasID.value, info.buffer, info.size);
             switch (info.format)
             {
                 case terminal::renderer::atlas::Format::RGBA:

@@ -39,31 +39,18 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
                            Modifier _mouseProtocolSuppressModifier,
-                           int _logicalDpiX,
-                           int _logicalDpiY,
+                           crispy::Point _logicalDpi,
                            renderer::FontDescriptions const& _fontDescriptions,
                            CursorShape _cursorShape, // TODO: remember !
                            CursorDisplay _cursorDisplay,
                            milliseconds _cursorBlinkInterval,
-                           terminal::ColorProfile _colorProfile,
+                           terminal::ColorPalette _colorPalette,
                            terminal::Opacity _backgroundOpacity,
                            renderer::Decorator _hyperlinkNormal,
                            renderer::Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
-                           Process::ExecInfo const& _shell,
-                           renderer::RenderTarget* _renderTarget) :
+                           Process::ExecInfo const& _shell) :
     events_{ _events },
-    renderer_{
-        _pty->screenSize(),
-        _logicalDpiX,
-        _logicalDpiY,
-        _fontDescriptions,
-        _colorProfile,
-        _backgroundOpacity,
-        _hyperlinkNormal,
-        _hyperlinkHover,
-        _renderTarget
-    },
     fontSize_{ _fontDescriptions.size },
     size_{
         static_cast<int>(_pty->screenSize().width * gridMetrics().cellSize.width),
@@ -76,15 +63,26 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         _cursorBlinkInterval,
         _now,
         _wordDelimiters,
-        _mouseProtocolSuppressModifier
+        _mouseProtocolSuppressModifier,
+        {800, 600},     // maxImageSize
+        256,            // maxImageColorRegisters
+        true,           // sixelCursorConformance
+        _colorPalette
     ),
     process_{ _shell, terminal_.device() },
     processExitWatcher_{ [this]() {
         (void) process_.wait();
         terminal_.device().close();
     } },
-    colorProfile_{_colorProfile},
-    defaultColorProfile_{_colorProfile}
+    renderer_{
+        terminal_.screenSize(),
+        _logicalDpi,
+        _fontDescriptions,
+        terminal_.screen().colorPalette(),
+        _backgroundOpacity,
+        _hyperlinkNormal,
+        _hyperlinkHover
+    }
 {
     terminal_.screen().setCursorStyle(_cursorDisplay, _cursorShape);
     terminal_.screen().setCellPixelSize(renderer_.cellSize());
@@ -100,39 +98,10 @@ void TerminalView::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
     events_.requestCaptureBuffer(_absoluteStartLine, _lineCount);
 }
 
-optional<RGBColor> TerminalView::requestDynamicColor(DynamicColorName _name)
+void TerminalView::setColorPalette(terminal::ColorPalette const& _colors)
 {
-    switch (_name)
-    {
-        case DynamicColorName::DefaultForegroundColor:
-            return colorProfile_.defaultForeground;
-        case DynamicColorName::DefaultBackgroundColor:
-            return colorProfile_.defaultBackground;
-        case DynamicColorName::TextCursorColor:
-            return colorProfile_.cursor;
-        case DynamicColorName::MouseForegroundColor:
-            return colorProfile_.mouseForeground;
-        case DynamicColorName::MouseBackgroundColor:
-            return colorProfile_.mouseBackground;
-        case DynamicColorName::HighlightForegroundColor:
-            if (colorProfile_.selectionForeground.has_value())
-                return colorProfile_.selectionForeground.value();
-            else
-                return nullopt;
-        case DynamicColorName::HighlightBackgroundColor:
-            if (colorProfile_.selectionBackground.has_value())
-                return colorProfile_.selectionBackground.value();
-            else
-                return nullopt;
-    }
-    return nullopt; // should never happen
-}
-
-void TerminalView::setColorProfile(terminal::ColorProfile const& _colors)
-{
-    colorProfile_ = _colors;
-    defaultColorProfile_ = _colors;
-    renderer_.setColorProfile(colorProfile_);
+    terminal_.screen().colorPalette() = _colors;
+    terminal_.screen().defaultColorPalette() = _colors;
 }
 
 bool TerminalView::alive() const
@@ -302,65 +271,9 @@ void TerminalView::onSelectionComplete()
     events_.onSelectionComplete();
 }
 
-void TerminalView::resetDynamicColor(DynamicColorName _name)
-{
-    switch (_name)
-    {
-        case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = defaultColorProfile_.defaultForeground;
-            break;
-        case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = defaultColorProfile_.defaultBackground;
-            break;
-        case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = defaultColorProfile_.cursor;
-            break;
-        case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = defaultColorProfile_.mouseForeground;
-            break;
-        case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = defaultColorProfile_.mouseBackground;
-            break;
-        case DynamicColorName::HighlightForegroundColor:
-            colorProfile_.selectionForeground = defaultColorProfile_.selectionForeground;
-            break;
-        case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selectionBackground = defaultColorProfile_.selectionBackground;
-            break;
-    }
-}
-
 void TerminalView::resizeWindow(int _width, int _height, bool _unitInPixels)
 {
     events_.resizeWindow(_width, _height, _unitInPixels);
-}
-
-void TerminalView::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
-{
-    switch (_name)
-    {
-        case DynamicColorName::DefaultForegroundColor:
-            colorProfile_.defaultForeground = _value;
-            break;
-        case DynamicColorName::DefaultBackgroundColor:
-            colorProfile_.defaultBackground = _value;
-            break;
-        case DynamicColorName::TextCursorColor:
-            colorProfile_.cursor = _value;
-            break;
-        case DynamicColorName::MouseForegroundColor:
-            colorProfile_.mouseForeground = _value;
-            break;
-        case DynamicColorName::MouseBackgroundColor:
-            colorProfile_.mouseBackground = _value;
-            break;
-        case DynamicColorName::HighlightForegroundColor:
-            colorProfile_.selectionForeground = _value;
-            break;
-        case DynamicColorName::HighlightBackgroundColor:
-            colorProfile_.selectionBackground = _value;
-            break;
-    }
 }
 
 void TerminalView::setWindowTitle(std::string_view const& _title)

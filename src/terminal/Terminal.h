@@ -46,7 +46,6 @@ class Terminal : public ScreenEvents {
         virtual ~Events() = default;
 
         virtual void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) = 0;
-        virtual std::optional<RGBColor> requestDynamicColor(DynamicColorName /*_name*/) { return std::nullopt; }
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void screenUpdated() {}
@@ -58,9 +57,7 @@ class Terminal : public ScreenEvents {
         virtual void reply(std::string_view const& /*_response*/) {}
         virtual void onClosed() {}
         virtual void onSelectionComplete() {}
-        virtual void resetDynamicColor(DynamicColorName /*_name*/) {}
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
-        virtual void setDynamicColor(DynamicColorName, RGBColor const&) {}
         virtual void setWindowTitle(std::string_view const& /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
@@ -75,8 +72,11 @@ class Terminal : public ScreenEvents {
              Modifier _mouseProtocolBypassModifier = Modifier::Shift,
              crispy::Size _maxImageSize = crispy::Size{800, 600},
              int _maxImageColorRegisters = 256,
-             bool _sixelCursorConformance = true);
+             bool _sixelCursorConformance = true,
+             ColorPalette _colorPalette = {});
     ~Terminal();
+
+    void start();
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
@@ -242,7 +242,6 @@ class Terminal : public ScreenEvents {
 
   private:
     void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
-    std::optional<RGBColor> requestDynamicColor(DynamicColorName _name) override;
     void bell() override;
     void bufferChanged(ScreenType) override;
     void scrollbackBufferCleared() override;
@@ -253,13 +252,11 @@ class Terminal : public ScreenEvents {
     void dumpState() override;
     void notify(std::string_view const& _title, std::string_view const& _body) override;
     void reply(std::string_view const& _response) override;
-    void resetDynamicColor(DynamicColorName _name) override;
     void resizeWindow(int _width, int _height, bool _unitInPixels) override;
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
     void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;
     void setCursorVisibility(bool _visible) override;
-    void setDynamicColor(DynamicColorName _name, RGBColor const& _value) override;
     void setGenerateFocusEvents(bool _enabled) override;
     void setMouseProtocol(MouseProtocol _protocol, bool _enabled) override;
     void setMouseTransport(MouseTransport _transport) override;
@@ -302,7 +299,7 @@ class Terminal : public ScreenEvents {
     InputGenerator::Sequence pendingInput_;
     Screen screen_;
     std::mutex mutable screenLock_;
-    std::thread screenUpdateThread_;
+    std::unique_ptr<std::thread> screenUpdateThread_;
     Viewport viewport_;
     std::unique_ptr<Selector> selector_;
 };
