@@ -28,6 +28,10 @@ class open_shaper : public shaper {
   public:
     explicit open_shaper(crispy::Point _dpi);
 
+    void set_dpi(crispy::Point _dpi) override;
+
+    void clear_cache() override;
+
     std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
 
     font_metrics metrics(font_key _key) const override;

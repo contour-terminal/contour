@@ -76,6 +76,16 @@ class shaper {
     virtual ~shaper() = default;
 
     /**
+     * Sets or updates DPI to the given value.
+     */
+    virtual void set_dpi(crispy::Point _dpi) = 0;
+
+    /**
+     * Clears internal caches (if any).
+     */
+    virtual void clear_cache() = 0;
+
+    /**
      * Returns a font matching the given font description.
      *
      * On Linux this font will be using Freetype, whereas

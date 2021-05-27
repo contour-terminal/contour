@@ -607,6 +607,22 @@ open_shaper::open_shaper(crispy::Point _dpi) : d(new Private(_dpi), [](Private* 
 {
 }
 
+void open_shaper::set_dpi(crispy::Point _dpi)
+{
+    std::cout << fmt::format("open_shaper.set_dpi! {}\n", _dpi);
+    if (_dpi == crispy::Point{})
+        return;
+
+    d->dpi_ = _dpi;
+}
+
+void open_shaper::clear_cache()
+{
+    std::cout << fmt::format("open_shaper.clear_cache\n");
+    d->fonts_.clear();
+    d->fontPathSizeToKeys.clear();
+}
+
 optional<font_key> open_shaper::load_font(font_description const& _description, font_size _size)
 {
     auto fontPathsOpt = getFontFallbackPaths(_description);
