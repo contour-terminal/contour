@@ -61,7 +61,6 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     textRenderingEngine_(make_unique<StandardTextShaper>(
         gridMetrics_,
         textShaper_,
-        fontDescriptions_,
         fonts_,
         std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
     ))
@@ -91,14 +90,8 @@ void TextRenderer::updateFontMetrics()
     clearCache();
 }
 
-void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color)
+void TextRenderer::renderCell(RenderCell const& _cell)
 {
-    if (row_ != _pos.row)
-    {
-        row_ = _pos.row;
-        textRenderingEngine_->endLine();
-    }
-
     auto const style = [&](auto mask) constexpr -> TextStyle {
         if ((mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
                 == (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
@@ -108,17 +101,27 @@ void TextRenderer::schedule(Coordinate const& _pos, Cell const& _cell, RGBColor 
         if (mask & CharacterStyleMask::Mask::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
-    }(_cell.attributes().styles);
+    }(_cell.flags);
 
-    auto const codepoints = crispy::span(_cell.codepoints().data(), _cell.codepoints().size());
+    auto const codepoints = crispy::span(_cell.codepoints.data(), _cell.codepoints.size());
 
-    textRenderingEngine_->appendCell(codepoints, style, _color);
+    if (_cell.flags & CharacterStyleMask::CellSequenceStart)
+        textRenderingEngine_->setTextPosition(_cell.position);
+
+    textRenderingEngine_->appendCell(codepoints, style, _cell.foregroundColor);
+
+    if (_cell.flags & CharacterStyleMask::CellSequenceEnd)
+        textRenderingEngine_->endSequence();
+}
+
+void TextRenderer::start()
+{
+    textRenderingEngine_->beginFrame();
 }
 
 void TextRenderer::finish()
 {
-    textRenderingEngine_->endFrame();
-    row_ = 1;
+    textRenderingEngine_->endSequence();
 }
 
 void TextRenderer::renderRun(crispy::Point _pos,
@@ -406,11 +409,9 @@ void TextRenderer::debugCache(std::ostream& _textOutput) const
 // {{{ StandardTextShaper
 StandardTextShaper::StandardTextShaper(GridMetrics const& _gridMetrics,
                                        text::shaper& _textShaper,
-                                       FontDescriptions const& _fontDescriptions,
                                        FontKeys const& _fonts,
                                        RenderGlyphs _renderGlyphs):
     gridMetrics_{ _gridMetrics },
-    fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
     textShaper_{ _textShaper },
     renderGlyphs_{ std::move(_renderGlyphs) }
@@ -423,91 +424,64 @@ void StandardTextShaper::clearCache()
     cache_.clear();
 }
 
-void StandardTextShaper::reset(Coordinate _pos, TextStyle _style, RGBColor _color)
-{
-    currentLine_ = _pos.row;
-    startColumn_ = _pos.column;
-    style_ = _style;
-    color_ = _color;
-    clusterOffset_ = 0;
-    codepoints_.clear();
-    clusters_.clear();
-}
-
 void StandardTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
                                     TextStyle _style,
                                     RGBColor _color)
 {
-    constexpr char32_t SP = 0x20;
-    bool const emptyCell = _codepoints.empty() || _codepoints.front() == SP;
-
-    switch (state_)
+    bool const attribsChanged = _color != color_ || _style != style_;
+    bool const textStartFound = !textStartFound_ &&
+        (_codepoints.empty() || _codepoints[0] == 0x20);
+    if (attribsChanged || textStartFound)
     {
-        case State::Empty:
-            if (!emptyCell)
-            {
-                state_ = State::Filling;
-                reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
-                extend(_codepoints);
-            }
-            break;
-        case State::Filling:
-        {
-            bool const sameFont = _style == style_ && _color == color_;
-
-            if (!emptyCell && sameFont)
-                extend(_codepoints);
-            else
-            {
-                flushPendingSegments();
-                if (emptyCell)
-                    state_ = State::Empty;
-                else // i.o.w.: cell attributes OR row number changed
-                {
-                    reset(Coordinate{currentLine_, startColumn_ + clusterOffset_}, _style, _color);
-                    extend(_codepoints);
-                }
-            }
-            break;
-        }
+        auto const textCursor = crispy::Point{
+            textPosition_.x + gridMetrics_.cellSize.width * cellCount_,
+            textPosition_.y
+        };
+        endSequence();
+        // Since there's no gap between the last and the new sequence,
+        // we can easily recompute the beginning of the text position ourselfs.
+        setTextPosition(textCursor);
+        textStartFound_ = true;
+        color_ = _color;
+        style_ = _style;
     }
-    clusterOffset_++;
-}
 
-void StandardTextShaper::extend(crispy::span<char32_t const> _codepoints)
-{
     for (char32_t const codepoint: _codepoints)
     {
         codepoints_.emplace_back(codepoint);
-        clusters_.emplace_back(clusterOffset_);
+        clusters_.emplace_back(cellCount_);
     }
+    cellCount_++;
 }
 
-void StandardTextShaper::endLine()
+void StandardTextShaper::beginFrame()
 {
-    flushPendingSegments();
-    reset(Coordinate{currentLine_ + 1, 1}, style_, color_);
+    assert(codepoints_.empty());
+    assert(clusters_.empty());
+    //assert(cellCount_ == 0);
+
+    auto constexpr DefaultColor = RGBColor{};
+    style_ = TextStyle::Invalid;
+    color_ = DefaultColor;
 }
 
-void StandardTextShaper::endFrame()
+void StandardTextShaper::setTextPosition(crispy::Point _position)
+{
+    textPosition_ = _position;
+}
+
+void StandardTextShaper::endSequence()
 {
     if (!codepoints_.empty())
-        // Last line wasn't finished via endLine(), so flush now.
-        flushPendingSegments();
+    {
+        text::shape_result const& glyphPositions = cachedGlyphPositions();
+        renderGlyphs_(textPosition_, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+    }
 
-    auto constexpr TopLeft = Coordinate{1, 1};
-    auto constexpr DefaultColor = RGBColor{};
-
-    reset(TopLeft, TextStyle::Invalid, DefaultColor);
-    state_ = State::Empty;
-}
-
-void StandardTextShaper::flushPendingSegments()
-{
-    text::shape_result const& glyphPositions = cachedGlyphPositions();
-    crispy::Point const point = gridMetrics_.map(Coordinate{currentLine_, startColumn_});
-
-    renderGlyphs_(point, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+    codepoints_.clear();
+    clusters_.clear();
+    cellCount_ = 0;
+    textStartFound_ = false;
 }
 
 text::shape_result const& StandardTextShaper::cachedGlyphPositions()

@@ -40,26 +40,13 @@ class BackgroundRenderer : public Renderable {
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(Coordinate const& _pos, RGBColor const& _color);
-
-    void renderOnce(Coordinate const& _pos, RGBColor const& _color, int _count);
-
-    void renderPendingCells();
-    void finish();
+    void renderCell(RenderCell const& _cell);
 
   private:
-    void renderCellRange();
-
     // private data
     GridMetrics const& gridMetrics_;
     RGBColor const& defaultColor_;
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
-
-    // input state
-    RGBColor color_{};
-    int row_ = 0;
-    int startColumn_ = 0;
-    int columnCount_ = 0;
 };
 
 } // end namespace

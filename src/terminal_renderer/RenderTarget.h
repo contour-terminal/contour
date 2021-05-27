@@ -14,6 +14,11 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+
+#include <terminal/Color.h>
+#include <terminal/Grid.h> // cell attribs
+#include <terminal/Image.h> // ImageFragment
+
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 
@@ -21,6 +26,17 @@
 #include <memory>
 
 namespace terminal::renderer {
+
+struct RenderCell
+{
+    std::u32string codepoints; // TODO: I wonder if that would also work for Cell (performance-wise).
+    crispy::Point position;
+    CharacterStyleMask flags;
+    RGBColor foregroundColor;
+    RGBColor backgroundColor;
+    RGBColor decorationColor;
+    std::optional<ImageFragment> image;
+};
 
 struct AtlasTextureInfo {
     std::string atlasName;

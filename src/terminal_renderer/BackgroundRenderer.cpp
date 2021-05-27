@@ -34,68 +34,21 @@ void BackgroundRenderer::setRenderTarget(RenderTarget& _renderTarget)
     Renderable::setRenderTarget(_renderTarget);
 }
 
-void BackgroundRenderer::renderCell(Coordinate const& _pos, RGBColor const& _color)
+void BackgroundRenderer::renderCell(RenderCell const& _cell)
 {
-    if (row_ == _pos.row && color_ == _color)
-        columnCount_++;
-    else
-    {
-        renderPendingCells();
-
-        startColumn_ = _pos.column;
-        row_ = _pos.row;
-        color_ = _color;
-        columnCount_ = 1;
-    }
-}
-
-void BackgroundRenderer::renderOnce(Coordinate const& _pos, RGBColor const& _color, int _count)
-{
-    renderPendingCells();
-
-    startColumn_ = _pos.column;
-    row_ = _pos.row;
-    columnCount_ = _count;
-    color_ = _color;
-
-    renderCellRange();
-}
-
-void BackgroundRenderer::renderCellRange()
-{
-    if (color_ == defaultColor_)
+    if (_cell.backgroundColor == defaultColor_)
         return;
 
-    auto const pos = gridMetrics_.map(startColumn_, row_);
-
     renderTarget().renderRectangle(
-        pos.x,
-        pos.y,
-        gridMetrics_.cellSize.width * columnCount_,
+        _cell.position.x,
+        _cell.position.y,
+        gridMetrics_.cellSize.width,
         gridMetrics_.cellSize.height,
-        static_cast<float>(color_.red) / 255.0f,
-        static_cast<float>(color_.green) / 255.0f,
-        static_cast<float>(color_.blue) / 255.0f,
+        static_cast<float>(_cell.backgroundColor.red) / 255.0f,
+        static_cast<float>(_cell.backgroundColor.green) / 255.0f,
+        static_cast<float>(_cell.backgroundColor.blue) / 255.0f,
         opacity_
     );
-
-    columnCount_ = 0;
-    startColumn_ = 0;
-    row_ = 0;
-}
-
-void BackgroundRenderer::renderPendingCells()
-{
-    if (columnCount_)
-        renderCellRange();
-}
-
-void BackgroundRenderer::finish()
-{
-    startColumn_ = 0;
-    row_ = 0;
-    color_ = RGBColor{};
-    columnCount_ = 0;
 }
 
 } // end namespace

@@ -22,6 +22,7 @@
 #include <terminal_renderer/ImageRenderer.h>
 #include <terminal_renderer/TextRenderer.h>
 
+#include <terminal/Image.h>
 #include <terminal/Terminal.h>
 
 #include <crispy/size.h>
@@ -34,6 +35,13 @@
 #include <utility>
 
 namespace terminal::renderer {
+
+struct RenderCursor
+{
+    crispy::Point position;
+    CursorShape shape;
+    int width;
+};
 
 /**
  * Renders a terminal's screen to the current OpenGL context.
@@ -125,14 +133,13 @@ class Renderer : public Renderable {
     }
 
   private:
-    /// Invoked internally by render() function.
-    uint64_t renderInternalNoFlush(Terminal& _terminal,
-                                   std::chrono::steady_clock::time_point _now,
-                                   terminal::Coordinate const& _currentMousePosition,
-                                   bool _pressure);
+    std::optional<RenderCursor> fetchRenderableCells(
+            Terminal& _terminal,
+            terminal::Coordinate _currentMousePosition,
+            std::vector<RenderCell>& _output);
+    void renderCells(std::vector<RenderCell> const& _renderableCells);
 
-    void renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected);
-    void renderCursor(Terminal const& _terminal);
+    std::optional<RenderCursor> renderCursor(Terminal const& _terminal);
 
     void executeImageDiscards();
 
@@ -148,6 +155,8 @@ class Renderer : public Renderable {
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
+
+    std::vector<RenderCell> renderableCells_;   //!< reusable buffer for holding cells to be rendered.
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

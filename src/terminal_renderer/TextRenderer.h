@@ -185,6 +185,10 @@ public:
 
     virtual void clearCache() = 0;
 
+    virtual void beginFrame() = 0;
+
+    virtual void setTextPosition(crispy::Point _position) = 0;
+
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
     ///
@@ -192,11 +196,8 @@ public:
                             TextStyle _style,
                             RGBColor _color) = 0;
 
-    /// Marks the end of a rendered line.
-    virtual void endLine() = 0;
-
-    /// Marks the end of a rendered frame.
-    virtual void endFrame() = 0;
+    /// Marks the end of a consecutive sequence of text.
+    virtual void endSequence() = 0;
 };
 
 // Fully featured Text shaping pipeline.
@@ -205,31 +206,21 @@ class StandardTextShaper : public TextShaper
 public:
     StandardTextShaper(GridMetrics const& _gridMetrics,
                        text::shaper& _textShaper,
-                       FontDescriptions const& _fontDescriptions,
                        FontKeys const& _fonts,
                        RenderGlyphs _renderGlyphs);
 
     void clearCache() override;
 
-    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
-    /// at the end of the currently filled line.
-    ///
+    void beginFrame() override;
+    void setTextPosition(crispy::Point _position) override;
     void appendCell(crispy::span<char32_t const> _codepoints,
                     TextStyle _style,
                     RGBColor _color) override;
-
-    /// Marks the end of a rendered line.
-    void endLine() override;
-
-    /// Marks the end of a rendered frame.
-    void endFrame() override;
+    void endSequence() override;
 
 private:
     // helper functions
     //
-    void reset(Coordinate _pos, TextStyle _style, RGBColor _color);
-    void extend(crispy::span<char32_t const> _codepoints);
-    void flushPendingSegments();
     text::shape_result const& cachedGlyphPositions();
     text::shape_result requestGlyphPositions();
     text::shape_result shapeRun(unicode::run_segmenter::range const& _run);
@@ -237,23 +228,20 @@ private:
     // fonts, text shaper, and grid metrics
     //
     GridMetrics const& gridMetrics_;
-    FontDescriptions const& fontDescriptions_;
     FontKeys const& fonts_;
     text::shaper& textShaper_;
     RenderGlyphs renderGlyphs_;
 
     // render states
     //
-    enum class State { Empty, Filling };
-    State state_ = State::Empty;
-    int currentLine_ = 1;
-    int startColumn_ = 1;
+    crispy::Point textPosition_;
     TextStyle style_ = TextStyle::Invalid;
     RGBColor color_{};
 
     std::vector<char32_t> codepoints_;
     std::vector<int> clusters_;
-    int clusterOffset_ = 0;
+    int cellCount_ = 0;
+    bool textStartFound_ = false;
 
     // text shaping cache
     //
@@ -287,7 +275,8 @@ class TextRenderer : public Renderable {
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
-    void schedule(Coordinate const& _pos, Cell const& _cell, RGBColor const& _color);
+    void start();
+    void renderCell(RenderCell const& _cell);
     void finish();
 
     void debugCache(std::ostream& _textOutput) const;
@@ -328,8 +317,6 @@ class TextRenderer : public Renderable {
     GridMetrics const& gridMetrics_;
     FontDescriptions& fontDescriptions_;
     FontKeys const& fonts_;
-
-    int row_ = 1;
 
     // performance optimizations
     //

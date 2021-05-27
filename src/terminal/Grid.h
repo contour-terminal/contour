@@ -70,9 +70,9 @@ struct Margin {
 // }}}
 
 // {{{ CharacterStyleMask
-class CharacterStyleMask {
+class CharacterStyleMask { // CellFlags
   public:
-	enum Mask : uint16_t {
+	enum Mask : uint32_t {
 		Bold = (1 << 0),
 		Faint = (1 << 1),
 		Italic = (1 << 2),
@@ -88,6 +88,12 @@ class CharacterStyleMask {
         Framed = (1 << 12),
         Encircled = (1 << 13),
         Overline = (1 << 14),
+        Image = (1 << 15),
+
+        // The following flags are for internal use only.
+        Hover = (1 << 16), // Marks the cell with "Hyperlink is currently hovered" hint.
+        CellSequenceStart = (1 << 17), // Marks the beginning of a consecutive sequence of non-empty grid cells.
+        CellSequenceEnd = (1 << 18), // Marks the end of a consecutive sequence of non-empty grid cells.
 	};
 
 	constexpr CharacterStyleMask() : mask_{} {}
@@ -108,8 +114,6 @@ class CharacterStyleMask {
   private:
 	unsigned mask_;
 };
-
-std::string to_string(CharacterStyleMask _mask);
 
 constexpr bool operator==(CharacterStyleMask const& a, CharacterStyleMask const& b) noexcept
 {

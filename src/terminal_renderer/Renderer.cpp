@@ -28,10 +28,12 @@ using std::scoped_lock;
 using std::chrono::steady_clock;
 using std::make_unique;
 using std::move;
+using std::nullopt;
 using std::optional;
 using std::reference_wrapper;
 using std::tuple;
 using std::unique_ptr;
+using std::vector;
 
 namespace terminal::renderer {
 
@@ -181,91 +183,27 @@ uint64_t Renderer::render(Terminal& _terminal,
 {
     gridMetrics_.pageSize = _terminal.screenSize();
 
+    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
+    auto const changes = _terminal.tick(_now);
+    auto const cursorOpt = fetchRenderableCells(_terminal, _currentMousePosition, renderableCells_);
+
     executeImageDiscards();
-
-    uint64_t const changes = renderInternalNoFlush(_terminal, _now, _currentMousePosition, _pressure);
-
-    backgroundRenderer_.renderPendingCells();
-    backgroundRenderer_.finish();
+    textRenderer_.start();
+    textRenderer_.setPressure(pressure);
+    renderCells(renderableCells_);
     textRenderer_.finish();
+    renderableCells_.clear();
+
+    if (cursorOpt)
+    {
+        auto const& cursor = *cursorOpt;
+        cursorRenderer_.setShape(cursor.shape);
+        cursorRenderer_.render(cursor.position, cursor.width);
+    }
 
     renderTarget().execute();
 
     return changes;
-}
-
-uint64_t Renderer::renderInternalNoFlush(Terminal& _terminal,
-                                         steady_clock::time_point _now,
-                                         terminal::Coordinate const& _currentMousePosition,
-                                         bool _pressure)
-{
-    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
-    textRenderer_.setPressure(pressure);
-
-    auto _l = scoped_lock{_terminal};
-    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::DECMode::ReverseVideo);
-    auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
-
-    renderCursor(_terminal);
-
-    auto const renderHyperlinks = !pressure && _terminal.screen().contains(_currentMousePosition);
-
-    auto const currentMousePositionRel = Coordinate{
-        _currentMousePosition.row - _terminal.viewport().relativeScrollOffset(),
-        _currentMousePosition.column
-    };
-
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-    }
-
-    auto const changes = _terminal.preRender(_now);
-
-    _terminal.screen().render(
-        [&](Coordinate const& _pos, Cell const& _cell) {
-            auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
-            auto const selected = _terminal.isSelectedAbsolute(absolutePos);
-            renderCell(_pos, _cell, reverseVideo, selected);
-        },
-        _terminal.viewport().absoluteScrollOffset()
-    );
-
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
-    }
-
-    return changes;
-}
-
-void Renderer::renderCursor(Terminal const& _terminal)
-{
-    bool const shouldDisplayCursor = _terminal.screen().cursor().visible
-        && (_terminal.cursorDisplay() == CursorDisplay::Steady || _terminal.cursorBlinkActive());
-
-    // TODO: check if CursorStyle has changed, and update render context accordingly.
-    if (shouldDisplayCursor && _terminal.viewport().isLineVisible(_terminal.screen().cursor().position.row))
-    {
-        Cell const& cursorCell = _terminal.screen().at(_terminal.screen().cursor().position);
-
-        auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
-                                                              : CursorShape::Rectangle;
-
-        cursorRenderer_.setShape(cursorShape);
-
-        cursorRenderer_.render(
-            gridMetrics_.map(
-                _terminal.screen().cursor().position.column,
-                _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset()
-            ),
-            cursorCell.width()
-        );
-    }
 }
 
 tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
@@ -279,15 +217,161 @@ tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell con
     return tuple{a, b};
 }
 
-void Renderer::renderCell(Coordinate const& _pos, Cell const& _cell, bool _reverseVideo, bool _selected)
+constexpr CharacterStyleMask toCellStyle(Decorator _decorator)
 {
-    auto const [fg, bg] = makeColors(colorPalette_, _cell, _reverseVideo, _selected);
+    switch (_decorator)
+    {
+        case Decorator::Underline: return CharacterStyleMask::Underline;
+        case Decorator::DoubleUnderline: return CharacterStyleMask::DoublyUnderlined;
+        case Decorator::CurlyUnderline: return CharacterStyleMask::CurlyUnderlined;
+        case Decorator::DottedUnderline: return CharacterStyleMask::DottedUnderline;
+        case Decorator::DashedUnderline: return CharacterStyleMask::DashedUnderline;
+        case Decorator::Overline: return CharacterStyleMask::Overline;
+        case Decorator::CrossedOut: return CharacterStyleMask::CrossedOut;
+        case Decorator::Framed: return CharacterStyleMask::Framed;
+        case Decorator::Encircle: return CharacterStyleMask::Encircled;
+    }
+    return CharacterStyleMask{};
+}
 
-    backgroundRenderer_.renderCell(_pos, bg);
-    decorationRenderer_.renderCell(_pos, _cell);
-    textRenderer_.schedule(_pos, _cell, fg);
-    if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
-        imageRenderer_.renderImage(gridMetrics_.map(_pos), fragment.value());
+optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
+                                                      terminal::Coordinate _currentMousePosition,
+                                                      vector<RenderCell>& _output)
+{
+    auto _l = scoped_lock{_terminal};
+
+    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
+    auto const renderHyperlinks = _terminal.screen().contains(_currentMousePosition);
+    auto const currentMousePositionRel = Coordinate{
+        _currentMousePosition.row - _terminal.viewport().relativeScrollOffset(),
+        _currentMousePosition.column
+    };
+
+    if (renderHyperlinks)
+    {
+        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
+        if (cellAtMouse.hyperlink())
+            cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+    }
+
+    bool gap = true;
+    int lineNr = 0; // 0 for no-line-number.
+    _terminal.screen().render(
+        [&](Coordinate const& _pos, Cell const& _cell) // mutable
+        {
+            auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
+            auto const selected = _terminal.isSelectedAbsolute(absolutePos);
+            auto const [fg, bg] = makeColors(colorPalette_, _cell, reverseVideo, selected);
+
+            auto const cellEmpty = (_cell.codepoints().empty() || _cell.codepoints()[0] == 0x20)
+                                && !_cell.imageFragment().has_value();
+            auto const customBackground = bg != colorPalette_.defaultBackground;
+            if (cellEmpty && !customBackground)
+            {
+                gap = true;
+                if (!_output.empty())
+                    _output.back().flags |= CharacterStyleMask::CellSequenceEnd;
+                return;
+            }
+
+            RenderCell cell;
+            cell.backgroundColor = bg;
+            cell.foregroundColor = fg;
+            cell.decorationColor = _cell.attributes().getUnderlineColor(colorPalette_);
+            cell.position = gridMetrics_.map(_pos);
+            cell.flags = _cell.attributes().styles;
+
+            if (!_cell.codepoints().empty())
+            {
+                assert(!_cell.imageFragment().has_value());
+                cell.codepoints.insert(cell.codepoints.begin(),
+                                       _cell.codepoints().begin(),
+                                       _cell.codepoints().end());
+            }
+            else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
+            {
+                assert(_cell.codepoints().empty());
+                cell.flags |= CharacterStyleMask::Image; // TODO: this should already be there.
+                cell.image = _cell.imageFragment();
+            }
+
+            if (lineNr != _pos.row)
+            {
+                lineNr = _pos.row;
+                if (!_output.empty())
+                    _output.back().flags |= CharacterStyleMask::CellSequenceEnd;
+                cell.flags |= CharacterStyleMask::CellSequenceStart;
+            }
+
+            if (gap)
+            {
+                gap = false;
+                cell.flags |= CharacterStyleMask::CellSequenceStart;
+            }
+
+            if (_cell.hyperlink())
+            {
+                auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
+                                    ? colorPalette_.hyperlinkDecoration.hover
+                                    : colorPalette_.hyperlinkDecoration.normal;
+                auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
+                                    ? decorationRenderer_.hyperlinkHover()
+                                    : decorationRenderer_.hyperlinkNormal();
+                cell.flags |= toCellStyle(decoration);
+                cell.decorationColor = color;
+            }
+
+            _output.emplace_back(std::move(cell));
+        },
+        _terminal.viewport().absoluteScrollOffset()
+    );
+
+    if (renderHyperlinks)
+    {
+        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
+        if (cellAtMouse.hyperlink())
+            cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
+    }
+
+    return renderCursor(_terminal);
+}
+
+void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
+{
+    for (RenderCell const& cell: _renderableCells)
+    {
+        backgroundRenderer_.renderCell(cell);
+        decorationRenderer_.renderCell(cell);
+        textRenderer_.renderCell(cell);
+        if (cell.image.has_value())
+            imageRenderer_.renderImage(cell.position, *cell.image);
+    }
+}
+
+optional<RenderCursor> Renderer::renderCursor(Terminal const& _terminal)
+{
+    bool const shouldDisplayCursor = _terminal.screen().cursor().visible
+        && (_terminal.cursorDisplay() == CursorDisplay::Steady || _terminal.cursorBlinkActive());
+
+    if (!shouldDisplayCursor || !_terminal.viewport().isLineVisible(_terminal.screen().cursor().position.row))
+        return nullopt;
+
+    // TODO: check if CursorStyle has changed, and update render context accordingly.
+
+    Cell const& cursorCell = _terminal.screen().at(_terminal.screen().cursor().position);
+
+    auto const cursorShape = _terminal.screen().focused() ? _terminal.cursorShape()
+                                                          : CursorShape::Rectangle;
+
+    return RenderCursor{
+        gridMetrics_.map(
+            _terminal.screen().cursor().position.column,
+            _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset()
+        ),
+        cursorShape,
+        cursorCell.width()
+    };
 }
 
 void Renderer::dumpState(std::ostream& _textOutput) const

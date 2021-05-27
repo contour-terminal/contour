@@ -283,44 +283,23 @@ void DecorationRenderer::rebuild()
     // TODO: Encircle
 }
 
-void DecorationRenderer::renderCell(Coordinate const& _pos,
-                                    Cell const& _cell)
+void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
-    if (_cell.hyperlink())
-    {
-        auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                            ? colorPalette_.hyperlinkDecoration.hover
-                            : colorPalette_.hyperlinkDecoration.normal;
-        auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
-                            ? hyperlinkHover_
-                            : hyperlinkNormal_;
-        renderDecoration(decoration, _pos, 1, color);
-    }
-    else
-    {
-        auto constexpr underlineMappings = array{
-            pair{CharacterStyleMask::Underline, Decorator::Underline},
-            pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
-            pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
-            pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
-            pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
-        };
-
-        for (auto const& mapping : underlineMappings)
-            if (_cell.attributes().styles & mapping.first)
-                renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
-    }
-
-    auto constexpr supplementalMappings = array{
+    auto constexpr mappings = array{
+        pair{CharacterStyleMask::Underline, Decorator::Underline},
+        pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
+        pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
+        pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
+        pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
         pair{CharacterStyleMask::Overline, Decorator::Overline},
         pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},
         pair{CharacterStyleMask::Framed, Decorator::Framed},
         pair{CharacterStyleMask::Encircled, Decorator::Encircle},
     };
 
-    for (auto const& mapping : supplementalMappings)
-        if (_cell.attributes().styles & mapping.first)
-            renderDecoration(mapping.second, _pos, 1, _cell.attributes().getUnderlineColor(colorPalette_));
+    for (auto const& mapping: mappings)
+        if (_cell.flags & mapping.first)
+            renderDecoration(mapping.second, _cell.position, 1, _cell.decorationColor);
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)
@@ -338,34 +317,13 @@ optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _
 }
 
 void DecorationRenderer::renderDecoration(Decorator _decoration,
-                                          Coordinate const& _pos,
+                                          crispy::Point _pos,
                                           int _columnCount,
                                           RGBColor const& _color)
 {
-    if (optional<DataRef> const dataRef = getDataRef(_decoration); dataRef.has_value())
-    {
-#if 0 // !defined(NDEBUG)
-        cout << fmt::format(
-            "DecorationRenderer.renderDecoration: {} from {} with {} cells, color {}\n",
-            _decoration, _pos, _columnCount, _color
-        );
-#endif
-        auto const pos = gridMetrics_.map(_pos);
-        auto const x = pos.x;
-        auto const y = pos.y;
-        auto const z = 0;
-        auto const color = array{
-            float(_color.red) / 255.0f,
-            float(_color.green) / 255.0f,
-            float(_color.blue) / 255.0f,
-            1.0f
-        };
-        atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
-        auto const advanceX = static_cast<int>(gridMetrics_.cellSize.width);
-        for (int const i : crispy::times(_columnCount))
-            textureScheduler().renderTexture({textureInfo, i * advanceX + x, y, z, color});
-    }
-    else
+    optional<DataRef> const dataRef = getDataRef(_decoration);
+
+    if (!dataRef.has_value())
     {
 #if 0 // !defined(NDEBUG)
         cout << fmt::format(
@@ -373,7 +331,28 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
             _decoration, _pos, _columnCount, _color
         );
 #endif
+        return;
     }
+
+#if 0 // !defined(NDEBUG)
+    cout << fmt::format(
+        "DecorationRenderer.renderDecoration: {} from {} with {} cells, color {}\n",
+        _decoration, _pos, _columnCount, _color
+    );
+#endif
+    auto const x = _pos.x;
+    auto const y = _pos.y;
+    auto const z = 0;
+    auto const color = array{
+        float(_color.red) / 255.0f,
+        float(_color.green) / 255.0f,
+        float(_color.blue) / 255.0f,
+        1.0f
+    };
+    atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
+    auto const advanceX = static_cast<int>(gridMetrics_.cellSize.width);
+    for (int const i : crispy::times(_columnCount))
+        textureScheduler().renderTexture({textureInfo, i * advanceX + x, y, z, color});
 }
 
 } // end namespace

@@ -140,12 +140,12 @@ class Terminal : public ScreenEvents {
     uint64_t render(std::chrono::steady_clock::time_point _now, Renderer const& pass, RenderPasses... passes) const
     {
         auto _l = std::lock_guard{*this};
-        auto const changes = preRender(_now);
+        auto const changes = tick(_now);
         renderPass(pass, std::forward<RenderPasses>(passes)...);
         return changes;
     }
 
-    uint64_t preRender(std::chrono::steady_clock::time_point _now) const
+    uint64_t tick(std::chrono::steady_clock::time_point _now) const
     {
         auto const changes = changes_.exchange(0);
         updateCursorVisibilityState(_now);

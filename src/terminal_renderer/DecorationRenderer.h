@@ -74,12 +74,15 @@ class DecorationRenderer : public Renderable {
         hyperlinkHover_ = _hover;
     }
 
-    void renderCell(Coordinate const& _pos, Cell const& _cell);
+    void renderCell(RenderCell const& _cell);
 
     void renderDecoration(Decorator _decoration,
-                          Coordinate const& _pos,
+                          crispy::Point _pos,
                           int _columnCount,
                           RGBColor const& _color);
+
+    constexpr Decorator hyperlinkNormal() const noexcept { return hyperlinkNormal_; }
+    constexpr Decorator hyperlinkHover() const noexcept { return hyperlinkHover_; }
 
   private:
     using Atlas = atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
