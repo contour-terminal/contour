@@ -85,6 +85,9 @@ void TextRenderer::clearCache()
 
 void TextRenderer::updateFontMetrics()
 {
+    if (!renderTargetAvailable())
+        return;
+
     clearCache();
 }
 

@@ -106,6 +106,9 @@ profiles:
             # Initial font size in pixels.
             size: 12
 
+            # DPI scaling factor applied on top of the system configured on (default: 1.0).
+            dpi_scale: 1.0
+
             # Indicates whether or not to include *only* monospace fonts in the font and
             # font-fallback list (Default: true).
             only_monospace: true

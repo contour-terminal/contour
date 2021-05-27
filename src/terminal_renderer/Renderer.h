@@ -80,7 +80,8 @@ class Renderer : public Renderable {
 
     void setMargin(int _leftMargin, int _bottomMargin) noexcept
     {
-        renderTarget_->setMargin(_leftMargin, _bottomMargin);
+        if (renderTarget_)
+            renderTarget_->setMargin(_leftMargin, _bottomMargin);
         gridMetrics_.pageMargin.left = _leftMargin;
         gridMetrics_.pageMargin.bottom = _bottomMargin;
     }

@@ -831,6 +831,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             profile.fonts.size = MinimumFontSize;
         }
 
+        softLoadValue(fonts, "dpi_scale", profile.fonts.dpiScale);
+
         bool onlyMonospace = true;
         softLoadValue(fonts, "only_monospace", onlyMonospace, true);
 

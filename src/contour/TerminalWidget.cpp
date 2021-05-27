@@ -58,6 +58,8 @@
 #include <tuple>
 #include <vector>
 
+#include <range/v3/all.hpp>
+
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
@@ -273,6 +275,14 @@ namespace // {{{
         debuglog(WidgetTag).write("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
+
+    constexpr crispy::Point scale(crispy::Point p, double s)
+    {
+        return crispy::Point{
+            static_cast<int>(static_cast<double>(p.x) * s),
+            static_cast<int>(static_cast<double>(p.y) * s)
+        };
+    }
 } // }}}
 
 TerminalWidget::TerminalWidget(config::Config _config,
@@ -292,7 +302,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
         config_.bypassMouseProtocolModifier,
-        crispy::Point{ logicalDpiX(), logicalDpiY() },
+        scale(crispy::Point{ logicalDpiX(), logicalDpiY() }, profile_.fonts.dpiScale),
         profile().fonts,
         profile().cursorShape,
         profile().cursorDisplay,
@@ -639,6 +649,9 @@ bool TerminalWidget::reloadConfigWithProfile(std::string const& _profileName)
     try
     {
         loadConfigFromFile(newConfig, config_.backingFilePath.string());
+
+        for (config::TerminalProfile& profile: newConfig.profiles | ranges::views::values)
+            profile.fonts.dpi = scale(crispy::Point{ logicalDpiX(), logicalDpiY() }, profile.fonts.dpiScale);
     }
     catch (exception const& e)
     {

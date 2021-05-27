@@ -129,7 +129,6 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
 {
     terminal::Terminal& terminal = _terminalView.terminal();
     terminal::Screen& screen = terminal.screen();
-    config::TerminalProfile const* profile = _newConfig.profile(_profileName);
     auto const _l = scoped_lock{terminal};
 
     terminal.setWordDelimiters(_newConfig.wordDelimiters);
@@ -142,7 +141,11 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
     screen.setMaxImageSize(_newConfig.maxImageSize);
     screen.setMode(terminal::DECMode::SixelScrolling, _newConfig.sixelScrolling);
 
-    if (profile != nullptr)
+    config::TerminalProfile const* profile = _newConfig.profile(_profileName);
+    if (profile == nullptr)
+        return;
+
+    if (!_terminalView.renderer().renderTargetAvailable())
         return;
 
     _terminalView.renderer().setFonts(profile->fonts);

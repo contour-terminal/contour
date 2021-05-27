@@ -122,6 +122,9 @@ void Renderer::executeImageDiscards()
 
 void Renderer::clearCache()
 {
+    if (!renderTargetAvailable())
+        return;
+
     renderTarget().clearCache();
 
     // TODO(?): below functions are actually doing the same again and again and again. delete them (and their functions for that)
@@ -132,6 +135,8 @@ void Renderer::clearCache()
 
 void Renderer::setFonts(FontDescriptions _fontDescriptions)
 {
+    textShaper_->clear_cache();
+    textShaper_->set_dpi(_fontDescriptions.dpi);
     fontDescriptions_ = move(_fontDescriptions);
     fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
     updateFontMetrics();
@@ -158,6 +163,9 @@ void Renderer::updateFontMetrics()
 
 void Renderer::setRenderSize(Size _size)
 {
+    if (!renderTargetAvailable())
+        return;
+
     renderTarget().setRenderSize(_size);
 }
 

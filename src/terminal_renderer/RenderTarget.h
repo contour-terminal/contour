@@ -78,6 +78,7 @@ class Renderable {
     virtual void clearCache() {}
     virtual void setRenderTarget(RenderTarget& _renderTarget) { renderTarget_ = &_renderTarget; }
     RenderTarget& renderTarget() { return *renderTarget_; }
+    constexpr bool renderTargetAvailable() const noexcept { return renderTarget_; }
 
     atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return renderTarget_->monochromeAtlasAllocator(); }
     atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return renderTarget_->coloredAtlasAllocator(); }

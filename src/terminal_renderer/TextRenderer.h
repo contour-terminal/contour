@@ -137,6 +137,8 @@ namespace terminal::renderer {
 struct GridMetrics;
 
 struct FontDescriptions {
+    double dpiScale = 1.0;
+    crispy::Point dpi = {96, 96};
     text::font_size size;
     text::font_description regular;
     text::font_description bold;

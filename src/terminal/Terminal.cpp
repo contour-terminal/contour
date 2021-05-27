@@ -106,7 +106,7 @@ void Terminal::screenUpdateThread()
         if (auto const n = pty_->read(buf.data(), buf.size()); n != -1)
         {
             //log("outputThread.data: {}", crispy::escape(buf, buf + n));
-            lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+            auto const _l = lock_guard{*this};
             screen_.write(buf.data(), n);
         }
         else
@@ -366,7 +366,7 @@ void Terminal::flushInput()
 
 void Terminal::writeToScreen(char const* data, size_t size)
 {
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+    auto const _l = lock_guard{*this};
     screen_.write(data, size);
 }
 
@@ -398,7 +398,8 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
 
 void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
 {
-    lock_guard<decltype(screenLock_)> _l{ screenLock_ };
+    auto const _l = lock_guard{*this};
+
     screen_.resize(_cells);
     if (_pixels)
         screen_.setCellPixelSize(*_pixels / _cells);
