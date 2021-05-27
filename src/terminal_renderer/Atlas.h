@@ -73,6 +73,32 @@ struct TextureInfo {
     TextureInfo(TextureInfo const&) = delete;
     TextureInfo& operator=(TextureInfo const&) = delete;
 
+    // NOTE: std::reference_wrapper doesn't have a move constructor,
+    // it could have copied ;-(
+    // so I sadly have to fully provide a absolutely obvious
+    // constructor, otherwise compiling in C++20 mode will fail. ;-(
+    TextureInfo(AtlasID _atlas,
+                std::reference_wrapper<std::string const> _atlasName,
+                crispy::Point _offset,
+                crispy::Size _bitmapSize,
+                crispy::Size _targetSize,
+                float _relativeX,
+                float _relativeY,
+                float _relativeWidth,
+                float _relativeHeight,
+                int _user):
+        atlas{ _atlas },
+        atlasName{ _atlasName },
+        offset{ _offset },
+        bitmapSize{ _bitmapSize },
+        targetSize{ _targetSize },
+        relativeX{ _relativeX },
+        relativeY{ _relativeY },
+        relativeWidth{ _relativeWidth },
+        relativeHeight{ _relativeHeight },
+        user{ _user }
+    {}
+
     AtlasID atlas;                  // for example 0 for GL_TEXTURE0
     std::reference_wrapper<std::string const> atlasName;
     crispy::Point offset;           // Offset into the 2D texture atlas.
