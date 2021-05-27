@@ -144,7 +144,7 @@ struct GraphicsAttributes {
 
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette) const noexcept
     {
-        float const opacity = [=]() {
+        float const opacity = [this]() {
             if (styles & CharacterStyleMask::Faint)
                 return 0.5f;
             else
@@ -157,7 +157,7 @@ struct GraphicsAttributes {
 
     std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
     {
-        float const opacity = [=]() { // TODO: don't make opacity dependant on Faint-attribute.
+        float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
             if (styles & CharacterStyleMask::Faint)
                 return 0.5f;
             else

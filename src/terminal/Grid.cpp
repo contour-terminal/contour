@@ -352,7 +352,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         generate_n(
             back_inserter(lines_),
             fillLineCount,
-            [=]() { return Line(screenSize_.width, Cell{}, wrappableFlag); }
+            [this, wrappableFlag]() { return Line(screenSize_.width, Cell{}, wrappableFlag); }
         );
 
         screenSize_.height = _newHeight;
