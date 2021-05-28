@@ -1,7 +1,7 @@
 # Milestone 0.2.0 checklist
 
-- [ ] bold / italic: config should inherit family from regular and adapt bold/italic style
-- [ ] resizeing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
+- [ ] scrollbar not updated properly?
+- [ ] resizing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
 - [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)
 
