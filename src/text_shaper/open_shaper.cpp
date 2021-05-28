@@ -95,6 +95,19 @@ auto constexpr MissingGlyphId = 0xFFFDu;
 
 namespace // {{{ helper
 {
+    constexpr string_view fcSpacingStr(int _value) noexcept
+    {
+        using namespace std::string_view_literals;
+        switch (_value)
+        {
+            case FC_PROPORTIONAL: return "proportional"sv;
+            case FC_DUAL: return "dual"sv;
+            case FC_MONO: return "mono"sv;
+            case FC_CHARCELL: return "charcell"sv;
+            default: return "INVALID"sv;
+        }
+    }
+
     static string ftErrorStr(FT_Error _errorCode)
     {
         #undef __FTERRORS_H__
@@ -376,21 +389,12 @@ namespace // {{{ helper
             FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
             if (_fd.force_spacing)
             {
-                if (_fd.spacing == font_spacing::proportional)
+                if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL) ||
+                    (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
                 {
-                    if (spacing != FC_PROPORTIONAL)
-                    {
-                        debuglog(FontFallbackTag).write("Skipping font: {} ({})", (char const*)(file), spacing);
-                        continue;
-                    }
-                }
-                else if (_fd.spacing == font_spacing::mono)
-                {
-                    if (spacing < FC_DUAL)
-                    {
-                        debuglog(FontFallbackTag).write("Skipping font: {} ({})", (char const*)(file), spacing);
-                        continue;
-                    }
+                    debuglog(FontFallbackTag).write("Skipping font: {} ({} < {}).",
+                        (char const*)(file), fcSpacingStr(spacing), fcSpacingStr(FC_DUAL));
+                    continue;
                 }
             }
 
@@ -479,7 +483,7 @@ namespace // {{{ helper
 
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
-                debuglog(FontFallbackTag).write("Failed to FT_Select_Size: {}", ftErrorStr(ec));
+                debuglog(FontFallbackTag).write("Failed to FT_Select_Size(index={}, file={}): {}", strikeIndex, _path, ftErrorStr(ec));
         }
         else
         {
@@ -487,7 +491,7 @@ namespace // {{{ helper
 
             if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size, _dpi.x, _dpi.y); ec != FT_Err_Ok)
             {
-                debuglog(FontFallbackTag).write("Failed to FT_Set_Char_Size: {}\n", ftErrorStr(ec));
+                debuglog(FontFallbackTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
             }
         }
 
