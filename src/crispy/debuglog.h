@@ -27,12 +27,14 @@
     #if __has_include(<version>)
         #include <version>
     #endif
-    #if __has_include(<source_location>)
-        #include <source_location>
-        #define CRISPY_SOURCE_LOCATION 1
-        #define CRISPY_SOURCE_LOCATION_CURRENT() crispy::source_location::current()
-        namespace crispy { using source_location = std::source_location; }
-    #elif __has_include(<experimental/source_location>)
+    // XXX GCC 11 seems to break here because it states that <source_location> is present
+    //     and indeed it can be included, but it's not exposing std::source_location.
+    // #if __has_include(<source_location>)
+    //     #include <source_location>
+    //     #define CRISPY_SOURCE_LOCATION 1
+    //     #define CRISPY_SOURCE_LOCATION_CURRENT() crispy::source_location::current()
+    //     namespace crispy { using source_location = std::source_location; }
+    #if __has_include(<experimental/source_location>)
         #include <experimental/source_location>
         #define CRISPY_SOURCE_LOCATION 1
         #define CRISPY_SOURCE_LOCATION_CURRENT() crispy::source_location::current()
