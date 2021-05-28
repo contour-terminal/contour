@@ -1,3 +1,7 @@
 debian/tmp/usr/bin/contour
 debian/tmp/usr/share/applications/contour.desktop
+debian/tmp/usr/share/contour/Changelog.md
+debian/tmp/usr/share/contour/LICENSE.txt
+debian/tmp/usr/share/contour/README.md
+debian/tmp/usr/share/contour/shell-integration.zsh
 debian/tmp/usr/share/pixmaps/contour.png
