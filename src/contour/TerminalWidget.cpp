@@ -730,10 +730,13 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 
 void TerminalWidget::wheelEvent(QWheelEvent* _event)
 {
-    auto const button = _event->delta() > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
-    auto const mouseEvent = terminal::MousePressEvent{button, makeModifier(_event->modifiers())};
+    auto const modifier = makeModifier(_event->modifiers());
+    auto const yDelta = _event->pixelDelta().y() ? _event->pixelDelta().y() : _event->angleDelta().y();
+    if (!yDelta)
+        return;
 
-    executeInput(mouseEvent);
+    auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+    executeInput(terminal::MousePressEvent{button, modifier});
 }
 
 bool TerminalWidget::executeInput(terminal::MouseEvent const& _mouseEvent)
