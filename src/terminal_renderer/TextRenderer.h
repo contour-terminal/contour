@@ -201,13 +201,13 @@ public:
 };
 
 // Fully featured Text shaping pipeline.
-class StandardTextShaper : public TextShaper
+class ComplexTextShaper : public TextShaper
 {
 public:
-    StandardTextShaper(GridMetrics const& _gridMetrics,
-                       text::shaper& _textShaper,
-                       FontKeys const& _fonts,
-                       RenderGlyphs _renderGlyphs);
+    ComplexTextShaper(GridMetrics const& _gridMetrics,
+                      text::shaper& _textShaper,
+                      FontKeys const& _fonts,
+                      RenderGlyphs _renderGlyphs);
 
     void clearCache() override;
 
@@ -254,9 +254,38 @@ private:
 };
 
 // Text rendering pipeline optimized for performance with simple feature set.
-class SimpleTextShaper : public TextShaper
-{
-    // TODO: only uses trivial freetype like calls (plus caching, no harfbuzz)
+class SimpleTextShaper : public TextShaper {
+public:
+    SimpleTextShaper(GridMetrics const& _gridMetrics,
+                     text::shaper& _textShaper,
+                     FontKeys const& _fonts,
+                     RenderGlyphs _renderGlyphs);
+    void clearCache() override {};
+    void beginFrame() override {};
+    void setTextPosition(crispy::Point _position) override;
+    void appendCell(crispy::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color) override;
+    void endSequence() override;
+
+    text::shape_result cachedGlyphPositions(crispy::span<char32_t const> _codepoints, TextStyle _style);
+    void flush();
+
+private:
+    GridMetrics const& gridMetrics_;
+    FontKeys const& fonts_;
+    text::shaper& textShaper_;
+    RenderGlyphs renderGlyphs_;
+
+    // cache
+    std::list<std::u32string> cacheKeyStorage_;
+    std::unordered_map<TextCacheKey, text::shape_result> cache_;
+
+    // input state
+    crispy::Point textPosition_ = {0, 0};
+    RGBColor color_;
+
+    // intermediate states
+    int cellCount_ = 0;
+    std::vector<text::glyph_position> glyphPositions_;
 };
 // }}}
 
@@ -267,6 +296,8 @@ class TextRenderer : public Renderable {
                  text::shaper& _textShaper,
                  FontDescriptions& _fontDescriptions,
                  FontKeys const& _fontKeys);
+
+    void setComplexTextShaping(bool _complex);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;

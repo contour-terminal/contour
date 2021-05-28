@@ -46,9 +46,28 @@ using namespace std::placeholders;
 
 namespace terminal::renderer {
 
-namespace {
+namespace // {{{ helpers
+{
     auto const TextRendererTag = crispy::debugtag::make("renderer.text", "Logs details about text rendering.");
-}
+
+    text::font_key getFontForStyle(FontKeys const& _fonts, TextStyle _style)
+    {
+        switch (_style)
+        {
+            case TextStyle::Invalid:
+                break;
+            case TextStyle::Regular:
+                return _fonts.regular;
+            case TextStyle::Bold:
+                return _fonts.bold;
+            case TextStyle::Italic:
+                return _fonts.italic;
+            case TextStyle::BoldItalic:
+                return _fonts.boldItalic;
+        }
+        return _fonts.regular;
+    }
+} // }}}
 
 TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
                            text::shaper& _textShaper,
@@ -57,14 +76,31 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     gridMetrics_{ _gridMetrics },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{ _textShaper },
-    textRenderingEngine_(make_unique<StandardTextShaper>(
-        gridMetrics_,
-        textShaper_,
-        fonts_,
-        std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
-    ))
+    textShaper_{ _textShaper }
 {
+    setComplexTextShaping(true); // TODO: configurable
+}
+
+void TextRenderer::setComplexTextShaping(bool _complex)
+{
+    if (_complex)
+    {
+        textRenderingEngine_ = make_unique<ComplexTextShaper>(
+            gridMetrics_,
+            textShaper_,
+            fonts_,
+            std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+        );
+    }
+    else
+    {
+        textRenderingEngine_ = make_unique<SimpleTextShaper>(
+            gridMetrics_,
+            textShaper_,
+            fonts_,
+            std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+        );
+    }
 }
 
 void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
@@ -406,11 +442,11 @@ void TextRenderer::debugCache(std::ostream& _textOutput) const
     }
 }
 
-// {{{ StandardTextShaper
-StandardTextShaper::StandardTextShaper(GridMetrics const& _gridMetrics,
-                                       text::shaper& _textShaper,
-                                       FontKeys const& _fonts,
-                                       RenderGlyphs _renderGlyphs):
+// {{{ ComplexTextShaper
+ComplexTextShaper::ComplexTextShaper(GridMetrics const& _gridMetrics,
+                                     text::shaper& _textShaper,
+                                     FontKeys const& _fonts,
+                                     RenderGlyphs _renderGlyphs):
     gridMetrics_{ _gridMetrics },
     fonts_{ _fonts },
     textShaper_{ _textShaper },
@@ -418,15 +454,15 @@ StandardTextShaper::StandardTextShaper(GridMetrics const& _gridMetrics,
 {
 }
 
-void StandardTextShaper::clearCache()
+void ComplexTextShaper::clearCache()
 {
     cacheKeyStorage_.clear();
     cache_.clear();
 }
 
-void StandardTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
-                                    TextStyle _style,
-                                    RGBColor _color)
+void ComplexTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
+                                   TextStyle _style,
+                                   RGBColor _color)
 {
     bool const attribsChanged = _color != color_ || _style != style_;
     bool const textStartFound = !textStartFound_ &&
@@ -454,7 +490,7 @@ void StandardTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
     cellCount_++;
 }
 
-void StandardTextShaper::beginFrame()
+void ComplexTextShaper::beginFrame()
 {
     assert(codepoints_.empty());
     assert(clusters_.empty());
@@ -465,12 +501,12 @@ void StandardTextShaper::beginFrame()
     color_ = DefaultColor;
 }
 
-void StandardTextShaper::setTextPosition(crispy::Point _position)
+void ComplexTextShaper::setTextPosition(crispy::Point _position)
 {
     textPosition_ = _position;
 }
 
-void StandardTextShaper::endSequence()
+void ComplexTextShaper::endSequence()
 {
     if (!codepoints_.empty())
     {
@@ -484,7 +520,7 @@ void StandardTextShaper::endSequence()
     textStartFound_ = false;
 }
 
-text::shape_result const& StandardTextShaper::cachedGlyphPositions()
+text::shape_result const& ComplexTextShaper::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
     if (auto const cached = cache_.find(TextCacheKey{codepoints, style_}); cached != cache_.end())
@@ -496,7 +532,7 @@ text::shape_result const& StandardTextShaper::cachedGlyphPositions()
     return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
-text::shape_result StandardTextShaper::requestGlyphPositions()
+text::shape_result ComplexTextShaper::requestGlyphPositions()
 {
     text::shape_result glyphPositions;
     unicode::run_segmenter::range run;
@@ -507,28 +543,11 @@ text::shape_result StandardTextShaper::requestGlyphPositions()
     return glyphPositions;
 }
 
-text::shape_result StandardTextShaper::shapeRun(unicode::run_segmenter::range const& _run)
+text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range const& _run)
 {
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
-    auto const font = [&]() -> text::font_key {
-        if (isEmojiPresentation)
-            return fonts_.emoji;
-        switch (style_)
-        {
-            case TextStyle::Invalid:
-                break;
-            case TextStyle::Regular:
-                return fonts_.regular;
-            case TextStyle::Bold:
-                return fonts_.bold;
-            case TextStyle::Italic:
-                return fonts_.italic;
-            case TextStyle::BoldItalic:
-                return fonts_.boldItalic;
-        }
-        return fonts_.regular;
-    }();
+    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, style_);
 
     // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
     auto const count = static_cast<int>(_run.end - _run.start);
@@ -573,6 +592,73 @@ text::shape_result StandardTextShaper::shapeRun(unicode::run_segmenter::range co
     }
 
     return gpos;
+}
+// }}}
+
+// {{{ SimpleTextShaper
+SimpleTextShaper::SimpleTextShaper(GridMetrics const& _gridMetrics,
+                                   text::shaper& _textShaper,
+                                   FontKeys const& _fonts,
+                                   RenderGlyphs _renderGlyphs):
+    gridMetrics_{ _gridMetrics },
+    fonts_{ _fonts },
+    textShaper_{ _textShaper },
+    renderGlyphs_{ std::move(_renderGlyphs) }
+{
+}
+
+void SimpleTextShaper::setTextPosition(crispy::Point _position)
+{
+    textPosition_ = _position;
+}
+
+void SimpleTextShaper::appendCell(crispy::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)
+{
+    if (color_ != _color)
+    {
+        flush();
+        color_ = _color;
+    }
+
+    optional<text::glyph_position> glyphPositionOpt = textShaper_.shape(getFontForStyle(fonts_, _style), _codepoints[0]);
+    if (!glyphPositionOpt.has_value())
+        return;
+
+    glyphPositions_.emplace_back(glyphPositionOpt.value());
+    cellCount_++;
+}
+
+text::shape_result SimpleTextShaper::cachedGlyphPositions(crispy::span<char32_t const> _codepoints, TextStyle _style)
+{
+    auto const codepoints = u32string_view(&_codepoints[0], _codepoints.size());
+    if (auto const cached = cache_.find(TextCacheKey{codepoints, _style}); cached != cache_.end())
+        return cached->second;
+
+    auto glyphPositionOpt = textShaper_.shape(getFontForStyle(fonts_, _style), _codepoints[0]);
+    if (!glyphPositionOpt.has_value())
+        return {};
+
+    cacheKeyStorage_.emplace_back(u32string{codepoints});
+    auto const cacheKeyFromStorage = TextCacheKey{ cacheKeyStorage_.back(), _style };
+
+    return cache_[cacheKeyFromStorage] = {glyphPositionOpt.value()};
+}
+
+void SimpleTextShaper::endSequence()
+{
+    flush();
+}
+
+void SimpleTextShaper::flush()
+{
+    if (glyphPositions_.empty())
+        return;
+
+    text::shape_result const& glyphPositions = glyphPositions_;
+    renderGlyphs_(textPosition_, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+    glyphPositions_.clear();
+    textPosition_.x += gridMetrics_.cellSize.width * cellCount_;
+    cellCount_ = 0;
 }
 // }}}
 
