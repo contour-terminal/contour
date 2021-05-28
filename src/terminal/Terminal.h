@@ -153,8 +153,8 @@ class Terminal : public ScreenEvents {
     }
     // }}}
 
-    void lock() const { screenLock_.lock(); }
-    void unlock() const { screenLock_.unlock(); }
+    void lock() const { outerLock_.lock(); innerLock_.lock(); }
+    void unlock() const { outerLock_.unlock(); innerLock_.unlock(); }
 
     /// Only access this when having locked.
     Screen const& screen() const noexcept { return screen_; }
@@ -298,7 +298,8 @@ class Terminal : public ScreenEvents {
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
     Screen screen_;
-    std::mutex mutable screenLock_;
+    std::mutex mutable outerLock_;
+    std::mutex mutable innerLock_;
     std::unique_ptr<std::thread> screenUpdateThread_;
     Viewport viewport_;
     std::unique_ptr<Selector> selector_;

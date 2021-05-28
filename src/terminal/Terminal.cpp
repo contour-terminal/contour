@@ -97,7 +97,7 @@ void Terminal::start()
 
 void Terminal::screenUpdateThread()
 {
-    constexpr size_t BufSize = 32 * 1024;
+    constexpr size_t BufSize = std::numeric_limits<uint16_t>::max();
     vector<char> buf;
     buf.resize(BufSize);
 
