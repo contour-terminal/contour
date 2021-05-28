@@ -52,6 +52,20 @@ class span {
     constexpr reference_type front() const noexcept { return begin_[0]; }
     constexpr reference_type back() const noexcept { return std::prev(end_); }
 
+    reference_type at(size_t i)
+    {
+        if (i >= size())
+            throw std::invalid_argument("i");
+        return begin_[i];
+    }
+
+    const_reference_type at(size_t i) const
+    {
+        if (i >= size())
+            throw std::invalid_argument("i");
+        return begin_[i];
+    }
+
   private:
     pointer_type begin_;
     pointer_type end_;
