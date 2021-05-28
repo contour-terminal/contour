@@ -713,6 +713,19 @@ optional<glyph_position> open_shaper::shape(font_key _font,
 
     glyph_index glyphIndex{ FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
     if (!glyphIndex.value)
+    {
+        for (auto const& fallbackFont : fontInfo.fallbackFonts)
+        {
+            optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
+            if (!fallbackKeyOpt.has_value())
+                continue;
+            FontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
+            glyphIndex = glyph_index{ FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), _codepoint) };
+            if (glyphIndex.value)
+                break;
+        }
+    }
+    if (!glyphIndex.value)
         return nullopt;
 
     glyph_position gpos{};
