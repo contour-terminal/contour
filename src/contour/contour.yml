@@ -109,9 +109,14 @@ profiles:
             # DPI scaling factor applied on top of the system configured on (default: 1.0).
             dpi_scale: 1.0
 
-            # Indicates whether or not to include *only* monospace fonts in the font and
-            # font-fallback list (Default: true).
-            only_monospace: true
+            # Text shaping related settings
+            text_shaping:
+                # Determines what shaping method to use. Value options are:
+                # - complex : Full Unicode text shaping, supporting most Unicode features.
+                # - simple  : reduced text shaping features for improved
+                #             performance but lesser Unicode features.
+                # Default: complex
+                method: complex
 
             # Font render modes tell the font rasterizer engine what rendering technique to use.
             #
@@ -121,6 +126,10 @@ profiles:
             # - gray         Uses standard gray-scaled anti-aliasing.
             # - monochrome   Uses pixel-perfect bitmap rendering.
             render_mode: gray
+
+            # Indicates whether or not to include *only* monospace fonts in the font and
+            # font-fallback list (Default: true).
+            only_monospace: true
 
             # Font family to use for displaying text.
             #

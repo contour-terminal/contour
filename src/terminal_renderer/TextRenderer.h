@@ -136,6 +136,12 @@ namespace terminal::renderer {
 
 struct GridMetrics;
 
+enum class TextShapingMethod
+{
+    Complex, //!< fully featured text shaping
+    Simple,  //!< minimal text shaping for optimum performance butless features
+};
+
 struct FontDescriptions {
     double dpiScale = 1.0;
     crispy::Point dpi = {96, 96};
@@ -146,6 +152,7 @@ struct FontDescriptions {
     text::font_description boldItalic;
     text::font_description emoji;
     text::render_mode renderMode;
+    TextShapingMethod textShapingMethod;
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
@@ -297,8 +304,6 @@ class TextRenderer : public Renderable {
                  FontDescriptions& _fontDescriptions,
                  FontKeys const& _fontKeys);
 
-    void setComplexTextShaping(bool _complex);
-
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
@@ -313,6 +318,8 @@ class TextRenderer : public Renderable {
     void debugCache(std::ostream& _textOutput) const;
 
   private:
+    void setTextShapingMethod(TextShapingMethod _method);
+
     void renderRun(crispy::Point _startPos,
                    crispy::span<text::glyph_position const> _glyphPositions,
                    RGBColor _color);

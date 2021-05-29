@@ -78,28 +78,29 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     fonts_{ _fonts },
     textShaper_{ _textShaper }
 {
-    setComplexTextShaping(true); // TODO: configurable
+    setTextShapingMethod(fontDescriptions_.textShapingMethod);
 }
 
-void TextRenderer::setComplexTextShaping(bool _complex)
+void TextRenderer::setTextShapingMethod(TextShapingMethod _method)
 {
-    if (_complex)
+    switch (_method)
     {
-        textRenderingEngine_ = make_unique<ComplexTextShaper>(
-            gridMetrics_,
-            textShaper_,
-            fonts_,
-            std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
-        );
-    }
-    else
-    {
-        textRenderingEngine_ = make_unique<SimpleTextShaper>(
-            gridMetrics_,
-            textShaper_,
-            fonts_,
-            std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
-        );
+        case TextShapingMethod::Complex:
+            textRenderingEngine_ = make_unique<ComplexTextShaper>(
+                gridMetrics_,
+                textShaper_,
+                fonts_,
+                std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+            );
+            return;
+        case TextShapingMethod::Simple:
+            textRenderingEngine_ = make_unique<SimpleTextShaper>(
+                gridMetrics_,
+                textShaper_,
+                fonts_,
+                std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
+            );
+            return;
     }
 }
 
@@ -120,6 +121,8 @@ void TextRenderer::clearCache()
 
 void TextRenderer::updateFontMetrics()
 {
+    setTextShapingMethod(fontDescriptions_.textShapingMethod);
+
     if (!renderTargetAvailable())
         return;
 

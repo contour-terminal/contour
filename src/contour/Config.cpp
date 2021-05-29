@@ -833,6 +833,20 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
 
         softLoadValue(fonts, "dpi_scale", profile.fonts.dpiScale);
 
+        if (auto textShaping = fonts["text_shaping"]; textShaping)
+        {
+            if (auto methodNode = textShaping["method"]; methodNode)
+            {
+                auto const methodStr = methodNode.as<string>();
+                if (methodStr == "simple")
+                    profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Simple;
+                else if (methodStr == "complex")
+                    profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Complex;
+                else
+                    debuglog(ConfigTag).write("Unknown text shaping method: {}", methodStr);
+            }
+        }
+
         bool onlyMonospace = true;
         softLoadValue(fonts, "only_monospace", onlyMonospace, true);
 
