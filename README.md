@@ -2,23 +2,23 @@
 [![CI Build](https://github.com/christianparpart/contour/workflows/Build/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3ABuild)
 [![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
+[![Discord](https://img.shields.io/discord/479301317337284608.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/https://discord.gg/ktvcTUkc)
 
 ![alt text](docs/contour-screenshots-0.1.0-pre2.png "Screenshot")
 
-**IMPORTANT: THIS PROJECT IS IN ALPHA STAGE & ACTIVE DEVELOPMENT**
+**IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
 
-`contour` is a modern terminal emulator, for everyday use. It is fully separating emulation from
-graphical representation for clear separation of concerns but also for special features to come
-before version 1.0 is released (headless terminal server with GUI & TUI frontends).
+`contour` is a modern terminal emulator, for everyday use. It is aiming
+for power users with a modern feature mindset.
 
 ## Features
 
-- ✅ Available on all 3 major platforms, Linux, OS/X, Windows.
+- ✅ Available on all 3 major platforms, Linux, OS/X, Windows (Windows is alpha stage).
+- ✅ GPU-accelerated rendering.
+- ✅ Font ligatures support (such as in Fira Code).
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emojis :-)
 - ✅ Unicode: Grapheme cluster support
-- ✅ Font ligatures support (such as in Fira Code).
 - ✅ Bold and italic fonts
-- ✅ GPU-accelerated rendering.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 - ✅ Runtime configuration reload
@@ -26,12 +26,12 @@ before version 1.0 is released (headless terminal server with GUI & TUI frontend
 - ✅ Key binding customization
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
-- ✅ Synchronized rendering (via `DECSM 2026` / `DECRM 2026`)
+- ✅ [Synchronized rendering](https://github.com/christianparpart/contour/wiki/VTExtensions#synchronized-output) (via `DECSM 2026` / `DECRM 2026`)
 - ✅ Text reflow (configurable via `DECSM 2027` / `DECRM 2027`)
-- ✅ Clickable hyperlinks via OSC 8
+- ✅ Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
 - ✅ Clipboard setting via OSC 52
 - ✅ Sixel inline images
-- ✅ Terminal page buffer capture VT extension to quickly extract contents.
+- ✅ Terminal page [buffer capture VT extension](https://github.com/christianparpart/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
 
 ## CLI - Command Line Interface
 
