@@ -286,15 +286,15 @@ void DecorationRenderer::rebuild()
 void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
     auto constexpr mappings = array{
-        pair{CharacterStyleMask::Underline, Decorator::Underline},
-        pair{CharacterStyleMask::DoublyUnderlined, Decorator::DoubleUnderline},
-        pair{CharacterStyleMask::CurlyUnderlined, Decorator::CurlyUnderline},
-        pair{CharacterStyleMask::DottedUnderline, Decorator::DottedUnderline},
-        pair{CharacterStyleMask::DashedUnderline, Decorator::DashedUnderline},
-        pair{CharacterStyleMask::Overline, Decorator::Overline},
-        pair{CharacterStyleMask::CrossedOut, Decorator::CrossedOut},
-        pair{CharacterStyleMask::Framed, Decorator::Framed},
-        pair{CharacterStyleMask::Encircled, Decorator::Encircle},
+        pair{CellFlags::Underline, Decorator::Underline},
+        pair{CellFlags::DoublyUnderlined, Decorator::DoubleUnderline},
+        pair{CellFlags::CurlyUnderlined, Decorator::CurlyUnderline},
+        pair{CellFlags::DottedUnderline, Decorator::DottedUnderline},
+        pair{CellFlags::DashedUnderline, Decorator::DashedUnderline},
+        pair{CellFlags::Overline, Decorator::Overline},
+        pair{CellFlags::CrossedOut, Decorator::CrossedOut},
+        pair{CellFlags::Framed, Decorator::Framed},
+        pair{CellFlags::Encircled, Decorator::Encircle},
     };
 
     for (auto const& mapping: mappings)

@@ -150,21 +150,21 @@ namespace // {{{ helper
 
         // TODO: _sgr.styles;
         auto constexpr masks = array{
-            pair{CharacterStyleMask::Bold, "1"sv},
-            pair{CharacterStyleMask::Faint, "2"sv},
-            pair{CharacterStyleMask::Italic, "3"sv},
-            pair{CharacterStyleMask::Underline, "4"sv},
-            pair{CharacterStyleMask::Blinking, "5"sv},
-            pair{CharacterStyleMask::Inverse, "7"sv},
-            pair{CharacterStyleMask::Hidden, "8"sv},
-            pair{CharacterStyleMask::CrossedOut, "9"sv},
-            pair{CharacterStyleMask::DoublyUnderlined, "4:2"sv},
-            pair{CharacterStyleMask::CurlyUnderlined, "4:3"sv},
-            pair{CharacterStyleMask::DottedUnderline, "4:4"sv},
-            pair{CharacterStyleMask::DashedUnderline, "4:5"sv},
-            pair{CharacterStyleMask::Framed, "51"sv},
-            // TODO(impl or completely remove): pair{CharacterStyleMask::Encircled, ""sv},
-            pair{CharacterStyleMask::Overline, "53"sv},
+            pair{CellFlags::Bold, "1"sv},
+            pair{CellFlags::Faint, "2"sv},
+            pair{CellFlags::Italic, "3"sv},
+            pair{CellFlags::Underline, "4"sv},
+            pair{CellFlags::Blinking, "5"sv},
+            pair{CellFlags::Inverse, "7"sv},
+            pair{CellFlags::Hidden, "8"sv},
+            pair{CellFlags::CrossedOut, "9"sv},
+            pair{CellFlags::DoublyUnderlined, "4:2"sv},
+            pair{CellFlags::CurlyUnderlined, "4:3"sv},
+            pair{CellFlags::DottedUnderline, "4:4"sv},
+            pair{CellFlags::DashedUnderline, "4:5"sv},
+            pair{CellFlags::Framed, "51"sv},
+            // TODO(impl or completely remove): pair{CellFlags::Encircled, ""sv},
+            pair{CellFlags::Overline, "53"sv},
         };
 
         for (auto const& mask: masks)
@@ -637,7 +637,7 @@ std::string Screen::screenshot(function<string(int)> const& _postLine) const
         {
             Cell const& cell = at({row, col});
 
-            if (cell.attributes().styles & CharacterStyleMask::Bold)
+            if (cell.attributes().styles & CellFlags::Bold)
                 writer.sgr_add(GraphicsRendition::Bold);
             else
                 writer.sgr_add(GraphicsRendition::Normal);
@@ -1528,73 +1528,73 @@ void Screen::setGraphicsRendition(GraphicsRendition _rendition)
             cursor_.graphicsRendition = {};
             break;
         case GraphicsRendition::Bold:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Bold;
+            cursor_.graphicsRendition.styles |= CellFlags::Bold;
             break;
         case GraphicsRendition::Faint:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Faint;
+            cursor_.graphicsRendition.styles |= CellFlags::Faint;
             break;
         case GraphicsRendition::Italic:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Italic;
+            cursor_.graphicsRendition.styles |= CellFlags::Italic;
             break;
         case GraphicsRendition::Underline:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Underline;
+            cursor_.graphicsRendition.styles |= CellFlags::Underline;
             break;
         case GraphicsRendition::Blinking:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Blinking;
+            cursor_.graphicsRendition.styles |= CellFlags::Blinking;
             break;
         case GraphicsRendition::Inverse:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Inverse;
+            cursor_.graphicsRendition.styles |= CellFlags::Inverse;
             break;
         case GraphicsRendition::Hidden:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Hidden;
+            cursor_.graphicsRendition.styles |= CellFlags::Hidden;
             break;
         case GraphicsRendition::CrossedOut:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::CrossedOut;
+            cursor_.graphicsRendition.styles |= CellFlags::CrossedOut;
             break;
         case GraphicsRendition::DoublyUnderlined:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::DoublyUnderlined;
+            cursor_.graphicsRendition.styles |= CellFlags::DoublyUnderlined;
             break;
         case GraphicsRendition::CurlyUnderlined:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::CurlyUnderlined;
+            cursor_.graphicsRendition.styles |= CellFlags::CurlyUnderlined;
             break;
         case GraphicsRendition::DottedUnderline:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::DottedUnderline;
+            cursor_.graphicsRendition.styles |= CellFlags::DottedUnderline;
             break;
         case GraphicsRendition::DashedUnderline:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::DashedUnderline;
+            cursor_.graphicsRendition.styles |= CellFlags::DashedUnderline;
             break;
         case GraphicsRendition::Framed:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Framed;
+            cursor_.graphicsRendition.styles |= CellFlags::Framed;
             break;
         case GraphicsRendition::Overline:
-            cursor_.graphicsRendition.styles |= CharacterStyleMask::Overline;
+            cursor_.graphicsRendition.styles |= CellFlags::Overline;
             break;
         case GraphicsRendition::Normal:
-            cursor_.graphicsRendition.styles &= ~(CharacterStyleMask::Bold | CharacterStyleMask::Faint);
+            cursor_.graphicsRendition.styles &= ~(CellFlags::Bold | CellFlags::Faint);
             break;
         case GraphicsRendition::NoItalic:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Italic;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Italic;
             break;
         case GraphicsRendition::NoUnderline:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Underline;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Underline;
             break;
         case GraphicsRendition::NoBlinking:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Blinking;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Blinking;
             break;
         case GraphicsRendition::NoInverse:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Inverse;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Inverse;
             break;
         case GraphicsRendition::NoHidden:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Hidden;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Hidden;
             break;
         case GraphicsRendition::NoCrossedOut:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::CrossedOut;
+            cursor_.graphicsRendition.styles &= ~CellFlags::CrossedOut;
             break;
         case GraphicsRendition::NoFramed:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Framed;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Framed;
             break;
         case GraphicsRendition::NoOverline:
-            cursor_.graphicsRendition.styles &= ~CharacterStyleMask::Overline;
+            cursor_.graphicsRendition.styles &= ~CellFlags::Overline;
             break;
     }
 }

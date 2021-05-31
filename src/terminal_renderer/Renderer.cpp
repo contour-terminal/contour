@@ -217,21 +217,21 @@ tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell con
     return tuple{a, b};
 }
 
-constexpr CharacterStyleMask toCellStyle(Decorator _decorator)
+constexpr CellFlags toCellStyle(Decorator _decorator)
 {
     switch (_decorator)
     {
-        case Decorator::Underline: return CharacterStyleMask::Underline;
-        case Decorator::DoubleUnderline: return CharacterStyleMask::DoublyUnderlined;
-        case Decorator::CurlyUnderline: return CharacterStyleMask::CurlyUnderlined;
-        case Decorator::DottedUnderline: return CharacterStyleMask::DottedUnderline;
-        case Decorator::DashedUnderline: return CharacterStyleMask::DashedUnderline;
-        case Decorator::Overline: return CharacterStyleMask::Overline;
-        case Decorator::CrossedOut: return CharacterStyleMask::CrossedOut;
-        case Decorator::Framed: return CharacterStyleMask::Framed;
-        case Decorator::Encircle: return CharacterStyleMask::Encircled;
+        case Decorator::Underline: return CellFlags::Underline;
+        case Decorator::DoubleUnderline: return CellFlags::DoublyUnderlined;
+        case Decorator::CurlyUnderline: return CellFlags::CurlyUnderlined;
+        case Decorator::DottedUnderline: return CellFlags::DottedUnderline;
+        case Decorator::DashedUnderline: return CellFlags::DashedUnderline;
+        case Decorator::Overline: return CellFlags::Overline;
+        case Decorator::CrossedOut: return CellFlags::CrossedOut;
+        case Decorator::Framed: return CellFlags::Framed;
+        case Decorator::Encircle: return CellFlags::Encircled;
     }
-    return CharacterStyleMask{};
+    return CellFlags{};
 }
 
 optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
@@ -271,7 +271,7 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             {
                 gap = true;
                 if (!_output.empty())
-                    _output.back().flags |= CharacterStyleMask::CellSequenceEnd;
+                    _output.back().flags |= CellFlags::CellSequenceEnd;
                 return;
             }
 
@@ -292,7 +292,7 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
             {
                 assert(_cell.codepoints().empty());
-                cell.flags |= CharacterStyleMask::Image; // TODO: this should already be there.
+                cell.flags |= CellFlags::Image; // TODO: this should already be there.
                 cell.image = _cell.imageFragment();
             }
 
@@ -300,14 +300,14 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             {
                 lineNr = _pos.row;
                 if (!_output.empty())
-                    _output.back().flags |= CharacterStyleMask::CellSequenceEnd;
-                cell.flags |= CharacterStyleMask::CellSequenceStart;
+                    _output.back().flags |= CellFlags::CellSequenceEnd;
+                cell.flags |= CellFlags::CellSequenceStart;
             }
 
             if (gap)
             {
                 gap = false;
-                cell.flags |= CharacterStyleMask::CellSequenceStart;
+                cell.flags |= CellFlags::CellSequenceStart;
             }
 
             if (_cell.hyperlink())

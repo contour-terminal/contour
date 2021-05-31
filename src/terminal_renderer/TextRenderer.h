@@ -41,7 +41,7 @@ namespace terminal::renderer
 
     struct CacheKey {
         std::u32string_view text;
-        CharacterStyleMask styles;
+        CellFlags styles;
 
         bool operator==(CacheKey const& _rhs) const noexcept
         {

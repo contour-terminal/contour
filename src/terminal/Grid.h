@@ -69,8 +69,8 @@ struct Margin {
 };
 // }}}
 
-// {{{ CharacterStyleMask
-class CharacterStyleMask { // CellFlags
+// {{{ CellFlags
+class CellFlags {
   public:
 	enum Mask : uint32_t {
 		Bold = (1 << 0),
@@ -96,12 +96,12 @@ class CharacterStyleMask { // CellFlags
         CellSequenceEnd = (1 << 18), // Marks the end of a consecutive sequence of non-empty grid cells.
 	};
 
-	constexpr CharacterStyleMask() : mask_{} {}
-	constexpr CharacterStyleMask(Mask m) : mask_{m} {}
-	constexpr CharacterStyleMask(unsigned m) : mask_{m} {}
-	constexpr CharacterStyleMask(CharacterStyleMask const& _other) noexcept : mask_{_other.mask_} {}
+	constexpr CellFlags() : mask_{} {}
+	constexpr CellFlags(Mask m) : mask_{m} {}
+	constexpr CellFlags(unsigned m) : mask_{m} {}
+	constexpr CellFlags(CellFlags const& _other) noexcept : mask_{_other.mask_} {}
 
-	constexpr CharacterStyleMask& operator=(CharacterStyleMask const& _other) noexcept
+	constexpr CellFlags& operator=(CellFlags const& _other) noexcept
 	{
 		mask_ = _other.mask_;
 		return *this;
@@ -115,24 +115,24 @@ class CharacterStyleMask { // CellFlags
 	unsigned mask_;
 };
 
-constexpr bool operator==(CharacterStyleMask const& a, CharacterStyleMask const& b) noexcept
+constexpr bool operator==(CellFlags const& a, CellFlags const& b) noexcept
 {
 	return a.mask() == b.mask();
 }
 
-constexpr CharacterStyleMask& operator|=(CharacterStyleMask& a, CharacterStyleMask const& b) noexcept
+constexpr CellFlags& operator|=(CellFlags& a, CellFlags const& b) noexcept
 {
     a = a | b;
 	return a;
 }
 
-constexpr CharacterStyleMask& operator&=(CharacterStyleMask& a, CharacterStyleMask const& b) noexcept
+constexpr CellFlags& operator&=(CellFlags& a, CellFlags const& b) noexcept
 {
     a = a & b;
 	return a;
 }
 
-constexpr bool operator!(CharacterStyleMask const& a) noexcept
+constexpr bool operator!(CellFlags const& a) noexcept
 {
 	return a.mask() == 0;
 }
@@ -144,38 +144,38 @@ struct GraphicsAttributes {
     Color foregroundColor{DefaultColor{}};
     Color backgroundColor{DefaultColor{}};
     Color underlineColor{DefaultColor{}};
-    CharacterStyleMask styles{};
+    CellFlags styles{};
 
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette) const noexcept
     {
         float const opacity = [this]() {
-            if (styles & CharacterStyleMask::Faint)
+            if (styles & CellFlags::Faint)
                 return 0.5f;
             else
                 return 1.0f;
         }();
 
-        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+        bool const bright = (styles & CellFlags::Bold) != 0;
         return apply(_colorPalette, underlineColor, ColorTarget::Foreground, bright) * opacity;
     }
 
     std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
     {
         float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
-            if (styles & CharacterStyleMask::Faint)
+            if (styles & CellFlags::Faint)
                 return 0.5f;
             else
                 return 1.0f;
         }();
 
-        bool const bright = (styles & CharacterStyleMask::Bold) != 0;
+        bool const bright = (styles & CellFlags::Bold) != 0;
 
         auto const [fgColorTarget, bgColorTarget] =
             _reverseVideo
                 ? std::pair{ ColorTarget::Background, ColorTarget::Foreground }
                 : std::pair{ ColorTarget::Foreground, ColorTarget::Background };
 
-        return (styles & CharacterStyleMask::Inverse) == 0
+        return (styles & CellFlags::Inverse) == 0
             ? std::pair{ apply(_colorPalette, foregroundColor, fgColorTarget, bright) * opacity,
                          apply(_colorPalette, backgroundColor, bgColorTarget, false) }
             : std::pair{ apply(_colorPalette, backgroundColor, bgColorTarget, bright) * opacity,
@@ -393,6 +393,12 @@ class Line { // {{{
     Line(Line&&) = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) = default;
+
+    void clear() noexcept
+    {
+        for (Cell& cell: buffer_)
+            cell.reset();
+    }
 
     Buffer* operator->() noexcept { return &buffer_; }
     Buffer const* operator->()  const noexcept { return &buffer_; }

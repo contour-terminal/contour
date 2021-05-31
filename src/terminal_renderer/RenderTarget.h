@@ -31,7 +31,7 @@ struct RenderCell
 {
     std::u32string codepoints; // TODO: I wonder if that would also work for Cell (performance-wise).
     crispy::Point position;
-    CharacterStyleMask flags;
+    CellFlags flags;
     RGBColor foregroundColor;
     RGBColor backgroundColor;
     RGBColor decorationColor;

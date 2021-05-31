@@ -132,24 +132,24 @@ void TextRenderer::updateFontMetrics()
 void TextRenderer::renderCell(RenderCell const& _cell)
 {
     auto const style = [&](auto mask) constexpr -> TextStyle {
-        if ((mask & (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
-                == (CharacterStyleMask::Mask::Bold | CharacterStyleMask::Mask::Italic))
+        if ((mask & (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
+                == (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
             return TextStyle::BoldItalic;
-        if (mask & CharacterStyleMask::Mask::Bold)
+        if (mask & CellFlags::Mask::Bold)
             return TextStyle::Bold;
-        if (mask & CharacterStyleMask::Mask::Italic)
+        if (mask & CellFlags::Mask::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
     }(_cell.flags);
 
     auto const codepoints = crispy::span(_cell.codepoints.data(), _cell.codepoints.size());
 
-    if (_cell.flags & CharacterStyleMask::CellSequenceStart)
+    if (_cell.flags & CellFlags::CellSequenceStart)
         textRenderingEngine_->setTextPosition(_cell.position);
 
     textRenderingEngine_->appendCell(codepoints, style, _cell.foregroundColor);
 
-    if (_cell.flags & CharacterStyleMask::CellSequenceEnd)
+    if (_cell.flags & CellFlags::CellSequenceEnd)
         textRenderingEngine_->endSequence();
 }
 

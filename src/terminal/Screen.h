@@ -764,7 +764,7 @@ namespace fmt // {{{
     };
 
     template <>
-    struct formatter<terminal::CharacterStyleMask> {
+    struct formatter<terminal::CellFlags> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
         {
@@ -772,9 +772,9 @@ namespace fmt // {{{
         }
 
         template <typename FormatContext>
-        auto format(terminal::CharacterStyleMask const& _mask, FormatContext& ctx)
+        auto format(terminal::CellFlags const& _mask, FormatContext& ctx)
         {
-            using Mask = terminal::CharacterStyleMask;
+            using Mask = terminal::CellFlags;
             auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 12>{
                 std::pair{Mask::Bold, "bold"},
                 std::pair{Mask::Faint, "faint"},
