@@ -73,7 +73,7 @@ namespace // {{{ helper
 // {{{ Cell impl
 string Cell::toUtf8() const
 {
-    if (codepointCount_)
+    if (!codepoints_.empty())
         return unicode::convert_to<char>(codepoints());
     else
         return " ";

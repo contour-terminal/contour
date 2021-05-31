@@ -206,32 +206,29 @@ class Cell {
     Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
         codepoints_{},
         attributes_{std::move(_attrib)},
-        width_{1},
-        codepointCount_{0}
+        width_{1}
     {
         setCharacter(_ch);
     }
 
-    constexpr Cell() noexcept :
+    Cell() noexcept :
         codepoints_{},
         attributes_{},
-        width_{1},
-        codepointCount_{0}
+        width_{1}
     {}
 
     void reset() noexcept
     {
         attributes_ = {};
-        codepointCount_ = 0;
         width_ = 1;
         hyperlink_ = nullptr;
+        codepoints_.clear();
         imageFragment_.reset();
     }
 
     void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
     {
         attributes_ = std::move(_attribs);
-        codepointCount_ = 0;
         width_ = 1;
         hyperlink_ = _hyperlink;
         imageFragment_.reset();
@@ -242,15 +239,23 @@ class Cell {
     Cell& operator=(Cell const&) = default;
     Cell& operator=(Cell&&) noexcept = default;
 
-    constexpr std::u32string_view codepoints() const noexcept
+    std::u32string_view codepoints() const noexcept
     {
-        return std::u32string_view{codepoints_.data(), codepointCount_};
+        return codepoints_;
     }
 
-    constexpr char32_t codepoint(size_t i) const noexcept { return codepoints_[i]; }
-    constexpr int codepointCount() const noexcept { return codepointCount_; }
+    char32_t codepoint(size_t i) const noexcept
+    {
+#if !defined(NDEBUG)
+        return codepoints_.at(i);
+#else
+        return codepoints_[i];
+#endif
+    }
 
-    constexpr bool empty() const noexcept { return codepointCount_ == 0 && !imageFragment_; }
+    int codepointCount() const noexcept { return codepoints_.size(); }
+
+    bool empty() const noexcept { return codepoints_.empty() && !imageFragment_; }
 
     constexpr int width() const noexcept { return width_; }
 
@@ -264,21 +269,20 @@ class Cell {
         imageFragment_.emplace(std::move(_imageFragment));
         hyperlink_ = std::move(_hyperlink);
         width_ = 1;
-        codepointCount_ = 0;
+        codepoints_.clear();
     }
 
     void setCharacter(char32_t _codepoint) noexcept
     {
         imageFragment_.reset();
-        codepoints_[0] = _codepoint;
         if (_codepoint)
         {
-            codepointCount_ = 1;
+            codepoints_.assign(1, _codepoint);
             width_ = std::max(unicode::width(_codepoint), 1);
         }
         else
         {
-            codepointCount_ = 0;
+            codepoints_.clear();
             width_ = 1;
         }
     }
@@ -291,10 +295,9 @@ class Cell {
     int appendCharacter(char32_t _codepoint) noexcept
     {
         imageFragment_.reset();
-        if (codepointCount_ < MaxCodepoints)
+        if (codepoints_.size() < MaxCodepoints)
         {
-            codepoints_[codepointCount_] = _codepoint;
-            codepointCount_++;
+            codepoints_.push_back(_codepoint);
 
             constexpr bool AllowWidthChange = false; // TODO: make configurable
 
@@ -327,7 +330,7 @@ class Cell {
 
   private:
     /// Unicode codepoint to be displayed.
-    std::array<char32_t, MaxCodepoints> codepoints_;
+    std::u32string codepoints_;
 
     /// Graphics renditions, such as foreground/background color or other grpahics attributes.
     GraphicsAttributes attributes_;
@@ -335,16 +338,13 @@ class Cell {
     /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
     uint8_t width_;
 
-    /// Number of combined codepoints stored in this cell.
-    uint8_t codepointCount_;
-
     HyperlinkRef hyperlink_ = nullptr;
 
     /// Image fragment to be rendered in this cell.
     std::optional<ImageFragment> imageFragment_;
 };
 
-constexpr bool operator==(Cell const& a, Cell const& b) noexcept
+inline bool operator==(Cell const& a, Cell const& b) noexcept
 {
     if (a.codepointCount() != b.codepointCount())
         return false;
