@@ -231,15 +231,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
     debuglog(TextRendererTag).write("Glyph metrics: {}", glyph);
-    // auto const xMax = glyph.left + glyph.width;
-    // if (xMax > gridMetrics_.cellSize.width * numCells)
-    // {
-    //     debuglog(TextRendererTag).write("Glyph width {}+{}={} exceeds cell width {}.",
-    //                                     glyph.left,
-    //                                     glyph.width,
-    //                                     xMax,
-    //                                     gridMetrics_.cellSize.width * numCells);
-    // }
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
@@ -393,7 +384,6 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                      + _glyphPos.offset.x
                      ;
 
-        // auto const y = _pos.y() + _gpos.y + baseline + _glyph.descender;
         auto const y = _pos.y                           // bottom left
                      + _glyphPos.offset.y               // -> harfbuzz adjustment
                      + gridMetrics_.baseline            // -> baseline
@@ -497,7 +487,6 @@ void ComplexTextShaper::beginFrame()
 {
     assert(codepoints_.empty());
     assert(clusters_.empty());
-    //assert(cellCount_ == 0);
 
     auto constexpr DefaultColor = RGBColor{};
     style_ = TextStyle::Invalid;
@@ -556,7 +545,6 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
     auto const count = static_cast<int>(_run.end - _run.start);
     auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
     auto const clusters = crispy::span(clusters_.data() + _run.start, count);
-    // XXX auto const clusterGap = -static_cast<int>(clusters_[0]);
 
     text::shape_result gpos;
     textShaper_.shape(
