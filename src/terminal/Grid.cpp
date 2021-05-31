@@ -580,6 +580,21 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
 {
     auto const wrappableFlag = lines_.back().wrappableFlag();
 
+    if (historyLineCount() == maxHistoryLineCount().value_or(-1))
+    {
+        // We've reached to history line count limit already.
+        // Rotate lines that would fall off down to the bottom again in a clean state.
+        // We do save quite some overhead due to avoiding unnecessary memory allocations.
+        for (int i = 0; i < _count; ++i)
+        {
+            Line line = move(lines_.front());
+            lines_.pop_front();
+            line.reset(_attr);
+            lines_.emplace_back(move(line));
+        }
+        return;
+    }
+
     if (auto const n = min(_count, screenSize_.height); n > 0)
     {
         generate_n(

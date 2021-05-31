@@ -217,9 +217,9 @@ class Cell {
         width_{1}
     {}
 
-    void reset() noexcept
+    void reset(GraphicsAttributes _attributes = {}) noexcept
     {
-        attributes_ = {};
+        attributes_ = std::move(_attributes);
         width_ = 1;
         hyperlink_ = nullptr;
         codepoints_.clear();
@@ -230,6 +230,7 @@ class Cell {
     {
         attributes_ = std::move(_attribs);
         width_ = 1;
+        codepoints_.clear();
         hyperlink_ = _hyperlink;
         imageFragment_.reset();
     }
@@ -394,10 +395,10 @@ class Line { // {{{
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) = default;
 
-    void clear() noexcept
+    void reset(GraphicsAttributes _attributes) noexcept
     {
         for (Cell& cell: buffer_)
-            cell.reset();
+            cell.reset(_attributes);
     }
 
     Buffer* operator->() noexcept { return &buffer_; }
