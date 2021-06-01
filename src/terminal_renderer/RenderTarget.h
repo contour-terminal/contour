@@ -22,6 +22,8 @@
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 
+#include <unicode/utf8.h>
+
 #include <array>
 #include <memory>
 
@@ -107,3 +109,30 @@ class Renderable {
 };
 
 } // end namespace
+
+namespace fmt
+{
+    template <>
+    struct formatter<terminal::renderer::RenderCell> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+
+        using CellFlags = terminal::CellFlags;
+        using RenderCell = terminal::renderer::RenderCell;
+
+        template <typename FormatContext>
+        auto format(RenderCell const& cell, FormatContext& ctx)
+        {
+            std::string s;
+            if (cell.flags & CellFlags::CellSequenceStart) s += "S";
+            if (cell.flags & CellFlags::CellSequenceEnd) s += "E";
+            return format_to(ctx.out(),
+                    "flags={} bg={} fg={} text='{}'",
+                    s, cell.backgroundColor, cell.foregroundColor,
+                    unicode::to_utf8(cell.codepoints));
+        }
+    };
+}

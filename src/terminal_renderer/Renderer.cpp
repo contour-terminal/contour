@@ -262,7 +262,50 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
     }
 
-    bool gap = true;
+    auto const appendCell = [&](Coordinate const& _pos, Cell const& _cell,
+                                RGBColor fg, RGBColor bg)
+    {
+        RenderCell cell;
+        cell.backgroundColor = bg;
+        cell.foregroundColor = fg;
+        cell.decorationColor = _cell.attributes().getUnderlineColor(colorPalette_);
+        cell.position = gridMetrics_.map(_pos);
+        cell.flags = _cell.attributes().styles;
+
+        if (!_cell.codepoints().empty())
+        {
+            assert(!_cell.imageFragment().has_value());
+            cell.codepoints = _cell.codepoints();
+        }
+        else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
+        {
+            assert(_cell.codepoints().empty());
+            cell.flags |= CellFlags::Image; // TODO: this should already be there.
+            cell.image = _cell.imageFragment();
+        }
+
+        if (_cell.hyperlink())
+        {
+            auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
+                                ? colorPalette_.hyperlinkDecoration.hover
+                                : colorPalette_.hyperlinkDecoration.normal;
+            auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
+                                ? decorationRenderer_.hyperlinkHover()
+                                : decorationRenderer_.hyperlinkNormal();
+            cell.flags |= toCellStyle(decoration);
+            cell.decorationColor = color;
+        }
+
+        _output.emplace_back(move(cell));
+    };
+
+    enum class State {
+        Gap,
+        Sequence,
+    };
+    State state = State::Gap;
+
+    //bool gap = true;
     int lineNr = 0; // 0 for no-line-number.
     _terminal.screen().render(
         [&](Coordinate const& _pos, Cell const& _cell) // mutable
@@ -274,6 +317,45 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             auto const cellEmpty = (_cell.codepoints().empty() || _cell.codepoints()[0] == 0x20)
                                 && !_cell.imageFragment().has_value();
             auto const customBackground = bg != colorPalette_.defaultBackground;
+
+            bool isNewLine = false;
+            if (lineNr != _pos.row)
+            {
+                isNewLine = true;
+                lineNr = _pos.row;
+                if (!_output.empty())
+                    _output.back().flags |= CellFlags::CellSequenceEnd;
+            }
+
+            // {{{
+            switch (state)
+            {
+                case State::Gap:
+                    if (!cellEmpty || customBackground)
+                    {
+                        state = State::Sequence;
+                        appendCell(_pos, _cell, fg, bg);
+                        _output.back().flags |= CellFlags::CellSequenceStart;
+                    }
+                    break;
+                case State::Sequence:
+                    if (cellEmpty && !customBackground)
+                    {
+                        _output.back().flags |= CellFlags::CellSequenceEnd;
+                        state = State::Gap;
+                    }
+                    else
+                    {
+                        appendCell(_pos, _cell, fg, bg);
+
+                        if (isNewLine)
+                            _output.back().flags |= CellFlags::CellSequenceStart;
+                    }
+                    break;
+            }
+            // }}}
+
+#if 0 // {{{
             if (cellEmpty && !customBackground)
             {
                 gap = true;
@@ -281,6 +363,7 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
                     _output.back().flags |= CellFlags::CellSequenceEnd;
                 return;
             }
+            // assume cell is not empty and/or having custom SGR
 
             RenderCell cell;
             cell.backgroundColor = bg;
@@ -292,9 +375,7 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             if (!_cell.codepoints().empty())
             {
                 assert(!_cell.imageFragment().has_value());
-                cell.codepoints.insert(cell.codepoints.begin(),
-                                       _cell.codepoints().begin(),
-                                       _cell.codepoints().end());
+                cell.codepoints = _cell.codepoints();
             }
             else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
             {
@@ -308,10 +389,18 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
                 lineNr = _pos.row;
                 if (!_output.empty())
                     _output.back().flags |= CellFlags::CellSequenceEnd;
-                cell.flags |= CellFlags::CellSequenceStart;
+                if (!cellEmpty)
+                    cell.flags |= CellFlags::CellSequenceStart;
+                else
+                    gap = true;
             }
-
-            if (gap)
+            else if (cellEmpty && !gap)
+            {
+                gap = true;
+                if (!_output.empty())
+                    _output.back().flags |= CellFlags::CellSequenceEnd;
+            }
+            else if (gap)
             {
                 gap = false;
                 cell.flags |= CellFlags::CellSequenceStart;
@@ -330,9 +419,12 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
             }
 
             _output.emplace_back(std::move(cell));
+#endif // }}}
         },
         _terminal.viewport().absoluteScrollOffset()
     );
+    for (auto const& cell: _output)
+        std::cout << fmt::format("render: pos={}, {}\n", cell.position, cell);
 
     if (renderHyperlinks)
     {

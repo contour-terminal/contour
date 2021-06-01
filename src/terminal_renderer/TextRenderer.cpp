@@ -131,7 +131,7 @@ void TextRenderer::updateFontMetrics()
 
 void TextRenderer::renderCell(RenderCell const& _cell)
 {
-    auto const style = [&](auto mask) constexpr -> TextStyle {
+    auto const style = [](auto mask) constexpr -> TextStyle {
         if ((mask & (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
                 == (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
             return TextStyle::BoldItalic;
@@ -160,7 +160,6 @@ void TextRenderer::start()
 
 void TextRenderer::finish()
 {
-    textRenderingEngine_->endSequence();
 }
 
 void TextRenderer::renderRun(crispy::Point _pos,
@@ -458,21 +457,18 @@ void ComplexTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
                                    RGBColor _color)
 {
     bool const attribsChanged = _color != color_ || _style != style_;
-    bool const textStartFound = !textStartFound_ &&
-        (_codepoints.empty() || _codepoints[0] == 0x20);
-    if (attribsChanged || textStartFound)
+    bool const hasText = !_codepoints.empty() && _codepoints[0] != 0x20;
+    bool const noText = !hasText;
+    bool const textStartFound = !textStartFound_ && hasText;
+    if (noText)
+        textStartFound_ = false;
+    if (attribsChanged || textStartFound || noText)
     {
-        auto const textCursor = crispy::Point{
-            textPosition_.x + gridMetrics_.cellSize.width * cellCount_,
-            textPosition_.y
-        };
-        endSequence();
-        // Since there's no gap between the last and the new sequence,
-        // we can easily recompute the beginning of the text position ourselfs.
-        setTextPosition(textCursor);
-        textStartFound_ = true;
+        if (cellCount_)
+            endSequence(); // also increments text start position
         color_ = _color;
         style_ = _style;
+        textStartFound_ = textStartFound;
     }
 
     for (char32_t const codepoint: _codepoints)
@@ -496,10 +492,15 @@ void ComplexTextShaper::beginFrame()
 void ComplexTextShaper::setTextPosition(crispy::Point _position)
 {
     textPosition_ = _position;
+    std::cout << fmt::format("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
 }
 
 void ComplexTextShaper::endSequence()
 {
+    std::cout << fmt::format("ComplexTextShaper.equenceEnd({}): {}+{}\n",
+            textPosition_.x / gridMetrics_.cellSize.width,
+            textPosition_, cellCount_);
+
     if (!codepoints_.empty())
     {
         text::shape_result const& glyphPositions = cachedGlyphPositions();
@@ -508,6 +509,7 @@ void ComplexTextShaper::endSequence()
 
     codepoints_.clear();
     clusters_.clear();
+    textPosition_.x += gridMetrics_.cellSize.width * cellCount_;
     cellCount_ = 0;
     textStartFound_ = false;
 }
