@@ -371,7 +371,7 @@ class Line { // {{{
         Marked    = 0x0004,
     };
 
-    using Buffer = std::deque<Cell>;
+    using Buffer = std::vector<Cell>;
     using iterator = Buffer::iterator;
     using const_iterator = Buffer::const_iterator;
     using reverse_iterator = Buffer::reverse_iterator;
