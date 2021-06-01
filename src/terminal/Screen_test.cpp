@@ -275,13 +275,12 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     screen.write("B");
     auto const& c2 = screen.at({1, 2});
     CHECK(c2.codepointCount() == 0);
-    CHECK(c2.codepoint(0) == 0);
+    CHECK(c2.codepoints().empty());
     CHECK(c2.width() == 1);
 
     auto const& c3 = screen.at({1, 3});
     CHECK(c3.codepointCount() == 1);
     CHECK(c3.codepoint(0) == 'B');
-    CHECK(c3.codepoint(1) == 0);
     CHECK(c3.width() == 1);
 }
 
