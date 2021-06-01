@@ -402,7 +402,7 @@ class Line { // {{{
     }
 
     Buffer* operator->() noexcept { return &buffer_; }
-    Buffer const* operator->()  const noexcept { return &buffer_; }
+    Buffer const* operator->() const noexcept { return &buffer_; }
     auto& operator[](std::size_t _index) { return buffer_[_index]; }
     auto const& operator[](std::size_t _index) const { return buffer_[_index]; }
 
