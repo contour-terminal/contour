@@ -141,9 +141,9 @@ constexpr bool operator!(CellFlags const& a) noexcept
 // {{{ GraphicsAttributes
 /// Character graphics rendition information.
 struct GraphicsAttributes {
-    Color foregroundColor{DefaultColor{}};
-    Color backgroundColor{DefaultColor{}};
-    Color underlineColor{DefaultColor{}};
+    Color foregroundColor{DefaultColor()};
+    Color backgroundColor{DefaultColor()};
+    Color underlineColor{DefaultColor()};
     CellFlags styles{};
 
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette) const noexcept

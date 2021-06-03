@@ -367,7 +367,7 @@ namespace impl // {{{ some command generator helpers
 				case 36: _screen.setForegroundColor(IndexedColor::Cyan); break;
 				case 37: _screen.setForegroundColor(IndexedColor::White); break;
 				case 38: _screen.setForegroundColor(parseColor(_seq, &i)); break;
-				case 39: _screen.setForegroundColor(DefaultColor{}); break;
+				case 39: _screen.setForegroundColor(DefaultColor()); break;
 				case 40: _screen.setBackgroundColor(IndexedColor::Black); break;
 				case 41: _screen.setBackgroundColor(IndexedColor::Red); break;
 				case 42: _screen.setBackgroundColor(IndexedColor::Green); break;
@@ -377,7 +377,7 @@ namespace impl // {{{ some command generator helpers
 				case 46: _screen.setBackgroundColor(IndexedColor::Cyan); break;
 				case 47: _screen.setBackgroundColor(IndexedColor::White); break;
 				case 48: _screen.setBackgroundColor(parseColor(_seq, &i)); break;
-				case 49: _screen.setBackgroundColor(DefaultColor{}); break;
+				case 49: _screen.setBackgroundColor(DefaultColor()); break;
                 case 51: _screen.setGraphicsRendition(GraphicsRendition::Framed); break;
                 case 53: _screen.setGraphicsRendition(GraphicsRendition::Overline); break;
                 case 54: _screen.setGraphicsRendition(GraphicsRendition::NoFramed); break;

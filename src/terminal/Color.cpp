@@ -19,6 +19,53 @@ using namespace std;
 
 namespace terminal {
 
+string to_string(Color _color)
+{
+    using Type = Color::Type;
+    switch (_color.type)
+    {
+        case Type::Indexed:
+            return fmt::format("{}", _color.index);
+        case Type::Bright:
+            switch (_color.index)
+            {
+                case 0: return "bright-black";
+                case 1: return "bright-red";
+                case 2: return "bright-green";
+                case 3: return "bright-yellow";
+                case 4: return "bright-blue";
+                case 5: return "bright-magenta";
+                case 6: return "bright-cyan";
+                case 7: return "bright-white";
+                case 8: return "bright-DEFAULT";
+            }
+            return "?";
+        case Type::Default:
+            switch (_color.index)
+            {
+                case 0: return "black";
+                case 1: return "red";
+                case 2: return "green";
+                case 3: return "yellow";
+                case 4: return "blue";
+                case 5: return "magenta";
+                case 6: return "cyan";
+                case 7: return "white";
+                case 8: return "DEFAULT";
+            }
+            return "?";
+        case Type::RGB:
+        {
+            char buf[8];
+            auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", _color.rgb.red, _color.rgb.green, _color.rgb.blue);
+            return string(buf, n);
+        }
+        case Type::Undefined:
+            break;
+    }
+    return "?";
+}
+
 string to_string(IndexedColor color)
 {
     switch (color)
@@ -105,66 +152,42 @@ RGBAColor& RGBAColor::operator=(string const& _hexCode)
     return *this;
 }
 
-string to_string(RGBColor const c)
+string to_string(RGBColor c)
 {
     char buf[8];
     auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", c.red, c.green, c.blue);
     return string(buf, n);
 }
 
-string to_string(RGBAColor const c)
+string to_string(RGBAColor c)
 {
     char buf[10];
     auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X%02X", c.red(), c.green(), c.blue(), c.alpha());
     return string(buf, n);
 }
 
-string to_string(Color const& c)
+RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept
 {
-    if (isUndefined(c))
-        return "UNDEFINED";
-
-    if (isDefault(c))
-        return "DEFAULT";
-
-    if (isIndexed(c))
-        return to_string(get<IndexedColor>(c));
-
-    if (holds_alternative<BrightColor>(c))
-        return to_string(get<BrightColor>(c));
-
-    if (isRGB(c))
-        return to_string(get<RGBColor>(c));
-
-    return "?";
-}
-
-RGBColor const& apply(ColorPalette const& _profile, Color const& _color, ColorTarget _target, bool _bright) noexcept
-{
-    return visit(
-        overloaded{
-            [&](UndefinedColor) -> RGBColor const& {
-                return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
-            },
-            [&](DefaultColor) -> RGBColor const& {
-                return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
-            },
-            [&](IndexedColor color) -> RGBColor const& {
-                auto const index = static_cast<size_t>(color);
+    switch (_color.type)
+    {
+        case Color::Type::RGB:
+            return _color.rgb;
+        case Color::Type::Indexed:
+            {
+                auto const index = static_cast<size_t>(_color.index);
                 if (_bright && index < 8)
                     return _profile.brightColor(index);
                 else
                     return _profile.indexedColor(index);
-            },
-            [&](BrightColor color) -> RGBColor const& {
-                return _profile.brightColor(static_cast<size_t>(color));
-            },
-            [](RGBColor const& color) -> RGBColor const& {
-                return color;
-            },
-        },
-        _color
-    );
+                break;
+            }
+        case Color::Type::Bright:
+            return _profile.brightColor(static_cast<size_t>(_color.index));
+        case Color::Type::Undefined:
+        case Color::Type::Default:
+            break;
+    }
+    return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
 }
 
 }  // namespace terminal

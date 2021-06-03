@@ -27,16 +27,6 @@
 
 namespace terminal {
 
-struct UndefinedColor {};
-
-constexpr bool operator==(UndefinedColor, UndefinedColor) noexcept { return true; }
-constexpr bool operator!=(UndefinedColor, UndefinedColor) noexcept { return false; }
-
-struct DefaultColor {};
-
-constexpr bool operator==(DefaultColor, DefaultColor) noexcept { return true; }
-constexpr bool operator!=(DefaultColor, DefaultColor) noexcept { return false; }
-
 enum class IndexedColor : uint8_t {
     Black = 0,
     Red = 1,
@@ -62,6 +52,7 @@ enum class BrightColor {
     White = 7,
 };
 
+// {{{ RGBColor
 struct RGBColor {
     uint8_t red;
     uint8_t green;
@@ -80,7 +71,7 @@ struct RGBColor {
     RGBColor& operator=(std::string const& _hexCode);
 };
 
-constexpr RGBColor operator*(RGBColor const& c, float s) noexcept
+constexpr RGBColor operator*(RGBColor c, float s) noexcept
 {
     return RGBColor{
         static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
@@ -94,16 +85,18 @@ constexpr RGBColor operator "" _rgb(unsigned long long _value)
     return RGBColor{static_cast<uint32_t>(_value)};
 }
 
-constexpr bool operator==(RGBColor const& a, RGBColor const& b) noexcept
+constexpr bool operator==(RGBColor a, RGBColor b) noexcept
 {
     return a.red == b.red && a.green == b.green && a.blue == b.blue;
 }
 
-constexpr bool operator!=(RGBColor const& a, RGBColor const& b) noexcept
+constexpr bool operator!=(RGBColor a, RGBColor b) noexcept
 {
     return !(a == b);
 }
+// }}}
 
+// {{{ RGBAColor
 struct RGBAColor {
     uint32_t value;
 
@@ -131,18 +124,81 @@ struct RGBAColor {
     RGBAColor& operator=(std::string const& _hexCode);
 };
 
-constexpr bool operator==(RGBAColor const& a, RGBAColor const& b) noexcept
+constexpr bool operator==(RGBAColor a, RGBAColor b) noexcept
 {
     return a.value == b.value;
 }
 
-constexpr bool operator!=(RGBAColor const& a, RGBAColor const& b) noexcept
+constexpr bool operator!=(RGBAColor a, RGBAColor b) noexcept
+{
+    return !(a == b);
+}
+// }}}
+
+// {{{ Color
+struct Color
+{
+    enum class Type { Undefined, Default, Bright, Indexed, RGB };
+
+    Type type;
+    union {
+        int index;
+        RGBColor rgb;
+    };
+
+    constexpr Color() noexcept : type{Type::Undefined}, index{} {}
+    constexpr Color(Color const&) noexcept = default;
+    constexpr Color(Color&&) noexcept = default;
+    constexpr Color& operator=(Color const&) noexcept = default;
+    constexpr Color& operator=(Color&&) noexcept = default;
+
+    constexpr Color(BrightColor _value) noexcept : type{Type::Bright}, index{static_cast<int>(_value)} {}
+    constexpr Color(IndexedColor _value) noexcept : type{Type::Indexed}, index{static_cast<int>(_value)} {}
+    constexpr Color(RGBColor _rgb) noexcept : type{Type::RGB}, rgb{_rgb} {}
+
+    constexpr explicit Color(Type _type, int _index) noexcept : type{_type}, index{_index} {}
+
+    constexpr static Color Undefined() noexcept { return Color{Type::Undefined, 0}; }
+    constexpr static Color Default() noexcept { return Color{Type::Default, 0}; }
+    constexpr static Color Bright(int _index) noexcept { return Color{Type::Bright, _index}; }
+    constexpr static Color Indexed(int _index) noexcept { return Color{Type::Indexed, _index}; }
+    constexpr static Color RGB(RGBColor _color) noexcept { return Color{_color}; }
+};
+
+constexpr bool operator==(Color a, Color b) noexcept
+{
+    return a.type == b.type && a.index == b.index;
+}
+
+constexpr bool operator!=(Color a, Color b) noexcept
 {
     return !(a == b);
 }
 
-using Color = std::variant<UndefinedColor, DefaultColor, IndexedColor, BrightColor, RGBColor>;
+constexpr bool isUndefined(Color _color) noexcept { return _color.type == Color::Type::Undefined; }
+constexpr bool isDefaultColor(Color _color) noexcept { return _color.type == Color::Type::Default; }
 
+constexpr bool isIndexedColor(Color _color) noexcept { return _color.type == Color::Type::Undefined; }
+constexpr bool isBrightColor(Color _color) noexcept { return _color.type == Color::Type::Bright; }
+constexpr bool isRGBColor(Color _color) noexcept { return _color.type == Color::Type::RGB; }
+
+constexpr int getIndexedColor(Color _color) noexcept { return _color.index; }
+constexpr int getBrightColor(Color _color) noexcept { return _color.index; }
+constexpr RGBColor getRGBColor(Color _color) noexcept { return _color.rgb; }
+
+std::string to_string(Color color);
+std::string to_string(IndexedColor color);
+std::string to_string(BrightColor color);
+std::string to_string(RGBColor c);
+std::string to_string(RGBAColor c);
+
+inline std::ostream& operator<<(std::ostream& os, terminal::Color value) { return os << to_string(value); }
+
+constexpr Color UndefinedColor() noexcept { return Color::Undefined(); }
+constexpr Color DefaultColor() noexcept { return Color::Default(); }
+// }}}
+
+// {{{ ColorPalette
 struct ColorPalette
 {
     using Palette = std::array<RGBColor, 256>;
@@ -187,22 +243,22 @@ struct ColorPalette
         return colors;
     }();
 
-    RGBColor const& normalColor(size_t _index) const noexcept {
+    RGBColor normalColor(size_t _index) const noexcept {
         assert(_index < 8);
         return palette.at(_index);
     }
 
-    RGBColor const& brightColor(size_t _index) const noexcept {
+    RGBColor brightColor(size_t _index) const noexcept {
         assert(_index < 8);
         return palette.at(_index + 8);
     }
 
-    RGBColor const& dimColor(size_t _index) const {
+    RGBColor dimColor(size_t _index) const {
         assert(_index < 8);
         return palette.at(_index); // TODO
     }
 
-    RGBColor const& indexedColor(size_t _index) const noexcept {
+    RGBColor indexedColor(size_t _index) const noexcept {
         assert(_index < 256);
         return palette.at(_index);
     }
@@ -227,6 +283,11 @@ enum class ColorTarget {
     Background,
 };
 
+RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept;
+
+// }}}
+
+// {{{ Opacity
 enum class Opacity : uint8_t {
     Transparent = 0x00,
     Opaque = 0xFF
@@ -241,98 +302,18 @@ constexpr Opacity& operator--(Opacity& _value) noexcept {
     _value = static_cast<Opacity>(std::max(static_cast<int>(_value) - 15, 0));
     return _value;
 }
-
-RGBColor const& apply(ColorPalette const& _colorPalette, Color const& _color, ColorTarget _target, bool _bright) noexcept;
-
-constexpr bool operator==(Color const& a, Color const& b) noexcept
-{
-    if (a.index() != b.index())
-        return false;
-
-    if (std::holds_alternative<IndexedColor>(a))
-        return std::get<IndexedColor>(a) == std::get<IndexedColor>(b);
-
-    if (std::holds_alternative<BrightColor>(a))
-        return std::get<BrightColor>(a) == std::get<BrightColor>(b);
-
-    if (std::holds_alternative<UndefinedColor>(a))
-        return true;
-
-    if (std::holds_alternative<DefaultColor>(a))
-        return true;
-
-    /*static_*/assert(std::holds_alternative<RGBColor>(a));
-    return std::get<RGBColor>(a) == std::get<RGBColor>(b);
-}
-
-std::string to_string(IndexedColor color);
-std::string to_string(BrightColor color);
-std::string to_string(RGBColor c);
-std::string to_string(RGBAColor c);
-std::string to_string(Color const& c);
-
-constexpr bool isUndefined(Color const& color) noexcept
-{
-    return std::holds_alternative<UndefinedColor>(color);
-}
-
-constexpr bool isDefault(Color const& color) noexcept
-{
-    return std::holds_alternative<DefaultColor>(color);
-}
-
-constexpr bool isIndexed(Color const& color) noexcept
-{
-    return std::holds_alternative<IndexedColor>(color);
-}
-
-constexpr bool isRGB(Color const& color) noexcept
-{
-    return std::holds_alternative<RGBColor>(color);
-}
-
-inline std::ostream& operator<<(std::ostream& os, terminal::IndexedColor value)
-{
-    return os << to_string(value);
-}
-
-inline std::ostream& operator<<(std::ostream& os, terminal::BrightColor value)
-{
-    return os << to_string(value);
-}
-
-inline std::ostream& operator<<(std::ostream& os, terminal::RGBColor value)
-{
-    return os << to_string(value);
-}
-
-inline std::ostream& operator<<(std::ostream& os, terminal::RGBAColor value)
-{
-    return os << to_string(value);
-}
-
-inline std::ostream& operator<<(std::ostream& os, terminal::Color value)
-{
-    return os << to_string(value);
-}
+// }}}
 
 }  // namespace terminal
 
-namespace fmt {
+namespace fmt // {{{
+{
     template <>
-    struct formatter<terminal::IndexedColor> {
+    struct formatter<terminal::Color> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::IndexedColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
-    };
-
-    template <>
-    struct formatter<terminal::BrightColor> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::BrightColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+        auto format(terminal::Color value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
     };
 
     template <>
@@ -340,7 +321,7 @@ namespace fmt {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::RGBColor const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+        auto format(terminal::RGBColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
     };
 
     template <>
@@ -348,14 +329,8 @@ namespace fmt {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::RGBAColor const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
+        auto format(terminal::RGBAColor value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
     };
 
-    template <>
-    struct formatter<terminal::Color> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::Color const& value, FormatContext& ctx) { return format_to(ctx.out(), to_string(value)); }
-    };
 }
+// }}}

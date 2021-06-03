@@ -86,9 +86,9 @@ namespace // {{{ helper
         auto const sgrAddStr = [&](string_view _value) { sgrSep(); output += _value; };
         auto const sgrAddSub = [&](unsigned _value) { output += std::to_string(_value); };
 
-        if (holds_alternative<IndexedColor>(_sgr.foregroundColor))
+        if (isIndexedColor(_sgr.foregroundColor))
         {
-            auto const colorValue = get<IndexedColor>(_sgr.foregroundColor);
+            auto const colorValue = getIndexedColor(_sgr.foregroundColor);
             if (static_cast<unsigned>(colorValue) < 8)
                 sgrAdd(30 + static_cast<unsigned>(colorValue));
             else
@@ -98,13 +98,13 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (holds_alternative<DefaultColor>(_sgr.foregroundColor))
+        else if (isDefaultColor(_sgr.foregroundColor))
             sgrAdd(39);
-        else if (holds_alternative<BrightColor>(_sgr.foregroundColor))
-            sgrAdd(90 + static_cast<unsigned>(get<BrightColor>(_sgr.foregroundColor)));
-        else if (holds_alternative<RGBColor>(_sgr.foregroundColor))
+        else if (isBrightColor(_sgr.foregroundColor))
+            sgrAdd(90 + static_cast<unsigned>(getBrightColor(_sgr.foregroundColor)));
+        else if (isRGBColor(_sgr.foregroundColor))
         {
-            auto const& rgb = get<RGBColor>(_sgr.foregroundColor);
+            auto const& rgb = getRGBColor(_sgr.foregroundColor);
             sgrAdd(38);
             sgrAddSub(2);
             sgrAddSub(static_cast<unsigned>(rgb.red));
@@ -112,9 +112,9 @@ namespace // {{{ helper
             sgrAddSub(static_cast<unsigned>(rgb.blue));
         }
 
-        if (holds_alternative<IndexedColor>(_sgr.backgroundColor))
+        if (isIndexedColor(_sgr.backgroundColor))
         {
-            auto const colorValue = get<IndexedColor>(_sgr.backgroundColor);
+            auto const colorValue = getIndexedColor(_sgr.backgroundColor);
             if (static_cast<unsigned>(colorValue) < 8)
                 sgrAdd(40 + static_cast<unsigned>(colorValue));
             else
@@ -124,13 +124,13 @@ namespace // {{{ helper
                 sgrAddSub(static_cast<unsigned>(colorValue));
             }
         }
-        else if (holds_alternative<DefaultColor>(_sgr.backgroundColor))
+        else if (isDefaultColor(_sgr.backgroundColor))
             sgrAdd(49);
-        else if (holds_alternative<BrightColor>(_sgr.backgroundColor))
-            sgrAdd(100 + static_cast<unsigned>(get<BrightColor>(_sgr.backgroundColor)));
-        else if (holds_alternative<RGBColor>(_sgr.backgroundColor))
+        else if (isBrightColor(_sgr.backgroundColor))
+            sgrAdd(100 + getBrightColor(_sgr.backgroundColor));
+        else if (isRGBColor(_sgr.backgroundColor))
         {
-            auto const& rgb = get<RGBColor>(_sgr.backgroundColor);
+            auto const& rgb = getRGBColor(_sgr.backgroundColor);
             sgrAdd(48);
             sgrAddSub(2);
             sgrAddSub(static_cast<unsigned>(rgb.red));
@@ -138,9 +138,9 @@ namespace // {{{ helper
             sgrAddSub(static_cast<unsigned>(rgb.blue));
         }
 
-        if (holds_alternative<RGBColor>(_sgr.underlineColor))
+        if (isRGBColor(_sgr.underlineColor))
         {
-            auto const& rgb = get<RGBColor>(_sgr.underlineColor);
+            auto const& rgb = getRGBColor(_sgr.underlineColor);
             sgrAdd(58);
             sgrAddSub(2);
             sgrAddSub(static_cast<unsigned>(rgb.red));
@@ -239,9 +239,9 @@ namespace // {{{ helper
             {
                 sgr_.clear();
                 sgr_.push_back(n);
-                currentForegroundColor_ = DefaultColor{};
-                currentBackgroundColor_ = DefaultColor{};
-                currentUnderlineColor_ = DefaultColor{};
+                currentForegroundColor_ = DefaultColor();
+                currentBackgroundColor_ = DefaultColor();
+                currentUnderlineColor_ = DefaultColor();
             }
             else
             {
@@ -273,9 +273,9 @@ namespace // {{{ helper
             if (_color != currentForegroundColor_)
             {
                 currentForegroundColor_ = _color;
-                if (holds_alternative<IndexedColor>(_color))
+                if (isIndexedColor(_color))
                 {
-                    auto const colorValue = get<IndexedColor>(_color);
+                    auto const colorValue = getIndexedColor(_color);
                     if (static_cast<unsigned>(colorValue) < 8)
                         sgr_add(30 + static_cast<unsigned>(colorValue));
                     else
@@ -285,13 +285,13 @@ namespace // {{{ helper
                         sgr_add(static_cast<unsigned>(colorValue));
                     }
                 }
-                else if (holds_alternative<DefaultColor>(_color))
+                else if (isDefaultColor(_color))
                     sgr_add(39);
-                else if (holds_alternative<BrightColor>(_color))
-                    sgr_add(90 + static_cast<unsigned>(get<BrightColor>(_color)));
-                else if (holds_alternative<RGBColor>(_color))
+                else if (isBrightColor(_color))
+                    sgr_add(90 + static_cast<unsigned>(getBrightColor(_color)));
+                else if (isRGBColor(_color))
                 {
-                    auto const& rgb = get<RGBColor>(_color);
+                    auto const rgb = getRGBColor(_color);
                     sgr_add(38);
                     sgr_add(2);
                     sgr_add(static_cast<unsigned>(rgb.red));
@@ -306,9 +306,9 @@ namespace // {{{ helper
             if (true)//_color != currentBackgroundColor_)
             {
                 currentBackgroundColor_ = _color;
-                if (holds_alternative<IndexedColor>(_color))
+                if (isIndexedColor(_color))
                 {
-                    auto const colorValue = get<IndexedColor>(_color);
+                    auto const colorValue = getIndexedColor(_color);
                     if (static_cast<unsigned>(colorValue) < 8)
                         sgr_add(40 + static_cast<unsigned>(colorValue));
                     else
@@ -318,13 +318,13 @@ namespace // {{{ helper
                         sgr_add(static_cast<unsigned>(colorValue));
                     }
                 }
-                else if (holds_alternative<DefaultColor>(_color))
+                else if (isDefaultColor(_color))
                     sgr_add(49);
-                else if (holds_alternative<BrightColor>(_color))
-                    sgr_add(100 + static_cast<unsigned>(get<BrightColor>(_color)));
-                else if (holds_alternative<RGBColor>(_color))
+                else if (isBrightColor(_color))
+                    sgr_add(100 + static_cast<unsigned>(getBrightColor(_color)));
+                else if (isRGBColor(_color))
                 {
-                    auto const& rgb = get<RGBColor>(_color);
+                    auto const& rgb = getRGBColor(_color);
                     sgr_add(48);
                     sgr_add(2);
                     sgr_add(static_cast<unsigned>(rgb.red));
@@ -339,9 +339,9 @@ namespace // {{{ helper
         std::vector<unsigned> lastSGR_;
         std::vector<unsigned> sgr_;
         std::stringstream sstr;
-        Color currentForegroundColor_ = DefaultColor{};
-        Color currentUnderlineColor_ = DefaultColor{};
-        Color currentBackgroundColor_ = DefaultColor{};
+        Color currentForegroundColor_ = DefaultColor();
+        Color currentUnderlineColor_ = DefaultColor();
+        Color currentBackgroundColor_ = DefaultColor();
         KeyMode cursorKeysMode_ = KeyMode::Normal;
     };
 
