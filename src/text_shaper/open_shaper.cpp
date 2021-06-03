@@ -781,7 +781,8 @@ void open_shaper::shape(font_key _font,
             continue;
 
         // Skip if main font is monospace but fallback font is not.
-        if (fontInfo.description.spacing != font_spacing::proportional)
+        if (fontInfo.description.force_spacing &&
+            fontInfo.description.spacing != font_spacing::proportional)
         {
             FontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
             bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
