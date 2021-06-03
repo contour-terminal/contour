@@ -160,6 +160,7 @@ void TextRenderer::start()
 
 void TextRenderer::finish()
 {
+    textRenderingEngine_->endSequence();
 }
 
 void TextRenderer::renderRun(crispy::Point _pos,
