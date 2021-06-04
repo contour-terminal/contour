@@ -47,16 +47,7 @@ jobs:
         run: |
           cat /etc/apt/sources.list
           sudo apt-get -qy update
-          sudo apt-get install -y \
-            "g++-9"             \
-            build-essential     \
-            cmake               \
-            extra-cmake-modules \
-            libfontconfig1-dev  \
-            libfreetype6-dev    \
-            libharfbuzz-dev     \
-            libqt5gui5          \
-            qtbase5-dev
+          sudo ./scripts/install-deps.sh
       - name: "Check out repository Ericsson/CodeChecker"
         uses: actions/checkout@v2
         with:
@@ -129,8 +120,7 @@ jobs:
             "logged_compilation.json" \
             --config "$CODECHECKER_CONFIG" \
             --jobs $(nproc) \
-            --output "Results" \
-          || true
+            --output "Results"
       - name: "Perform static analysis (CTU for pushes on master)"
         if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
         run: |
@@ -144,16 +134,18 @@ jobs:
             --output "Results" \
             \
             --ctu \
-            --ctu-ast-mode load-from-pch \
-          || true
+            --ctu-ast-mode load-from-pch
       - name: "Convert static analysis results to HTML"
+        # Ignore the exit status of the parse command - the fact that we have
+        # reports will be obvious from the arfect and the CI output.
         run: |
           "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             parse \
             "Results" \
             --config "$CODECHECKER_CONFIG" \
             --export html \
-            --output "Results-HTML"
+            --output "Results-HTML" \
+          || true
       - name: "Dump analysis results to CI log"
         # Ignore the exit status of the parse command - the fact that we have
         # reports will be obvious from the arfect and the CI output.
