@@ -493,14 +493,14 @@ void ComplexTextShaper::beginFrame()
 void ComplexTextShaper::setTextPosition(crispy::Point _position)
 {
     textPosition_ = _position;
-    std::cout << fmt::format("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
+    // std::cout << fmt::format("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
 }
 
 void ComplexTextShaper::endSequence()
 {
-    std::cout << fmt::format("ComplexTextShaper.equenceEnd({}): {}+{}\n",
-            textPosition_.x / gridMetrics_.cellSize.width,
-            textPosition_, cellCount_);
+    // std::cout << fmt::format("ComplexTextShaper.equenceEnd({}): {}+{}\n",
+    //         textPosition_.x / gridMetrics_.cellSize.width,
+    //         textPosition_, cellCount_);
 
     if (!codepoints_.empty())
     {

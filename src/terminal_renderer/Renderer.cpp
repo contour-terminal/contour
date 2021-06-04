@@ -423,8 +423,6 @@ optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
         },
         _terminal.viewport().absoluteScrollOffset()
     );
-    for (auto const& cell: _output)
-        std::cout << fmt::format("render: pos={}, {}\n", cell.position, cell);
 
     if (renderHyperlinks)
     {
