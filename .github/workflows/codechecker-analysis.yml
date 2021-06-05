@@ -14,9 +14,9 @@ on:
       - fix/**
       - improvement/**
       - wip
-    pull_requests:
-      branches:
-        - master
+  pull_request:
+    branches:
+      - master
 
 jobs:
   ubuntu_2004:
@@ -120,7 +120,8 @@ jobs:
             "logged_compilation.json" \
             --config "$CODECHECKER_CONFIG" \
             --jobs $(nproc) \
-            --output "Results"
+            --output "Results" \
+          || true
       - name: "Perform static analysis (CTU for pushes on master)"
         if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
         run: |
@@ -134,7 +135,8 @@ jobs:
             --output "Results" \
             \
             --ctu \
-            --ctu-ast-mode load-from-pch
+            --ctu-ast-mode load-from-pch \
+          || true
       - name: "Convert static analysis results to HTML"
         # Ignore the exit status of the parse command - the fact that we have
         # reports will be obvious from the arfect and the CI output.
