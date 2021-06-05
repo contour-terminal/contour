@@ -1,8 +1,10 @@
 # Milestone 0.2.0 checklist
 
+- [ ] BUG: audo-hide mouse only on char, but not on non-char keys.
 - [ ] resizing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
 - [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)
+- [ ] config option to disable reflow entirely
 
 - [ ] move scrollbar into profile
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
