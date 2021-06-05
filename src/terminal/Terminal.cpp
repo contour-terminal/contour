@@ -57,6 +57,7 @@ namespace
 }
 
 Terminal::Terminal(std::unique_ptr<Pty> _pty,
+                   int _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
@@ -70,6 +71,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
                    double _refreshRate
 ) :
     changes_{ 0 },
+    ptyReadBufferSize_{ _ptyReadBufferSize },
     eventListener_{ _eventListener },
     refreshInterval_{ static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_{},
@@ -121,10 +123,8 @@ void Terminal::mainLoop()
 {
     mainLoopThreadID_ = this_thread::get_id();
 
-    // TODO: BufSize configurable per config / CLI flag
-    constexpr size_t BufSize = 16386;//32768;//std::numeric_limits<uint16_t>::max();
     vector<char> buf;
-    buf.resize(BufSize);
+    buf.resize(ptyReadBufferSize_);
 
     for (;;)
     {

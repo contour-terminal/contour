@@ -100,6 +100,10 @@ struct Config {
 
     std::optional<FileSystem::path> logFilePath;
 
+    // Configures the size of the PTY read buffer.
+    // Changing this value may result in better or worse throughput performance.
+    int ptyReadBufferSize = 16384;
+
     std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;

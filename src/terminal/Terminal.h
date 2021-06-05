@@ -66,6 +66,7 @@ class Terminal : public ScreenEvents {
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
+             int _ptyReadBufferSize,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
@@ -328,6 +329,7 @@ class Terminal : public ScreenEvents {
     mutable std::atomic<uint64_t> changes_;
 
     std::thread::id mainLoopThreadID_{};
+    int ptyReadBufferSize_;
     Events& eventListener_;
 
     std::chrono::milliseconds refreshInterval_;

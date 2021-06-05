@@ -1024,6 +1024,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
+    softLoadValue(doc, "read_buffer_size", _config.ptyReadBufferSize);
+
     if (auto profiles = doc["profiles"]; profiles)
     {
         for (auto i = profiles.begin(); i != profiles.end(); ++i)

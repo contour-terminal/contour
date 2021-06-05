@@ -61,6 +61,7 @@ class TerminalView : private Terminal::Events {
     };
 
     TerminalView(std::chrono::steady_clock::time_point _now,
+                 int _ptyReadBufferSize,
                  Events& _events,
                  std::optional<size_t> _maxHistoryLineCount,
                  std::string const& _wordDelimiters,

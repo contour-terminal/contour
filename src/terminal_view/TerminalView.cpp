@@ -35,6 +35,7 @@ using std::unique_ptr;
 namespace terminal::view {
 
 TerminalView::TerminalView(steady_clock::time_point _now,
+                           int _ptyReadBufferSize,
                            Events& _events,
                            optional<size_t> _maxHistoryLineCount,
                            string const& _wordDelimiters,
@@ -59,6 +60,7 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     },
     terminal_(
         std::move(_pty),
+        _ptyReadBufferSize,
         *this,
         _maxHistoryLineCount,
         _cursorBlinkInterval,

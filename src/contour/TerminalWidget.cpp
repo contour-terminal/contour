@@ -306,6 +306,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     fonts_{ profile().fonts },
     terminalView_{make_unique<terminal::view::TerminalView>(
         now_,
+        config_.ptyReadBufferSize,
         *this,
         profile().maxHistoryLineCount,
         config_.wordDelimiters,
