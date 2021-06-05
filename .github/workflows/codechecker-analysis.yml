@@ -25,11 +25,11 @@ jobs:
     env:
       # The version of LLVM to use. Needed to set the appropriate clang-XX
       # binaries.
-      LLVM_VER: 13
+      LLVM_VER: 12
       # Defined if the version above represents the latest available version.
       # (This is needed because the LLVM nightly PPA doesn't tag the latest
       # rolling version.)
-      LLVM_LATEST: "yes"
+      LLVM_LATEST: ""   # No.
 
       CODECHECKER_CONFIG: .github/codechecker/config.json
     steps:
@@ -94,17 +94,13 @@ jobs:
           echo "::set-output name=CODECHECKER_GITSEVEN::$(./build/CodeChecker/bin/CodeChecker analyzer-version | grep 'Git commit' | cut -d'|' -f 2 | cut -c 2-8)"
           popd
       - name: "Build Contour"
+        # Note: Keep this in sync with that in build.yml!
         run: |
-          mkdir Build
+          BUILD_DIR="Build" \
+            CMAKE_BUILD_TYPE="Debug" \
+            CXX="g++-9" \
+            ./scripts/ci-prepare-contour.sh
           pushd Build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_CXX_COMPILER="g++-9" \
-            -DYAML_BUILD_SHARED_LIBS=OFF \
-            -DYAML_CPP_BUILD_CONTRIB=OFF \
-            -DYAML_CPP_BUILD_TESTS=OFF \
-            -DYAML_CPP_BUILD_TOOLS=OFF \
-            -DYAML_CPP_INSTALL=OFF
           "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
             log \
             --build "cmake --build . -- -j3" \
