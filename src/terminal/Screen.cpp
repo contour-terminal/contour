@@ -582,7 +582,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
 {
     Cell& cell = *currentColumn_;
     cell.setCharacter(_character);
-    cell.attributes() = cursor_.graphicsRendition;
+    cell.setAttributes(cursor_.graphicsRendition);
     cell.setHyperlink(currentHyperlink_);
 
     lastColumn_ = currentColumn_;

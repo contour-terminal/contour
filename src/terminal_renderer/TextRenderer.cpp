@@ -132,12 +132,11 @@ void TextRenderer::updateFontMetrics()
 void TextRenderer::renderCell(RenderCell const& _cell)
 {
     auto const style = [](auto mask) constexpr -> TextStyle {
-        if ((mask & (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
-                == (CellFlags::Mask::Bold | CellFlags::Mask::Italic))
+        if (contains_all(mask, CellFlags::Bold | CellFlags::Italic))
             return TextStyle::BoldItalic;
-        if (mask & CellFlags::Mask::Bold)
+        if (mask & CellFlags::Bold)
             return TextStyle::Bold;
-        if (mask & CellFlags::Mask::Italic)
+        if (mask & CellFlags::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
     }(_cell.flags);

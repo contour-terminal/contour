@@ -793,7 +793,7 @@ namespace fmt // {{{
             std::ostringstream os;
             for (auto const& mapping : mappings)
             {
-                if (_mask.mask() & mapping.first)
+                if (_mask & mapping.first)
                 {
                     if (i) os << ", ";
                     os << mapping.second;

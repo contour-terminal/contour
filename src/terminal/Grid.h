@@ -70,71 +70,70 @@ struct Margin {
 // }}}
 
 // {{{ CellFlags
-class CellFlags {
-  public:
-	enum Mask : uint32_t {
-		Bold = (1 << 0),
-		Faint = (1 << 1),
-		Italic = (1 << 2),
-		Underline = (1 << 3),
-		Blinking = (1 << 4),
-		Inverse = (1 << 5),
-		Hidden = (1 << 6),
-		CrossedOut = (1 << 7),
-		DoublyUnderlined = (1 << 8),
-        CurlyUnderlined = (1 << 9),
-        DottedUnderline = (1 << 10),
-        DashedUnderline = (1 << 11),
-        Framed = (1 << 12),
-        Encircled = (1 << 13),
-        Overline = (1 << 14),
-        Image = (1 << 15),
+enum class CellFlags : uint32_t
+{
+    Bold = (1 << 0),
+    Faint = (1 << 1),
+    Italic = (1 << 2),
+    Underline = (1 << 3),
+    Blinking = (1 << 4),
+    Inverse = (1 << 5),
+    Hidden = (1 << 6),
+    CrossedOut = (1 << 7),
+    DoublyUnderlined = (1 << 8),
+    CurlyUnderlined = (1 << 9),
+    DottedUnderline = (1 << 10),
+    DashedUnderline = (1 << 11),
+    Framed = (1 << 12),
+    Encircled = (1 << 13),
+    Overline = (1 << 14),
+    Image = (1 << 15),
 
-        // The following flags are for internal use only.
-        Hover = (1 << 16), // Marks the cell with "Hyperlink is currently hovered" hint.
-        CellSequenceStart = (1 << 17), // Marks the beginning of a consecutive sequence of non-empty grid cells.
-        CellSequenceEnd = (1 << 18), // Marks the end of a consecutive sequence of non-empty grid cells.
-	};
-
-	constexpr CellFlags() : mask_{} {}
-	constexpr CellFlags(Mask m) : mask_{m} {}
-	constexpr CellFlags(unsigned m) : mask_{m} {}
-	constexpr CellFlags(CellFlags const& _other) noexcept : mask_{_other.mask_} {}
-
-	constexpr CellFlags& operator=(CellFlags const& _other) noexcept
-	{
-		mask_ = _other.mask_;
-		return *this;
-	}
-
-	constexpr unsigned mask() const noexcept { return mask_; }
-
-	constexpr operator unsigned () const noexcept { return mask_; }
-
-  private:
-	unsigned mask_;
+    // The following flags are for internal use only.
+    Hover = (1 << 16), // Marks the cell with "Hyperlink is currently hovered" hint.
+    CellSequenceStart = (1 << 17), // Marks the beginning of a consecutive sequence of non-empty grid cells.
+    CellSequenceEnd = (1 << 18), // Marks the end of a consecutive sequence of non-empty grid cells.
 };
 
-constexpr bool operator==(CellFlags const& a, CellFlags const& b) noexcept
+constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
 {
-	return a.mask() == b.mask();
-}
-
-constexpr CellFlags& operator|=(CellFlags& a, CellFlags const& b) noexcept
-{
-    a = a | b;
+    a = static_cast<CellFlags>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
 	return a;
 }
 
-constexpr CellFlags& operator&=(CellFlags& a, CellFlags const& b) noexcept
+constexpr CellFlags& operator&=(CellFlags& a, CellFlags b) noexcept
 {
-    a = a & b;
+    a = static_cast<CellFlags>(static_cast<unsigned>(a) & static_cast<unsigned>(b));
 	return a;
 }
 
-constexpr bool operator!(CellFlags const& a) noexcept
+/// Tests if @p b is contained in @p a.
+constexpr bool operator&(CellFlags a, CellFlags b) noexcept
 {
-	return a.mask() == 0;
+    return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
+}
+
+constexpr bool contains_all(CellFlags _base, CellFlags _test) noexcept
+{
+    return (static_cast<unsigned>(_base) & static_cast<unsigned>(_test)) == static_cast<unsigned>(_test);
+}
+
+/// Merges two CellFlags sets.
+constexpr CellFlags operator|(CellFlags a, CellFlags b) noexcept
+{
+    return static_cast<CellFlags>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+}
+
+/// Inverts the flags set.
+constexpr CellFlags operator~(CellFlags a) noexcept
+{
+    return static_cast<CellFlags>(~static_cast<unsigned>(a));
+}
+
+/// Tests for all flags cleared state.
+constexpr bool operator!(CellFlags a) noexcept
+{
+    return static_cast<unsigned>(a) == 0;
 }
 // }}}
 
@@ -168,7 +167,7 @@ struct GraphicsAttributes {
                 return 1.0f;
         }();
 
-        bool const bright = (styles & CellFlags::Bold) != 0;
+        bool const bright = (styles & CellFlags::Bold);
 
         auto const [fgColorTarget, bgColorTarget] =
             _reverseVideo
@@ -203,12 +202,17 @@ class Cell {
   public:
     static size_t constexpr MaxCodepoints = 9;
 
-    Cell(char32_t _ch, GraphicsAttributes _attrib) noexcept :
+    Cell(char32_t _codepoint, GraphicsAttributes _attrib) noexcept :
         codepoints_{},
-        attributes_{std::move(_attrib)},
+        attributes_{_attrib},
         width_{1}
     {
-        setCharacter(_ch);
+        // setCharacter(_codepoint);
+        if (_codepoint)
+        {
+            codepoints_.assign(1, _codepoint);
+            width_ = std::max(unicode::width(_codepoint), 1);
+        }
     }
 
     Cell() noexcept :
@@ -219,7 +223,7 @@ class Cell {
 
     void reset(GraphicsAttributes _attributes = {}) noexcept
     {
-        attributes_ = std::move(_attributes);
+        attributes_ = _attributes;
         width_ = 1;
         hyperlink_ = nullptr;
         codepoints_.clear();
@@ -228,7 +232,7 @@ class Cell {
 
     void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
     {
-        attributes_ = std::move(_attribs);
+        attributes_ = _attribs;
         width_ = 1;
         codepoints_.clear();
         hyperlink_ = _hyperlink;
@@ -260,8 +264,7 @@ class Cell {
 
     constexpr int width() const noexcept { return width_; }
 
-    constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
-    constexpr GraphicsAttributes& attributes() noexcept { return attributes_; }
+    constexpr GraphicsAttributes attributes() const noexcept { return attributes_; }
 
     std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
 
@@ -322,6 +325,11 @@ class Cell {
             }
         }
         return 0;
+    }
+
+    void setAttributes(GraphicsAttributes _attributes) noexcept
+    {
+        attributes_ = _attributes;
     }
 
     std::string toUtf8() const;
