@@ -163,7 +163,7 @@ void UnixPty::wakeupReader()
     (void) rv;
 }
 
-int UnixPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
+int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
 {
     timeval tv{};
     tv.tv_sec = _timeout.count() / 1000;
@@ -187,7 +187,7 @@ int UnixPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
         }
 
         if (rv < 0)
-            continue;
+            return -1;
 
         bool piped = false;
         if (FD_ISSET(pipe_[0], &rfd))
@@ -204,7 +204,7 @@ int UnixPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
         }
 
         if (FD_ISSET(master_, &rfd))
-            return static_cast<int>(::read(master_, buf, size));
+            return static_cast<int>(::read(master_, _buf, _size));
 
         if (piped)
         {
