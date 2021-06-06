@@ -163,8 +163,8 @@ endmacro()
 
 # {{{ libunicode
 macro(ThirdPartiesAdd_libunicode)
-    set(3rdparty_libunicode_VERSION "9c45cfaea1d450aa1ead2362cd48a70fd0ef830e" CACHE STRING "libunicode: commit hash")
-    set(3rdparty_libunicode_CHECKSUM "SHA256=1bb948f0f2b0d01358b3378fb1acf78cc1d2d96c7b13e5a314851ecc25c0d4f3" CACHE STRING "libunicode: download checksum")
+    set(3rdparty_libunicode_VERSION "1ece4f3d3c49abc48f781d85943f6153b3aa29bb" CACHE STRING "libunicode: commit hash")
+    set(3rdparty_libunicode_CHECKSUM "SHA256=a385d35a4c5d31e506b92be64459ad278e97cd4f1f37a0bbb2ea25aa1f3d7a2f" CACHE STRING "libunicode: download checksum")
     # XXX: temporary patch until libunicode gets rid of sumbodules.
     set(libunicode_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/libunicode.patch")
     if(NOT EXISTS "${libunicode_patch}")
