@@ -33,11 +33,10 @@ jobs:
       run: mkdir build
     - name: "cmake"
       run: |
-        cd build && cmake .. \
-          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-9 \
-          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-          -DYAML_CPP_INSTALL=OFF
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="Release" \
+          CXX="g++-9" \
+          ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
     - name: "test: crispy"
@@ -66,12 +65,11 @@ jobs:
       run: mkdir build
     - name: "cmake"
       run: |
-        cd build && cmake .. \
-          -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=g++-9 \
-          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-          -DYAML_CPP_INSTALL=OFF
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
+          CXX="g++-9" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
+          ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
     - name: "test: crispy"
@@ -130,13 +128,11 @@ jobs:
       run: mkdir build
     - name: "cmake"
       run: |
-        cd build && cmake .. \
-          -DUSE_BOOST_FILESYSTEM=ON \
-          -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-          -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-8 \
-          -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-          -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-          -DYAML_CPP_INSTALL=OFF
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="Release" \
+          CXX="g++-8" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DUSE_BOOST_FILESYSTEM=ON" \
+          ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
     - name: "test: crispy"
