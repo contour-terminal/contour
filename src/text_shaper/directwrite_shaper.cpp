@@ -1,6 +1,6 @@
 #include <text_shaper/directwrite_shaper.h>
 
-#include <crispy/logger.h>
+#include <crispy/debuglog.h>
 
 #include <algorithm>
 #include <string>
