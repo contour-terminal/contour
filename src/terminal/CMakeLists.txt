@@ -10,6 +10,10 @@ option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" O
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 option(LIBTERMINAL_EXECUTION_PAR "Builds with parallel execution where possible [default: OFF]" OFF)
 
+# Compile-time terminal features
+option(LIBTERMINAL_IMAGES "Enables image support [default: ON]" ON)
+option(LIBTERMINAL_HYPERLINKS "Enables hyperlink support [default: ON]" ON)
+
 if(MSVC)
     add_definitions(-DNOMINMAX)
 endif()
@@ -83,6 +87,13 @@ if(LIBTERMINAL_LOG_RAW)
 endif()
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_TRACE=1)
+endif()
+
+if(LIBTERMINAL_IMAGES)
+    target_compile_definitions(terminal PUBLIC LIBTERMINAL_IMAGES=1)
+endif()
+if(LIBTERMINAL_HYPERLINKS)
+    target_compile_definitions(terminal PUBLIC LIBTERMINAL_HYPERLINKS=1)
 endif()
 
 # ----------------------------------------------------------------------------

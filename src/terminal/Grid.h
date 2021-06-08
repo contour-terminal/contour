@@ -204,8 +204,8 @@ class Cell {
 
     Cell(char32_t _codepoint, GraphicsAttributes _attrib) noexcept :
         codepoints_{},
-        attributes_{_attrib},
-        width_{1}
+        width_{1},
+        attributes_{_attrib}
     {
         // setCharacter(_codepoint);
         if (_codepoint)
@@ -217,27 +217,35 @@ class Cell {
 
     Cell() noexcept :
         codepoints_{},
-        attributes_{},
-        width_{1}
+        width_{1},
+        attributes_{}
     {}
 
     void reset(GraphicsAttributes _attributes = {}) noexcept
     {
         attributes_ = _attributes;
         width_ = 1;
+#if defined(LIBTERMINAL_HYPERLINKS)
         hyperlink_ = nullptr;
+#endif
         codepoints_.clear();
+#if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
+#endif
     }
 
+#if defined(LIBTERMINAL_HYPERLINKS)
     void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
     {
         attributes_ = _attribs;
         width_ = 1;
         codepoints_.clear();
         hyperlink_ = _hyperlink;
+#if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
+#endif
     }
+#endif
 
     Cell(Cell const&) = default;
     Cell(Cell&&) noexcept = default;
@@ -260,25 +268,41 @@ class Cell {
 
     int codepointCount() const noexcept { return codepoints_.size(); }
 
+#if defined(LIBTERMINAL_IMAGES)
     bool empty() const noexcept { return codepoints_.empty() && !imageFragment_; }
+#else
+    bool empty() const noexcept { return codepoints_.empty(); }
+#endif
 
     constexpr int width() const noexcept { return width_; }
 
     constexpr GraphicsAttributes attributes() const noexcept { return attributes_; }
 
+#if defined(LIBTERMINAL_IMAGES)
     std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
+    // std::optional<ImageFragment> imageFragment() const noexcept { return std::nullopt; }
 
-    void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
+    void setImage(ImageFragment _imageFragment)
     {
         imageFragment_.emplace(std::move(_imageFragment));
-        hyperlink_ = std::move(_hyperlink);
         width_ = 1;
         codepoints_.clear();
     }
 
+#if defined(LIBTERMINAL_HYPERLINKS)
+    void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
+    {
+        setImage(_imageFragment);
+        hyperlink_ = std::move(_hyperlink);
+    }
+#endif
+#endif
+
     void setCharacter(char32_t _codepoint) noexcept
     {
+#if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
+#endif
         if (_codepoint)
         {
             codepoints_.assign(1, _codepoint);
@@ -298,7 +322,9 @@ class Cell {
 
     int appendCharacter(char32_t _codepoint) noexcept
     {
+#if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
+#endif
         if (codepoints_.size() < MaxCodepoints)
         {
             codepoints_.push_back(_codepoint);
@@ -334,23 +360,32 @@ class Cell {
 
     std::string toUtf8() const;
 
+#if defined(LIBTERMINAL_HYPERLINKS)
     HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
     void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
+#else
+    HyperlinkRef hyperlink() const noexcept { return HyperlinkRef(); }
+    void setHyperlink(HyperlinkRef const&) { }
+#endif
 
   private:
     /// Unicode codepoint to be displayed.
     std::u32string codepoints_;
 
-    /// Graphics renditions, such as foreground/background color or other grpahics attributes.
-    GraphicsAttributes attributes_;
-
     /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
     uint8_t width_;
 
+    /// Graphics renditions, such as foreground/background color or other grpahics attributes.
+    GraphicsAttributes attributes_;
+
+#if defined(LIBTERMINAL_HYPERLINKS)
     HyperlinkRef hyperlink_ = nullptr;
+#endif
 
     /// Image fragment to be rendered in this cell.
+#if defined(LIBTERMINAL_IMAGES)
     std::optional<ImageFragment> imageFragment_;
+#endif
 };
 
 inline bool operator==(Cell const& a, Cell const& b) noexcept

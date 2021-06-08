@@ -583,7 +583,9 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     Cell& cell = *currentColumn_;
     cell.setCharacter(_character);
     cell.setAttributes(cursor_.graphicsRendition);
+#if defined(LIBTERMINAL_HYPERLINKS)
     cell.setHyperlink(currentHyperlink_);
+#endif
 
     lastColumn_ = currentColumn_;
     lastCursorPosition_ = cursor_.position;
@@ -600,7 +602,11 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
         cursor_.position.column += n;
         currentColumn_++;
         for (int i = 1; i < n; ++i)
+#if defined(LIBTERMINAL_HYPERLINKS)
             (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
+#else
+            (currentColumn_++)->reset(cursor_.graphicsRendition);
+#endif
     }
     else if (cursor_.autoWrap)
         wrapPending_ = 1;
@@ -619,7 +625,11 @@ void Screen::clearAndAdvance(int _offset)
         assert(n > 0);
         cursor_.position.column += n;
         for (auto i = 0; i < n; ++i)
+#if defined(LIBTERMINAL_HYPERLINKS)
             (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
+#else
+            (currentColumn_++)->reset(cursor_.graphicsRendition);
+#endif
     }
     else if (cursor_.autoWrap)
     {
@@ -757,7 +767,9 @@ void Screen::resetSoft()
     setTopBottomMargin(1, size().height); // DECSTBM
     setLeftRightMargin(1, size().width); // DECRLM
 
+#if defined(LIBTERMINAL_HYPERLINKS)
     currentHyperlink_ = {};
+#endif
     colorPalette_ = defaultColorPalette_;
 
     // TODO: DECNKM (Numeric keypad)
@@ -792,7 +804,9 @@ void Screen::resetHard()
         Margin::Range{1, size_.width}
     };
 
+#if defined(LIBTERMINAL_HYPERLINKS)
     currentHyperlink_ = {};
+#endif
     colorPalette_ = defaultColorPalette_;
 
     eventListener_.hardReset();
@@ -995,8 +1009,10 @@ void Screen::sendTerminalId()
 
 void Screen::clearToEndOfScreen()
 {
+#if defined(LIBTERMINAL_HYPERLINKS)
     if (isAlternateScreen() && cursor_.position.row == 1 && cursor_.position.column == 1)
         hyperlinks_.clear();
+#endif
 
     clearToEndOfLine();
 
@@ -1214,6 +1230,7 @@ void Screen::setCurrentWorkingDirectory(string const& _url)
 
 void Screen::hyperlink(string const& _id, string const& _uri)
 {
+#if defined(LIBTERMINAL_HYPERLINKS)
     if (_uri.empty())
         currentHyperlink_ = nullptr;
     else if (_id.empty())
@@ -1229,6 +1246,7 @@ void Screen::hyperlink(string const& _id, string const& _uri)
     // Care about eviction.
     // Move hyperlink store into ScreenBuffer, so it gets reset upon every switch into
     // alternate screen (not for main screen!)
+#endif
 }
 
 void Screen::moveCursorUp(int _n)
@@ -1909,6 +1927,11 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
     (void) _imageOffset;
     (void) _imageSize;
 
+#if !defined(LIBTERMINAL_IMAGES)
+    (void) _imageRef;
+    (void) _alignmentPolicy;
+    (void) _autoScroll;
+#else
     auto const linesAvailable = 1 + size_.height - _topLeft.row;
     auto const linesToBeRendered = min(_gridSize.height, linesAvailable);
     auto const columnsToBeRendered = min(_gridSize.width, size_.width - _topLeft.column - 1);
@@ -1930,10 +1953,11 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
             LIBTERMINAL_EXECUTION_COMMA(par)
             Size{columnsToBeRendered, linesToBeRendered},
             [&](Point const& offset) {
-                at(_topLeft + offset).setImage(
-                    ImageFragment{rasterizedImage, Coordinate(offset)},
-                    currentHyperlink_
-                );
+                [[maybe_unused]] Cell& cell = at(_topLeft + offset);
+                cell.setImage(ImageFragment{rasterizedImage, Coordinate(offset)});
+#if defined(LIBTERMINAL_HYPERLINKS)
+                cell.setHyperlink(currentHyperlink_);
+#endif
             }
         );
         moveCursorTo(Coordinate{_topLeft.row + linesToBeRendered - 1, _topLeft.column});
@@ -1952,10 +1976,14 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 crispy::times(columnsToBeRendered),
                 [&](int columnOffset) {
-                    at(Coordinate{size_.height, columnOffset + 1}).setImage(
-                        ImageFragment{rasterizedImage, Coordinate{linesToBeRendered + lineOffset, columnOffset}},
-                        currentHyperlink_
-                    );
+                    [[maybe_unused]] Cell& cell = at(Coordinate{size_.height, columnOffset + 1});
+                    cell.setImage(ImageFragment{
+                        rasterizedImage,
+                        Coordinate{linesToBeRendered + lineOffset, columnOffset}
+                    });
+#if defined(LIBTERMINAL_HYPERLINKS)
+                    cell.setHyperlink(currentHyperlink_);
+#endif
                 }
             );
         }
@@ -1963,6 +1991,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
 
     // move ansi text cursor to position of the sixel cursor
     moveCursorToColumn(_topLeft.column + _gridSize.width);
+#endif
 }
 
 void Screen::setWindowTitle(std::string const& _title)

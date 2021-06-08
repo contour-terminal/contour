@@ -58,7 +58,11 @@ namespace // {{{ helper
 {
     bool is_blank(Cell const& _cell) noexcept
     {
-        return !_cell.imageFragment() && _cell.codepointCount() == 0;
+        return
+#if defined(LIBTERMINAL_IMAGES)
+            !_cell.imageFragment() &&
+#endif
+            _cell.codepointCount() == 0;
     }
 
     template <typename... Args>

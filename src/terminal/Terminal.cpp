@@ -221,15 +221,19 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
 
         if (!_cell.codepoints().empty())
         {
+#if defined(LIBTERMINAL_IMAGES)
             assert(!_cell.imageFragment().has_value());
+#endif
             cell.codepoints = _cell.codepoints();
         }
+#if defined(LIBTERMINAL_IMAGES)
         else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
         {
             assert(_cell.codepoints().empty());
             cell.flags |= CellFlags::Image; // TODO: this should already be there.
             cell.image = _cell.imageFragment();
         }
+#endif
 
         if (_cell.hyperlink())
         {
@@ -265,7 +269,10 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
             auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell, reverseVideo, selected);
 
             auto const cellEmpty = (_cell.codepoints().empty() || _cell.codepoints()[0] == 0x20)
-                                && !_cell.imageFragment().has_value();
+#if defined(LIBTERMINAL_IMAGES)
+                                && !_cell.imageFragment().has_value()
+#endif
+                                ;
             auto const customBackground = bg != screen_.colorPalette().defaultBackground;
 
             bool isNewLine = false;

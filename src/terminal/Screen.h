@@ -688,8 +688,10 @@ class Screen : public capabilities::StaticDatabase {
 
     // Hyperlink related
     //
+#if defined(LIBTERMINAL_HYPERLINKS)
     HyperlinkRef currentHyperlink_ = {};
     std::unordered_map<std::string, HyperlinkRef> hyperlinks_; // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
+#endif
 
     // experimental features
     //
