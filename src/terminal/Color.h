@@ -138,11 +138,11 @@ constexpr bool operator!=(RGBAColor a, RGBAColor b) noexcept
 // {{{ Color
 struct Color
 {
-    enum class Type { Undefined, Default, Bright, Indexed, RGB };
+    enum class Type : uint8_t { Undefined, Default, Bright, Indexed, RGB };
 
     Type type;
     union {
-        int index;
+        uint8_t index;
         RGBColor rgb;
     };
 
@@ -152,16 +152,16 @@ struct Color
     constexpr Color& operator=(Color const&) noexcept = default;
     constexpr Color& operator=(Color&&) noexcept = default;
 
-    constexpr Color(BrightColor _value) noexcept : type{Type::Bright}, index{static_cast<int>(_value)} {}
-    constexpr Color(IndexedColor _value) noexcept : type{Type::Indexed}, index{static_cast<int>(_value)} {}
+    constexpr Color(BrightColor _value) noexcept : type{Type::Bright}, index{static_cast<uint8_t>(_value)} {}
+    constexpr Color(IndexedColor _value) noexcept : type{Type::Indexed}, index{static_cast<uint8_t>(_value)} {}
     constexpr Color(RGBColor _rgb) noexcept : type{Type::RGB}, rgb{_rgb} {}
 
-    constexpr explicit Color(Type _type, int _index) noexcept : type{_type}, index{_index} {}
+    constexpr explicit Color(Type _type, uint8_t _index) noexcept : type{_type}, index{_index} {}
 
     constexpr static Color Undefined() noexcept { return Color{Type::Undefined, 0}; }
     constexpr static Color Default() noexcept { return Color{Type::Default, 0}; }
-    constexpr static Color Bright(int _index) noexcept { return Color{Type::Bright, _index}; }
-    constexpr static Color Indexed(int _index) noexcept { return Color{Type::Indexed, _index}; }
+    constexpr static Color Bright(uint8_t _index) noexcept { return Color{Type::Bright, _index}; }
+    constexpr static Color Indexed(uint8_t _index) noexcept { return Color{Type::Indexed, _index}; }
     constexpr static Color RGB(RGBColor _color) noexcept { return Color{_color}; }
 };
 
