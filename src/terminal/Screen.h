@@ -19,7 +19,6 @@
 #include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/InputGenerator.h> // MouseTransport
 #include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Sequencer.h>
