@@ -1021,9 +1021,7 @@ bool TerminalWidget::executeAction(Action const& _action)
     enum class Result { Nothing, Silently, Dirty };
     auto constexpr OnePt = text::font_size{ 1.0 };
 
-    auto const postScroll = [this](bool _dirty) -> Result {
-        if (_dirty)
-            emit viewportChanged(this);
+    auto const postScroll = [](bool _dirty) -> Result {
         return _dirty ? Result::Dirty : Result::Nothing;
     };
 

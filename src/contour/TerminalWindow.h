@@ -65,12 +65,12 @@ class TerminalWindow :
     void onScrollBarValueChanged();
     void terminalScreenUpdated(TerminalWidget* _terminalWidget);
     void profileChanged(TerminalWidget* _terminalWidget);
-    void viewportChanged(TerminalWidget* _terminalWidget);
     void onTerminalClosed(TerminalWidget* _terminalWidget);
     void setBackgroundBlur(bool _enable);
 
   private:
     void updateScrollbarPosition();
+    void updateScrollbarValues();
 
     // data members
     //

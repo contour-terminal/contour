@@ -161,6 +161,20 @@ void TerminalWindow::updateScrollbarPosition()
 #endif
 }
 
+void TerminalWindow::updateScrollbarValues()
+{
+#if defined(CONTOUR_SCROLLBAR)
+    if (!scrollBar_->isVisible())
+        return;
+
+    scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
+    if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
+        scrollBar_->setValue(s.value());
+    else
+        scrollBar_->setValue(scrollBar_->maximum());
+#endif
+}
+
 void TerminalWindow::onScrollBarValueChanged()
 {
 #if defined(CONTOUR_SCROLLBAR)
@@ -223,7 +237,7 @@ void TerminalWindow::profileChanged(TerminalWidget*)
 #endif
 }
 
-void TerminalWindow::terminalBufferChanged(TerminalWidget* _terminalWidget, terminal::ScreenType _type)
+void TerminalWindow::terminalBufferChanged(TerminalWidget* /*_terminalWidget*/, terminal::ScreenType _type)
 {
     debuglog(WindowTag).write("Screen buffer type has changed to {}.", _type);
 #if defined(CONTOUR_SCROLLBAR)
@@ -234,34 +248,12 @@ void TerminalWindow::terminalBufferChanged(TerminalWidget* _terminalWidget, term
 #endif
 
     updateScrollbarPosition();
-    viewportChanged(_terminalWidget);
-}
-
-void TerminalWindow::viewportChanged(TerminalWidget*)
-{
-#if defined(CONTOUR_SCROLLBAR)
-    if (!scrollBar_->isVisible())
-        return;
-
-    scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
-    if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
-        scrollBar_->setValue(s.value());
-#endif
+    updateScrollbarValues();
 }
 
 void TerminalWindow::terminalScreenUpdated(TerminalWidget*)
 {
-#if defined(CONTOUR_SCROLLBAR)
-    if (!scrollBar_->isVisible())
-        return;
-
-    scrollBar_->setMaximum(terminalWidget_->view()->terminal().screen().historyLineCount());
-
-    if (auto const s = terminalWidget_->view()->terminal().viewport().absoluteScrollOffset(); s.has_value())
-        scrollBar_->setValue(s.value());
-    else
-        scrollBar_->setValue(scrollBar_->maximum());
-#endif
+    updateScrollbarValues();
 }
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
