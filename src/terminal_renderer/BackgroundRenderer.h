@@ -14,6 +14,8 @@
 #pragma once
 
 #include <terminal_renderer/RenderTarget.h>
+
+#include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
 #include <memory>

@@ -17,6 +17,7 @@
 #include <terminal_renderer/RenderTarget.h>
 
 #include <terminal/Color.h>
+#include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
 #include <text_shaper/font.h>

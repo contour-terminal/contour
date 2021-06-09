@@ -45,6 +45,7 @@ class TerminalView : private Terminal::Events {
 
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
+        virtual void renderBufferUpdated() = 0;
         virtual void screenUpdated() {}
         virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
         virtual void setFontDef(FontDef const& /*_fontDef*/) {}
@@ -74,7 +75,8 @@ class TerminalView : private Terminal::Events {
                  renderer::Decorator _hyperlinkNormal,
                  renderer::Decorator _hyperlinkHover,
                  std::unique_ptr<Pty> _client,
-                 Process::ExecInfo const& _shell);
+                 Process::ExecInfo const& _shell,
+                 double _refreshRate);
 
     TerminalView(TerminalView const&) = delete;
     TerminalView(TerminalView&&) = delete;
@@ -144,6 +146,7 @@ class TerminalView : private Terminal::Events {
     void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     void bell() override;
     void bufferChanged(ScreenType) override;
+    void renderBufferUpdated() override;
     void screenUpdated() override;
     FontDef getFontDef() override;
     void setFontDef(FontDef const& _fontSpec) override;

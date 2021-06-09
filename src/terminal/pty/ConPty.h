@@ -31,7 +31,8 @@ class ConPty : public Pty
     void prepareParentProcess() override;
     void prepareChildProcess() override;
 
-    int read(char* buf, size_t size) override;
+    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     crispy::Size screenSize() const noexcept override;
     void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;

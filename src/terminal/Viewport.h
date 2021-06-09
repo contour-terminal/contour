@@ -24,8 +24,11 @@ class Screen;
 
 class Viewport {
   public:
-    explicit Viewport(Screen& _screen) :
-        screen_{ _screen }
+    using ModifyEvent = std::function<void()>;
+
+    explicit Viewport(Screen& _screen, ModifyEvent _onModify = {}) :
+        screen_{ _screen },
+        modified_{ _onModify ? std::move(_onModify) : []() {} }
     {}
 
     /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
@@ -92,7 +95,11 @@ class Viewport {
 
     bool forceScrollToBottom()
     {
+        if (!scrollOffset_)
+            return false;
+
         scrollOffset_.reset();
+        modified_();
         return true;
     }
 
@@ -104,6 +111,7 @@ class Viewport {
         if (0 <= _absoluteScrollOffset && _absoluteScrollOffset < historyLineCount())
         {
             scrollOffset_.emplace(_absoluteScrollOffset);
+            modified_();
             return true;
         }
 
@@ -152,6 +160,7 @@ class Viewport {
 
   private:
     Screen& screen_;
+    ModifyEvent modified_;
     std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
 };
 

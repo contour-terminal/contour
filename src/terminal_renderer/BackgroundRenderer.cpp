@@ -39,9 +39,11 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
     if (_cell.backgroundColor == defaultColor_)
         return;
 
+    auto const pos = gridMetrics_.map(_cell.position);
+
     renderTarget().renderRectangle(
-        _cell.position.x,
-        _cell.position.y,
+        pos.x,
+        pos.y,
         gridMetrics_.cellSize.width,
         gridMetrics_.cellSize.height,
         static_cast<float>(_cell.backgroundColor.red) / 255.0f,

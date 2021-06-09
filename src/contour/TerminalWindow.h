@@ -48,8 +48,7 @@ class TerminalWidget;
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
 class TerminalWindow :
-    public QMainWindow,
-    public terminal::view::TerminalView::Events
+    public QMainWindow
 {
     Q_OBJECT
 

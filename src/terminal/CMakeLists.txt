@@ -28,6 +28,7 @@ set(terminal_HEADERS
     pty/Pty.h
     pty/UnixPty.h
     pty/ConPty.h
+    RenderBuffer.h
     Screen.h
     Selector.h
     Sequencer.h
@@ -47,6 +48,7 @@ set(terminal_SOURCES
     InputGenerator.cpp
     Parser.cpp
     Process.cpp
+    RenderBuffer.cpp
     Screen.cpp
     Sequencer.cpp
     Selector.cpp

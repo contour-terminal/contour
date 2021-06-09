@@ -92,12 +92,11 @@ Renderer::Renderer(Size _screenSize,
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
-    colorPalette_{ _colorPalette },
     backgroundOpacity_{ _backgroundOpacity },
     backgroundRenderer_{ gridMetrics_, _colorPalette.defaultBackground },
     imageRenderer_{ cellSize() },
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
-    decorationRenderer_{ gridMetrics_, _colorPalette, _hyperlinkNormal, _hyperlinkHover },
+    decorationRenderer_{ gridMetrics_, _hyperlinkNormal, _hyperlinkHover },
     cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorPalette.cursor }
 {
 }
@@ -185,27 +184,36 @@ void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
 
 uint64_t Renderer::render(Terminal& _terminal,
                           steady_clock::time_point _now,
-                          terminal::Coordinate const& _currentMousePosition,
                           bool _pressure)
 {
     gridMetrics_.pageSize = _terminal.screenSize();
 
-    auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
     auto const changes = _terminal.tick(_now);
-    auto const cursorOpt = fetchRenderableCells(_terminal, _currentMousePosition, renderableCells_);
 
-    executeImageDiscards();
-    textRenderer_.start();
-    textRenderer_.setPressure(pressure);
-    renderCells(renderableCells_);
-    textRenderer_.finish();
-    renderableCells_.clear();
-
-    if (cursorOpt)
     {
-        auto const& cursor = *cursorOpt;
-        cursorRenderer_.setShape(cursor.shape);
-        cursorRenderer_.render(cursor.position, cursor.width);
+        #if defined(CONTOUR_RENDER_DOUBLE_BUFFERING) || defined(_WIN32) // {{{
+        // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
+        // so we have to explicitly refresh the render buffer
+        // from within the render (reader) thread instead ofthe terminal (writer) thread.
+        _terminal.refreshRenderBuffer(std::chrono::steady_clock::now());
+        #endif // }}}
+
+        auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
+        RenderBufferRef const renderBuffer = _terminal.renderBuffer();
+        auto const& cursorOpt = renderBuffer.get().cursor;
+
+        executeImageDiscards();
+        textRenderer_.start();
+        textRenderer_.setPressure(pressure);
+        renderCells(renderBuffer.get().screen);
+        textRenderer_.finish();
+
+        if (cursorOpt)
+        {
+            auto const& cursor = *cursorOpt;
+            cursorRenderer_.setShape(cursor.shape);
+            cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width);
+        }
     }
 
     renderTarget().execute();
@@ -241,199 +249,6 @@ constexpr CellFlags toCellStyle(Decorator _decorator)
     return CellFlags{};
 }
 
-optional<RenderCursor> Renderer::fetchRenderableCells(Terminal& _terminal,
-                                                      terminal::Coordinate _currentMousePosition,
-                                                      vector<RenderCell>& _output)
-{
-    auto _l = scoped_lock{_terminal};
-
-    auto const reverseVideo = _terminal.screen().isModeEnabled(terminal::DECMode::ReverseVideo);
-    auto const baseLine = _terminal.viewport().absoluteScrollOffset().value_or(_terminal.screen().historyLineCount());
-    auto const renderHyperlinks = _terminal.screen().contains(_currentMousePosition);
-    auto const currentMousePositionRel = Coordinate{
-        _currentMousePosition.row - _terminal.viewport().relativeScrollOffset(),
-        _currentMousePosition.column
-    };
-
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-    }
-
-    auto const appendCell = [&](Coordinate const& _pos, Cell const& _cell,
-                                RGBColor fg, RGBColor bg)
-    {
-        RenderCell cell;
-        cell.backgroundColor = bg;
-        cell.foregroundColor = fg;
-        cell.decorationColor = _cell.attributes().getUnderlineColor(colorPalette_);
-        cell.position = gridMetrics_.map(_pos);
-        cell.flags = _cell.attributes().styles;
-
-        if (!_cell.codepoints().empty())
-        {
-            assert(!_cell.imageFragment().has_value());
-            cell.codepoints = _cell.codepoints();
-        }
-        else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
-        {
-            assert(_cell.codepoints().empty());
-            cell.flags |= CellFlags::Image; // TODO: this should already be there.
-            cell.image = _cell.imageFragment();
-        }
-
-        if (_cell.hyperlink())
-        {
-            auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                                ? colorPalette_.hyperlinkDecoration.hover
-                                : colorPalette_.hyperlinkDecoration.normal;
-            auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
-                                ? decorationRenderer_.hyperlinkHover()
-                                : decorationRenderer_.hyperlinkNormal();
-            cell.flags |= toCellStyle(decoration);
-            cell.decorationColor = color;
-        }
-
-        _output.emplace_back(move(cell));
-    };
-
-    enum class State {
-        Gap,
-        Sequence,
-    };
-    State state = State::Gap;
-
-    //bool gap = true;
-    int lineNr = 0; // 0 for no-line-number.
-    _terminal.screen().render(
-        [&](Coordinate const& _pos, Cell const& _cell) // mutable
-        {
-            auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
-            auto const selected = _terminal.isSelectedAbsolute(absolutePos);
-            auto const [fg, bg] = makeColors(colorPalette_, _cell, reverseVideo, selected);
-
-            auto const cellEmpty = (_cell.codepoints().empty() || _cell.codepoints()[0] == 0x20)
-                                && !_cell.imageFragment().has_value();
-            auto const customBackground = bg != colorPalette_.defaultBackground;
-
-            bool isNewLine = false;
-            if (lineNr != _pos.row)
-            {
-                isNewLine = true;
-                lineNr = _pos.row;
-                if (!_output.empty())
-                    _output.back().flags |= CellFlags::CellSequenceEnd;
-            }
-
-            // {{{
-            switch (state)
-            {
-                case State::Gap:
-                    if (!cellEmpty || customBackground)
-                    {
-                        state = State::Sequence;
-                        appendCell(_pos, _cell, fg, bg);
-                        _output.back().flags |= CellFlags::CellSequenceStart;
-                    }
-                    break;
-                case State::Sequence:
-                    if (cellEmpty && !customBackground)
-                    {
-                        _output.back().flags |= CellFlags::CellSequenceEnd;
-                        state = State::Gap;
-                    }
-                    else
-                    {
-                        appendCell(_pos, _cell, fg, bg);
-
-                        if (isNewLine)
-                            _output.back().flags |= CellFlags::CellSequenceStart;
-                    }
-                    break;
-            }
-            // }}}
-
-#if 0 // {{{
-            if (cellEmpty && !customBackground)
-            {
-                gap = true;
-                if (!_output.empty())
-                    _output.back().flags |= CellFlags::CellSequenceEnd;
-                return;
-            }
-            // assume cell is not empty and/or having custom SGR
-
-            RenderCell cell;
-            cell.backgroundColor = bg;
-            cell.foregroundColor = fg;
-            cell.decorationColor = _cell.attributes().getUnderlineColor(colorPalette_);
-            cell.position = gridMetrics_.map(_pos);
-            cell.flags = _cell.attributes().styles;
-
-            if (!_cell.codepoints().empty())
-            {
-                assert(!_cell.imageFragment().has_value());
-                cell.codepoints = _cell.codepoints();
-            }
-            else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
-            {
-                assert(_cell.codepoints().empty());
-                cell.flags |= CellFlags::Image; // TODO: this should already be there.
-                cell.image = _cell.imageFragment();
-            }
-
-            if (lineNr != _pos.row)
-            {
-                lineNr = _pos.row;
-                if (!_output.empty())
-                    _output.back().flags |= CellFlags::CellSequenceEnd;
-                if (!cellEmpty)
-                    cell.flags |= CellFlags::CellSequenceStart;
-                else
-                    gap = true;
-            }
-            else if (cellEmpty && !gap)
-            {
-                gap = true;
-                if (!_output.empty())
-                    _output.back().flags |= CellFlags::CellSequenceEnd;
-            }
-            else if (gap)
-            {
-                gap = false;
-                cell.flags |= CellFlags::CellSequenceStart;
-            }
-
-            if (_cell.hyperlink())
-            {
-                auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                                    ? colorPalette_.hyperlinkDecoration.hover
-                                    : colorPalette_.hyperlinkDecoration.normal;
-                auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
-                                    ? decorationRenderer_.hyperlinkHover()
-                                    : decorationRenderer_.hyperlinkNormal();
-                cell.flags |= toCellStyle(decoration);
-                cell.decorationColor = color;
-            }
-
-            _output.emplace_back(std::move(cell));
-#endif // }}}
-        },
-        _terminal.viewport().absoluteScrollOffset()
-    );
-
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = _terminal.screen().at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
-    }
-
-    return renderCursor(_terminal);
-}
-
 void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
 {
     for (RenderCell const& cell: _renderableCells)
@@ -442,7 +257,7 @@ void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
         decorationRenderer_.renderCell(cell);
         textRenderer_.renderCell(cell);
         if (cell.image.has_value())
-            imageRenderer_.renderImage(cell.position, *cell.image);
+            imageRenderer_.renderImage(gridMetrics_.map(cell.position), *cell.image);
     }
 }
 

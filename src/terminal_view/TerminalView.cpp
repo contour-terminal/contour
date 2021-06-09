@@ -49,7 +49,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
                            renderer::Decorator _hyperlinkNormal,
                            renderer::Decorator _hyperlinkHover,
                            unique_ptr<Pty> _pty,
-                           Process::ExecInfo const& _shell) :
+                           Process::ExecInfo const& _shell,
+                           double _refreshRate):
     events_{ _events },
     fontSize_{ _fontDescriptions.size },
     size_{
@@ -67,7 +68,8 @@ TerminalView::TerminalView(steady_clock::time_point _now,
         {800, 600},     // maxImageSize
         256,            // maxImageColorRegisters
         true,           // sixelCursorConformance
-        _colorPalette
+        _colorPalette,
+        _refreshRate
     ),
     process_{ _shell, terminal_.device() },
     processExitWatcher_{ [this]() {
@@ -178,7 +180,7 @@ bool TerminalView::setTerminalSize(Size _cells)
 
 uint64_t TerminalView::render(steady_clock::time_point const& _now, bool _pressure)
 {
-    return renderer_.render(terminal_, _now, terminal().currentMousePosition(), _pressure);
+    return renderer_.render(terminal_, _now, _pressure);
 }
 
 Process::ExitStatus TerminalView::waitForProcessExit()
@@ -195,6 +197,11 @@ void TerminalView::bell()
 void TerminalView::bufferChanged(ScreenType _type)
 {
     events_.bufferChanged(_type);
+}
+
+void TerminalView::renderBufferUpdated()
+{
+    events_.renderBufferUpdated();
 }
 
 void TerminalView::screenUpdated()

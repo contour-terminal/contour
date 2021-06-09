@@ -15,6 +15,7 @@
 
 #include <terminal/pty/Pty.h>
 
+#include <array>
 #include <optional>
 
 #if defined(__APPLE__)
@@ -31,7 +32,8 @@ class UnixPty : public Pty
     explicit UnixPty(crispy::Size const& windowSize);
     ~UnixPty() override;
 
-    int read(char* buf, size_t size) override;
+    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     crispy::Size screenSize() const noexcept override;
     void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;
@@ -44,6 +46,7 @@ class UnixPty : public Pty
     crispy::Size size_;
     int master_;
     int slave_;
+    std::array<int, 2> pipe_;
 };
 
 }  // namespace terminal

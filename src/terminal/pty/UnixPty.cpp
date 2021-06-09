@@ -21,6 +21,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <iostream>
+
 #if defined(__APPLE__)
 #include <util.h>
 #else
@@ -39,6 +41,7 @@
 using crispy::Size;
 using std::runtime_error;
 using std::numeric_limits;
+using std::max;
 using namespace std::string_literals;
 
 namespace terminal {
@@ -118,6 +121,22 @@ UnixPty::UnixPty(Size const& _windowSize) :
     // TODO: termios term{};
     if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, wsa) < 0)
         throw runtime_error{ "Failed to open PTY. "s + strerror(errno) };
+
+#if defined(__linux__)
+    if (pipe2(pipe_.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
+        throw runtime_error{ "Failed to create PTY pipe. "s + strerror(errno) };
+#else
+    if (pipe(pipe_.data()) < 0)
+        throw runtime_error{ "Failed to create PTY pipe. "s + strerror(errno) };
+    for (auto const fd: pipe_)
+    {
+        int currentFlags{};
+        if (fcntl(fd, F_GETFL, &currentFlags) < 0)
+            break;
+        if (fcntl(fd, F_SETFL, currentFlags | O_CLOEXEC | O_NONBLOCK) < 0)
+            break;
+    }
+#endif
 }
 
 UnixPty::~UnixPty()
@@ -127,61 +146,72 @@ UnixPty::~UnixPty()
 
 void UnixPty::close()
 {
-    if (master_ >= 0)
+    for (auto* fd: {&pipe_.at(0), &pipe_.at(1), &master_, &slave_})
     {
-        ::close(master_);
-        master_ = -1;
-    }
+        if (*fd < 0)
+            continue;
 
-    if (slave_ >= 0)
-    {
-        ::close(slave_);
-        slave_ = -1;
+        ::close(*fd);
+        *fd = -1;
     }
 }
 
-int UnixPty::read(char* buf, size_t size)
+void UnixPty::wakeupReader()
 {
-    ssize_t rv = ::read(master_, buf, size);
-    if (rv < 0 || rv >= static_cast<decltype(rv)>(size))
-        return rv;
-#if 1
-    //size_t const cap = size;
-    ssize_t nread = rv;
-    int i = 1;
-    size -= rv;
-    buf += rv;
+    char dummy{};
+    auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
+    (void) rv;
+}
 
-    auto const oldFlags = fcntl(master_, F_GETFL);
-    fcntl(master_, F_SETFL, oldFlags | O_NONBLOCK);
+int UnixPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
+{
+    timeval tv{};
+    tv.tv_sec = _timeout.count() / 1000;
+    tv.tv_usec = (_timeout.count() % 1000) * 1000;
 
-    fd_set in, out, err;
-    FD_ZERO(&in);
-    FD_ZERO(&out);
-    FD_ZERO(&err);
-    FD_SET(master_, &in);
-
-    while (size > 0)
+    for (;;)
     {
-        ++i;
-        timeval tv{0, 0};
-        int const selected = select(master_ + 1, &in, &out, &err, &tv);
-        if (selected <= 0)
-            break;
-        rv = ::read(master_, buf, size);
-        if (rv < 0)
-            break;
-        nread += rv;
-        size -= rv;
-        buf += rv;
-    }
+        fd_set rfd, wfd, efd;
+        FD_ZERO(&rfd);
+        FD_ZERO(&wfd);
+        FD_ZERO(&efd);
+        FD_SET(master_, &rfd);
+        FD_SET(pipe_[0], &rfd);
+        auto const nfds = 1 + max(master_, pipe_[0]);
+        int rv = select(nfds, &rfd, &wfd, &efd, &tv);
 
-    fcntl(master_, F_SETFL, oldFlags);
-    //printf("pty.read: %zu/%zu bytes (%ld%%, #%d)\n", nread, cap, nread * 100 / cap, i);
-    return nread;
-#else
-    return rv;
-#endif
+        if (rv == 0)
+        {
+            errno = EAGAIN;
+            return -1;
+        }
+
+        if (rv < 0)
+            continue;
+
+        bool piped = false;
+        if (FD_ISSET(pipe_[0], &rfd))
+        {
+            piped = true;
+            int n = 0;
+            for (bool done = false; !done; )
+            {
+                char dummy[256];
+                rv = ::read(pipe_[0], dummy, sizeof(dummy));
+                done = rv > 0;
+                n += max(rv, 0);
+            }
+        }
+
+        if (FD_ISSET(master_, &rfd))
+            return static_cast<int>(::read(master_, buf, size));
+
+        if (piped)
+        {
+            errno = EINTR;
+            return -1;
+        }
+    }
 }
 
 int UnixPty::write(char const* buf, size_t size)

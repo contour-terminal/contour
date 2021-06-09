@@ -525,6 +525,8 @@ void Screen::fail(std::string const& _message) const
 
 void Screen::write(char const * _data, size_t _size)
 {
+    if (!_size)
+        return;
 #if defined(LIBTERMINAL_LOG_RAW)
     if (crispy::logging_sink::for_debug().enabled())
         debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data, _data + _size));

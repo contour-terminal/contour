@@ -145,6 +145,8 @@ void configureTerminal(terminal::view::TerminalView& _terminalView,
     if (profile == nullptr)
         return;
 
+    terminal.setRefreshRate(profile->refreshRate);
+
     if (!_terminalView.renderer().renderTargetAvailable())
         return;
 

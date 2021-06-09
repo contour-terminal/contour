@@ -19,6 +19,7 @@
 #include <terminal/Screen.h>
 #include <terminal/Selector.h>
 #include <terminal/Viewport.h>
+#include <terminal/RenderBuffer.h>
 
 #include <fmt/format.h>
 
@@ -48,6 +49,7 @@ class Terminal : public ScreenEvents {
         virtual void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) = 0;
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
+        virtual void renderBufferUpdated() = 0;
         virtual void screenUpdated() {}
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*_fontSpec*/) {}
@@ -73,10 +75,13 @@ class Terminal : public ScreenEvents {
              crispy::Size _maxImageSize = crispy::Size{800, 600},
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true,
-             ColorPalette _colorPalette = {});
+             ColorPalette _colorPalette = {},
+             double _refreshRate = 30.0);
     ~Terminal();
 
     void start();
+
+    void setRefreshRate(double _refreshRate);
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
@@ -120,7 +125,7 @@ class Terminal : public ScreenEvents {
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(char const* data, size_t size);
-    void writeToScreen(std::string_view const& _text) { writeToScreen(_text.data(), _text.size()); }
+    void writeToScreen(std::string_view _text) { writeToScreen(_text.data(), _text.size()); }
     void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
     // }}}
 
@@ -153,13 +158,55 @@ class Terminal : public ScreenEvents {
     }
     // }}}
 
+    // {{{ RenderBuffer synchronization API
+
+    /// Ensures the terminals event loop is interrupted
+    /// and the render buffer is refreshed.
+    ///
+    void breakLoopAndRefreshRenderBuffer();
+
+    /// Refreshes the render buffer.
+    /// When this function returns, the back buffer is updated
+    /// and it is attempted to swap the back/front buffers.
+    /// but the swap has NOT been invoked yet.
+    ///
+    /// @retval true   front buffer now contains the refreshed render buffer.
+    /// @retval false  back buffer contains the refreshed render buffer,
+    ///                and RenderDoubleBuffer::swapBuffers() must again
+    ///                be successfully invoked to swap back/front buffers
+    ///                in order to access the refreshed render buffer.
+    ///
+    /// @see RenderDoubleBuffer::swapBuffers()
+    /// @see renderBuffer()
+    ///
+    bool refreshRenderBuffer(std::chrono::steady_clock::time_point _now);
+
+    /// Eventually refreshes the render buffer iff
+    /// - the screen contents has changed AND refresh rate satisfied,
+    /// - viewport has changed, or
+    /// - refreshing the render buffer was explicitly requested.
+    ///
+    /// @see RenderDoubleBuffer::swapBuffers()
+    /// @see renderBuffer()
+    void ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now);
+
+    /// Aquuires read-access handle to front render buffer.
+    ///
+    /// This also acquires the reader lock and releases it automatically
+    /// upon RenderBufferRef destruction.
+    ///
+    /// @see ensureFreshRenderBuffer()
+    /// @see refreshRenderBuffer()
+    RenderBufferRef renderBuffer() { return renderBuffer_.frontBuffer(); }
+    // }}}
+
     void lock() const { outerLock_.lock(); innerLock_.lock(); }
     void unlock() const { outerLock_.unlock(); innerLock_.unlock(); }
 
-    /// Only access this when having locked.
+    /// Only access this when having the terminal object locked.
     Screen const& screen() const noexcept { return screen_; }
 
-    /// Only access this when having locked.
+    /// Only access this when having the terminal object locked.
     Screen& screen() noexcept { return screen_; }
 
     bool lineWrapped(int _lineNumber) const { return screen_.lineWrapped(_lineNumber); }
@@ -226,10 +273,16 @@ class Terminal : public ScreenEvents {
     std::string extractSelectionText() const;
     std::string extractLastMarkRange() const;
 
+    /// Tests whether or not the mouse is currently hovering a hyperlink.
+    bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
+
   private:
     void flushInput();
-    void screenUpdateThread();
+    void mainLoop();
+    void refreshRenderBuffer(RenderBuffer& _output);
+    std::optional<RenderCursor> renderCursor();
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
+    bool updateCursorHoveringState();
 
     template <typename Renderer, typename... RemainingPasses>
     void renderPass(Renderer const& pass, RemainingPasses... remainingPasses) const
@@ -240,7 +293,8 @@ class Terminal : public ScreenEvents {
             renderPass(std::forward<RemainingPasses>(remainingPasses)...);
     }
 
-  private:
+    // overrides
+    //
     void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     void bell() override;
     void bufferChanged(ScreenType) override;
@@ -267,11 +321,18 @@ class Terminal : public ScreenEvents {
     void hardReset() override;
     void discardImage(Image const&) override;
 
-  private:
+    // private data
+    //
+
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
+    std::thread::id mainLoopThreadID_{};
     Events& eventListener_;
+
+    std::chrono::milliseconds refreshInterval_;
+    bool screenDirty_ = false;
+    RenderDoubleBuffer renderBuffer_{};
 
     std::unique_ptr<Pty> pty_;
 
@@ -303,6 +364,7 @@ class Terminal : public ScreenEvents {
     std::unique_ptr<std::thread> screenUpdateThread_;
     Viewport viewport_;
     std::unique_ptr<Selector> selector_;
+    std::atomic<bool> hoveringHyperlink_ = false;
 };
 
 }  // namespace terminal

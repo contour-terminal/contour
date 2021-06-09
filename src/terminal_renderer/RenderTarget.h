@@ -17,7 +17,6 @@
 
 #include <terminal/Color.h>
 #include <terminal/Grid.h> // cell attribs
-#include <terminal/Image.h> // ImageFragment
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
@@ -28,17 +27,6 @@
 #include <memory>
 
 namespace terminal::renderer {
-
-struct RenderCell
-{
-    std::u32string codepoints; // TODO: I wonder if that would also work for Cell (performance-wise).
-    crispy::Point position;
-    CellFlags flags;
-    RGBColor foregroundColor;
-    RGBColor backgroundColor;
-    RGBColor decorationColor;
-    std::optional<ImageFragment> image;
-};
 
 struct AtlasTextureInfo {
     std::string atlasName;
@@ -109,30 +97,3 @@ class Renderable {
 };
 
 } // end namespace
-
-namespace fmt
-{
-    template <>
-    struct formatter<terminal::renderer::RenderCell> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-
-        using CellFlags = terminal::CellFlags;
-        using RenderCell = terminal::renderer::RenderCell;
-
-        template <typename FormatContext>
-        auto format(RenderCell const& cell, FormatContext& ctx)
-        {
-            std::string s;
-            if (cell.flags & CellFlags::CellSequenceStart) s += "S";
-            if (cell.flags & CellFlags::CellSequenceEnd) s += "E";
-            return format_to(ctx.out(),
-                    "flags={} bg={} fg={} text='{}'",
-                    s, cell.backgroundColor, cell.foregroundColor,
-                    unicode::to_utf8(cell.codepoints));
-        }
-    };
-}

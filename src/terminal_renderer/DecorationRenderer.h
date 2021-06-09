@@ -16,6 +16,7 @@
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/RenderTarget.h>
 
+#include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
 namespace terminal::renderer {
@@ -59,9 +60,7 @@ class DecorationRenderer : public Renderable {
     /// @param _commandListener
     /// @param _monochromeTextureAtlas
     /// @param _gridMetrics
-    /// @param _colorPalette
     DecorationRenderer(GridMetrics const& _gridMetrics,
-                       ColorPalette const& _colorPalette,
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover);
 
@@ -98,8 +97,6 @@ class DecorationRenderer : public Renderable {
 
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
-
-    ColorPalette const& colorPalette_;
 
     std::unique_ptr<Atlas> atlas_;
 };

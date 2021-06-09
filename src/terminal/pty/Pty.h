@@ -15,6 +15,7 @@
 
 #include <crispy/size.h>
 
+#include <chrono>
 #include <optional>
 
 namespace terminal {
@@ -45,7 +46,15 @@ class Pty {
     /// @param size   Capacity of parameter @p buf. At most @p size bytes will be stored into it.
     ///
     /// @returns number of bytes stored in @p buf or -1 on error.
-    virtual int read(char* buf, size_t size) = 0;
+    virtual int read(char* buf, size_t size, std::chrono::milliseconds _timeout) = 0;
+
+    /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
+    ///
+    /// If no read() is currently being in progress, then this call
+    /// will have no effect.
+    ///
+    /// @notice This is typically implemented using non-blocking I/O.
+    virtual void wakeupReader() = 0;
 
     /// Writes to the PTY device, so the other end can read from it.
     ///

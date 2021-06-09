@@ -109,7 +109,6 @@ class TerminalWidget :
     bool executeAllActions(std::vector<actions::Action> const& _actions);
     bool executeInput(terminal::MouseEvent const& event);
     void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
-    void scrollToBottomAndRedraw();
 
     bool fullscreen() const;
     void toggleFullscreen();
@@ -136,6 +135,7 @@ class TerminalWidget :
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void screenUpdated() override;
+    void renderBufferUpdated() override;
     void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
     void setFontDef(terminal::FontDef const& _fontDef) override;
     void copyToClipboard(std::string_view const& _data) override;
@@ -189,6 +189,7 @@ class TerminalWidget :
     /// @returns boolean indicating whether the screen was clean before and made dirty (true), false otherwise.
     bool setScreenDirty()
     {
+        //(still needed?) terminalView_->terminal().forceRender();
         for (;;)
         {
             auto state = state_.load();

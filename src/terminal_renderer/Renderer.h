@@ -101,7 +101,6 @@ class Renderer : public Renderable {
      */
     uint64_t render(Terminal& _terminal,
                     std::chrono::steady_clock::time_point _now,
-                    terminal::Coordinate const& _currentMousePosition,
                     bool _pressure);
 
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
@@ -133,10 +132,6 @@ class Renderer : public Renderable {
     }
 
   private:
-    std::optional<RenderCursor> fetchRenderableCells(
-            Terminal& _terminal,
-            terminal::Coordinate _currentMousePosition,
-            std::vector<RenderCell>& _output);
     void renderCells(std::vector<RenderCell> const& _renderableCells);
 
     std::optional<RenderCursor> renderCursor(Terminal const& _terminal);
@@ -150,13 +145,10 @@ class Renderer : public Renderable {
 
     GridMetrics gridMetrics_;
 
-    ColorPalette const& colorPalette_;
     Opacity backgroundOpacity_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
     std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
-
-    std::vector<RenderCell> renderableCells_;   //!< reusable buffer for holding cells to be rendered.
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

@@ -768,6 +768,14 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     softLoadValue(_node, "maximized", profile.maximized, false);
     softLoadValue(_node, "fullscreen", profile.fullscreen, false);
 
+    if (auto const value = _node["refresh_rate"])
+    {
+        if (value.IsScalar() && value.as<string>() == "auto")
+            profile.refreshRate = 0.0;
+        else
+            profile.refreshRate = value.as<double>();
+    }
+
     if (auto args = _node["arguments"]; args && args.IsSequence())
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());

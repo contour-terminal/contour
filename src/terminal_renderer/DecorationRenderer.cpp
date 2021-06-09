@@ -58,13 +58,11 @@ optional<Decorator> to_decorator(std::string const& _value)
 }
 
 DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
-                                       ColorPalette const& _colorPalette,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover) :
     gridMetrics_{ _gridMetrics },
     hyperlinkNormal_{ _hyperlinkNormal },
-    hyperlinkHover_{ _hyperlinkHover },
-    colorPalette_{ _colorPalette }
+    hyperlinkHover_{ _hyperlinkHover }
 {
 }
 
@@ -299,7 +297,7 @@ void DecorationRenderer::renderCell(RenderCell const& _cell)
 
     for (auto const& mapping: mappings)
         if (_cell.flags & mapping.first)
-            renderDecoration(mapping.second, _cell.position, 1, _cell.decorationColor);
+            renderDecoration(mapping.second, gridMetrics_.map(_cell.position), 1, _cell.decorationColor);
 }
 
 optional<DecorationRenderer::DataRef> DecorationRenderer::getDataRef(Decorator _decoration)

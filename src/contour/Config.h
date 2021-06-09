@@ -59,6 +59,7 @@ struct TerminalProfile {
     terminal::Process::ExecInfo shell;
     bool maximized = false;
     bool fullscreen = false;
+    double refreshRate = 0.0; // 0=auto
 
     crispy::Size terminalSize;
 

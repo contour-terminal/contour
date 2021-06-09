@@ -283,6 +283,14 @@ namespace // {{{
             static_cast<int>(static_cast<double>(p.y) * s)
         };
     }
+
+    double sanitizeRefreshRate(double _userValue, double _systemValue) noexcept
+    {
+        if (1.0 < _userValue && _userValue < _systemValue)
+            return _userValue;
+        else
+            return _systemValue;
+    }
 } // }}}
 
 TerminalWidget::TerminalWidget(config::Config _config,
@@ -316,11 +324,16 @@ TerminalWidget::TerminalWidget(config::Config _config,
 #else
         make_unique<terminal::UnixPty>(profile().terminalSize),
 #endif
-        profile().shell
+        profile().shell,
+        sanitizeRefreshRate(
+            profile().refreshRate,
+            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+        )
     )},
     configFileChangeWatcher_{},
     updateTimer_(this)
 {
+
     debuglog(WidgetTag).write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
                               config_.profile(config_.defaultProfileName)->terminalSize,
                               profile().fonts.size,
@@ -353,6 +366,15 @@ TerminalWidget::TerminalWidget(config::Config _config,
     connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWidget::blinkingCursorUpdate));
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+
+    // sanitize/auto-fill refresh rates for profiles where it is set to 0 (auto)
+    for (auto& profile: config_.profiles)
+    {
+        profile.second.refreshRate = sanitizeRefreshRate(
+            profile.second.refreshRate,
+            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+        );
+    }
 
     configureTerminal(*terminalView_, config_, profileName_);
     updateGeometry();
@@ -677,6 +699,15 @@ bool TerminalWidget::reloadConfig(config::Config _newConfig, string const& _prof
                               _newConfig.backingFilePath.string(),
                               _profileName);
 
+    // sanitize/auto-fill refresh rates for profiles where it is set to 0 (auto)
+    for (auto& profile: _newConfig.profiles)
+    {
+        profile.second.refreshRate = sanitizeRefreshRate(
+            profile.second.refreshRate,
+            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+        );
+    }
+
     configureTerminal(*terminalView_, _newConfig, _profileName);
 
     config_ = std::move(_newConfig);
@@ -708,7 +739,6 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
     if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
     {
         terminalView_->terminal().send(*inputEvent, now_);
-        scrollToBottomAndRedraw();
         return;
     }
 
@@ -732,13 +762,11 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
         }
     }
 
-    if (!_keyEvent->text().isEmpty())
-    {
-        for (auto const ch : _keyEvent->text().toUcs4())
-            terminalView_->terminal().send(terminal::CharInputEvent{ch, modifiers}, now_);
+    if (_keyEvent->text().isEmpty())
+        return;
 
-        scrollToBottomAndRedraw();
-    }
+    for (auto const ch: _keyEvent->text().toUcs4())
+        terminalView_->terminal().send(terminal::CharInputEvent{ch, modifiers}, now_);
 }
 
 void TerminalWidget::wheelEvent(QWheelEvent* _event)
@@ -804,35 +832,16 @@ void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
     auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / terminalView_->cellWidth()};
     auto const mod = makeModifier(_event->modifiers());
 
-    {
-        auto const _l = scoped_lock{terminalView_->terminal()};
-        auto const currentMousePosition = terminalView_->terminal().currentMousePosition();
-        auto const currentMousePositionRel = terminal::Coordinate{
-            currentMousePosition.row - terminalView_->terminal().viewport().relativeScrollOffset(),
-            currentMousePosition.column
-        };
-
-        if (terminalView_->terminal().screen().contains(currentMousePosition))
-        {
-            if (terminalView_->terminal().screen().at(currentMousePositionRel).hyperlink())
-                setCursor(Qt::CursorShape::PointingHandCursor);
-            else
-                setDefaultCursor();
-        }
-    }
-
     auto const handled = terminalView_->terminal().send(terminal::MouseMoveEvent{row, col, mod}, now_);
 
-    // XXX always update as we don't know if a hyperlink is visible and its hover-state has changed.
-    // We could implement an actual check by keeping track of how many grid cells do contain a
-    // hyperlink whose number eventually updates upon every cell write.
-    bool constexpr hyperlinkVisible = true;
+    bool const mouseHoveringHyperlink = terminalView_->terminal().isMouseHoveringHyperlink();
+    if (mouseHoveringHyperlink)
+        setCursor(Qt::CursorShape::PointingHandCursor);
+    else
+        setDefaultCursor();
 
-    if (hyperlinkVisible || handled || terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
-    {
-        setScreenDirty();
-        update();
-    }
+    if (mouseHoveringHyperlink || handled || terminalView_->terminal().isSelectionAvailable()) // && only if selection has changed!
+        terminalView_->terminal().breakLoopAndRefreshRenderBuffer();
 }
 
 void TerminalWidget::setDefaultCursor()
@@ -849,16 +858,6 @@ void TerminalWidget::setDefaultCursor()
     }
 }
 
-void TerminalWidget::scrollToBottomAndRedraw()
-{
-    auto const dirty = terminalView_->terminal().viewport().scrollToBottom();
-    if (dirty)
-    {
-        setScreenDirty();
-        update();
-    }
-}
-
 void TerminalWidget::focusInEvent(QFocusEvent* _event) // TODO: paint with "normal" colors
 {
     QOpenGLWidget::focusInEvent(_event);
@@ -870,7 +869,6 @@ void TerminalWidget::focusInEvent(QFocusEvent* _event) // TODO: paint with "norm
     else
         setCursor(Qt::CursorShape::BlankCursor);
 
-    terminalView_->terminal().screen().setFocus(true);
     terminalView_->terminal().send(terminal::FocusInEvent{}, now_);
 
     emit setBackgroundBlur(profile_.backgroundBlur);
@@ -1200,9 +1198,6 @@ bool TerminalWidget::executeAction(Action const& _action)
     switch (result)
     {
         case Result::Dirty:
-            setScreenDirty();
-            update();
-            return true;
         case Result::Silently:
             return true;
         case Result::Nothing:
@@ -1369,6 +1364,23 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
         update();
 }
 
+void TerminalWidget::renderBufferUpdated()
+{
+    if (!initialized_.load())
+        return;
+
+    if (terminalView_->terminal().screen().isPrimaryScreen())
+    {
+        post([this]()
+        {
+            emit screenUpdated(this);
+        });
+    }
+
+    if (setScreenDirty())
+        update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+}
+
 void TerminalWidget::screenUpdated()
 {
 #if defined(CONTOUR_VT_METRICS)
@@ -1379,18 +1391,10 @@ void TerminalWidget::screenUpdated()
     if (!initialized_.load())
         return;
 
-    if (terminalView_->terminal().screen().isPrimaryScreen())
-    {
-        post([this]()
-        {
-            if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
-                terminalView_->terminal().viewport().scrollToBottom();
-            emit screenUpdated(this);
-        });
-    }
+    if (profile().autoScrollOnUpdate && terminalView_->terminal().viewport().scrolled())
+        terminalView_->terminal().viewport().scrollToBottom();
 
-    if (setScreenDirty())
-        update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+    //renderBufferUpdated();
 }
 
 void TerminalWidget::onScrollBarValueChanged(int _value)

@@ -119,13 +119,22 @@ void ConPty::prepareChildProcess()
 {
 }
 
-int ConPty::read(char* buf, size_t size)
+int ConPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
 {
+    // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
+    (void) _timeout;
+
     DWORD nread{};
     if (ReadFile(input_, buf, static_cast<DWORD>(size), &nread, nullptr))
         return static_cast<int>(nread);
     else
         return -1;
+}
+
+void ConPty::wakeupReader()
+{
+    // TODO: Windows ConPTY does *NOT* support non-blocking / overlapped I/O.
+    // How can we make ReadFile() return early? We could maybe WriteFile() to it?
 }
 
 int ConPty::write(char const* buf, size_t size)

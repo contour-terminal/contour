@@ -145,7 +145,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
     auto const codepoints = crispy::span(_cell.codepoints.data(), _cell.codepoints.size());
 
     if (_cell.flags & CellFlags::CellSequenceStart)
-        textRenderingEngine_->setTextPosition(_cell.position);
+        textRenderingEngine_->setTextPosition(gridMetrics_.map(_cell.position));
 
     textRenderingEngine_->appendCell(codepoints, style, _cell.foregroundColor);
 
