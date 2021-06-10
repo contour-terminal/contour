@@ -744,6 +744,15 @@ void softLoadFont(YAML::Node const& _node, string_view _key, text::font_descript
     }
 }
 
+bool sanitizeRange(std::reference_wrapper<int> _value, int _min, int _max)
+{
+    if (_min <= _value.get() && _value.get() <= _max)
+        return true;
+
+    _value.get() = std::clamp(_value.get(), _min, _max);
+    return false;
+}
+
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
                                     unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
@@ -821,6 +830,21 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     {
         softLoadValue(terminalSize, "columns", profile.terminalSize.width);
         softLoadValue(terminalSize, "lines", profile.terminalSize.height);
+
+        auto constexpr MinimalTerminalSize = crispy::Size{3, 3};
+        auto constexpr MaximumTerminalSize = crispy::Size{300, 200};
+
+        if (!sanitizeRange(ref(profile.terminalSize.width), MinimalTerminalSize.width, MaximumTerminalSize.width))
+            debuglog(ConfigTag).write(
+                "Terminal width {} out of bounds. Should be between {} and {}.",
+                profile.terminalSize.width, MinimalTerminalSize.width, MaximumTerminalSize.width
+            );
+
+        if (!sanitizeRange(ref(profile.terminalSize.height), MinimalTerminalSize.height, MaximumTerminalSize.height))
+            debuglog(ConfigTag).write(
+                "Terminal height {} out of bounds. Should be between {} and {}.",
+                profile.terminalSize.height, MinimalTerminalSize.height, MaximumTerminalSize.height
+            );
     }
 
     if (auto const permissions = _node["permissions"]; permissions && permissions.IsMap())
