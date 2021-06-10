@@ -749,6 +749,9 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
          keySeq[0]
     );
 
+    if (cursor().shape() != Qt::CursorShape::BlankCursor)
+        setCursor(Qt::CursorShape::BlankCursor);
+
     if (auto const i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
         executeAllActions(i->second);
@@ -760,9 +763,6 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
         terminalView_->terminal().send(*inputEvent, now_);
         return;
     }
-
-    if (cursor().shape() != Qt::CursorShape::BlankCursor)
-        setCursor(Qt::CursorShape::BlankCursor);
 
     auto const modifiers = makeModifier(_keyEvent->modifiers());
 
