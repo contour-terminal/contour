@@ -280,7 +280,6 @@ class Cell {
 
 #if defined(LIBTERMINAL_IMAGES)
     std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
-    // std::optional<ImageFragment> imageFragment() const noexcept { return std::nullopt; }
 
     void setImage(ImageFragment _imageFragment)
     {
@@ -292,7 +291,7 @@ class Cell {
 #if defined(LIBTERMINAL_HYPERLINKS)
     void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
     {
-        setImage(_imageFragment);
+        setImage(std::move(_imageFragment));
         hyperlink_ = std::move(_hyperlink);
     }
 #endif
@@ -363,9 +362,6 @@ class Cell {
 #if defined(LIBTERMINAL_HYPERLINKS)
     HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
     void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
-#else
-    HyperlinkRef hyperlink() const noexcept { return HyperlinkRef(); }
-    void setHyperlink(HyperlinkRef const&) { }
 #endif
 
   private:
