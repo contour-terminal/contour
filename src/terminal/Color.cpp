@@ -21,7 +21,7 @@ namespace terminal {
 
 string to_string(Color _color)
 {
-    using Type = Color::Type;
+    using Type = ColorType;
     switch (_color.type)
     {
         case Type::Indexed:
@@ -170,9 +170,9 @@ RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, 
 {
     switch (_color.type)
     {
-        case Color::Type::RGB:
+        case ColorType::RGB:
             return _color.rgb;
-        case Color::Type::Indexed:
+        case ColorType::Indexed:
             {
                 auto const index = static_cast<size_t>(_color.index);
                 if (_bright && index < 8)
@@ -181,10 +181,10 @@ RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, 
                     return _profile.indexedColor(index);
                 break;
             }
-        case Color::Type::Bright:
+        case ColorType::Bright:
             return _profile.brightColor(static_cast<size_t>(_color.index));
-        case Color::Type::Undefined:
-        case Color::Type::Default:
+        case ColorType::Undefined:
+        case ColorType::Default:
             break;
     }
     return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;

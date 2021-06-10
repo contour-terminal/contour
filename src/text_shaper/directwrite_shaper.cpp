@@ -131,7 +131,7 @@ directwrite_shaper::directwrite_shaper(crispy::Point _dpi) :
 
 optional<font_key> directwrite_shaper::load_font(font_description const& _description, font_size _size)
 {
-    debuglog().write("Loading font chain for: {}", _description);
+    debuglog(FontFallbackTag).write("Loading font chain for: {}", _description);
 
     IDWriteFontCollection* fontCollection{};
     d->factory->GetSystemFontCollection(&fontCollection);
@@ -204,7 +204,7 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
             return key;
         }
     }
-    debuglog().write("Font not found.");
+    debuglog(FontFallbackTag).write("Font not found.");
     return nullopt;
 
 #if 0
@@ -323,6 +323,23 @@ bool directwrite_shaper::has_color(font_key _font) const
 {
     // TODO: use internal hash map to font info
     return false;
+}
+
+void directwrite_shaper::set_dpi(crispy::Point _dpi)
+{
+    d->dpi_ = _dpi;
+    clear_cache();
+}
+
+void directwrite_shaper::clear_cache()
+{
+    // TODO: clear the cache
+}
+
+optional<glyph_position> directwrite_shaper::shape(font_key _font,
+                                                   char32_t _codepoint)
+{
+    return nullopt; // TODO
 }
 
 } // end namespace

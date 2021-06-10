@@ -51,12 +51,6 @@ using std::vector;
 
 using namespace std::string_literals;
 
-namespace {
-    auto const FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
-    auto const TextShapingTag = crispy::debugtag::make("font.textshaping", "Logs details about text shaping.");
-    auto const GlyphRenderTag = crispy::debugtag::make("font.render", "Logs details about rendering glyphs.");
-}
-
 struct FontPathAndSize
 {
     string path;

@@ -18,6 +18,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 #include <crispy/span.h>
+#include <crispy/debuglog.h>
 
 #include <cstdint>
 #include <functional>
@@ -31,6 +32,10 @@
 #include <fmt/format.h>
 
 namespace text {
+
+auto const inline FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
+auto const inline TextShapingTag = crispy::debugtag::make("font.textshaping", "Logs details about text shaping.");
+auto const inline GlyphRenderTag = crispy::debugtag::make("font.render", "Logs details about rendering glyphs.");
 
 enum class bitmap_format { alpha_mask, rgb, rgba };
 
