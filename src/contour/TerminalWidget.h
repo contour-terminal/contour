@@ -95,7 +95,6 @@ class TerminalWidget :
     void terminalBufferChanged(TerminalWidget*, terminal::ScreenType);
     void profileChanged(TerminalWidget*);
     void screenUpdated(TerminalWidget*);
-    void viewportChanged(TerminalWidget*);
     void terminated(TerminalWidget*);
 
   public Q_SLOTS:

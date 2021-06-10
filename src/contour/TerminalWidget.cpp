@@ -291,6 +291,24 @@ namespace // {{{
         else
             return _systemValue;
     }
+
+    QScreen* screenOf(QWidget* _widget)
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+        return _widget->screen();
+#elif QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+        #warning "Using alternative implementation of screenOf() for Qt >= 5.10.0"
+        if (auto topLevel = _widget->window())
+        {
+            if (auto screenByPos = QGuiApplication::screenAt(topLevel->geometry().center()))
+                return screenByPos;
+        }
+        return QGuiApplication::primaryScreen();
+#else
+        #warning "Using alternative implementation of screenOf() for Qt < 5.10.0"
+        return QGuiApplication::primaryScreen();
+#endif
+    }
 } // }}}
 
 TerminalWidget::TerminalWidget(config::Config _config,
@@ -328,7 +346,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
         profile().shell,
         sanitizeRefreshRate(
             profile().refreshRate,
-            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+            static_cast<double>(screenOf(this) ? screenOf(this)->refreshRate() : 30.0)
         )
     )},
     configFileChangeWatcher_{},
@@ -373,7 +391,7 @@ TerminalWidget::TerminalWidget(config::Config _config,
     {
         profile.second.refreshRate = sanitizeRefreshRate(
             profile.second.refreshRate,
-            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+            static_cast<double>(screenOf(this) ? screenOf(this)->refreshRate() : 30.0)
         );
     }
 
@@ -705,7 +723,7 @@ bool TerminalWidget::reloadConfig(config::Config _newConfig, string const& _prof
     {
         profile.second.refreshRate = sanitizeRefreshRate(
             profile.second.refreshRate,
-            static_cast<double>(screen() ? screen()->refreshRate() : 30.0)
+            static_cast<double>(screenOf(this) ? screenOf(this)->refreshRate() : 30.0)
         );
     }
 
