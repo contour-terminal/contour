@@ -763,16 +763,18 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 
     if (auto const i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
-        if (!allowKeyMappings_ && containsToggleKeybind(i->second))
-        {
-            executeAction(actions::ToggleAllKeyMaps{});
-            return;
-        }
-        else if (allowKeyMappings_)
+        if (allowKeyMappings_)
         {
             executeAllActions(i->second);
             return;
         }
+        else if (containsToggleKeybind(i->second))
+        {
+            executeAction(actions::ToggleAllKeyMaps{});
+            return;
+        }
+        else
+            debuglog(KeyboardTag).write("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
     }
 
     if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
