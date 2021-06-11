@@ -20,6 +20,7 @@
 namespace contour::actions {
 
 struct FollowHyperlink{};
+struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
 struct ScreenshotVT{};
 struct IncreaseFontSize{};
@@ -60,6 +61,7 @@ using Action = std::variant<
     ResetFontSize,
     ReloadConfig,
     ResetConfig,
+    ToggleAllKeyMaps,
     ToggleFullscreen,
     ScreenshotVT,
     IncreaseFontSize,

@@ -222,6 +222,7 @@ class TerminalWidget :
     //
     std::chrono::steady_clock::time_point now_;
     config::Config config_;
+    bool allowKeyMappings_ = true;
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;

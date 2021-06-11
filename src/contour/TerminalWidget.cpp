@@ -735,6 +735,15 @@ bool TerminalWidget::reloadConfig(config::Config _newConfig, string const& _prof
     return true;
 }
 
+bool containsToggleKeybind(std::vector<actions::Action> const& _actions)
+{
+    for (auto const& action: _actions)
+        if (holds_alternative<actions::ToggleAllKeyMaps>(action))
+            return true;
+
+    return false;
+}
+
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
     auto const keySeq = toKeySequence(_keyEvent);
@@ -754,8 +763,16 @@ void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 
     if (auto const i = config_.keyMappings.find(keySeq); i != end(config_.keyMappings))
     {
-        executeAllActions(i->second);
-        return;
+        if (!allowKeyMappings_ && containsToggleKeybind(i->second))
+        {
+            executeAction(actions::ToggleAllKeyMaps{});
+            return;
+        }
+        else if (allowKeyMappings_)
+        {
+            executeAllActions(i->second);
+            return;
+        }
     }
 
     if (auto const inputEvent = mapQtToTerminalKeyEvent(_keyEvent->key(), _keyEvent->modifiers()))
@@ -1046,6 +1063,14 @@ bool TerminalWidget::executeAction(Action const& _action)
     Result const result = visit(overloaded{
         [&](actions::WriteScreen const& _write) -> Result {
             terminalView_->terminal().writeToScreen(_write.chars);
+            return Result::Silently;
+        },
+        [&](actions::ToggleAllKeyMaps) -> Result {
+            allowKeyMappings_ = !allowKeyMappings_;
+            debuglog(KeyboardTag).write(
+                "{} key mappings.",
+                allowKeyMappings_ ? "Enabling" : "Disabling"
+            );
             return Result::Silently;
         },
         [&](actions::ToggleFullscreen) -> Result {
