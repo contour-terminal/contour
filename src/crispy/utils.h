@@ -1,11 +1,14 @@
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <fmt/format.h>
 
 namespace crispy {
 
@@ -208,5 +211,52 @@ struct finally {
     std::function<void()> hook{};
     ~finally() { hook(); }
 };
+
+inline std::optional<unsigned> fromHexDigit(char _value)
+{
+    if ('0' <= _value && _value <= '9')
+        return _value - '0';
+    if ('a' <= _value && _value <= 'f')
+        return 10 + _value - 'a';
+    if ('A' <= _value && _value <= 'F')
+        return 10 + _value - 'A';
+    return std::nullopt;
+};
+
+template <typename T>
+std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hexString)
+{
+    if (_hexString.size() % 2)
+        return std::nullopt;
+
+    std::basic_string<T> output;
+    output.resize(_hexString.size() / 2);
+
+    auto i = _hexString.rbegin();
+    auto e = _hexString.rend();
+    size_t k = output.size();
+    while (i != e)
+    {
+        auto const c1 = fromHexDigit(*i++);
+        auto const c2 = fromHexDigit(*i++);
+        if (!c1 || !c2)
+            return std::nullopt;
+        auto const value = (c2.value() << 4 | c1.value());
+        output[--k] = value;
+    }
+
+    return output;
+}
+
+template <typename T>
+std::basic_string<T> toHexString(std::basic_string_view<T> _input)
+{
+    std::basic_string<T> output;
+
+    for (T const ch: _input)
+        output += fmt::format("{:02X}", static_cast<unsigned>(ch));
+
+    return output;
+}
 
 } // end namespace

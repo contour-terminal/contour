@@ -123,3 +123,13 @@ TEST_CASE("utils.to_integer.16")
     CHECK(crispy::to_integer<16>("321"sv).value_or(-1) == 0x321);
     CHECK(crispy::to_integer<16>("12345"sv).value_or(-1) == 0x12345);
 }
+
+TEST_CASE("fromHexString")
+{
+    CHECK(!crispy::fromHexString("abc"sv));
+    CHECK(!crispy::fromHexString("GX"sv));
+
+    CHECK(crispy::fromHexString(""sv).value() == ""sv);
+    CHECK(crispy::fromHexString("61"sv).value() == "a"sv);
+    CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
+}
