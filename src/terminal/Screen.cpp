@@ -2212,6 +2212,31 @@ namespace
     }
 }
 
+void Screen::requestCapability(std::string_view _name)
+{
+    if (!respondToTCapQuery_)
+    {
+#if defined(LIBTERMINAL_LOG_RAW)
+        debuglog(ScreenRawOutputTag).write("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
+#endif
+        return;
+    }
+
+    if (booleanCapability(_name))
+        reply("\033P1+r{}\033\\", toHexString(_name));
+    else if (auto const value = numericCapability(_name); value >= 0)
+    {
+        auto hexValue = fmt::format("{:X}", value);
+        if (hexValue.size() % 2)
+            hexValue.insert(hexValue.begin(), '0');
+        reply("\033P1+r{}={}\033\\", toHexString(_name), hexValue);
+    }
+    else if (auto const value = stringCapability(_name); !value.empty())
+        reply("\033P1+r{}={}\033\\", toHexString(_name), asHex(value));
+    else
+        reply("\033P0+r\033\\");
+}
+
 void Screen::requestCapability(capabilities::Code _code)
 {
     if (!respondToTCapQuery_)

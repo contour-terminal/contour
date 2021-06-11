@@ -1294,45 +1294,6 @@ unique_ptr<ParserExtension> Sequencer::hookSTP(Sequence const& /*_seq*/)
     );
 }
 
-constexpr optional<capabilities::Code> tcap(u32string_view _hexString)
-{
-    if (_hexString.size() != 4)
-        return nullopt;
-
-    auto const num = [](char _value) -> optional<unsigned>
-    {
-        if ('0' <= _value && _value <= '9')
-            return _value - '0';
-        if ('a' <= _value && _value <= 'f')
-            return 10 + _value - 'a';
-        if ('A' <= _value && _value <= 'F')
-            return 10 + _value - 'A';
-        return nullopt;
-    };
-
-    auto const hexDigitsOpt = array{
-        num(_hexString[0]),
-        num(_hexString[1]),
-        num(_hexString[2]),
-        num(_hexString[3])
-    };
-
-    if (crispy::any_of(hexDigitsOpt, [](auto x) { return !x.has_value(); }))
-        return nullopt;
-
-    auto const hexDigits = array{
-        hexDigitsOpt[0].value(),
-        hexDigitsOpt[1].value(),
-        hexDigitsOpt[2].value(),
-        hexDigitsOpt[3].value()
-    };
-
-    auto const c1 = hexDigits[0] << 4 | hexDigits[1];
-    auto const c2 = hexDigits[2] << 4 | hexDigits[3];
-
-    return capabilities::Code{uint16_t( c1 << 8 | c2 )};
-}
-
 unique_ptr<ParserExtension> Sequencer::hookXTGETTCAP(Sequence const& /*_seq*/)
 {
     // DCS + q Pt ST
@@ -1361,10 +1322,13 @@ unique_ptr<ParserExtension> Sequencer::hookXTGETTCAP(Sequence const& /*_seq*/)
 
     return make_unique<SimpleStringCollector>(
         [this](u32string_view const& _data) {
-            auto const caps = crispy::split(_data, U';');
-            for (auto cap: caps)
-                if (optional<capabilities::Code> x = tcap(cap); x.has_value())
-                    screen_.requestCapability(x.value());
+            auto const capsInHex = crispy::split(_data, U';');
+            for (auto hexCap: capsInHex)
+            {
+                string const hexCap8 = unicode::convert_to<char>(hexCap);
+                if (auto const capOpt = crispy::fromHexString(string_view(hexCap8.data(), hexCap8.size())))
+                    screen_.requestCapability(capOpt.value());
+            }
         }
     );
 }

@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <string>
 
@@ -43,8 +44,24 @@ struct Code
     constexpr Code(Code &&) = default;
     constexpr Code& operator=(Code &&) = default;
     constexpr explicit Code(uint16_t _code) : code{_code} {}
-    constexpr explicit Code(std::string_view _code) : code{uint16_t(_code[0] << 8 | _code[1])} {}
+
+    constexpr explicit Code(std::string_view _code) : code{uint16_t(_code[0] << 8 | _code[1])}
+    {
+        code = uint16_t(_code[0] << 8 | _code[1]);
+    }
 };
+
+constexpr bool operator==(Code a, Code b) noexcept
+{
+    return a.code == b.code;
+}
+
+constexpr bool operator==(Code a, std::string_view b) noexcept
+{
+    if (b.size() != 2)
+        return false;
+    return a == Code(b);
+}
 
 struct Def
 {
@@ -75,6 +92,12 @@ class Database {
     virtual int numericCapability(Code _cap) const = 0;
     virtual std::string_view stringCapability(Code _cap) const = 0;
 
+    virtual bool booleanCapability(std::string_view _cap) const = 0;
+    virtual int numericCapability(std::string_view _cap) const = 0;
+    virtual std::string_view stringCapability(std::string_view _cap) const = 0;
+
+    virtual std::optional<Code> codeFromName(std::string_view _name) const = 0;
+
     virtual std::string terminfo() const = 0;
 };
 
@@ -83,6 +106,13 @@ class StaticDatabase : public Database {
     bool booleanCapability(Code _cap) const override;
     int numericCapability(Code _cap) const override;
     std::string_view stringCapability(Code _cap) const override;
+
+    bool booleanCapability(std::string_view _cap) const override;
+    int numericCapability(std::string_view _cap) const override;
+    std::string_view stringCapability(std::string_view _cap) const override;
+
+    std::optional<Code> codeFromName(std::string_view _name) const override;
+
     std::string terminfo() const override;
 };
 
@@ -97,6 +127,11 @@ namespace fmt
         template <typename FormatContext>
         auto format(terminal::capabilities::Code _value, FormatContext& ctx)
         {
+            if (_value.code & 0xFF0000)
+                return format_to(ctx.out(), "{}{}{}", char((_value.code >> 16) & 0xFF),
+                                                      char((_value.code >> 8) & 0xFF),
+                                                      char(_value.code & 0xFF));
+
             return format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF),
                                                 char(_value.code & 0xFF));
         }

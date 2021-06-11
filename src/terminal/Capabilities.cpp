@@ -17,9 +17,14 @@
 #include <range/v3/action/sort.hpp>
 #include <range/v3/action/transform.hpp>
 #include <range/v3/algorithm/copy.hpp>
+#include <range/v3/view/transform.hpp>
+#include <range/v3/view/concat.hpp>
 
-using std::string_view;
+using std::nullopt;
+using std::optional;
 using std::string;
+using std::string_view;
+using std::u32string_view;
 
 using namespace terminal::capabilities::literals;
 using namespace std::string_view_literals;
@@ -76,7 +81,7 @@ namespace
     );
 
     constexpr auto inline Undefined = Code{};
-    constexpr inline auto stringCaps = defineCapabilities(
+    constexpr inline auto stringCaps = defineCapabilities( // {{{
         String{ "TN"_tcap, ""sv, "xterm-256color"sv }, // termcap/terminfo name (xterm extension)
         String{ "ac"_tcap, "acsc"sv, "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based on vt100
         String{ "bl"_tcap, "bel"sv, "^G"sv }, // The audible bell character
@@ -317,8 +322,13 @@ namespace
 	    String{ "Km"_tcap, "kmous"sv, "\E[M"sv },
 	    String{ "kN"_tcap, "knp"sv, "\E[6~"sv },
 	    String{ "kP"_tcap, "kpp"sv, "\E[5~"sv },
-	    String{ "&8"_tcap, "kund"sv, ""sv }
-    );
+	    String{ "&8"_tcap, "kund"sv, ""sv },
+
+        // RGB for the ncurses direct-color extension.
+        // Only a terminfo name is provided, since termcap applica-
+        // tions cannot use this information
+        String{ Undefined, "RGB"sv, "8/8/8"sv }
+    ); // }}}
 }
 
 bool StaticDatabase::booleanCapability(Code _cap) const
@@ -346,6 +356,45 @@ string_view StaticDatabase::stringCapability(Code _cap) const
             return cap.value;
 
     return {};
+}
+
+bool StaticDatabase::booleanCapability(string_view _cap) const
+{
+    for (auto const tcap: booleanCaps)
+        if (tcap.name == _cap || tcap.code == _cap)
+            return tcap.value;
+
+    return false;
+}
+
+int StaticDatabase::numericCapability(string_view _cap) const
+{
+    for (auto const tcap: numericalCaps)
+        if (tcap.name == _cap || tcap.code == _cap)
+            return tcap.value;
+
+    return -1;
+}
+
+string_view StaticDatabase::stringCapability(string_view _cap) const
+{
+    for (auto const tcap: stringCaps)
+        if (tcap.name == _cap || tcap.code == _cap)
+            return tcap.value;
+
+    return {};
+}
+
+optional<Code> StaticDatabase::codeFromName(string_view _name) const
+{
+    using ranges::views::concat;
+    using ranges::views::transform;
+    auto const tr = transform([](auto cap) { return std::pair{cap.name, cap.code}; });
+    for (auto const cap: concat(numericalCaps | tr, booleanCaps | tr, stringCaps | tr))
+        if (cap.first == _name)
+            return cap.second;
+
+    return nullopt;
 }
 
 string StaticDatabase::terminfo() const

@@ -2303,6 +2303,16 @@ TEST_CASE("OSC.4")
     }
 }
 
+TEST_CASE("XTGETTCAP")
+{
+    auto screen = MockScreen{{2, 2}};
+    auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
+    screen.write(queryStr);
+    INFO(fmt::format("Reply data: {}", screen.replyData));
+    // "\033P1+r8/8/8\033\\"
+    // TODO: CHECK(...)
+}
+
 // TODO: resize test (should be in Grid_test.cpp?)
 TEST_CASE("resize", "[screen]")
 {

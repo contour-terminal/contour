@@ -153,6 +153,7 @@ class Screen : public capabilities::StaticDatabase {
            ColorPalette _colorPalette = {}
     );
 
+    using StaticDatabase::numericCapability;
     int numericCapability(capabilities::Code _cap) const override;
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
@@ -269,6 +270,7 @@ class Screen : public capabilities::StaticDatabase {
     void selectConformanceLevel(VTType _level);
     void requestDynamicColor(DynamicColorName _name);
     void requestCapability(capabilities::Code _code);
+    void requestCapability(std::string_view _name);
     void sendDeviceAttributes();
     void sendTerminalId();
 
