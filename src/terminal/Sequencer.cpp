@@ -1533,6 +1533,25 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DA2: screen_.sendTerminalId(); break;
         case DA3: return ApplyResult::Unsupported;
         case DCH: screen_.deleteCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case DECCRA:
+            {
+                // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
+                // DECCRA is not affected by the page margins.
+                auto const origin = screen_.origin();
+                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
+                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const bottom = _seq.param_or(2, Sequence::Parameter{ screen_.size().height });
+                auto const right = _seq.param_or(3, Sequence::Parameter{ screen_.size().width });
+                auto const page = _seq.param_or(4, Sequence::Parameter{ 0 });
+
+                auto const targetTop = _seq.param_or(5, Sequence::Parameter{ origin.row });
+                auto const targetLeft = _seq.param_or(6, Sequence::Parameter{ origin.column });
+                auto const targetPage = _seq.param_or(7, Sequence::Parameter{ 0 });
+
+                screen_.copyArea(top, left, bottom, right, page,
+                                 targetTop, targetLeft, targetPage);
+            }
+            break;
         case DECDC: screen_.deleteColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECRM:

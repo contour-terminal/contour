@@ -281,6 +281,7 @@ constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes");
 constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VTType::VT100, "DA3", "Send tertiary device attributes");
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters");
+constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, "DECCRA", "Copy rectangular area");
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, "DECDC", "Delete column");
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, "DECIC", "Insert column");
 constexpr inline auto DECMODERESTORE = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTType::VT525, "DECMODERESTORE", "Restore DEC private modes.");
@@ -415,6 +416,7 @@ inline auto const& functions() noexcept
             DA2,
             DA3,
             DCH,
+            DECCRA,
             DECDC,
             DECIC,
             DECMODERESTORE,
@@ -589,6 +591,7 @@ constexpr bool isBatchable(FunctionDefinition const& _function)
         case CUP:
         case CUU:
         case DCH:
+        case DECCRA:
         case DECDC:
         case DECIC:
         case DECSCUSR:

@@ -237,6 +237,11 @@ class Screen : public capabilities::StaticDatabase {
     void insertLines(int _n);      // IL
     void insertColumns(int _n);    // DECIC
 
+    void copyArea(
+        int _top, int _left, int _bottom, int _right, int _page,
+        int _targetTop, int _targetLeft, int _targetPage
+    );
+
     void deleteLines(int _n);      // DL
 
     void backIndex();    // DECBI

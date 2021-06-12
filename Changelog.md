@@ -38,6 +38,7 @@
 - Adds VT sequence `CSI Ps b` (`REP`) for repeating the last graphical character `Ps` times.
 - Adds VT sequence `OSC 4 ; INDEX ; COLOR ST` for setting or querying color palette (if COLOR is `?` instead of a color spec).
 - Adds VT sequence `OSC 104 ; INDEX ST` for resetting color palette entry or complete palette (if no (index is given).
+- Adds VT sequence `DECCRA` to copy a rectangular area.
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.

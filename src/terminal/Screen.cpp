@@ -36,6 +36,7 @@
 #include <iterator>
 #include <sstream>
 #include <string_view>
+#include <tuple>
 #include <variant>
 
 #include <assert.h>
@@ -1153,6 +1154,51 @@ void Screen::insertColumns(int _n)
     if (isCursorInsideMargins())
         for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
             insertChars(lineNo, _n);
+}
+
+void Screen::copyArea(int _top, int _left, int _bottom, int _right, int _page,
+                      int _targetTop, int _targetLeft, int _targetPage
+)
+{
+    (void) _page;
+    (void) _targetPage;
+
+    // The space at https://vt100.net/docs/vt510-rm/DECCRA.html states:
+    // "If Pbs is greater than Pts, // or Pls is greater than Prs, the terminal ignores DECCRA."
+    //
+    // However, the first part "Pbs is greater than Pts" does not make sense.
+    if (_bottom < _top || _right < _left)
+        return;
+
+    if (_top == _targetTop && _left == _targetLeft)
+        // Copy to its own location => no-op.
+        return;
+
+    auto const [x0, xInc, xEnd] = [&]() {
+        if (_targetLeft > _left) // moving right
+            return std::tuple{_right - _left, -1, -1};
+        else
+            return std::tuple{0, +1, _right - _left + 1};
+    }();
+
+    auto const [y0, yInc, yEnd] = [&]() {
+        if (_targetTop > _top) // moving down
+            return std::tuple{_bottom - _top, -1, -1};
+        else
+            return std::tuple{0, +1, _bottom - _top + 1};
+    }();
+
+    for (auto y = y0; y != yEnd; y += yInc)
+    {
+        for (auto x = x0; x != xEnd; x += xInc)
+        {
+            Cell const& sourceCell = at({_top + y, _left + x});
+            Cell& targetCell = at({_targetTop + y, _targetLeft + x});
+            targetCell = sourceCell;
+        }
+    }
+
+    updateCursorIterators();
 }
 
 void Screen::deleteLines(int _n)
