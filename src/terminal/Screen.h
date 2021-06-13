@@ -242,6 +242,8 @@ class Screen : public capabilities::StaticDatabase {
         int _targetTop, int _targetLeft, int _targetPage
     );
 
+    void eraseArea(int _top, int _left, int _bottom, int _right);
+
     void deleteLines(int _n);      // DL
 
     void backIndex();    // DECBI

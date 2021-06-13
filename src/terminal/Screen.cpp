@@ -1201,6 +1201,28 @@ void Screen::copyArea(int _top, int _left, int _bottom, int _right, int _page,
     updateCursorIterators();
 }
 
+void Screen::eraseArea(int _top, int _left, int _bottom, int _right)
+{
+    assert(_right <= size_.width);
+    assert(_bottom <= size_.height);
+
+    if (_top > _bottom || _left > _right)
+        return;
+
+    for (int y = _top; y <= _bottom; ++y)
+    {
+        Line& line = grid().lineAt(y);
+        auto column = next(begin(line), _left - 1);
+        for (int x = _left; x <= _right; ++x)
+        {
+            Cell& cell = *column;
+            cell.reset();
+            cell.setCharacter(0x20);
+            ++column;
+        }
+    }
+}
+
 void Screen::deleteLines(int _n)
 {
     if (isCursorInsideMargins())

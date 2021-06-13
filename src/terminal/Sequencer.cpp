@@ -1552,6 +1552,21 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                                  targetTop, targetLeft, targetPage);
             }
             break;
+        case DECERA:
+            {
+                // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
+                auto const origin = screen_.origin();
+                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
+                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+
+                // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is treated as the width or height of that page.
+                auto const size = screen_.size();
+                auto const bottom = min(_seq.param_or(2, Sequence::Parameter{ size.height }), size.height);
+                auto const right = min(_seq.param_or(3, Sequence::Parameter{ size.width }), size.width);
+
+                screen_.eraseArea(top, left, bottom, right);
+            }
+            break;
         case DECDC: screen_.deleteColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECRM:
