@@ -283,6 +283,7 @@ constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VT
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters");
 constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, "DECCRA", "Copy rectangular area");
 constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, "DECERA", "Erase rectangular area");
+constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 4, '$', 'x', VTType::VT420, "DECFRA", "Fill rectangular area");
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, "DECDC", "Delete column");
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, "DECIC", "Insert column");
 constexpr inline auto DECMODERESTORE = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTType::VT525, "DECMODERESTORE", "Restore DEC private modes.");
@@ -419,6 +420,7 @@ inline auto const& functions() noexcept
             DCH,
             DECCRA,
             DECERA,
+            DECFRA,
             DECDC,
             DECIC,
             DECMODERESTORE,

@@ -1223,6 +1223,26 @@ void Screen::eraseArea(int _top, int _left, int _bottom, int _right)
     }
 }
 
+void Screen::fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right)
+{
+    // "Pch can be any value from 32 to 126 or from 160 to 255."
+    if (!(32 <= _ch && _ch <= 126) && !(160 <= _ch && _ch <= 255))
+        return;
+
+    for (int y = _top; y <= _bottom; ++y)
+    {
+        Line& line = grid().lineAt(y);
+        auto column = next(begin(line), _left - 1);
+        for (int x = _left; x <= _right; ++x)
+        {
+            Cell& cell = *column;
+            cell.reset(cursor().graphicsRendition);
+            cell.setCharacter(_ch);
+            ++column;
+        }
+    }
+}
+
 void Screen::deleteLines(int _n)
 {
     if (isCursorInsideMargins())
