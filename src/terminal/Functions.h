@@ -26,7 +26,7 @@
 
 namespace terminal {
 
-enum class FunctionCategory {
+enum class FunctionCategory : uint8_t {
     C0   = 0,
     ESC  = 1,
     CSI  = 2,
@@ -35,35 +35,57 @@ enum class FunctionCategory {
 };
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
-struct FunctionDefinition { // TODO: rename Function
+struct FunctionDefinition // TODO: rename Function
+{
     FunctionCategory category;  // (3 bits) C0, ESC, CSI, OSC, DCS
     char leader;                // (3 bits) 0x3C..0x3F (one of: < = > ?, or 0x00 for none)
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
-    int32_t minimumParameters;  // (4 bits) 0..7
-    int32_t maximumParameters;  // (7 bits) 0..127 or 0..2^7 for integer value (OSC function parameter)
+    uint8_t minimumParameters;  // (4 bits) 0..7
+    uint16_t maximumParameters; // (10 bits) 0..i024 for integer value (OSC function parameter)
 
     VTType conformanceLevel;
     std::string_view mnemonic;
     std::string_view comment;
 
-    constexpr unsigned id() const noexcept
+    using id_type = uint32_t;
+
+    constexpr id_type id() const noexcept
     {
-        switch (category)
-        {
-            case FunctionCategory::C0:
-                return static_cast<unsigned>(category) | finalSymbol << 3;
-            default:
-                return static_cast<unsigned>(category)
-                     | (!leader ? 0 :       (leader - 0x3C)       <<  3)
-                     | (!intermediate ? 0 : (intermediate - 0)    << (3 + 3))
-                     | (!finalSymbol ? 0 :  (finalSymbol - 0x30)  << (3 + 3 + 4))
-                     | minimumParameters                          << (3 + 3 + 4 + 7)
-                     | maximumParameters                          << (3 + 3 + 4 + 7 + 4);
-        }
+        unsigned constexpr CategoryShift      = 0;
+        unsigned constexpr LeaderShift        = 3;
+        unsigned constexpr IntermediateShift  = 3+3;
+        unsigned constexpr FinalShift         = 3+3+4;
+        unsigned constexpr MinParamShift      = 3+3+4+7;
+        unsigned constexpr MaxParamShift      = 3+3+4+7+4;
+
+        // if (category == FunctionCategory::C0)
+        //     return static_cast<id_type>(category) | finalSymbol << 3;
+
+        auto const maskCat = static_cast<id_type>(category) << CategoryShift;
+
+        // 0x3C..0x3F; (one of: < = > ?, or 0x00 for none)
+        auto const maskLeader = !leader
+            ? 0 : (static_cast<id_type>(leader) - 0x3C) << LeaderShift;
+
+        // 0x20..0x2F: (intermediates, usually just one, or 0x00 if none)
+        auto const maskInterm = !intermediate
+            ? 0 : (static_cast<id_type>(intermediate) - 0x20 + 1) << IntermediateShift;
+
+        // 0x40..0x7E: final character
+        auto const maskFinalS = !finalSymbol  ? 0 : (static_cast<id_type>(finalSymbol) - 0x40) << FinalShift;
+        auto const maskMinPar = minimumParameters << MinParamShift;
+        auto const maskMaxPar = maximumParameters << MaxParamShift;
+
+        return maskCat
+             | maskLeader
+             | maskInterm
+             | maskFinalS
+             | maskMinPar
+             | maskMaxPar;
     }
 
-    constexpr operator unsigned () const noexcept { return id(); }
+    constexpr operator id_type () const noexcept { return id(); }
 };
 
 constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
@@ -140,7 +162,7 @@ namespace detail // {{{
         return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
     }
 
-    constexpr auto OSC(int _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto OSC(uint16_t _code, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
     }
@@ -150,7 +172,7 @@ namespace detail // {{{
         return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
     }
 
-    constexpr auto CSI(std::optional<char> _leader, int _argc0, int _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto CSI(std::optional<char> _leader, uint8_t _argc0, uint8_t _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         // TODO: static_assert on _leader/_intermediate range-or-null
         return FunctionDefinition{
@@ -166,7 +188,7 @@ namespace detail // {{{
         };
     }
 
-    constexpr auto DCS(std::optional<char> _leader, int _argc0, int _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto DCS(std::optional<char> _leader, uint8_t _argc0, uint8_t _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
     {
         // TODO: static_assert on _leader/_intermediate range-or-null
         return FunctionDefinition{
