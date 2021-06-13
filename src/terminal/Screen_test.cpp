@@ -2413,6 +2413,140 @@ TEST_CASE("resize", "[screen]")
     // TODO: what do we want to do when re resize to {0, y}, {x, 0}, {0, 0}?
 }
 
+// {{{ DECCRA
+// TODO: also verify attributes have been copied
+// TODO: also test with: DECOM enabled
+// TODO: also test with: margins set and having them exceeded
+// TODO: also test with: overflowing source bottom/right dimensions
+// TODO: also test with: out-of-bounds target or source top/left positions
+
+MockScreen screenForDECRA()
+{
+    auto screen = MockScreen{{6, 5}};
+
+    screen.write("ABCDEF\r\n"
+                 "abcdef\r\n"
+                 "123456\r\n");
+    screen.write("\033[43m");
+    screen.write("GHIJKL\r\n"
+                 "ghijkl");
+    screen.write("\033[0m");
+
+    auto const initialText = "ABCDEF\n"
+                             "abcdef\n"
+                             "123456\n"
+                             "GHIJKL\n"
+                             "ghijkl\n";
+
+    CHECK(screen.renderText() == initialText);
+
+    return screen;
+}
+
+TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
+{
+    auto screen = screenForDECRA();
+    auto const initialText = "ABCDEF\n"
+                             "abcdef\n"
+                             "123456\n"
+                             "GHIJKL\n"
+                             "ghijkl\n";
+    CHECK(screen.renderText() == initialText);
+
+    auto constexpr page = 0;
+
+    auto constexpr sTop = 4;
+    auto constexpr sLeft = 3;
+
+    auto constexpr sBottom = 5;
+    auto constexpr sRight = 6;
+
+    auto constexpr tTop = 3;
+    auto constexpr tLeft = 2;
+
+    auto const expectedText = "ABCDEF\n"
+                              "abcdef\n" // .3456.
+                              "1IJKL6\n" // .IJKL.
+                              "GijklL\n"
+                              "ghijkl\n";
+
+    // copy up by one line (4 to 3), 2 lines
+    // copy left by one column (3 to 2), 2 columns
+
+    auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
+            sTop, sLeft, sBottom, sRight, page,
+            tTop, tLeft, page);
+    screen.write(deccraSeq);
+
+    auto const resultText = screen.renderText();
+    CHECK(resultText == expectedText);
+}
+
+TEST_CASE("DECCRA.Right.intersecting", "[screen]")
+{
+    // Moves a rectangular area by one column to the right.
+    auto screen = screenForDECRA();
+
+    auto const initialText = "ABCDEF\n"
+                             "abcdef\n"
+                             "123456\n"
+                             "GHIJKL\n"
+                             "ghijkl\n";
+    CHECK(screen.renderText() == initialText);
+    auto const expectedText = "ABCDEF\n"
+                              "abbcdf\n"
+                              "122346\n"
+                              "GHHIJL\n"
+                              "ghijkl\n";
+
+    auto constexpr page = 0;
+    auto constexpr sTopLeft = Coordinate{2, 2};
+    auto constexpr sBottomRight = Coordinate{4, 4};
+    auto constexpr tTopLeft = Coordinate{2, 3};
+
+    auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
+            sTopLeft.row, sTopLeft.column,
+            sBottomRight.row, sBottomRight.column, page,
+            tTopLeft.row, tTopLeft.column, page);
+    screen.write(deccraSeq);
+
+    auto const resultText = screen.renderText();
+    CHECK(resultText == expectedText);
+}
+
+TEST_CASE("DECCRA.Left.intersecting", "[screen]")
+{
+    // Moves a rectangular area by one column to the left.
+    auto screen = screenForDECRA();
+    auto const initialText = "ABCDEF\n"
+                             "abcdef\n"
+                             "123456\n"
+                             "GHIJKL\n"
+                             "ghijkl\n";
+    CHECK(screen.renderText() == initialText);
+
+    auto const expectedText = "ABCDEF\n"
+                              "abdeff\n"
+                              "124566\n"
+                              "GHIJKL\n"
+                              "ghijkl\n";
+
+    auto constexpr page = 0;
+    auto constexpr sTopLeft = Coordinate{2, 4};
+    auto constexpr sBottomRight = Coordinate{3, 6};
+    auto constexpr tTopLeft = Coordinate{2, 3};
+
+    auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
+            sTopLeft.row, sTopLeft.column,
+            sBottomRight.row, sBottomRight.column, page,
+            tTopLeft.row, tTopLeft.column, page);
+    screen.write(deccraSeq);
+
+    auto const resultText = screen.renderText();
+    CHECK(resultText == expectedText);
+}
+// }}}
+
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
 // TODO: SetGraphicsRendition
