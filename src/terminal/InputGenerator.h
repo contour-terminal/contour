@@ -17,6 +17,7 @@
 #include <terminal/Coordinate.h>
 
 #include <crispy/overloaded.h>
+#include <unicode/convert.h>
 
 #include <optional>
 #include <set>
@@ -581,11 +582,11 @@ namespace fmt { // {{{
         auto format(terminal::MousePressEvent ev, FormatContext& _ctx)
         {
             return format_to(_ctx.out(),
-                "(press={}, mod={}, at={}:{})",
+                "MousePressEvent {} at {}:{} {}",
                 ev.button,
-                ev.modifier,
                 ev.row,
-                ev.column
+                ev.column,
+                ev.modifier
             );
         }
     };
@@ -598,10 +599,10 @@ namespace fmt { // {{{
         auto format(terminal::MouseMoveEvent ev, FormatContext& _ctx)
         {
             return format_to(_ctx.out(),
-                "(mod={}, at={}:{})",
-                ev.modifier,
+                "MouseMoveEvent {} at {}:{} {}",
                 ev.row,
-                ev.column
+                ev.column,
+                ev.modifier
             );
         }
     };
@@ -614,12 +615,88 @@ namespace fmt { // {{{
         auto format(terminal::MouseReleaseEvent ev, FormatContext& _ctx)
         {
             return format_to(_ctx.out(),
-                "(release={}, mod={}, at={}:{})",
+                "MouseReleaseEvent {} at {}:{} {}",
                 ev.button,
-                ev.modifier,
                 ev.row,
-                ev.column
+                ev.column,
+                ev.modifier
             );
+        }
+    };
+
+    template <>
+    struct formatter<terminal::KeyInputEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::KeyInputEvent _event, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(), "KeyInputEvent: {} {}", _event.key, _event.modifier);
+        }
+    };
+
+    template <>
+    struct formatter<terminal::CharInputEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::CharInputEvent _event, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(), "CharInputEvent: {} {}", unicode::convert_to<char>(_event.value), _event.modifier);
+        }
+    };
+
+    template <>
+    struct formatter<terminal::FocusInEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::FocusInEvent, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(), "FocusInEvent");
+        }
+    };
+
+    template <>
+    struct formatter<terminal::FocusOutEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::FocusOutEvent, FormatContext& _ctx)
+        {
+            return format_to(_ctx.out(), "FocusOutEvent");
+        }
+    };
+
+    template <>
+    struct formatter<terminal::InputEvent> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::InputEvent const& _event, FormatContext& _ctx)
+        {
+            if (std::holds_alternative<terminal::KeyInputEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::KeyInputEvent>(_event));
+
+            if (std::holds_alternative<terminal::CharInputEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::CharInputEvent>(_event));
+
+            if (std::holds_alternative<terminal::MousePressEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::MousePressEvent>(_event));
+
+            if (std::holds_alternative<terminal::MouseMoveEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::MouseMoveEvent>(_event));
+
+            if (std::holds_alternative<terminal::MouseReleaseEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::MouseReleaseEvent>(_event));
+
+            if (std::holds_alternative<terminal::FocusInEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::FocusInEvent>(_event));
+
+            if (std::holds_alternative<terminal::FocusOutEvent>(_event))
+                return format_to(_ctx.out(), "{}", std::get<terminal::FocusOutEvent>(_event));
+
+            return format_to(_ctx.out(), "<Unknown InputEvent:{}>", _event.index());
         }
     };
 } // }}}
