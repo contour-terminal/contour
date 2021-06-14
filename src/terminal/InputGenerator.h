@@ -64,6 +64,16 @@ class Modifier {
         return *this;
     }
 
+    constexpr Modifier with(Modifier const& _other) const noexcept
+    {
+        return Modifier(static_cast<Key>(mask_ | _other.mask_));
+    }
+
+    constexpr Modifier without(Modifier const& _other) const noexcept
+    {
+        return Modifier(static_cast<Key>(mask_ & ~_other.mask_));
+    }
+
     bool contains(Modifier const& _other) const noexcept
     {
         return (mask_ & _other.mask_) == _other.mask_;
