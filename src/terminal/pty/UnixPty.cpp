@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/pty/UnixPty.h>
+#include <crispy/debuglog.h>
 
 #include <cassert>
 #include <cstddef>
@@ -46,6 +47,8 @@ using std::max;
 using namespace std::string_literals;
 
 namespace terminal {
+
+auto const inline PtyTag = crispy::debugtag::make("system.pty", "Logs PTY informations.");
 
 namespace
 {
@@ -112,15 +115,14 @@ UnixPty::UnixPty(Size const& _windowSize, optional<Size> _pixels) :
             break;
     }
 #endif
+    debuglog(PtyTag).write("PTY opened. master={}, slave={}, pipe=({}, {})",
+                            master_, slave_, pipe_.at(0), pipe_.at(1));
 }
 
 UnixPty::~UnixPty()
 {
-    close();
-}
+    debuglog(PtyTag).write("Destructing.");
 
-void UnixPty::close()
-{
     for (auto* fd: {&pipe_.at(0), &pipe_.at(1), &master_, &slave_})
     {
         if (*fd < 0)
@@ -131,8 +133,26 @@ void UnixPty::close()
     }
 }
 
+void UnixPty::close()
+{
+    debuglog(PtyTag).write("PTY closing. master={}, slave={}, pipe=({}, {})",
+                            master_, slave_, pipe_.at(0), pipe_.at(1));
+
+    for (auto* fd: {&master_, &slave_})
+    {
+        if (*fd < 0)
+            continue;
+
+        ::close(*fd);
+        *fd = -1;
+    }
+
+    wakeupReader();
+}
+
 void UnixPty::wakeupReader()
 {
+    //debuglog(PtyTag).write("waking up via pipe {}", pipe_[1]);
     char dummy{};
     auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
     (void) rv;
@@ -140,6 +160,13 @@ void UnixPty::wakeupReader()
 
 int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
 {
+    if (master_ < 0)
+    {
+        debuglog(PtyTag).write("read() called with closed PTY master.");
+        errno = ENODEV;
+        return -1;
+    }
+
     timeval tv{};
     tv.tv_sec = _timeout.count() / 1000;
     tv.tv_usec = (_timeout.count() % 1000) * 1000;
@@ -153,6 +180,13 @@ int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
         FD_SET(master_, &rfd);
         FD_SET(pipe_[0], &rfd);
         auto const nfds = 1 + max(master_, pipe_[0]);
+
+        // debuglog(PtyTag).write(
+        //     "read: select({}, {}) for {}.{:04}s.",
+        //     master_, pipe_[0],
+        //     tv.tv_sec, tv.tv_usec / 1000
+        // );
+
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
 
         if (rv == 0)
@@ -179,7 +213,11 @@ int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
         }
 
         if (FD_ISSET(master_, &rfd))
-            return static_cast<int>(::read(master_, _buf, _size));
+        {
+            auto const rv = static_cast<int>(::read(master_, _buf, _size));
+            // debuglog(PtyTag).write("read returned {}. {}", rv, rv < 0 ? strerror(errno) : "");
+            return rv;
+        }
 
         if (piped)
         {

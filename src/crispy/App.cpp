@@ -40,7 +40,8 @@ namespace CLI = crispy::cli;
 namespace crispy {
 
 namespace // {{{ helper
-{ CLI::HelpStyle helpStyle()
+{
+    CLI::HelpStyle helpStyle()
     {
         auto style = CLI::HelpStyle{};
 
@@ -73,7 +74,12 @@ namespace // {{{ helper
     void customizeDebugLog()
     {
         // A curated list of colors.
-        static const bool colorized = isatty(STDOUT_FILENO);
+        static const bool colorized =
+#if !defined(_WIN32)
+            isatty(STDOUT_FILENO);
+#else
+            true;
+#endif
         static constexpr auto colors = std::array{
             2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
             150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,

@@ -46,26 +46,25 @@ class Terminal : public ScreenEvents {
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) = 0;
+        virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() = 0;
         virtual void screenUpdated() {}
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*_fontSpec*/) {}
-        virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+        virtual void copyToClipboard(std::string_view /*_data*/) {}
         virtual void dumpState() {}
-        virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
-        virtual void reply(std::string_view const& /*_response*/) {}
+        virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
-        virtual void onSelectionComplete() {}
+        virtual void onSelectionCompleted() = 0;
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
-        virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+        virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
     };
 
-    Terminal(std::unique_ptr<Pty> _pty,
+    Terminal(Pty& _pty,
              int _ptyReadBufferSize,
              Events& _eventListener,
              std::optional<size_t> _maxHistoryLineCount = std::nullopt,
@@ -88,30 +87,24 @@ class Terminal : public ScreenEvents {
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
 
     /// Retrieves reference to the underlying PTY device.
-    Pty& device() noexcept { return *pty_; }
+    Pty& device() noexcept { return pty_; }
 
-    crispy::Size screenSize() const noexcept { return pty_->screenSize(); }
+    crispy::Size screenSize() const noexcept { return pty_.screenSize(); }
     void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels);
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
 
     // {{{ input proxy
-    // Sends given input event to connected slave.
-    bool send(KeyInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(CharInputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(MousePressEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(MouseReleaseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(MouseMoveEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(FocusInEvent const& _focusEvent, std::chrono::steady_clock::time_point _now);
-    bool send(FocusOutEvent const& _focusEvent, std::chrono::steady_clock::time_point _now);
-
-    bool send(MouseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-    bool send(InputEvent const& _inputEvent, std::chrono::steady_clock::time_point _now);
-
-    /// Sends verbatim text in bracketed mode to application.
-    void sendPaste(std::string_view const& _text);
-
-    void sendRaw(std::string_view const& _text);
+    using Timestamp = std::chrono::steady_clock::time_point;
+    bool sendKeyPressEvent(KeyInputEvent const& _event, Timestamp _now);
+    bool sendCharPressEvent(CharInputEvent const& _event, Timestamp _now);
+    bool sendMousePressEvent(MousePressEvent const& _event, Timestamp _now);
+    bool sendMouseMoveEvent(MouseMoveEvent const& _event, Timestamp _now);
+    bool sendMouseReleaseEvent(MouseReleaseEvent const& _event, Timestamp _now);
+    bool sendFocusInEvent();
+    bool sendFocusOutEvent();
+    void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
+    void sendRaw(std::string_view _text);   // Sends raw string to the application.
     // }}}
 
     // {{{ screen proxy
@@ -198,7 +191,7 @@ class Terminal : public ScreenEvents {
     ///
     /// @see ensureFreshRenderBuffer()
     /// @see refreshRenderBuffer()
-    RenderBufferRef renderBuffer() { return renderBuffer_.frontBuffer(); }
+    RenderBufferRef renderBuffer() const { return renderBuffer_.frontBuffer(); }
     // }}}
 
     void lock() const { outerLock_.lock(); innerLock_.lock(); }
@@ -303,10 +296,10 @@ class Terminal : public ScreenEvents {
     void screenUpdated() override;
     FontDef getFontDef() override;
     void setFontDef(FontDef const& _fontDef) override;
-    void copyToClipboard(std::string_view const& _data) override;
+    void copyToClipboard(std::string_view _data) override;
     void dumpState() override;
-    void notify(std::string_view const& _title, std::string_view const& _body) override;
-    void reply(std::string_view const& _response) override;
+    void notify(std::string_view _title, std::string_view _body) override;
+    void reply(std::string_view _response) override;
     void resizeWindow(int _width, int _height, bool _unitInPixels) override;
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
@@ -316,7 +309,7 @@ class Terminal : public ScreenEvents {
     void setMouseProtocol(MouseProtocol _protocol, bool _enabled) override;
     void setMouseTransport(MouseTransport _transport) override;
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode) override;
-    void setWindowTitle(std::string_view const& _title) override;
+    void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void useApplicationCursorKeys(bool _enabled) override;
     void hardReset() override;
@@ -336,7 +329,7 @@ class Terminal : public ScreenEvents {
     bool screenDirty_ = false;
     RenderDoubleBuffer renderBuffer_{};
 
-    std::unique_ptr<Pty> pty_;
+    Pty& pty_;
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
@@ -367,6 +360,7 @@ class Terminal : public ScreenEvents {
     Viewport viewport_;
     std::unique_ptr<Selector> selector_;
     std::atomic<bool> hoveringHyperlink_ = false;
+    std::atomic<bool> renderBufferUpdateEnabled_ = true;
 };
 
 }  // namespace terminal

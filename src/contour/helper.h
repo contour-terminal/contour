@@ -18,10 +18,12 @@
 
 #include <QtCore/Qt>
 #include <QtCore/QCoreApplication>
-#include <QtGui/QKeySequence>
 #include <QtGui/QKeyEvent>
 
 #include <cctype>
+#include <map>
+#include <string>
+#include <string_view>
 
 namespace terminal::view {
     class TerminalView;
@@ -125,13 +127,19 @@ constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
     }
 }
 
-QKeySequence toKeySequence(QKeyEvent* _keyEvent);
+std::variant<
+    std::monostate,
+    terminal::KeyInputEvent,
+    std::vector<terminal::CharInputEvent>
+>
+mapQtToTerminalKeyEvent(QKeyEvent* _event);
 
-std::optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardModifiers _mods);
-
-void configureTerminal(terminal::view::TerminalView& _terminalView,
-                       config::Config const& _newConfig,
-                       std::string const& _profileName);
+class TerminalSession;
+bool sendKeyEvent(QKeyEvent* _keyEvent, TerminalSession& _session);
+void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session);
+void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session);
+void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session);
+void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session);
 
 void spawnNewTerminal(std::string const& _programPath,
                       std::string const& _configPath,
@@ -149,5 +157,12 @@ auto const inline WidgetTag = crispy::debugtag::make("system.widget", "Logs syst
         while ((err = glGetError()) != GL_NO_ERROR) \
             debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
     } while (0)
+
+using PermissionCache = std::map<std::string, bool>;
+
+bool requestPermission(PermissionCache& _cache,
+                       QWidget* _parent,
+                       config::Permission _allowedByConfig,
+                       std::string_view _topicText);
 
 }

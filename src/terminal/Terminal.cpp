@@ -36,7 +36,7 @@ using std::move;
 
 namespace terminal {
 
-namespace
+namespace // {{{ helpers
 {
     void trimSpaceRight(string& value)
     {
@@ -55,8 +55,9 @@ namespace
         return tuple{a, b};
     }
 }
+// }}}
 
-Terminal::Terminal(std::unique_ptr<Pty> _pty,
+Terminal::Terminal(Pty& _pty,
                    int _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    optional<size_t> _maxHistoryLineCount,
@@ -75,7 +76,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
     eventListener_{ _eventListener },
     refreshInterval_{ static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_{},
-    pty_{ move(_pty) },
+    pty_{ _pty },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
     cursorShape_{ CursorShape::Block }, // TODO: pass via param
     cursorBlinkInterval_{ _cursorBlinkInterval },
@@ -86,7 +87,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
     mouseProtocolBypassModifier_{ _mouseProtocolBypassModifier },
     inputGenerator_{},
     screen_{
-        pty_->screenSize(),
+        pty_.screenSize(),
         *this,
         true, // logs raw output by default?
         true, // logs trace output by default?
@@ -103,7 +104,7 @@ Terminal::Terminal(std::unique_ptr<Pty> _pty,
 
 Terminal::~Terminal()
 {
-    pty_->wakeupReader();
+    pty_.wakeupReader();
 
     if (screenUpdateThread_)
         screenUpdateThread_->join();
@@ -123,6 +124,15 @@ void Terminal::mainLoop()
 {
     mainLoopThreadID_ = this_thread::get_id();
 
+    debuglog(TerminalTag).write(
+        "Starting main loop with thread id {}",
+        [&]() {
+            stringstream sstr;
+            sstr << mainLoopThreadID_;
+            return sstr.str();
+        }()
+    );
+
     vector<char> buf;
     buf.resize(ptyReadBufferSize_);
 
@@ -134,16 +144,26 @@ void Terminal::mainLoop()
                 : refreshInterval_ // std::chrono::seconds(0)
                 ;
 
-        auto const n = pty_->read(buf.data(), buf.size(), timeout);
-
-        if (n < 0 && (errno != EINTR && errno != EAGAIN))
-            break;
+        auto const n = pty_.read(buf.data(), buf.size(), timeout);
 
         if (n > 0)
+        {
             writeToScreen(buf.data(), n);
 
-        auto const now = std::chrono::steady_clock::now();
-        ensureFreshRenderBuffer(now);
+            #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+            auto const now = std::chrono::steady_clock::now();
+            ensureFreshRenderBuffer(now);
+            #endif
+        }
+        else if (n == 0)
+        {
+            debuglog(TerminalTag).write("PTY read returned with zero bytes.");
+        }
+        else if (n < 0 && (errno != EINTR && errno != EAGAIN))
+        {
+            debuglog(TerminalTag).write("PTY read failed. {}", strerror(errno));
+            break;
+        }
     }
     eventListener_.onClosed();
 }
@@ -157,7 +177,7 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     if (this_thread::get_id() == mainLoopThreadID_)
         return;
 
-    pty_->wakeupReader();
+    pty_.wakeupReader();
 }
 
 bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now)
@@ -169,6 +189,12 @@ bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now)
 
 void Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now)
 {
+    if (!renderBufferUpdateEnabled_)
+    {
+        renderBuffer_.state = RenderBufferState::WaitingForRefresh;
+        return;
+    }
+
     auto const elapsed = _now - renderBuffer_.lastUpdate;
     auto const avoidRefresh = elapsed < refreshInterval_;
 
@@ -184,8 +210,14 @@ void Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
             renderBuffer_.state = RenderBufferState::TrySwapBuffers;
             [[fallthrough]];
         case RenderBufferState::TrySwapBuffers:
-            if (renderBuffer_.swapBuffers(_now))
-                eventListener_.renderBufferUpdated();
+            #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+                // We have been actively invoked by the render thread, so don't inform it about updates.
+                renderBuffer_.swapBuffers(_now);
+            #else
+                // Passively invoked by the terminal thread, so do inform render thread about updates.
+                if (renderBuffer_.swapBuffers(_now))
+                    eventListener_.renderBufferUpdated();
+            #endif
             break;
     }
 }
@@ -200,6 +232,8 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
         currentMousePosition_.row - viewport_.relativeScrollOffset(),
         currentMousePosition_.column
     };
+
+    changes_.store(0);
 
     if (renderHyperlinks)
     {
@@ -349,10 +383,8 @@ optional<RenderCursor> Terminal::renderCursor()
 }
 // }}}
 
-bool Terminal::send(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_point _now)
+bool Terminal::sendKeyPressEvent(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_point _now)
 {
-    debuglog(KeyboardTag).write("key: {}; keyEvent: {}", to_string(_keyEvent.key), to_string(_keyEvent.modifier));
-
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
@@ -361,36 +393,37 @@ bool Terminal::send(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_p
         return true;
 
     viewport_.scrollToBottom();
-    bool const success = inputGenerator_.generate(_keyEvent);
-    flushInput();
-    return success;
-}
+    bool const success = inputGenerator_.generate(_keyEvent.key, _keyEvent.modifier);
+    if (success)
+        debuglog(InputTag).write("Sending {}.", _keyEvent);
 
-bool Terminal::send(CharInputEvent const& _charEvent, chrono::steady_clock::time_point _now)
-{
-    cursorBlinkState_ = 1;
-    lastCursorBlink_ = _now;
-
-    if (_charEvent.value <= 0x7F && isprint(static_cast<int>(_charEvent.value)))
-        debuglog(KeyboardTag).write("char: {} ({})", static_cast<char>(_charEvent.value), to_string(_charEvent.modifier));
-    else
-        debuglog(KeyboardTag).write("char: 0x{:04X} ({})", static_cast<uint32_t>(_charEvent.value), to_string(_charEvent.modifier));
-
-    // Early exit if KAM is enabled.
-    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
-        return true;
-
-    bool const success = inputGenerator_.generate(_charEvent);
     flushInput();
     viewport_.scrollToBottom();
     return success;
 }
 
-bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::time_point _now)
+bool Terminal::sendCharPressEvent(CharInputEvent const& _charEvent, steady_clock::time_point _now)
 {
-    // TODO: anything else? logging?
+    cursorBlinkState_ = 1;
+    lastCursorBlink_ = _now;
 
-    respectMouseProtocol_ = !(_mousePress.modifier.any() && _mousePress.modifier.contains(mouseProtocolBypassModifier_));
+    // Early exit if KAM is enabled.
+    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
+        return true;
+
+    auto const success = inputGenerator_.generate(_charEvent.value, _charEvent.modifier);
+    if (success)
+        debuglog(InputTag).write("Sending {}.", _charEvent);
+
+    flushInput();
+    viewport_.scrollToBottom();
+    return success;
+}
+
+bool Terminal::sendMousePressEvent(MousePressEvent const& _mousePress, chrono::steady_clock::time_point _now)
+{
+    respectMouseProtocol_ = mouseProtocolBypassModifier_ == Modifier::None
+                         || !_mousePress.modifier.contains(mouseProtocolBypassModifier_);
 
     MousePressEvent const withPosition{_mousePress.button,
                                        _mousePress.modifier,
@@ -400,6 +433,7 @@ bool Terminal::send(MousePressEvent const& _mousePress, chrono::steady_clock::ti
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
+        debuglog(InputTag).write("Sending {}.", withPosition);
         flushInput();
         return true;
     }
@@ -450,7 +484,7 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
+bool Terminal::sendMouseMoveEvent(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
 {
     auto const newPosition = _mouseMove.coordinates();
     bool const positionChanged = newPosition != currentMousePosition_;
@@ -462,6 +496,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     // Do not handle mouse-move events in sub-cell dimensions.
     if (respectMouseProtocol_ && inputGenerator_.generate(_mouseMove))
     {
+        debuglog(InputTag).write("Sending {}.", _mouseMove);
         flushInput();
         return true;
     }
@@ -473,6 +508,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
+        changed = true;
         setSelector(make_unique<Selector>(
             Selector::Mode::Linear,
             wordDelimiters_,
@@ -483,6 +519,7 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
 
     if (selectionAvailable() && selector()->state() != Selector::State::Complete)
     {
+        changed = true;
         selector()->extend(absoluteCoordinate(newPosition));
         breakLoopAndRefreshRenderBuffer();
         return true;
@@ -493,14 +530,16 @@ bool Terminal::send(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time
     return changed;
 }
 
-bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
+bool Terminal::sendMouseReleaseEvent(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
 {
     MouseReleaseEvent const withPosition{_mouseRelease.button,
                                          _mouseRelease.modifier,
                                          currentMousePosition_.row,
                                          currentMousePosition_.column};
+
     if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
     {
+        debuglog(InputTag).write("Sending {}.", withPosition);
         flushInput();
         return true;
     }
@@ -518,7 +557,7 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
                     break;
                 case Selector::State::InProgress:
                     selector()->stop();
-                    eventListener_.onSelectionComplete();
+                    eventListener_.onSelectionCompleted();
                     break;
                 case Selector::State::Complete:
                     break;
@@ -529,14 +568,14 @@ bool Terminal::send(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock
     return true;
 }
 
-bool Terminal::send(FocusInEvent const& _focusEvent,
-                    [[maybe_unused]] std::chrono::steady_clock::time_point _now)
+bool Terminal::sendFocusInEvent()
 {
     screen_.setFocus(true);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generate(_focusEvent))
+    if (inputGenerator_.generate(FocusInEvent{}))
     {
+        debuglog(InputTag).write("Sending {}.", FocusInEvent{});
         flushInput();
         return true;
     }
@@ -544,14 +583,14 @@ bool Terminal::send(FocusInEvent const& _focusEvent,
     return false;
 }
 
-bool Terminal::send(FocusOutEvent const& _focusEvent,
-                    [[maybe_unused]] std::chrono::steady_clock::time_point _now)
+bool Terminal::sendFocusOutEvent()
 {
     screen_.setFocus(false);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generate(_focusEvent))
+    if (inputGenerator_.generate(FocusOutEvent{}))
     {
+        debuglog(InputTag).write("Sending {}.", FocusOutEvent{});
         flushInput();
         return true;
     }
@@ -559,35 +598,14 @@ bool Terminal::send(FocusOutEvent const& _focusEvent,
     return false;
 }
 
-bool Terminal::send(MouseEvent const& _inputEvent, std::chrono::steady_clock::time_point _now)
+void Terminal::sendPaste(string_view _text)
 {
-    return visit(overloaded{
-        [=](MousePressEvent const& ev) -> bool { return send(InputEvent{ev}, _now); },
-        [=](MouseReleaseEvent const& ev) -> bool { return send(InputEvent{ev}, _now); },
-        [=](MouseMoveEvent const& ev) -> bool { return send(InputEvent{ev}, _now); }
-    }, _inputEvent);
-}
-
-bool Terminal::send(InputEvent const& _inputEvent, chrono::steady_clock::time_point _now)
-{
-    return visit(overloaded{
-        [=](KeyInputEvent const& _key) -> bool { return send(_key, _now); },
-        [=](CharInputEvent const& _char) -> bool { return send(_char, _now); },
-        [=](MousePressEvent const& _mouse) -> bool { return send(_mouse, _now); },
-        [=](MouseMoveEvent const& _mouseMove) -> bool { return send(_mouseMove, _now); },
-        [=](MouseReleaseEvent const& _mouseRelease) -> bool { return send(_mouseRelease, _now); },
-        [=](FocusInEvent const& _event) -> bool { return send(_event, _now); },
-        [=](FocusOutEvent const& _event) -> bool { return send(_event, _now); },
-    }, _inputEvent);
-}
-
-void Terminal::sendPaste(string_view const& _text)
-{
+    debuglog(InputTag).write("Sending paste of {} bytes.", _text.size());
     inputGenerator_.generatePaste(_text);
     flushInput();
 }
 
-void Terminal::sendRaw(std::string_view const& _text)
+void Terminal::sendRaw(string_view _text)
 {
     inputGenerator_.generate(_text);
     flushInput();
@@ -596,22 +614,24 @@ void Terminal::sendRaw(std::string_view const& _text)
 void Terminal::flushInput()
 {
     inputGenerator_.swap(pendingInput_);
-    if (!pendingInput_.empty())
-    {
-        // XXX should be the only location that does write to the PTY's stdin to avoid race conditions.
-        pty_->write(pendingInput_.data(), pendingInput_.size());
-        debuglog(KeyboardTag).write(crispy::escape(begin(pendingInput_), end(pendingInput_)));
-        pendingInput_.clear();
-    }
+    if (pendingInput_.empty())
+        return;
+
+    // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
+    debuglog(InputTag).write("Flushing input: \"{}\"", crispy::escape(begin(pendingInput_), end(pendingInput_)));
+    pty_.write(pendingInput_.data(), pendingInput_.size());
+    pendingInput_.clear();
 }
 
 void Terminal::writeToScreen(char const* data, size_t size)
 {
     auto const _l = lock_guard{*this};
     screen_.write(data, size);
+    renderBufferUpdateEnabled_ = !screen_.isModeEnabled(DECMode::BatchedRendering);
 }
 
-bool Terminal::shouldRender(chrono::steady_clock::time_point const& _now) const
+// TODO: this family of functions seems we don't need anymore
+bool Terminal::shouldRender(steady_clock::time_point const& _now) const
 {
     return changes_.load() || (
         cursorDisplay_ == CursorDisplay::Blink &&
@@ -660,7 +680,7 @@ void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
     if (_pixels)
         screen_.setCellPixelSize(*_pixels / _cells);
 
-    pty_->resizeScreen(_cells, _pixels);
+    pty_.resizeScreen(_cells, _pixels);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
@@ -770,7 +790,7 @@ void Terminal::scrollbackBufferCleared()
 void Terminal::screenUpdated()
 {
     screenDirty_ = true;
-    //pty_->wakeupReader();
+    //pty_.wakeupReader();
     eventListener_.screenUpdated();
 }
 
@@ -784,7 +804,7 @@ void Terminal::setFontDef(FontDef const& _fontDef)
     eventListener_.setFontDef(_fontDef);
 }
 
-void Terminal::copyToClipboard(std::string_view const& _data)
+void Terminal::copyToClipboard(string_view _data)
 {
     eventListener_.copyToClipboard(_data);
 }
@@ -794,14 +814,18 @@ void Terminal::dumpState()
     eventListener_.dumpState();
 }
 
-void Terminal::notify(std::string_view const& _title, std::string_view const& _body)
+void Terminal::notify(string_view _title, string_view _body)
 {
     eventListener_.notify(_title, _body);
 }
 
-void Terminal::reply(string_view const& _reply)
+void Terminal::reply(string_view _reply)
 {
-    eventListener_.reply(_reply);
+    // this is invoked from within the terminal thread.
+    // most likely that's not the main thread, which will however write
+    // the actual input events.
+    // TODO: introduce new mutex to guard terminal writes.
+    sendRaw(_reply);
 }
 
 void Terminal::resizeWindow(int _width, int _height, bool _unitInPixels)
@@ -850,12 +874,12 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode _mode)
     inputGenerator_.setMouseWheelMode(_mode);
 }
 
-void Terminal::setWindowTitle(std::string_view const& _title)
+void Terminal::setWindowTitle(string_view _title)
 {
     eventListener_.setWindowTitle(_title);
 }
 
-void Terminal::setTerminalProfile(std::string const& _configProfileName)
+void Terminal::setTerminalProfile(string const& _configProfileName)
 {
     eventListener_.setTerminalProfile(_configProfileName);
 }

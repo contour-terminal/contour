@@ -50,7 +50,8 @@ namespace {
 using namespace std;
 using actions::Action;
 
-namespace {
+namespace
+{
     template <typename String>
     inline std::string toLower(String const& _value)
     {
@@ -143,84 +144,31 @@ namespace {
 
         return out;
     }
+}
 
-    auto toQtKeyboardModifier(terminal::Modifier _mods) -> Qt::KeyboardModifiers {
-        Qt::KeyboardModifiers mods;
-        if (_mods.shift())
-            mods.setFlag(Qt::ShiftModifier);
-        if (_mods.alt())
-            mods.setFlag(Qt::AltModifier);
-        if (_mods.control())
-            mods.setFlag(Qt::ControlModifier);
-        if (_mods.meta())
-            mods.setFlag(Qt::MetaModifier);
-        return mods;
-    };
+vector<actions::Action> const* apply(InputMappings const& _mappings,
+                                     terminal::KeyInputEvent const& _event)
+{
+    if (auto const i = _mappings.keyMappings.find(_event); i != _mappings.keyMappings.end())
+        return &i->second;
+    return nullptr;
+}
 
-    QKeySequence toQtKeySequence(terminal::CharInputEvent _char) {
-        auto const mods = toQtKeyboardModifier(_char.modifier);
-        using terminal::ControlCode::C0;
-        switch (static_cast<C0>(_char.value))
-        {
-            case C0::CR:
-                return QKeySequence(Qt::Key_Return | mods);
-            default:
-                return QKeySequence(_char.value | mods);
-        }
-    };
+vector<actions::Action> const* apply(InputMappings const& _mappings,
+                                     terminal::CharInputEvent const& _event)
+{
+    if (auto const i = _mappings.charMappings.find(_event); i != _mappings.charMappings.end())
+        return &i->second;
+    return nullptr;
+}
 
-    QKeySequence toQtKeySequence(terminal::KeyInputEvent const& _key) {
-        using terminal::Key;
 
-        static auto constexpr mapping = array{
-            pair{Key::Insert, Qt::Key_Insert},
-            pair{Key::Delete, Qt::Key_Delete},
-            pair{Key::RightArrow, Qt::Key_Right},
-            pair{Key::LeftArrow, Qt::Key_Left},
-            pair{Key::DownArrow, Qt::Key_Down},
-            pair{Key::UpArrow, Qt::Key_Up},
-            pair{Key::PageDown, Qt::Key_PageDown},
-            pair{Key::PageUp, Qt::Key_PageUp},
-            pair{Key::Home, Qt::Key_Home},
-            pair{Key::End, Qt::Key_End},
-            pair{Key::F1, Qt::Key_F1},
-            pair{Key::F2, Qt::Key_F2},
-            pair{Key::F3, Qt::Key_F3},
-            pair{Key::F4, Qt::Key_F4},
-            pair{Key::F5, Qt::Key_F5},
-            pair{Key::F6, Qt::Key_F6},
-            pair{Key::F7, Qt::Key_F7},
-            pair{Key::F8, Qt::Key_F8},
-            pair{Key::F9, Qt::Key_F9},
-            pair{Key::F10, Qt::Key_F10},
-            pair{Key::F11, Qt::Key_F11},
-            pair{Key::F12, Qt::Key_F12},
-            // todo: F13..F25
-            // TODO: NumPad
-            // pair{Key::Numpad_0, Qt::Key_0},
-            // pair{Key::Numpad_1, Qt::Key_1},
-            // pair{Key::Numpad_2, Qt::Key_2},
-            // pair{Key::Numpad_3, Qt::Key_3},
-            // pair{Key::Numpad_4, Qt::Key_4},
-            // pair{Key::Numpad_5, Qt::Key_5},
-            // pair{Key::Numpad_6, Qt::Key_6},
-            // pair{Key::Numpad_7, Qt::Key_7},
-            // pair{Key::Numpad_8, Qt::Key_8},
-            // pair{Key::Numpad_9, Qt::Key_9},
-            // pair{Key::Numpad_Decimal, Qt::Key_Period},
-            // pair{Key::Numpad_Divide, Qt::Key_Slash},
-            // pair{Key::Numpad_Multiply, Qt::Key_Asterisk},
-            // pair{Key::Numpad_Subtract, Qt::Key_Minus},
-            // pair{Key::Numpad_Add, Qt::Key_Plus},
-            // pair{Key::Numpad_Enter, Qt::Key_Enter},
-            // pair{Key::Numpad_Equal, Qt::Key_Equal},
-        };
-
-        if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key.key; }); i != end(mapping))
-            return QKeySequence{static_cast<int>(i->second) | static_cast<int>(toQtKeyboardModifier(_key.modifier)) };
-
-        throw std::invalid_argument(fmt::format("Unsupported input Key. {}", _key.key));
-    };
+vector<actions::Action> const* apply(InputMappings const& _mappings,
+                                     terminal::MousePressEvent const& _event)
+{
+    if (auto const i = _mappings.mouseMappings.find(_event); i != _mappings.mouseMappings.end())
+        return &i->second;
+    return nullptr;
 }
 
 FileSystem::path configHome(string const& _programName)
@@ -462,28 +410,26 @@ optional<terminal::Modifier> parseModifier(YAML::Node const& _node)
 {
     using terminal::Modifier;
     if (!_node)
-        return Modifier::None;
-    else if (_node.IsScalar())
-        return parseModifierKey(_node.as<string>());
-    else if (_node.IsSequence())
-    {
-        terminal::Modifier mods;
-        for (size_t i = 0; i < _node.size(); ++i)
-        {
-            if (!_node[i].IsScalar())
-                return nullopt;
-
-            auto const mod = parseModifierKey(_node[i].as<string>());
-            if (!mod)
-                return nullopt;
-
-            mods |= *mod;
-        }
-        return mods;
-    }
-    else
         return nullopt;
-};
+    if (_node.IsScalar())
+        return parseModifierKey(_node.as<string>());
+    if (!_node.IsSequence())
+        return nullopt;
+
+    terminal::Modifier mods;
+    for (size_t i = 0; i < _node.size(); ++i)
+    {
+        if (!_node[i].IsScalar())
+            return nullopt;
+
+        auto const mod = parseModifierKey(_node[i].as<string>());
+        if (!mod)
+            return nullopt;
+
+        mods |= *mod;
+    }
+    return mods;
+}
 
 void parseInputMapping(Config& _config, YAML::Node const& _mapping)
 {
@@ -564,24 +510,21 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         }
     };
 
-	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods) -> pair<optional<terminal::InputEvent>, bool> {
+	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods) -> pair<optional<variant<terminal::KeyInputEvent, terminal::CharInputEvent>>, bool> {
         if (!_node)
             return make_pair(nullopt, false);
-        else if (!_node.IsScalar())
-            return make_pair(nullopt, true);
-        else if (auto const input = parseKeyOrChar(_node.as<string>()); input.has_value())
-        {
-            return make_pair(terminal::InputEvent{visit(overloaded{
-                [&](terminal::Key _key) -> terminal::InputEvent {
-                    return terminal::KeyInputEvent{_key, _mods};
-                },
-                [&](char32_t _ch) -> terminal::InputEvent {
-                    return terminal::CharInputEvent{static_cast<char32_t>(toupper(_ch)), _mods};
-                }
-            }, input.value())}, true);
-        }
 
-        return make_pair(nullopt, false);
+        if (!_node.IsScalar())
+            return make_pair(nullopt, true);
+
+        auto const input = parseKeyOrChar(_node.as<string>());
+        if (!input.has_value())
+            return make_pair(nullopt, false);
+
+        if (std::holds_alternative<terminal::Key>(*input))
+            return {terminal::KeyInputEvent{std::get<terminal::Key>(*input), _mods}, true};
+
+        return {terminal::CharInputEvent{std::get<char32_t>(*input), _mods}, true};
     };
 
     auto const action = parseAction(_mapping);
@@ -593,15 +536,15 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
             if (keyEvent.has_value())
             {
                 if (holds_alternative<KeyInputEvent>(*keyEvent))
-                    _config.keyMappings[toQtKeySequence(get<KeyInputEvent>(*keyEvent))].emplace_back(*action);
+                    _config.inputMappings.keyMappings[get<KeyInputEvent>(*keyEvent)].emplace_back(*action);
                 else
-                    _config.keyMappings[toQtKeySequence(get<CharInputEvent>(*keyEvent))].emplace_back(*action);
+                    _config.inputMappings.charMappings[get<CharInputEvent>(*keyEvent)].emplace_back(*action);
             }
         }
         else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
         {
             if (mouseEvent.has_value())
-                _config.mouseMappings[*mouseEvent].emplace_back(*action);
+                _config.inputMappings.mouseMappings[*mouseEvent].emplace_back(*action);
         }
         else
         {
@@ -1072,6 +1015,15 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 			for (size_t i = 0; i < mapping.size(); ++i)
 				parseInputMapping(_config, mapping[i]);
     }
+
+    auto const logMappings = [](auto const& _mapping) {
+        for (auto const& m: _mapping)
+            for (auto const& a: m.second)
+                debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
+    };
+    logMappings(_config.inputMappings.keyMappings);
+    logMappings(_config.inputMappings.charMappings);
+    logMappings(_config.inputMappings.mouseMappings);
 }
 
 optional<std::string> readConfigFile(std::string const& _filename)

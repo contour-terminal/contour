@@ -23,11 +23,6 @@ endif()
 
 option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
 
-if("${OpenGL_GL_PREFERENCE}" STREQUAL "")
-    # possible values are: GLVND, LEGACY
-    set(OpenGL_GL_PREFERENCE "GLVND")
-endif()
-
 include(EnableCcache)
 include(ClangTidy)
 include(CIncludeMe)
@@ -79,8 +74,6 @@ add_subdirectory(src/terminal)
 
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(src/terminal_renderer)
-    add_subdirectory(src/terminal_view)
-    add_subdirectory(src/terminal_renderer/opengl)
 endif()
 
 add_subdirectory(src/contour)
@@ -114,7 +107,6 @@ message(STATUS "Enable with code coverage:          ${CONTOUR_CODE_COVERAGE_ENAB
 message(STATUS "Build contour frontend GUI:         ${CONTOUR_FRONTEND_GUI}")
 message(STATUS "|> Enable blur effect on KWin:      ${CONTOUR_BLUR_PLATFORM_KWIN}")
 message(STATUS "|> Enable performance metrics:      ${CONTOUR_PERF_STATS}")
-message(STATUS "|> OpenGL preference:               ${OpenGL_GL_PREFERENCE}")
 message(STATUS "Using filesystem API:               ${USING_FILESYSTEM_API_STRING}")
 message(STATUS "Using ccache:                       ${USING_CCACHE_STRING}")
 message(STATUS "------------------------------------------------------------------------------")

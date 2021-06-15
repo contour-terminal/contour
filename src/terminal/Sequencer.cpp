@@ -49,6 +49,7 @@ using std::get;
 using std::holds_alternative;
 using std::make_shared;
 using std::make_unique;
+using std::max;
 using std::min;
 using std::nullopt;
 using std::optional;
@@ -64,8 +65,6 @@ using std::u32string_view;
 using std::vector;
 
 using namespace std::string_view_literals;
-
-#define CONTOUR_SYNCHRONIZED_OUTPUT 1
 
 namespace terminal {
 
@@ -1001,14 +1000,9 @@ void Sequencer::error(std::string_view const& _errorString)
 
 void Sequencer::print(char32_t _char)
 {
-    if (batching_)
-        batchedSequences_.emplace_back(_char);
-    else
-    {
-        precedingGraphicCharacter_ = _char;
-        instructionCounter_++;
-        screen_.writeText(_char);
-    }
+    precedingGraphicCharacter_ = _char;
+    instructionCounter_++;
+    screen_.writeText(_char);
 }
 
 void Sequencer::execute(char _controlCode)
@@ -1191,16 +1185,6 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
     return make_unique<SixelParser>(
         *sixelImageBuilder_,
         [this]() {
-#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
-            if (batching_)
-            {
-                batchedSequences_.emplace_back(SixelImage{
-                    sixelImageBuilder_->size(),
-                    sixelImageBuilder_->data()
-                });
-            }
-            else
-#endif
             {
                 screen_.sixelImage(
                     sixelImageBuilder_->size(),
@@ -1291,17 +1275,6 @@ unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 
 void Sequencer::executeControlFunction(char _c0)
 {
-#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
-    if (batching_)
-    {
-        sequence_.clear();
-        sequence_.setCategory(FunctionCategory::C0);
-        sequence_.setFinalChar(_c0);
-        handleSequence();
-        return;
-    }
-#endif
-
     instructionCounter_++;
     switch (_c0)
     {
@@ -1351,26 +1324,7 @@ void Sequencer::handleSequence()
     instructionCounter_++;
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
-#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
-        if (*funcSpec == DECSM && sequence_.containsParameter(2026))
-        {
-            batching_ = true;
-            apply(*funcSpec, sequence_);
-        }
-        else if (*funcSpec == DECRM && sequence_.containsParameter(2026))
-        {
-            batching_ = false;
-            flushBatchedSequences();
-            apply(*funcSpec, sequence_);
-        }
-        else if (batching_ && isBatchable(*funcSpec))
-        {
-            batchedSequences_.emplace_back(sequence_);
-        }
-        else
-#endif
-            apply(*funcSpec, sequence_);
-
+        applyAndLog(*funcSpec, sequence_);
         screen_.verifyState();
     }
     else
@@ -1387,7 +1341,7 @@ void Sequencer::flushBatchedSequences()
         {
             auto const& seq = get<Sequence>(batchable);
             if (FunctionDefinition const* spec = seq.functionDefinition(); spec != nullptr)
-                apply(*spec, seq);
+                applyAndLog(*spec, seq);
         }
         else if (holds_alternative<SixelImage>(batchable))
         {
@@ -1398,17 +1352,25 @@ void Sequencer::flushBatchedSequences()
     batchedSequences_.clear();
 }
 
+void Sequencer::applyAndLog(FunctionDefinition const& _function, Sequence const& _seq)
+{
+    auto const result = apply(_function, _seq);
+    switch (result)
+    {
+        case ApplyResult::Invalid:
+            debuglog(VTParserTag).write("Invalid VT sequence: {}", _seq);
+            break;
+        case ApplyResult::Unsupported:
+            debuglog(VTParserTag).write("Unsupported VT sequence: {}", _seq);
+            break;
+        case ApplyResult::Ok:
+            break;
+    }
+}
+
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
 ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const& _seq)
 {
-#if defined(CONTOUR_SYNCHRONIZED_OUTPUT)
-    if (batching_ && isBatchable(_function))
-    {
-        batchedSequences_.emplace_back(_seq);
-        return ApplyResult::Ok;
-    }
-#endif
-
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionDefinition
     switch (_function)
@@ -1512,9 +1474,14 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECDC: screen_.deleteColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DECRM:
-            crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-                impl::setModeDEC(_seq, i, false, screen_);
-            });
+            {
+                ApplyResult r = ApplyResult::Ok;
+                crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
+                    auto const t = impl::setModeDEC(_seq, i, false, screen_);
+                    r = max(r, t);
+                });
+                return r;
+            }
             break;
         case DECRQM:
             if (_seq.parameterCount() != 1)
@@ -1541,7 +1508,16 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             screen_.resize(Size{screen_.size().height, _seq.param(0)});
             return ApplyResult::Ok;
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
-        case DECSM: crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setModeDEC(_seq, i, true, screen_); }); break;
+        case DECSM:
+            {
+                ApplyResult r = ApplyResult::Ok;
+                crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i)
+                {
+                    auto const t = impl::setModeDEC(_seq, i, true, screen_);
+                    r = max(r, t);
+                });
+                return r;
+            }
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSTR: screen_.resetSoft(); break;
         case DECXCPR: screen_.reportExtendedCursorPosition(); break;
@@ -1565,15 +1541,30 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             }
             break;
         case RM:
-            crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-                impl::setAnsiMode(_seq, i, false, screen_);
-            });
+            {
+                ApplyResult r = ApplyResult::Ok;
+                crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i)
+                {
+                    auto const t = impl::setAnsiMode(_seq, i, false, screen_);
+                    r = max(r, t);
+                });
+                return r;
+            }
             break;
         case SCOSC: screen_.saveCursor(); break;
         case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case SETMARK: screen_.setMark(); break;
         case SGR: return impl::dispatchSGR(_seq, screen_);
-        case SM: crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) { impl::setAnsiMode(_seq, i, true, screen_); }); break;
+        case SM:
+            {
+                ApplyResult r = ApplyResult::Ok;
+                crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i)
+                {
+                    auto const t = impl::setAnsiMode(_seq, i, true, screen_);
+                    r = max(r, t);
+                });
+                return r;
+            }
         case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
         case TBC: return impl::TBC(_seq, screen_);
         case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;
@@ -1593,8 +1584,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             screen_.setWindowTitle(_seq.intermediateCharacters());
             return ApplyResult::Ok;
         case SETICON:
-            //return emitCommand<ChangeIconTitle>(_output, _seq.intermediateCharacters());
-            return ApplyResult::Unsupported;
+            return ApplyResult::Ok; // NB: Silently ignore!
         case SETWINTITLE: screen_.setWindowTitle(_seq.intermediateCharacters()); break;
         case SETXPROP: return ApplyResult::Unsupported;
         case SETCOLPAL: return impl::SETCOLPAL(_seq, screen_);

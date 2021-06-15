@@ -17,11 +17,13 @@
 #include <terminal/Coordinate.h>
 
 #include <crispy/overloaded.h>
+#include <crispy/escape.h>
 #include <unicode/convert.h>
 
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -200,10 +202,32 @@ struct KeyInputEvent {
     Modifier modifier{};
 };
 
+constexpr bool operator==(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
+{
+    return _lhs.key == _rhs.key &&
+           _lhs.modifier == _rhs.modifier;
+}
+
+constexpr bool operator!=(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
+{
+    return !(_lhs == _rhs);
+}
+
 struct CharInputEvent {
     char32_t value{};
     Modifier modifier{};
 };
+
+constexpr bool operator==(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
+{
+    return _lhs.value == _rhs.value &&
+           _lhs.modifier == _rhs.modifier;
+}
+
+constexpr bool operator!=(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
+{
+    return !(_lhs == _rhs);
+}
 
 enum class MouseButton {
     Left,
@@ -221,6 +245,19 @@ struct MousePressEvent {
     int row = 1;
     int column = 1;
 };
+
+constexpr bool operator==(MousePressEvent a, MousePressEvent b) noexcept
+{
+    return a.button == b.button
+        && a.modifier == b.modifier
+        && a.column == b.column
+        && a.row == b.row;
+}
+
+constexpr bool operator!=(MousePressEvent a, MousePressEvent b) noexcept
+{
+    return !(a == b);
+}
 
 struct MouseMoveEvent {
     /// Row number in screen coordinates [1..rows]
@@ -245,82 +282,6 @@ struct MouseReleaseEvent {
 
 struct FocusInEvent {};
 struct FocusOutEvent {};
-
-using InputEvent = std::variant<
-    KeyInputEvent,
-    CharInputEvent,
-    MousePressEvent,
-    MouseMoveEvent,
-    MouseReleaseEvent,
-    FocusInEvent,
-    FocusOutEvent
->;
-
-using MouseEvent = std::variant<
-    MousePressEvent,
-    MouseMoveEvent,
-    MouseReleaseEvent
->;
-
-constexpr Modifier modifier(InputEvent _event) noexcept
-{
-    return std::visit(overloaded{
-        [](KeyInputEvent _keyInput) -> Modifier { return _keyInput.modifier; },
-        [](CharInputEvent _charInput) -> Modifier { return _charInput.modifier; },
-        [](MousePressEvent _mousePress) -> Modifier { return _mousePress.modifier; },
-        [](MouseMoveEvent) -> Modifier { return Modifier::None; },
-        [](MouseReleaseEvent) -> Modifier { return Modifier::None; },
-        [](FocusInEvent) -> Modifier { return Modifier::None; },
-        [](FocusOutEvent) -> Modifier { return Modifier::None; },
-    }, _event);
-}
-
-inline bool operator<(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
-{
-    if (modifier(_lhs) < modifier(_rhs))
-        return true;
-
-    if (_lhs.index() < _rhs.index())
-        return true;
-
-    if (_lhs.index() == _rhs.index() && modifier(_lhs) == modifier(_rhs))
-    {
-        if (std::holds_alternative<KeyInputEvent>(_lhs))
-            return std::get<KeyInputEvent>(_lhs).key < std::get<KeyInputEvent>(_rhs).key;
-        if (std::holds_alternative<CharInputEvent>(_lhs))
-            return std::get<CharInputEvent>(_lhs).value < std::get<CharInputEvent>(_rhs).value;
-        if (std::holds_alternative<MousePressEvent>(_lhs))
-            return std::get<MousePressEvent>(_lhs).button < std::get<MousePressEvent>(_rhs).button;
-        if (std::holds_alternative<MouseMoveEvent>(_lhs))
-            return std::get<MouseMoveEvent>(_lhs).as_pair() < std::get<MouseMoveEvent>(_rhs).as_pair();
-        if (std::holds_alternative<MouseReleaseEvent>(_lhs))
-            return std::get<MouseReleaseEvent>(_lhs).button < std::get<MouseReleaseEvent>(_rhs).button;
-        if (std::holds_alternative<FocusInEvent>(_lhs))
-            return true;
-        if (std::holds_alternative<FocusOutEvent>(_lhs))
-            return true;
-    }
-
-    return false;
-}
-
-inline bool operator==(InputEvent const& _lhs, InputEvent const& _rhs) noexcept
-{
-    if (modifier(_lhs) == modifier(_rhs))
-    {
-        if (std::holds_alternative<KeyInputEvent>(_lhs) && std::holds_alternative<KeyInputEvent>(_rhs))
-            return std::get<KeyInputEvent>(_lhs).key == std::get<KeyInputEvent>(_rhs).key;
-        if (std::holds_alternative<CharInputEvent>(_lhs) && std::holds_alternative<CharInputEvent>(_rhs))
-            return std::get<CharInputEvent>(_lhs).value == std::get<CharInputEvent>(_rhs).value;
-        if (std::holds_alternative<MousePressEvent>(_lhs) && std::holds_alternative<MousePressEvent>(_rhs))
-            return std::get<MousePressEvent>(_lhs).button == std::get<MousePressEvent>(_rhs).button;
-        if (std::holds_alternative<FocusInEvent>(_lhs) && std::holds_alternative<FocusInEvent>(_rhs))
-            return true;
-        if (std::holds_alternative<FocusOutEvent>(_lhs) && std::holds_alternative<FocusOutEvent>(_rhs))
-            return true;
-    }
-    return false;
-}
 
 enum class MouseTransport {
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
@@ -376,11 +337,9 @@ class InputGenerator {
     void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
     bool generateFocusEvents() const noexcept { return generateFocusEvents_; };
 
-    /// Generates input sequences for given input event.
-    bool generate(InputEvent const& _inputEvent);
-
     /// Generates input sequence for a pressed character.
     bool generate(char32_t _characterEvent, Modifier _modifier);
+    bool generate(std::u32string const& _characterEvent, Modifier _modifier);
 
     /// Generates input sequence for a pressed special key.
     bool generate(Key _key, Modifier _modifier);
@@ -579,14 +538,16 @@ namespace fmt { // {{{
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(terminal::MousePressEvent ev, FormatContext& _ctx)
+        auto format(terminal::MousePressEvent const& ev, FormatContext& _ctx)
         {
             return format_to(_ctx.out(),
-                "MousePressEvent {} at {}:{} {}",
+                ev.modifier.any()
+                    ? "Mouse button press {}+{} ({}:{})"
+                    : "Mouse button press {} ({}:{})",
                 ev.button,
+                ev.modifier,
                 ev.row,
-                ev.column,
-                ev.modifier
+                ev.column
             );
         }
     };
@@ -599,7 +560,9 @@ namespace fmt { // {{{
         auto format(terminal::MouseMoveEvent ev, FormatContext& _ctx)
         {
             return format_to(_ctx.out(),
-                "MouseMoveEvent {} at {}:{} {}",
+                ev.modifier.any()
+                    ? "MouseMoveEvent to {}:{} +{}"
+                    : "MouseMoveEvent to {}:{}",
                 ev.row,
                 ev.column,
                 ev.modifier
@@ -631,7 +594,12 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::KeyInputEvent _event, FormatContext& _ctx)
         {
-            return format_to(_ctx.out(), "KeyInputEvent: {} {}", _event.key, _event.modifier);
+            return format_to(_ctx.out(),
+                _event.modifier.any()
+                    ? "{}+{}"
+                    : "{}",
+                _event.key, _event.modifier
+            );
         }
     };
 
@@ -642,7 +610,11 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::CharInputEvent _event, FormatContext& _ctx)
         {
-            return format_to(_ctx.out(), "CharInputEvent: {} {}", unicode::convert_to<char>(_event.value), _event.modifier);
+            auto const u8str = unicode::convert_to<char>(_event.value);
+            if (_event.modifier.any())
+                return format_to(_ctx.out(), "\"{}\"+{}", crispy::escape(u8str), _event.modifier);
+            else
+                return format_to(_ctx.out(), "\"{}\"", crispy::escape(u8str), _event.modifier);
         }
     };
 
@@ -667,38 +639,6 @@ namespace fmt { // {{{
             return format_to(_ctx.out(), "FocusOutEvent");
         }
     };
-
-    template <>
-    struct formatter<terminal::InputEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::InputEvent const& _event, FormatContext& _ctx)
-        {
-            if (std::holds_alternative<terminal::KeyInputEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::KeyInputEvent>(_event));
-
-            if (std::holds_alternative<terminal::CharInputEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::CharInputEvent>(_event));
-
-            if (std::holds_alternative<terminal::MousePressEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::MousePressEvent>(_event));
-
-            if (std::holds_alternative<terminal::MouseMoveEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::MouseMoveEvent>(_event));
-
-            if (std::holds_alternative<terminal::MouseReleaseEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::MouseReleaseEvent>(_event));
-
-            if (std::holds_alternative<terminal::FocusInEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::FocusInEvent>(_event));
-
-            if (std::holds_alternative<terminal::FocusOutEvent>(_event))
-                return format_to(_ctx.out(), "{}", std::get<terminal::FocusOutEvent>(_event));
-
-            return format_to(_ctx.out(), "<Unknown InputEvent:{}>", _event.index());
-        }
-    };
 } // }}}
 
 namespace std { // {{{
@@ -711,7 +651,7 @@ namespace std { // {{{
 
     template<>
     struct hash<terminal::CharInputEvent> {
-        constexpr size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
+        size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
             return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.value) & 0xFF);
         }
     };
@@ -748,32 +688,6 @@ namespace std { // {{{
     struct hash<terminal::FocusOutEvent> {
         constexpr size_t operator()(terminal::FocusOutEvent const&) const noexcept {
             return (6 << 16) | 2;
-        }
-    };
-
-    template<>
-    struct hash<terminal::MouseEvent> {
-        constexpr size_t operator()(terminal::MouseEvent const& _input) const noexcept {
-            return visit(overloaded{
-                [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },
-                [](terminal::MouseMoveEvent ev) { return hash<terminal::MouseMoveEvent>{}(ev); },
-                [](terminal::MouseReleaseEvent ev) { return hash<terminal::MouseReleaseEvent>{}(ev); },
-            }, _input);
-        }
-    };
-
-    template<>
-    struct hash<terminal::InputEvent> {
-        constexpr size_t operator()(terminal::InputEvent const& _input) const noexcept {
-            return visit(overloaded{
-                [](terminal::KeyInputEvent ev) { return hash<terminal::KeyInputEvent>{}(ev); },
-                [](terminal::CharInputEvent ev) { return hash<terminal::CharInputEvent>{}(ev); },
-                [](terminal::MousePressEvent ev) { return hash<terminal::MousePressEvent>{}(ev); },
-                [](terminal::MouseMoveEvent ev) { return hash<terminal::MouseMoveEvent>{}(ev); },
-                [](terminal::MouseReleaseEvent ev) { return hash<terminal::MouseReleaseEvent>{}(ev); },
-                [](terminal::FocusInEvent ev) { return hash<terminal::FocusInEvent>{}(ev); },
-                [](terminal::FocusOutEvent ev) { return hash<terminal::FocusOutEvent>{}(ev); },
-            }, _input);
         }
     };
 } // }}}

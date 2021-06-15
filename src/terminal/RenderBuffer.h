@@ -94,7 +94,7 @@ constexpr std::string_view to_string(RenderBufferState _state) noexcept
 
 struct RenderDoubleBuffer
 {
-    std::mutex readerLock;
+    std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
     std::array<RenderBuffer, 2> buffers{};
     std::atomic<RenderBufferState> state = RenderBufferState::WaitingForRefresh;
@@ -102,9 +102,9 @@ struct RenderDoubleBuffer
 
     RenderBuffer& backBuffer() noexcept { return buffers[currentBackBufferIndex]; }
 
-    RenderBufferRef frontBuffer()
+    RenderBufferRef frontBuffer() const
     {
-        RenderBuffer& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
+        RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
         return RenderBufferRef(frontBuffer, readerLock);
     }
 

@@ -10,6 +10,10 @@ option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" O
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 option(LIBTERMINAL_EXECUTION_PAR "Builds with parallel execution where possible [default: OFF]" OFF)
 
+# This is an optimization feature that hopefully improves performance when enabled.
+# But it's currently disabled by default as I am not fully satisfied with it yet.
+option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
+
 # Compile-time terminal features
 option(LIBTERMINAL_IMAGES "Enables image support [default: ON]" ON)
 option(LIBTERMINAL_HYPERLINKS "Enables hyperlink support [default: ON]" ON)
@@ -32,6 +36,7 @@ set(terminal_HEADERS
     pty/Pty.h
     pty/UnixPty.h
     pty/ConPty.h
+    pty/PtyProcess.h
     RenderBuffer.h
     Screen.h
     Selector.h
@@ -43,6 +48,7 @@ set(terminal_HEADERS
 )
 
 set(terminal_SOURCES
+    pty/PtyProcess.cpp
     Charset.cpp
     Capabilities.cpp
     Color.cpp
@@ -96,6 +102,10 @@ if(LIBTERMINAL_IMAGES)
 endif()
 if(LIBTERMINAL_HYPERLINKS)
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_HYPERLINKS=1)
+endif()
+
+if(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE AND NOT(WIN32))
+    target_compile_definitions(terminal PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
 endif()
 
 # ----------------------------------------------------------------------------

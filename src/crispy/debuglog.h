@@ -100,10 +100,10 @@ namespace debugtag
         return store().at(_id.value);
     }
 
-    inline tag_id make(std::string_view _name, std::string_view _description)
+    inline tag_id make(std::string_view _name, std::string_view _description, bool _enabled = false)
     {
         assert(crispy::none_of(store(), [&](tag_info const& x) { return x.name == _name; }));
-        store().emplace_back(tag_info{std::string(_name), false, std::string(_description)});
+        store().emplace_back(tag_info{std::string(_name), _enabled, std::string(_description)});
         return tag_id{ store().size() - 1 };
     }
 

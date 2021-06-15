@@ -627,12 +627,13 @@ class Sequencer : public ParserEvents {
 
     void flushBatchedSequences();
 
+    void applyAndLog(FunctionDefinition const& _function, Sequence const& _context);
     ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
-  private:
+    // private data
+    //
     Sequence sequence_{};
     Screen& screen_;
-    bool batching_ = false;
     char32_t precedingGraphicCharacter_ = {};
     int64_t instructionCounter_ = 0;
     using Batchable = std::variant<char32_t, Sequence, SixelImage>;

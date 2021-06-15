@@ -826,5 +826,4 @@ namespace fmt {
             return format_to(ctx.out(), s);
         }
     };
-
 }

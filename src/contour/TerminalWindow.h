@@ -16,8 +16,11 @@
 #include <contour/Actions.h>
 #include <contour/Config.h>
 #include <contour/FileChangeWatcher.h>
+#include <contour/TerminalDisplay.h>
+#include <contour/TerminalSession.h>
+#include <contour/opengl/TerminalWidget.h>
+
 #include <terminal/Metrics.h>
-#include <terminal_view/TerminalView.h>
 
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
@@ -40,8 +43,30 @@
 
 namespace contour {
 
-class TerminalWidget;
+#if defined(CONTOUR_SCROLLBAR)
+class ScrollableDisplay: public QWidget
+{
+    Q_OBJECT
 
+public:
+    ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main);
+
+    QSize sizeHint() const override;
+    void resizeEvent(QResizeEvent* _event) override;
+
+    void showScrollBar(bool _show);
+    void updatePosition();
+
+public Q_SLOTS:
+    void updateValues();
+    void onValueChanged();
+
+private:
+    TerminalSession& session_;
+    QWidget* mainWidget_;
+    QScrollBar* scrollBar_;
+};
+#endif
 
 // XXX Maybe just now a main window and maybe later just a TerminalWindow.
 //
@@ -58,20 +83,15 @@ class TerminalWindow :
     bool event(QEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
 
-    QSize sizeHint() const override;
+    //QSize sizeHint() const override;
 
   public Q_SLOTS:
-    void terminalBufferChanged(TerminalWidget*, terminal::ScreenType);
-    void onScrollBarValueChanged();
-    void terminalScreenUpdated(TerminalWidget* _terminalWidget);
-    void profileChanged(TerminalWidget* _terminalWidget);
-    void onTerminalClosed(TerminalWidget* _terminalWidget);
+    void terminalBufferChanged(terminal::ScreenType);
+    void profileChanged();
+    void onTerminalClosed();
     void setBackgroundBlur(bool _enable);
 
   private:
-    void updateScrollbarPosition();
-    void updateScrollbarValues();
-
     // data members
     //
     config::Config config_;
@@ -80,11 +100,11 @@ class TerminalWindow :
     std::string programPath_;
 
 #if defined(CONTOUR_SCROLLBAR)
-    QHBoxLayout* layout_ = nullptr;
-    QScrollBar* scrollBar_ = nullptr;
+    ScrollableDisplay* scrollableDisplay_ = nullptr;
 #endif
 
-    TerminalWidget* terminalWidget_ = nullptr;
+    std::unique_ptr<TerminalSession> terminalSession_;
+    opengl::TerminalWidget* terminalWidget_ = nullptr;
 };
 
 } // namespace contour

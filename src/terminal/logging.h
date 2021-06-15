@@ -17,8 +17,9 @@
 
 namespace terminal {
 
-auto const inline KeyboardTag = crispy::debugtag::make("vt.input", "Logs terminal input events.");
-auto const inline VTParserTag = crispy::debugtag::make("vt.parser", "Logs terminal parser errors.");
+auto const inline TerminalTag = crispy::debugtag::make("vt.session", "Logs general terminal events.");
+auto const inline InputTag    = crispy::debugtag::make("vt.input", "Logs terminal keyboard/mouse input events.");
+auto const inline VTParserTag = crispy::debugtag::make("vt.parser", "Logs terminal parser errors.", true);
 
 #if defined(LIBTERMINAL_LOG_RAW)
 auto const inline ScreenRawOutputTag = crispy::debugtag::make("vt.output", "Logs raw writes to the terminal screen.");

@@ -318,7 +318,7 @@ namespace // {{{ helper
 
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
-        debuglog(FontFallbackTag).write("Loading font chain for: {}", _fd);
+        debuglog(FontLoaderTag).write("Loading font chain for: {}", _fd);
         auto pat = unique_ptr<FcPattern, void(*)(FcPattern*)>(
             FcPatternCreate(),
             [](auto p) { FcPatternDestroy(p); });
@@ -479,12 +479,12 @@ namespace // {{{ helper
         auto ftErrorCode = FT_New_Face(_ft, _path.c_str(), 0, &ftFace);
         if (!ftFace)
         {
-            debuglog(FontFallbackTag).write("Failed to load font from path {}. {}", _path, ftErrorStr(ftErrorCode));
+            debuglog(FontLoaderTag).write("Failed to load font from path {}. {}", _path, ftErrorStr(ftErrorCode));
             return nullopt;
         }
 
         if (FT_Error const ec = FT_Select_Charmap(ftFace, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
-            debuglog(FontFallbackTag).write("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
+            debuglog(FontLoaderTag).write("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
 
         if (FT_HAS_COLOR(ftFace))
         {
@@ -492,7 +492,7 @@ namespace // {{{ helper
 
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
-                debuglog(FontFallbackTag).write("Failed to FT_Select_Size(index={}, file={}): {}", strikeIndex, _path, ftErrorStr(ec));
+                debuglog(FontLoaderTag).write("Failed to FT_Select_Size(index={}, file={}): {}", strikeIndex, _path, ftErrorStr(ec));
         }
         else
         {
@@ -500,7 +500,7 @@ namespace // {{{ helper
 
             if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size, _dpi.x, _dpi.y); ec != FT_Err_Ok)
             {
-                debuglog(FontFallbackTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
+                debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
             }
         }
 
@@ -568,7 +568,7 @@ struct open_shaper::Private // {{{
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        debuglog(FontFallbackTag).write("Loading font: key={}, path=\"{}\" size={} dpi={} {}", key, _path, _fontSize, dpi_, metrics(key));
+        debuglog(FontLoaderTag).write("Loading font: key={}, path=\"{}\" size={} dpi={} {}", key, _path, _fontSize, dpi_, metrics(key));
         fontPathSizeToKeys.emplace(pair{FontPathAndSize{move(_path), _fontSize}, key});
         return key;
     }
@@ -622,7 +622,6 @@ open_shaper::open_shaper(crispy::Point _dpi) : d(new Private(_dpi), [](Private* 
 
 void open_shaper::set_dpi(crispy::Point _dpi)
 {
-    std::cout << fmt::format("open_shaper.set_dpi! {}\n", _dpi);
     if (_dpi == crispy::Point{})
         return;
 
@@ -631,7 +630,6 @@ void open_shaper::set_dpi(crispy::Point _dpi)
 
 void open_shaper::clear_cache()
 {
-    std::cout << fmt::format("open_shaper.clear_cache\n");
     d->fonts_.clear();
     d->fontPathSizeToKeys.clear();
 }

@@ -50,10 +50,10 @@ class ScreenEvents {
     virtual void screenUpdated() {}
     virtual FontDef getFontDef() { return {}; }
     virtual void setFontDef(FontDef const& /*_fontDef*/) {}
-    virtual void copyToClipboard(std::string_view const& /*_data*/) {}
+    virtual void copyToClipboard(std::string_view /*_data*/) {}
     virtual void dumpState() {}
-    virtual void notify(std::string_view const& /*_title*/, std::string_view const& /*_body*/) {}
-    virtual void reply(std::string_view const& /*_response*/) {}
+    virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
+    virtual void reply(std::string_view /*_response*/) {}
     virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
     virtual void setApplicationkeypadMode(bool /*_enabled*/) {}
     virtual void setBracketedPaste(bool /*_enabled*/) {}
@@ -63,7 +63,7 @@ class ScreenEvents {
     virtual void setMouseProtocol(MouseProtocol, bool) {}
     virtual void setMouseTransport(MouseTransport) {}
     virtual void setMouseWheelMode(InputGenerator::MouseWheelMode) {}
-    virtual void setWindowTitle(std::string_view const& /*_title*/) {}
+    virtual void setWindowTitle(std::string_view /*_title*/) {}
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
     virtual void hardReset() {}
 
@@ -76,12 +76,11 @@ class ScreenEvents {
 
 class MockScreenEvents : public ScreenEvents {
   public:
-    void reply(std::string_view const& _response) override
+    void reply(std::string_view _response) override
     {
         replyData += _response;
     }
 
-  public:
     std::string replyData;
 };
 

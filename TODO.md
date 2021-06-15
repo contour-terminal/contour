@@ -1,7 +1,37 @@
+# current PR checklist
+
+- [ ] LIVE: create a neofetch-patch for contour support
+  - show font (OSC 50)
+  - version: (XTVERSION)
+  - test 2026 synchronized output support (DECRQM)
+  - show sixel
+  - distor (`lsb_release`)
+
+- [ ] TEST: RenderBuffer ops testable (esp. 2026)?
+- [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
+- [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
+- [ ] BUG? eval need of `Terminal::shouldRender` and friends
+- [ ] CHECK: CopyLastMarkRange seems to not copy last 2 lines instead (due to zsh double line prompt?)
+  - try with zsh single line prompts
+  - ensure unit tests for that
+- [ ] CHECK: PPA does not have latest builds anyamore?
+- [ ] QA: Session.send...Event: pass args directly, don't use ..Event{} structs for that.
+- [ ] RENDER-BUG: "template..." is segmented as "template." and ".." but should be "template..." (or "template" and "...")
+- [ ] BUG? showNotification: not working (because not connected, not ported)
+- [x] BUG: Alt+Left/Right at least in tmux/vim are not working?
+- [x] BUG: tab is generating Shift+tab.
+- [x] BUG: mouse-scroll ignored inside vim
+- [x] BUG: mouse shift-click events ignored?
+- [x] TerminalSession: debuglog() should use better tag
+- [x] debuglog rework debug tags. group them better. reduce complexity
+- [x] DEB package installs /usr/include/ragnes and such
+- [x] BUG? verify OSC 50 set font.
+- [x] BUG? verify DEC mode 2026 working as expected?
+
 # Milestone 0.2.0 checklist
 
-- [ ] BUG/SECURITY: DCS without ST is problematic
-- [ ] BUG: audo-hide mouse only on char, but not on non-char keys.
+- [ ] BUG/SECURITY: DCS without ST is problematic (what are other TEs doing?)
+- [x] BUG: audo-hide mouse only on char, but not on non-char keys.
 - [ ] resizing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
 - [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)

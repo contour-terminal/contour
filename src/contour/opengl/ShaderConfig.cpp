@@ -1,6 +1,6 @@
 /**
  * This file is part of the "libterminal" project
- *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *   Copyright (c) 2019-2021 Christian Parpart <christian@parpart.family>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,17 +11,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/opengl/ShaderConfig.h>
+#include <contour/opengl/ShaderConfig.h>
 
 #include <crispy/debuglog.h>
 
 #include <iostream>
 #include <string>
 
-#include "background_vert.h"
-#include "background_frag.h"
-#include "text_vert.h"
-#include "text_frag.h"
+#include <contour/opengl/background_vert.h>
+#include <contour/opengl/background_frag.h>
+#include <contour/opengl/text_vert.h>
+#include <contour/opengl/text_frag.h>
 
 namespace terminal::renderer::opengl {
 

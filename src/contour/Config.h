@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include "Actions.h"
+#include <contour/Actions.h>
 
-#include <terminal_renderer/opengl/ShaderConfig.h>
+#include <contour/opengl/ShaderConfig.h>
 
 #include <terminal_renderer/TextRenderer.h>         // FontDescriptions
 #include <terminal_renderer/DecorationRenderer.h>   // Decorator
@@ -28,8 +28,6 @@
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
-
-#include <QKeySequence>
 
 #include <chrono>
 #include <system_error>
@@ -54,6 +52,17 @@ enum class Permission
     Allow,
     Ask
 };
+
+struct InputMappings
+{
+    std::unordered_map<terminal::KeyInputEvent, std::vector<actions::Action>> keyMappings;
+    std::unordered_map<terminal::CharInputEvent, std::vector<actions::Action>> charMappings;
+    std::unordered_map<terminal::MousePressEvent, std::vector<actions::Action>> mouseMappings;
+};
+
+std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::KeyInputEvent const& _event);
+std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::CharInputEvent const& _event);
+std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::MousePressEvent const& _event);
 
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;
@@ -122,13 +131,15 @@ struct Config {
         return nullptr;
     }
 
+    TerminalProfile& profile() noexcept { return *profile(defaultProfileName); }
+    TerminalProfile const& profile() const noexcept { return *profile(defaultProfileName); }
+
     // selection
     std::string wordDelimiters;
     terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
 
     // input mapping
-    std::map<QKeySequence, std::vector<actions::Action>> keyMappings;
-    std::unordered_map<terminal::MouseEvent, std::vector<actions::Action>> mouseMappings;
+    InputMappings inputMappings;
 
     static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
 

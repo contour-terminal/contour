@@ -12,65 +12,48 @@
  * limitations under the License.
  */
 #include <contour/helper.h>
-#include <terminal_view/TerminalView.h>
+#include <contour/TerminalDisplay.h>
+#include <contour/TerminalSession.h>
+#include <terminal/Terminal.h>
 
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtCore/QProcess>
 #include <QtNetwork/QHostInfo>
+#include <QtWidgets/QMessageBox>
 
 #include <array>
 #include <algorithm>
 #include <mutex>
 
 using std::array;
-using std::scoped_lock;
+using std::chrono::steady_clock;
+using std::get;
+using std::holds_alternative;
+using std::max;
+using std::monostate;
 using std::nullopt;
 using std::optional;
-using std::string;
 using std::pair;
+using std::scoped_lock;
+using std::string;
+using std::u32string;
+using std::variant;
+using std::vector;
 
 namespace contour {
 
-QKeySequence toKeySequence(QKeyEvent *_keyEvent)
-{
-    auto const mod = [](int _qtMod) constexpr -> int {
-        int res = 0;
-        if (_qtMod & Qt::AltModifier) res += Qt::ALT;
-        if (_qtMod & Qt::ShiftModifier) res += Qt::SHIFT;
-#if defined(__APPLE__)
-        // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
-        //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
-        //      and the MetaModifier value corresponds to the Control keys."
-        if (_qtMod & Qt::ControlModifier) res += Qt::META;
-        if (_qtMod & Qt::MetaModifier) res += Qt::CTRL;
-#else
-        if (_qtMod & Qt::ControlModifier) res += Qt::CTRL;
-        if (_qtMod & Qt::MetaModifier) res += Qt::META;
-#endif
-        return res;
-    }(_keyEvent->modifiers());
-
-    // only modifier but no key press?
-    if (isModifier(static_cast<Qt::Key>(_keyEvent->key())))
-        return QKeySequence();
-
-    // modifier AND key press?
-    if (_keyEvent->key() && mod)
-        return QKeySequence(int(_keyEvent->modifiers() | _keyEvent->key()));
-
-    return QKeySequence();
-}
-
-optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardModifiers _mods)
+bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 {
     using terminal::Key;
-    using terminal::InputEvent;
     using terminal::KeyInputEvent;
     using terminal::CharInputEvent;
+    using terminal::Modifier;
 
-    static auto constexpr mapping = array{
+    auto const now = steady_clock::now();
+
+    static auto constexpr keyMappings = array{ // {{{
         pair{Qt::Key_Insert, Key::Insert},
         pair{Qt::Key_Delete, Key::Delete},
         pair{Qt::Key_Right, Key::RightArrow},
@@ -93,78 +76,130 @@ optional<terminal::InputEvent> mapQtToTerminalKeyEvent(int _key, Qt::KeyboardMod
         pair{Qt::Key_F10, Key::F10},
         pair{Qt::Key_F11, Key::F11},
         pair{Qt::Key_F12, Key::F12},
-        // todo: F13..F25
-        // TODO: NumPad
-        // pair{Qt::Key_0, Key::Numpad_0},
-        // pair{Qt::Key_1, Key::Numpad_1},
-        // pair{Qt::Key_2, Key::Numpad_2},
-        // pair{Qt::Key_3, Key::Numpad_3},
-        // pair{Qt::Key_4, Key::Numpad_4},
-        // pair{Qt::Key_5, Key::Numpad_5},
-        // pair{Qt::Key_6, Key::Numpad_6},
-        // pair{Qt::Key_7, Key::Numpad_7},
-        // pair{Qt::Key_8, Key::Numpad_8},
-        // pair{Qt::Key_9, Key::Numpad_9},
-        // pair{Qt::Key_Period, Key::Numpad_Decimal},
-        // pair{Qt::Key_Slash, Key::Numpad_Divide},
-        // pair{Qt::Key_Asterisk, Key::Numpad_Multiply},
-        // pair{Qt::Key_Minus, Key::Numpad_Subtract},
-        // pair{Qt::Key_Plus, Key::Numpad_Add},
-        // pair{Qt::Key_Enter, Key::Numpad_Enter},
-        // pair{Qt::Key_Equal, Key::Numpad_Equal},
-    };
+        pair{Qt::Key_F13, Key::F13},
+        pair{Qt::Key_F14, Key::F14},
+        pair{Qt::Key_F15, Key::F15},
+        pair{Qt::Key_F16, Key::F16},
+        pair{Qt::Key_F17, Key::F17},
+        pair{Qt::Key_F18, Key::F18},
+        pair{Qt::Key_F19, Key::F19},
+        pair{Qt::Key_F20, Key::F20},
+    }; // }}}
 
-    if (auto i = find_if(begin(mapping), end(mapping), [_key](auto const& x) { return x.first == _key; }); i != end(mapping))
-        return { InputEvent{KeyInputEvent{i->second, makeModifier(_mods)}} };
+    static auto constexpr charMappings = array{ // {{{
+        pair{Qt::Key_AsciiCircum, '^'},
+        pair{Qt::Key_AsciiTilde, '~'},
+        pair{Qt::Key_Backslash, '\\'},
+        pair{Qt::Key_Bar, '|'},
+        pair{Qt::Key_BraceLeft, '{'},
+        pair{Qt::Key_BraceRight, '}'},
+        pair{Qt::Key_BracketLeft, '['},
+        pair{Qt::Key_BracketRight, ']'},
+        pair{Qt::Key_QuoteLeft, '`'},
+        pair{Qt::Key_Underscore, '_'},
+    }; // }}}
 
-    if (_key == Qt::Key_Backtab)
-        return { InputEvent{CharInputEvent{'\t', makeModifier(_mods | Qt::ShiftModifier)}} };
+    auto const modifiers = makeModifier(_event->modifiers());
+    auto const key = _event->key();
 
-    return nullopt;
+    if (auto i = find_if(begin(keyMappings), end(keyMappings), [_event](auto const& x) { return x.first == _event->key(); }); i != end(keyMappings))
+    {
+        _session.sendKeyPressEvent(KeyInputEvent{i->second, modifiers}, now);
+        return true;
+    }
+
+    if (auto i = find_if(begin(charMappings), end(charMappings), [_event](auto const& x) { return x.first == _event->key(); }); i != end(charMappings))
+    {
+        _session.sendCharPressEvent(CharInputEvent{static_cast<char32_t>(i->second), modifiers}, now);
+        return true;
+    }
+
+    if (key == Qt::Key_Backtab)
+    {
+        _session.sendCharPressEvent(CharInputEvent{U'\t', modifiers.with(Modifier::Shift)}, now);
+        return true;
+    }
+
+    if (modifiers.contains(Modifier::Control))
+    {
+        if (key >= Qt::Key_A && key <= Qt::Key_Z)
+        {
+            _session.sendCharPressEvent(CharInputEvent{
+                static_cast<char32_t>(key - Qt::Key_A + 'A'),
+                modifiers.with(Modifier::Control)}, now);
+            return true;
+        }
+        switch (key)
+        {
+            case Qt::Key_BraceLeft: _session.sendCharPressEvent(CharInputEvent{L'[', modifiers}, now);
+                return true;
+            case Qt::Key_Equal:
+                _session.sendCharPressEvent(CharInputEvent{L'=', modifiers}, now);
+                return true;
+            case Qt::Key_BraceRight:
+                _session.sendCharPressEvent(CharInputEvent{L']', modifiers}, now);
+                return true;
+        }
+    }
+
+    if (!_event->text().isEmpty())
+    {
+        for (auto const ch: _event->text().toUcs4())
+            _session.sendCharPressEvent(CharInputEvent{ch, modifiers}, now);
+        return true;
+    }
+
+    return false;
 }
 
-void configureTerminal(terminal::view::TerminalView& _terminalView,
-                       config::Config const& _newConfig,
-                       std::string const& _profileName)
+void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 {
-    terminal::Terminal& terminal = _terminalView.terminal();
-    terminal::Screen& screen = terminal.screen();
-    auto const _l = scoped_lock{terminal};
+    auto const yDelta = _event->pixelDelta().y() ? _event->pixelDelta().y()
+                                                 : _event->angleDelta().y();
 
-    terminal.setWordDelimiters(_newConfig.wordDelimiters);
-    terminal.setMouseProtocolBypassModifier(_newConfig.bypassMouseProtocolModifier);
+    if (yDelta)
+    {
+        auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp
+                                       : terminal::MouseButton::WheelDown;
 
-    terminal.screen().setRespondToTCapQuery(_newConfig.experimentalFeatures.count("tcap"));
+        auto const mouseEvent = terminal::MousePressEvent{
+            button,
+            makeModifier(_event->modifiers())
+        };
 
-    screen.setSixelCursorConformance(_newConfig.sixelCursorConformance);
-    screen.setMaxImageColorRegisters(_newConfig.maxImageColorRegisters);
-    screen.setMaxImageSize(_newConfig.maxImageSize);
-    screen.setMode(terminal::DECMode::SixelScrolling, _newConfig.sixelScrolling);
+        _session.sendMousePressEvent(mouseEvent,  steady_clock::now());
+    }
+}
 
-    config::TerminalProfile const* profile = _newConfig.profile(_profileName);
-    if (profile == nullptr)
-        return;
+void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
+{
+    auto const mousePressEvent = terminal::MousePressEvent{
+        makeMouseButton(_event->button()),
+        makeModifier(_event->modifiers())};
 
-    terminal.setRefreshRate(profile->refreshRate);
+    _session.sendMousePressEvent(mousePressEvent, steady_clock::now());
+    _event->accept();
+}
 
-    if (!_terminalView.renderer().renderTargetAvailable())
-        return;
+void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
+{
+    auto const mouseButton = makeMouseButton(_event->button());
+    auto const mouseEvent = terminal::MouseReleaseEvent{mouseButton};
+    _session.sendMouseReleaseEvent(mouseEvent, steady_clock::now());
+    _event->accept();
+}
 
-    _terminalView.renderer().setFonts(profile->fonts);
-    _terminalView.updateFontMetrics();
+void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
+{
+    auto constexpr MarginTop = 0;
+    auto constexpr MarginLeft = 0;
 
-    auto const newScreenSize = _terminalView.size() / _terminalView.gridMetrics().cellSize;
-    if (newScreenSize != _terminalView.terminal().screenSize())
-        _terminalView.setTerminalSize(newScreenSize);
-        // TODO: maybe update margin after this call?
+    auto const cellSize = _session.display()->cellSize();
+    auto const row = int{1 + (max(_event->y(), 0) - MarginTop) /  cellSize.height};
+    auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / cellSize.width};
+    auto const mouseEvent = terminal::MouseMoveEvent{row, col, makeModifier(_event->modifiers())};
 
-    screen.setTabWidth(profile->tabWidth);
-    screen.setMaxHistoryLineCount(profile->maxHistoryLineCount);
-    terminal.setCursorDisplay(profile->cursorDisplay);
-    terminal.setCursorShape(profile->cursorShape);
-    _terminalView.setColorPalette(profile->colors);
-    _terminalView.setHyperlinkDecoration(profile->hyperlinkDecoration.normal,
-                                         profile->hyperlinkDecoration.hover);
+    _session.sendMouseMoveEvent(mouseEvent, steady_clock::now());
 }
 
 void spawnNewTerminal(string const& _programPath,
@@ -195,4 +230,53 @@ void spawnNewTerminal(string const& _programPath,
     QProcess::startDetached(program, args);
 }
 
+bool requestPermission(PermissionCache& _cache,
+                       QWidget* _parent,
+                       config::Permission _allowedByConfig,
+                       std::string_view _topicText)
+{
+    switch (_allowedByConfig)
+    {
+        case config::Permission::Allow:
+            debuglog(WidgetTag).write("Permission for {} allowed by configuration.", _topicText);
+            return true;
+        case config::Permission::Deny:
+            debuglog(WidgetTag).write("Permission for {} denied by configuration.", _topicText);
+            return false;
+        case config::Permission::Ask:
+            break;
+    }
+
+    // Did we remember a last interactive question?
+    if (auto const i = _cache.find(string(_topicText)); i != _cache.end())
+        return i->second;
+
+    debuglog(WidgetTag).write("Permission for {} requires asking user.", _topicText);
+
+    auto const reply = QMessageBox::question(_parent,
+        fmt::format("{} requested", _topicText).c_str(),
+        QString::fromStdString(fmt::format("The application has requested for {}. Do you allow this?", _topicText)),
+        QMessageBox::StandardButton::Yes
+            | QMessageBox::StandardButton::YesToAll
+            | QMessageBox::StandardButton::No
+            | QMessageBox::StandardButton::NoToAll,
+        QMessageBox::StandardButton::NoButton
+    );
+
+    switch (reply)
+    {
+        case QMessageBox::StandardButton::NoToAll:
+            _cache[string(_topicText)] = false;
+            break;
+        case QMessageBox::StandardButton::YesToAll:
+            _cache[string(_topicText)] = true;
+            [[fallthrough]];
+        case QMessageBox::StandardButton::Yes:
+            return true;
+        default:
+            break;
+    }
+
+    return false;
+}
 } // end namespace

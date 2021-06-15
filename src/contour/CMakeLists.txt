@@ -1,12 +1,14 @@
 include(FilesystemResolver)
 
 find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
-find_package(OpenGL REQUIRED)
 
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
+
+# OpenGL accelerated TerminalDisplay
+add_subdirectory(opengl)
 
 # {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
@@ -38,9 +40,10 @@ if(CONTOUR_FRONTEND_GUI)
         ContourGuiApp.cpp ContourGuiApp.h
         Controller.cpp Controller.h
         FileChangeWatcher.cpp FileChangeWatcher.h
-        TerminalWidget.cpp TerminalWidget.h
+        TerminalSession.cpp TerminalSession.h
         TerminalWindow.cpp TerminalWindow.h
         helper.cpp helper.h
+
     )
 endif()
 
@@ -107,7 +110,7 @@ if(Boost_FILESYSTEM_FOUND)
 endif()
 
 if(CONTOUR_FRONTEND_GUI)
-    target_link_libraries(contour terminal_view terminal_renderer_opengl Qt5::Gui Qt5::Widgets Qt5::Network OpenGL::GL)
+    target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt5::Gui Qt5::Widgets Qt5::Network)
     if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
         target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
         target_link_libraries(contour KF5::WindowSystem)

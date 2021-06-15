@@ -33,6 +33,7 @@
 
 namespace text {
 
+auto const inline FontLoaderTag = crispy::debugtag::make("font.loader", "Logs font loads and loading errors.");
 auto const inline FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
 auto const inline TextShapingTag = crispy::debugtag::make("font.textshaping", "Logs details about text shaping.");
 auto const inline GlyphRenderTag = crispy::debugtag::make("font.render", "Logs details about rendering glyphs.");

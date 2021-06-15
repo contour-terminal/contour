@@ -76,7 +76,6 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
 }
 
 Renderer::Renderer(Size _screenSize,
-                   crispy::Point _logicalDpi,
                    FontDescriptions const& _fontDescriptions,
                    terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
@@ -84,9 +83,9 @@ Renderer::Renderer(Size _screenSize,
                    Decorator _hyperlinkHover):
     textShaper_{
         #if defined(_WIN32)
-        make_unique<text::directwrite_shaper>(_logicalDpi)
+        make_unique<text::directwrite_shaper>(_fontDescriptions.dpi)
         #else
-        make_unique<text::open_shaper>(_logicalDpi)
+        make_unique<text::open_shaper>(_fontDescriptions.dpi)
         #endif
     },
     fontDescriptions_{ _fontDescriptions },
@@ -191,11 +190,11 @@ uint64_t Renderer::render(Terminal& _terminal,
     auto const changes = _terminal.tick(_now);
 
     {
-        #if defined(CONTOUR_RENDER_DOUBLE_BUFFERING) || defined(_WIN32) // {{{
+        #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{
         // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
         // so we have to explicitly refresh the render buffer
         // from within the render (reader) thread instead ofthe terminal (writer) thread.
-        _terminal.refreshRenderBuffer(std::chrono::steady_clock::now());
+        _terminal.refreshRenderBuffer(_now);
         #endif // }}}
 
         auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();

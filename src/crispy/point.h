@@ -26,6 +26,17 @@ struct [[nodiscard]] Point
     int y;
 };
 
+template <typename T> constexpr inline T Zero{};
+template <> constexpr inline Point Zero<Point> = Point{0, 0};
+
+constexpr Point operator*(Point a, double s) noexcept
+{
+    return Point{
+        static_cast<int>(a.x * s),
+        static_cast<int>(a.y * s)
+    };
+}
+
 constexpr Point operator+(Point a, Point b) noexcept
 {
     return Point{a.x + b.x, a.y + b.y};

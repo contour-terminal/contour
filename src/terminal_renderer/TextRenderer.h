@@ -143,9 +143,10 @@ enum class TextShapingMethod
     Simple,  //!< minimal text shaping for optimum performance butless features
 };
 
-struct FontDescriptions {
+struct FontDescriptions
+{
     double dpiScale = 1.0;
-    crispy::Point dpi = {96, 96};
+    crispy::Point dpi = {0, 0}; // 0 => auto-fill with defaults
     text::font_size size;
     text::font_description regular;
     text::font_description bold;

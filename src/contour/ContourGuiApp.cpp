@@ -16,7 +16,7 @@
 #if defined(CONTOUR_FRONTEND_GUI)
 #include <contour/Config.h>
 #include <contour/Controller.h>
-#include <contour/TerminalWidget.h>
+#include <contour/opengl/TerminalWidget.h>
 #endif
 
 #if defined(CONTOUR_FRONTEND_GUI)
@@ -176,7 +176,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     QApplication app(argc, (char**) argv);
 
-    QSurfaceFormat::setDefaultFormat(contour::TerminalWidget::surfaceFormat());
+    QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
 
     contour::Controller controller(argv[0], config, liveConfig, profileName);
     controller.start();

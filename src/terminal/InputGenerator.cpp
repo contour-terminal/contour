@@ -13,6 +13,8 @@
  */
 #include <terminal/InputGenerator.h>
 #include <terminal/ControlCode.h>
+#include <terminal/logging.h>
+#include <crispy/utils.h>
 
 #include <unicode/convert.h>
 
@@ -314,13 +316,13 @@ void InputGenerator::reset()
 
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
-    // cerr << fmt::format("InputGenerator.setCursorKeysMode: {}\n", _mode);
+    debuglog(InputTag).write("set cursor keys mode: {}", _mode);
     cursorKeysMode_ = _mode;
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode _mode)
 {
-    // cerr << fmt::format("InputGenerator.setNumpadKeysMode: {}\n", _mode);
+    debuglog(InputTag).write("set numpad keys mode: {}", _mode);
     numpadKeysMode_ = _mode;
 }
 
@@ -331,26 +333,14 @@ void InputGenerator::setApplicationKeypadMode(bool _enable)
     else
         numpadKeysMode_ = KeyMode::Normal; // aka. Numeric
 
-    // cerr << fmt::format(
-    //     "InputGenerator.setApplicationKeypadMode: {} -> {}\n",
-    //     (_enable ? "enable" : "disable"),
-    //     numpadKeysMode_
-    // );
+    debuglog(InputTag).write("set application keypad mode: {} -> {}", _enable, numpadKeysMode_);
 }
 
-bool InputGenerator::generate(InputEvent const& _inputEvent)
+bool InputGenerator::generate(u32string const& _characterEvent, Modifier _modifier)
 {
-    return visit(overloaded{
-        [&](KeyInputEvent const& _key) { return generate(_key.key, _key.modifier); },
-        [&](CharInputEvent const& _chr) { return generate(_chr.value, _chr.modifier); },
-		// TODO: the mouse input events should only generate input and return true *iff* requested
-		//       by the connected application, returning false immediately otherwise.
-        [&](MousePressEvent const& _mousePress) { return generate(_mousePress); },
-        [&](MouseMoveEvent const& _mouseMove) { return generate(_mouseMove); },
-        [&](MouseReleaseEvent const& _mouseRelease) { return generate(_mouseRelease); },
-        [&](FocusInEvent const& _focusIn) { return generate(_focusIn); },
-        [&](FocusOutEvent const& _focusOut) { return generate(_focusOut); }
-    }, _inputEvent);
+    for (char32_t const ch: _characterEvent)
+        generate(ch, _modifier);
+    return true;
 }
 
 bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
@@ -375,18 +365,28 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
 
     if (_modifier == Modifier::Shift && _characterEvent == 0x09)
         return append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
-    else if (_characterEvent < 32 || (!_modifier.control() && _characterEvent <= 0x7F))
-        return append(chr); // raw C0 code
-    else if (_modifier == Modifier::Control && _characterEvent == L' ')
+
+    // raw C0 code
+    if (_modifier == Modifier::Control && _characterEvent < 32)
+        return append(static_cast<uint8_t>(_characterEvent));
+
+    if (_modifier == Modifier::Control && _characterEvent == L' ')
         return append("\x00");
-    else if (_modifier == Modifier::Control && tolower(chr) >= 'a' && tolower(chr) <= 'z')
-        return append(static_cast<char>(tolower(chr) - 'a' + 1));
-    else if (_modifier.control() && _characterEvent >= '[' && _characterEvent <= '_')
+
+    if (_modifier == Modifier::Control && crispy::ascending('A', chr, 'Z'))
+        return append(static_cast<char>(chr - 'A' + 1));
+
+    if (_modifier == Modifier::Control && _characterEvent >= '[' && _characterEvent <= '_')
         return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
-    else if (!_modifier || _modifier == Modifier::Shift)
+
+    if (_modifier.without(Modifier::Alt).none() || _modifier == Modifier::Shift)
         return append(unicode::convert_to<char>(_characterEvent));
+
+    if (_characterEvent < 0x7F)
+        append(static_cast<char>(_characterEvent));
     else
-        return false;
+        append(unicode::convert_to<char>(_characterEvent));
+    return true;
 }
 
 bool InputGenerator::generate(Key _key, Modifier _modifier)

@@ -55,7 +55,6 @@ class Renderer : public Renderable {
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
     Renderer(crispy::Size _screenSize,
-             crispy::Point _logicalDpi,
              FontDescriptions const& _fontDescriptions,
              ColorPalette const& _colorPalette,
              Opacity _backgroundOpacity,
