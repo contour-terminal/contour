@@ -2136,7 +2136,7 @@ void Screen::requestDynamicColor(DynamicColorName _name)
     if (color.has_value())
     {
         reply(
-            "\033]{};{}\x07",
+            "\033]{};{}\033\\",
             setDynamicColorCommand(_name),
             setDynamicColorValue(color.value())
         );
