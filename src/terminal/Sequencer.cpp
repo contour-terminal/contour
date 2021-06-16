@@ -1647,6 +1647,11 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECMODERESTORE: return impl::restoreDECModes(_seq, screen_);
         case DECMODESAVE: return impl::saveDECModes(_seq, screen_);
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(_seq, screen_);
+        case XTVERSION:
+            screen_.reply(fmt::format("\033P>|{} {}\033\\",
+                                      LIBTERMINAL_NAME,
+                                      LIBTERMINAL_VERSION_STRING));
+            return ApplyResult::Ok;
 
         // OSC
         case SETTITLE:

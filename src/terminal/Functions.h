@@ -323,7 +323,9 @@ constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTType::VT525, "WINMANIP", "Window Manipulation");
 constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTType::VT525 /*Xterm*/, "XTSMGRAPHICS", "Setting/getting Sixel/ReGIS graphics settings.");
 constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTType::VT525 /*Xterm*/, "XTSHIFTESCAPE", "Set/reset shift-escape options.");
+constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTType::VT525 /*Xterm*/, "XTVERSION", "Query terminal name and version");
 constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VTType::VT525 /*Extension*/, "CAPTURE", "Report screen buffer capture.");
+
 
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTType::VT525, "STP", "Set Terminal Profile");
@@ -460,6 +462,7 @@ inline auto const& functions() noexcept
             WINMANIP,
             XTSMGRAPHICS,
             XTSHIFTESCAPE,
+            XTVERSION,
 
             // DCS
             STP,

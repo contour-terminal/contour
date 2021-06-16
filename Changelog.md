@@ -41,6 +41,7 @@
 - Adds VT sequence `DECCRA` to copy a rectangular area.
 - Adds VT sequence `DECERA` to erase a rectangular area.
 - Adds VT sequence `DECFRA` to fill a rectangular area.
+- Adds VT sequence `CSI > q` (XTVERSION) to query terminal identification (name and version). Response comes as `DCS >| Contour ContourVersion ST`.
 - Adds new CLI command: `contour capture ...` to capture the screen buffer.
 - Adds new CLI command: `contour set profile to NAME` to change the profile on the fly.
 - Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.
