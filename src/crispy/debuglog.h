@@ -95,6 +95,11 @@ namespace debugtag
     //     return tag_id{ store().size() - 1 };
     // }
 
+    inline tag_info const& get(tag_id _id)
+    {
+        return store().at(_id.value);
+    }
+
     inline tag_id make(std::string_view _name, std::string_view _description)
     {
         assert(crispy::none_of(store(), [&](tag_info const& x) { return x.name == _name; }));
@@ -204,10 +209,10 @@ class logging_sink {
 
     std::string standard_transform(log_message const& _message)
     {
-        return fmt::format("[{}:{}] {}: {}\n",
+        return fmt::format("[{}:{}:{}]: {}\n",
+            debugtag::get(_message.tag()).name,
             _message.location().file_name(),
             _message.location().line(),
-            _message.location().function_name(),
             _message.text()
         );
     }

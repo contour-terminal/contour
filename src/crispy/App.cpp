@@ -72,8 +72,25 @@ namespace // {{{ helper
 
     void customizeDebugLog()
     {
+        // A curated list of colors.
+        static const bool colorized = isatty(STDOUT_FILENO);
+        static constexpr auto colors = std::array{
+            2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
+            150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
+        };
         crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
         {
+            auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
+            {
+                if (!colorized)
+                    return {"", "", ""};
+                auto const tagStart = "\033[1m";
+                auto const colorIndex = colors.at((_msg.tag().value) % colors.size());
+                auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
+                auto const resetSGR = fmt::format("\033[m");
+                return {tagStart, msgStart, resetSGR};
+            }();
+
             auto const srcIndex = string_view(_msg.location().file_name()).find("src");
             auto const fileName = string(srcIndex != string_view::npos
                 ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
@@ -86,12 +103,19 @@ namespace // {{{ helper
                 if (i != 0)
                     result += "        ";
                 else
+                {
+                    result += sgrTag;
                     result += fmt::format("[{}:{}:{}] ",
+                                          debugtag::get(_msg.tag()).name,
                                           fileName,
-                                          _msg.location().line(),
-                                          _msg.location().function_name());
+                                          _msg.location().line()
+                            );
+                    result += sgrReset;
+                }
 
+                result += sgrMessage;
                 result += line;
+                result += sgrReset;
                 result += '\n';
             }
 
