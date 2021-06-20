@@ -29,6 +29,7 @@ macro(ThirdPartiesAdd_fmtlib)
             URL_HASH "${3rdparty_fmtlib_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
         )
         FetchContent_MakeAvailable(fmtlib)
     else()
@@ -39,6 +40,7 @@ macro(ThirdPartiesAdd_fmtlib)
             PREFIX "${FETCHCONTENT_BASE_DIR}/fmtlib-${3rdparty_fmtlib_VERSION}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "fmtlib-${3rdparty_fmtlib_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
             UPDATE_DISCONNECTED 1
         )
     endif()
@@ -61,6 +63,7 @@ macro(ThirdPartiesAdd_Catch2)
             URL_HASH "${3rdparty_Catch2_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
         )
         FetchContent_MakeAvailable(Catch2)
     else()
@@ -71,6 +74,7 @@ macro(ThirdPartiesAdd_Catch2)
             PREFIX "${FETCHCONTENT_BASE_DIR}/Catch2-${3rdparty_Catch2_VERSION}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
         )
     endif()
 endmacro()
@@ -79,14 +83,19 @@ macro(ThirdPartiesAdd_range_v3)
     set(3rdparty_range_v3_VERSION "0.11.0" CACHE STRING "Embedded range-v3 version")
     set(3rdparty_range_v3_CHECKSUM "MD5=97ab1653f3aa5f9e3d8200ee2a4911d3" CACHE STRING "Embedded range-v3 hash")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
-        FetchContent_Declare(
-            range-v3
-            URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
-            URL_HASH "${3rdparty_range_v3_CHECKSUM}"
-            DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
-        )
-        FetchContent_MakeAvailable(range-v3)
+        FetchContent_GetProperties(range_v3)
+        if(NOT "${range_v3_POPULATED}")
+            FetchContent_Populate(
+                range_v3
+                URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+                URL_HASH "${3rdparty_range_v3_CHECKSUM}"
+                DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
+                DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+                EXCLUDE_FROM_ALL
+            )
+            add_subdirectory(${range_v3_SOURCE_DIR} ${range_v3_BINARY_DIR} EXCLUDE_FROM_ALL)
+            # ^^^ That's the only way to avoid installing this dependency during install step.
+        endif()
     else()
         download_project(
             PROJ range-v3
@@ -94,6 +103,7 @@ macro(ThirdPartiesAdd_range_v3)
             URL_HASH "${3rdparty_range_v3_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/range-v3-${3rdparty_range_v3_VERSION}"
         )
     endif()
@@ -142,6 +152,7 @@ macro(ThirdPartiesAdd_yaml_cpp)
             URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
             # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
             # PATCH_COMMAND patch "${yaml_cpp_patch}"
         )
@@ -153,6 +164,7 @@ macro(ThirdPartiesAdd_yaml_cpp)
             URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/yaml-cpp-${3rdparty_range_v3_VERSION}"
             # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
             # PATCH_COMMAND patch "${yaml_cpp_patch}"
@@ -200,6 +212,7 @@ macro(ThirdPartiesAdd_libunicode)
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
             UPDATE_DISCONNECTED 0
+            EXCLUDE_FROM_ALL
             # same here
             #PATCH_COMMAND patch "${libunicode_patch}"
         )
@@ -211,6 +224,7 @@ macro(ThirdPartiesAdd_libunicode)
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
             DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/libunicode-${3rdparty_libunicode_VERSION}"
             # same here
             #PATCH_COMMAND patch "${libunicode_patch}"
