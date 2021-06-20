@@ -1,10 +1,22 @@
-frontend:
-  - src/contour/*.cpp
-  - src/contour/*.h
-  - src/terminal_view/*.cpp
-  - src/terminal_view/*.h
-backend:
-  - src/terminal/*.cpp
-  - src/terminal/*.h
-test:
-  - src/**/*_test.cpp
+"frontend":
+    - src/contour/*.cpp
+    - src/contour/*.h
+"OpenGL":
+    - src/contour/opengl/*.cpp
+    - src/contour/opengl/*.h
+"fonts":
+    - src/text_shaper/*.cpp
+    - src/text_shaper/*.h
+"VT: renderer":
+    - src/terminal_renderer/*.cpp
+    - src/terminal_renderer/*.h
+"VT: backend":
+    - src/terminal/*.cpp
+    - src/terminal/*.h
+"test":
+    - src/**/*_test.cpp
+"documentation":
+    - "**/*.md"
+    - docs/**
+"CI":
+    - .github/**
