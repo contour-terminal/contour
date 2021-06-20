@@ -1724,11 +1724,17 @@ void Screen::restoreModes(std::vector<DECMode> const& _modes)
 
 void Screen::setMode(AnsiMode _mode, bool _enable)
 {
+    if (!isValidAnsiMode(static_cast<int>(_mode)))
+        return;
+
     modes_.set(_mode, _enable);
 }
 
 void Screen::setMode(DECMode _mode, bool _enable)
 {
+    if (!isValidDECMode(static_cast<int>(_mode)))
+        return;
+
     switch (_mode)
     {
         case DECMode::AutoWrap:
@@ -1873,24 +1879,40 @@ void Screen::setMode(DECMode _mode, bool _enable)
     modes_.set(_mode, _enable);
 }
 
-void Screen::requestMode(std::variant<AnsiMode, DECMode> _mode)
+enum class ModeResponse { // TODO: respect response 0, 3, 4.
+    NotRecognized = 0,
+    Set = 1,
+    Reset = 2,
+    PermanentlySet = 3,
+    PermanentlyReset = 4
+};
+
+void Screen::requestAnsiMode(int _mode)
 {
-    enum class ModeResponse { // TODO: respect response 0, 3, 4.
-        NotRecognized = 0,
-        Set = 1,
-        Reset = 2,
-        PermanentlySet = 3,
-        PermanentlyReset = 4
-    };
+    ModeResponse const modeResponse =
+        isValidAnsiMode(_mode)
+            ? isModeEnabled(static_cast<AnsiMode>(_mode))
+                ? ModeResponse::Set
+                : ModeResponse::Reset
+            : ModeResponse::NotRecognized;
 
-    ModeResponse const modeResponse = isModeEnabled(_mode)
-        ? ModeResponse::Set
-        : ModeResponse::Reset;
+    auto const code = toAnsiModeNum(static_cast<AnsiMode>(_mode));
 
-    if (holds_alternative<AnsiMode>(_mode))
-        reply("\033[{};{}$y", to_code(get<AnsiMode>(_mode)), static_cast<unsigned>(modeResponse));
-    else
-        reply("\033[?{};{}$y", to_code(get<DECMode>(_mode)), static_cast<unsigned>(modeResponse));
+    reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
+}
+
+void Screen::requestDECMode(int _mode)
+{
+    ModeResponse const modeResponse =
+        isValidDECMode(_mode)
+            ? isModeEnabled(static_cast<DECMode>(_mode))
+                ? ModeResponse::Set
+                : ModeResponse::Reset
+            : ModeResponse::NotRecognized;
+
+    auto const code = toDECModeNum(static_cast<DECMode>(_mode));
+
+    reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
 void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)

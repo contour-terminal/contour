@@ -406,80 +406,6 @@ namespace impl // {{{ some command generator helpers
 		return ApplyResult::Ok;
 	}
 
-	ApplyResult requestMode(Sequence const& /*_seq*/, unsigned int _mode)
-	{
-		switch (_mode)
-		{
-			case 1: // GATM, Guarded area transfer
-			case 2: // KAM, Keyboard action
-			case 3: // CRM, Control representation
-			case 4: // IRM, Insert/replace
-			case 5: // SRTM, Status reporting transfer
-			case 7: // VEM, Vertical editing
-			case 10: // HEM, Horizontal editing
-			case 11: // PUM, Positioning unit
-			case 12: // SRM, Send/receive
-			case 13: // FEAM, Format effector action
-			case 14: // FETM, Format effector transfer
-			case 15: // MATM, Multiple area transfer
-			case 16: // TTM, Transfer termination
-			case 17: // SATM, Selected area transfer
-			case 18: // TSM, Tabulation stop
-			case 19: // EBM, Editing boundary
-			case 20: // LNM, Line feed/new line
-				return ApplyResult::Unsupported; // TODO
-			default:
-				return ApplyResult::Invalid;
-		}
-	}
-
-	ApplyResult requestModeDEC(Sequence const& /*_seq*/, unsigned int _mode)
-	{
-		switch (_mode)
-		{
-			case 1: // DECCKM, Cursor keys
-			case 2: // DECANM, ANSI
-			case 3: // DECCOLM, Column
-			case 4: // DECSCLM, Scrolling
-			case 5: // DECSCNM, Screen
-			case 6: // DECOM, Origin
-			case 7: // DECAWM, Autowrap
-			case 8: // DECARM, Autorepeat
-			case 18: // DECPFF, Print form feed
-			case 19: // DECPEX, Printer extent
-			case 25: // DECTCEM, Text cursor enable
-			case 34: // DECRLM, Cursor direction, right to left
-			case 35: // DECHEBM, Hebrew keyboard mapping
-			case 36: // DECHEM, Hebrew encoding mode
-			case 42: // DECNRCM, National replacement character set
-			case 57: // DECNAKB, Greek keyboard mapping
-			case 60: // DECHCCM*, Horizontal cursor coupling
-			case 61: // DECVCCM, Vertical cursor coupling
-			case 64: // DECPCCM, Page cursor coupling
-			case 66: // DECNKM, Numeric keypad
-			case 67: // DECBKM, Backarrow key
-			case 68: // DECKBUM, Keyboard usage
-			case 69: // DECVSSM / DECLRMM, Vertical split screen
-			case 73: // DECXRLM, Transmit rate limiting
-			case 81: // DECKPM, Key position
-			case 95: // DECNCSM, No clearing screen on column change
-			case 96: // DECRLCM, Cursor right to left
-			case 97: // DECCRTSM, CRT save
-			case 98: // DECARSM, Auto resize
-			case 99: // DECMCM, Modem control
-			case 100: // DECAAM, Auto answerback
-			case 101: // DECCANSM, Conceal answerback message
-			case 102: // DECNULM, Ignoring null
-			case 103: // DECHDPXM, Half-duplex
-			case 104: // DECESKM, Secondary keyboard language
-			case 106: // DECOSCNM, Overscan
-            case 2026: // Batched rendering (Synchronized output)
-				return ApplyResult::Unsupported;
-			default:
-				return ApplyResult::Invalid;
-		}
-	}
-
     ApplyResult CPR(Sequence const& _seq, Screen& _screen)
     {
         switch (_seq.param(0))
@@ -1590,8 +1516,16 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                 impl::setModeDEC(_seq, i, false, screen_);
             });
             break;
-        case DECRQM: return impl::requestModeDEC(_seq, _seq.param(0));
-        case DECRQM_ANSI: return impl::requestMode(_seq, _seq.param(0));
+        case DECRQM:
+            if (_seq.parameterCount() != 1)
+                return ApplyResult::Invalid;
+            screen_.requestDECMode(_seq.param(0));
+            return ApplyResult::Ok;
+        case DECRQM_ANSI:
+            if (_seq.parameterCount() != 1)
+                return ApplyResult::Invalid;
+            screen_.requestAnsiMode(_seq.param(0));
+            return ApplyResult::Ok;
         case DECRQPSR: return impl::DECRQPSR(_seq, screen_);
         case DECSCUSR: return impl::DECSCUSR(_seq, screen_);
         case DECSCPP:
