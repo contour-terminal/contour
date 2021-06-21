@@ -227,59 +227,115 @@ std::string to_string(CharsetTable i);
 std::string to_string(CharsetId charset);
 std::string to_string(GraphicsRendition s);
 
-constexpr std::string_view to_code(AnsiMode m)
+constexpr int toAnsiModeNum(AnsiMode m)
 {
     switch (m)
     {
-        case AnsiMode::KeyboardAction: return "2";
-        case AnsiMode::Insert: return "4";
-        case AnsiMode::SendReceive: return "12";
-        case AnsiMode::AutomaticNewLine: return "20";
+        case AnsiMode::KeyboardAction: return 2;
+        case AnsiMode::Insert: return 4;
+        case AnsiMode::SendReceive: return 12;
+        case AnsiMode::AutomaticNewLine: return 20;
     }
-    return "";
+    return static_cast<int>(m);
 }
+
+constexpr bool isValidAnsiMode(int _mode) noexcept
+{
+    switch (static_cast<AnsiMode>(_mode))
+    {
+        case AnsiMode::KeyboardAction:
+        case AnsiMode::Insert:
+        case AnsiMode::SendReceive:
+        case AnsiMode::AutomaticNewLine:
+            return true;
+    }
+    return false;
+}
+
 
 std::string to_string(DECMode _mode);
 
-constexpr std::string_view to_code(DECMode m)
+constexpr int toDECModeNum(DECMode m)
 {
     switch (m)
     {
-        case DECMode::UseApplicationCursorKeys: return "?1";
-        case DECMode::DesignateCharsetUSASCII: return "?2";
-        case DECMode::Columns132: return "?3";
-        case DECMode::SmoothScroll: return "?4";
-        case DECMode::ReverseVideo: return "?5";
-        case DECMode::Origin: return "?6";
-        case DECMode::AutoWrap: return "?7";
-        case DECMode::MouseProtocolX10: return "?9";
-        case DECMode::ShowToolbar: return "?10";
-        case DECMode::BlinkingCursor: return "?12";
-        case DECMode::PrinterExtend: return "?19";
-        case DECMode::VisibleCursor: return "?25";
-        case DECMode::ShowScrollbar: return "?30";
-        case DECMode::AllowColumns80to132: return "?40";
-        case DECMode::DebugLogging: return "?46";
-        case DECMode::UseAlternateScreen: return "?47";
-        case DECMode::LeftRightMargin: return "?69";
-        case DECMode::MouseProtocolNormalTracking: return "?1000";
-        case DECMode::MouseProtocolHighlightTracking: return "?1001";
-        case DECMode::MouseProtocolButtonTracking: return "?1002";
-        case DECMode::MouseProtocolAnyEventTracking: return "?1003";
-        case DECMode::SaveCursor: return "?1048";
-        case DECMode::ExtendedAltScreen: return "?1049";
-        case DECMode::BracketedPaste: return "?2004";
-        case DECMode::FocusTracking: return "?1004";
-        case DECMode::SixelScrolling: return "?80";
-        case DECMode::UsePrivateColorRegisters: return "?1070";
-        case DECMode::MouseExtended: return "?1005";
-        case DECMode::MouseSGR: return "?1006";
-        case DECMode::MouseURXVT: return "?1015";
-        case DECMode::MouseAlternateScroll: return "?1007";
-        case DECMode::BatchedRendering: return "?2026";
-        case DECMode::TextReflow: return "?2027";
+        case DECMode::UseApplicationCursorKeys: return 1;
+        case DECMode::DesignateCharsetUSASCII: return 2;
+        case DECMode::Columns132: return 3;
+        case DECMode::SmoothScroll: return 4;
+        case DECMode::ReverseVideo: return 5;
+        case DECMode::Origin: return 6;
+        case DECMode::AutoWrap: return 7;
+        case DECMode::MouseProtocolX10: return 9;
+        case DECMode::ShowToolbar: return 10;
+        case DECMode::BlinkingCursor: return 12;
+        case DECMode::PrinterExtend: return 19;
+        case DECMode::VisibleCursor: return 25;
+        case DECMode::ShowScrollbar: return 30;
+        case DECMode::AllowColumns80to132: return 40;
+        case DECMode::DebugLogging: return 46;
+        case DECMode::UseAlternateScreen: return 47;
+        case DECMode::LeftRightMargin: return 69;
+        case DECMode::MouseProtocolNormalTracking: return 1000;
+        case DECMode::MouseProtocolHighlightTracking: return 1001;
+        case DECMode::MouseProtocolButtonTracking: return 1002;
+        case DECMode::MouseProtocolAnyEventTracking: return 1003;
+        case DECMode::SaveCursor: return 1048;
+        case DECMode::ExtendedAltScreen: return 1049;
+        case DECMode::BracketedPaste: return 2004;
+        case DECMode::FocusTracking: return 1004;
+        case DECMode::SixelScrolling: return 80;
+        case DECMode::UsePrivateColorRegisters: return 1070;
+        case DECMode::MouseExtended: return 1005;
+        case DECMode::MouseSGR: return 1006;
+        case DECMode::MouseURXVT: return 1015;
+        case DECMode::MouseAlternateScroll: return 1007;
+        case DECMode::BatchedRendering: return 2026;
+        case DECMode::TextReflow: return 2027;
     }
-    return "0";
+    return static_cast<int>(m);
+}
+
+constexpr bool isValidDECMode(int _mode) noexcept
+{
+    switch (static_cast<DECMode>(_mode))
+    {
+        case DECMode::UseApplicationCursorKeys:
+        case DECMode::DesignateCharsetUSASCII:
+        case DECMode::Columns132:
+        case DECMode::SmoothScroll:
+        case DECMode::ReverseVideo:
+        case DECMode::MouseProtocolX10:
+        case DECMode::MouseProtocolNormalTracking:
+        case DECMode::MouseProtocolHighlightTracking:
+        case DECMode::MouseProtocolButtonTracking:
+        case DECMode::MouseProtocolAnyEventTracking:
+        case DECMode::SaveCursor:
+        case DECMode::ExtendedAltScreen:
+        case DECMode::Origin:
+        case DECMode::AutoWrap:
+        case DECMode::PrinterExtend:
+        case DECMode::LeftRightMargin:
+        case DECMode::ShowToolbar:
+        case DECMode::BlinkingCursor:
+        case DECMode::VisibleCursor:
+        case DECMode::ShowScrollbar:
+        case DECMode::AllowColumns80to132:
+        case DECMode::DebugLogging:
+        case DECMode::UseAlternateScreen:
+        case DECMode::BracketedPaste:
+        case DECMode::FocusTracking:
+        case DECMode::SixelScrolling:
+        case DECMode::UsePrivateColorRegisters:
+        case DECMode::MouseExtended:
+        case DECMode::MouseSGR:
+        case DECMode::MouseURXVT:
+        case DECMode::MouseAlternateScroll:
+        case DECMode::BatchedRendering:
+        case DECMode::TextReflow:
+            return true;
+    }
+    return false;
 }
 
 CursorShape makeCursorShape(std::string const& _name);

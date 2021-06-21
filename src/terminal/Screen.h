@@ -299,7 +299,6 @@ class Screen : public capabilities::StaticDatabase {
     void setUnderlineColor(Color const& _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void requestMode(std::variant<AnsiMode, DECMode> _mode);
     void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
     void setLeftRightMargin(std::optional<int> _left, std::optional<int> _right);
     void screenAlignmentPattern();
@@ -364,6 +363,8 @@ class Screen : public capabilities::StaticDatabase {
     void restoreCursor(Cursor const& _savedCursor);
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
+    void requestAnsiMode(int _mode);
+    void requestDECMode(int _mode);
 
     crispy::Size const& size() const noexcept { return size_; }
     void resize(crispy::Size const& _newSize);
