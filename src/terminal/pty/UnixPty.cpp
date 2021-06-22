@@ -41,6 +41,7 @@
 using crispy::Size;
 using std::runtime_error;
 using std::numeric_limits;
+using std::optional;
 using std::max;
 using namespace std::string_literals;
 
@@ -98,7 +99,7 @@ namespace
     }
 }
 
-UnixPty::UnixPty(Size const& _windowSize) :
+UnixPty::UnixPty(Size const& _windowSize, optional<Size> _pixels) :
     size_{ _windowSize }
 {
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
@@ -108,8 +109,8 @@ UnixPty::UnixPty(Size const& _windowSize) :
     winsize const ws{
         static_cast<unsigned short>(_windowSize.height),
         static_cast<unsigned short>(_windowSize.width),
-        0,
-        0
+        static_cast<unsigned short>(_pixels.value_or(Size{}).width),
+        static_cast<unsigned short>(_pixels.value_or(Size{}).height)
     };
 
 #if defined(__APPLE__)

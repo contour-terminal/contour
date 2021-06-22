@@ -89,7 +89,9 @@ TerminalView::TerminalView(steady_clock::time_point _now,
     }
 {
     terminal_.screen().setCursorStyle(_cursorDisplay, _cursorShape);
-    terminal_.screen().setCellPixelSize(renderer_.cellSize());
+
+    // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
+    terminal_.resizeScreen(terminal_.screenSize(), terminal_.screenSize() * cellSize());
 }
 
 void TerminalView::setRenderTarget(renderer::RenderTarget& _renderTarget)

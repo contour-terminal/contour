@@ -29,7 +29,7 @@ namespace terminal {
 class UnixPty : public Pty
 {
   public:
-    explicit UnixPty(crispy::Size const& windowSize);
+    explicit UnixPty(crispy::Size const& windowSize, std::optional<crispy::Size> _pixels = std::nullopt);
     ~UnixPty() override;
 
     int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
