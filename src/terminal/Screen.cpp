@@ -1912,7 +1912,7 @@ void Screen::requestDECMode(int _mode)
 
     auto const code = toDECModeNum(static_cast<DECMode>(_mode));
 
-    reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
+    reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
 void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)

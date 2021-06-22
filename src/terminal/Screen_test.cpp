@@ -46,6 +46,11 @@ namespace
             grid().setReflowOnResize(false);
         }
     };
+
+    auto e(string const& s)
+    {
+        return crispy::escape(s);
+    }
 }
 
 TEST_CASE("Screen.isLineVisible", "[screen]")
@@ -1658,39 +1663,39 @@ TEST_CASE("RequestMode", "[screen]")
     SECTION("ANSI modes: enabled") {
         screen.setMode(AnsiMode::Insert, true); // IRM
         screen.requestAnsiMode((int) AnsiMode::Insert);
-        REQUIRE(screen.replyData == fmt::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: disabled") {
         screen.setMode(AnsiMode::Insert, false); // IRM
         screen.requestAnsiMode((int) AnsiMode::Insert);
-        REQUIRE(screen.replyData == fmt::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: unknown") {
         AnsiMode m = static_cast<AnsiMode>(1234);
         screen.setMode(m, true); // DECOM
         screen.requestAnsiMode((int) m);
-        REQUIRE(screen.replyData == fmt::format("\033[{};0$y", toAnsiModeNum(m)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[{};0$y", toAnsiModeNum(m))));
     }
 
     SECTION("DEC modes: enabled") {
         screen.setMode(DECMode::Origin, true); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(screen.replyData == fmt::format("\033[{};1$y", toDECModeNum(DECMode::Origin)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: disabled") {
         screen.setMode(DECMode::Origin, false); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(screen.replyData == fmt::format("\033[{};2$y", toDECModeNum(DECMode::Origin)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: unknown") {
         DECMode m = static_cast<DECMode>(1234);
         screen.setMode(m, true); // DECOM
         screen.requestDECMode(static_cast<int>(m));
-        REQUIRE(screen.replyData == fmt::format("\033[{};0$y", toDECModeNum(m)));
+        REQUIRE(e(screen.replyData) == e(fmt::format("\033[?{};0$y", toDECModeNum(m))));
     }
 }
 
