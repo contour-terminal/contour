@@ -980,7 +980,7 @@ void Screen::sendDeviceAttributes()
         DeviceAttributes::CaptureScreenBuffer |
         DeviceAttributes::Columns132 |
         //TODO: DeviceAttributes::NationalReplacementCharacterSets |
-        //TODO: DeviceAttributes::RectangularEditing |
+        DeviceAttributes::RectangularEditing |
         //TODO: DeviceAttributes::SelectiveErase |
         DeviceAttributes::SixelGraphics |
         //TODO: DeviceAttributes::TechnicalCharacters |
