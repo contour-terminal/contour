@@ -199,7 +199,16 @@ Process::Process(string const& _path,
             // reset signal(s) to default that may have been changed in the parent process.
             signal(SIGPIPE, SIG_DFL);
 
-            ::execvp(_path.c_str(), argv);
+            ::execvp(argv[0], argv);
+
+            // Fallback: Try login shell.
+            fprintf(stdout, "\r\n\e[31;1mFailed to spawn %s. %s\e[m\r\n\n", argv[0], strerror(errno));
+            fflush(stdout);
+            auto const theLoginShell = loginShell();
+            argv[0] = const_cast<char*>(theLoginShell.c_str());
+            ::execvp(argv[0], argv);
+
+            // Bad luck.
             ::_exit(EXIT_FAILURE);
             break;
         }
