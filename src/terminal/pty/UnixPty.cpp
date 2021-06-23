@@ -261,9 +261,9 @@ void UnixPty::prepareChildProcess()
     ::close(master_);
     master_ = -1;
 
-    auto const tio = constructTerminalSettings(master_);
-    if (tcsetattr(master_, TCSANOW, &tio) == 0)
-        tcflush(master_, TCIOFLUSH);
+    auto const tio = constructTerminalSettings(slave_);
+    if (tcsetattr(slave_, TCSANOW, &tio) == 0)
+        tcflush(slave_, TCIOFLUSH);
 
     if (login_tty(slave_) < 0)
         _exit(EXIT_FAILURE);
