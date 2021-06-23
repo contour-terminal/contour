@@ -61,35 +61,9 @@ namespace
         auto tio = getTerminalSettings(fd);
 
         // input flags
-        tio.c_iflag |= IGNBRK;    // Ignore Break condition on input.
 #if defined(IUTF8)
         tio.c_iflag |= IUTF8;     // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
 #endif
-#if defined(IUCLC)
-        tio.c_iflag &= IUCLC;     // Map uppercase characters to lowercase on input (not in POSIX).
-#endif
-        tio.c_iflag &= ~IXON;     // Disable CTRL-S / CTRL-Q on output.
-        tio.c_iflag &= ~IXOFF;    // Disable CTRL-S / CTRL-Q on input.
-        tio.c_iflag &= ~ICRNL;    // Ensure CR isn't translated to NL.
-        tio.c_iflag &= ~INLCR;    // Ensure NL isn't translated to CR.
-        tio.c_iflag &= ~IGNCR;    // Ensure CR isn't ignored.
-        tio.c_iflag &= ~IMAXBEL;  // Ensure beeping on full input buffer isn't enabled.
-        tio.c_iflag &= ~ISTRIP;   // Ensure stripping of 8th bit on input isn't enabled.
-
-        // output flags
-        tio.c_oflag &= ~OPOST;   // Don't enable implementation defined output processing.
-        tio.c_oflag &= ~ONLCR;   // Don't map NL to CR-NL.
-        tio.c_oflag &= ~OCRNL;   // Don't map CR to NL.
-        tio.c_oflag &= ~ONLRET;  // Don't output CR.
-
-        // control flags
-
-        // local flags
-        tio.c_lflag &= ~IEXTEN;  // Don't enable implementation defined input processing.
-        tio.c_lflag &= ~ICANON;  // Don't enable line buffering (Canonical mode).
-        tio.c_lflag &= ~ECHO;    // Don't echo input characters.
-        tio.c_lflag &= ~ISIG;    // Don't generate signal upon receiving characters for
-                                    // INTR, QUIT, SUSP, DSUSP.
 
         // special characters
         tio.c_cc[VMIN] = 1;   // Report as soon as 1 character is available.
