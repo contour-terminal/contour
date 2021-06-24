@@ -16,6 +16,7 @@
 #include <crispy/utils.h>
 
 #include <algorithm>
+#include <array>
 #include <iomanip>
 #include <numeric>
 #include <optional>
@@ -80,7 +81,7 @@ namespace // {{{ helper
 #else
             true;
 #endif
-        static constexpr auto colors = std::array{
+        static constexpr auto colors = std::array<int, 23>{
             2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
             150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
         };
