@@ -100,6 +100,7 @@ Terminal::Terminal(Pty& _pty,
     screenUpdateThread_{},
     viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } }
 {
+    readBuffer_.resize(ptyReadBufferSize_);
 }
 
 Terminal::~Terminal()
@@ -133,39 +134,45 @@ void Terminal::mainLoop()
         }()
     );
 
-    vector<char> buf;
-    buf.resize(ptyReadBufferSize_);
-
     for (;;)
     {
-        auto const timeout =
-            renderBuffer_.state == RenderBufferState::WaitingForRefresh && !screenDirty_
-                ? std::chrono::seconds(4)
-                : refreshInterval_ // std::chrono::seconds(0)
-                ;
-
-        auto const n = pty_.read(buf.data(), buf.size(), timeout);
-
-        if (n > 0)
-        {
-            writeToScreen(buf.data(), n);
-
-            #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-            auto const now = std::chrono::steady_clock::now();
-            ensureFreshRenderBuffer(now);
-            #endif
-        }
-        else if (n == 0)
-        {
-            debuglog(TerminalTag).write("PTY read returned with zero bytes.");
-        }
-        else if (n < 0 && (errno != EINTR && errno != EAGAIN))
-        {
-            debuglog(TerminalTag).write("PTY read failed. {}", strerror(errno));
+        if (!processInputOnce())
             break;
-        }
     }
+
     eventListener_.onClosed();
+}
+
+bool Terminal::processInputOnce()
+{
+    auto const timeout =
+        renderBuffer_.state == RenderBufferState::WaitingForRefresh && !screenDirty_
+            ? std::chrono::seconds(4)
+            : refreshInterval_ // std::chrono::seconds(0)
+            ;
+
+    auto const n = pty_.read(readBuffer_.data(), readBuffer_.size(), timeout);
+
+    if (n > 0)
+    {
+        writeToScreen(readBuffer_.data(), n);
+
+        #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+        auto const now = std::chrono::steady_clock::now();
+        ensureFreshRenderBuffer(now);
+        #endif
+    }
+    else if (n == 0)
+    {
+        debuglog(TerminalTag).write("PTY read returned with zero bytes.");
+    }
+    else if (n < 0 && (errno != EINTR && errno != EAGAIN))
+    {
+        debuglog(TerminalTag).write("PTY read failed. {}", strerror(errno));
+        return false;
+    }
+
+    return true;
 }
 
 // {{{ RenderBuffer synchronization

@@ -21,22 +21,29 @@ namespace terminal {
 class MockPty : public Pty
 {
   public:
-    explicit MockPty(Size const& windowSize);
+    explicit MockPty(crispy::Size const& windowSize);
     ~MockPty() override;
 
-    int read(char* buf, size_t size) override;
+    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    Size screenSize() const noexcept override;
-    void resizeScreen(Size _cells, std::optional<Size> _pixels = std::nullopt) override;
+    crispy::Size screenSize() const noexcept override;
+    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;
 
     void prepareChildProcess() override;
     void prepareParentProcess() override;
     void close() override;
 
+    std::string& stdinBuffer() noexcept { return inputBuffer_; }
+    std::string& stdoutBuffer() noexcept { return outputBuffer_; }
+    bool isClosed() const noexcept { return closed_; }
+
   private:
-    Size size_;
+    crispy::Size screenSize_;
+    std::optional<crispy::Size> pixelSize_;
     std::string inputBuffer_;
     std::string outputBuffer_;
+    bool closed_ = false;
 };
 
 } // end namespace

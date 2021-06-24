@@ -34,6 +34,7 @@ set(terminal_HEADERS
     Parser.h
     Process.h
     pty/Pty.h
+    pty/MockPty.h
     pty/UnixPty.h
     pty/ConPty.h
     pty/PtyProcess.h
@@ -48,6 +49,7 @@ set(terminal_HEADERS
 )
 
 set(terminal_SOURCES
+    pty/MockPty.cpp
     pty/PtyProcess.cpp
     Charset.cpp
     Capabilities.cpp
@@ -119,6 +121,7 @@ if(LIBTERMINAL_TESTING)
         Grid_test.cpp
         Parser_test.cpp
         Screen_test.cpp
+        Terminal_test.cpp
         SixelParser_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)

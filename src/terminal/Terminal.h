@@ -49,7 +49,7 @@ class Terminal : public ScreenEvents {
         virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
-        virtual void renderBufferUpdated() = 0;
+        virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*_fontSpec*/) {}
@@ -57,7 +57,7 @@ class Terminal : public ScreenEvents {
         virtual void dumpState() {}
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
-        virtual void onSelectionCompleted() = 0;
+        virtual void onSelectionCompleted() {}
         virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
@@ -270,6 +270,8 @@ class Terminal : public ScreenEvents {
     /// Tests whether or not the mouse is currently hovering a hyperlink.
     bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
 
+    bool processInputOnce();
+
   private:
     void flushInput();
     void mainLoop();
@@ -330,6 +332,7 @@ class Terminal : public ScreenEvents {
     RenderDoubleBuffer renderBuffer_{};
 
     Pty& pty_;
+    std::vector<char> readBuffer_;
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
