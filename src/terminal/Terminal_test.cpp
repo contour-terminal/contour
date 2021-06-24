@@ -125,6 +125,17 @@ namespace // {{{ helpers
     }
 } // }}}
 
+// TODO: Test case posibilities:
+//
+// - [x] Synchronized output (?2026)
+// - [ ] double click word selection
+// - [ ] tripple click line selection
+// - [ ] rectangular block selection
+// - [ ] text selection with bypassing enabled application mouse protocol
+// - [ ] extractLastMarkRange
+// - [ ] scroll mark up
+// - [ ] scroll mark down
+
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 {
     constexpr auto BatchOn = "\033[?2026h"sv;
