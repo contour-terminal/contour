@@ -20,6 +20,7 @@
 #include <terminal/SixelParser.h>
 #include <crispy/size.h>
 
+#include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>

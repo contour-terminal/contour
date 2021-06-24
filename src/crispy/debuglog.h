@@ -16,6 +16,7 @@
 #include <crispy/indexed.h>
 #include <crispy/algorithm.h>
 
+#include <cassert>
 #include <iostream>
 #include <string>
 #include <string_view>
