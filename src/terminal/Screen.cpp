@@ -2476,7 +2476,8 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
     using Item = XtSmGraphics::Item;
     using Action = XtSmGraphics::Action;
 
-    constexpr auto SixelItem = 1;
+    constexpr auto NumberOfColorRegistersItem = 1;
+    constexpr auto SixelItem = 2;
 
     constexpr auto Success = 0;
     constexpr auto Failure = 3;
@@ -2489,20 +2490,20 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                 case Action::Read:
                 {
                     auto const value = imageColorPalette_->size();
-                    reply("\033[?{};{};{}S", SixelItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::ReadLimit:
                 {
                     auto const value = imageColorPalette_->maxSize();
-                    reply("\033[?{};{};{}S", SixelItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::ResetToDefault:
                 {
                     auto const value = 256; // TODO: read the configuration's default here
                     imageColorPalette_->setSize(value);
-                    reply("\033[?{};{};{}S", SixelItem, Success, value);
+                    reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;
                 }
                 case Action::SetToValue:
@@ -2510,13 +2511,13 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                     visit(overloaded{
                         [&](int _number) {
                             imageColorPalette_->setSize(_number);
-                            reply("\033[?{};{};{}S", SixelItem, Success, _number);
+                            reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, _number);
                         },
                         [&](Size) {
-                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
+                            reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
                         },
                         [&](monostate) {
-                            reply("\033[?{};{};{}S", SixelItem, Failure, 0);
+                            reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
                         },
                     }, _value);
                     break;
@@ -2528,10 +2529,10 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
             switch (_action)
             {
                 case Action::Read:
-                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSize_.width, maxImageSize_.height);
+                    reply("\033[?{};{};{};{}S", SixelItem, Success, maxImageSize_.width, maxImageSize_.height);
                     break;
                 case Action::ReadLimit:
-                    reply("\033[?{};{};{}S", SixelItem, Success, maxImageSizeLimit_.width, maxImageSizeLimit_.height);
+                    reply("\033[?{};{};{};{}S", SixelItem, Success, maxImageSizeLimit_.width, maxImageSizeLimit_.height);
                     break;
                 case Action::ResetToDefault:
                     // The limit is the default at the same time.
