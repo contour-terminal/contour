@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/GridMetrics.h>
 
 #include <terminal/Color.h>
 #include <terminal/Grid.h> // cell attribs
@@ -47,7 +48,7 @@ class RenderTarget
     virtual ~RenderTarget() = default;
 
     virtual void setRenderSize(crispy::Size _size) = 0;
-    virtual void setMargin(int _left, int _bottom) = 0;
+    virtual void setMargin(PageMargin _margin) = 0;
 
     virtual atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;
     virtual atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept = 0;

@@ -85,12 +85,11 @@ class Renderer : public Renderable {
         gridMetrics_.pageSize = _screenSize;
     }
 
-    void setMargin(int _leftMargin, int _bottomMargin) noexcept
+    void setMargin(PageMargin _margin) noexcept
     {
         if (renderTarget_)
-            renderTarget_->setMargin(_leftMargin, _bottomMargin);
-        gridMetrics_.pageMargin.left = _leftMargin;
-        gridMetrics_.pageMargin.bottom = _bottomMargin;
+            renderTarget_->setMargin(_margin);
+        gridMetrics_.pageMargin = _margin;
     }
 
     /**

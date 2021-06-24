@@ -7,6 +7,7 @@
   - show sixel
   - distor (`lsb_release`)
 
+- [ ] CHECK: profile change upon shortcut
 - [ ] config: warn on unknown yaml keys
 - [ ] TEST: RenderBuffer ops testable (esp. 2026)?
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
