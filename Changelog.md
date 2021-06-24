@@ -15,6 +15,7 @@
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
 - Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter `--live-config`.
 - Changes the CLI command line interface syntax.
+- Removes `tab_width` configuration. Tab width cannot be configured anymore but remaints by default at 8.
 - Adds basic automatically created archive for Arch Linux to the CI build artifacts page and release page.
 - Adds support for bypassing the mouse protocol via Shift-click (configurable via `bypass_mouse_protocol_modifier`)
 - Adds improved debug logging. via CLI flag `-d` (`--enable-debug`) to accept a comma seperated list of tags to enable logging for. Appending a `*` at the end of a debug tag will enable all debug tags that match prefix its prefix.  The list of available debuglog tags can be found via CLI flag `-D` (`--list-debug-tags`).

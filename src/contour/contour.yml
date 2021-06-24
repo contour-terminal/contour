@@ -160,9 +160,6 @@ profiles:
             # Defaults to "emoji".
             emoji: "emoji"
 
-        # Tab width to move the cursor to the right when a HT control character is recieved.
-        tab_width: 8
-
         # Terminal cursor display configuration
         cursor:
             # Supported shapes are:

@@ -865,8 +865,6 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         debuglog(ConfigTag).write("Using render mode: {}", profile.fonts.renderMode);
     }
 
-    softLoadValue(_node, "tab_width", profile.tabWidth);
-
     if (auto history = _node["history"]; history)
     {
         if (auto limit = history["limit"]; limit)

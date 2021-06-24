@@ -78,8 +78,6 @@ struct TerminalProfile {
 
     terminal::renderer::FontDescriptions fonts;
 
-    int tabWidth;
-
     struct {
         Permission captureBuffer = Permission::Ask;
         Permission changeFont = Permission::Ask;

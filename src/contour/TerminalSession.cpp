@@ -761,7 +761,6 @@ void TerminalSession::configureTerminal()
     // if (!_terminalView.renderer().renderTargetAvailable())
     //     return;
 
-    screen.setTabWidth(profile_.tabWidth);
     screen.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
     terminal_.setCursorDisplay(profile_.cursorDisplay);
     terminal_.setCursorShape(profile_.cursorShape);
