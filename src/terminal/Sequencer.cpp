@@ -31,7 +31,6 @@
 
 #include <array>
 #include <iostream>             // error logging
-#include <cassert>
 #include <cstdlib>
 #include <iterator>
 #include <numeric>

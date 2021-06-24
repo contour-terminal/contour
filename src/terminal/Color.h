@@ -15,6 +15,7 @@
 
 #include <fmt/format.h>
 
+#include <cassert>
 #include <array>
 #include <algorithm>
 #include <cstdint>
