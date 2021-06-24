@@ -19,6 +19,7 @@ for power users with a modern feature mindset.
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emojis :-)
 - ✅ Unicode: Grapheme cluster support
 - ✅ Bold and italic fonts
+- ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 - ✅ Runtime configuration reload
