@@ -25,8 +25,9 @@
 #include <string>
 #include <string_view>
 
-namespace terminal::view {
-    class TerminalView;
+namespace terminal::renderer
+{
+    class Renderer;
 }
 
 namespace contour {
@@ -44,6 +45,14 @@ namespace detail {
        ~FunctionCallEvent() { fun(); }
     };
 }
+
+enum class MouseCursorShape
+{
+    Hidden,
+    PointingHand,
+    IBeam,
+    Arrow,
+};
 
 template <typename F>
 void postToObject(QObject* obj, F fun)
@@ -164,5 +173,35 @@ bool requestPermission(PermissionCache& _cache,
                        QWidget* _parent,
                        config::Permission _allowedByConfig,
                        std::string_view _topicText);
+
+terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer);
+
+terminal::renderer::PageMargin computeMargin(crispy::Size _cellSize, crispy::Size _charCells, crispy::Size _pixels) noexcept;
+
+bool applyFontDescription(
+    crispy::Size _cellSize,
+    crispy::Size _screenSize,
+    crispy::Size _pixelSize,
+    crispy::Point _screenDPI,
+    terminal::renderer::Renderer& _renderer,
+    terminal::renderer::FontDescriptions _fontDescriptions);
+
+constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
+{
+    switch (_shape)
+    {
+        case contour::MouseCursorShape::Hidden:
+            return Qt::CursorShape::BlankCursor;
+        case contour::MouseCursorShape::Arrow:
+            return Qt::CursorShape::ArrowCursor;
+        case contour::MouseCursorShape::IBeam:
+            return Qt::CursorShape::IBeamCursor;
+        case contour::MouseCursorShape::PointingHand:
+            return Qt::CursorShape::PointingHandCursor;
+    }
+
+    // should never be reached
+    return Qt::CursorShape::ArrowCursor;
+}
 
 }

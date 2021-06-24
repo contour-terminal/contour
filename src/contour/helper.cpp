@@ -15,6 +15,7 @@
 #include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
 #include <terminal/Terminal.h>
+#include <terminal_renderer/Renderer.h>
 
 #include <QtCore/QString>
 #include <QtCore/QStringList>
@@ -41,6 +42,10 @@ using std::string;
 using std::u32string;
 using std::variant;
 using std::vector;
+
+using crispy::Point;
+using crispy::Size;
+using crispy::Zero;
 
 namespace contour {
 
@@ -279,4 +284,74 @@ bool requestPermission(PermissionCache& _cache,
 
     return false;
 }
+
+terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer)
+{
+    auto const fontByStyle = [&](text::font_weight _weight, text::font_slant _slant) -> text::font_description const&
+    {
+        auto const bold = _weight != text::font_weight::normal;
+        auto const italic = _slant != text::font_slant::normal;
+        if (bold && italic)
+            return _renderer.fontDescriptions().boldItalic;
+        else if (bold)
+            return _renderer.fontDescriptions().bold;
+        else if (italic)
+            return _renderer.fontDescriptions().italic;
+        else
+            return _renderer.fontDescriptions().regular;
+    };
+    auto const nameOfStyledFont = [&](text::font_weight _weight, text::font_slant _slant) -> string
+    {
+        auto const& regularFont = _renderer.fontDescriptions().regular;
+        auto const& styledFont = fontByStyle(_weight, _slant);
+        if (styledFont.familyName == regularFont.familyName)
+            return "auto";
+        else
+            return styledFont.toPattern();
+    };
+    return {
+        _renderer.fontDescriptions().size.pt,
+        _renderer.fontDescriptions().regular.familyName,
+        nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
+        nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
+        nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
+        _renderer.fontDescriptions().emoji.toPattern()
+    };
+}
+
+terminal::renderer::PageMargin computeMargin(Size _cellSize, Size _charCells, Size _pixels) noexcept
+{
+    auto const usedHeight = static_cast<int>(_charCells.height * _cellSize.height);
+    auto const freeHeight = static_cast<int>(_pixels.height - usedHeight);
+    auto const bottomMargin = freeHeight;
+
+    //auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();
+    //auto const freeWidth = _pixels.width - usedWidth;
+    auto constexpr leftMargin = 0;
+
+    return {leftMargin, bottomMargin};
+}
+
+bool applyFontDescription(Size _cellSize,
+                          Size _screenSize,
+                          Size _pixelSize,
+                          Point _screenDPI,
+                          terminal::renderer::Renderer& _renderer,
+                          terminal::renderer::FontDescriptions _fontDescriptions)
+{
+    if (_renderer.fontDescriptions() == _fontDescriptions)
+        return false;
+
+    auto const windowMargin = computeMargin(_cellSize, _screenSize, _pixelSize);
+
+    if (_fontDescriptions.dpi == Zero<Point>)
+        _fontDescriptions.dpi = _screenDPI;
+
+    _renderer.setFonts(_fontDescriptions);
+    _renderer.setMargin(windowMargin);
+    _renderer.updateFontMetrics();
+
+    return true;
+}
+
 } // end namespace

@@ -21,6 +21,20 @@
 
 namespace terminal::renderer {
 
+struct CellMargin
+{
+    int top = 0;
+    int left = 0;
+    int bottom = 0;
+    int right = 0;
+};
+
+struct PageMargin
+{
+    int left;
+    int bottom;
+};
+
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
@@ -34,17 +48,8 @@ struct GridMetrics
         int thickness = 1;  // underline thickness
     } underline{};
 
-    struct {
-        int top = 0;
-        int left = 0;
-        int bottom = 0;
-        int right = 0;
-    } cellMargin{};         // TODO: use me
-
-    struct {
-        int left = 0;
-        int bottom = 0;
-    } pageMargin{};
+    CellMargin cellMargin{}; // TODO: implement respecting cell margins.
+    PageMargin pageMargin{};
 
     /// Maps screen coordinates to target surface coordinates.
     ///

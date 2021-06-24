@@ -151,6 +151,12 @@ void Renderer::setFonts(FontDescriptions _fontDescriptions)
 
 bool Renderer::setFontSize(text::font_size _fontSize)
 {
+    if (_fontSize.pt < 5.) // Let's not be crazy.
+        return false;
+
+    if (_fontSize.pt > 200.)
+        return false;
+
     fontDescriptions_.size = _fontSize;
     fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
     updateFontMetrics();

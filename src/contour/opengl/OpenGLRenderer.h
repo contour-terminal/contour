@@ -40,13 +40,12 @@ class OpenGLRenderer final :
     OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                    ShaderConfig const& _rectShaderConfig,
                    crispy::Size _size,
-                   int _leftMargin,
-                   int _bottomMargin);
+                   terminal::renderer::PageMargin _margin);
 
     ~OpenGLRenderer() override;
 
     void setRenderSize(crispy::Size _size) override;
-    void setMargin(int _left, int _bottom) noexcept override;
+    void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
 
     atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
     atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
@@ -98,8 +97,7 @@ class OpenGLRenderer final :
     crispy::Size size_;
     QMatrix4x4 projectionMatrix_;
 
-    int leftMargin_ = 0;
-    int bottomMargin_ = 0;
+    terminal::renderer::PageMargin margin_{};
 
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;

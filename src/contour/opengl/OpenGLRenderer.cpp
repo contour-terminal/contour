@@ -204,15 +204,13 @@ inline void bound(T& _bindable, Fn&& _callable)
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
                                Size _size,
-                               int _leftMargin,
-                               int _bottomMargin) :
+                               terminal::renderer::PageMargin _margin):
     size_{ _size },
     projectionMatrix_{ortho(
         0.0f, float(_size.width),      // left, right
         0.0f, float(_size.height)      // bottom, top
     )},
-    leftMargin_{ _leftMargin },
-    bottomMargin_{ _bottomMargin },
+    margin_{ _margin },
     textShader_{ createShader(_textShaderConfig) },
     textProjectionLocation_{ textShader_->uniformLocation("vs_projection") },
     // texture
@@ -292,10 +290,9 @@ void OpenGLRenderer::setRenderSize(Size _size)
     );
 }
 
-void OpenGLRenderer::setMargin(int _left, int _bottom) noexcept
+void OpenGLRenderer::setMargin(terminal::renderer::PageMargin _margin) noexcept
 {
-    leftMargin_ = _left;
-    bottomMargin_ = _bottom;
+    margin_ = _margin;
 }
 
 atlas::TextureAtlasAllocator& OpenGLRenderer::monochromeAtlasAllocator() noexcept

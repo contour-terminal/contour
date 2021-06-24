@@ -50,11 +50,6 @@ class TerminalWidget :
     Q_OBJECT
 
 public:
-    struct WindowMargin {
-        int left;
-        int bottom;
-    };
-
     TerminalWidget(config::TerminalProfile const& _profile,
                    TerminalSession& _session,
                    std::function<void()> _adaptSize,
@@ -158,7 +153,6 @@ public:
     void statsSummary();
     void doResize(crispy::Size _size);
     terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
-    WindowMargin computeMargin(crispy::Size _charCells, crispy::Size _pixels) const noexcept;
 
     /// Defines the current screen-dirtiness-vs-rendering state.
     ///
@@ -208,7 +202,6 @@ public:
     TerminalSession& session_;
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBackgroundBlur_;
-    WindowMargin windowMargin_{};
     terminal::renderer::Renderer renderer_;
     crispy::Size size_;                     // view size in pixels
     text::font_size fontSize_{};

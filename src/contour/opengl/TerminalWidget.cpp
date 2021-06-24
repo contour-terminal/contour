@@ -260,7 +260,6 @@ TerminalWidget::TerminalWidget(
     session_{ _session },
     adaptSize_{ std::move(_adaptSize) },
     enableBackgroundBlur_{ std::move(_enableBackgroundBlur) },
-    windowMargin_{ computeMargin(profile_.terminalSize, {width(), height()}) },
     renderer_{
         terminal().screenSize(),
         sanitizeDPI(profile_.fonts),
@@ -414,8 +413,7 @@ void TerminalWidget::initializeGL()
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         Size{width(), height()},
-        0, // TODO left margin
-        0 // TODO bottom margin
+        terminal::renderer::PageMargin{} // TODO margin
     );
 
     renderer_.setRenderTarget(*renderTarget_);
@@ -486,10 +484,9 @@ void TerminalWidget::resizeGL(int _width, int _height)
     size_ = Size{_width, _height};
     auto const newScreenSize = screenSize();
 
-    windowMargin_ = computeMargin(newScreenSize, size_);
     renderer_.setRenderSize(size_);
     renderer_.setScreenSize(newScreenSize);
-    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+    renderer_.setMargin(computeMargin(gridMetrics().cellSize, newScreenSize, size_));
     //renderer_.clearCache();
 
     if (newScreenSize != terminal().screenSize())
@@ -704,40 +701,12 @@ bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, stri
 
 terminal::FontDef TerminalWidget::getFontDef()
 {
-    auto const fontByStyle = [&](text::font_weight _weight, text::font_slant _slant) -> text::font_description const&
-    {
-        auto const bold = _weight != text::font_weight::normal;
-        auto const italic = _slant != text::font_slant::normal;
-        if (bold && italic)
-            return renderer_.fontDescriptions().boldItalic;
-        else if (bold)
-            return renderer_.fontDescriptions().bold;
-        else if (italic)
-            return renderer_.fontDescriptions().italic;
-        else
-            return renderer_.fontDescriptions().regular;
-    };
-    auto const nameOfStyledFont = [&](text::font_weight _weight, text::font_slant _slant) -> string
-    {
-        auto const& regularFont = renderer_.fontDescriptions().regular;
-        auto const& styledFont = fontByStyle(_weight, _slant);
-        if (styledFont.familyName == regularFont.familyName)
-            return "auto";
-        else
-            return styledFont.toPattern();
-    };
-    return {
-        renderer_.fontDescriptions().size.pt,
-        renderer_.fontDescriptions().regular.familyName,
-        nameOfStyledFont(text::font_weight::bold, text::font_slant::normal),
-        nameOfStyledFont(text::font_weight::normal, text::font_slant::italic),
-        nameOfStyledFont(text::font_weight::bold, text::font_slant::italic),
-        renderer_.fontDescriptions().emoji.toPattern()
-    };
+    return getFontDefinition(renderer_);
 }
 
 void TerminalWidget::bell()
 {
+    QApplication::beep();
 }
 
 void TerminalWidget::copyToClipboard(std::string_view _data)
@@ -881,38 +850,19 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
 
 void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
 {
-    if (renderer_.fontDescriptions() == _fontDescriptions)
-        return;
-
-    windowMargin_ = computeMargin(screenSize(), size_);
-    auto fd = _fontDescriptions;
-    if (fd.dpi == Zero<Point>)
-        fd.dpi = screenDPI();
-    renderer_.setFonts(std::move(fd));//_fontDescriptions);
-    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
-    renderer_.updateFontMetrics();
-
-    // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_);
+    if (applyFontDescription(gridMetrics().cellSize,
+                             screenSize(), size_, screenDPI(),
+                             renderer_, _fontDescriptions))
+        resize(size_); // resize widget (same pixels, but adjusted terminal rows/columns and margin)
 }
 
 bool TerminalWidget::setFontSize(text::font_size _size)
 {
-    if (_size.pt < 5.) // Let's not be crazy.
-        return false;
-
-    if (_size.pt > 200.)
-        return false;
-
     if (!renderer_.setFontSize(_size))
         return false;
 
-    windowMargin_ = computeMargin(screenSize(), pixelSize());
-    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
-
-    // resize terminalView (same pixels, but adjusted terminal rows/columns and margin)
-    resize(size_);
-
+    renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), pixelSize()));
+    resize(size_); // resize view (same pixels, but adjusted terminal rows/columns and margin)
     updateMinimumSize();
     return true;
 }
@@ -927,38 +877,15 @@ bool TerminalWidget::setScreenSize(crispy::Size _newScreenSize)
     return true;
 }
 
-constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
-{
-    switch (_shape)
-    {
-        case contour::MouseCursorShape::Hidden:
-            return Qt::CursorShape::BlankCursor;
-        case contour::MouseCursorShape::Arrow:
-            return Qt::CursorShape::ArrowCursor;
-        case contour::MouseCursorShape::IBeam:
-            return Qt::CursorShape::IBeamCursor;
-        case contour::MouseCursorShape::PointingHand:
-            return Qt::CursorShape::PointingHandCursor;
-    }
-
-    // should never be reached
-    return Qt::CursorShape::ArrowCursor;
-}
-
 void TerminalWidget::setMouseCursorShape(MouseCursorShape _shape)
 {
-    auto const newShape = toQtMouseShape(_shape);
-    if (cursor().shape() == newShape)
-        return;
-
-    setCursor(newShape);
+    if (auto const newShape = toQtMouseShape(_shape); newShape != cursor().shape())
+        setCursor(newShape);
 }
 
 void TerminalWidget::setTerminalProfile(config::TerminalProfile _profile)
 {
-    (void) _profile;
-    // TODO
-    // profile_ = std::move(_profile);
+    (void) _profile; // profile_ = std::move(_profile); // TODO
 }
 
 void TerminalWidget::setWindowTitle(string_view _title)
@@ -1114,19 +1041,6 @@ void TerminalWidget::blinkingCursorUpdate()
     scheduleRedraw();
 }
 
-TerminalWidget::WindowMargin TerminalWidget::computeMargin(Size _charCells, Size _pixels) const noexcept
-{
-    auto const usedHeight = static_cast<int>(_charCells.height * gridMetrics().cellSize.height);
-    auto const freeHeight = static_cast<int>(_pixels.height - usedHeight);
-    auto const bottomMargin = freeHeight;
-
-    //auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();
-    //auto const freeWidth = _pixels.width - usedWidth;
-    auto constexpr leftMargin = 0;
-
-    return {leftMargin, bottomMargin};
-}
-
 float TerminalWidget::contentScale() const
 {
     if (!window()->windowHandle())
@@ -1141,11 +1055,9 @@ void TerminalWidget::resize(Size _size)
 
     auto const newScreenSize = screenSize();
 
-    windowMargin_ = computeMargin(newScreenSize, size_);
-
     renderer_.setRenderSize(_size);
     renderer_.setScreenSize(newScreenSize);
-    renderer_.setMargin(windowMargin_.left, windowMargin_.bottom);
+    renderer_.setMargin(computeMargin(gridMetrics().cellSize, newScreenSize, size_));
     //renderer_.clearCache();
 
     if (newScreenSize != terminal().screenSize())

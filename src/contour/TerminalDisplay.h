@@ -14,6 +14,7 @@
 #pragma once
 
 #include <contour/Config.h>
+#include <contour/helper.h>
 
 #include <terminal/InputGenerator.h>
 #include <terminal/Image.h>
@@ -26,13 +27,6 @@
 #include <functional>
 
 namespace contour {
-
-enum class MouseCursorShape {
-    Hidden,
-    PointingHand,
-    IBeam,
-    Arrow,
-};
 
 /**
  * VT Display interface.
