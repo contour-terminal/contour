@@ -122,10 +122,10 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     if (modifiers.contains(Modifier::Control))
     {
-        if (key >= Qt::Key_A && key <= Qt::Key_Z)
+        if (key >= 0x20 && key < 0x7F)
         {
             _session.sendCharPressEvent(CharInputEvent{
-                static_cast<char32_t>(key - Qt::Key_A + 'A'),
+                static_cast<char32_t>(key),
                 modifiers.with(Modifier::Control)}, now);
             return true;
         }
