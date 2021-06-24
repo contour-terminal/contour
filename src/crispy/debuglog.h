@@ -22,6 +22,8 @@
 #include <string_view>
 #include <utility>
 #include <functional>
+#include <vector>
+
 #include <fmt/format.h>
 
 #if defined(__has_include)
