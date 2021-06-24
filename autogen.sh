@@ -1,15 +1,15 @@
 #! /bin/bash
 set -ex
 
+ROOTDIR="$(dirname $0)"
 BUILD_TYPE="${1:-Debug}"
 WORKDIR="build"
 if [[ "${BUILD_TYPE}" != "Debug" ]]; then
     WORKDIR="release"
 fi
 
-ROOTDIR="$(pwd)"
-mkdir -p "${WORKDIR}"
-cd "${WORKDIR}"
+mkdir -p "${ROOTDIR}/${WORKDIR}"
+cd "${ROOTDIR}/${WORKDIR}"
 
 exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
