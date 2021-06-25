@@ -181,7 +181,7 @@ namespace // {{{ helper
         using Writer = std::function<void(char const*, size_t)>;
 
         explicit VTWriter(Writer writer) : writer_{std::move(writer)} {}
-        explicit VTWriter(std::ostream& output) : VTWriter{[&](auto d, auto n) { output.write(d, n); }} {}
+        explicit VTWriter(std::ostream& output) : VTWriter{[&](auto d, auto n) { output.write(d, static_cast<std::streamsize>(n)); }} {}
         explicit VTWriter(std::vector<char>& output) : VTWriter{[&](auto d, auto n) { output.insert(output.end(), d, d + n); }} {}
 
         void setCursorKeysMode(KeyMode _mode) noexcept { cursorKeysMode_ = _mode; }
@@ -192,7 +192,7 @@ namespace // {{{ helper
         {
             char buf[4];
             auto enc = unicode::encoder<char>{};
-            auto count = distance(buf, enc(v, buf));
+            auto count = static_cast<size_t>(distance(buf, enc(v, buf)));
             write(string_view(buf, count));
         }
 
@@ -683,7 +683,7 @@ optional<int> Screen::findMarkerBackward(int _currentCursorLine) const
     if (_currentCursorLine < 0 || !isPrimaryScreen())
         return nullopt;
 
-    _currentCursorLine = min(_currentCursorLine, historyLineCount() + size_.height);
+    _currentCursorLine = min(_currentCursorLine, static_cast<int>(historyLineCount()) + size_.height);
 
     for (int i = _currentCursorLine - 1; i >= 0; --i)
         if (grid().absoluteLineAt(i).marked())
@@ -697,7 +697,7 @@ optional<int> Screen::findMarkerForward(int _currentCursorLine) const
     if (_currentCursorLine < 0 || !isPrimaryScreen())
         return nullopt;
 
-    for (int i = _currentCursorLine + 1; i < historyLineCount() + grid().screenSize().height; ++i)
+    for (int i = _currentCursorLine + 1; i < static_cast<int>(historyLineCount()) + grid().screenSize().height; ++i)
         if (grid().absoluteLineAt(i).marked())
             return {i};
 
@@ -898,9 +898,9 @@ string Screen::renderTextLine(int row) const
 
 string Screen::renderHistoryTextLine(int _lineNumberIntoHistory) const
 {
-    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= historyLineCount());
+    assert(1 <= _lineNumberIntoHistory && _lineNumberIntoHistory <= static_cast<int>(historyLineCount()));
     string line;
-    line.reserve(size_.width);
+    line.reserve(static_cast<size_t>(size_.width));
 
     for (Cell const& cell : grid().lineAt(1 - _lineNumberIntoHistory))
         if (cell.codepointCount())
@@ -1061,7 +1061,7 @@ void Screen::eraseCharacters(int _n)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    size_t const n = min(size_.width - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
+    auto const n = min(size_.width - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
     fill_n(currentColumn_, n, Cell{{}, cursor_.graphicsRendition});
 }
 
@@ -1467,7 +1467,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     // TODO: when capturing _lineCount < screenSize.height, start at the lowest non-empty line.
     auto const relativeStartLine = _logicalLines ? grid().computeRelativeLineNumberFromBottom(_lineCount)
                                                  : size_.height - _lineCount + 1;
-    auto const startLine = clamp(1 - historyLineCount(), relativeStartLine, size_.height);
+    auto const startLine = clamp(1 - static_cast<int>(historyLineCount()), relativeStartLine, size_.height);
 
     // dumpState();
 
@@ -1776,8 +1776,8 @@ void Screen::setMode(DECMode _mode, bool _enable)
                 else
                 {
                     // disabling reflow only affects currently line and below
-                    auto const startLine = historyLineCount() + realCursorPosition().row - 1;
-                    auto const endLine = historyLineCount() + size_.height;
+                    auto const startLine = static_cast<int>(historyLineCount()) + realCursorPosition().row - 1;
+                    auto const endLine = static_cast<int>(historyLineCount()) + size_.height;
                     assert(primaryGrid().lines(startLine, endLine).begin() == currentLine_);
                     for (Line& line : primaryGrid().lines(startLine, endLine))
                         line.setFlag(Line::Flags::Wrappable, _enable);
@@ -2201,7 +2201,7 @@ void Screen::requestCharacterSize(RequestPixelSize _area) // TODO: rename Reques
             reply("\033[9;{};{}t", size_.height, size_.width);
             break;
         case RequestPixelSize::CellArea:
-            assert(!"Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
+            assert(false && "Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
             break;
     }
 }

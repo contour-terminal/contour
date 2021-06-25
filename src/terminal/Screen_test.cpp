@@ -21,7 +21,7 @@ using crispy::Size;
 using namespace terminal;
 using namespace std;
 
-namespace
+namespace // {{{ helper
 {
     void logScreenText(Screen const& screen, string const& headline = "")
     {
@@ -51,7 +51,30 @@ namespace
     {
         return crispy::escape(s);
     }
-}
+
+    MockScreen screenForDECRA()
+    {
+        auto screen = MockScreen{{6, 5}};
+
+        screen.write("ABCDEF\r\n"
+                     "abcdef\r\n"
+                     "123456\r\n");
+        screen.write("\033[43m");
+        screen.write("GHIJKL\r\n"
+                     "ghijkl");
+        screen.write("\033[0m");
+
+        auto const initialText = "ABCDEF\n"
+                                 "abcdef\n"
+                                 "123456\n"
+                                 "GHIJKL\n"
+                                 "ghijkl\n";
+
+        CHECK(screen.renderText() == initialText);
+
+        return screen;
+    }
+} // }}}
 
 TEST_CASE("Screen.isLineVisible", "[screen]")
 {
@@ -1781,10 +1804,15 @@ TEST_CASE("render into history", "[screen]")
     REQUIRE(screen.historyLineCount() == 3);
 
     string renderedText;
-    renderedText.resize((screen.size().width + 1) * screen.size().height);
+    renderedText.resize(static_cast<size_t>(
+        static_cast<uint16_t>(screen.size().width + 1)
+      * static_cast<uint16_t>(screen.size().height)));
     auto const renderer = [&](Coordinate const& pos, Cell const& cell) {
-        auto const offset = (pos.row - 1) * (screen.size().width + 1)
-                          + (pos.column - 1);
+        auto const offset = static_cast<size_t>(
+            static_cast<uint16_t>(pos.row - 1)
+          * static_cast<uint16_t>(screen.size().width + 1))
+          + static_cast<uint16_t>(pos.column - 1
+        );
         renderedText.at(offset) = static_cast<char>(cell.codepoint(0));
         if (pos.column == screen.size().width)
             renderedText.at(offset + 1) = '\n';
@@ -2094,10 +2122,6 @@ TEST_CASE("findMarkerForward", "[screen]")
         auto mark = screen.findMarkerForward(5);
         REQUIRE_FALSE(mark.has_value());
 
-        // test one line beyond history line count
-        mark = screen.findMarkerForward(-1);
-        REQUIRE_FALSE(mark.has_value());
-
         // test last history line
         mark = screen.findMarkerForward(0);
         REQUIRE_FALSE(mark.has_value());
@@ -2191,11 +2215,7 @@ TEST_CASE("findMarkerBackward", "[screen]")
 
         REQUIRE(screen.historyLineCount() == 3);
 
-        auto mark = screen.findMarkerBackward(screen.size().height);
-        REQUIRE_FALSE(mark.has_value());
-
-        // test one line beyond history line count
-        mark = screen.findMarkerBackward(-1);
+        auto mark = screen.findMarkerBackward(static_cast<unsigned>(screen.size().height));
         REQUIRE_FALSE(mark.has_value());
 
         // test last history line
@@ -2264,10 +2284,6 @@ TEST_CASE("findMarkerBackward", "[screen]")
         // 0: -> NONE
         marker = screen.findMarkerBackward(0);
         CHECK_FALSE(marker.has_value());
-
-        // -1: -> NONE (one off edge case)
-        marker = screen.findMarkerBackward(-1);
-        CHECK_FALSE(marker.has_value());
     }
 }
 
@@ -2325,12 +2341,12 @@ TEST_CASE("OSC.4")
     auto screen = MockScreen{{2, 2}};
 
     SECTION("query") {
-        screen.write("\e]4;1;?");
+        screen.write("\033]4;1;?");
         INFO(screen.replyData);
     }
 
     SECTION("set") {
-        screen.write("\e]4;1;rgb:ab/cd/ef");
+        screen.write("\033]4;1;rgb:ab/cd/ef");
     }
 }
 
@@ -2450,29 +2466,6 @@ TEST_CASE("resize", "[screen]")
 // TODO: also test with: margins set and having them exceeded
 // TODO: also test with: overflowing source bottom/right dimensions
 // TODO: also test with: out-of-bounds target or source top/left positions
-
-MockScreen screenForDECRA()
-{
-    auto screen = MockScreen{{6, 5}};
-
-    screen.write("ABCDEF\r\n"
-                 "abcdef\r\n"
-                 "123456\r\n");
-    screen.write("\033[43m");
-    screen.write("GHIJKL\r\n"
-                 "ghijkl");
-    screen.write("\033[0m");
-
-    auto const initialText = "ABCDEF\n"
-                             "abcdef\n"
-                             "123456\n"
-                             "GHIJKL\n"
-                             "ghijkl\n";
-
-    CHECK(screen.renderText() == initialText);
-
-    return screen;
-}
 
 TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
 {

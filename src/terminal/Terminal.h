@@ -112,9 +112,9 @@ class Terminal : public ScreenEvents {
     Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
     {
         // TODO: unit test case me BEFORE merge, yo !
-        auto const row = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount()) + (_pos.row - 1);
+        auto const row = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount()) + (static_cast<unsigned>(_pos.row) - 1);
         auto const col = _pos.column;
-        return Coordinate{row, col};
+        return Coordinate{static_cast<int>(row), col};
     }
 
     /// Writes a given VT-sequence to screen.
@@ -203,7 +203,7 @@ class Terminal : public ScreenEvents {
     /// Only access this when having the terminal object locked.
     Screen& screen() noexcept { return screen_; }
 
-    bool lineWrapped(int _lineNumber) const { return screen_.lineWrapped(_lineNumber); }
+    bool lineWrapped(unsigned _lineNumber) const { return screen_.lineWrapped(_lineNumber); }
 
     Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
 

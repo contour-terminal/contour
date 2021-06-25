@@ -28,13 +28,13 @@ namespace // {{{ helper
     {
         UNSCOPED_INFO(fmt::format("Grid.dump({}, {}): {}\n", _grid.historyLineCount(), _grid.screenSize(), _headline));
 
-        for (int row = 0; row < _grid.historyLineCount() + _grid.screenSize().height; ++row)
+        for (size_t row = 0; row < _grid.historyLineCount() + static_cast<size_t>(_grid.screenSize().height); ++row)
         {
             UNSCOPED_INFO(fmt::format(
                 "{}: \"{}\" {}\n",
                 row,
-                _grid.renderTextLine(row - _grid.historyLineCount() + 1),
-                _grid.absoluteLineAt(row).flags()
+                _grid.renderTextLine(static_cast<int>(row - _grid.historyLineCount() + 1)),
+                _grid.absoluteLineAt(static_cast<unsigned>(row)).flags()
             ));
         }
     }

@@ -181,7 +181,7 @@ class Screen : public capabilities::StaticDatabase {
     void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
     std::optional<int> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
 
-    int historyLineCount() const noexcept { return grid().historyLineCount(); }
+    size_t historyLineCount() const noexcept { return grid().historyLineCount(); }
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -374,9 +374,9 @@ class Screen : public capabilities::StaticDatabase {
 
     bool isCursorInsideMargins() const noexcept
     {
-        bool const insideVerticalMargin = margin_.vertical.contains(cursor_.position.row);
+        bool const insideVerticalMargin = margin_.vertical.contains(static_cast<unsigned>(cursor_.position.row));
         bool const insideHorizontalMargin = !isModeEnabled(DECMode::LeftRightMargin)
-                                         || margin_.horizontal.contains(cursor_.position.column);
+                                         || margin_.horizontal.contains(static_cast<unsigned>(cursor_.position.column));
         return insideVerticalMargin && insideHorizontalMargin;
     }
 
@@ -387,14 +387,14 @@ class Screen : public capabilities::StaticDatabase {
             return realCursorPosition();
         else
             return Coordinate{
-                cursor_.position.row - margin_.vertical.from + 1,
-                cursor_.position.column - margin_.horizontal.from + 1
+                cursor_.position.row - static_cast<int>(margin_.vertical.from + 1),
+                cursor_.position.column - static_cast<int>(margin_.horizontal.from + 1)
             };
     }
 
     constexpr Coordinate origin() const noexcept {
         if (cursor_.originMode)
-            return {margin_.vertical.from, margin_.horizontal.from};
+            return {static_cast<int>(margin_.vertical.from), static_cast<int>(margin_.horizontal.from)};
         else
             return {1, 1};
     }
@@ -511,7 +511,7 @@ class Screen : public capabilities::StaticDatabase {
     ///                            (0..-N) for savedLines area
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
-    std::optional<int> findMarkerForward(int _currentCursorLine) const;
+    std::optional<unsigned> findMarkerForward(unsigned _currentCursorLine) const;
 
     /// Finds the previous marker right next to the given line position.
     ///
@@ -519,7 +519,7 @@ class Screen : public capabilities::StaticDatabase {
     ///                            (0..-N) for savedLines area
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
-    std::optional<int> findMarkerBackward(int _currentCursorLine) const;
+    std::optional<unsigned> findMarkerBackward(unsigned _currentCursorLine) const;
 
     /// ScreenBuffer's type, such as main screen or alternate screen.
     ScreenType bufferType() const noexcept { return screenType_; }
@@ -568,13 +568,13 @@ class Screen : public capabilities::StaticDatabase {
     Grid& backgroundGrid() noexcept { return isPrimaryScreen() ? alternateGrid() : primaryGrid(); }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
-    bool lineWrapped(int _lineNumber) const { return activeGrid_->absoluteLineAt(_lineNumber).wrapped(); }
+    bool lineWrapped(unsigned _lineNumber) const { return activeGrid_->absoluteLineAt(_lineNumber).wrapped(); }
 
-    int toAbsoluteLine(int _relativeLine) const noexcept { return activeGrid_->toAbsoluteLine(_relativeLine); }
-    Coordinate toAbsolute(Coordinate _coord) const noexcept { return {activeGrid_->toAbsoluteLine(_coord.row), _coord.column}; }
+    unsigned toAbsoluteLine(int _relativeLine) const noexcept { return activeGrid_->toAbsoluteLine(_relativeLine); }
+    Coordinate toAbsolute(Coordinate _coord) const noexcept { return {static_cast<int>(activeGrid_->toAbsoluteLine(_coord.row)), _coord.column}; }
 
-    int toRelativeLine(int _absoluteLine) const noexcept { return activeGrid_->toRelativeLine(_absoluteLine); }
-    Coordinate toRelative(Coordinate _coord) const noexcept { return {activeGrid_->toRelativeLine(_coord.row), _coord.column}; }
+    int toRelativeLine(unsigned _absoluteLine) const noexcept { return activeGrid_->toRelativeLine(_absoluteLine); }
+    Coordinate toRelative(Coordinate _coord) const noexcept { return {activeGrid_->toRelativeLine(static_cast<unsigned>(_coord.row)), _coord.column}; }
 
     ColorPalette& colorPalette() noexcept { return colorPalette_; }
     ColorPalette const& colorPalette() const noexcept { return colorPalette_; }
@@ -634,7 +634,8 @@ class Screen : public capabilities::StaticDatabase {
     /// Sets the current column to given logical column number.
     void setCurrentColumn(int _n);
 
-  private:
+    // private data
+    //
     ScreenEvents& eventListener_;
 
     bool logRaw_ = false;

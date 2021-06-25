@@ -32,7 +32,7 @@ class Viewport {
     {}
 
     /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
-    std::optional<int> absoluteScrollOffset() const noexcept
+    std::optional<unsigned> absoluteScrollOffset() const noexcept
     {
         return scrollOffset_;
     }
@@ -50,7 +50,7 @@ class Viewport {
     int relativeScrollOffset() const noexcept
     {
         return scrollOffset_.has_value()
-            ? historyLineCount() - scrollOffset_.value()
+            ? static_cast<int>(historyLineCount()) - static_cast<int>(scrollOffset_.value())
             : 0;
     }
 
@@ -59,21 +59,21 @@ class Viewport {
         return crispy::ascending(1 - relativeScrollOffset(), _row, screenLineCount() - relativeScrollOffset());
     }
 
-    bool scrollUp(int _numLines)
+    bool scrollUp(unsigned _numLines)
     {
         if (_numLines <= 0)
             return false;
 
-        auto const newOffset = std::max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0);
+        auto const newOffset = std::max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0u);
         return scrollToAbsolute(newOffset);
     }
 
-    bool scrollDown(int _numLines)
+    bool scrollDown(unsigned _numLines)
     {
         if (_numLines <= 0)
             return false;
 
-        auto const newOffset = absoluteScrollOffset().value_or(historyLineCount()) + _numLines;
+        auto const newOffset = absoluteScrollOffset().value_or(static_cast<unsigned>(historyLineCount())) + _numLines;
         return scrollToAbsolute(newOffset);
     }
 
@@ -103,12 +103,12 @@ class Viewport {
         return true;
     }
 
-    bool scrollToAbsolute(int _absoluteScrollOffset)
+    bool scrollToAbsolute(unsigned _absoluteScrollOffset)
     {
         if (scrollingDisabled())
             return false;
 
-        if (0 <= _absoluteScrollOffset && _absoluteScrollOffset < historyLineCount())
+        if (_absoluteScrollOffset < static_cast<unsigned>(historyLineCount()))
         {
             scrollOffset_.emplace(_absoluteScrollOffset);
             modified_();
@@ -149,8 +149,8 @@ class Viewport {
     }
 
   private:
-    int historyLineCount() const noexcept { return screen_.historyLineCount(); }
-    int screenLineCount() const noexcept { return screen_.size().height; }
+    size_t historyLineCount() const noexcept { return screen_.historyLineCount(); }
+    unsigned short screenLineCount() const noexcept { return static_cast<unsigned short>(screen_.size().height); }
 
     bool scrollingDisabled() const noexcept
     {
@@ -158,10 +158,11 @@ class Viewport {
         return screen_.isAlternateScreen();
     }
 
-  private:
+    // private data
+    //
     Screen& screen_;
     ModifyEvent modified_;
-    std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    std::optional<unsigned> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
 };
 
 }

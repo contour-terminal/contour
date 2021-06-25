@@ -35,16 +35,16 @@ namespace // {{{ helpers
         terminal::RenderBufferRef renderBuffer = _terminal.renderBuffer();
 
         vector<string> lines;
-        lines.resize(_terminal.screenSize().height);
+        lines.resize(static_cast<size_t>(_terminal.screenSize().height));
 
         terminal::Coordinate lastPos = {};
         size_t lastCount = 0;
         for (terminal::RenderCell const& cell: renderBuffer.buffer.screen)
         {
             auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
-            auto& currentLine = lines.at(cell.position.row - 1);
+            auto& currentLine = lines.at(static_cast<size_t>(cell.position.row - 1));
             if (gap > 0) // Did we jump?
-                currentLine.insert(currentLine.end(), gap - 1, ' ');
+                currentLine.insert(currentLine.end(), static_cast<size_t>(gap - 1), ' ');
 
             currentLine += unicode::convert_to<char>(u32string_view(cell.codepoints));
             lastPos = cell.position;

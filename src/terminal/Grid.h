@@ -54,14 +54,14 @@ namespace terminal {
 // {{{ Margin
 struct Margin {
 	struct Range {
-		int from;
-		int to;
+		unsigned int from;
+		unsigned int to;
 
-		constexpr int length() const noexcept { return to - from + 1; }
+		constexpr unsigned length() const noexcept { return to - from + 1; }
 		constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
 		constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
 
-		constexpr bool contains(int _value) const noexcept { return from <= _value && _value <= to; }
+		constexpr bool contains(unsigned _value) const noexcept { return from <= _value && _value <= to; }
 	};
 
 	Range vertical{}; // top-bottom
@@ -415,7 +415,7 @@ class Line { // {{{
     using const_iterator = Buffer::const_iterator;
     using reverse_iterator = Buffer::reverse_iterator;
 
-    Line(int _numCols, Cell const& _defaultCell, Flags _flags) :
+    Line(size_t _numCols, Cell const& _defaultCell, Flags _flags) :
         buffer_(static_cast<size_t>(_numCols), _defaultCell),
         flags_{static_cast<unsigned>(_flags)}
     {}
@@ -423,8 +423,8 @@ class Line { // {{{
     Line(Buffer const& _init, Flags _flags) : Line(Buffer(_init), _flags) {}
     Line(Buffer&& _init, Flags _flags);
     Line(iterator const& _begin, iterator const& _end, Flags _flags);
-    Line(int _numCols, Buffer&& _init, Flags _flags);
-    Line(int _numCols, std::string_view const& _s, Flags _flags);
+    Line(size_t _numCols, Buffer&& _init, Flags _flags);
+    Line(size_t _numCols, std::string_view const& _s, Flags _flags);
 
     Buffer& buffer() noexcept { return buffer_; }
 
@@ -447,25 +447,25 @@ class Line { // {{{
 
     void prepend(Buffer const&);
     void append(Buffer const&);
-    void append(int _count, Cell const& _initial);
+    void append(size_t _count, Cell const& _initial);
 
     Buffer remove(iterator const& _from, iterator const& _to);
 
     /// Shhift left by @p _count cells and fill right with cells of @p _fill.
     ///
     /// @returns sequence of cells that have been shifted out.
-    Buffer shift_left(int _count, Cell const& _fill);
+    Buffer shift_left(unsigned _count, Cell const& _fill);
 
     crispy::range<const_iterator> trim_blank_right() const;
 
-    int size() const noexcept { return static_cast<int>(buffer_.size()); }
+    size_t size() const noexcept { return buffer_.size(); }
 
     bool blank() const noexcept;
 
     // TODO (trimmed version of size()): int maxOccupiedColumns() const noexcept { return size(); }
 
-    void resize(int _size);
-    [[nodiscard]] Buffer reflow(int _column);
+    void resize(size_t _size);
+    [[nodiscard]] Buffer reflow(size_t _column);
 
     iterator begin() { return buffer_.begin(); }
     iterator end() { return buffer_.end(); }
@@ -584,8 +584,8 @@ class Grid {
     /// @returns updated cursor position.
     Coordinate resize(crispy::Size _screenSize, Coordinate _currentCursorPos, bool _wrapPending);
 
-    std::optional<int> maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
-    void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
+    std::optional<size_t> maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
 
     bool reflowOnResize() const noexcept { return reflowOnResize_; }
     void setReflowOnResize(bool _enabled) { reflowOnResize_ = _enabled; }
@@ -600,18 +600,18 @@ class Grid {
     template <typename RendererT>
     void render(RendererT && _render, std::optional<int> _scrollOffset = std::nullopt) const;
 
-    Line& absoluteLineAt(int _line) noexcept;
-    Line const& absoluteLineAt(int _line) const noexcept;
+    Line& absoluteLineAt(unsigned _line) noexcept;
+    Line const& absoluteLineAt(unsigned _line) const noexcept;
 
     /// @returns reference to Line at given relative offset @p _line.
     Line& lineAt(int _line) noexcept;
     Line const& lineAt(int _line) const noexcept;
 
     /// Converts a relative line number into an absolute line number.
-    int toAbsoluteLine(int _relativeLine) const noexcept;
+    unsigned toAbsoluteLine(int _relativeLine) const noexcept;
 
     /// Converts an absolute line number into a relative line number.
-    int toRelativeLine(int _absoluteLine) const noexcept;
+    int toRelativeLine(unsigned _absoluteLine) const noexcept;
 
     int computeRelativeLineNumberFromBottom(int _n) const noexcept;
 
@@ -621,8 +621,8 @@ class Grid {
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell const& at(Coordinate const& _coord) const noexcept;
 
-    crispy::range<Lines::const_iterator> lines(int _start, int _count) const;
-    crispy::range<Lines::iterator> lines(int _start, int _count);
+    crispy::range<Lines::const_iterator> lines(size_t _start, size_t _count) const;
+    crispy::range<Lines::iterator> lines(size_t _start, size_t _count);
 
     crispy::range<Lines::const_iterator> pageAtScrollOffset(std::optional<unsigned> _scrollOffset) const;
     crispy::range<Lines::iterator> pageAtScrollOffset(std::optional<unsigned> _scrollOffset);
@@ -640,17 +640,17 @@ class Grid {
     /// @param _n number of lines to scroll up within the given margin.
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
-    void scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+    void scrollUp(unsigned _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
 
     /// Scrolls down by @p _n lines within the given margin.
     ///
     /// @param _n number of lines to scroll down within the given margin.
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
-    void scrollDown(int _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+    void scrollDown(unsigned _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
 
-    std::string renderTextLineAbsolute(int row) const;
-    std::string renderTextLine(int row) const;
+    std::string renderTextLineAbsolute(unsigned row) const; // absolute line number
+    std::string renderTextLine(int row) const; // relative line number
     std::string renderText() const;
 
     /// Renders the full grid's text characters.
@@ -662,13 +662,13 @@ class Grid {
     /// Ensures the maxHistoryLineCount attribute will be satisified, potentially deleting any
     /// overflowing history line.
     void clampHistory();
-    void appendNewLines(int _count, GraphicsAttributes _attr);
+    void appendNewLines(size_t _count, GraphicsAttributes _attr);
 
     // private data
     //
     crispy::Size screenSize_;
     bool reflowOnResize_;
-    std::optional<int> maxHistoryLineCount_;
+    std::optional<size_t> maxHistoryLineCount_;
     Lines lines_;
 };
 
@@ -681,18 +681,18 @@ inline void Grid::render(RendererT && _render, std::optional<int> _scrollOffset)
         for (auto const && [colNumber, column] : crispy::indexed(line, 1))
             _render({rowNumber, colNumber}, column);
 
-        for (auto const colNumber : crispy::times(line.size() + 1, std::max(0, screenSize_.width - line.size())))
+        for (auto const colNumber : crispy::times(static_cast<int>(line.size()) + 1, std::max(0, screenSize_.width - static_cast<int>(line.size()))))
             _render({rowNumber, colNumber}, Cell{});
     }
 }
 
-inline Line& Grid::absoluteLineAt(int _line) noexcept
+inline Line& Grid::absoluteLineAt(unsigned _line) noexcept
 {
-    assert(crispy::ascending(0, _line, static_cast<int>(lines_.size()) - 1));
+    assert(crispy::ascending(0u, _line, static_cast<unsigned>(lines_.size()) - 1));
     return *next(lines_.begin(), _line);
 }
 
-inline Line const& Grid::absoluteLineAt(int _line) const noexcept
+inline Line const& Grid::absoluteLineAt(unsigned _line) const noexcept
 {
     return const_cast<Grid&>(*this).absoluteLineAt(_line);
 }
@@ -709,19 +709,19 @@ inline Line const& Grid::lineAt(int _line) const noexcept
     return const_cast<Grid&>(*this).lineAt(_line);
 }
 
-inline int Grid::toAbsoluteLine(int _relativeLine) const noexcept
+inline unsigned Grid::toAbsoluteLine(int _relativeLine) const noexcept
 {
-    return static_cast<int>(historyLineCount()) + _relativeLine - 1;
+    return static_cast<unsigned>(static_cast<int>(historyLineCount()) + _relativeLine - 1);
 }
 
-inline int Grid::toRelativeLine(int _absoluteLine) const noexcept
+inline int Grid::toRelativeLine(unsigned _absoluteLine) const noexcept
 {
-    return _absoluteLine - static_cast<int>(historyLineCount());
+    return static_cast<int>(_absoluteLine) - static_cast<int>(historyLineCount());
 }
 
 inline Cell& Grid::at(Coordinate const& _coord) noexcept
 {
-    assert(crispy::ascending(1 - historyLineCount(), _coord.row, screenSize_.height));
+    assert(crispy::ascending(1 - static_cast<int>(historyLineCount()), _coord.row, screenSize_.height));
     assert(crispy::ascending(1, _coord.column, screenSize_.width));
 
     if (_coord.row > 0)
@@ -735,31 +735,31 @@ inline Cell const& Grid::at(Coordinate const& _coord) const noexcept
     return const_cast<Grid&>(*this).at(_coord);
 }
 
-inline crispy::range<Lines::const_iterator> Grid::lines(int _start, int _end) const
+inline crispy::range<Lines::const_iterator> Grid::lines(size_t _start, size_t _end) const
 {
-    assert(crispy::ascending(0, _start, int(lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
-    assert(crispy::ascending(_start, _end, int(lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(size_t{0}, _start, (lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(_start, _end, (lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
 
     return crispy::range<Lines::const_iterator>(
-        next(lines_.cbegin(), _start),
-        next(lines_.cbegin(), _end)
+        next(lines_.cbegin(), static_cast<long int>(_start)),
+        next(lines_.cbegin(), static_cast<long int>(_end))
     );
 }
 
-inline crispy::range<Lines::iterator> Grid::lines(int _start, int _end)
+inline crispy::range<Lines::iterator> Grid::lines(size_t _start, size_t _end)
 {
-    assert(crispy::ascending(0, _start, int(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
-    assert(crispy::ascending(_start, _end, int(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(size_t{0}, _start, lines_.size()) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(_start, _end, lines_.size()) && "Absolute scroll offset must not be negative or overflowing.");
 
     return crispy::range<Lines::iterator>(
-        next(lines_.begin(), _start),
-        next(lines_.begin(), _end)
+        next(lines_.begin(), static_cast<long int>(_start)),
+        next(lines_.begin(), static_cast<long int>(_end))
     );
 }
 
 inline crispy::range<Lines::const_iterator> Grid::pageAtScrollOffset(std::optional<unsigned> _scrollOffset) const
 {
-    assert(crispy::ascending(0u, _scrollOffset.value_or(0u), historyLineCount()) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(0u, _scrollOffset.value_or(0u), static_cast<unsigned>(historyLineCount())) && "Absolute scroll offset must not be negative or overflowing.");
 
     auto const start = std::next(lines_.cbegin(),
                                  static_cast<long int>(_scrollOffset.value_or(historyLineCount())));
@@ -770,7 +770,7 @@ inline crispy::range<Lines::const_iterator> Grid::pageAtScrollOffset(std::option
 
 inline crispy::range<Lines::iterator> Grid::pageAtScrollOffset(std::optional<unsigned> _scrollOffset)
 {
-    assert(crispy::ascending(0u, _scrollOffset.value_or(0u), historyLineCount()) && "Absolute scroll offset must not be negative or overflowing.");
+    assert(crispy::ascending(0u, _scrollOffset.value_or(0u), static_cast<unsigned>(historyLineCount())) && "Absolute scroll offset must not be negative or overflowing.");
 
     return crispy::range<Lines::iterator>(
         std::next(

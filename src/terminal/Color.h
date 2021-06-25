@@ -184,8 +184,8 @@ constexpr bool isIndexedColor(Color _color) noexcept { return _color.type == Col
 constexpr bool isBrightColor(Color _color) noexcept { return _color.type == ColorType::Bright; }
 constexpr bool isRGBColor(Color _color) noexcept { return _color.type == ColorType::RGB; }
 
-constexpr int getIndexedColor(Color _color) noexcept { return _color.index; }
-constexpr int getBrightColor(Color _color) noexcept { return _color.index; }
+constexpr uint8_t getIndexedColor(Color _color) noexcept { return _color.index; }
+constexpr uint8_t getBrightColor(Color _color) noexcept { return _color.index; }
 constexpr RGBColor getRGBColor(Color _color) noexcept { return _color.rgb; }
 
 std::string to_string(Color color);

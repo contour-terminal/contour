@@ -96,24 +96,24 @@ Line::Line(iterator const& _begin, iterator const& _end, Flags _flags) :
 {
 }
 
-Line::Line(int _numCols, Buffer&& _init, Flags _flags) :
+Line::Line(size_t _numCols, Buffer&& _init, Flags _flags) :
     buffer_{move(_init)},
     flags_{ static_cast<unsigned>(_flags) }
 {
-    buffer_.resize(static_cast<int>(_numCols));
+    buffer_.resize(_numCols);
 }
 
-Line::Line(int _numCols, std::string_view const& _s, Flags _flags) :
+Line::Line(size_t _numCols, std::string_view const& _s, Flags _flags) :
     Line(_numCols, Cell{}, _flags)
 {
     for (auto const && [i, ch] : crispy::indexed(_s))
-        buffer_.at(i).setCharacter(ch);
+        buffer_.at(i).setCharacter(static_cast<char32_t>(ch));
 }
 
 string Line::toUtf8() const
 {
     std::stringstream sstr;
-    for (Cell const& cell : crispy::range(begin(), next(begin(), size())))
+    for (Cell const& cell : crispy::range(begin(), next(begin(), static_cast<long int>(size()))))
     {
         if (cell.codepointCount() == 0)
         {
@@ -146,7 +146,7 @@ void Line::append(Buffer const& _cells)
     buffer_.insert(buffer_.end(), _cells.begin(), _cells.end());
 }
 
-void Line::append(int _count, Cell const& _initial)
+void Line::append(size_t _count, Cell const& _initial)
 {
     fill_n(back_inserter(buffer_), _count, _initial);
 }
@@ -162,11 +162,11 @@ crispy::range<Line::const_iterator> Line::trim_blank_right() const
     return crispy::range(i, e);
 }
 
-Line::Buffer Line::shift_left(int _count, Cell const& _fill)
+Line::Buffer Line::shift_left(unsigned _count, Cell const& _fill)
 {
-    auto const actualShiftCount = min(_count, size());
+    auto const actualShiftCount = min(static_cast<size_t>(_count), size());
     auto const from = std::begin(buffer_);
-    auto const to = std::next(std::begin(buffer_), actualShiftCount);
+    auto const to = std::next(std::begin(buffer_), static_cast<long int>(actualShiftCount));
 
     auto out = remove(from, to);
     append(actualShiftCount, _fill);
@@ -191,10 +191,10 @@ void Line::setText(std::string_view _u8string)
         buffer_.at(i).setCharacter(ch);
 }
 
-void Line::resize(int _size)
+void Line::resize(size_t _size)
 {
     if (_size >= 0)
-        buffer_.resize(static_cast<int>(_size));
+        buffer_.resize(_size);
 }
 
 bool Line::blank() const noexcept
@@ -202,14 +202,14 @@ bool Line::blank() const noexcept
     return std::all_of(cbegin(), cend(), is_blank);
 }
 
-Line::Buffer Line::reflow(int _newColumnCount)
+Line::Buffer Line::reflow(size_t _newColumnCount)
 {
     switch (crispy::strongCompare(_newColumnCount, size()))
     {
         case Comparison::Equal:
             break;
         case Comparison::Greater:
-            buffer_.resize(_newColumnCount);
+            buffer_.resize(static_cast<size_t>(_newColumnCount));
             break;
         case Comparison::Less:
         {
@@ -221,7 +221,7 @@ Line::Buffer Line::reflow(int _newColumnCount)
             {
                 auto const [reflowStart, reflowEnd] = [this, _newColumnCount]()
                 {
-                    auto const reflowStart = next(buffer_.begin(), _newColumnCount /* - buffer_[_newColumnCount].width()*/);
+                    auto const reflowStart = next(buffer_.begin(), static_cast<long int>(_newColumnCount /* - buffer_[_newColumnCount].width()*/));
                     auto reflowEnd = buffer_.end();
 
                     while (reflowEnd != reflowStart && is_blank(*prev(reflowEnd)))
@@ -237,7 +237,7 @@ Line::Buffer Line::reflow(int _newColumnCount)
             }
             else
             {
-                auto const reflowStart = next(buffer_.cbegin(), _newColumnCount);
+                auto const reflowStart = next(buffer_.cbegin(), static_cast<long int>(_newColumnCount));
                 buffer_.erase(reflowStart, buffer_.end());
                 assert(size() == _newColumnCount);
                 return {};
@@ -273,7 +273,7 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
  * @param _initialNoWrap
  */
 void addNewWrappedLines(Lines& _targetLines,
-                        int _newColumnCount,
+                        size_t _newColumnCount,
                         Line::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
                         Line::Flags _baseFlags,
                         bool _initialNoWrap)
@@ -281,10 +281,10 @@ void addNewWrappedLines(Lines& _targetLines,
     // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
     int i = 0;
 
-    while (static_cast<int>(_logicalLineBuffer.size()) >= _newColumnCount)
+    while (_logicalLineBuffer.size() >= _newColumnCount)
     {
         auto from = begin(_logicalLineBuffer);
-        auto to = next(begin(_logicalLineBuffer), _newColumnCount);
+        auto to = next(begin(_logicalLineBuffer), static_cast<int>(_newColumnCount));
         auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
         _targetLines.emplace_back(Line(from, to, _baseFlags | wrappedFlag));
         logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
@@ -300,7 +300,7 @@ void addNewWrappedLines(Lines& _targetLines,
     }
 }
 
-void Grid::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
+void Grid::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
 {
     maxHistoryLineCount_ = _maxHistoryLineCount;
     clampHistory();
@@ -342,11 +342,12 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
 {
     auto const growLines = [this](int _newHeight) -> Coordinate
     {
+        assert(_newHeight > screenSize_.height);
         // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until screenSize_.height == _newHeight.
 
-        auto const extendCount = _newHeight - screenSize_.height;
-        auto const rowsToTakeFromSavedLines = min(extendCount, historyLineCount());
+        auto const extendCount = static_cast<unsigned>(_newHeight - screenSize_.height);
+        auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned>(historyLineCount()));
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
         auto const wrappableFlag = lines_.back().wrappableFlag();
 
@@ -356,12 +357,12 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         generate_n(
             back_inserter(lines_),
             fillLineCount,
-            [this, wrappableFlag]() { return Line(screenSize_.width, Cell{}, wrappableFlag); }
+            [this, wrappableFlag]() { return Line(static_cast<size_t>(screenSize_.width), Cell{}, wrappableFlag); }
         );
 
         screenSize_.height = _newHeight;
 
-        return Coordinate{rowsToTakeFromSavedLines, 0};
+        return Coordinate{static_cast<int>(rowsToTakeFromSavedLines), 0};
     };
 
     auto const shrinkLines = [this](int _newHeight, Coordinate _cursor) -> Coordinate
@@ -379,20 +380,20 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         else
         {
             // Hard-cut below cursor by the number of lines to shrink.
-            lines_.resize(historyLineCount() + _newHeight);
+            lines_.resize(historyLineCount() + static_cast<size_t>(_newHeight));
             screenSize_.height = _newHeight;
             return Coordinate{0, 0};
         }
     };
 
-    auto const growColumns = [this, _wrapPending](int _newColumnCount, Coordinate _cursor) -> Coordinate
+    auto const growColumns = [this, _wrapPending](size_t _newColumnCount, Coordinate _cursor) -> Coordinate
     {
         if (!reflowOnResize_)
         {
             for (Line& line : lines_)
-                if (static_cast<int>(line.size()) < _newColumnCount)
-                    line.resize(_newColumnCount);
-            screenSize_.width = _newColumnCount;
+                if (line.size() < static_cast<size_t>(_newColumnCount))
+                    line.resize(static_cast<size_t>(_newColumnCount));
+            screenSize_.width = static_cast<int>(_newColumnCount);
             return _cursor + Coordinate{0, _wrapPending ? 1 : 0};
         }
         else
@@ -400,8 +401,8 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             // Grow columns by inverse shrink,
             // i.e. the lines are traversed in reverse order.
 
-            auto const extendCount = _newColumnCount - screenSize_.width;
-            assert(extendCount > 0);
+            assert(_newColumnCount > static_cast<unsigned>(screenSize_.width));
+            auto const extendCount = _newColumnCount - static_cast<unsigned>(screenSize_.width);
 
             logf("Growing by {} cols", extendCount);
 
@@ -417,7 +418,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
                      line.toUtf8(),
                      Line(Line::Buffer(logicalLineBuffer), line.flags()).toUtf8(),
                      line.wrapped() ? "WRAPPED" : "");
-                assert(line.size() >= screenSize_.width);
+                assert(line.size() >= static_cast<unsigned>(screenSize_.width));
 
                 if (line.wrapped())
                 {
@@ -446,29 +447,30 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             }
 
             lines_ = move(grownLines);
-            screenSize_.width = _newColumnCount;
+            screenSize_.width = static_cast<int>(_newColumnCount);
 
-            auto cy = 0;
-            if (historyLineCount() < 0)
+            auto cy = size_t{0};
+            auto const historyLineCountDelta = (static_cast<int>(lines_.size()) - static_cast<int>(screenSize_.height));
+            if (historyLineCountDelta < 0)
             {
                 cy = historyLineCount();
-                appendNewLines(-historyLineCount(), lines_.back()->back().attributes());
+                appendNewLines(static_cast<size_t>(-historyLineCountDelta), lines_.back()->back().attributes());
             }
 
-            return _cursor + Coordinate{cy, _wrapPending ? 1 : 0};
+            return _cursor + Coordinate{static_cast<int>(cy), _wrapPending ? 1 : 0};
         }
     };
 
-    auto const shrinkColumns = [this](int _newColumnCount, Coordinate _cursor) -> Coordinate
+    auto const shrinkColumns = [this](size_t _newColumnCount, Coordinate _cursor) -> Coordinate
     {
         if (!reflowOnResize_)
         {
-            screenSize_.width = _newColumnCount;
+            screenSize_.width = static_cast<int>(_newColumnCount);
             crispy::for_each(lines_, [=](Line& line) {
                 if (line.size() < _newColumnCount)
                     line.resize(_newColumnCount);
             });
-            return _cursor + Coordinate{0, min(_cursor.column, _newColumnCount)};
+            return _cursor + Coordinate{0u, static_cast<int>(min(static_cast<size_t>(_cursor.column), _newColumnCount))};
         }
         else
         {
@@ -543,7 +545,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
 
             lines_ = move(shrinkedLines);
-            screenSize_.width = _newColumnCount;
+            screenSize_.width = static_cast<int>(_newColumnCount);
 
             return _cursor; // TODO
         }
@@ -555,10 +557,10 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
     switch (crispy::strongCompare(_newSize.width, screenSize_.width))
     {
         case Comparison::Greater:
-            cursorPosition = growColumns(_newSize.width, cursorPosition);
+            cursorPosition = growColumns(static_cast<size_t>(_newSize.width), cursorPosition);
             break;
         case Comparison::Less:
-            cursorPosition = shrinkColumns(_newSize.width, cursorPosition);
+            cursorPosition = shrinkColumns(static_cast<size_t>(_newSize.width), cursorPosition);
             break;
         case Comparison::Equal:
             break;
@@ -580,7 +582,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
     return cursorPosition;
 }
 
-void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
+void Grid::appendNewLines(size_t _count, GraphicsAttributes _attr)
 {
     auto const wrappableFlag = lines_.back().wrappableFlag();
 
@@ -589,7 +591,7 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
         // We've reached to history line count limit already.
         // Rotate lines that would fall off down to the bottom again in a clean state.
         // We do save quite some overhead due to avoiding unnecessary memory allocations.
-        for (int i = 0; i < _count; ++i)
+        for (size_t i = 0; i < _count; ++i)
         {
             Line line = move(lines_.front());
             lines_.pop_front();
@@ -599,12 +601,12 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
         return;
     }
 
-    if (auto const n = min(_count, screenSize_.height); n > 0)
+    if (auto const n = min(_count, static_cast<size_t>(screenSize_.height)); n > 0)
     {
         generate_n(
             back_inserter(lines_),
             n,
-            [&]() { return Line(screenSize_.width, Cell{{}, _attr}, wrappableFlag); }
+            [&]() { return Line(static_cast<size_t>(screenSize_.width), Cell{{}, _attr}, wrappableFlag); }
         );
         clampHistory();
     }
@@ -613,7 +615,7 @@ void Grid::appendNewLines(int _count, GraphicsAttributes _attr)
 void Grid::clearHistory()
 {
     if (historyLineCount())
-        lines_.erase(begin(lines_), next(begin(lines_), historyLineCount()));
+        lines_.erase(begin(lines_), next(begin(lines_), static_cast<long int>(historyLineCount())));
 }
 
 void Grid::clampHistory()
@@ -640,12 +642,12 @@ void Grid::clampHistory()
         line.setFlag(Line::Flags::Wrappable, wrappable);
     }
 
-    lines_.erase(begin(lines_), next(begin(lines_), diff));
+    lines_.erase(begin(lines_), next(begin(lines_), static_cast<long int>(diff)));
 }
 
-void Grid::scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
+void Grid::scrollUp(unsigned _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
 {
-    if (_margin.horizontal != Margin::Range{1, screenSize_.width})
+    if (_margin.horizontal != Margin::Range{1, static_cast<unsigned>(screenSize_.width)})
     {
         // a full "inside" scroll-up
         auto const marginHeight = _margin.vertical.length();
@@ -693,9 +695,9 @@ void Grid::scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin
         );
 #endif
     }
-    else if (_margin.vertical == Margin::Range{1, screenSize_.height})
+    else if (_margin.vertical == Margin::Range{1, static_cast<unsigned>(screenSize_.height)})
     {
-        if (auto const n = min(_n, screenSize_.height); n > 0)
+        if (auto const n = min(_n, static_cast<unsigned>(screenSize_.height)); n > 0)
         {
             appendNewLines(n, _defaultAttributes);
         }
@@ -725,12 +727,12 @@ void Grid::scrollUp(int _n, GraphicsAttributes const& _defaultAttributes, Margin
     }
 }
 
-void Grid::scrollDown(int v_n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
+void Grid::scrollDown(unsigned v_n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
 {
     auto const marginHeight = _margin.vertical.length();
     auto const n = min(v_n, marginHeight);
 
-    if (_margin.horizontal != Margin::Range{1, screenSize_.width})
+    if (_margin.horizontal != Margin::Range{1, static_cast<unsigned>(screenSize_.width)})
     {
         // full "inside" scroll-down
         if (n < marginHeight)
@@ -784,7 +786,7 @@ void Grid::scrollDown(int v_n, GraphicsAttributes const& _defaultAttributes, Mar
             );
         }
     }
-    else if (_margin.vertical == Margin::Range{1, screenSize_.height})
+    else if (_margin.vertical == Margin::Range{1, static_cast<unsigned>(screenSize_.height)})
     {
         rotate(
             begin(mainPage()),
@@ -827,12 +829,12 @@ void Grid::scrollDown(int v_n, GraphicsAttributes const& _defaultAttributes, Mar
     }
 }
 
-string Grid::renderTextLineAbsolute(int row) const
+string Grid::renderTextLineAbsolute(unsigned row) const
 {
     string line;
-    line.reserve(screenSize_.width);
+    line.reserve(static_cast<size_t>(screenSize_.width));
     for (int col = 1; col <= screenSize_.width; ++col)
-        if (auto const& cell = at({row - historyLineCount() + 1, col}); cell.codepointCount())
+        if (auto const& cell = at({static_cast<int>(row - historyLineCount()) + 1, col}); cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -843,7 +845,7 @@ string Grid::renderTextLineAbsolute(int row) const
 string Grid::renderTextLine(int row) const
 {
     string line;
-    line.reserve(screenSize_.width);
+    line.reserve(static_cast<size_t>(screenSize_.width));
     for (int col = 1; col <= screenSize_.width; ++col)
         if (auto const& cell = at({row, col}); cell.codepointCount())
             line += cell.toUtf8();
@@ -856,9 +858,9 @@ string Grid::renderTextLine(int row) const
 string Grid::renderAllText() const
 {
     string text;
-    text.reserve((historyLineCount() + screenSize_.height) * (screenSize_.width + 1));
+    text.reserve((historyLineCount() + static_cast<size_t>(screenSize_.height)) * static_cast<size_t>(screenSize_.width + 1));
 
-    for (int lineNr = 0; lineNr < historyLineCount() + screenSize_.height; ++lineNr)
+    for (unsigned lineNr = 0; lineNr < historyLineCount() + static_cast<unsigned>(screenSize_.height); ++lineNr)
     {
         text += renderTextLineAbsolute(lineNr);
         text += '\n';
@@ -870,7 +872,10 @@ string Grid::renderAllText() const
 string Grid::renderText() const
 {
     string text;
-    text.reserve(screenSize_.height * (screenSize_.width + 1));
+    text.reserve(
+        static_cast<uint16_t>(screenSize_.height) *
+        static_cast<uint16_t>(screenSize_.width + 1)
+    );
 
     for (int lineNr = 1; lineNr <= screenSize_.height; ++lineNr)
     {

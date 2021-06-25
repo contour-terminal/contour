@@ -20,9 +20,12 @@
 using crispy::Size;
 using namespace terminal;
 
-SixelImageBuilder sixelImageBuilder(Size _size, RGBAColor _defaultColor)
+namespace
 {
-    return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    SixelImageBuilder sixelImageBuilder(Size _size, RGBAColor _defaultColor)
+    {
+        return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    }
 }
 
 TEST_CASE("SixelParser.ground_000000", "[sixel]")
@@ -247,11 +250,13 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 4});
 
-    for (auto const [x, y] : crispy::times(ib.size().width) * crispy::times(ib.size().height))
+    for (auto const [x, y] : crispy::times(static_cast<unsigned>(ib.size().width)) * crispy::times(static_cast<unsigned>(ib.size().height)))
     {
         auto const& expectedColor = x < 4 && y < 6 ? pinColors.at(x) : defaultColor;
-        auto const& actualColor = ib.at(Coordinate{y, x});
-        INFO(fmt::format("at {}, expect {}, actual {}", Coordinate{y, x}, expectedColor, actualColor));
+        auto const xi = static_cast<int>(x);
+        auto const yi = static_cast<int>(y);
+        auto const& actualColor = ib.at(Coordinate{yi, xi});
+        INFO(fmt::format("at {}, expect {}, actual {}", Coordinate{yi, xi}, expectedColor, actualColor));
         CHECK(actualColor == expectedColor);
     }
 }

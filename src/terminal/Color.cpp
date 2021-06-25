@@ -58,7 +58,7 @@ string to_string(Color _color)
         {
             char buf[8];
             auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", _color.rgb.red, _color.rgb.green, _color.rgb.blue);
-            return string(buf, n);
+            return string(buf, static_cast<size_t>(n));
         }
         case Type::Undefined:
             break;
@@ -126,16 +126,16 @@ RGBColor& RGBColor::operator=(string const& _hexCode)
     if (_hexCode.size() == 7 && _hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        uint32_t const value = strtoul(_hexCode.c_str() + 1, &eptr, 16);
-        if (eptr && *eptr == '\0')
-            *this = RGBColor{value};
+        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
+        if (eptr && *eptr == '\0' && value < std::numeric_limits<uint32_t>::max())
+            *this = RGBColor{static_cast<uint32_t>(value)};
     }
     if (_hexCode.size() >= 3 && _hexCode[0] == '0' && _hexCode[1] == 'x')
     {
         char* eptr = nullptr;
-        uint32_t const value = strtoul(_hexCode.c_str() + 2, &eptr, 16);
-        if (eptr && *eptr == '\0')
-            *this = RGBColor{value};
+        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 2, &eptr, 16));
+        if (eptr && *eptr == '\0' && value < std::numeric_limits<uint32_t>::max())
+            *this = RGBColor{static_cast<uint32_t>(value)};
     }
     return *this;
 }
@@ -145,9 +145,9 @@ RGBAColor& RGBAColor::operator=(string const& _hexCode)
     if (_hexCode.size() == 9 && _hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        uint32_t const value = strtoul(_hexCode.c_str() + 1, &eptr, 16);
-        if (eptr && *eptr == '\0')
-            *this = RGBAColor{value};
+        auto const value = strtoul(_hexCode.c_str() + 1, &eptr, 16);
+        if (eptr && *eptr == '\0' && value < std::numeric_limits<uint32_t>::max())
+            *this = RGBAColor{static_cast<uint32_t>(value)};
     }
     return *this;
 }
@@ -156,14 +156,14 @@ string to_string(RGBColor c)
 {
     char buf[8];
     auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", c.red, c.green, c.blue);
-    return string(buf, n);
+    return string(buf, static_cast<size_t>(n));
 }
 
 string to_string(RGBAColor c)
 {
     char buf[10];
     auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X%02X", c.red(), c.green(), c.blue(), c.alpha());
-    return string(buf, n);
+    return string(buf, static_cast<size_t>(n));
 }
 
 RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept
