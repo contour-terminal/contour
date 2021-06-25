@@ -1,3 +1,10 @@
+# TODAY/TOSTREAM :-D
+
+
+- [ ] code health (get compiler warnings branch merged, have it compile-time optional `CONTOUR_PEDANTIC=OFF/ON`
+- [x] Ubuntu 18.04 ppa (fontconfig)
+- [ ] improve unit tests (InputGenerator)
+
 # current PR checklist
 
 - [ ] LIVE: create a neofetch-patch for contour support
