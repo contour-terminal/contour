@@ -9,7 +9,7 @@
 
 - [ ] CHECK: profile change upon shortcut
 - [ ] config: warn on unknown yaml keys
-- [ ] TEST: RenderBuffer ops testable (esp. 2026)?
+- [x] TEST: RenderBuffer ops testable (esp. 2026)?
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
 - [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
 - [ ] BUG? eval need of `Terminal::shouldRender` and friends
