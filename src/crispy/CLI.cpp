@@ -304,7 +304,7 @@ namespace // {{{ helper
     {
         CLI_DEBUG(fmt::format("setOption({}): {}", _key, _value));
         _context.output.values[_key] = move(_value);
-    };
+   };
 
     void parseOptionList(ParseContext& _context)
     {
@@ -411,45 +411,49 @@ namespace // {{{ helper
     StringViewList stringViewList(int argc, char const * const * _argv)
     {
         StringViewList output;
-        output.resize(argc);
+        if (argc <= 0)
+            return output;
 
-        for (auto const i : times(argc))
+        output.resize(static_cast<size_t>(argc));
+
+        for (auto const i : times(static_cast<size_t>(argc)))
             output[i] = _argv[i];
 
         return output;
     }
+
+    void validate(Command const& _command)
+    {
+        (void) _command;
+        // TODO: throw if Command is not well defined.
+        //
+        // - no duplicated nems in same scope
+        // - names must not start with '-' (dash)
+        // - must not contain '='
+    }
+
+    void validate(Command const& _command, ParseContext& _context, string const& _keyPrefix)
+    {
+        auto const key = _keyPrefix.empty() ? string(_command.name)
+                                            : fmt::format("{}.{}", _keyPrefix, _command.name);
+
+        // Ensure all required fields are provided for those commands that have been provided.
+        for (Option const& option: _command.options)
+        {
+            auto const optionKey = fmt::format("{}.{}", key, option.name);
+            if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
+                throw invalid_argument(fmt::format("Missing option: {}", optionKey));
+        }
+
+        for (Command const& subcmd: _command.children)
+        {
+            auto const commandKey  = fmt::format("{}.{}", key, subcmd.name);
+            if (_context.output.get<bool>(commandKey))
+                validate(subcmd, _context, key);
+        }
+    }
+
 } // }}}
-
-void validate(Command const& _command)
-{
-    (void) _command;
-    // TODO: throw if Command is not well defined.
-    //
-    // - no duplicated nems in same scope
-    // - names must not start with '-' (dash)
-    // - must not contain '='
-}
-
-void validate(Command const& _command, ParseContext& _context, string const& _keyPrefix)
-{
-    auto const key = _keyPrefix.empty() ? string(_command.name)
-                                        : fmt::format("{}.{}", _keyPrefix, _command.name);
-
-    // Ensure all required fields are provided for those commands that have been provided.
-    for (Option const& option: _command.options)
-    {
-        auto const optionKey = fmt::format("{}.{}", key, option.name);
-        if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
-            throw invalid_argument(fmt::format("Missing option: {}", optionKey));
-    }
-
-    for (Command const& subcmd: _command.children)
-    {
-        auto const commandKey  = fmt::format("{}.{}", key, subcmd.name);
-        if (_context.output.get<bool>(commandKey))
-            validate(subcmd, _context, key);
-    }
-}
 
 optional<FlagStore> parse(Command const& _command, StringViewList const& _args)
 {
@@ -488,14 +492,14 @@ namespace crispy::cli // {{{ Help output
 
 namespace // {{{ helpers
 {
-    string spaces(int _count)
+    string spaces(size_t _count)
     {
         return string(_count, ' ');
     }
 
-    string indent(int _level, int* _cursor = nullptr)
+    string indent(unsigned _level, unsigned* _cursor = nullptr)
     {
-        auto constexpr TabWidth = 4;
+        auto constexpr TabWidth = 4u;
 
         if (_cursor)
             *_cursor += _level * TabWidth;
@@ -562,21 +566,21 @@ namespace // {{{ helpers
         return stylizer(style);
     }
 
-    string_view wordWrapped(string_view _text, int _margin, int _cursor)
+    string_view wordWrapped(string_view _text, unsigned _margin, unsigned _cursor)
     {
-        auto const unwrappedLength = _cursor + int(_text.size());
+        auto const unwrappedLength = _cursor + _text.size();
         if (unwrappedLength <= _margin)
             return _text;
 
         // Cut string at right margin, then shift left until we've hit a whitespace character.
-        auto i = _margin - _cursor + 1;
+        auto i = static_cast<unsigned>(_margin - _cursor + 1);
         while (i > 0 && _text[i] != ' ')
             --i;
 
         return _text.substr(0, i);
     }
 
-    string wordWrapped(string_view _text, int _indent, int _margin, int* _cursor)
+    string wordWrapped(string_view _text, unsigned _indent, unsigned _margin, unsigned* _cursor)
     {
         string output;
         size_t i = 0;
@@ -588,7 +592,7 @@ namespace // {{{ helpers
             auto const chunk = wordWrapped(_text.substr(i), _margin, *_cursor);
 
             output += chunk;
-            *_cursor += chunk.size();
+            *_cursor += static_cast<unsigned>(chunk.size());
             i += chunk.size();
 
             if (i == _text.size())
@@ -657,9 +661,9 @@ namespace // {{{ helpers
     string printOption(Option const& _option,
                        optional<HelpStyle::ColorMap> const& _colors,
                        OptionStyle _displayStyle,
-                       int _indent, int _margin, int* _cursor)
+                       unsigned _indent, unsigned _margin, unsigned* _cursor)
     {
-        auto const plainTextLength = int(printOption(_option, nullopt, _displayStyle).size());
+        auto const plainTextLength = static_cast<unsigned>(printOption(_option, nullopt, _displayStyle).size());
         if (*_cursor + plainTextLength < _margin)
         {
             *_cursor += plainTextLength;
@@ -681,7 +685,7 @@ namespace // {{{ helpers
     }
 
     void detailedDescription(ostream& _os, Command const& _command,
-                             HelpStyle const& _style, int _margin, vector<Command const*>& _parents)
+                             HelpStyle const& _style, unsigned _margin, vector<Command const*>& _parents)
     {
         // NOTE: We asume that cursor position is at first column!
         auto const stylize = stylizer(_style);
@@ -707,7 +711,7 @@ namespace // {{{ helpers
 
             if (hasParentCommand)
             {
-                int cursor = 1;
+                unsigned cursor = 1;
                 _os << indent(2, &cursor);
                 _os << stylize(wordWrapped(_command.helpText, cursor, _margin, &cursor), HelpElement::HelpText) << "\n\n";
             }
@@ -720,17 +724,17 @@ namespace // {{{ helpers
             auto const leftPadding = indent(3);
             auto const minRightPadSize = 2;
             auto const maxOptionTextSize = longestOptionText(_command.options, _style.optionStyle);
-            auto const columnWidth = leftPadding.size() + maxOptionTextSize + minRightPadSize;
+            auto const columnWidth = static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
 
             for (Option const& option : _command.options)
             {
-                auto const leftSize = leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size();
-                auto const actualRightPaddingSize = int(columnWidth) - int(leftSize);
+                auto const leftSize = static_cast<unsigned>(leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size());
+                auto const actualRightPaddingSize = columnWidth - leftSize;
                 auto const left = leftPadding + printOption(option, _style.colors, _style.optionStyle) + spaces(actualRightPaddingSize);
 
                 _os << left;
 
-                int cursor = int(columnWidth) + 1;
+                auto cursor = static_cast<unsigned>(columnWidth + 1);
                 _os << stylize(wordWrapped(option.helpText, columnWidth, _margin, &cursor), HelpElement::HelpText);
 
                 // {{{ append default value, if any
@@ -743,7 +747,7 @@ namespace // {{{ helpers
                                            + DefaultTextPrefix + " "
                                            + stylize(defaultValueStr, HelpElement::OptionValue)
                                            + stylize("]", HelpElement::Braces);
-                    auto const defaultTextLength = int(1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1);
+                    auto const defaultTextLength = static_cast<unsigned>(1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1);
                     if (cursor + defaultTextLength > _margin)
                         _os << "\n" << spaces(columnWidth) << defaultText;
                     else
@@ -757,7 +761,7 @@ namespace // {{{ helpers
             {
                 auto const& verbatim = _command.verbatim.value();
                 auto const leftSize = leftPadding.size() + 2 + verbatim.placeholder.size();
-                auto const actualRightPaddingSize = int(columnWidth) - int(leftSize);
+                auto const actualRightPaddingSize = static_cast<unsigned>(columnWidth - leftSize);
                 auto const left = leftPadding
                     + stylize("[", HelpElement::Braces)
                     + stylize(verbatim.placeholder, HelpElement::Verbatim)
@@ -765,7 +769,7 @@ namespace // {{{ helpers
                     + spaces(actualRightPaddingSize);
 
                 _os << left;
-                int cursor = int(columnWidth) + 1;
+                auto cursor = static_cast<unsigned>(columnWidth + 1);
                 _os << stylize(wordWrapped(verbatim.helpText, columnWidth, _margin, &cursor), HelpElement::HelpText);
                 _os << '\n';
             }
@@ -781,7 +785,7 @@ namespace // {{{ helpers
         } // }}}
     }
 
-    void detailedDescription(ostream& _os, Command const& _command, HelpStyle const& _style, int _margin)
+    void detailedDescription(ostream& _os, Command const& _command, HelpStyle const& _style, unsigned _margin)
     {
         vector<Command const*> parents;
         detailedDescription(_os, _command, _style, _margin, parents);
@@ -810,12 +814,12 @@ HelpStyle::ColorMap HelpStyle::defaultColors()
  * @param _colored Boolean indicating whether or not to colorize the output via VT sequences.
  * @param _margin  Number of characters to write at most per line.
  */
-string usageText(Command const& _command, HelpStyle const& _style, int _margin, string const& _cmdPrefix)
+string usageText(Command const& _command, HelpStyle const& _style, unsigned _margin, string const& _cmdPrefix)
 {
     auto const colorize = colorizer(_style.colors);
-    auto const indentationWidth = int(_cmdPrefix.size());
+    auto const indentationWidth = static_cast<unsigned>(_cmdPrefix.size());
 
-    auto const printOptionList = [&](ostream& _os, OptionList const& _options, int* _cursor)
+    auto const printOptionList = [&](ostream& _os, OptionList const& _options, unsigned* _cursor)
     {
         auto const indent = *_cursor;
         for (Option const& option : _options)
@@ -831,12 +835,12 @@ string usageText(Command const& _command, HelpStyle const& _style, int _margin, 
 
         if (_command.select == CommandSelect::Explicit)
         {
-            cursor += _command.name.size();
+            cursor += static_cast<unsigned>(_command.name.size());
             sstr << _command.name;
         }
         else
         {
-            cursor += _command.name.size() + 2;
+            cursor += static_cast<unsigned>(_command.name.size() + 2);
             sstr << colorize("[", HelpElement::Braces);
             sstr << colorize(_command.name, HelpElement::ImplicitCommand);
             sstr << colorize("]", HelpElement::Braces);
@@ -880,7 +884,7 @@ string usageText(Command const& _command, HelpStyle const& _style, int _margin, 
     }
 }
 
-string helpText(Command const& _command, HelpStyle const& _style, int _margin)
+string helpText(Command const& _command, HelpStyle const& _style, unsigned _margin)
 {
     auto const stylize = stylizer(_style);
 

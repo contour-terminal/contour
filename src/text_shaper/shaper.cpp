@@ -41,7 +41,8 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Si
     auto const factor = int(ceilf(ratio));
 
     vector<uint8_t> dest;
-    dest.resize(_newSize.height * _newSize.width * 4);
+    size_t const len = size_t(_newSize.height) * size_t(_newSize.width) * 4;
+    dest.resize(len);
 
     debuglog(FontScaleTag).write("scaling from {} to {}, ratio {}x{} ({}), factor {}",
                                  _bitmap.size, _newSize, ratioX, ratioY, ratio, factor);
@@ -67,10 +68,10 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Si
 
             if (count)
             {
-                d[0] = b / count;
-                d[1] = g / count;
-                d[2] = r / count;
-                d[3] = a / count;
+                d[0] = static_cast<uint8_t>(b / count);
+                d[1] = static_cast<uint8_t>(g / count);
+                d[2] = static_cast<uint8_t>(r / count);
+                d[3] = static_cast<uint8_t>(a / count);
             }
         }
     }

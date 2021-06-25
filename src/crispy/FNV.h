@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -30,7 +31,7 @@ class FNV {
     /// and returns the applied FNV result.
     constexpr U operator()(U _memory, T _value) const noexcept
     {
-        _memory ^= _value;
+        _memory ^= static_cast<std::common_type_t<T, U>>(_value);
         _memory *= prime_;
         return _memory;
     }

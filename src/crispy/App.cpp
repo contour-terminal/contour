@@ -59,9 +59,9 @@ namespace // {{{ helper
          return style;
     }
 
-    int screenWidth()
+    unsigned screenWidth()
     {
-        constexpr auto DefaultWidth = 80;
+        constexpr auto DefaultWidth = 80u;
 
 #if !defined(_WIN32)
         auto ws = winsize{};

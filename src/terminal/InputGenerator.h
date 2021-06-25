@@ -335,7 +335,7 @@ class InputGenerator {
     MouseWheelMode mouseWheelMode() const noexcept { return mouseWheelMode_; }
 
     void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
-    bool generateFocusEvents() const noexcept { return generateFocusEvents_; };
+    bool generateFocusEvents() const noexcept { return generateFocusEvents_; }
 
     /// Generates input sequence for a pressed character.
     bool generate(char32_t _characterEvent, Modifier _modifier);
@@ -674,7 +674,7 @@ namespace std { // {{{
     template<>
     struct hash<terminal::MouseMoveEvent> {
         constexpr size_t operator()(terminal::MouseMoveEvent const& _input) const noexcept {
-            return (4 << 16) | (_input.row << 8) | (_input.column & 0xFF);
+            return static_cast<size_t>((4 << 16) | (_input.row << 8) | (_input.column & 0xFF));
         }
     };
 

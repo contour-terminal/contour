@@ -51,21 +51,33 @@ using std::vector;
 
 using namespace std::string_literals;
 
-struct FontPathAndSize
+namespace // {{{ FontInfo, FontPathAndSize
 {
-    string path;
-    text::font_size size;
-};
+    using HbBufferPtr = std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)>;
+    using HbFontPtr = std::unique_ptr<hb_font_t, void(*)(hb_font_t*)>;
+    using FtFacePtr = std::unique_ptr<FT_FaceRec_, void(*)(FT_FaceRec_*)>;
 
-bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
-{
-    return a.path == b.path && a.size.pt == b.size.pt;
-}
+    struct FontInfo
+    {
+        string path;
+        text::font_size size;
+        FtFacePtr ftFace;
+        HbFontPtr hbFont;
+        text::font_description description{};
+        vector<string> fallbackFonts{};
+    };
 
-bool operator!=(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
-{
-    return !(a == b);
-}
+    struct FontPathAndSize
+    {
+        string path;
+        text::font_size size;
+    };
+
+    bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
+    {
+        return a.path == b.path && a.size.pt == b.size.pt;
+    }
+} // }}}
 
 namespace std
 {
@@ -80,10 +92,6 @@ namespace std
 }
 
 namespace text {
-
-using HbBufferPtr = std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)>;
-using HbFontPtr = std::unique_ptr<hb_font_t, void(*)(hb_font_t*)>;
-using FtFacePtr = std::unique_ptr<FT_FaceRec_, void(*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
@@ -197,7 +205,7 @@ namespace // {{{ helper
                 break;
         }
         return FT_RENDER_MODE_NORMAL;
-    };
+    }
 
     constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
     {
@@ -214,6 +222,19 @@ namespace // {{{ helper
                 // TODO: make this list complete
                 return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
         }
+    }
+
+    void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span<unsigned> _clusters, unicode::Script _script)
+    {
+        hb_buffer_clear_contents(_hbBuf);
+        for (auto const i : crispy::times(_codepoints.size()))
+            hb_buffer_add(_hbBuf, _codepoints[i], _clusters[i]);
+
+        hb_buffer_set_direction(_hbBuf, HB_DIRECTION_LTR);
+        hb_buffer_set_script(_hbBuf, mapScriptToHarfbuzzScript(_script));
+        hb_buffer_set_language(_hbBuf, hb_language_get_default());
+        hb_buffer_set_content_type(_hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);
+        hb_buffer_guess_segment_properties(_hbBuf);
     }
 
 #if 0
@@ -447,7 +468,7 @@ namespace // {{{ helper
     int computeAverageAdvance(FT_Face _face) noexcept
     {
         FT_Pos maxAdvance = 0;
-        for (int i = 32; i < 128; i++)
+        for (uint8_t i = 32; i < 128; i++)
         {
             if (auto ci = FT_Get_Char_Index(_face, i); ci == FT_Err_Ok)
                 if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
@@ -498,7 +519,9 @@ namespace // {{{ helper
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize.pt * 64.0));
 
-            if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size, _dpi.x, _dpi.y); ec != FT_Err_Ok)
+            if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size,
+                                                     static_cast<FT_UInt>(_dpi.x),
+                                                     static_cast<FT_UInt>(_dpi.y)); ec != FT_Err_Ok)
             {
                 debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
             }
@@ -518,17 +541,45 @@ namespace // {{{ helper
             if (glyphMissing(gpos))
                 gpos.glyph.index = glyph_index{ missingGlyph };
     }
-} // }}}
 
-struct FontInfo
-{
-    string path;
-    font_size size;
-    FtFacePtr ftFace;
-    HbFontPtr hbFont;
-    font_description description{};
-    vector<string> fallbackFonts{};
-};
+    bool tryShape(font_key _font,
+                  FontInfo& _fontInfo,
+                  hb_buffer_t* _hbBuf,
+                  hb_font_t* _hbFont,
+                  unicode::Script _script,
+                  u32string_view _codepoints,
+                  crispy::span<unsigned> _clusters,
+                  shape_result& _result)
+    {
+        assert(_hbFont != nullptr);
+        assert(_hbBuf != nullptr);
+
+        prepareBuffer(_hbBuf, _codepoints, _clusters, _script);
+
+        hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
+        hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
+
+        auto const glyphCount = hb_buffer_get_length(_hbBuf);
+        hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(_hbBuf, nullptr);
+        hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(_hbBuf, nullptr);
+
+        _result.clear();
+        _result.reserve(glyphCount);
+
+        for (auto const i : crispy::times(glyphCount))
+        {
+            glyph_position gpos{};
+            gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
+            gpos.offset.x = int(static_cast<double>(pos[i].x_offset) / 64.0); // gpos.offset.(x,y) ?
+            gpos.offset.y = int(static_cast<double>(pos[i].y_offset) / 64.0);
+            gpos.advance.x = int(static_cast<double>(pos[i].x_advance) / 64.0);
+            gpos.advance.y = int(static_cast<double>(pos[i].y_advance) / 64.0);
+            _result.emplace_back(gpos);
+        }
+        return crispy::none_of(_result, glyphMissing);
+    }
+
+} // }}}
 
 struct open_shaper::Private // {{{
 {
@@ -663,56 +714,6 @@ bool open_shaper::has_color(font_key _font) const
     return FT_HAS_COLOR(d->fonts_.at(_font).ftFace.get());
 }
 
-void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span<int> _clusters, unicode::Script _script)
-{
-    hb_buffer_clear_contents(_hbBuf);
-    for (auto const i : crispy::times(_codepoints.size()))
-        hb_buffer_add(_hbBuf, _codepoints[i], _clusters[i]);
-
-    hb_buffer_set_direction(_hbBuf, HB_DIRECTION_LTR);
-    hb_buffer_set_script(_hbBuf, mapScriptToHarfbuzzScript(_script));
-    hb_buffer_set_language(_hbBuf, hb_language_get_default());
-    hb_buffer_set_content_type(_hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);
-    hb_buffer_guess_segment_properties(_hbBuf);
-}
-
-bool tryShape(font_key _font,
-              FontInfo& _fontInfo,
-              hb_buffer_t* _hbBuf,
-              hb_font_t* _hbFont,
-              unicode::Script _script,
-              u32string_view _codepoints,
-              crispy::span<int> _clusters,
-              shape_result& _result)
-{
-    assert(_hbFont != nullptr);
-    assert(_hbBuf != nullptr);
-
-    prepareBuffer(_hbBuf, _codepoints, _clusters, _script);
-
-    hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
-    hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
-
-    auto const glyphCount = static_cast<int>(hb_buffer_get_length(_hbBuf));
-    hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(_hbBuf, nullptr);
-    hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(_hbBuf, nullptr);
-
-    _result.clear();
-    _result.reserve(glyphCount);
-
-    for (auto const i : crispy::times(glyphCount))
-    {
-        glyph_position gpos{};
-        gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
-        gpos.offset.x = int(pos[i].x_offset / 64.0f); // gpos.offset.(x,y) ?
-        gpos.offset.y = int(pos[i].y_offset / 64.0f);
-        gpos.advance.x = int(pos[i].x_advance / 64.0f);
-        gpos.advance.y = int(pos[i].y_advance / 64.0f);
-        _result.emplace_back(gpos);
-    }
-    return crispy::none_of(_result, glyphMissing);
-}
-
 optional<glyph_position> open_shaper::shape(font_key _font,
                                             char32_t _codepoint)
 {
@@ -745,7 +746,7 @@ optional<glyph_position> open_shaper::shape(font_key _font,
 
 void open_shaper::shape(font_key _font,
                         u32string_view _codepoints,
-                        crispy::span<int> _clusters,
+                        crispy::span<unsigned> _clusters,
                         unicode::Script _script,
                         shape_result& _result)
 {
@@ -799,7 +800,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     auto const font = _glyph.font;
     auto ftFace = d->fonts_.at(font).ftFace.get();
     auto const glyphIndex = _glyph.index;
-    FT_Int32 const flags = ftRenderFlag(_mode) | (has_color(font) ? FT_LOAD_COLOR : 0);
+    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (has_color(font) ? FT_LOAD_COLOR : 0));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
     if (ec != FT_Err_Ok)
@@ -838,13 +839,12 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 
+    auto const outputWidth = static_cast<unsigned>(output.size.width);
+    auto const outputHeight = static_cast<unsigned>(output.size.height);
     switch (ftFace->glyph->bitmap.pixel_mode)
     {
         case FT_PIXEL_MODE_MONO:
         {
-            auto const width = output.size.width;
-            auto const height = output.size.height;
-
             // convert mono to gray
             FT_Bitmap ftBitmap;
             FT_Bitmap_Init(&ftBitmap);
@@ -856,12 +856,12 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             ftBitmap.num_grays = 256;
 
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(height * width); // 8-bit channel (with values 0 or 255)
+            output.bitmap.resize(outputHeight * outputWidth); // 8-bit channel (with values 0 or 255)
 
-            auto const pitch = abs(ftBitmap.pitch);
-            for (auto i = 0; i < int(ftBitmap.rows); ++i)
-                for (auto j = 0; j < int(ftBitmap.width); ++j)
-                    output.bitmap[i * width + j] = ftBitmap.buffer[(height - 1 - i) * pitch + j] * 255;
+            auto const pitch = static_cast<unsigned>(abs(ftBitmap.pitch));
+            for (auto const i: crispy::times(ftBitmap.rows))
+                for (auto const j: crispy::times(ftBitmap.width))
+                    output.bitmap[i * outputWidth + j] = ftBitmap.buffer[(outputHeight - 1 - i) * pitch + j] * 255;
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
             break;
@@ -869,13 +869,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         case FT_PIXEL_MODE_GRAY:
         {
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(output.size.height * output.size.width);
+            output.bitmap.resize(outputHeight * outputWidth);
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
+            auto const pitch = static_cast<unsigned>(abs(ftFace->glyph->bitmap.pitch));
             auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto i = 0; i < output.size.height; ++i)
-                for (auto j = 0; j < output.size.width; ++j)
-                    output.bitmap[i * output.size.width + j] = s[(output.size.height - 1 - i) * pitch + j];
+            for (auto const i: crispy::times(outputHeight))
+                for (auto const j: crispy::times(outputWidth))
+                    output.bitmap[i * outputWidth + j] = s[(outputHeight - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD:
@@ -887,28 +887,25 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.bitmap.resize(width * height);
             output.size.width /= 3;
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
             auto s = ftFace->glyph->bitmap.buffer;
-            for (auto const i : crispy::times(ftFace->glyph->bitmap.rows))
-                for (auto const j : crispy::times(ftFace->glyph->bitmap.width))
+            for (auto const i: crispy::times(ftFace->glyph->bitmap.rows))
+                for (auto const j: crispy::times(ftFace->glyph->bitmap.width))
                     output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_BGRA:
         {
-            auto const width = output.size.width;
-            auto const height = output.size.height;
-
             output.format = bitmap_format::rgba;
-            output.bitmap.resize(height * width * 4);
+            output.bitmap.resize(outputHeight * outputWidth * 4);
             auto t = output.bitmap.begin();
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
-            for (auto const i : crispy::times(height))
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
+            for (auto const i : crispy::times(outputHeight))
             {
-                for (auto const j : crispy::times(width))
+                for (auto const j : crispy::times(outputWidth))
                 {
-                    auto const s = &ftFace->glyph->bitmap.buffer[(height - i - 1) * pitch + j * 4];
+                    auto const s = &ftFace->glyph->bitmap.buffer[(outputHeight - i - 1) * pitch + j * 4];
 
                     // BGRA -> RGBA
                     *t++ = s[2];

@@ -45,13 +45,13 @@ namespace detail
 template <typename Iterator, typename Alphabet>
 std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 {
-    int const inputLength = std::distance(begin, end);
-    int const outputLength = ((inputLength + 2) / 3 * 4) + 1;
+    size_t const inputLength = static_cast<size_t>(std::distance(begin, end));
+    size_t const outputLength = ((inputLength + 2) / 3 * 4) + 1;
 
     std::string output;
     output.resize(outputLength);
 
-    auto i = 0;
+    auto i = size_t{0};
     auto const e = inputLength - 2;
     auto const input = begin;
     auto out = output.begin();
@@ -89,7 +89,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
         *out++ = '=';
     }
 
-    auto const outlen = std::distance(output.begin(), out);
+    auto const outlen = static_cast<size_t>(std::distance(output.begin(), out));
     output.resize(outlen);
 
     return output;
@@ -118,7 +118,7 @@ size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 
     auto const indexSize = std::size(index);
 
-    while (pos != end && index[size_t(*pos)] < indexSize)
+    while (pos != end && index[static_cast<uint8_t>(*pos)] < indexSize)
         pos++;
 
     auto const nprbytes = std::distance(begin, pos) - 1;
@@ -142,7 +142,7 @@ template <typename Iterator, typename IndexTable, typename Output>
 size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
 {
     auto const index = [indexmap](Iterator i) {
-        return indexmap[static_cast<size_t>(*i)];
+        return indexmap[static_cast<uint8_t>(*i)];
     };
 
     if (begin == end)
@@ -152,7 +152,7 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
     Iterator input = begin;
     while (input != end && index(input) <= 63)
         input++;
-    size_t nprbytes = std::distance(begin, input);
+    size_t nprbytes = static_cast<size_t>(std::distance(begin, input));
     size_t decodedCount = ((nprbytes + 3) / 4) * 3;
 
     auto out = output;
@@ -160,9 +160,9 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 
     while (nprbytes > 4)
     {
-        *out++ = index(input + 0) << 2 | index(input + 1) >> 4;
-        *out++ = index(input + 1) << 4 | index(input + 2) >> 2;
-        *out++ = index(input + 2) << 6 | index(input + 3);
+        *out++ = static_cast<char>(index(input + 0) << 2 | index(input + 1) >> 4);
+        *out++ = static_cast<char>(index(input + 1) << 4 | index(input + 2) >> 2);
+        *out++ = static_cast<char>(index(input + 2) << 6 | index(input + 3));
 
         input += 4;
         nprbytes -= 4;
@@ -170,15 +170,15 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 
     if (nprbytes > 1)
     {
-        *(out++) = index(input + 0) << 2 | index(input + 1) >> 4;
+        *(out++) = static_cast<char>(index(input + 0) << 2 | index(input + 1) >> 4);
 
         if (nprbytes > 2)
         {
-            *(out++) = index(input + 1) << 4 | index(input + 2) >> 2;
+            *(out++) = static_cast<char>(index(input + 1) << 4 | index(input + 2) >> 2);
 
             if (nprbytes > 3)
             {
-                *(out++) = index(input + 2) << 6 | index(input + 3);
+                *(out++) = static_cast<char>(index(input + 2) << 6 | index(input + 3));
             }
         }
     }

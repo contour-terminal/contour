@@ -95,12 +95,12 @@ TEST_CASE("InputGenerator.Ctrl+_", "[terminal,input]")
 
 TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
 {
-    for (char ch = 'A'; ch <= 'Z'; ++ch)
+    for (char32_t ch = 'A'; ch <= 'Z'; ++ch)
     {
         INFO(fmt::format("Testing Ctrl+{}", ch));
         auto input = InputGenerator{};
         input.generate(ch, Modifier::Control);
-        auto const c0 = string(1, static_cast<char>(ch - 'A' + 1));
+        auto const c0 = string(1, static_cast<char>(ch - L'A' + 1));
         REQUIRE(escape(input.peek()) == escape(c0));
     }
 }

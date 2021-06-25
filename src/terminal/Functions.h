@@ -74,8 +74,8 @@ struct FunctionDefinition // TODO: rename Function
 
         // 0x40..0x7E: final character
         auto const maskFinalS = !finalSymbol  ? 0 : (static_cast<id_type>(finalSymbol) - 0x40) << FinalShift;
-        auto const maskMinPar = minimumParameters << MinParamShift;
-        auto const maskMaxPar = maximumParameters << MaxParamShift;
+        auto const maskMinPar = static_cast<unsigned>(minimumParameters << MinParamShift);
+        auto const maskMaxPar = static_cast<unsigned>(maximumParameters << MaxParamShift);
 
         return maskCat
              | maskLeader

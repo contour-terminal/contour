@@ -88,10 +88,11 @@ class SixelParser : public ParserExtension
         parseFragment(_range.data(), _range.data() + _range.size());
     }
 
+    /// This function is only used in unit tests.
     void parseFragment(std::string_view _range)
     {
-        for (char32_t ch : _range)
-            parse(static_cast<char>(ch)); // XXX only used in unit tests
+        for (auto const ch: _range)
+            parse(static_cast<char32_t>(ch));
     }
 
     void parse(char32_t _value);

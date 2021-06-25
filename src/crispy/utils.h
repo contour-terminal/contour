@@ -169,29 +169,29 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
         {
             case 2:
                 if ('0' <= ch && ch <= '1')
-                    value += ch - '0';
+                    value += static_cast<T>(ch - '0');
                 else
                     return std::nullopt;
                 break;
             case 8:
                 if ('0' <= ch && ch <= '7')
-                    value += ch - '0';
+                    value += static_cast<T>(ch - '0');
                 else
                     return std::nullopt;
                 break;
             case 10:
                 if ('0' <= ch && ch <= '9')
-                    value += ch - '0';
+                    value += static_cast<T>(ch - '0');
                 else
                     return std::nullopt;
                 break;
             case 16:
                 if ('0' <= ch && ch <= '9')
-                    value += ch - '0';
+                    value += static_cast<T>(ch - '0');
                 else if ('a' <= ch && ch <= 'f')
-                    value += 10 + ch - 'a';
+                    value += static_cast<T>(10 + ch - 'a');
                 else if (ch >= 'A' && ch <= 'F')
-                    value += 10 + ch - 'A';
+                    value += static_cast<T>(10 + ch - 'A');
                 else
                     return std::nullopt;
                 break;
@@ -221,7 +221,7 @@ inline std::optional<unsigned> fromHexDigit(char _value)
     if ('A' <= _value && _value <= 'F')
         return 10 + _value - 'A';
     return std::nullopt;
-};
+}
 
 template <typename T>
 std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hexString)
@@ -241,7 +241,7 @@ std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hex
         auto const c2 = fromHexDigit(*i++);
         if (!c1 || !c2)
             return std::nullopt;
-        auto const value = (c2.value() << 4 | c1.value());
+        auto const value = static_cast<char>((c2.value() << 4 | c1.value()));
         output[--k] = value;
     }
 
