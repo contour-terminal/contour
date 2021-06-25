@@ -27,8 +27,10 @@ if(APPLE)
     list(APPEND TEXT_SHAPER_LIBS Freetype::Freetype)
     list(APPEND TEXT_SHAPER_LIBS PkgConfig::harfbuzz)
 elseif("${CMAKE_SYSTEM}" MATCHES "Linux")
-    execute_process(COMMAND lsb_release -a
-                    OUTPUT_VARIABLE LSB_RELEASE_OUTPUT)
+    execute_process(COMMAND lsb_release -c
+                    OUTPUT_VARIABLE LSB_RELEASE_OUTPUT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "[LSB] ${LSB_RELEASE_OUTPUT}")
     if ("${LSB_RELEASE_OUTPUT}" MATCHES "bionic")
         message(STATUS "Ubuntu 18.04 detected. Using pkg-config to detect fontconfig.")
         find_package(PkgConfig REQUIRED)
