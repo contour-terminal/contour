@@ -365,6 +365,14 @@ class InputGenerator {
     /// Swaps out the generated input control sequences.
     void swap(Sequence& _other);
 
+    /// Peeks into the generated output, returning it as string view.
+    ///
+    /// @return a view into the generated buffer sequence.
+    std::string_view peek() const noexcept
+    {
+        return std::string_view(pendingSequence_.data(), pendingSequence_.size());
+    }
+
     enum class MouseEventType { Press, Drag, Release };
 
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.

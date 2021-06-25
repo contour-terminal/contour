@@ -116,6 +116,7 @@ if(LIBTERMINAL_TESTING)
     add_executable(terminal_test
         test_main.cpp
         Capabilities_test.cpp
+        InputGenerator_test.cpp
 		Selector_test.cpp
         Functions_test.cpp
         Grid_test.cpp
