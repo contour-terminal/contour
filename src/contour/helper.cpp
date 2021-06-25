@@ -129,9 +129,10 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
     {
         if (key >= 0x20 && key < 0x7F)
         {
-            _session.sendCharPressEvent(CharInputEvent{
-                static_cast<char32_t>(key),
-                modifiers.with(Modifier::Control)}, now);
+            _session.sendCharPressEvent(
+                CharInputEvent{static_cast<char32_t>(key), modifiers},
+                now
+            );
             return true;
         }
         switch (key)
