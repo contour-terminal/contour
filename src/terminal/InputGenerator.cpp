@@ -371,7 +371,7 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
         return append(static_cast<uint8_t>(_characterEvent));
 
     if (_modifier == Modifier::Control && _characterEvent == L' ')
-        return append("\x00");
+        return append('\x00');
 
     if (_modifier == Modifier::Control && crispy::ascending('A', chr, 'Z'))
         return append(static_cast<char>(chr - 'A' + 1));
