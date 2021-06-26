@@ -362,9 +362,9 @@ Screen::Screen(Size const& _size,
                ScreenEvents& _eventListener,
                bool _logRaw,
                bool _logTrace,
-               optional<int> _maxHistoryLineCount,
+               optional<size_t> _maxHistoryLineCount,
                Size _maxImageSize,
-               int _maxImageColorRegisters,
+               size_t _maxImageColorRegisters,
                bool _sixelCursorConformance,
                ColorPalette _colorPalette
 ) :
@@ -398,7 +398,7 @@ Screen::Screen(Size const& _size,
     resetHard();
 }
 
-int Screen::numericCapability(capabilities::Code _cap) const
+unsigned Screen::numericCapability(capabilities::Code _cap) const
 {
     using namespace capabilities::literals;
 
@@ -412,12 +412,12 @@ int Screen::numericCapability(capabilities::Code _cap) const
     }
 }
 
-void Screen::setMaxHistoryLineCount(optional<int> _maxHistoryLineCount)
+void Screen::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
 {
     primaryGrid().setMaxHistoryLineCount(_maxHistoryLineCount);
 }
 
-void Screen::resizeColumns(int _newColumnCount, bool _clear)
+void Screen::resizeColumns(unsigned _newColumnCount, bool _clear)
 {
     // DECCOLM / DECSCPP
     if (_clear)
@@ -603,14 +603,14 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
         ? static_cast<int>(margin_.horizontal.to) - cursor_.position.column
         : size_.width - cursor_.position.column;
 
-    auto const n = min(cell.width(), cellsAvailable);
+    auto const n = min(static_cast<unsigned>(cell.width()), cellsAvailable);
 
     if (n == cell.width())
     {
         assert(n > 0);
         cursor_.position.column += n;
         currentColumn_++;
-        for (int i = 1; i < n; ++i)
+        for (unsigned i = 1; i < n; ++i)
 #if defined(LIBTERMINAL_HYPERLINKS)
             (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
 #else
@@ -875,19 +875,19 @@ void Screen::linefeed(unsigned _newColumn)
     }
 }
 
-void Screen::scrollUp(int _n, Margin const& _margin)
+void Screen::scrollUp(unsigned _n, Margin const& _margin)
 {
     grid().scrollUp(_n, cursor().graphicsRendition, _margin);
     updateCursorIterators();
 }
 
-void Screen::scrollDown(int _n, Margin const& _margin)
+void Screen::scrollDown(unsigned _n, Margin const& _margin)
 {
     grid().scrollDown(_n, cursor().graphicsRendition, _margin);
     updateCursorIterators();
 }
 
-void Screen::setCurrentColumn(int _n)
+void Screen::setCurrentColumn(unsigned _n)
 {
     auto const col = cursor_.originMode ? margin_.horizontal.from + _n - 1 : _n;
     auto const clampedCol = min(col, size_.width);
@@ -1065,7 +1065,7 @@ void Screen::clearScrollbackBuffer()
     eventListener_.scrollbackBufferCleared();
 }
 
-void Screen::eraseCharacters(int _n)
+void Screen::eraseCharacters(unsigned _n)
 {
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
@@ -1101,25 +1101,25 @@ void Screen::clearLine()
     );
 }
 
-void Screen::moveCursorToNextLine(int _n)
+void Screen::moveCursorToNextLine(unsigned _n)
 {
-    moveCursorTo({cursorPosition().row + _n, 1});
+    moveCursorTo({cursorPosition().row + static_cast<int>(_n), 1});
 }
 
-void Screen::moveCursorToPrevLine(int _n)
+void Screen::moveCursorToPrevLine(unsigned _n)
 {
-    auto const n = min(_n, cursorPosition().row - 1);
+    auto const n = min(_n, static_cast<unsigned>(cursorPosition().row) - 1);
     moveCursorTo({cursorPosition().row - n, 1});
 }
 
-void Screen::insertCharacters(int _n)
+void Screen::insertCharacters(unsigned _n)
 {
     if (isCursorInsideMargins())
         insertChars(realCursorPosition().row, _n);
 }
 
 /// Inserts @p _n characters at given line @p _lineNo.
-void Screen::insertChars(int _lineNo, int _n)
+void Screen::insertChars(int _lineNo, unsigned _n)
 {
     auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
 
@@ -1144,7 +1144,7 @@ void Screen::insertChars(int _lineNo, int _n)
     );
 }
 
-void Screen::insertLines(int _n)
+void Screen::insertLines(unsigned _n)
 {
     if (isCursorInsideMargins())
     {
@@ -1158,7 +1158,7 @@ void Screen::insertLines(int _n)
     }
 }
 
-void Screen::insertColumns(int _n)
+void Screen::insertColumns(unsigned _n)
 {
     if (isCursorInsideMargins())
         for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
@@ -1252,7 +1252,7 @@ void Screen::fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right
     }
 }
 
-void Screen::deleteLines(int _n)
+void Screen::deleteLines(unsigned _n)
 {
     if (isCursorInsideMargins())
     {
@@ -1266,13 +1266,13 @@ void Screen::deleteLines(int _n)
     }
 }
 
-void Screen::deleteCharacters(int _n)
+void Screen::deleteCharacters(unsigned _n)
 {
     if (isCursorInsideMargins() && _n != 0)
         deleteChars(realCursorPosition().row, _n);
 }
 
-void Screen::deleteChars(int _lineNo, int _n)
+void Screen::deleteChars(int _lineNo, unsigned _n)
 {
     auto line = next(begin(grid().mainPage()), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
@@ -1295,7 +1295,7 @@ void Screen::deleteChars(int _lineNo, int _n)
         Cell{L' ', cursor_.graphicsRendition}
     );
 }
-void Screen::deleteColumns(int _n)
+void Screen::deleteColumns(unsigned _n)
 {
     if (isCursorInsideMargins())
         for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
@@ -1346,7 +1346,7 @@ void Screen::hyperlink(string const& _id, string const& _uri)
 #endif
 }
 
-void Screen::moveCursorUp(int _n)
+void Screen::moveCursorUp(unsigned _n)
 {
     auto const n = min(
         _n,
@@ -1360,7 +1360,7 @@ void Screen::moveCursorUp(int _n)
     setCurrentColumn(cursorPosition().column);
 }
 
-void Screen::moveCursorDown(int _n)
+void Screen::moveCursorDown(unsigned _n)
 {
     auto const currentLineNumber = cursorPosition().row;
     auto const n = min(
@@ -1379,14 +1379,14 @@ void Screen::moveCursorDown(int _n)
     setCurrentColumn(cursorPosition().column);
 }
 
-void Screen::moveCursorForward(int _n)
+void Screen::moveCursorForward(unsigned _n)
 {
     auto const n = min(_n,  margin_.horizontal.length() - cursor_.position.column);
     cursor_.position.column += n;
     updateColumnIterator();
 }
 
-void Screen::moveCursorBackward(int _n)
+void Screen::moveCursorBackward(unsigned _n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
     wrapPending_ = 0;
@@ -1474,7 +1474,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     auto writer = VTWriter([&](auto buf, auto len) { capturedBuffer += string_view(buf, len); });
 
     // TODO: when capturing _lineCount < screenSize.height, start at the lowest non-empty line.
-    auto const relativeStartLine = _logicalLines ? grid().computeRelativeLineNumberFromBottom(_lineCount)
+    auto const relativeStartLine = _logicalLines ? grid().computeRelativeLogicalLineNumberFromBottom(_lineCount)
                                                  : size_.height - _lineCount + 1;
     auto const startLine = clamp(1 - static_cast<int>(historyLineCount()), relativeStartLine, size_.height);
 

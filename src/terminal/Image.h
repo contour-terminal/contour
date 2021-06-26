@@ -68,8 +68,8 @@ class Image {
     constexpr ImageFormat format() const noexcept { return format_; }
     Data const& data() const noexcept { return data_; }
     constexpr crispy::Size size() const noexcept { return size_; }
-    constexpr int width() const noexcept { return size_.width; }
-    constexpr int height() const noexcept { return size_.height; }
+    constexpr auto width() const noexcept { return size_.width; }
+    constexpr auto height() const noexcept { return size_.height; }
 
   private:
     Id const id_;

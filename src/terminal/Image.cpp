@@ -29,8 +29,8 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     // TODO: respect alignment hint
     // TODO: respect resize hint
 
-    auto const xOffset = _pos.column * cellSize_.width;
-    auto const yOffset = _pos.row * cellSize_.height;
+    auto const xOffset = _pos.column * static_cast<int>(cellSize_.width);
+    auto const yOffset = _pos.row * static_cast<int>(cellSize_.height);
     auto const pixelOffset = Coordinate{yOffset, xOffset};
 
     Image::Data fragData;
@@ -62,7 +62,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     auto target = &fragData[0];
 
     // fill horizontal gap at the bottom
-    for (int y = availableHeight * cellSize_.width; y < cellSize_.height * cellSize_.width; ++y)
+    for (auto y = availableHeight * cellSize_.width; y < cellSize_.height * cellSize_.width; ++y)
     {
         *target++ = defaultColor_.red();
         *target++ = defaultColor_.green();

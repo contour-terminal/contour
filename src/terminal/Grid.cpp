@@ -305,14 +305,10 @@ void Grid::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
     clampHistory();
 }
 
-// TODO: rename to include word Logical
-/**
- * Computes the relative line number for the bottom-most @p _n logical lines.
- */
-int Grid::computeRelativeLineNumberFromBottom(int _n) const noexcept
+int Grid::computeRelativeLogicalLineNumberFromBottom(unsigned _n) const noexcept
 {
     int logicalLineCount = 0;
-    int outputRelativePhysicalLine = screenSize_.height;
+    int outputRelativePhysicalLine = static_cast<int>(screenSize_.height);
 
     auto i = lines_.rbegin();
     while (i != lines_.rend())
@@ -339,7 +335,7 @@ int Grid::computeRelativeLineNumberFromBottom(int _n) const noexcept
 
 Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapPending)
 {
-    auto const growLines = [this](int _newHeight) -> Coordinate
+    auto const growLines = [this](unsigned _newHeight) -> Coordinate
     {
         assert(_newHeight > screenSize_.height);
         // Grow line count by splicing available lines from history back into buffer, if available,
@@ -361,7 +357,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         return Coordinate{static_cast<int>(rowsToTakeFromSavedLines), 0};
     };
 
-    auto const shrinkLines = [this](int _newHeight, Coordinate _cursor) -> Coordinate
+    auto const shrinkLines = [this](unsigned _newHeight, Coordinate _cursor) -> Coordinate
     {
         // Shrink existing line count to _newSize.height
         // by splicing the number of lines to be shrinked by into savedLines bottom.
@@ -371,7 +367,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             auto const shrinkedLinesCount = screenSize_.height - _newHeight;
             screenSize_.height = _newHeight;
             clampHistory();
-            return Coordinate{shrinkedLinesCount, 0};
+            return Coordinate{static_cast<int>(shrinkedLinesCount), 0};
         }
         else
         {

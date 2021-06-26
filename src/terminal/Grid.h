@@ -274,7 +274,7 @@ class Cell {
     bool empty() const noexcept { return codepoints_.empty(); }
 #endif
 
-    constexpr int width() const noexcept { return width_; }
+    constexpr uint8_t width() const noexcept { return width_; }
 
     constexpr GraphicsAttributes attributes() const noexcept { return attributes_; }
 
@@ -613,7 +613,8 @@ class Grid {
     /// Converts an absolute line number into a relative line number.
     int toRelativeLine(unsigned _absoluteLine) const noexcept;
 
-    int computeRelativeLineNumberFromBottom(int _n) const noexcept;
+    /// Computes the relative line number for the bottom-most @p _n logical lines.
+    int computeRelativeLogicalLineNumberFromBottom(unsigned _n) const noexcept;
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(Coordinate const& _coord) noexcept;
@@ -681,7 +682,7 @@ inline void Grid::render(RendererT && _render, std::optional<int> _scrollOffset)
         for (auto const && [colNumber, column] : crispy::indexed(line, 1))
             _render({rowNumber, colNumber}, column);
 
-        for (auto const colNumber : crispy::times(static_cast<int>(line.size()) + 1, std::max(0, screenSize_.width - static_cast<int>(line.size()))))
+        for (auto const colNumber : crispy::times(static_cast<int>(line.size()) + 1, std::max(0u, screenSize_.width - static_cast<int>(line.size()))))
             _render({rowNumber, colNumber}, Cell{});
     }
 }
@@ -699,7 +700,7 @@ inline Line const& Grid::absoluteLineAt(unsigned _line) const noexcept
 
 inline Line& Grid::lineAt(int _line) noexcept
 {
-    assert(crispy::ascending(1 - static_cast<int>(historyLineCount()), _line, screenSize_.height));
+    assert(crispy::ascending(1 - static_cast<int>(historyLineCount()), _line, static_cast<int>(screenSize_.height)));
 
     return *next(lines_.begin(), static_cast<long int>(historyLineCount()) + _line - 1);
 }
@@ -721,8 +722,8 @@ inline int Grid::toRelativeLine(unsigned _absoluteLine) const noexcept
 
 inline Cell& Grid::at(Coordinate const& _coord) noexcept
 {
-    assert(crispy::ascending(1 - static_cast<int>(historyLineCount()), _coord.row, screenSize_.height));
-    assert(crispy::ascending(1, _coord.column, screenSize_.width));
+    assert(crispy::ascending(1 - static_cast<int>(historyLineCount()), _coord.row, static_cast<int>(screenSize_.height)));
+    assert(crispy::ascending(1, _coord.column, static_cast<int>(screenSize_.width)));
 
     if (_coord.row > 0)
         return (*next(lines_.rbegin(), screenSize_.height - _coord.row))[static_cast<size_t>(_coord.column - 1)];

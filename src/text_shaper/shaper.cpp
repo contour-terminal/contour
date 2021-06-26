@@ -48,16 +48,16 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Si
                                  _bitmap.size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
-    for (int i = 0, sr = 0; i < _newSize.height; i++, sr += factor)
+    for (unsigned i = 0, sr = 0; i < _newSize.height; i++, sr += factor)
     {
-        for (int j = 0, sc = 0; j < _newSize.width; j++, sc += factor, d += 4)
+        for (unsigned j = 0, sc = 0; j < _newSize.width; j++, sc += factor, d += 4)
         {
             // calculate area average
-            unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-            for (int y = sr; y < min(sr + factor, _bitmap.size.height); y++)
+            unsigned r = 0, g = 0, b = 0, a = 0, count = 0;
+            for (unsigned y = sr; y < min(sr + factor, _bitmap.size.height); y++)
             {
                 uint8_t const* p = _bitmap.bitmap.data() + (y * _bitmap.size.width * 4) + sc * 4;
-                for (int x = sc; x < min(sc + factor, _bitmap.size.width); x++, count++)
+                for (unsigned x = sc; x < min(sc + factor, _bitmap.size.width); x++, count++)
                 {
                     b += *(p++);
                     g += *(p++);

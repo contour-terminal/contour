@@ -128,22 +128,22 @@ class SixelParser : public ParserExtension
 class SixelColorPalette
 {
   public:
-    SixelColorPalette(int _size, int _maxSize);
+    SixelColorPalette(size_t _size, size_t _maxSize);
 
     void reset();
 
-    int size() const noexcept { return static_cast<int>(palette_.size()); }
-    void setSize(int _newSize);
+    size_t size() const noexcept { return palette_.size(); }
+    void setSize(size_t _newSize);
 
-    int maxSize() const noexcept { return maxSize_; }
-    void setMaxSize(int _newSize);
+    size_t maxSize() const noexcept { return maxSize_; }
+    void setMaxSize(size_t _newSize);
 
     void setColor(int _index, RGBColor const& _color);
     RGBColor at(int _index) const noexcept;
 
   private:
     std::vector<RGBColor> palette_;
-    int maxSize_;
+    size_t maxSize_;
 };
 
 /// Sixel Image Builder API

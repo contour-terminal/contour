@@ -146,15 +146,15 @@ class Screen : public capabilities::StaticDatabase {
            ScreenEvents& _eventListener,
            bool _logRaw = false,
            bool _logTrace = false,
-           std::optional<int> _maxHistoryLineCount = std::nullopt,
+           std::optional<size_t> _maxHistoryLineCount = std::nullopt,
            crispy::Size _maxImageSize = crispy::Size{800, 600},
-           int _maxImageColorRegisters = 256,
+           size_t _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true,
            ColorPalette _colorPalette = {}
     );
 
     using StaticDatabase::numericCapability;
-    int numericCapability(capabilities::Code _cap) const override;
+    unsigned numericCapability(capabilities::Code _cap) const override;
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
@@ -178,8 +178,8 @@ class Screen : public capabilities::StaticDatabase {
         terminalId_ = _id;
     }
 
-    void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
-    std::optional<int> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
+    void setMaxHistoryLineCount(std::optional<size_t> _maxHistoryLineCount);
+    std::optional<size_t> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
 
     size_t historyLineCount() const noexcept { return grid().historyLineCount(); }
 
@@ -230,12 +230,12 @@ class Screen : public capabilities::StaticDatabase {
 
     void clearScrollbackBuffer();
 
-    void eraseCharacters(int _n);  // ECH
-    void insertCharacters(int _n); // ICH
-    void deleteCharacters(int _n); // DCH
-    void deleteColumns(int _n);    // DECDC
-    void insertLines(int _n);      // IL
-    void insertColumns(int _n);    // DECIC
+    void eraseCharacters(unsigned _n);  // ECH
+    void insertCharacters(unsigned _n); // ICH
+    void deleteCharacters(unsigned _n); // DCH
+    void deleteColumns(unsigned _n);    // DECDC
+    void insertLines(unsigned _n);      // IL
+    void insertColumns(unsigned _n);    // DECIC
 
     void copyArea(
         int _top, int _left, int _bottom, int _right, int _page,
@@ -246,25 +246,25 @@ class Screen : public capabilities::StaticDatabase {
 
     void fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right);
 
-    void deleteLines(int _n);      // DL
+    void deleteLines(unsigned _n);      // DL
 
     void backIndex();    // DECBI
     void forwardIndex(); // DECFI
 
-    void moveCursorBackward(int _n);      // CUB
-    void moveCursorDown(int _n);          // CUD
-    void moveCursorForward(int _n);       // CUF
-    void moveCursorTo(int _n);            // CUP
+    void moveCursorBackward(unsigned _n);      // CUB
+    void moveCursorDown(unsigned _n);          // CUD
+    void moveCursorForward(unsigned _n);       // CUF
+    void moveCursorTo(unsigned _n);            // CUP
     void moveCursorToBeginOfLine();       // CR
-    void moveCursorToColumn(int _n);      // CHA
-    void moveCursorToLine(int _n);        // VPA
-    void moveCursorToNextLine(int _n);    // CNL
+    void moveCursorToColumn(unsigned _n);      // CHA
+    void moveCursorToLine(unsigned _n);        // VPA
+    void moveCursorToNextLine(unsigned _n);    // CNL
     void moveCursorToNextTab();           // HT
-    void moveCursorToPrevLine(int _n);    // CPL
-    void moveCursorUp(int _n);            // CUU
+    void moveCursorToPrevLine(unsigned _n);    // CPL
+    void moveCursorUp(unsigned _n);            // CUU
 
-    void cursorBackwardTab(int _n);       // CBT
-    void cursorForwardTab(int _n);        // CHT
+    void cursorBackwardTab(unsigned _n);       // CBT
+    void cursorForwardTab(unsigned _n);        // CHT
     void backspace();                     // BS
     void horizontalTabClear(HorizontalTabClear _which); // TBC
     void horizontalTabSet();              // HTS
@@ -370,7 +370,7 @@ class Screen : public capabilities::StaticDatabase {
     void resize(crispy::Size const& _newSize);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
-    void resizeColumns(int _newColumnCount, bool _clear);
+    void resizeColumns(unsigned _newColumnCount, bool _clear);
 
     bool isCursorInsideMargins() const noexcept
     {
@@ -436,8 +436,8 @@ class Screen : public capabilities::StaticDatabase {
     Coordinate clampToScreen(Coordinate const& coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{1}, size_.height),
-            std::clamp(coord.column, int{1}, size_.width)
+            std::clamp(coord.row, int{1}, static_cast<int>(size_.height)),
+            std::clamp(coord.column, int{1}, static_cast<int>(size_.width))
         };
     }
 
@@ -612,30 +612,30 @@ class Screen : public capabilities::StaticDatabase {
     }
 
     /// @returns an iterator to @p _n columns after column @p _begin.
-    ColumnIterator columnIteratorAt(ColumnIterator _begin, int _n)
+    ColumnIterator columnIteratorAt(ColumnIterator _begin, unsigned _n)
     {
         return next(_begin, _n - 1);
     }
 
     /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(int _n)
+    ColumnIterator columnIteratorAt(unsigned _n)
     {
         return columnIteratorAt(std::begin(*currentLine_), _n);
     }
 
     /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(int _n) const
+    ColumnIterator columnIteratorAt(unsigned _n) const
     {
         return const_cast<Screen*>(this)->columnIteratorAt(_n);
     }
 
     void scrollUp(unsigned n, Margin const& margin);
     void scrollDown(unsigned n, Margin const& margin);
-    void insertChars(unsigned _lineNo, unsigned _n);
-    void deleteChars(unsigned _lineNo, unsigned _n);
+    void insertChars(int _lineNo, unsigned _n);
+    void deleteChars(int _lineNo, unsigned _n);
 
     /// Sets the current column to given logical column number.
-    void setCurrentColumn(int _n);
+    void setCurrentColumn(unsigned _n);
 
     // private data
     //
@@ -655,7 +655,7 @@ class Screen : public capabilities::StaticDatabase {
     ColorPalette defaultColorPalette_;
     ColorPalette colorPalette_;
 
-    int maxImageColorRegisters_;
+    size_t maxImageColorRegisters_;
     crispy::Size maxImageSize_;
     crispy::Size maxImageSizeLimit_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;

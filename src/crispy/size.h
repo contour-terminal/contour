@@ -10,13 +10,13 @@
 namespace crispy {
 
 struct [[nodiscard]] Size {
-    int width;
-	int height;
+    unsigned width;
+	unsigned height;
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
     struct iterator {
       public:
-        constexpr iterator(int _width, int _next) noexcept :
+        constexpr iterator(unsigned _width, unsigned _next) noexcept :
             width{ _width },
             next{ _next },
             coord{ makeCoordinate(_next) }
@@ -41,15 +41,15 @@ struct [[nodiscard]] Size {
         constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
 
       private:
-        int width;
-        int next;
+        unsigned width;
+        unsigned next;
         Point coord{0, 0};
 
-        constexpr Point makeCoordinate(int offset) noexcept
+        constexpr Point makeCoordinate(unsigned offset) noexcept
         {
             return Point{
-                offset % width,
-                offset / width
+                static_cast<int>(offset % width),
+                static_cast<int>(offset / width)
             };
         }
     };
@@ -64,7 +64,7 @@ struct [[nodiscard]] Size {
 constexpr Size::iterator begin(Size const& s) noexcept { return s.begin(); }
 constexpr Size::iterator end(Size const& s) noexcept { return s.end(); }
 
-constexpr int area(Size size) noexcept
+constexpr unsigned area(Size size) noexcept
 {
     return size.width * size.height;
 }
@@ -111,8 +111,8 @@ constexpr Size operator*(Size _a, Size _b) noexcept
 inline Size operator*(Size _a, double _scalar) noexcept
 {
     return Size{
-        int(ceil(double(_a.width) * _scalar)),
-        int(ceil(double(_a.height) * _scalar))
+        static_cast<unsigned>(ceil(double(_a.width) * _scalar)),
+        static_cast<unsigned>(ceil(double(_a.height) * _scalar))
     };
 }
 

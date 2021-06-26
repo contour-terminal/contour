@@ -47,7 +47,7 @@ template <typename T> constexpr bool operator==(Cap<T> const& a, Cap<T> const& b
 template <typename T> constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept { return a.name == b.name; }
 
 using Boolean = Cap<bool>;
-using Numeric = Cap<int>;
+using Numeric = Cap<unsigned>;
 using String = Cap<std::string_view>;
 
 namespace
@@ -340,7 +340,7 @@ bool StaticDatabase::booleanCapability(Code _cap) const
     return false;
 }
 
-int StaticDatabase::numericCapability(Code _cap) const
+unsigned StaticDatabase::numericCapability(Code _cap) const
 {
     for (auto const& cap: numericalCaps)
         if (cap.code.code == _cap.code)
@@ -367,7 +367,7 @@ bool StaticDatabase::booleanCapability(string_view _cap) const
     return false;
 }
 
-int StaticDatabase::numericCapability(string_view _cap) const
+unsigned StaticDatabase::numericCapability(string_view _cap) const
 {
     for (auto const tcap: numericalCaps)
         if (tcap.name == _cap || tcap.code == _cap)
