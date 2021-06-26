@@ -1,6 +1,6 @@
 /**
- * This file is part of the "contour" project.
- *   Copyright (c) 2020 Christian Parpart <christian@parpart.family>
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2020-2021 Christian Parpart <christian@parpart.family>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,38 +13,63 @@
  */
 #pragma once
 
-namespace crispy
-{
+#include <cstdint>
+#include <type_traits>
+#include <cassert>
 
-/// boxed<T, Tag> represents a tagged and boxed type T.
-///
-/// Example could be: `using Column = boxed<int, 1>`
-/// as well as: `using Row = boxed<int, 2>`.
-///
-/// So you have two integer but different boxed types that can not accidentally mixed up
-/// when being used together.
-template <typename T, int Tag = 0>
-struct boxed
+namespace crispy {
+
+/**
+ * Wrapper to provide strong typing on primitive types.
+ *
+ * You must provide a unique tag (an empty struct) to each boxed
+ * type to ensure uniqueness of this type.
+ *
+ * @code
+ * namespace tags { struct Length{}; }
+ * using Length = boxed<std::size_t, tags::Length>;
+ * @endcode
+ */
+template <typename T, typename Tag> struct boxed
 {
+    static_assert(
+        std::is_integral_v<T> || std::is_floating_point_v<T>,
+        "Boxing is only useful on integral & floating point types."
+    );
+
+    using inner_type = T;
+
+    constexpr boxed(): value{} {}
+    constexpr explicit boxed(T _value) noexcept: value{_value} {}
+    constexpr boxed(boxed const&) = default;
+    constexpr boxed& operator=(boxed const&) = default;
+    constexpr boxed(boxed&&) noexcept = default;
+    constexpr boxed& operator=(boxed &&) noexcept = default;
+    ~boxed() = default;
+
     T value;
 
-    constexpr T& operator*() noexcept { return value; }
-    constexpr T const& operator*() const noexcept { return value; }
+    constexpr T& get() noexcept { return value; }
+    constexpr T const& get() const noexcept { return value; }
 };
 
-// relation
-template <typename T, int G> constexpr bool operator==(boxed<T, G> a, boxed<T, G> b) { return a.value == b.value; }
-template <typename T, int G> constexpr bool operator!=(boxed<T, G> a, boxed<T, G> b) { return a.value != b.value; }
-template <typename T, int G> constexpr bool operator<=(boxed<T, G> a, boxed<T, G> b) { return a.value <= b.value; }
-template <typename T, int G> constexpr bool operator>=(boxed<T, G> a, boxed<T, G> b) { return a.value >= b.value; }
-template <typename T, int G> constexpr bool operator<(boxed<T, G> a, boxed<T, G> b) { return a.value < b.value; }
-template <typename T, int G> constexpr bool operator>(boxed<T, G> a, boxed<T, G> b) { return a.value > b.value; }
+template <typename T, typename U> constexpr T const& operator*(boxed<T, U> const& a) noexcept { return a.value; }
+template <typename T, typename U> constexpr bool operator<(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value < b.value; }
+template <typename T, typename U> constexpr bool operator>(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value > b.value; }
+template <typename T, typename U> constexpr bool operator<=(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value <= b.value; }
+template <typename T, typename U> constexpr bool operator>=(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value >= b.value; }
+template <typename T, typename U> constexpr bool operator==(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value == b.value; }
+template <typename T, typename U> constexpr bool operator!=(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value != b.value; }
+template <typename T, typename U> constexpr bool operator!(boxed<T, U> const& a) noexcept { return !a.value; }
+template <typename T, typename U> constexpr boxed<T, U> operator+(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value + b.value}; }
+template <typename T, typename U> constexpr boxed<T, U> operator-(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value - b.value}; }
+template <typename T, typename U> constexpr boxed<T, U> operator*(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value * b.value}; }
+template <typename T, typename U> constexpr boxed<T, U> operator/(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value / b.value}; }
 
-// algebraic operation
-template <typename T, int G> constexpr boxed<T, G> operator+(boxed<T, G> a, boxed<T, G> b) { return boxed<T, G>{a.value + b.value}; }
-template <typename T, int G> constexpr boxed<T, G> operator-(boxed<T, G> a, boxed<T, G> b) { return boxed<T, G>{a.value - b.value}; }
-template <typename T, int G> constexpr boxed<T, G> operator-(boxed<T, G> a) { return boxed<T, G>{-a.value}; }
-template <typename T, int G> constexpr boxed<T, G> operator*(boxed<T, G> a, boxed<T, G> b) { return boxed<T, G>{a.value * b.value}; }
-template <typename T, int G> constexpr boxed<T, G> operator/(boxed<T, G> a, boxed<T, G> b) { return boxed<T, G>{a.value / b.value}; }
+template <typename From, typename FromTag, typename To, typename ToTag>
+constexpr auto boxed_cast(boxed<From, FromTag> const& from) noexcept
+{
+    return boxed<To, ToTag>{from.value};
+}
 
 }

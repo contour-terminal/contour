@@ -33,6 +33,7 @@ set(terminal_HEADERS
     InputGenerator.h
     Parser.h
     Process.h
+    primitives.h
     pty/Pty.h
     pty/MockPty.h
     pty/UnixPty.h
