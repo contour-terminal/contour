@@ -72,6 +72,43 @@ namespace // {{{ helper
         std::cout << fmt::format(std::forward<Args>(_args)...) << '\n';
 #endif
     }
+
+    /**
+     * Appends logical line by splitting into fixed-width lines.
+     *
+     * @param _targetLines
+     * @param _newColumnCount
+     * @param _logicalLineBuffer
+     * @param _baseFlags
+     * @param _initialNoWrap
+     */
+    void addNewWrappedLines(Lines& _targetLines,
+                            size_t _newColumnCount,
+                            Line::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
+                            Line::Flags _baseFlags,
+                            bool _initialNoWrap)
+    {
+        // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
+        int i = 0;
+
+        while (_logicalLineBuffer.size() >= _newColumnCount)
+        {
+            auto from = begin(_logicalLineBuffer);
+            auto to = next(begin(_logicalLineBuffer), static_cast<int>(_newColumnCount));
+            auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
+            _targetLines.emplace_back(Line(from, to, _baseFlags | wrappedFlag));
+            logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
+            _logicalLineBuffer.erase(from, to);
+            ++i;
+        }
+
+        if (_logicalLineBuffer.size() > 0)
+        {
+            auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
+            _targetLines.emplace_back(Line(_newColumnCount, move(_logicalLineBuffer), _baseFlags | wrappedFlag));
+            logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
+        }
+    }
 }
 // }}}
 // {{{ Cell impl
@@ -193,8 +230,7 @@ void Line::setText(std::string_view _u8string)
 
 void Line::resize(size_t _size)
 {
-    if (_size >= 0)
-        buffer_.resize(_size);
+    buffer_.resize(_size);
 }
 
 bool Line::blank() const noexcept
@@ -263,43 +299,6 @@ Grid::Grid(Size _screenSize, bool _reflowOnResize, optional<int> _maxHistoryLine
 {
 }
 
-/**
- * Appends logical line by splitting into fixed-width lines.
- *
- * @param _targetLines
- * @param _newColumnCount
- * @param _logicalLineBuffer
- * @param _baseFlags
- * @param _initialNoWrap
- */
-void addNewWrappedLines(Lines& _targetLines,
-                        size_t _newColumnCount,
-                        Line::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
-                        Line::Flags _baseFlags,
-                        bool _initialNoWrap)
-{
-    // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
-    int i = 0;
-
-    while (_logicalLineBuffer.size() >= _newColumnCount)
-    {
-        auto from = begin(_logicalLineBuffer);
-        auto to = next(begin(_logicalLineBuffer), static_cast<int>(_newColumnCount));
-        auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        _targetLines.emplace_back(Line(from, to, _baseFlags | wrappedFlag));
-        logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
-        _logicalLineBuffer.erase(from, to);
-        ++i;
-    }
-
-    if (_logicalLineBuffer.size() > 0)
-    {
-        auto const wrappedFlag = i == 0 && _initialNoWrap ? Line::Flags::None : Line::Flags::Wrapped;
-        _targetLines.emplace_back(Line(_newColumnCount, move(_logicalLineBuffer), _baseFlags | wrappedFlag));
-        logf(" - add line: '{}' ({})", _targetLines.back().toUtf8(), _targetLines.back().flags());
-    }
-}
-
 void Grid::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
 {
     maxHistoryLineCount_ = _maxHistoryLineCount;
@@ -350,9 +349,6 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         auto const rowsToTakeFromSavedLines = min(extendCount, static_cast<unsigned>(historyLineCount()));
         auto const fillLineCount = extendCount - rowsToTakeFromSavedLines;
         auto const wrappableFlag = lines_.back().wrappableFlag();
-
-        assert(rowsToTakeFromSavedLines >= 0);
-        assert(fillLineCount >= 0);
 
         generate_n(
             back_inserter(lines_),

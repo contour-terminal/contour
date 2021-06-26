@@ -458,8 +458,8 @@ void Screen::resize(Size const& _newSize)
 
     // Reset margin to their default.
     margin_ = Margin{
-        Margin::Range{1, _newSize.height},
-        Margin::Range{1, _newSize.width}
+        Margin::Range{1, static_cast<unsigned>(_newSize.height)},
+        Margin::Range{1, static_cast<unsigned>(_newSize.width)}
     };
 
     size_ = _newSize;
@@ -486,7 +486,7 @@ void Screen::verifyState() const
 #if !defined(NDEBUG)
     auto const lrmm = isModeEnabled(DECMode::LeftRightMargin);
     if (wrapPending_ &&
-            ((lrmm && (cursor_.position.column + wrapPending_ - 1) != margin_.horizontal.to)
+            ((lrmm && static_cast<unsigned>(cursor_.position.column + wrapPending_ - 1) != margin_.horizontal.to)
             || (!lrmm && (cursor_.position.column + wrapPending_ - 1) != size_.width)))
     {
         fail(fmt::format(
@@ -513,7 +513,8 @@ void Screen::verifyState() const
     else if (col != currentColumn_)
         fail(fmt::format("Calculated current column does not match."));
 
-    if (wrapPending_ && (cursor_.position.column + wrapPending_ - 1) != size_.width && cursor_.position.column != margin_.horizontal.to)
+    if (wrapPending_ && (cursor_.position.column + wrapPending_ - 1) != size_.width &&
+            static_cast<unsigned>(cursor_.position.column) != margin_.horizontal.to)
         fail(fmt::format("wrapPending flag set when cursor is not in last column."));
 #endif
 }
@@ -573,7 +574,13 @@ void Screen::writeText(char32_t _char)
         auto const extendedWidth = lastColumn_->appendCharacter(ch);
 
         if (extendedWidth > 0)
-            clearAndAdvance(extendedWidth);
+            clearAndAdvance(static_cast<unsigned>(extendedWidth));
+        else if (extendedWidth < 0)
+        {
+            // TODO: I think I should move the cursor back then!
+            // Think of Emoji emoji presentation (U+1F600) with VS15
+            // to become Emoji text presentation (that is only with N(arrow) width == 1).
+        }
     }
 
     sequencer_.resetInstructionCounter();
@@ -592,8 +599,9 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     lastCursorPosition_ = cursor_.position;
 
     bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin ? margin_.horizontal.to - cursor_.position.column
-                                                   : size_.width - cursor_.position.column;
+    auto const cellsAvailable = cursorInsideMargin
+        ? static_cast<int>(margin_.horizontal.to) - cursor_.position.column
+        : size_.width - cursor_.position.column;
 
     auto const n = min(cell.width(), cellsAvailable);
 
@@ -613,15 +621,16 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
         wrapPending_ = 1;
 }
 
-void Screen::clearAndAdvance(int _offset)
+void Screen::clearAndAdvance(unsigned _offset)
 {
     if (_offset == 0)
         return;
 
-    auto const availableColumnCount = margin_.horizontal.length() - cursor_.position.column;
-    auto const n = min(_offset, availableColumnCount);
+    auto const availableColumnCount =
+        static_cast<int>(margin_.horizontal.length()) - cursor_.position.column;
+    auto const n = min(static_cast<int>(_offset), availableColumnCount);
 
-    if (n == _offset)
+    if (n == static_cast<int>(_offset))
     {
         assert(n > 0);
         cursor_.position.column += n;
@@ -643,9 +652,9 @@ std::string Screen::screenshot(function<string(int)> const& _postLine) const
     auto result = std::stringstream{};
     auto writer = VTWriter(result);
 
-    for (int const absoluteRow : crispy::times(1, grid().historyLineCount() + size_.height))
+    for (auto const absoluteRow : crispy::times(1u, grid().historyLineCount() + static_cast<unsigned>(size_.height)))
     {
-        auto const row = absoluteRow - grid().historyLineCount();
+        auto const row = static_cast<int>(absoluteRow) - static_cast<int>(grid().historyLineCount());
         for (int const col : crispy::times(1, size_.width))
         {
             Cell const& cell = at({row, col});
@@ -678,26 +687,26 @@ std::string Screen::screenshot(function<string(int)> const& _postLine) const
     return result.str();
 }
 
-optional<int> Screen::findMarkerBackward(int _currentCursorLine) const
+optional<unsigned> Screen::findMarkerBackward(unsigned _currentCursorLine) const
 {
-    if (_currentCursorLine < 0 || !isPrimaryScreen())
+    if (!isPrimaryScreen())
         return nullopt;
 
-    _currentCursorLine = min(_currentCursorLine, static_cast<int>(historyLineCount()) + size_.height);
+    _currentCursorLine = min(_currentCursorLine, static_cast<unsigned>(historyLineCount()) + static_cast<unsigned>(size_.height));
 
-    for (int i = _currentCursorLine - 1; i >= 0; --i)
+    for (unsigned i = _currentCursorLine - 1; i >= 0; --i)
         if (grid().absoluteLineAt(i).marked())
             return {i};
 
     return nullopt;
 }
 
-optional<int> Screen::findMarkerForward(int _currentCursorLine) const
+optional<unsigned> Screen::findMarkerForward(unsigned _currentCursorLine) const
 {
     if (_currentCursorLine < 0 || !isPrimaryScreen())
         return nullopt;
 
-    for (int i = _currentCursorLine + 1; i < static_cast<int>(historyLineCount()) + grid().screenSize().height; ++i)
+    for (auto i = _currentCursorLine + 1; i < historyLineCount() + static_cast<unsigned>(grid().screenSize().height); ++i)
         if (grid().absoluteLineAt(i).marked())
             return {i};
 
@@ -801,8 +810,8 @@ void Screen::resetHard()
     lastCursorPosition_ = cursor_.position;
 
     margin_ = Margin{
-        Margin::Range{1, size_.height},
-        Margin::Range{1, size_.width}
+        Margin::Range{1, static_cast<unsigned>(size_.height)},
+        Margin::Range{1, static_cast<unsigned>(size_.width)}
     };
 
 #if defined(LIBTERMINAL_HYPERLINKS)
@@ -844,15 +853,15 @@ void Screen::setBuffer(ScreenType _type)
     }
 }
 
-void Screen::linefeed(int _newColumn)
+void Screen::linefeed(unsigned _newColumn)
 {
     wrapPending_ = 0;
 
-    if (realCursorPosition().row == margin_.vertical.to ||
+    if (static_cast<unsigned>(realCursorPosition().row) == margin_.vertical.to ||
         realCursorPosition().row == size_.height)
     {
         scrollUp(1);
-        moveCursorTo({cursorPosition().row, _newColumn});
+        moveCursorTo({cursorPosition().row, static_cast<int>(_newColumn)});
     }
     else
     {
@@ -860,7 +869,7 @@ void Screen::linefeed(int _newColumn)
         // it may be faster to just incrementally update them.
         // moveCursorTo({cursorPosition().row + 1, margin_.horizontal.from});
         cursor_.position.row++;
-        cursor_.position.column = _newColumn;
+        cursor_.position.column = static_cast<int>(_newColumn);
         currentLine_++;
         updateColumnIterator();
     }

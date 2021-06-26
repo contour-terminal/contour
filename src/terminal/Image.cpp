@@ -34,7 +34,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     auto const pixelOffset = Coordinate{yOffset, xOffset};
 
     Image::Data fragData;
-    fragData.resize(cellSize_.width * cellSize_.height * 4); // RGBA
+    fragData.resize(static_cast<size_t>(cellSize_.width) * static_cast<size_t>(cellSize_.height) * 4); // RGBA
     auto const availableWidth = min(image_->width() - pixelOffset.column, cellSize_.width);
     auto const availableHeight = min(image_->height() - pixelOffset.row, cellSize_.height);
 
@@ -72,7 +72,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset = ((pixelOffset.row + (availableHeight - 1 - y)) * image_->width() + pixelOffset.column) * 4;
+        auto const startOffset = static_cast<size_t>((pixelOffset.row + (availableHeight - 1 - y)) * image_->width() + pixelOffset.column) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 

@@ -409,7 +409,10 @@ class Screen : public capabilities::StaticDatabase {
         if (!cursor_.originMode)
             return pos;
         else
-            return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
+            return {
+                pos.row + static_cast<int>(margin_.vertical.from) - 1,
+                pos.column + static_cast<int>(margin_.horizontal.from) - 1
+            };
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
@@ -425,16 +428,16 @@ class Screen : public capabilities::StaticDatabase {
     Coordinate clampToOrigin(Coordinate const& coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{0}, margin_.vertical.length()),
-            std::clamp(coord.column, int{0}, margin_.horizontal.length())
+            std::clamp(coord.row, int{0}, static_cast<int>(margin_.vertical.length())),
+            std::clamp(coord.column, int{0}, static_cast<int>(margin_.horizontal.length()))
         };
     }
 
     Coordinate clampToScreen(Coordinate const& coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{ 1 }, size_.height),
-            std::clamp(coord.column, int{ 1 }, size_.width)
+            std::clamp(coord.row, int{1}, size_.height),
+            std::clamp(coord.column, int{1}, size_.width)
         };
     }
 
@@ -535,8 +538,8 @@ class Screen : public capabilities::StaticDatabase {
 
     void setMaxImageSize(crispy::Size _size) noexcept { sequencer_.setMaxImageSize(_size); }
 
-    void scrollUp(int n) { scrollUp(n, margin_); }
-    void scrollDown(int n) { scrollDown(n, margin_); }
+    void scrollUp(unsigned n) { scrollUp(n, margin_); }
+    void scrollDown(unsigned n) { scrollDown(n, margin_); }
 
     void verifyState() const;
 
@@ -590,10 +593,10 @@ class Screen : public capabilities::StaticDatabase {
     void setTabUnderCursor();
 
     /// Applies LF but also moves cursor to given column @p _column.
-    void linefeed(int _column);
+    void linefeed(unsigned _column);
 
     void writeCharToCurrentAndAdvance(char32_t _codepoint);
-    void clearAndAdvance(int _offset);
+    void clearAndAdvance(unsigned _offset);
 
     void fail(std::string const& _message) const;
 
@@ -626,10 +629,10 @@ class Screen : public capabilities::StaticDatabase {
         return const_cast<Screen*>(this)->columnIteratorAt(_n);
     }
 
-    void scrollUp(int n, Margin const& margin);
-    void scrollDown(int n, Margin const& margin);
-    void insertChars(int _lineNo, int _n);
-    void deleteChars(int _lineNo, int _n);
+    void scrollUp(unsigned n, Margin const& margin);
+    void scrollDown(unsigned n, Margin const& margin);
+    void insertChars(unsigned _lineNo, unsigned _n);
+    void deleteChars(unsigned _lineNo, unsigned _n);
 
     /// Sets the current column to given logical column number.
     void setCurrentColumn(int _n);
