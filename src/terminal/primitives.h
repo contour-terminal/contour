@@ -8,12 +8,26 @@
 namespace terminal {
 
 namespace tags { struct Column{}; }
+/// ColumnPosition represents the absolute column on the visibile screen area
+/// (usually the main page unless scrolled upwards).
 using ColumnPosition = crispy::boxed<unsigned, tags::Column>;
 
 namespace tags { struct Line{}; struct RelativeLine{}; struct HistoryLine{}; }
 using LinePosition = crispy::boxed<unsigned, tags::Line>;
 using RelativeLinePosition = crispy::boxed<int, tags::RelativeLine>;
 using HistoryLinePosition = crispy::boxed<unsigned, tags::HistoryLine>;
+
+// TODO: Maybe make boxed.h into its own C++ github repo?
+// TODO: Differenciate Line/Column types for DECOM enabled/disabled coordinates?
+//
+// Line, Column                 : respects DECOM if enabled (a.k.a. logical column)
+// PhysicalLine, PhysicalColumn : always relative to origin (top left)
+// ScrollbackLine               : line number relative to top-most line in scrollback buffer.
+//
+// Respectively for Coordinates:
+// - Coordinate
+// - PhysicalCoordinate
+// - ScrollbackCoordinate
 
 namespace tags { struct ScrollOffset{}; }
 using ScrollOffset = crispy::boxed<unsigned, tags::ScrollOffset>;
@@ -36,7 +50,16 @@ using Length = crispy::boxed<std::size_t, tags::Length>;
 namespace tags { struct From{}; struct To; }
 using From = crispy::boxed<uint16_t, tags::From>;
 using To = crispy::boxed<uint16_t, tags::To>;
-struct Range { From from; To to; };
+struct Range {
+    From from; To to;
+
+    // So you can do: for (auto const v: Range{3, 5}) { ... }
+    struct ValueTag{};
+    using iterator = crispy::boxed<uint16_t, ValueTag>;
+    iterator begin() const { return iterator{from.value}; }
+    auto end() const { return Value{static_cast<uint16_t>(to.value + 1)}; }
+    // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
+};
 
 constexpr Length length(Range range) noexcept
 {
