@@ -1109,7 +1109,7 @@ void Screen::moveCursorToNextLine(unsigned _n)
 void Screen::moveCursorToPrevLine(unsigned _n)
 {
     auto const n = min(_n, static_cast<unsigned>(cursorPosition().row) - 1);
-    moveCursorTo({cursorPosition().row - n, 1});
+    moveCursorTo({cursorPosition().row - static_cast<int>(n), 1});
 }
 
 void Screen::insertCharacters(unsigned _n)
@@ -1151,7 +1151,7 @@ void Screen::insertLines(unsigned _n)
         scrollDown(
             _n,
             Margin{
-                { cursor_.position.row, margin_.vertical.to },
+                { static_cast<unsigned>(cursor_.position.row), margin_.vertical.to },
                 margin_.horizontal
             }
         );
@@ -1161,7 +1161,7 @@ void Screen::insertLines(unsigned _n)
 void Screen::insertColumns(unsigned _n)
 {
     if (isCursorInsideMargins())
-        for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
+        for (auto lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
             insertChars(lineNo, _n);
 }
 
@@ -1259,7 +1259,7 @@ void Screen::deleteLines(unsigned _n)
         scrollUp(
             _n,
             Margin{
-                { cursor_.position.row, margin_.vertical.to },
+                { static_cast<unsigned>(cursor_.position.row), margin_.vertical.to },
                 margin_.horizontal
             }
         );
@@ -1277,7 +1277,7 @@ void Screen::deleteChars(int _lineNo, unsigned _n)
     auto line = next(begin(grid().mainPage()), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
     auto rightMargin = next(begin(*line), margin_.horizontal.to);
-    auto const n = min(_n, static_cast<int>(distance(column, rightMargin)));
+    auto const n = min(_n, static_cast<unsigned>(distance(column, rightMargin)));
 
     rotate(
         column,
@@ -1298,7 +1298,7 @@ void Screen::deleteChars(int _lineNo, unsigned _n)
 void Screen::deleteColumns(unsigned _n)
 {
     if (isCursorInsideMargins())
-        for (int lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
+        for (auto lineNo = margin_.vertical.from; lineNo <= margin_.vertical.to; ++lineNo)
             deleteChars(lineNo, _n);
 }
 
@@ -1392,11 +1392,11 @@ void Screen::moveCursorBackward(unsigned _n)
     wrapPending_ = 0;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
-    auto const n = min(_n, cursor_.position.column - 1);
+    auto const n = min(_n, static_cast<unsigned>(cursor_.position.column) - 1);
     setCurrentColumn(cursor_.position.column - n);
 }
 
-void Screen::moveCursorToColumn(int _column)
+void Screen::moveCursorToColumn(unsigned _column)
 {
     wrapPending_ = 0;
     setCurrentColumn(_column);
@@ -1408,9 +1408,9 @@ void Screen::moveCursorToBeginOfLine()
     setCurrentColumn(1);
 }
 
-void Screen::moveCursorToLine(int _row)
+void Screen::moveCursorToLine(unsigned _row)
 {
-    moveCursorTo({_row, cursor_.position.column});
+    moveCursorTo({static_cast<int>(_row), cursor_.position.column});
 }
 
 void Screen::moveCursorToNextTab()
@@ -1441,7 +1441,7 @@ void Screen::moveCursorToNextTab()
         {
             auto const n = min(
                 tabWidth_ - (cursor_.position.column - 1) % tabWidth_,
-                size_.width - cursorPosition().column
+                static_cast<int>(size_.width - cursorPosition().column)
             );
             moveCursorForward(n);
         }
@@ -1476,7 +1476,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     // TODO: when capturing _lineCount < screenSize.height, start at the lowest non-empty line.
     auto const relativeStartLine = _logicalLines ? grid().computeRelativeLogicalLineNumberFromBottom(_lineCount)
                                                  : size_.height - _lineCount + 1;
-    auto const startLine = clamp(1 - static_cast<int>(historyLineCount()), relativeStartLine, size_.height);
+    auto const startLine = clamp(1 - static_cast<int>(historyLineCount()), static_cast<int>(relativeStartLine), static_cast<int>(size_.height));
 
     // dumpState();
 
@@ -1526,13 +1526,13 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     reply("\033]314;\033\\"); // mark the end
 }
 
-void Screen::cursorForwardTab(int _count)
+void Screen::cursorForwardTab(unsigned _count)
 {
     for (int i = 0; i < _count; ++i)
         moveCursorToNextTab();
 }
 
-void Screen::cursorBackwardTab(int _count)
+void Screen::cursorBackwardTab(unsigned _count)
 {
     if (_count == 0)
         return;
@@ -1927,7 +1927,7 @@ void Screen::requestDECMode(int _mode)
 void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
 {
 	auto const bottom = _bottom.has_value()
-		? min(_bottom.value(), size_.height)
+		? min(static_cast<unsigned>(_bottom.value()), size_.height)
 		: size_.height;
 
 	auto const top = _top.value_or(1);
@@ -1945,7 +1945,7 @@ void Screen::setLeftRightMargin(optional<int> _left, optional<int> _right)
     if (isModeEnabled(DECMode::LeftRightMargin))
     {
 		auto const right = _right.has_value()
-			? min(_right.value(), size_.width)
+			? min(static_cast<unsigned>(_right.value()), size_.width)
 			: size_.width;
 		auto const left = _left.value_or(1);
 		if (left + 1 < right)
@@ -2010,7 +2010,7 @@ void Screen::sixelImage(Size _pixelSize, Image::Data&& _data)
 {
     auto const columnCount = int(ceilf(float(_pixelSize.width) / float(cellPixelSize_.width)));
     auto const rowCount = int(ceilf(float(_pixelSize.height) / float(cellPixelSize_.height)));
-    auto const extent = Size{columnCount, rowCount};
+    auto const extent = Size{(unsigned)columnCount, (unsigned)rowCount};
     auto const sixelScrolling = isModeEnabled(DECMode::SixelScrolling);
     auto const topLeft = sixelScrolling ? cursorPosition() : Coordinate{1, 1};
 
@@ -2079,7 +2079,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
 #endif
             }
         );
-        moveCursorTo(Coordinate{_topLeft.row + linesToBeRendered - 1, _topLeft.column});
+        moveCursorTo(Coordinate{static_cast<int>(_topLeft.row + linesToBeRendered - 1), static_cast<int>(_topLeft.column)});
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
@@ -2095,10 +2095,10 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 crispy::times(columnsToBeRendered),
                 [&](int columnOffset) {
-                    [[maybe_unused]] Cell& cell = at(Coordinate{size_.height, columnOffset + 1});
+                    [[maybe_unused]] Cell& cell = at(Coordinate{static_cast<int>(size_.height), columnOffset + 1});
                     cell.setImage(ImageFragment{
                         rasterizedImage,
-                        Coordinate{linesToBeRendered + lineOffset, columnOffset}
+                        Coordinate{static_cast<int>(linesToBeRendered + lineOffset), columnOffset}
                     });
 #if defined(LIBTERMINAL_HYPERLINKS)
                     cell.setHyperlink(currentHyperlink_);

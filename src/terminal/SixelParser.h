@@ -53,10 +53,10 @@ class SixelParser : public ParserExtension
         virtual ~Events() = default;
 
         /// Defines a new color at given register index.
-        virtual void setColor(int _index, RGBColor const& _color) = 0;
+        virtual void setColor(unsigned _index, RGBColor const& _color) = 0;
 
         /// Uses the given color for future paints
-        virtual void useColor(int _index) = 0;
+        virtual void useColor(unsigned _index) = 0;
 
         /// moves sixel-cursor to the left border
         virtual void rewind() = 0;
@@ -66,7 +66,7 @@ class SixelParser : public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(int _pan, int _pad, crispy::Size const& _imageSize) = 0;
+        virtual void setRaster(unsigned _pan, unsigned _pad, crispy::Size const& _imageSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t _sixel) = 0;
@@ -111,7 +111,7 @@ class SixelParser : public ParserExtension
     void finalize() override;
 
   private:
-    void paramShiftAndAddDigit(int _value);
+    void paramShiftAndAddDigit(unsigned _value);
     void transitionTo(State _newState);
     void enterState();
     void leaveState();
@@ -119,7 +119,7 @@ class SixelParser : public ParserExtension
 
   private:
     State state_ = State::Ground;
-    std::vector<int> params_;
+    std::vector<unsigned> params_;
 
     Events& events_;
     OnFinalize finalizer_;
@@ -138,8 +138,8 @@ class SixelColorPalette
     size_t maxSize() const noexcept { return maxSize_; }
     void setMaxSize(size_t _newSize);
 
-    void setColor(int _index, RGBColor const& _color);
-    RGBColor at(int _index) const noexcept;
+    void setColor(unsigned _index, RGBColor const& _color);
+    RGBColor at(unsigned _index) const noexcept;
 
   private:
     std::vector<RGBColor> palette_;
@@ -155,16 +155,16 @@ class SixelImageBuilder : public SixelParser::Events
     using Buffer = std::vector<uint8_t>;
 
     SixelImageBuilder(crispy::Size const& _maxSize,
-                      int _aspectVertical,
-                      int _aspectHorizontal,
+                      unsigned _aspectVertical,
+                      unsigned _aspectHorizontal,
                       RGBAColor _backgroundColor,
                       std::shared_ptr<SixelColorPalette> _colorPalette);
 
     crispy::Size const& maxSize() const noexcept { return maxSize_; }
 
     crispy::Size const& size() const noexcept { return size_; }
-    int aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
-    int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
+    unsigned aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
+    unsigned aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
     RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
 
     RGBAColor at(Coordinate _coord) const noexcept;
@@ -174,11 +174,11 @@ class SixelImageBuilder : public SixelParser::Events
 
     void clear(RGBAColor _fillColor);
 
-    void setColor(int _index, RGBColor const& _color) override;
-    void useColor(int _index) override;
+    void setColor(unsigned _index, RGBColor const& _color) override;
+    void useColor(unsigned _index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(int _pan, int _pad, crispy::Size const& _imageSize) override;
+    void setRaster(unsigned _pan, unsigned _pad, crispy::Size const& _imageSize) override;
     void render(int8_t _sixel) override;
 
     Coordinate const& sixelCursor() const noexcept { return sixelCursor_; }
@@ -192,10 +192,10 @@ class SixelImageBuilder : public SixelParser::Events
     crispy::Size size_;
     Buffer buffer_; /// RGBA buffer
     Coordinate sixelCursor_;
-    int currentColor_;
+    unsigned currentColor_;
     struct {
-        int nominator;
-        int denominator;
+        unsigned nominator;
+        unsigned denominator;
     } aspectRatio_;
 };
 

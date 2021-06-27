@@ -228,7 +228,7 @@ std::string to_string(CharsetTable i);
 std::string to_string(CharsetId charset);
 std::string to_string(GraphicsRendition s);
 
-constexpr int toAnsiModeNum(AnsiMode m)
+constexpr unsigned toAnsiModeNum(AnsiMode m)
 {
     switch (m)
     {
@@ -237,10 +237,10 @@ constexpr int toAnsiModeNum(AnsiMode m)
         case AnsiMode::SendReceive: return 12;
         case AnsiMode::AutomaticNewLine: return 20;
     }
-    return static_cast<int>(m);
+    return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidAnsiMode(int _mode) noexcept
+constexpr bool isValidAnsiMode(unsigned _mode) noexcept
 {
     switch (static_cast<AnsiMode>(_mode))
     {
@@ -256,7 +256,7 @@ constexpr bool isValidAnsiMode(int _mode) noexcept
 
 std::string to_string(DECMode _mode);
 
-constexpr int toDECModeNum(DECMode m)
+constexpr unsigned toDECModeNum(DECMode m)
 {
     switch (m)
     {
@@ -294,10 +294,10 @@ constexpr int toDECModeNum(DECMode m)
         case DECMode::BatchedRendering: return 2026;
         case DECMode::TextReflow: return 2027;
     }
-    return static_cast<int>(m);
+    return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidDECMode(int _mode) noexcept
+constexpr bool isValidDECMode(unsigned _mode) noexcept
 {
     switch (static_cast<DECMode>(_mode))
     {
@@ -341,7 +341,7 @@ constexpr bool isValidDECMode(int _mode) noexcept
 
 CursorShape makeCursorShape(std::string const& _name);
 
-constexpr DynamicColorName getChangeDynamicColorCommand(int value)
+constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
 {
     switch (value)
     {
@@ -357,7 +357,7 @@ constexpr DynamicColorName getChangeDynamicColorCommand(int value)
     }
 }
 
-constexpr int setDynamicColorCommand(DynamicColorName name)
+constexpr unsigned setDynamicColorCommand(DynamicColorName name)
 {
     switch (name)
     {
@@ -392,7 +392,7 @@ namespace XtSmGraphics
         ReadLimit = 4
     };
 
-    using Value = std::variant<std::monostate, int, crispy::Size>;
+    using Value = std::variant<std::monostate, unsigned, crispy::Size>;
 };
 
 /// TBC - Tab Clear
@@ -457,7 +457,7 @@ enum class ApplyResult {
 /// Helps constructing VT functions as they're being parsed by the VT parser.
 class Sequence {
   public:
-    using Parameter = int;
+    using Parameter = unsigned;
     using ParameterList = std::vector<std::vector<Parameter>>;
     using Intermediaries = std::string;
     using DataString = std::string;
@@ -557,21 +557,21 @@ class Sequence {
         return param_opt(_index).value_or(_defaultValue);
     }
 
-    int param(size_t _index) const noexcept
+    unsigned param(size_t _index) const noexcept
     {
         assert(_index < parameters_.size());
         assert(0 < parameters_[_index].size());
         return parameters_[_index][0];
     }
 
-    int subparam(size_t _index, size_t _subIndex) const noexcept
+    unsigned subparam(size_t _index, size_t _subIndex) const noexcept
     {
         assert(_index < parameters_.size());
         assert(_subIndex + 1 < parameters_[_index].size());
         return parameters_[_index][_subIndex + 1];
     }
 
-    bool containsParameter(int _value) const noexcept
+    bool containsParameter(unsigned _value) const noexcept
     {
         for (size_t i = 0; i < parameterCount(); ++i)
             if (param(i) == _value)
@@ -593,7 +593,7 @@ class Sequencer : public ParserEvents {
               std::shared_ptr<SixelColorPalette> _imageColorPalette);
 
     void setMaxImageSize(crispy::Size _value) { maxImageSize_ = _value; }
-    void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
+    void setMaxImageColorRegisters(unsigned _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
     int64_t instructionCounter() const noexcept { return instructionCounter_; }
@@ -645,7 +645,7 @@ class Sequencer : public ParserEvents {
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     bool usePrivateColorRegisters_ = false;
     crispy::Size maxImageSize_;
-    int maxImageRegisterCount_;
+    unsigned maxImageRegisterCount_;
     RGBAColor backgroundColor_;
 };
 
@@ -728,7 +728,7 @@ namespace fmt { // {{{
                 case DynamicColorName::HighlightBackgroundColor:
                     return format_to(ctx.out(), "HighlightBackgroundColor");
             }
-            return format_to(ctx.out(), "({})", static_cast<int>(name));
+            return format_to(ctx.out(), "({})", static_cast<unsigned>(name));
         }
     };
 

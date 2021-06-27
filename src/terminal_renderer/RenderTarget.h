@@ -31,7 +31,7 @@ namespace terminal::renderer {
 
 struct AtlasTextureInfo {
     std::string atlasName;
-    int atlasInstanceId;
+    unsigned atlasInstanceId;
     crispy::Size size;
     atlas::Format format;
     atlas::Buffer buffer;
@@ -65,7 +65,7 @@ class RenderTarget
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
-    virtual void renderRectangle(int _x, int _y, int _width, int _height,
+    virtual void renderRectangle(int _x, int _y, unsigned _width, unsigned _height,
                                  float _r, float _g, float _b, float _a) = 0;
 
     using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, crispy::Size /*_pixelSize*/)>;

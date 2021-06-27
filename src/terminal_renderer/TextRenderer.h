@@ -248,7 +248,7 @@ private:
     RGBColor color_{};
 
     std::vector<char32_t> codepoints_;
-    std::vector<int> clusters_;
+    std::vector<unsigned> clusters_;
     int cellCount_ = 0;
     bool textStartFound_ = false;
 

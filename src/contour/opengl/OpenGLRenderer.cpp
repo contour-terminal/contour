@@ -49,7 +49,7 @@ namespace terminal::renderer::opengl {
 
 namespace // {{{ helper
 {
-    int glFormat(atlas::Format _format)
+    unsigned glFormat(atlas::Format _format)
     {
         switch (_format)
         {
@@ -74,9 +74,9 @@ namespace // {{{ helper
     }
 } // }}}
 
-constexpr int MaxMonochromeTextureSize = 1024;
-constexpr int MaxColorTextureSize = 2048;
-constexpr int MaxInstanceCount = 24;
+constexpr unsigned MaxMonochromeTextureSize = 1024;
+constexpr unsigned MaxColorTextureSize = 2048;
+constexpr unsigned MaxInstanceCount = 24;
 
 struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
 {
@@ -84,7 +84,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     {
         std::vector<atlas::RenderTexture> renderTextures;
         std::vector<GLfloat> buffer;
-        int user = 0;
+        unsigned user = 0;
 
         void clear()
         {
@@ -98,11 +98,11 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
     std::vector<RenderBatch> renderBatches;
     std::vector<atlas::AtlasID> destroyAtlases;
 
-    std::list<int> atlasIDs_;
-    std::list<int> unusedAtlasIDs_;
-    int nextAtlasID_ = 0;
+    std::list<unsigned> atlasIDs_;
+    std::list<unsigned> unusedAtlasIDs_;
+    unsigned nextAtlasID_ = 0;
 
-    atlas::AtlasID allocateAtlasID(int _user)
+    atlas::AtlasID allocateAtlasID(unsigned _user)
     {
         // The allocated atlas ID is not the OpenGL texture ID but
         // an internal one that is used to reference into renderBatches, but
@@ -118,7 +118,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
         return id;
     }
 
-    atlas::AtlasID createAtlas(Size _size, atlas::Format _format, int _user) override
+    atlas::AtlasID createAtlas(Size _size, atlas::Format _format, unsigned _user) override
     {
         auto const id = allocateAtlasID(_user);
         createAtlases.emplace_back(atlas::CreateAtlas{id, _size, _format, _user});
@@ -394,25 +394,25 @@ void OpenGLRenderer::clearCache()
     lcdAtlasAllocator_.clear();
 }
 
-int OpenGLRenderer::maxTextureDepth()
+unsigned OpenGLRenderer::maxTextureDepth()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &value) );
-    return static_cast<int>(value);
+    return static_cast<unsigned>(value);
 }
 
-int OpenGLRenderer::maxTextureSize()
+unsigned OpenGLRenderer::maxTextureSize()
 {
     initialize();
 
     GLint value = {};
     CHECKED_GL( glGetIntegerv(GL_MAX_TEXTURE_SIZE, &value) );
-    return static_cast<int>(value);
+    return static_cast<unsigned>(value);
 }
 
-void OpenGLRenderer::clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format)
+void OpenGLRenderer::clearTextureAtlas(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format)
 {
     bindTexture(_textureId);
 
@@ -537,7 +537,7 @@ void OpenGLRenderer::bindTexture(GLuint _textureId)
     }
 }
 
-void OpenGLRenderer::renderRectangle(int _x, int _y, int _width, int _height,
+void OpenGLRenderer::renderRectangle(int _x, int _y, unsigned _width, unsigned _height,
                                      float _r, float _g, float _b, float _a)
 {
     GLfloat const x = _x;
@@ -659,7 +659,7 @@ Size OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::executeRenderTextures()
 {
-    currentTextureId_ = std::numeric_limits<int>::max();
+    currentTextureId_ = std::numeric_limits<unsigned>::max();
 
     // debuglog(OpenGLRendererTag).write(
     //     "OpenGLRenderer::executeRenderTextures() upload={} render={}",
@@ -685,7 +685,7 @@ void OpenGLRenderer::executeRenderTextures()
             continue;
 
         glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + batch.user));
-        bindTexture(textureAtlasID(atlas::AtlasID{static_cast<int>(i)}));
+        bindTexture(textureAtlasID(atlas::AtlasID{static_cast<unsigned>(i)}));
         glBindVertexArray(vao_);
 
         // upload buffer

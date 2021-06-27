@@ -122,7 +122,7 @@ struct FunctionSelector
     /// an optional value between 0x3C .. 0x3F
     char leader;
     /// number of arguments supplied
-    int argc;
+    uint16_t argc;
     /// an optional intermediate character between (0x20 .. 0x2F)
     char intermediate;
     /// between 0x40 .. 0x7F
@@ -538,7 +538,7 @@ inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectControl(char _leader, int _argc, char _intermediate, char _final)
+inline FunctionDefinition const* selectControl(char _leader, uint8_t _argc, char _intermediate, char _final)
 {
     return select({FunctionCategory::CSI, _leader, _argc, _intermediate, _final});
 }
@@ -550,9 +550,9 @@ inline FunctionDefinition const* selectControl(char _leader, int _argc, char _in
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectOSCommand(int _id)
+inline FunctionDefinition const* selectOSCommand(uint16_t _id)
 {
-    return select({FunctionCategory::OSC, 0, _id, 0, 0});
+    return select(FunctionSelector{FunctionCategory::OSC, 0, _id, 0, 0});
 }
 
 } // end namespace

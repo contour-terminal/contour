@@ -41,11 +41,11 @@ struct GridMetrics
     crispy::Size pageSize;  // page size in column- and line count
     crispy::Size cellSize;  // grid cell size in pixels
 
-    int baseline;           // glyph's baseline position relative to cell bottom.
+    unsigned baseline;           // glyph's baseline position relative to cell bottom.
 
     struct {
-        int position = 1;   // center underline position relative to cell bottom
-        int thickness = 1;  // underline thickness
+        unsigned position = 1;   // center underline position relative to cell bottom
+        unsigned thickness = 1;  // underline thickness
     } underline{};
 
     CellMargin cellMargin{}; // TODO: implement respecting cell margins.
@@ -57,9 +57,9 @@ struct GridMetrics
     /// @param row screen coordinate's line (between 1 and number of screen lines)
     ///
     /// @return 2D point into drawing coordinate system
-    constexpr crispy::Point map(int col, int row) const noexcept
+    constexpr crispy::Point map(unsigned col, unsigned row) const noexcept
     {
-        return map(Coordinate{row, col});
+        return map(Coordinate{static_cast<int>(row), static_cast<int>(col)});
     }
 
     constexpr crispy::Point map(Coordinate const& _pos) const noexcept
@@ -67,7 +67,7 @@ struct GridMetrics
         auto const x = pageMargin.left + (_pos.column - 1) * cellSize.width;
         auto const y = pageMargin.bottom + (pageSize.height - _pos.row) * cellSize.height;
 
-        return {x, y};
+        return {static_cast<int>(x), static_cast<int>(y)};
     }
 };
 

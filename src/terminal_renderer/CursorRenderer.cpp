@@ -61,7 +61,7 @@ void CursorRenderer::rebuild()
 
     auto const width = gridMetrics_.cellSize.width * columnWidth_;
     auto const baseline = gridMetrics_.baseline;
-    auto constexpr LineThickness = 1;
+    auto constexpr LineThickness = 1u;
 
     { // {{{ CursorShape::Block
         auto const height = gridMetrics_.cellSize.height;
@@ -75,9 +75,9 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Underscore
-        auto const thickness = max(LineThickness * baseline / 3, 1);
+        auto const thickness = max(LineThickness * baseline / 3, 1u);
         auto const height = baseline;
-        auto const base_y = max((height - thickness) / 2, 0);
+        auto const base_y = height > thickness ? (height - thickness) / 2 : 0;
         auto image = atlas::Buffer(width * height, 0);
 
         for (int y = 1; y <= thickness; ++y)
@@ -92,7 +92,7 @@ void CursorRenderer::rebuild()
         );
     } // }}}
     { // {{{ CursorShape::Bar
-        auto const thickness = max(LineThickness * baseline / 3, 1);
+        auto const thickness = max(LineThickness * baseline / 3, 1u);
         auto const height = gridMetrics_.cellSize.height;
         //auto const base_y = max((height - thickness) / 2, 0);
         auto image = atlas::Buffer(width * height, 0);
@@ -111,7 +111,7 @@ void CursorRenderer::rebuild()
     { // {{{ CursorShape::Rectangle
         auto const height = gridMetrics_.cellSize.height;
         auto image = atlas::Buffer(width * height, 0xFFu);
-        auto const thickness = max(width / 12, 1);
+        auto const thickness = max(width / 12, 1u);
 
         auto const innerWidth = width - 2 * thickness;
         auto const innerHeight = height - 2 * thickness;
@@ -154,8 +154,8 @@ void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
     if (optional<DataRef> const dataRef = getDataRef(shape_); dataRef.has_value())
     {
         auto const& textureInfo = get<0>(dataRef.value()).get();
-        auto const x = _pos.x;
-        auto const y = _pos.y;
+        auto const x = static_cast<unsigned>(_pos.x);
+        auto const y = static_cast<unsigned>(_pos.y);
         auto constexpr z = 0;
         textureScheduler().renderTexture({textureInfo, x, y, z, color()});
     }

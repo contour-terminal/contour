@@ -55,7 +55,7 @@ class OpenGLRenderer final :
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
 
-    void renderRectangle(int _x, int _y, int _width, int _height,
+    void renderRectangle(int _x, int _y, unsigned _width, unsigned _height,
                          float _r, float _g, float _b, float _a) override;
 
     void execute() override;
@@ -70,9 +70,9 @@ class OpenGLRenderer final :
     void initialize();
     void initializeTextureRendering();
     void initializeRectRendering();
-    int maxTextureDepth();
-    int maxTextureSize();
-    int maxTextureUnits();
+    unsigned maxTextureDepth();
+    unsigned maxTextureSize();
+    unsigned maxTextureUnits();
     crispy::Size renderBufferSize();
 
     crispy::Size colorTextureSizeHint();
@@ -84,11 +84,11 @@ class OpenGLRenderer final :
     void renderTexture(atlas::RenderTexture const& _param);
     void destroyAtlas(atlas::AtlasID _atlasID);
 
-    void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
+    void executeRenderRectangle(unsigned _x, unsigned _y, unsigned _width, unsigned _height, QVector4D const& _color);
 
     void bindTexture(GLuint _textureId);
     GLuint textureAtlasID(atlas::AtlasID _atlasID) const noexcept;
-    void clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format);
+    void clearTextureAtlas(GLuint _textureId, unsigned _width, unsigned _height, atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members

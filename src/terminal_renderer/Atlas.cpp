@@ -34,9 +34,9 @@ namespace terminal::renderer::atlas {
 
 TextureAtlasAllocator::TextureAtlasAllocator(AtlasBackend& _atlasBackend,
                                              Size _atlasTextureSize,
-                                             int _maxInstances,
+                                             unsigned _maxInstances,
                                              Format _format,
-                                             int _user,
+                                             unsigned _user,
                                              string _name) :
     atlasBackend_{ _atlasBackend },
     maxInstances_{ static_cast<size_t>(_maxInstances) },
@@ -103,7 +103,7 @@ TextureInfo const* TextureAtlasAllocator::insert(crispy::Size _bitmapSize,
                                                  crispy::Size _targetSize,
                                                  Format _format,
                                                  Buffer _data,
-                                                 int _user)
+                                                 unsigned _user)
 {
     // check free-map first
     if (auto i = discarded_.find(_bitmapSize); i != end(discarded_))
@@ -172,7 +172,7 @@ void TextureAtlasAllocator::release(TextureInfo const& _info)
 TextureInfo const& TextureAtlasAllocator::appendTextureInfo(crispy::Size _bitmapSize,
                                                             crispy::Size _targetSize,
                                                             Cursor _offset,
-                                                            int _user)
+                                                            unsigned _user)
 {
     textureInfos_.emplace_back(TextureInfo{
         _offset.atlas,

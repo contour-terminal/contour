@@ -687,8 +687,11 @@ void softLoadFont(YAML::Node const& _node, string_view _key, text::font_descript
     }
 }
 
-bool sanitizeRange(std::reference_wrapper<int> _value, int _min, int _max)
+template <typename T>
+bool sanitizeRange(std::reference_wrapper<T> _value, T _min, T _max)
 {
+    static_assert(std::is_integral_v<T>);
+
     if (_min <= _value.get() && _value.get() <= _max)
         return true;
 

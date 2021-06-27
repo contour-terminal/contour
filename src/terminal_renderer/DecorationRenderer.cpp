@@ -30,6 +30,7 @@ using std::array;
 using std::get;
 using std::max;
 using std::min;
+using std::move;
 using std::nullopt;
 using std::optional;
 using std::pair;
@@ -97,9 +98,10 @@ void DecorationRenderer::rebuild()
     auto const width = gridMetrics_.cellSize.width;
 
     { // {{{ underline
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
+        auto const thickness_half = unsigned(ceil(gridMetrics_.underline.thickness / 2.0));
+        auto const thickness = thickness_half * 2;
+        auto const y0 = gridMetrics_.underline.position > thickness_half
+            ? gridMetrics_.underline.position - thickness_half : 0;
         auto const height = y0 + thickness;
         auto image = atlas::Buffer(width * height, 0);
 
@@ -117,8 +119,9 @@ void DecorationRenderer::rebuild()
     { // {{{ double underline
         auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const thickness = min(1, thickness_half * 2);
-        auto const y1 = max(0, gridMetrics_.underline.position - thickness_half);
-        auto const y0 = max(0, y1 - 2 * thickness);
+        auto const y1 = gridMetrics_.underline.position > thickness_half
+            ? gridMetrics_.underline.position - thickness_half : 0;
+        auto const y0 = y1 > 2 * thickness ? y1 - 2 * thickness : 0;
         auto const height = y1 + thickness;
         auto image = atlas::Buffer(width * height, 0);
 
@@ -139,7 +142,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = int(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
+        auto const height = unsigned(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
         auto image = atlas::Buffer(width * height, 0);
 
         for (int x = 0; x < width; ++x)
@@ -150,7 +153,7 @@ void DecorationRenderer::rebuild()
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
             auto const y = static_cast<int>(normalizedY * static_cast<float>(height - gridMetrics_.underline.thickness));
             assert(y < height);
-            for (int yi = 0; yi < gridMetrics_.underline.thickness; ++yi)
+            for (unsigned yi = 0; yi < gridMetrics_.underline.thickness; ++yi)
                 image[(y + yi) * width + x] = 0xFF;
         }
 
@@ -162,8 +165,8 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const diameter = radius * 2;
+        auto const radius = unsigned(ceil(gridMetrics_.underline.thickness / 2.0));
+        auto const diameter = max(1u, radius * 2);
         auto const y0 = max(radius, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
         auto const height = 1 + y0 + radius;
         auto image = atlas::Buffer(width * height, 0);
@@ -199,9 +202,10 @@ void DecorationRenderer::rebuild()
     { // {{{ dashed underline
         // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
         // whereas the middle one is being skipped.
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
+        auto const thickness_half = unsigned(ceil(gridMetrics_.underline.thickness / 2.0));
+        auto const thickness = max(1u, thickness_half * 2);
+        auto const y0 = gridMetrics_.underline.position > thickness_half
+            ? gridMetrics_.underline.position - thickness_half : 0;
         auto const height = y0 + thickness;
         auto image = atlas::Buffer(width * height, 0);
 
@@ -219,7 +223,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = gridMetrics_.cellSize.height;
-        auto const thickness = max(1, gridMetrics_.underline.thickness / 2);
+        auto const thickness = max(1u, gridMetrics_.underline.thickness / 2);
         auto image = atlas::Buffer(width * cellHeight, 0u);
         auto const gap = 0; // thickness;
 
@@ -338,9 +342,9 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         _decoration, _pos, _columnCount, _color
     );
 #endif
-    auto const x = _pos.x;
-    auto const y = _pos.y;
-    auto const z = 0;
+    auto const x = static_cast<unsigned>(_pos.x);
+    auto const y = static_cast<unsigned>(_pos.y);
+    auto const z = 0u;
     auto const color = array{
         float(_color.red) / 255.0f,
         float(_color.green) / 255.0f,

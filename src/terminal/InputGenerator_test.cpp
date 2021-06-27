@@ -97,7 +97,7 @@ TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
 {
     for (char32_t ch = 'A'; ch <= 'Z'; ++ch)
     {
-        INFO(fmt::format("Testing Ctrl+{}", ch));
+        INFO(fmt::format("Testing Ctrl+{}", unicode::convert_to<char>(ch)));
         auto input = InputGenerator{};
         input.generate(ch, Modifier::Control);
         auto const c0 = string(1, static_cast<char>(ch - L'A' + 1));

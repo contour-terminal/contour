@@ -36,7 +36,7 @@ auto const inline AtlasTag = crispy::debugtag::make("renderer.atlas", "Logs deta
 using Buffer = std::vector<uint8_t>;
 enum class Format { Red, RGB, RGBA };
 
-constexpr int element_count(Format _format) noexcept
+constexpr unsigned element_count(Format _format) noexcept
 {
     switch (_format)
     {
@@ -49,7 +49,7 @@ constexpr int element_count(Format _format) noexcept
 
 struct AtlasID
 {
-    int value;
+    unsigned value;
 
     constexpr bool operator<(AtlasID const& _rhs) const noexcept { return value < _rhs.value; }
     constexpr bool operator==(AtlasID const& _rhs) const noexcept { return value == _rhs.value; }
@@ -59,12 +59,12 @@ struct CreateAtlas {
     AtlasID atlas;
     crispy::Size size;
     Format format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
-    int user;
+    unsigned user;
 };
 
 struct DestroyAtlas {
     // ID of the atlas to release the resources on the GPU for.
-    int atlas;
+    unsigned atlas;
 };
 
 struct TextureInfo {
@@ -86,7 +86,7 @@ struct TextureInfo {
                 float _relativeY,
                 float _relativeWidth,
                 float _relativeHeight,
-                int _user):
+                unsigned _user):
         atlas{ _atlas },
         atlasName{ _atlasName },
         offset{ _offset },
@@ -108,7 +108,7 @@ struct TextureInfo {
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
     float relativeHeight;           // height relative to Atlas::height_
-    int user;                       // some user defined value, in my case, whether or not this texture is colored or monochrome
+    unsigned user;                  // some user defined value, in my case, whether or not this texture is colored or monochrome
 };
 
 struct UploadTexture {
@@ -119,9 +119,9 @@ struct UploadTexture {
 
 struct RenderTexture {
     std::reference_wrapper<TextureInfo const> texture;
-    int x;                          // window x coordinate to render the texture to
-    int y;                          // window y coordinate to render the texture to
-    int z;                          // window z coordinate to render the texture to
+    unsigned x;                     // window x coordinate to render the texture to
+    unsigned y;                     // window y coordinate to render the texture to
+    unsigned z;                     // window z coordinate to render the texture to
     std::array<float, 4> color;     // optional; a color being associated with this texture
 };
 
@@ -135,7 +135,7 @@ class AtlasBackend {
     virtual ~AtlasBackend() = default;
 
     /// Creates a new (3D) texture atlas.
-    virtual AtlasID createAtlas(crispy::Size _size, Format _textureFormat, int _user) = 0;
+    virtual AtlasID createAtlas(crispy::Size _size, Format _textureFormat, unsigned _user) = 0;
 
     /// Uploads given texture to the atlas.
     virtual void uploadTexture(UploadTexture _texture) = 0;
@@ -174,9 +174,9 @@ class TextureAtlasAllocator {
      */
     TextureAtlasAllocator(AtlasBackend& _backend,
                           crispy::Size _atlasTextureSize,
-                          int _maxInstances,
+                          unsigned _maxInstances,
                           Format _format, // such as GL_R8 or GL_RGBA8
-                          int _user,
+                          unsigned _user,
                           std::string _name);
 
     TextureAtlasAllocator(TextureAtlasAllocator const&) = delete;
@@ -186,9 +186,9 @@ class TextureAtlasAllocator {
 
     ~TextureAtlasAllocator();
 
-    constexpr int user() const noexcept { return user_; }
+    constexpr unsigned user() const noexcept { return user_; }
     std::string const& name() const noexcept { return name_; }
-    constexpr int maxInstances() const noexcept { return maxInstances_; }
+    constexpr unsigned maxInstances() const noexcept { return maxInstances_; }
     constexpr crispy::Size size() const noexcept { return size_; }
     constexpr Format format() const noexcept { return format_; }
 
@@ -198,12 +198,12 @@ class TextureAtlasAllocator {
     constexpr AtlasID currentInstance() const noexcept { return cursor_.atlas; }
 
     /// @return current X offset into the current 3D texture atlas.
-    constexpr int currentX() const noexcept { return cursor_.position.x; }
+    constexpr unsigned currentX() const noexcept { return cursor_.position.x; }
 
     /// @return current Y offset into the current 3D texture atlas.
-    constexpr int currentY() const noexcept { return cursor_.position.y; }
+    constexpr unsigned currentY() const noexcept { return cursor_.position.y; }
 
-    constexpr int maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
+    constexpr unsigned maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
 
     void clear();
 
@@ -227,7 +227,7 @@ class TextureAtlasAllocator {
                               crispy::Size _targetSize,
                               Format _format,
                               Buffer _data,
-                              int _user = 0);
+                              unsigned _user = 0);
 
     /// Releases a given texture area the atlas for future reallocations.
     void release(TextureInfo const& _info);
@@ -256,7 +256,7 @@ class TextureAtlasAllocator {
     TextureInfo const& appendTextureInfo(crispy::Size _bitmapSize,
                                          crispy::Size _targetSize,
                                          Cursor _offset,
-                                         int _user);
+                                         unsigned _user);
 
 
     // private data fields
@@ -266,11 +266,11 @@ class TextureAtlasAllocator {
     crispy::Size size_;            // total atlas texture size in pixels
     Format const format_;          // internal storage format, such as GL_R8 or GL_RGBA8
 
-    int const user_;               // user-defined arbitrary data that relates to this atlas.
+    unsigned const user_;          // user-defined arbitrary data that relates to this atlas.
     std::string const name_;       // atlas human readable name (only for debugging)
 
     Cursor cursor_;                // current texture ID and cursor for the next sub texture
-    int maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
+    unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
     // TODO: make this an unordered_map
     std::map<crispy::Size, std::vector<Cursor>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
@@ -280,7 +280,7 @@ class TextureAtlasAllocator {
     std::list<TextureInfo> textureInfos_;
 };
 
-template <typename Key, typename Metadata = int>
+template <typename Key, typename Metadata = unsigned>
 class MetadataTextureAtlas {
   public:
     explicit MetadataTextureAtlas(TextureAtlasAllocator& _allocator) :
@@ -294,7 +294,7 @@ class MetadataTextureAtlas {
     MetadataTextureAtlas& operator=(MetadataTextureAtlas&&) = delete; // TODO
 
     //std::string const& name() const noexcept { return name_; }
-    constexpr int maxInstances() const noexcept { return atlas_.maxInstances(); }
+    constexpr unsigned maxInstances() const noexcept { return atlas_.maxInstances(); }
     constexpr crispy::Size size() const noexcept { return atlas_.size(); }
 
     /// @return number of textures stored in this texture atlas.
@@ -339,7 +339,7 @@ class MetadataTextureAtlas {
                                   crispy::Size _bitmapSize,
                                   crispy::Size _targetSize,
                                   Buffer&& _data,
-                                  int _user = 0,
+                                  unsigned _user = 0,
                                   Metadata _metadata = {})
     {
         assert(allocations_.find(_id) == allocations_.end());
@@ -388,10 +388,10 @@ class MetadataTextureAtlas {
 
     std::unordered_map<Key, TextureInfo const*> allocations_ = {};
 
-    // conditionally transform void to int as I can't conditionally enable/disable this member var.
+    // conditionally transform void to unsigned as I can't conditionally enable/disable this member var.
     std::unordered_map<
         Key,
-        std::conditional_t<std::is_same_v<Metadata, void>, int, Metadata>
+        std::conditional_t<std::is_same_v<Metadata, void>, unsigned, Metadata>
     > metadata_ = {};
 };
 

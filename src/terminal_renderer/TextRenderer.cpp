@@ -248,8 +248,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
             glyph.size = scaled.size; // TODO: there shall be only one with'x'height.
 
             // center the image in the middle of the cell
-            glyph.position.y = gridMetrics_.cellSize.height - gridMetrics_.baseline;
-            glyph.position.x = (gridMetrics_.cellSize.width * numCells - glyph.size.width) / 2;
+            glyph.position.y = static_cast<int>(gridMetrics_.cellSize.height - gridMetrics_.baseline);
+            glyph.position.x = static_cast<int>(gridMetrics_.cellSize.width * numCells - glyph.size.width) / 2;
 
             // (old way)
             // glyph.metrics.bearing.x /= factor;
@@ -390,7 +390,7 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                      - _glyphMetrics.bitmapSize.height  // -> bitmap height
                      ;
 
-        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
+        renderTexture(crispy::Point{x, static_cast<int>(y)}, _color, _textureInfo);
     }
 
 #if 0
@@ -509,7 +509,7 @@ void ComplexTextShaper::endSequence()
 
     codepoints_.clear();
     clusters_.clear();
-    textPosition_.x += gridMetrics_.cellSize.width * cellCount_;
+    textPosition_.x += static_cast<int>(gridMetrics_.cellSize.width * cellCount_);
     cellCount_ = 0;
     textStartFound_ = false;
 }
@@ -650,7 +650,7 @@ void SimpleTextShaper::flush()
     text::shape_result const& glyphPositions = glyphPositions_;
     renderGlyphs_(textPosition_, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
     glyphPositions_.clear();
-    textPosition_.x += gridMetrics_.cellSize.width * cellCount_;
+    textPosition_.x += static_cast<int>(gridMetrics_.cellSize.width * cellCount_);
     cellCount_ = 0;
 }
 // }}}

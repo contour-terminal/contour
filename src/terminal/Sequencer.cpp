@@ -1177,7 +1177,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             ? RGBAColor{0, 0, 0, 0}
             : backgroundColor_,
         usePrivateColorRegisters_
-            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
+            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0u, 16384u))
             : imageColorPalette_
     );
 
@@ -1414,7 +1414,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case CUB: screen_.moveCursorBackward(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CUD: screen_.moveCursorDown(_seq.param_or(0, Sequence::Parameter{1})); break;
         case CUF: screen_.moveCursorForward(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CUP: screen_.moveCursorTo(Coordinate{ _seq.param_or(0, 1), _seq.param_or(1, 1)}); break;
+        case CUP: screen_.moveCursorTo(Coordinate{ static_cast<int>(_seq.param_or(0, 1)), static_cast<int>(_seq.param_or(1, 1))}); break;
         case CUU: screen_.moveCursorUp(_seq.param_or(0, Sequence::Parameter{1})); break;
         case DA1: screen_.sendDeviceAttributes(); break;
         case DA2: screen_.sendTerminalId(); break;
@@ -1425,14 +1425,14 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 // DECCRA is not affected by the page margins.
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const top = _seq.param_or(0, Sequence::Parameter{ static_cast<unsigned>(origin.row) });
+                auto const left = _seq.param_or(1, Sequence::Parameter{ static_cast<unsigned>(origin.column) });
                 auto const bottom = _seq.param_or(2, Sequence::Parameter{ screen_.size().height });
                 auto const right = _seq.param_or(3, Sequence::Parameter{ screen_.size().width });
                 auto const page = _seq.param_or(4, Sequence::Parameter{ 0 });
 
-                auto const targetTop = _seq.param_or(5, Sequence::Parameter{ origin.row });
-                auto const targetLeft = _seq.param_or(6, Sequence::Parameter{ origin.column });
+                auto const targetTop = _seq.param_or(5, Sequence::Parameter{ static_cast<unsigned>(origin.row) });
+                auto const targetLeft = _seq.param_or(6, Sequence::Parameter{ static_cast<unsigned>(origin.column) });
                 auto const targetPage = _seq.param_or(7, Sequence::Parameter{ 0 });
 
                 screen_.copyArea(top, left, bottom, right, page,
@@ -1443,8 +1443,8 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             {
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const top = _seq.param_or(0, Sequence::Parameter{ static_cast<unsigned>(origin.row) });
+                auto const left = _seq.param_or(1, Sequence::Parameter{ static_cast<unsigned>(origin.column) });
 
                 // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is treated as the width or height of that page.
                 auto const size = screen_.size();
@@ -1459,8 +1459,8 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                 auto const ch = _seq.param_or(0, Sequence::Parameter{ 0 });
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const top = _seq.param_or(0, Sequence::Parameter{ static_cast<unsigned>(origin.row) });
+                auto const left = _seq.param_or(1, Sequence::Parameter{ static_cast<unsigned>(origin.column) });
 
                 // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is treated as the width or height of that page.
                 auto const size = screen_.size();

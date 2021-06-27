@@ -32,9 +32,9 @@ namespace
         return _value >= '0' && _value <= '9';
     }
 
-    constexpr int toDigit(char32_t _value) noexcept
+    constexpr unsigned toDigit(char32_t _value) noexcept
     {
-        return static_cast<int>(_value) - '0';
+        return static_cast<unsigned>(_value) - '0';
     }
 
     constexpr bool isSixel(char32_t _value) noexcept
@@ -44,7 +44,7 @@ namespace
 
     constexpr int8_t toSixel(char32_t _value) noexcept
     {
-        return static_cast<int8_t>(static_cast<int>(_value) - 63);
+        return static_cast<int8_t>(static_cast<unsigned>(_value) - 63);
     }
 
     constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)
@@ -74,7 +74,7 @@ constexpr inline std::array<RGBColor, 16> defaultColors = {
 };
 
 // {{{ SixelColorPalette
-SixelColorPalette::SixelColorPalette(int _size, int _maxSize) :
+SixelColorPalette::SixelColorPalette(size_t _size, size_t _maxSize) :
     palette_{},
     maxSize_{_maxSize}
 {
@@ -90,17 +90,17 @@ void SixelColorPalette::reset()
         palette_[i] = defaultColors[i];
 }
 
-void SixelColorPalette::setSize(int _newSize)
+void SixelColorPalette::setSize(size_t _newSize)
 {
-    palette_.resize(static_cast<size_t>(max(0, min(_newSize, maxSize_))));
+    palette_.resize(static_cast<size_t>(max(size_t{0}, min(_newSize, maxSize_))));
 }
 
-void SixelColorPalette::setMaxSize(int _value)
+void SixelColorPalette::setMaxSize(size_t _value)
 {
     maxSize_ = _value;
 }
 
-void SixelColorPalette::setColor(int _index, RGBColor const& _color)
+void SixelColorPalette::setColor(unsigned _index, RGBColor const& _color)
 {
     if (_index < maxSize_)
     {
@@ -112,7 +112,7 @@ void SixelColorPalette::setColor(int _index, RGBColor const& _color)
     }
 }
 
-RGBColor SixelColorPalette::at(int _index) const noexcept
+RGBColor SixelColorPalette::at(unsigned _index) const noexcept
 {
     return palette_[_index % palette_.size()];
 }
@@ -139,7 +139,7 @@ void SixelParser::parse(char32_t _value)
             else if (isSixel(_value))
             {
                 auto const sixel = toSixel(_value);
-                for (int i = 0; i < params_[0]; ++i)
+                for (unsigned i = 0; i < params_[0]; ++i)
                     events_.render(sixel);
                 transitionTo(State::Ground);
             }
@@ -215,9 +215,9 @@ void SixelParser::done()
         finalizer_();
 }
 
-void SixelParser::paramShiftAndAddDigit(int _value)
+void SixelParser::paramShiftAndAddDigit(unsigned _value)
 {
-    int& number = params_.back();
+    auto& number = params_.back();
     number = number * 10 + _value;
 }
 
@@ -274,9 +274,9 @@ void SixelParser::leaveState()
             }
             else if (params_.size() == 5)
             {
-                auto constexpr convertValue = [](int _value) {
+                auto constexpr convertValue = [](unsigned _value) {
                     // converts a color from range 0..100 to 0..255
-                    return static_cast<uint8_t>(static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f) % 256);
+                    return static_cast<uint8_t>(static_cast<unsigned>((static_cast<float>(_value) * 255.0f) / 100.0f) % 256);
                 };
                 auto const index = params_[0];
                 auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
@@ -311,8 +311,8 @@ void SixelParser::finalize()
 // =================================================================================
 
 SixelImageBuilder::SixelImageBuilder(Size const& _maxSize,
-                                     int _aspectVertical,
-                                     int _aspectHorizontal,
+                                     unsigned _aspectVertical,
+                                     unsigned _aspectHorizontal,
                                      RGBAColor _backgroundColor,
                                      std::shared_ptr<SixelColorPalette> _colorPalette) :
     maxSize_{ _maxSize },
@@ -331,7 +331,7 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
     sixelCursor_ = {0, 0};
 
     auto p = &buffer_[0];
-    for (int i = 0; i < size_.width * size_.height; ++i)
+    for (unsigned i = 0u; i < size_.width * size_.height; ++i)
     {
         *p++ = _fillColor.red();
         *p++ = _fillColor.green();
@@ -361,12 +361,12 @@ void SixelImageBuilder::write(Coordinate const& _coord, RGBColor const& _value) 
     }
 }
 
-void SixelImageBuilder::setColor(int _index, RGBColor const& _color)
+void SixelImageBuilder::setColor(unsigned _index, RGBColor const& _color)
 {
     colors_->setColor(_index, _color);
 }
 
-void SixelImageBuilder::useColor(int _index)
+void SixelImageBuilder::useColor(unsigned _index)
 {
     currentColor_ = _index % colors_->size();
 }
@@ -384,12 +384,12 @@ void SixelImageBuilder::newline()
         sixelCursor_.row += 6;
 }
 
-void SixelImageBuilder::setRaster(int _pan, int _pad, Size const& _imageSize)
+void SixelImageBuilder::setRaster(unsigned _pan, unsigned _pad, Size const& _imageSize)
 {
     aspectRatio_.nominator = _pan;
     aspectRatio_.denominator = _pad;
-    size_.width = clamp(_imageSize.width, 0, maxSize_.width);
-    size_.height = clamp(_imageSize.height, 0, maxSize_.height);
+    size_.width = clamp(_imageSize.width, 0u, maxSize_.width);
+    size_.height = clamp(_imageSize.height, 0u, maxSize_.height);
 
     buffer_.resize(size_.width * size_.height * 4);
 }
@@ -400,7 +400,7 @@ void SixelImageBuilder::render(int8_t _sixel)
     auto const x = sixelCursor_.column;
     if (x < size_.width)
     {
-        for (int i = 0; i < 6; ++i)
+        for (unsigned i = 0; i < 6; ++i)
         {
             auto const y = sixelCursor_.row + i;
             auto const pos = Coordinate{y, x};

@@ -1,5 +1,12 @@
 # Strongly Typing Primitives
 
+## Requirements
+
+- Size and offset are semantically different and need distinct types, too.
+- Length
+- Range with From and To
+- Margin with Top, Left, Bottom, Right
+
 ## Challenges
 
 C++ does not allow a convenient way of boxing primitive data types.
@@ -117,3 +124,15 @@ all available operators by forwarding each operation to their members.
 
 If one doesn't like adding a new keyword, just omit the "forward",
 or make it a non-reserved word that is still accepted in this context.
+
+## my changes
+
+Functions like `int sanitizeRange(int val, int low, int high);` became
+
+```cpp
+template <typename T>
+T sanitizeRange(T val, T low, T high) {
+    static_assert(std::is_integral_v<T>);
+    // ...
+}
+```
