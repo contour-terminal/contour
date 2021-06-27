@@ -835,7 +835,7 @@ void Terminal::reply(string_view _reply)
     sendRaw(_reply);
 }
 
-void Terminal::resizeWindow(int _width, int _height, bool _unitInPixels)
+void Terminal::resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels)
 {
     eventListener_.resizeWindow(_width, _height, _unitInPixels);
 }

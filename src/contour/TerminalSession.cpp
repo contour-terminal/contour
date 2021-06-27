@@ -277,7 +277,7 @@ void TerminalSession::onSelectionCompleted()
     }
 }
 
-void TerminalSession::resizeWindow(int _width, int _height, bool _inPixels)
+void TerminalSession::resizeWindow(unsigned _width, unsigned _height, bool _inPixels)
 {
     if (!display_)
         return;

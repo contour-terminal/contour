@@ -67,7 +67,8 @@ using namespace std::string_view_literals;
 
 namespace terminal {
 
-namespace // {{{ helpers
+// {{{ helpers
+namespace
 {
     /// @returns parsed tuple with OSC code and offset to first data parameter byte.
     pair<int, int> parseOSC(string const& _data)
@@ -116,7 +117,10 @@ namespace // {{{ helpers
     // }
 } // }}}
 
-namespace // {{{ some command generator helpers
+// {{{ some command generator helpers
+namespace
+{
+namespace impl
 {
     ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen& _screen)
 	{
@@ -888,7 +892,9 @@ namespace // {{{ some command generator helpers
 
         return ApplyResult::Ok;
     }
-} // }}}
+}
+}
+// }}}
 
 // {{{ Sequence impl
 std::string Sequence::raw() const
@@ -1526,7 +1532,11 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case EL: return impl::EL(_seq, screen_);
         case HPA: screen_.moveCursorToColumn(_seq.param(0)); break;
         case HPR: screen_.moveCursorForward(_seq.param(0)); break;
-        case HVP: screen_.moveCursorTo(Coordinate{_seq.param_or(0, Sequence::Parameter{1}), _seq.param_or(1, Sequence::Parameter{1})}); break; // YES, it's like a CUP!
+        case HVP: screen_.moveCursorTo(Coordinate{
+                static_cast<int>(_seq.param_or(0, Sequence::Parameter{1u})),
+                static_cast<int>(_seq.param_or(1, Sequence::Parameter{1u}))
+            });
+            break; // YES, it's like a CUP!
         case ICH: screen_.insertCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
         case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
         case REP:

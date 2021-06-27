@@ -813,7 +813,7 @@ void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_bod
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
+void TerminalWidget::resizeWindow(unsigned _width, unsigned _height, bool _inPixels)
 {
     if (isFullScreen())
     {

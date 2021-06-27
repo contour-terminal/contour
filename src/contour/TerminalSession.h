@@ -82,7 +82,7 @@ class TerminalSession: public terminal::Terminal::Events
     void notify(std::string_view _title, std::string_view _body) override;
     void onClosed() override;
     void onSelectionCompleted() override;
-    void resizeWindow(int _width, int _height, bool _unitInPixels) override;
+    void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) override;
     void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void discardImage(terminal::Image const&) override;

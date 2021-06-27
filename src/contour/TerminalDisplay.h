@@ -59,7 +59,7 @@ public:
     virtual void copyToClipboard(std::string_view _data) = 0;
     virtual void dumpState() = 0;
     virtual void notify(std::string_view _title, std::string_view _body) = 0;
-    virtual void resizeWindow(int _width, int _height, bool _unitInPixels) = 0;
+    virtual void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) = 0;
     virtual void setBackgroundBlur(bool _enabled) = 0;
     virtual void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) = 0;
     virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover) = 0;

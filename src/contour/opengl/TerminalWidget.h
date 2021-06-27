@@ -96,7 +96,7 @@ public:
     void copyToClipboard(std::string_view /*_data*/) override;
     void dumpState() override;
     void notify(std::string_view /*_title*/, std::string_view /*_body*/) override;
-    void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
+    void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) override;
     void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) override;
     bool setFontSize(text::font_size _size) override;
     bool setScreenSize(crispy::Size _newScreenSize) override;
