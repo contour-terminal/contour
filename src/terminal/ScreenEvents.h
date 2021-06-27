@@ -54,7 +54,7 @@ class ScreenEvents {
     virtual void dumpState() {}
     virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
     virtual void reply(std::string_view /*_response*/) {}
-    virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
+    virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
     virtual void setApplicationkeypadMode(bool /*_enabled*/) {}
     virtual void setBracketedPaste(bool /*_enabled*/) {}
     virtual void setCursorStyle(CursorDisplay, CursorShape) {}

@@ -304,7 +304,7 @@ namespace // {{{ helper
     {
         CLI_DEBUG(fmt::format("setOption({}): {}", _key, _value));
         _context.output.values[_key] = move(_value);
-   };
+    }
 
     void parseOptionList(ParseContext& _context)
     {

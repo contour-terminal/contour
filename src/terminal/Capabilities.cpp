@@ -340,13 +340,13 @@ bool StaticDatabase::booleanCapability(Code _cap) const
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(Code _cap) const
+optional<unsigned> StaticDatabase::numericCapability(Code _cap) const
 {
     for (auto const& cap: numericalCaps)
         if (cap.code.code == _cap.code)
             return cap.value;
 
-    return -1;
+    return nullopt;
 }
 
 string_view StaticDatabase::stringCapability(Code _cap) const
@@ -367,13 +367,13 @@ bool StaticDatabase::booleanCapability(string_view _cap) const
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(string_view _cap) const
+optional<unsigned> StaticDatabase::numericCapability(string_view _cap) const
 {
     for (auto const tcap: numericalCaps)
         if (tcap.name == _cap || tcap.code == _cap)
             return tcap.value;
 
-    return -1;
+    return nullopt;
 }
 
 string_view StaticDatabase::stringCapability(string_view _cap) const

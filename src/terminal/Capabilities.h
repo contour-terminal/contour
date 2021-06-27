@@ -89,11 +89,11 @@ class Database {
     virtual ~Database() = default;
 
     virtual bool booleanCapability(Code _cap) const = 0;
-    virtual unsigned numericCapability(Code _cap) const = 0;
+    virtual std::optional<unsigned> numericCapability(Code _cap) const = 0;
     virtual std::string_view stringCapability(Code _cap) const = 0;
 
     virtual bool booleanCapability(std::string_view _cap) const = 0;
-    virtual unsigned numericCapability(std::string_view _cap) const = 0;
+    virtual std::optional<unsigned> numericCapability(std::string_view _cap) const = 0;
     virtual std::string_view stringCapability(std::string_view _cap) const = 0;
 
     virtual std::optional<Code> codeFromName(std::string_view _name) const = 0;
@@ -104,11 +104,11 @@ class Database {
 class StaticDatabase : public Database {
   public:
     bool booleanCapability(Code _cap) const override;
-    unsigned numericCapability(Code _cap) const override;
+    std::optional<unsigned> numericCapability(Code _cap) const override;
     std::string_view stringCapability(Code _cap) const override;
 
     bool booleanCapability(std::string_view _cap) const override;
-    unsigned numericCapability(std::string_view _cap) const override;
+    std::optional<unsigned> numericCapability(std::string_view _cap) const override;
     std::string_view stringCapability(std::string_view _cap) const override;
 
     std::optional<Code> codeFromName(std::string_view _name) const override;

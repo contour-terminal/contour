@@ -116,7 +116,7 @@ namespace // {{{ helpers
     // }
 } // }}}
 
-namespace impl // {{{ some command generator helpers
+namespace // {{{ some command generator helpers
 {
     ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen& _screen)
 	{

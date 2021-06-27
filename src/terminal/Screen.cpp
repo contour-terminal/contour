@@ -72,6 +72,7 @@ using std::pair;
 using std::ref;
 using std::string;
 using std::string_view;
+using std::tuple;
 using std::vector;
 
 namespace terminal {
@@ -398,7 +399,7 @@ Screen::Screen(Size const& _size,
     resetHard();
 }
 
-unsigned Screen::numericCapability(capabilities::Code _cap) const
+optional<unsigned> Screen::numericCapability(capabilities::Code _cap) const
 {
     using namespace capabilities::literals;
 
@@ -450,7 +451,7 @@ void Screen::resize(Size const& _newSize)
     // update wrap-pending
     if (_newSize.width > size_.width)
         wrapPending_ = 0;
-    else if (cursor_.position.column == size_.width && _newSize.width < size_.width)
+    else if (static_cast<unsigned>(cursor_.position.column) == size_.width && _newSize.width < size_.width)
         // Shrink existing columns to _newSize.width.
         // Nothing should be done, I think, as we preserve prior (now exceeding) content.
         if (!wrapPending_)
@@ -471,7 +472,7 @@ void Screen::resize(Size const& _newSize)
     lastCursorPosition_ = clampCoordinate(lastCursorPosition_);
     lastColumn_ = columnIteratorAt(
         begin(*next(begin(grid().mainPage()), lastCursorPosition_.row - 1)), // last line
-        lastCursorPosition_.column
+        static_cast<unsigned>(lastCursorPosition_.column)
     );
 
     // truncating tabs
@@ -486,8 +487,8 @@ void Screen::verifyState() const
 #if !defined(NDEBUG)
     auto const lrmm = isModeEnabled(DECMode::LeftRightMargin);
     if (wrapPending_ &&
-            ((lrmm && static_cast<unsigned>(cursor_.position.column + wrapPending_ - 1) != margin_.horizontal.to)
-            || (!lrmm && (cursor_.position.column + wrapPending_ - 1) != size_.width)))
+            ((lrmm && (static_cast<unsigned>(cursor_.position.column) + wrapPending_ - 1) != margin_.horizontal.to)
+            || (!lrmm && (static_cast<unsigned>(cursor_.position.column) + wrapPending_ - 1) != size_.width)))
     {
         fail(fmt::format(
             "Wrap is pending but cursor's column ({}) is not at right side of margin ({}) or screen ({}).",
@@ -506,14 +507,14 @@ void Screen::verifyState() const
 
     // verify iterators
     [[maybe_unused]] auto const line = next(begin(grid().mainPage()), cursor_.position.row - 1);
-    [[maybe_unused]] auto const col = columnIteratorAt(cursor_.position.column);
+    [[maybe_unused]] auto const col = columnIteratorAt(static_cast<unsigned>(cursor_.position.column));
 
     if (line != currentLine_)
         fail(fmt::format("Calculated current line does not match."));
     else if (col != currentColumn_)
         fail(fmt::format("Calculated current column does not match."));
 
-    if (wrapPending_ && (cursor_.position.column + wrapPending_ - 1) != size_.width &&
+    if (wrapPending_ && (static_cast<unsigned>(cursor_.position.column) + wrapPending_ - 1) != size_.width &&
             static_cast<unsigned>(cursor_.position.column) != margin_.horizontal.to)
         fail(fmt::format("wrapPending flag set when cursor is not in last column."));
 #endif
@@ -599,16 +600,16 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     lastCursorPosition_ = cursor_.position;
 
     bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin
-        ? static_cast<int>(margin_.horizontal.to) - cursor_.position.column
-        : size_.width - cursor_.position.column;
+    auto const cellsAvailable =
+        (cursorInsideMargin ? margin_.horizontal.to : size_.width)
+        - static_cast<unsigned>(cursor_.position.column);
 
     auto const n = min(static_cast<unsigned>(cell.width()), cellsAvailable);
 
     if (n == cell.width())
     {
         assert(n > 0);
-        cursor_.position.column += n;
+        cursor_.position.column += static_cast<int>(n);
         currentColumn_++;
         for (unsigned i = 1; i < n; ++i)
 #if defined(LIBTERMINAL_HYPERLINKS)
@@ -655,9 +656,9 @@ std::string Screen::screenshot(function<string(int)> const& _postLine) const
     for (auto const absoluteRow : crispy::times(1u, grid().historyLineCount() + static_cast<unsigned>(size_.height)))
     {
         auto const row = static_cast<int>(absoluteRow) - static_cast<int>(grid().historyLineCount());
-        for (int const col : crispy::times(1, size_.width))
+        for (auto const col: crispy::times(1u, size_.width))
         {
-            Cell const& cell = at({row, col});
+            Cell const& cell = at({row, static_cast<int>(col)});
 
             if (cell.attributes().styles & CellFlags::Bold)
                 writer.sgr_add(GraphicsRendition::Bold);
@@ -694,16 +695,16 @@ optional<unsigned> Screen::findMarkerBackward(unsigned _currentCursorLine) const
 
     _currentCursorLine = min(_currentCursorLine, static_cast<unsigned>(historyLineCount()) + static_cast<unsigned>(size_.height));
 
-    for (unsigned i = _currentCursorLine - 1; i >= 0; --i)
-        if (grid().absoluteLineAt(i).marked())
-            return {i};
+    for (int i = static_cast<int>(_currentCursorLine) - 1; i >= 0; --i)
+        if (grid().absoluteLineAt(static_cast<unsigned>(i)).marked())
+            return {static_cast<unsigned>(i)};
 
     return nullopt;
 }
 
 optional<unsigned> Screen::findMarkerForward(unsigned _currentCursorLine) const
 {
-    if (_currentCursorLine < 0 || !isPrimaryScreen())
+    if (!isPrimaryScreen())
         return nullopt;
 
     for (auto i = _currentCursorLine + 1; i < historyLineCount() + static_cast<unsigned>(grid().screenSize().height); ++i)
@@ -723,7 +724,7 @@ void Screen::clearTabUnderCursor()
 {
     // populate tabs vector in case of default tabWidth is used (until now).
     if (tabs_.empty() && tabWidth_ != 0)
-        for (int column = tabWidth_; column <= size().width; column += tabWidth_)
+        for (auto column = tabWidth_; column <= size().width; column += tabWidth_)
             tabs_.emplace_back(column);
 
     // erase the specific tab underneath
@@ -858,7 +859,7 @@ void Screen::linefeed(unsigned _newColumn)
     wrapPending_ = 0;
 
     if (static_cast<unsigned>(realCursorPosition().row) == margin_.vertical.to ||
-        realCursorPosition().row == size_.height)
+        static_cast<unsigned>(realCursorPosition().row) == size_.height)
     {
         scrollUp(1);
         moveCursorTo({cursorPosition().row, static_cast<int>(_newColumn)});
@@ -891,7 +892,7 @@ void Screen::setCurrentColumn(unsigned _n)
 {
     auto const col = cursor_.originMode ? margin_.horizontal.from + _n - 1 : _n;
     auto const clampedCol = min(col, size_.width);
-    cursor_.position.column = clampedCol;
+    cursor_.position.column = static_cast<int>(clampedCol);
     updateColumnIterator();
 }
 
@@ -927,7 +928,7 @@ void Screen::linefeed()
     if (isModeEnabled(AnsiMode::AutomaticNewLine))
         linefeed(margin_.horizontal.from);
     else
-        linefeed(realCursorPosition().column);
+        linefeed(static_cast<unsigned>(realCursorPosition().column));
 }
 
 void Screen::backspace()
@@ -1070,7 +1071,7 @@ void Screen::eraseCharacters(unsigned _n)
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
     // It's not clear from the spec how to perform erase when inside margin and number of chars to be erased would go outside margins.
     // TODO: See what xterm does ;-)
-    auto const n = min(size_.width - realCursorPosition().column + 1, _n == 0 ? 1 : _n);
+    auto const n = min(size_.width - static_cast<unsigned>(realCursorPosition().column) + 1, _n == 0 ? 1 : _n);
     fill_n(currentColumn_, n, Cell{{}, cursor_.graphicsRendition});
 }
 
@@ -1115,15 +1116,20 @@ void Screen::moveCursorToPrevLine(unsigned _n)
 void Screen::insertCharacters(unsigned _n)
 {
     if (isCursorInsideMargins())
-        insertChars(realCursorPosition().row, _n);
+        insertChars(static_cast<unsigned>(realCursorPosition().row), _n);
 }
 
 /// Inserts @p _n characters at given line @p _lineNo.
-void Screen::insertChars(int _lineNo, unsigned _n)
+void Screen::insertChars(unsigned _lineNo, unsigned _n)
 {
-    auto const n = min(_n, margin_.horizontal.to - cursorPosition().column + 1);
+    auto const n = static_cast<unsigned>(
+        min(
+            static_cast<int>(_n),
+            static_cast<int>(margin_.horizontal.to) - cursorPosition().column + 1
+        )
+    );
 
-    auto && line = grid().lineAt(_lineNo);
+    auto && line = grid().lineAt(static_cast<int>(_lineNo));
     auto column0 = next(begin(line), realCursorPosition().column - 1);
     auto column1 = next(begin(line), margin_.horizontal.to - n);
     auto column2 = next(begin(line), margin_.horizontal.to);
@@ -1138,7 +1144,7 @@ void Screen::insertChars(int _lineNo, unsigned _n)
         updateColumnIterator();
 
     fill_n(
-        columnIteratorAt(begin(line), cursor_.position.column),
+        columnIteratorAt(begin(line), static_cast<unsigned>(cursor_.position.column)),
         n,
         Cell{L' ', cursor_.graphicsRendition}
     );
@@ -1165,8 +1171,8 @@ void Screen::insertColumns(unsigned _n)
             insertChars(lineNo, _n);
 }
 
-void Screen::copyArea(int _top, int _left, int _bottom, int _right, int _page,
-                      int _targetTop, int _targetLeft, int _targetPage
+void Screen::copyArea(unsigned _top, unsigned _left, unsigned _bottom, unsigned _right, unsigned _page,
+                      unsigned _targetTop, unsigned _targetLeft, unsigned _targetPage
 )
 {
     (void) _page;
@@ -1183,26 +1189,26 @@ void Screen::copyArea(int _top, int _left, int _bottom, int _right, int _page,
         // Copy to its own location => no-op.
         return;
 
-    auto const [x0, xInc, xEnd] = [&]() {
+    auto const [x0, xInc, xEnd] = [&]() -> tuple<int, int, int> {
         if (_targetLeft > _left) // moving right
-            return std::tuple{_right - _left, -1, -1};
+            return tuple{_right - _left, -1, -1};
         else
-            return std::tuple{0, +1, _right - _left + 1};
+            return tuple{0, +1, _right - _left + 1};
     }();
 
-    auto const [y0, yInc, yEnd] = [&]() {
+    auto const [y0, yInc, yEnd] = [&]() -> tuple<int, int, int> {
         if (_targetTop > _top) // moving down
-            return std::tuple{_bottom - _top, -1, -1};
+            return tuple{_bottom - _top, -1, -1};
         else
-            return std::tuple{0, +1, _bottom - _top + 1};
+            return tuple{0, +1, _bottom - _top + 1};
     }();
 
     for (auto y = y0; y != yEnd; y += yInc)
     {
         for (auto x = x0; x != xEnd; x += xInc)
         {
-            Cell const& sourceCell = at({_top + y, _left + x});
-            Cell& targetCell = at({_targetTop + y, _targetLeft + x});
+            Cell const& sourceCell = at({static_cast<int>(_top) + y, static_cast<int>(_left) + x});
+            Cell& targetCell = at({static_cast<int>(_targetTop) + y, static_cast<int>(_targetLeft) + x});
             targetCell = sourceCell;
         }
     }
@@ -1210,7 +1216,7 @@ void Screen::copyArea(int _top, int _left, int _bottom, int _right, int _page,
     updateCursorIterators();
 }
 
-void Screen::eraseArea(int _top, int _left, int _bottom, int _right)
+void Screen::eraseArea(unsigned _top, unsigned _left, unsigned _bottom, unsigned _right)
 {
     assert(_right <= size_.width);
     assert(_bottom <= size_.height);
@@ -1218,11 +1224,11 @@ void Screen::eraseArea(int _top, int _left, int _bottom, int _right)
     if (_top > _bottom || _left > _right)
         return;
 
-    for (int y = _top; y <= _bottom; ++y)
+    for (unsigned y = _top; y <= _bottom; ++y)
     {
-        Line& line = grid().lineAt(y);
+        Line& line = grid().lineAt(static_cast<int>(y));
         auto column = next(begin(line), _left - 1);
-        for (int x = _left; x <= _right; ++x)
+        for (unsigned x = _left; x <= _right; ++x)
         {
             Cell& cell = *column;
             cell.reset();
@@ -1232,17 +1238,17 @@ void Screen::eraseArea(int _top, int _left, int _bottom, int _right)
     }
 }
 
-void Screen::fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right)
+void Screen::fillArea(char32_t _ch, unsigned _top, unsigned _left, unsigned _bottom, unsigned _right)
 {
     // "Pch can be any value from 32 to 126 or from 160 to 255."
     if (!(32 <= _ch && _ch <= 126) && !(160 <= _ch && _ch <= 255))
         return;
 
-    for (int y = _top; y <= _bottom; ++y)
+    for (unsigned y = _top; y <= _bottom; ++y)
     {
-        Line& line = grid().lineAt(y);
+        Line& line = grid().lineAt(static_cast<int>(y));
         auto column = next(begin(line), _left - 1);
-        for (int x = _left; x <= _right; ++x)
+        for (unsigned x = _left; x <= _right; ++x)
         {
             Cell& cell = *column;
             cell.reset(cursor().graphicsRendition);
@@ -1269,10 +1275,10 @@ void Screen::deleteLines(unsigned _n)
 void Screen::deleteCharacters(unsigned _n)
 {
     if (isCursorInsideMargins() && _n != 0)
-        deleteChars(realCursorPosition().row, _n);
+        deleteChars(static_cast<unsigned>(realCursorPosition().row), _n);
 }
 
-void Screen::deleteChars(int _lineNo, unsigned _n)
+void Screen::deleteChars(unsigned _lineNo, unsigned _n)
 {
     auto line = next(begin(grid().mainPage()), _lineNo - 1);
     auto column = next(begin(*line), realCursorPosition().column - 1);
@@ -1350,19 +1356,19 @@ void Screen::moveCursorUp(unsigned _n)
 {
     auto const n = min(
         _n,
-        cursorPosition().row > margin_.vertical.from
-            ? cursorPosition().row - margin_.vertical.from
-            : cursorPosition().row - 1
+        static_cast<unsigned>(cursorPosition().row) > margin_.vertical.from
+            ? static_cast<unsigned>(cursorPosition().row) - margin_.vertical.from
+            : static_cast<unsigned>(cursorPosition().row) - 1
     );
 
-    cursor_.position.row -= n;
+    cursor_.position.row -= static_cast<int>(n);
     currentLine_ = prev(currentLine_, n);
-    setCurrentColumn(cursorPosition().column);
+    setCurrentColumn(static_cast<unsigned>(cursorPosition().column));
 }
 
 void Screen::moveCursorDown(unsigned _n)
 {
-    auto const currentLineNumber = cursorPosition().row;
+    auto const currentLineNumber = static_cast<unsigned>(cursorPosition().row);
     auto const n = min(
         _n,
         currentLineNumber <= margin_.vertical.to
@@ -1374,15 +1380,19 @@ void Screen::moveCursorDown(unsigned _n)
     //         ? min(v.n, size_.height - cursorPosition().row)
     //         : min(v.n, margin_.vertical.to - cursorPosition().row);
 
-    cursor_.position.row += n;
+    cursor_.position.row += static_cast<int>(n);
     currentLine_ = next(currentLine_, n);
-    setCurrentColumn(cursorPosition().column);
+    setCurrentColumn(static_cast<unsigned>(cursorPosition().column));
 }
 
 void Screen::moveCursorForward(unsigned _n)
 {
-    auto const n = min(_n,  margin_.horizontal.length() - cursor_.position.column);
-    cursor_.position.column += n;
+    auto const n = min(
+        _n,
+        margin_.horizontal.length() > static_cast<unsigned>(cursor_.position.column) ?
+        margin_.horizontal.length() - static_cast<unsigned>(cursor_.position.column) : 0
+    );
+    cursor_.position.column += static_cast<int>(n);
     updateColumnIterator();
 }
 
@@ -1393,7 +1403,7 @@ void Screen::moveCursorBackward(unsigned _n)
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
     auto const n = min(_n, static_cast<unsigned>(cursor_.position.column) - 1);
-    setCurrentColumn(cursor_.position.column - n);
+    setCurrentColumn(static_cast<unsigned>(cursor_.position.column) - n);
 }
 
 void Screen::moveCursorToColumn(unsigned _column)
@@ -1422,14 +1432,14 @@ void Screen::moveCursorToNextTab()
     {
         // advance to the next tab
         size_t i = 0;
-        while (i < tabs_.size() && realCursorPosition().column >= tabs_[i])
+        while (i < tabs_.size() && static_cast<unsigned>(realCursorPosition().column) >= tabs_[i])
             ++i;
 
-        auto const currentCursorColumn = cursorPosition().column;
+        auto const currentCursorColumn = static_cast<unsigned>(cursorPosition().column);
 
         if (i < tabs_.size())
             moveCursorForward(tabs_[i] - currentCursorColumn);
-        else if (realCursorPosition().column < margin_.horizontal.to)
+        else if (static_cast<unsigned>(realCursorPosition().column) < margin_.horizontal.to)
             moveCursorForward(margin_.horizontal.to - currentCursorColumn);
         else
             moveCursorToNextLine(1);
@@ -1437,11 +1447,11 @@ void Screen::moveCursorToNextTab()
     else if (tabWidth_)
     {
         // default tab settings
-        if (realCursorPosition().column < margin_.horizontal.to)
+        if (static_cast<unsigned>(realCursorPosition().column) < margin_.horizontal.to)
         {
             auto const n = min(
-                tabWidth_ - (cursor_.position.column - 1) % tabWidth_,
-                static_cast<int>(size_.width - cursorPosition().column)
+                tabWidth_ - static_cast<unsigned>(cursor_.position.column - 1) % tabWidth_,
+                size_.width - static_cast<unsigned>(cursorPosition().column)
             );
             moveCursorForward(n);
         }
@@ -1451,7 +1461,7 @@ void Screen::moveCursorToNextTab()
     else
     {
         // no tab stops configured
-        if (realCursorPosition().column < margin_.horizontal.to)
+        if (static_cast<unsigned>(realCursorPosition().column) < margin_.horizontal.to)
             // then TAB moves to the end of the screen
             moveCursorToColumn(margin_.horizontal.to);
         else
@@ -1466,7 +1476,7 @@ void Screen::notify(string const& _title, string const& _content)
     eventListener_.notify(_title, _content);
 }
 
-void Screen::captureBuffer(int _lineCount, bool _logicalLines)
+void Screen::captureBuffer(unsigned _lineCount, bool _logicalLines)
 {
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
 
@@ -1474,13 +1484,19 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     auto writer = VTWriter([&](auto buf, auto len) { capturedBuffer += string_view(buf, len); });
 
     // TODO: when capturing _lineCount < screenSize.height, start at the lowest non-empty line.
-    auto const relativeStartLine = _logicalLines ? grid().computeRelativeLogicalLineNumberFromBottom(_lineCount)
-                                                 : size_.height - _lineCount + 1;
-    auto const startLine = clamp(1 - static_cast<int>(historyLineCount()), static_cast<int>(relativeStartLine), static_cast<int>(size_.height));
+    auto const relativeStartLine = _logicalLines
+        ? grid().computeRelativeLogicalLineNumberFromBottom(_lineCount)
+        : static_cast<int>(size_.height) - static_cast<int>(_lineCount) + 1;
+
+    auto const startLine = clamp(
+        1 - static_cast<int>(historyLineCount()),
+        static_cast<int>(relativeStartLine),
+        static_cast<int>(size_.height)
+    );
 
     // dumpState();
 
-    auto const lineCount = size_.height - startLine + 1;
+    auto const lineCount = size_.height - static_cast<unsigned>(startLine) + 1;
 
     auto const trimSpaceRight = [](string& value)
     {
@@ -1488,7 +1504,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
             value.pop_back();
     };
 
-    for (int const row : crispy::times(startLine, lineCount))
+    for (auto const row: crispy::times(startLine, static_cast<int>(lineCount)))
     {
         auto const& lineBuffer = grid().lineAt(row);
 
@@ -1497,7 +1513,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
 
         if (!lineBuffer.blank())
         {
-            for (int const col : crispy::times(1, size_.width))
+            for (auto const col: crispy::times(1, static_cast<int>(size_.width)))
             {
                 Cell const& cell = at({row, col});
                 if (!cell.codepointCount())
@@ -1528,8 +1544,7 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
 
 void Screen::cursorForwardTab(unsigned _count)
 {
-    for (int i = 0; i < _count; ++i)
-        moveCursorToNextTab();
+    crispy::for_each(crispy::times(_count), [this](auto) { moveCursorToNextTab(); });
 }
 
 void Screen::cursorBackwardTab(unsigned _count)
@@ -1539,12 +1554,15 @@ void Screen::cursorBackwardTab(unsigned _count)
 
     if (!tabs_.empty())
     {
-        for (int k = 0; k < _count; ++k)
+        for (auto k = 0u; k < _count; ++k)
         {
-            auto const i = std::find_if(rbegin(tabs_), rend(tabs_),
-                                        [&](auto tabPos) -> bool {
-                                            return tabPos <= cursorPosition().column - 1;
-                                        });
+            auto const i = std::find_if(
+                rbegin(tabs_),
+                rend(tabs_),
+                [&](auto tabPos) -> bool {
+                    return tabPos <= static_cast<unsigned>(cursorPosition().column) - 1;
+                }
+            );
             if (i != rend(tabs_))
             {
                 // prev tab found -> move to prev tab
@@ -1560,11 +1578,11 @@ void Screen::cursorBackwardTab(unsigned _count)
     else if (tabWidth_)
     {
         // default tab settings
-        if (cursor_.position.column <= tabWidth_)
+        if (static_cast<unsigned>(cursor_.position.column) <= tabWidth_)
             moveCursorToBeginOfLine();
         else
         {
-            auto const m = cursor_.position.column % tabWidth_;
+            auto const m = static_cast<unsigned>(cursor_.position.column) % tabWidth_;
             auto const n = m
                          ? (_count - 1) * tabWidth_ + m
                          : _count * tabWidth_ + m;
@@ -1580,7 +1598,7 @@ void Screen::cursorBackwardTab(unsigned _count)
 
 void Screen::index()
 {
-    if (realCursorPosition().row == margin_.vertical.to)
+    if (static_cast<unsigned>(realCursorPosition().row) == margin_.vertical.to)
         scrollUp(1);
     else
         moveCursorTo({cursorPosition().row + 1, cursorPosition().column});
@@ -1588,7 +1606,7 @@ void Screen::index()
 
 void Screen::reverseIndex()
 {
-    if (realCursorPosition().row == margin_.vertical.from)
+    if (static_cast<unsigned>(realCursorPosition().row) == margin_.vertical.from)
         scrollDown(1);
     else
         moveCursorTo({cursorPosition().row - 1, cursorPosition().column});
@@ -1596,7 +1614,7 @@ void Screen::reverseIndex()
 
 void Screen::backIndex()
 {
-    if (realCursorPosition().column == margin_.horizontal.from)
+    if (static_cast<unsigned>(realCursorPosition().column) == margin_.horizontal.from)
         ;// TODO: scrollRight(1);
     else
         moveCursorTo({cursorPosition().row, cursorPosition().column - 1});
@@ -1604,7 +1622,7 @@ void Screen::backIndex()
 
 void Screen::forwardIndex()
 {
-    if (realCursorPosition().column == margin_.horizontal.to)
+    if (static_cast<unsigned>(realCursorPosition().column) == margin_.horizontal.to)
         ;// TODO: scrollLeft(1);
     else
         moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
@@ -1733,7 +1751,7 @@ void Screen::restoreModes(std::vector<DECMode> const& _modes)
 
 void Screen::setMode(AnsiMode _mode, bool _enable)
 {
-    if (!isValidAnsiMode(static_cast<int>(_mode)))
+    if (!isValidAnsiMode(static_cast<unsigned>(_mode)))
         return;
 
     modes_.set(_mode, _enable);
@@ -1741,7 +1759,7 @@ void Screen::setMode(AnsiMode _mode, bool _enable)
 
 void Screen::setMode(DECMode _mode, bool _enable)
 {
-    if (!isValidDECMode(static_cast<int>(_mode)))
+    if (!isValidDECMode(static_cast<unsigned>(_mode)))
         return;
 
     switch (_mode)
@@ -1764,7 +1782,7 @@ void Screen::setMode(DECMode _mode, bool _enable)
 
                 // sets the number of columns on the page to 80 or 132 and selects the
                 // corresponding 80- or 132-column font
-                auto const columns = _enable ? 132 : 80;
+                auto const columns = _enable ? 132u : 80u;
 
                 resizeColumns(columns, clear);
             }
@@ -1785,8 +1803,8 @@ void Screen::setMode(DECMode _mode, bool _enable)
                 else
                 {
                     // disabling reflow only affects currently line and below
-                    auto const startLine = static_cast<int>(historyLineCount()) + realCursorPosition().row - 1;
-                    auto const endLine = static_cast<int>(historyLineCount()) + size_.height;
+                    auto const startLine = static_cast<unsigned>(historyLineCount()) + static_cast<unsigned>(realCursorPosition().row) - 1;
+                    auto const endLine = static_cast<unsigned>(historyLineCount()) + size_.height;
                     assert(primaryGrid().lines(startLine, endLine).begin() == currentLine_);
                     for (Line& line : primaryGrid().lines(startLine, endLine))
                         line.setFlag(Line::Flags::Wrappable, _enable);
@@ -1896,7 +1914,7 @@ enum class ModeResponse { // TODO: respect response 0, 3, 4.
     PermanentlyReset = 4
 };
 
-void Screen::requestAnsiMode(int _mode)
+void Screen::requestAnsiMode(unsigned _mode)
 {
     ModeResponse const modeResponse =
         isValidAnsiMode(_mode)
@@ -1910,7 +1928,7 @@ void Screen::requestAnsiMode(int _mode)
     reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
-void Screen::requestDECMode(int _mode)
+void Screen::requestDECMode(unsigned _mode)
 {
     ModeResponse const modeResponse =
         isValidDECMode(_mode)
@@ -1924,7 +1942,7 @@ void Screen::requestDECMode(int _mode)
     reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
 
-void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
+void Screen::setTopBottomMargin(optional<unsigned> _top, optional<unsigned> _bottom)
 {
 	auto const bottom = _bottom.has_value()
 		? min(static_cast<unsigned>(_bottom.value()), size_.height)
@@ -1940,7 +1958,7 @@ void Screen::setTopBottomMargin(optional<int> _top, optional<int> _bottom)
     }
 }
 
-void Screen::setLeftRightMargin(optional<int> _left, optional<int> _right)
+void Screen::setLeftRightMargin(optional<unsigned> _left, optional<unsigned> _right)
 {
     if (isModeEnabled(DECMode::LeftRightMargin))
     {
@@ -2027,7 +2045,7 @@ void Screen::sixelImage(Size _pixelSize, Image::Data&& _data)
                     sixelScrolling);
 
     if (!sixelCursorConformance_)
-        linefeed(topLeft.column);
+        linefeed(static_cast<unsigned>(topLeft.column));
 }
 
 std::shared_ptr<Image const> Screen::uploadImage(ImageFormat _format, Size _imageSize, Image::Data&& _pixmap)
@@ -2051,9 +2069,9 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
     (void) _alignmentPolicy;
     (void) _autoScroll;
 #else
-    auto const linesAvailable = 1 + size_.height - _topLeft.row;
+    auto const linesAvailable = 1 + size_.height - static_cast<unsigned>(_topLeft.row);
     auto const linesToBeRendered = min(_gridSize.height, linesAvailable);
-    auto const columnsToBeRendered = min(_gridSize.width, size_.width - _topLeft.column - 1);
+    auto const columnsToBeRendered = min(_gridSize.width, size_.width - static_cast<unsigned>(_topLeft.column) - 1);
     auto const gapColor = RGBAColor{}; // TODO: cursor_.graphicsRendition.backgroundColor;
 
     // TODO: make use of _imageOffset and _imageSize
@@ -2079,7 +2097,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
 #endif
             }
         );
-        moveCursorTo(Coordinate{static_cast<int>(_topLeft.row + linesToBeRendered - 1), static_cast<int>(_topLeft.column)});
+        moveCursorTo(Coordinate{static_cast<int>(static_cast<unsigned>(_topLeft.row) + linesToBeRendered - 1), static_cast<int>(_topLeft.column)});
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
@@ -2090,7 +2108,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
         for (auto const lineOffset : crispy::times(remainingLineCount))
         {
             linefeed();
-            moveCursorForward(_topLeft.column);
+            moveCursorForward(static_cast<unsigned>(_topLeft.column));
             crispy::for_each(
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 crispy::times(columnsToBeRendered),
@@ -2109,7 +2127,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
     }
 
     // move ansi text cursor to position of the sixel cursor
-    moveCursorToColumn(_topLeft.column + _gridSize.width);
+    moveCursorToColumn(static_cast<unsigned>(_topLeft.column) + _gridSize.width);
 #endif
 }
 
@@ -2312,7 +2330,7 @@ void Screen::requestTabStops()
     else if (tabWidth_ != 0)
     {
         dcs << 1;
-        for (int column = tabWidth_ + 1; column <= size().width; column += tabWidth_)
+        for (auto column = tabWidth_ + 1; column <= size().width; column += tabWidth_)
             dcs << '/' << column;
     }
     dcs << "\033\\"sv; // ST
@@ -2345,7 +2363,7 @@ void Screen::requestCapability(std::string_view _name)
         reply("\033P1+r{}\033\\", toHexString(_name));
     else if (auto const value = numericCapability(_name); value >= 0)
     {
-        auto hexValue = fmt::format("{:X}", value);
+        auto hexValue = fmt::format("{:X}", *value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
         reply("\033P1+r{}={}\033\\", toHexString(_name), hexValue);
@@ -2371,9 +2389,9 @@ void Screen::requestCapability(capabilities::Code _code)
 #endif
     if (booleanCapability(_code))
         reply("\033P1+r{}\033\\", _code.hex());
-    else if (auto const value = numericCapability(_code); value >= 0)
+    else if (auto const value = numericCapability(_code))
     {
-        auto hexValue = fmt::format("{:X}", value);
+        auto hexValue = fmt::format("{:X}", *value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
         reply("\033P1+r{}={}\033\\", _code.hex(), hexValue);
@@ -2518,7 +2536,7 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                 case Action::SetToValue:
                 {
                     visit(overloaded{
-                        [&](int _number) {
+                        [&](unsigned _number) {
                             imageColorPalette_->setSize(_number);
                             reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, _number);
                         },

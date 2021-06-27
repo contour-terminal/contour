@@ -834,8 +834,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     }
 
     rasterized_glyph output{};
-    output.size.width = static_cast<int>(ftFace->glyph->bitmap.width);
-    output.size.height = static_cast<int>(ftFace->glyph->bitmap.rows);
+    output.size.width = ftFace->glyph->bitmap.width;
+    output.size.height = ftFace->glyph->bitmap.rows;
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 

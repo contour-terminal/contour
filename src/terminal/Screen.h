@@ -154,14 +154,14 @@ class Screen : public capabilities::StaticDatabase {
     );
 
     using StaticDatabase::numericCapability;
-    unsigned numericCapability(capabilities::Code _cap) const override;
+    std::optional<unsigned> numericCapability(capabilities::Code _cap) const override;
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
 
-    void setMaxImageColorRegisters(int _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
+    void setMaxImageColorRegisters(unsigned _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
     void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
     void setRespondToTCapQuery(bool _enable) { respondToTCapQuery_ = _enable; }
@@ -238,13 +238,13 @@ class Screen : public capabilities::StaticDatabase {
     void insertColumns(unsigned _n);    // DECIC
 
     void copyArea(
-        int _top, int _left, int _bottom, int _right, int _page,
-        int _targetTop, int _targetLeft, int _targetPage
+        unsigned _top, unsigned _left, unsigned _bottom, unsigned _right, unsigned _page,
+        unsigned _targetTop, unsigned _targetLeft, unsigned _targetPage
     );
 
-    void eraseArea(int _top, int _left, int _bottom, int _right);
+    void eraseArea(unsigned _top, unsigned _left, unsigned _bottom, unsigned _right);
 
-    void fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right);
+    void fillArea(char32_t _ch, unsigned _top, unsigned _left, unsigned _bottom, unsigned _right);
 
     void deleteLines(unsigned _n);      // DL
 
@@ -292,15 +292,15 @@ class Screen : public capabilities::StaticDatabase {
     void hyperlink(std::string const& _id, std::string const& _uri);      // OSC 8
     void notify(std::string const& _title, std::string const& _content);  // OSC 777
 
-    void captureBuffer(int _numLines, bool _logicalLines);
+    void captureBuffer(unsigned _numLines, bool _logicalLines);
 
     void setForegroundColor(Color const& _color);
     void setBackgroundColor(Color const& _color);
     void setUnderlineColor(Color const& _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
-    void setLeftRightMargin(std::optional<int> _left, std::optional<int> _right);
+    void setTopBottomMargin(std::optional<unsigned> _top, std::optional<unsigned> _bottom);
+    void setLeftRightMargin(std::optional<unsigned> _left, std::optional<unsigned> _right);
     void screenAlignmentPattern();
     void sendMouseEvents(MouseProtocol _protocol, bool _enable);
     void applicationKeypadMode(bool _enable);
@@ -363,8 +363,8 @@ class Screen : public capabilities::StaticDatabase {
     void restoreCursor(Cursor const& _savedCursor);
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
-    void requestAnsiMode(int _mode);
-    void requestDECMode(int _mode);
+    void requestAnsiMode(unsigned _mode);
+    void requestDECMode(unsigned _mode);
 
     crispy::Size const& size() const noexcept { return size_; }
     void resize(crispy::Size const& _newSize);
@@ -401,7 +401,7 @@ class Screen : public capabilities::StaticDatabase {
 
     Cursor const& cursor() const noexcept { return cursor_; }
 
-    int wrapPending() const noexcept { return wrapPending_; }
+    unsigned wrapPending() const noexcept { return wrapPending_; }
 
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
     Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
@@ -444,8 +444,8 @@ class Screen : public capabilities::StaticDatabase {
     // Tests if given coordinate is within the visible screen area.
     constexpr bool contains(Coordinate const& _coord) const noexcept
     {
-        return 1 <= _coord.row && _coord.row <= size_.height
-            && 1 <= _coord.column && _coord.column <= size_.width;
+        return 1 <= _coord.row && _coord.row <= static_cast<int>(size_.height)
+            && 1 <= _coord.column && _coord.column <= static_cast<int>(size_.width);
     }
 
     Cell const& currentCell() const noexcept
@@ -492,7 +492,7 @@ class Screen : public capabilities::StaticDatabase {
 
     auto scrollbackLines() const noexcept { return grid().scrollbackLines(); }
 
-    void setTabWidth(int _value)
+    void setTabWidth(unsigned _value)
     {
         tabWidth_ = _value;
     }
@@ -608,7 +608,7 @@ class Screen : public capabilities::StaticDatabase {
 
     void updateColumnIterator()
     {
-        currentColumn_ = columnIteratorAt(cursor_.position.column);
+        currentColumn_ = columnIteratorAt(static_cast<unsigned>(cursor_.position.column));
     }
 
     /// @returns an iterator to @p _n columns after column @p _begin.
@@ -631,8 +631,8 @@ class Screen : public capabilities::StaticDatabase {
 
     void scrollUp(unsigned n, Margin const& margin);
     void scrollDown(unsigned n, Margin const& margin);
-    void insertChars(int _lineNo, unsigned _n);
-    void deleteChars(int _lineNo, unsigned _n);
+    void insertChars(unsigned _lineNo, unsigned _n);
+    void deleteChars(unsigned _lineNo, unsigned _n);
 
     /// Sets the current column to given logical column number.
     void setCurrentColumn(unsigned _n);
@@ -673,9 +673,9 @@ class Screen : public capabilities::StaticDatabase {
 
     // XXX moved from ScreenBuffer
     Margin margin_;
-    int wrapPending_ = 0;
-    int tabWidth_{8};
-    std::vector<int> tabs_;
+    unsigned wrapPending_ = 0;
+    unsigned tabWidth_{8};
+    std::vector<unsigned> tabs_;
 
     // main/alt screen and history
     //

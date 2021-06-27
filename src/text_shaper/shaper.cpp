@@ -38,7 +38,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Si
     auto const ratioX = float(_bitmap.size.width) / float(_newSize.width);
     auto const ratioY = float(_bitmap.size.height) / float(_newSize.height);
     auto const ratio = max(ratioX, ratioY);
-    auto const factor = int(ceilf(ratio));
+    auto const factor = unsigned(ceilf(ratio));
 
     vector<uint8_t> dest;
     size_t const len = size_t(_newSize.height) * size_t(_newSize.width) * 4;

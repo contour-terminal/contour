@@ -52,7 +52,7 @@ constexpr int pixel_size(bitmap_format _format) noexcept
             return 1;
     }
     return 1;
-};
+}
 
 struct rasterized_glyph
 {

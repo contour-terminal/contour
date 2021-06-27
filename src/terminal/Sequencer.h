@@ -26,6 +26,8 @@
 #include <string_view>
 #include <vector>
 
+using std::min;
+
 namespace terminal {
 
 class Screen;
@@ -253,9 +255,6 @@ constexpr bool isValidAnsiMode(unsigned _mode) noexcept
     return false;
 }
 
-
-std::string to_string(DECMode _mode);
-
 constexpr unsigned toDECModeNum(DECMode m)
 {
     switch (m)
@@ -393,7 +392,7 @@ namespace XtSmGraphics
     };
 
     using Value = std::variant<std::monostate, unsigned, crispy::Size>;
-};
+}
 
 /// TBC - Tab Clear
 ///
@@ -521,7 +520,18 @@ class Sequence {
         switch (category_)
         {
             case FunctionCategory::OSC:
-                return FunctionSelector{category_, 0, parameters_[0][0], 0, 0};
+                return FunctionSelector{
+                    category_,
+                    0,
+                    static_cast<uint16_t>(
+                        min(
+                            parameters_[0][0],
+                            static_cast<unsigned>(std::numeric_limits<uint16_t>::max())
+                        )
+                    ),
+                    0,
+                    0
+                };
             default:
             {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
@@ -529,7 +539,13 @@ class Sequence {
                     ? static_cast<char>(intermediateCharacters_[0])
                     : char{};
 
-                return FunctionSelector{category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_};
+                return FunctionSelector{
+                    category_,
+                    leaderSymbol_,
+                    static_cast<uint16_t>(parameters_.size()),
+                    intermediate,
+                    finalChar_
+                };
             }
         }
     }

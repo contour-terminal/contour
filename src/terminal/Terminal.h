@@ -58,7 +58,7 @@ class Terminal : public ScreenEvents {
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionCompleted() {}
-        virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void resizeWindow(unsigned /*_width*/, unsigned /*_height*/, bool /*_unitInPixels*/) {}
         virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
@@ -302,7 +302,7 @@ class Terminal : public ScreenEvents {
     void dumpState() override;
     void notify(std::string_view _title, std::string_view _body) override;
     void reply(std::string_view _response) override;
-    void resizeWindow(int _width, int _height, bool _unitInPixels) override;
+    void resizeWindow(unsigned _width, unsigned _height, bool _unitInPixels) override;
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
     void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;

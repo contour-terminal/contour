@@ -307,7 +307,7 @@ void Grid::setMaxHistoryLineCount(optional<size_t> _maxHistoryLineCount)
 
 int Grid::computeRelativeLogicalLineNumberFromBottom(unsigned _n) const noexcept
 {
-    int logicalLineCount = 0;
+    unsigned logicalLineCount = 0u;
     int outputRelativePhysicalLine = static_cast<int>(screenSize_.height);
 
     auto i = lines_.rbegin();
@@ -362,7 +362,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         // Shrink existing line count to _newSize.height
         // by splicing the number of lines to be shrinked by into savedLines bottom.
 
-        if (_cursor.row == screenSize_.height)
+        if (_cursor.row == static_cast<int>(screenSize_.height))
         {
             auto const shrinkedLinesCount = screenSize_.height - _newHeight;
             screenSize_.height = _newHeight;
@@ -378,14 +378,14 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         }
     };
 
-    auto const growColumns = [this, _wrapPending](size_t _newColumnCount, Coordinate _cursor) -> Coordinate
+    auto const growColumns = [this, _wrapPending](unsigned _newColumnCount, Coordinate _cursor) -> Coordinate
     {
         if (!reflowOnResize_)
         {
             for (Line& line : lines_)
                 if (line.size() < static_cast<size_t>(_newColumnCount))
                     line.resize(static_cast<size_t>(_newColumnCount));
-            screenSize_.width = static_cast<int>(_newColumnCount);
+            screenSize_.width = _newColumnCount;
             return _cursor + Coordinate{0, _wrapPending ? 1 : 0};
         }
         else
@@ -439,7 +439,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             }
 
             lines_ = move(grownLines);
-            screenSize_.width = static_cast<int>(_newColumnCount);
+            screenSize_.width = _newColumnCount;
 
             auto cy = size_t{0};
             auto const historyLineCountDelta = (static_cast<int>(lines_.size()) - static_cast<int>(screenSize_.height));
@@ -453,16 +453,24 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
         }
     };
 
-    auto const shrinkColumns = [this](size_t _newColumnCount, Coordinate _cursor) -> Coordinate
+    auto const shrinkColumns = [this](unsigned _newColumnCount, Coordinate _cursor) -> Coordinate
     {
         if (!reflowOnResize_)
         {
-            screenSize_.width = static_cast<int>(_newColumnCount);
+            screenSize_.width = _newColumnCount;
             crispy::for_each(lines_, [=](Line& line) {
                 if (line.size() < _newColumnCount)
                     line.resize(_newColumnCount);
             });
-            return _cursor + Coordinate{0u, static_cast<int>(min(static_cast<size_t>(_cursor.column), _newColumnCount))};
+            return _cursor + Coordinate{
+                0,
+                static_cast<int>(
+                    min(
+                        static_cast<unsigned>(_cursor.column),
+                        _newColumnCount
+                    )
+                )
+            };
         }
         else
         {
@@ -537,7 +545,7 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
             addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
 
             lines_ = move(shrinkedLines);
-            screenSize_.width = static_cast<int>(_newColumnCount);
+            screenSize_.width = _newColumnCount;
 
             return _cursor; // TODO
         }
@@ -549,10 +557,10 @@ Coordinate Grid::resize(Size _newSize, Coordinate _currentCursorPos, bool _wrapP
     switch (crispy::strongCompare(_newSize.width, screenSize_.width))
     {
         case Comparison::Greater:
-            cursorPosition = growColumns(static_cast<size_t>(_newSize.width), cursorPosition);
+            cursorPosition = growColumns(_newSize.width, cursorPosition);
             break;
         case Comparison::Less:
-            cursorPosition = shrinkColumns(static_cast<size_t>(_newSize.width), cursorPosition);
+            cursorPosition = shrinkColumns(_newSize.width, cursorPosition);
             break;
         case Comparison::Equal:
             break;
@@ -825,8 +833,8 @@ string Grid::renderTextLineAbsolute(unsigned row) const
 {
     string line;
     line.reserve(static_cast<size_t>(screenSize_.width));
-    for (int col = 1; col <= screenSize_.width; ++col)
-        if (auto const& cell = at({static_cast<int>(row - historyLineCount()) + 1, col}); cell.codepointCount())
+    for (auto col = 1u; col <= screenSize_.width; ++col)
+        if (auto const& cell = at({static_cast<int>(row - historyLineCount()) + 1, static_cast<int>(col)}); cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -838,8 +846,8 @@ string Grid::renderTextLine(int row) const
 {
     string line;
     line.reserve(static_cast<size_t>(screenSize_.width));
-    for (int col = 1; col <= screenSize_.width; ++col)
-        if (auto const& cell = at({row, col}); cell.codepointCount())
+    for (auto col = 1u; col <= screenSize_.width; ++col)
+        if (auto const& cell = at({row, static_cast<int>(col)}); cell.codepointCount())
             line += cell.toUtf8();
         else
             line += " "; // fill character
@@ -869,9 +877,9 @@ string Grid::renderText() const
         static_cast<uint16_t>(screenSize_.width + 1)
     );
 
-    for (int lineNr = 1; lineNr <= screenSize_.height; ++lineNr)
+    for (auto lineNr = 1u; lineNr <= screenSize_.height; ++lineNr)
     {
-        text += renderTextLine(lineNr);
+        text += renderTextLine(static_cast<int>(lineNr));
         text += '\n';
     }
 

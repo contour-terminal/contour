@@ -682,7 +682,7 @@ inline void Grid::render(RendererT && _render, std::optional<int> _scrollOffset)
         for (auto const && [colNumber, column] : crispy::indexed(line, 1))
             _render({rowNumber, colNumber}, column);
 
-        for (auto const colNumber : crispy::times(static_cast<int>(line.size()) + 1, std::max(0u, screenSize_.width - static_cast<int>(line.size()))))
+        for (auto const colNumber: crispy::times(line.size() + 1, screenSize_.width - line.size()))
             _render({rowNumber, colNumber}, Cell{});
     }
 }
@@ -726,7 +726,7 @@ inline Cell& Grid::at(Coordinate const& _coord) noexcept
     assert(crispy::ascending(1, _coord.column, static_cast<int>(screenSize_.width)));
 
     if (_coord.row > 0)
-        return (*next(lines_.rbegin(), screenSize_.height - _coord.row))[static_cast<size_t>(_coord.column - 1)];
+        return (*next(lines_.rbegin(), static_cast<int>(screenSize_.height) - _coord.row))[static_cast<size_t>(_coord.column - 1)];
     else
         return (*next(lines_.begin(), static_cast<int>(historyLineCount()) + _coord.row - 1))[static_cast<size_t>(_coord.column - 1)];
 }

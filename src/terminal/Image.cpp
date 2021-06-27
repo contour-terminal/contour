@@ -35,8 +35,12 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     Image::Data fragData;
     fragData.resize(static_cast<size_t>(cellSize_.width) * static_cast<size_t>(cellSize_.height) * 4); // RGBA
-    auto const availableWidth = min(image_->width() - pixelOffset.column, cellSize_.width);
-    auto const availableHeight = min(image_->height() - pixelOffset.row, cellSize_.height);
+
+    assert(image_->width() >= static_cast<unsigned>(pixelOffset.column));
+    auto const availableWidth = min(image_->width() - static_cast<unsigned>(pixelOffset.column), cellSize_.width);
+
+    assert(image_->height() >= static_cast<unsigned>(pixelOffset.row));
+    auto const availableHeight = min(image_->height() - static_cast<unsigned>(pixelOffset.row), cellSize_.height);
 
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
@@ -70,14 +74,16 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
         *target++ = defaultColor_.alpha();
     }
 
-    for (int y = 0; y < availableHeight; ++y)
+    for (auto y = 0u; y < availableHeight; ++y)
     {
-        auto const startOffset = static_cast<size_t>((pixelOffset.row + (availableHeight - 1 - y)) * image_->width() + pixelOffset.column) * 4;
+        auto const startOffset = static_cast<size_t>(
+            (static_cast<unsigned>(pixelOffset.row) + (availableHeight - 1 - y)) * image_->width()
+          + static_cast<unsigned>(pixelOffset.column)) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 
         // fill vertical gap on right
-        for (int x = availableWidth; x < cellSize_.width; ++x)
+        for (auto x = availableWidth; x < cellSize_.width; ++x)
         {
             *target++ = defaultColor_.red();
             *target++ = defaultColor_.green();
