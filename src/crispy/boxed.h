@@ -53,6 +53,8 @@ template <typename T, typename Tag> struct boxed
     constexpr T const& get() const noexcept { return value; }
 };
 
+template <typename T, typename U> constexpr T& operator++(boxed<T, U>& a) noexcept { ++a; return a; }
+template <typename T, typename U> constexpr T& operator++(boxed<T, U>& a, int) noexcept { a++; return a; }
 template <typename T, typename U> constexpr T const& operator*(boxed<T, U> const& a) noexcept { return a.value; }
 template <typename T, typename U> constexpr bool operator<(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value < b.value; }
 template <typename T, typename U> constexpr bool operator>(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value > b.value; }
