@@ -85,7 +85,7 @@ macro(ThirdPartiesAdd_range_v3)
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_GetProperties(range_v3)
         if(NOT "${range_v3_POPULATED}")
-            FetchContent_Populate(
+            FetchContent_Declare(
                 range_v3
                 URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
                 URL_HASH "${3rdparty_range_v3_CHECKSUM}"
@@ -93,6 +93,7 @@ macro(ThirdPartiesAdd_range_v3)
                 DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
                 EXCLUDE_FROM_ALL
             )
+            FetchContent_Populate(range_v3)
             add_subdirectory(${range_v3_SOURCE_DIR} ${range_v3_BINARY_DIR} EXCLUDE_FROM_ALL)
             # ^^^ That's the only way to avoid installing this dependency during install step.
         endif()
