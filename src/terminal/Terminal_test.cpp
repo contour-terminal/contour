@@ -83,7 +83,8 @@ namespace // {{{ helpers
                 1024,
                 *this,
                 1024, // max history line count
-                std::chrono::milliseconds(500), // cursor blink interval
+                chrono::milliseconds(500), // cursor blink interval
+                chrono::steady_clock::time_point(), // initial time point
             }
         {
         }
@@ -128,6 +129,7 @@ namespace // {{{ helpers
 // TODO: Test case posibilities:
 //
 // - [x] Synchronized output (?2026)
+// - [x] Blinking cursor visiblity over time and on input events
 // - [ ] double click word selection
 // - [ ] tripple click line selection
 // - [ ] rectangular block selection
@@ -135,6 +137,48 @@ namespace // {{{ helpers
 // - [ ] extractLastMarkRange
 // - [ ] scroll mark up
 // - [ ] scroll mark down
+
+TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
+{
+    auto mc = MockTerm{{6, 4}};
+    auto& terminal = mc.terminal();
+    terminal.setCursorDisplay(terminal::CursorDisplay::Blink);
+    auto constexpr BlinkInterval = chrono::milliseconds(500);
+    terminal.setCursorBlinkingInterval(BlinkInterval);
+
+    auto const clockBase = chrono::steady_clock::time_point();
+
+    SECTION("over time")
+    {
+        auto const clockBeforeTurn = clockBase + BlinkInterval - chrono::milliseconds(1);
+        terminal.tick(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        CHECK(terminal.cursorCurrentlyVisible());
+
+        auto const clockAfterTurn = clockBase + BlinkInterval + chrono::milliseconds(1);
+        terminal.tick(clockAfterTurn);
+        terminal.ensureFreshRenderBuffer(clockAfterTurn);
+        CHECK(!terminal.cursorCurrentlyVisible());
+    }
+
+    SECTION("force show on keyboard input")
+    {
+        // get a state where the blinking cursor is not visible
+        auto const clockBeforeTurn = clockBase + BlinkInterval + chrono::milliseconds(1);
+        terminal.tick(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        CHECK(!terminal.cursorCurrentlyVisible());
+
+        // type something into the terminal
+        auto const clockAtInputEvent = clockBase + BlinkInterval + chrono::milliseconds(10);
+        terminal.sendCharPressEvent(terminal::CharInputEvent{L'x', terminal::Modifier{}}, clockAtInputEvent);
+
+        // now the cursor is visible before the interval has passed
+        terminal.tick(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        CHECK(terminal.cursorCurrentlyVisible());
+    }
+}
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 {
