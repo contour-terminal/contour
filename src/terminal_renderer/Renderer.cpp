@@ -213,7 +213,7 @@ uint64_t Renderer::render(Terminal& _terminal,
         renderCells(renderBuffer.get().screen);
         textRenderer_.finish();
 
-        if (cursorOpt)
+        if (cursorOpt && _terminal.cursorCurrentlyVisible())
         {
             auto const& cursor = *cursorOpt;
             cursorRenderer_.setShape(cursor.shape);

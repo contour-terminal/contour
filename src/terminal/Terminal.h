@@ -216,9 +216,20 @@ class Terminal : public ScreenEvents {
 
     bool cursorBlinkActive() const noexcept { return cursorBlinkState_; }
 
+    bool cursorCurrentlyVisible() const noexcept
+    {
+        return screen_.cursor().visible
+            && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
+    }
+
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept
     {
         return lastCursorBlink_;
+    }
+
+    constexpr void setCursorBlinkingInterval(std::chrono::milliseconds _value)
+    {
+        cursorBlinkInterval_ = _value;
     }
 
     constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept

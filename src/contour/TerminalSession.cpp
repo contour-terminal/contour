@@ -764,6 +764,7 @@ void TerminalSession::configureTerminal()
     //     return;
 
     screen.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
+    terminal_.setCursorBlinkingInterval(profile_.cursorBlinkInterval);
     terminal_.setCursorDisplay(profile_.cursorDisplay);
     terminal_.setCursorShape(profile_.cursorShape);
     terminal_.screen().colorPalette() = profile_.colors;
