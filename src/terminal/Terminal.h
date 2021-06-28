@@ -214,8 +214,6 @@ class Terminal : public ScreenEvents {
     CursorShape cursorShape() const noexcept { return cursorShape_; }
     void setCursorShape(CursorShape _value);
 
-    bool cursorVisibility() const noexcept { return cursorVisibility_; }
-
     bool cursorBlinkActive() const noexcept { return cursorBlinkState_; }
 
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept
@@ -336,7 +334,6 @@ class Terminal : public ScreenEvents {
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
-    bool cursorVisibility_ = true;
     std::chrono::milliseconds cursorBlinkInterval_;
 	mutable unsigned cursorBlinkState_;
 	mutable std::chrono::steady_clock::time_point lastCursorBlink_;

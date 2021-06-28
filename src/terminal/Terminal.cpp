@@ -856,9 +856,9 @@ void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
     cursorShape_ = _shape;
 }
 
-void Terminal::setCursorVisibility(bool _visible)
+void Terminal::setCursorVisibility(bool /*_visible*/)
 {
-    cursorVisibility_ = _visible;
+    // don't do anything for now
 }
 
 void Terminal::setGenerateFocusEvents(bool _enabled)

@@ -566,7 +566,7 @@ void TerminalWidget::onFrameSwapped()
             case State::CleanIdle:
                 renderingPressure_ = false;
                 if (profile_.cursorDisplay == terminal::CursorDisplay::Blink
-                        && terminal().cursorVisibility())
+                        && terminal().screen().cursor().visible)
                     updateTimer_.start(terminal().nextRender(steady_clock::now()));
                 return;
         }
