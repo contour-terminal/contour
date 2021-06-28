@@ -1,7 +1,12 @@
 #! /bin/bash
 set -ex
 
-ROOTDIR="$(dirname $0)"
+if [[ -x "$(command -v realpath)" ]]; then
+  ROOTDIR="$(realpath $(dirname $0))"
+else
+  ROOTDIR="$(dirname $0)"
+fi
+
 BUILD_TYPE="${1:-Debug}"
 WORKDIR="build"
 if [[ "${BUILD_TYPE}" != "Debug" ]]; then
