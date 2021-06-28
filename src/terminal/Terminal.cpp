@@ -202,6 +202,12 @@ void Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
         return;
     }
 
+    if (!screenDirty_)
+    {
+        renderBuffer_.state = RenderBufferState::WaitingForRefresh;
+        return;
+    }
+
     auto const elapsed = _now - renderBuffer_.lastUpdate;
     auto const avoidRefresh = elapsed < refreshInterval_;
 
@@ -674,7 +680,7 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
 {
     auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
     if (diff <= cursorBlinkInterval())
-        return {diff};
+        return {cursorBlinkInterval_ - diff};
     else
         return chrono::milliseconds::min();
 }
@@ -856,9 +862,9 @@ void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
     cursorShape_ = _shape;
 }
 
-void Terminal::setCursorVisibility(bool _visible)
+void Terminal::setCursorVisibility(bool /*_visible*/)
 {
-    cursorVisibility_ = _visible;
+    // don't do anything for now
 }
 
 void Terminal::setGenerateFocusEvents(bool _enabled)
