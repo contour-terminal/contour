@@ -51,7 +51,14 @@ namespace {
 using namespace std;
 using actions::Action;
 
-namespace
+// TODO:
+// - [x] report missing keys
+// - [ ] report superfluous keys (by keeping track of loaded keys, then iterate
+//       through full document and report any key that has not been loaded but is available)
+// - [ ] Do we want to report when no color schemes are defined? (at least warn about?)
+// - [ ] Do we want to report when no input mappings are defined? (at least warn about?)
+
+namespace // {{{ helper
 {
     template <typename String>
     inline std::string toLower(String const& _value)
@@ -146,6 +153,7 @@ namespace
         return out;
     }
 }
+// }}}
 
 vector<actions::Action> const* apply(InputMappings const& _mappings,
                                      terminal::KeyInputEvent const& _event)
@@ -218,37 +226,55 @@ FileSystem::path configHome()
 }
 
 template <typename T>
-bool softLoadValue(YAML::Node const& _node, string const& _name, T& _store)
+bool tryLoadValue(YAML::Node const& _root,
+                  std::string const& _path,
+                  std::vector<std::string_view> const& _keys,
+                  size_t _offset,
+                  T& _store)
 {
-    if (auto value = _node[_name]; value)
+    if (_offset == _keys.size())
     {
-        _store = value.as<T>();
+        _store = _root.as<T>();
+        debuglog(ConfigTag).write("Loading {} with {}", _path, crispy::escape(fmt::format("{}", _store)));
+        return true;
+    }
+
+    auto const currentKey = string(_keys.at(_offset));
+    debuglog(ConfigTag).write("-> key {}", currentKey);
+
+    auto const child = _root[currentKey];
+    if (!child)
+    {
+        auto const defaultStr = crispy::escape(fmt::format("{}", _store));
+        errorlog().write(
+            "Missing key {}. Using default: {}.",
+            _path, !defaultStr.empty() ? defaultStr : "\"\""s
+        );
         return false;
     }
-    return false;
+
+    return tryLoadValue(child, _path, _keys, _offset + 1, _store);
 }
 
-template <typename T, typename U>
-void softLoadValue(YAML::Node const& _node, string const& _name, T& _store, U const& _default)
+template <typename T>
+bool tryLoadValue(YAML::Node const& _root,
+                  string const& _path,
+                  T& _store)
 {
-    if (auto value = _node[_name]; value)
-        _store = value.as<T>();
-    else
-        _store = _default;
+    debuglog(ConfigTag).write("Try load: {}\n", _path);
+    auto const keys = crispy::split(_path, '.');
+    return tryLoadValue(_root, _path, keys, 0, _store);
 }
 
-void softLoadPermission(YAML::Node const& _node, string const& _name, Permission& _out)
+optional<Permission> toPermission(string const& _value)
 {
-    if (auto const valueNode = _node[_name]; valueNode && valueNode.IsScalar())
-    {
-        auto const value = valueNode.as<string>();
-        if (value == "allow")
-            _out = Permission::Allow;
-        else if (value == "deny")
-            _out = Permission::Deny;
-        else if (value == "ask")
-            _out = Permission::Ask;
-    }
+    if (_value == "allow")
+        return Permission::Allow;
+    else if (_value == "deny")
+        return Permission::Deny;
+    else if (_value == "ask")
+        return Permission::Ask;
+    return nullopt;
 }
 
 void createFileIfNotExists(FileSystem::path const& _path)
@@ -718,64 +744,64 @@ optional<terminal::VTType> stringToVTType(std::string const& _value)
     return nullopt;
 }
 
-TerminalProfile loadTerminalProfile(YAML::Node const& _node,
+template <typename T>
+bool tryLoadChild(YAML::Node const& _doc,
+                  string const& _parentPath,
+                  string const& _key,
+                  T& _store)
+{
+    auto const path = fmt::format("{}.{}", _parentPath, _key);
+    return tryLoadValue(_doc, path, _store);
+}
+
+TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
+                                    std::string const& _name,
                                     unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
     auto profile = TerminalProfile{};
 
-    if (auto colors = _node["colors"]; colors)
+    if (auto colors = _doc["profiles"][_name]["colors"]; colors)
     {
         if (colors.IsMap())
             profile.colors = loadColorScheme(colors);
         else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
             profile.colors = i->second;
         else
-            cerr << fmt::format("scheme '{}' not found.", colors.as<string>()) << '\n';
+            errorlog().write("scheme '{}' not found.", colors.as<string>());
     }
     else
-        cerr << fmt::format("No colors section found.") << '\n';
+        errorlog().write("No colors section in profile {} found.", _name);
 
-    softLoadValue(_node, "shell", profile.shell.program);
+    string const basePath = fmt::format("profiles.{}", _name);
     if (profile.shell.program.empty())
         profile.shell.program = terminal::Process::loginShell();
+    tryLoadChild(_doc, basePath, "shell", profile.shell.program);
+    tryLoadChild(_doc, basePath, "maximized", profile.maximized);
+    tryLoadChild(_doc, basePath, "fullscreen", profile.fullscreen);
+    tryLoadChild(_doc, basePath, "refresh_rate", profile.refreshRate);
 
-    softLoadValue(_node, "maximized", profile.maximized, false);
-    softLoadValue(_node, "fullscreen", profile.fullscreen, false);
-
-    if (auto const value = _node["refresh_rate"])
-    {
-        if (value.IsScalar() && value.as<string>() == "auto")
-            profile.refreshRate = 0.0;
-        else
-            profile.refreshRate = value.as<double>();
-    }
-
-    if (auto args = _node["arguments"]; args && args.IsSequence())
+    if (auto args = _doc["profiles"][_name]["arguments"]; args && args.IsSequence())
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());
 
-    if (auto wd = _node["initial_working_directory"]; wd && wd.IsScalar())
+    string strValue = FileSystem::current_path().generic_string();
+    tryLoadChild(_doc, basePath, "initial_working_directory", strValue);
+    if (profile.shell.workingDirectory.empty())
+        profile.shell.workingDirectory = FileSystem::current_path();
+    else if (strValue[0] == '~')
     {
-        string const& value = wd.Scalar();
-        if (value.empty())
-            profile.shell.workingDirectory = FileSystem::current_path();
-        else if (value[0] != '~')
-            profile.shell.workingDirectory = FileSystem::path(value);
-        else
-        {
-            bool const delim = value.size() >= 2 && (value[1] == '/' || value[1] == '\\');
-            auto const subPath = FileSystem::path(value.substr(delim ? 2 : 1));
-            profile.shell.workingDirectory = terminal::Process::homeDirectory() / subPath;
-        }
+        bool const delim = strValue.size() >= 2 && (strValue[1] == '/' || strValue[1] == '\\');
+        auto const subPath = FileSystem::path(strValue.substr(delim ? 2 : 1));
+        profile.shell.workingDirectory = terminal::Process::homeDirectory() / subPath;
     }
     else
-        profile.shell.workingDirectory = FileSystem::current_path();
+        profile.shell.workingDirectory  = FileSystem::path(strValue);
 
     profile.shell.env["TERMINAL_NAME"] = "contour";
     profile.shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
     profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
-    if (auto env = _node["environment"]; env)
+    if (auto env = _doc["profiles"][_name]["environment"]; env)
     {
         for (auto i = env.begin(); i != env.end(); ++i)
         {
@@ -791,21 +817,16 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
     if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
         profile.shell.env["COLORTERM"] = "truecolor";
 
-    if (auto const terminalId = _node["terminal_id"]; terminalId)
-    {
-        auto const terminalIdStr = terminalId.as<string>();
-        if (auto const idOpt = stringToVTType(terminalIdStr))
-            profile.terminalId = idOpt.value();
-        else
-            errorlog().write("Invalid Terminal ID \"{}\", specified",
-                             terminalIdStr);
-    }
+    strValue = fmt::format("{}", profile.terminalId);
+    tryLoadChild(_doc, basePath, "terminal_id", strValue);
+    if (auto const idOpt = stringToVTType(strValue))
+        profile.terminalId = idOpt.value();
+    else
+        errorlog().write("Invalid Terminal ID \"{}\", specified", strValue);
 
-    if (auto terminalSize = _node["terminal_size"]; terminalSize)
+    tryLoadChild(_doc, basePath, "terminal_size.columns", profile.terminalSize.width);
+    tryLoadChild(_doc, basePath, "terminal_size.lines", profile.terminalSize.height);
     {
-        softLoadValue(terminalSize, "columns", profile.terminalSize.width);
-        softLoadValue(terminalSize, "lines", profile.terminalSize.height);
-
         auto constexpr MinimalTerminalSize = crispy::Size{3, 3};
         auto constexpr MaximumTerminalSize = crispy::Size{300, 200};
 
@@ -822,126 +843,121 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
             );
     }
 
-    if (auto const permissions = _node["permissions"]; permissions && permissions.IsMap())
+    strValue = "ask";
+    if (tryLoadChild(_doc, basePath, "permissions.capture_buffer", strValue))
     {
-        softLoadPermission(permissions, "capture_buffer", profile.permissions.captureBuffer);
-        softLoadPermission(permissions, "change_font", profile.permissions.changeFont);
+        if (auto x = toPermission(strValue))
+            profile.permissions.captureBuffer = x.value();
     }
 
-    if (auto fonts = _node["font"]; fonts)
+    strValue = "ask";
+    if (tryLoadChild(_doc, basePath, "permissions.change_font", strValue))
     {
-        softLoadValue(fonts, "size", profile.fonts.size.pt);
+        if (auto x = toPermission(strValue))
+            profile.permissions.changeFont = x.value();
+    }
+
+    if (tryLoadChild(_doc, basePath, "font.size", profile.fonts.size.pt))
+    {
         if (profile.fonts.size < MinimumFontSize)
         {
             errorlog().write("Invalid font size {} set in config file. Minimum value is {}.",
                              profile.fonts.size, MinimumFontSize);
             profile.fonts.size = MinimumFontSize;
         }
+    }
 
-        softLoadValue(fonts, "dpi_scale", profile.fonts.dpiScale);
+    tryLoadChild(_doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
 
-        if (auto textShaping = fonts["text_shaping"]; textShaping)
-        {
-            if (auto methodNode = textShaping["method"]; methodNode)
-            {
-                auto const methodStr = methodNode.as<string>();
-                if (methodStr == "simple")
-                    profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Simple;
-                else if (methodStr == "complex")
-                    profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Complex;
-                else
-                    errorlog().write("Unknown text shaping method: {}", methodStr);
-            }
-        }
-
-        bool onlyMonospace = true;
-        softLoadValue(fonts, "only_monospace", onlyMonospace, true);
-
-        profile.fonts.regular.familyName = "regular";
-        profile.fonts.regular.spacing = text::font_spacing::mono;
-        profile.fonts.regular.force_spacing = onlyMonospace;
-        softLoadFont(fonts, "regular", profile.fonts.regular);
-
-        profile.fonts.bold = profile.fonts.regular;
-        profile.fonts.bold.weight = text::font_weight::bold;
-        softLoadFont(fonts, "bold", profile.fonts.bold);
-
-        profile.fonts.italic = profile.fonts.regular;
-        profile.fonts.italic.slant = text::font_slant::italic;
-        softLoadFont(fonts, "italic", profile.fonts.italic);
-
-        profile.fonts.boldItalic = profile.fonts.regular;
-        profile.fonts.boldItalic.weight = text::font_weight::bold;
-        profile.fonts.boldItalic.slant = text::font_slant::italic;
-        softLoadFont(fonts, "bold_italic", profile.fonts.boldItalic);
-
-        profile.fonts.emoji.familyName = "emoji";
-        profile.fonts.emoji.spacing = text::font_spacing::mono;
-        softLoadFont(fonts, "emoji", profile.fonts.emoji);
-
-        string renderModeStr;
-        softLoadValue(fonts, "render_mode", renderModeStr);
-        auto const static renderModeMap = array{
-            pair{"lcd"sv, text::render_mode::lcd},
-            pair{"light"sv, text::render_mode::light},
-            pair{"gray"sv, text::render_mode::gray},
-            pair{""sv, text::render_mode::gray},
-            pair{"monochrome"sv, text::render_mode::bitmap},
-        };
-
-        auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
-        if (i != renderModeMap.end())
-            profile.fonts.renderMode = i->second;
+    strValue = "complex";
+    tryLoadChild(_doc, basePath, "font.text_shaping.method", strValue);
+    {
+        if (strValue == "simple")
+            profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Simple;
+        else if (strValue == "complex")
+            profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Complex;
         else
-            errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
-        debuglog(ConfigTag).write("Using render mode: {}", profile.fonts.renderMode);
+            errorlog().write("Unknown text shaping method: {}", strValue);
     }
 
-    if (auto history = _node["history"]; history)
-    {
-        if (auto limit = history["limit"]; limit)
-        {
-            if (limit.as<int>() < 0)
-                profile.maxHistoryLineCount = nullopt;
-            else
-                profile.maxHistoryLineCount = limit.as<size_t>();
-        }
+    bool onlyMonospace = true;
+    tryLoadChild(_doc, basePath, "font.only_monospace", onlyMonospace);
 
-        softLoadValue(history, "auto_scroll_on_update", profile.autoScrollOnUpdate);
-        softLoadValue(history, "scroll_multiplier", profile.historyScrollMultiplier);
-    }
+    profile.fonts.regular.familyName = "regular";
+    profile.fonts.regular.spacing = text::font_spacing::mono;
+    profile.fonts.regular.force_spacing = onlyMonospace;
+    softLoadFont(_doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
 
-    if (auto background = _node["background"]; background)
-    {
-        if (auto opacity = background["opacity"]; opacity)
-            profile.backgroundOpacity =
-                (terminal::Opacity)(static_cast<unsigned>(255 * clamp(opacity.as<float>(), 0.0f, 1.0f)));
-        softLoadValue(background, "blur", profile.backgroundBlur);
-    }
+    profile.fonts.bold = profile.fonts.regular;
+    profile.fonts.bold.weight = text::font_weight::bold;
+    softLoadFont(_doc["profiles"][_name]["font"], "bold", profile.fonts.bold);
 
-    if (auto deco = _node["hyperlink_decoration"]; deco)
-    {
-        if (auto normal = deco["normal"]; normal && normal.IsScalar())
-            if (auto const pdeco = terminal::renderer::to_decorator(normal.as<string>()); pdeco.has_value())
-                profile.hyperlinkDecoration.normal = *pdeco;
+    profile.fonts.italic = profile.fonts.regular;
+    profile.fonts.italic.slant = text::font_slant::italic;
+    softLoadFont(_doc["profiles"][_name]["font"], "italic", profile.fonts.italic);
 
-        if (auto hover = deco["hover"]; hover && hover.IsScalar())
-            if (auto const pdeco = terminal::renderer::to_decorator(hover.as<string>()); pdeco.has_value())
-                profile.hyperlinkDecoration.hover = *pdeco;
-    }
+    profile.fonts.boldItalic = profile.fonts.regular;
+    profile.fonts.boldItalic.weight = text::font_weight::bold;
+    profile.fonts.boldItalic.slant = text::font_slant::italic;
+    softLoadFont(_doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
 
-    if (auto cursor = _node["cursor"]; cursor)
-    {
-        if (auto shape = cursor["shape"]; shape)
-            profile.cursorShape = terminal::makeCursorShape(shape.as<string>());
+    profile.fonts.emoji.familyName = "emoji";
+    profile.fonts.emoji.spacing = text::font_spacing::mono;
+    softLoadFont(_doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
 
-        bool blinking = false;
-        softLoadValue(cursor, "blinking", blinking);
-        profile.cursorDisplay = blinking ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+    strValue = "gray";
+    string renderModeStr;
+    tryLoadChild(_doc, basePath, "font.render_mode", strValue);
+    auto const static renderModeMap = array{
+        pair{"lcd"sv, text::render_mode::lcd},
+        pair{"light"sv, text::render_mode::light},
+        pair{"gray"sv, text::render_mode::gray},
+        pair{""sv, text::render_mode::gray},
+        pair{"monochrome"sv, text::render_mode::bitmap},
+    };
 
-        if (cursor["blinking_interval"].IsDefined())
-            profile.cursorBlinkInterval = chrono::milliseconds(cursor["blinking_interval"].as<int>());
-    }
+    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
+    if (i != renderModeMap.end())
+        profile.fonts.renderMode = i->second;
+    else
+        errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+
+    int intValue = profile.maxHistoryLineCount.value_or(-1);
+    tryLoadChild(_doc, basePath, "history.limit", intValue);
+    if (intValue < 0)
+        profile.maxHistoryLineCount = nullopt;
+    else
+        profile.maxHistoryLineCount = static_cast<size_t>(intValue);
+
+    tryLoadChild(_doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
+    tryLoadChild(_doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
+
+    float floatValue = 1.0;
+    tryLoadChild(_doc, basePath, "background.opacity", floatValue);
+    profile.backgroundOpacity = (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
+    tryLoadChild(_doc, basePath, "background.blur", profile.backgroundBlur);
+
+    strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
+    tryLoadChild(_doc, basePath, "hyperlink_decoration.normal", strValue);
+    if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
+        profile.hyperlinkDecoration.normal = *pdeco;
+
+    strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
+    tryLoadChild(_doc, basePath, "hyperlink_decoration.hover", strValue);
+    if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
+        profile.hyperlinkDecoration.hover = *pdeco;
+
+    strValue = "block";
+    tryLoadChild(_doc, basePath, "cursor.shape", strValue);
+    profile.cursorShape = terminal::makeCursorShape(strValue);
+
+    bool boolValue = profile.cursorDisplay == terminal::CursorDisplay::Blink;
+    tryLoadChild(_doc, basePath, "cursor.blinking", boolValue);
+    profile.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+
+    unsigned uintValue = profile.cursorBlinkInterval.count();
+    tryLoadChild(_doc, basePath, "cursor.blinking_interval", uintValue);
+    profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
 
     return profile;
 }
@@ -956,7 +972,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     YAML::Node doc = YAML::LoadFile(_fileName.string());
 
-    softLoadValue(doc, "word_delimiters", _config.wordDelimiters);
+    tryLoadValue(doc, "word_delimiters", _config.wordDelimiters);
 
     if (auto opt = parseModifier(doc["bypass_mouse_protocol_modifier"]); opt.has_value())
         _config.bypassMouseProtocolModifier = opt.value();
@@ -984,33 +1000,28 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    if (auto images = doc["images"]; images)
-    {
-        softLoadValue(images, "sixel_scrolling", _config.sixelScrolling);
-        softLoadValue(images, "sixel_cursor_conformance", _config.sixelCursorConformance);
-        softLoadValue(images, "sixel_register_count", _config.maxImageColorRegisters);
-        softLoadValue(images, "max_width", _config.maxImageSize.width);
-        softLoadValue(images, "max_height", _config.maxImageSize.height);
-    }
+    tryLoadValue(doc, "images.sixel_scrolling", _config.sixelScrolling);
+    tryLoadValue(doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
+    tryLoadValue(doc, "images.sixel_register_count", _config.maxImageColorRegisters);
+    tryLoadValue(doc, "images.max_width", _config.maxImageSize.width);
+    tryLoadValue(doc, "images.max_height", _config.maxImageSize.height);
 
-    if (auto scrollbar = doc["scrollbar"]; scrollbar)
+    string strValue = fmt::format("{}", ScrollBarPosition::Right);
+    if (tryLoadValue(doc, "scrollbar.position", strValue))
     {
-        if (auto value = scrollbar["position"]; value)
-        {
-            auto const literal = toLower(value.as<string>());
-            if (literal == "left")
-                _config.scrollbarPosition = ScrollBarPosition::Left;
-            else if (literal == "right")
-                _config.scrollbarPosition = ScrollBarPosition::Right;
-            else if (literal == "hidden")
-                _config.scrollbarPosition = ScrollBarPosition::Hidden;
-            else
-                throw std::runtime_error("Invalid value in scrollbar_position. Should be one of: left, right, hidden.");
-        }
-
-        if (auto value = scrollbar["hide_in_alt_screen"]; value)
-            _config.hideScrollbarInAltScreen = value.as<bool>();
+        auto const literal = toLower(strValue);
+        if (literal == "left")
+            _config.scrollbarPosition = ScrollBarPosition::Left;
+        else if (literal == "right")
+            _config.scrollbarPosition = ScrollBarPosition::Right;
+        else if (literal == "hidden")
+            _config.scrollbarPosition = ScrollBarPosition::Hidden;
+        else
+            errorlog().write("Invalid value for config entry {}: {}",
+                             "scrollbar.position",
+                             strValue);
     }
+    tryLoadValue(doc, "scrollbar.hide_in_alt_screen", _config.hideScrollbarInAltScreen);
 
     if (auto profiles = doc["color_schemes"]; profiles)
     {
@@ -1021,18 +1032,18 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    softLoadValue(doc, "read_buffer_size", _config.ptyReadBufferSize);
+    tryLoadValue(doc, "read_buffer_size", _config.ptyReadBufferSize);
 
     if (auto profiles = doc["profiles"]; profiles)
     {
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            _config.profiles[name] = loadTerminalProfile(i->second, _config.colorschemes);
+            _config.profiles[name] = loadTerminalProfile(doc, name, _config.colorschemes);
         }
     }
 
-    softLoadValue(doc, "default_profile", _config.defaultProfileName);
+    tryLoadValue(doc, "default_profile", _config.defaultProfileName);
     if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
     {
         cerr << fmt::format("default_profile \"{}\" not found in profiles list.",
