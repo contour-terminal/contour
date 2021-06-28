@@ -133,6 +133,7 @@ class TerminalSession: public terminal::Terminal::Events
 
     void scheduleRedraw()
     {
+        terminal_.markScreenDirty();
         if (display_)
             display_->scheduleRedraw();
     }

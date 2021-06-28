@@ -281,6 +281,8 @@ class Terminal : public ScreenEvents {
 
     bool processInputOnce();
 
+    void markScreenDirty() { screenDirty_ = true; }
+
   private:
     void flushInput();
     void mainLoop();
