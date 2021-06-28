@@ -778,13 +778,13 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         auto constexpr MaximumTerminalSize = crispy::Size{300, 200};
 
         if (!sanitizeRange(ref(profile.terminalSize.width), MinimalTerminalSize.width, MaximumTerminalSize.width))
-            debuglog(ConfigTag).write(
+            errorlog().write(
                 "Terminal width {} out of bounds. Should be between {} and {}.",
                 profile.terminalSize.width, MinimalTerminalSize.width, MaximumTerminalSize.width
             );
 
         if (!sanitizeRange(ref(profile.terminalSize.height), MinimalTerminalSize.height, MaximumTerminalSize.height))
-            debuglog(ConfigTag).write(
+            errorlog().write(
                 "Terminal height {} out of bounds. Should be between {} and {}.",
                 profile.terminalSize.height, MinimalTerminalSize.height, MaximumTerminalSize.height
             );
@@ -801,8 +801,8 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         softLoadValue(fonts, "size", profile.fonts.size.pt);
         if (profile.fonts.size < MinimumFontSize)
         {
-            debuglog(ConfigTag).write("Invalid font size {} set in config file. Minimum value is {}.",
-                                      profile.fonts.size, MinimumFontSize);
+            errorlog().write("Invalid font size {} set in config file. Minimum value is {}.",
+                             profile.fonts.size, MinimumFontSize);
             profile.fonts.size = MinimumFontSize;
         }
 
@@ -818,7 +818,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
                 else if (methodStr == "complex")
                     profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Complex;
                 else
-                    debuglog(ConfigTag).write("Unknown text shaping method: {}", methodStr);
+                    errorlog().write("Unknown text shaping method: {}", methodStr);
             }
         }
 
@@ -861,7 +861,7 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         if (i != renderModeMap.end())
             profile.fonts.renderMode = i->second;
         else
-            debuglog(ConfigTag).write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+            errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
         debuglog(ConfigTag).write("Using render mode: {}", profile.fonts.renderMode);
     }
 
@@ -940,14 +940,14 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             auto const key = x.first.as<string>();
             if (crispy::count(KnownExperimentalFeatures, key) == 0)
             {
-                debuglog(ConfigTag).write("Unknown experimental feature tag: {}.", key);
+                errorlog().write("Unknown experimental feature tag: {}.", key);
                 continue;
             }
 
             if (!x.second.as<bool>())
                 continue;
 
-            debuglog(ConfigTag).write("Enabling experimental feature {}.", key);
+            errorlog().write("Enabling experimental feature {}.", key);
             _config.experimentalFeatures.insert(key);
         }
     }
