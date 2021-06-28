@@ -23,14 +23,6 @@ jobs:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
     env:
-      # The version of LLVM to use. Needed to set the appropriate clang-XX
-      # binaries.
-      LLVM_VER: 12
-      # Defined if the version above represents the latest available version.
-      # (This is needed because the LLVM nightly PPA doesn't tag the latest
-      # rolling version.)
-      LLVM_LATEST: ""   # No.
-
       CODECHECKER_CONFIG: .github/codechecker/config.json
     steps:
       - name: "Check out repository"
@@ -63,12 +55,9 @@ jobs:
             python3-dev     \
             python3-venv
           curl -sL http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          if [[ ! -z "$LLVM_LATEST" ]]
-          then
-            sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME main"
-          else
-            sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME-$LLVM_VER main"
-          fi
+          sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME main"
+          # Get the largest Clang package number available.
+          export LLVM_VER="$(apt-cache search --full 'clang-[[:digit:]]*$' | grep '^Package: clang' | cut -d ' ' -f 2 | sort -V | tail -n 1 | sed 's/clang-//')"
           sudo apt-get -y --no-install-recommends install \
             clang-$LLVM_VER      \
             clang-tidy-$LLVM_VER
