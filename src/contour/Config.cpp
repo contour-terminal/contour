@@ -27,6 +27,7 @@
 
 #include <QtGui/QOpenGLContext>
 
+#include <array>
 #include <algorithm>
 #include <array>
 #include <fstream>
@@ -696,6 +697,27 @@ bool sanitizeRange(std::reference_wrapper<int> _value, int _min, int _max)
     return false;
 }
 
+optional<terminal::VTType> stringToVTType(std::string const& _value)
+{
+    using Type = terminal::VTType;
+    auto constexpr static mappings = array<tuple<string_view, terminal::VTType>, 10>{
+        tuple{"VT100"sv, Type::VT100},
+        tuple{"VT220"sv, Type::VT220},
+        tuple{"VT240"sv, Type::VT240},
+        tuple{"VT330"sv, Type::VT330},
+        tuple{"VT340"sv, Type::VT340},
+        tuple{"VT320"sv, Type::VT320},
+        tuple{"VT420"sv, Type::VT420},
+        tuple{"VT510"sv, Type::VT510},
+        tuple{"VT520"sv, Type::VT520},
+        tuple{"VT525"sv, Type::VT525}
+    };
+    for (auto const& mapping: mappings)
+        if (get<0>(mapping) == _value)
+            return get<1>(mapping);
+    return nullopt;
+}
+
 TerminalProfile loadTerminalProfile(YAML::Node const& _node,
                                     unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
@@ -768,6 +790,16 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _node,
         profile.shell.env["TERM"] = "xterm-256color";
     if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
         profile.shell.env["COLORTERM"] = "truecolor";
+
+    if (auto const terminalId = _node["terminal_id"]; terminalId)
+    {
+        auto const terminalIdStr = terminalId.as<string>();
+        if (auto const idOpt = stringToVTType(terminalIdStr))
+            profile.terminalId = idOpt.value();
+        else
+            errorlog().write("Invalid Terminal ID \"{}\", specified",
+                             terminalIdStr);
+    }
 
     if (auto terminalSize = _node["terminal_size"]; terminalSize)
     {

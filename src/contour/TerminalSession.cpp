@@ -749,6 +749,8 @@ void TerminalSession::configureTerminal()
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
 
+    debuglog(WidgetTag).write("Setting terminal ID to {}.", profile_.terminalId);
+    screen.setTerminalId(profile_.terminalId);
     screen.setRespondToTCapQuery(config_.experimentalFeatures.count("tcap"));
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
