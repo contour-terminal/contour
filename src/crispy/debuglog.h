@@ -226,6 +226,8 @@ class logging_sink {
     Writer writer_;
 };
 
+auto const inline ErrorTag = crispy::debugtag::make("error", "Logs general errors.");
+
 }
 
 #if defined(CRISPY_SOURCE_LOCATION)
@@ -243,3 +245,4 @@ class logging_sink {
     #define debuglog(_tag) (::crispy::log_message([](::crispy::log_message const& m) { ::crispy::logging_sink::for_debug().write(m); }, ::crispy::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__), (_tag)))
 #endif
 
+#define errorlog() (debuglog(::crispy::ErrorTag))

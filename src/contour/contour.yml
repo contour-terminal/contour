@@ -73,6 +73,21 @@ profiles:
             TERM: xterm-256color
             COLORTERM: truecolor
 
+        # Determines the terminal type that is being advertised.
+        # Possible values are:
+        #   - VT100
+        #   - VT220
+        #   - VT240
+        #   - VT330
+        #   - VT340
+        #   - VT320
+        #   - VT420
+        #   - VT510
+        #   - VT520
+        #   - VT525
+        # Default: VT525
+        terminal_id: VT525
+
         # Determines the initial terminal sice in characters.
         terminal_size:
             columns: 130

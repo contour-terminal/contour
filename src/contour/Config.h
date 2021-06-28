@@ -71,6 +71,7 @@ struct TerminalProfile {
     double refreshRate = 0.0; // 0=auto
 
     crispy::Size terminalSize;
+    terminal::VTType terminalId = terminal::VTType::VT525;
 
     std::optional<int> maxHistoryLineCount;
     int historyScrollMultiplier;
