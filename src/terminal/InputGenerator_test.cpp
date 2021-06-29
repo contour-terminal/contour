@@ -13,7 +13,7 @@
  */
 #include <terminal/InputGenerator.h>
 #include <crispy/escape.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 #include <unicode/convert.h>
 

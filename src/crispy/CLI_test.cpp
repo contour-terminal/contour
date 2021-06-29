@@ -13,7 +13,7 @@
  */
 #include <crispy/CLI.h>
 #include <fmt/format.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 // TODO API / impl:
 //

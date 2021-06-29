@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <crispy/utils.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 using namespace std::string_view_literals;
 

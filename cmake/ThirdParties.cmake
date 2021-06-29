@@ -47,9 +47,11 @@ macro(ThirdPartiesAdd_fmtlib)
 endmacro()
 
 macro(ThirdPartiesAdd_Catch2)
-    set(3rdparty_Catch2_VERSION "2.13.6" CACHE STRING "Embedded catch2 version")
-    set(3rdparty_Catch2_CHECKSUM "SHA256=48dfbb77b9193653e4e72df9633d2e0383b9b625a47060759668480fdf24fbd4" CACHE STRING "Embedded catch2 checksum")
-    set(3rdparty_Catch2_URL "https://github.com/catchorg/Catch2/archive/refs/tags/v${3rdparty_Catch2_VERSION}.tar.gz")
+    set(3rdparty_Catch2_VERSION "bf61a418cbc4d3b430e3d258c5287780944ad505" CACHE STRING "Embedded catch2 version")
+    set(3rdparty_Catch2_CHECKSUM "SHA256=7521e7e7ee7f2d301a639bdfe4a95855fbe503417d73af0934f9d1933ca38407" CACHE STRING "Embedded catch2 checksum")
+    set(3rdparty_Catch2_NAME "catch2-${3rdparty_Catch2_VERSION}.zip" CACHE STRING "Embedded Catch2 download name")
+    set(3rdparty_Catch2_URL "https://github.com/catchorg/Catch2/archive/${3rdparty_Catch2_VERSION}.zip" CACHE STRING "Embedded Catch2 URL")
+
     set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")
     set(CATCH_BUILD_EXTRA_TESTS OFF CACHE INTERNAL "")
     set(CATCH_BUILD_TESTING OFF CACHE INTERNAL "")
@@ -62,7 +64,7 @@ macro(ThirdPartiesAdd_Catch2)
             URL "${3rdparty_Catch2_URL}"
             URL_HASH "${3rdparty_Catch2_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_Catch2_NAME}"
             EXCLUDE_FROM_ALL
         )
         FetchContent_MakeAvailable(Catch2)
@@ -73,7 +75,7 @@ macro(ThirdPartiesAdd_Catch2)
             URL_HASH "${3rdparty_Catch2_CHECKSUM}"
             PREFIX "${FETCHCONTENT_BASE_DIR}/Catch2-${3rdparty_Catch2_VERSION}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "catch2-${3rdparty_Catch2_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_Catch2_NAME}"
             EXCLUDE_FROM_ALL
         )
     endif()

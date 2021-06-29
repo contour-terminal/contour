@@ -14,7 +14,7 @@
 #include <terminal/Screen.h>
 #include <terminal/Viewport.h>
 #include <crispy/escape.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <string_view>
 
 using crispy::Size;

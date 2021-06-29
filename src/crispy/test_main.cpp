@@ -11,5 +11,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#define CATCH_CONFIG_MAIN
-#include <catch2/catch.hpp>
+#define CATCH_CONFIG_RUNNER
+#include <catch2/catch_all.hpp>
+
+int main(int argc, char const* argv[])
+{
+    int const result = Catch::Session().run(argc, argv);
+
+    // avoid closing extern console to close on VScode/windows
+    // system("pause");
+
+    return result;
+}

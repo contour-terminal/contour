@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <crispy/compose.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 TEST_CASE("compose.simple")
 {
