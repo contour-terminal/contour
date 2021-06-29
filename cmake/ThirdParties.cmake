@@ -146,8 +146,11 @@ endmacro()
 
 # {{{ libunicode
 macro(ThirdPartiesAdd_libunicode)
-    set(3rdparty_libunicode_VERSION "1ece4f3d3c49abc48f781d85943f6153b3aa29bb" CACHE STRING "libunicode: commit hash")
-    set(3rdparty_libunicode_CHECKSUM "SHA256=a385d35a4c5d31e506b92be64459ad278e97cd4f1f37a0bbb2ea25aa1f3d7a2f" CACHE STRING "libunicode: download checksum")
+    set(3rdparty_libunicode_VERSION "2be93a5039110cf5d9a2d49c988896f6a22b2448" CACHE STRING "libunicode: commit hash")
+    set(3rdparty_libunicode_CHECKSUM "SHA256=ed8f71006c135ed4f69052af55034c00dbaa8fb9ea1032b3bb79aced829dae9d" CACHE STRING "libunicode: download checksum")
+    set(3rdparty_libunicode_NAME "libunicode-${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode download name")
+    set(3rdparty_libunicode_URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode URL")
+    set(LIBUNICODE_TESTING OFF CACHE INTERNAL "")
     # XXX: temporary patch until libunicode gets rid of sumbodules.
     set(libunicode_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/libunicode.patch")
     if(NOT EXISTS "${libunicode_patch}")
@@ -178,10 +181,10 @@ macro(ThirdPartiesAdd_libunicode)
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
             libunicode
-            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.tar.gz"
+            URL "${3rdparty_libunicode_URL}"
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_libunicode_NAME}"
             UPDATE_DISCONNECTED 0
             EXCLUDE_FROM_ALL
             # same here
@@ -191,10 +194,10 @@ macro(ThirdPartiesAdd_libunicode)
     else()
         download_project(
             PROJ libunicode
-            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+            URL "${3rdparty_libunicode_URL}"
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_libunicode_NAME}"
             EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/libunicode-${3rdparty_libunicode_VERSION}"
             # same here
