@@ -32,6 +32,7 @@
 - Adds config option `profile.*.font.dpi_scale: FLOAT` to apply some additional DPI scaling on fonts.
 - Adds config option `profile.*.refresh_rate: FLOAT` to configure how often the terminal screen will be rendered at most when currently under heavy screen changes. A value of `"auto"` will use the currently connected monitor's refresh rate.
 - Adds configuration's action `ToggleAllKeyMaps` to enable/disable intercepting and interpreting keybinds. The one that did toggle it will not be disabled.
+- Adds configuration's action `ClearHistoryAndReset` to clear the history, and resetting the terminal.
 - Adds experimental config option `profile.*.font.text_shaping.method: METHOD` with possible values `complex`(defualt, fully featured) and `simple` (most simple with improved performance but less features) for selecting how to perform text shaping.
 - Adds VT sequence for enabling/disabling debug logging. `CSI ? 46 h` and `CSI ? 46 l` and CLI option `-d`.
 - Adds VT sequence for querying/setting current font `OSC 50 ; ? ST` and `OSC 50 ; Font ST` (and `OSC 60 Ps Ps Ps Ps Ps ST` for a more fine grained font query/setting control).

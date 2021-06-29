@@ -99,6 +99,7 @@ class TerminalSession: public terminal::Terminal::Events
 
     // Actions
     void operator()(actions::ChangeProfile const&);
+    void operator()(actions::ClearHistoryAndReset);
     void operator()(actions::CopyPreviousMarkRange);
     void operator()(actions::CopySelection);
     void operator()(actions::DecreaseFontSize);
