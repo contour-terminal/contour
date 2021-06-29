@@ -315,8 +315,7 @@ color_schemes:
 # - ScrollToTop       Scrolls to the top of the screen buffer.
 # - ScrollUp          Scrolls up by the multiplier factor.
 # - SendChars         Writes given characters in `chars` member to the applications input.
-# - ToggleAllKeyMaps  Disables/enables responding to all keybinds
-#                     (this keybind will be preserved when disabling all others).
+# - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
 # - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 

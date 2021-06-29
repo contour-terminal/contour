@@ -49,11 +49,12 @@ namespace {
 optional<Action> fromString(string const& _name)
 {
     auto static const mappings = array{
-        mapAction<actions::FollowHyperlink>("FollowHyperlink"),
         mapAction<actions::ChangeProfile>("ChangeProfile"),
+        mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
         mapAction<actions::CopySelection>("CopySelection"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
         mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
+        mapAction<actions::FollowHyperlink>("FollowHyperlink"),
         mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
         mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
         mapAction<actions::NewTerminal>("NewTerminal"),
@@ -62,14 +63,17 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::PasteClipboard>("PasteClipboard"),
         mapAction<actions::PasteSelection>("PasteSelection"),
         mapAction<actions::Quit>("Quit"),
+        mapAction<actions::ReloadConfig>("ReloadConfig"),
+        mapAction<actions::ResetConfig>("ResetConfig"),
+        mapAction<actions::ResetFontSize>("ResetFontSize"),
         mapAction<actions::ScreenshotVT>("ScreenshotVT"),
         mapAction<actions::ScrollDown>("ScrollDown"),
+        mapAction<actions::ScrollMarkDown>("ScrollMarkDown"),
+        mapAction<actions::ScrollMarkUp>("ScrollMarkUp"),
         mapAction<actions::ScrollOneDown>("ScrollOneDown"),
         mapAction<actions::ScrollOneUp>("ScrollOneUp"),
         mapAction<actions::ScrollPageDown>("ScrollPageDown"),
         mapAction<actions::ScrollPageUp>("ScrollPageUp"),
-        mapAction<actions::ScrollMarkUp>("ScrollMarkUp"),
-        mapAction<actions::ScrollMarkDown>("ScrollMarkDown"),
         mapAction<actions::ScrollToBottom>("ScrollToBottom"),
         mapAction<actions::ScrollToTop>("ScrollToTop"),
         mapAction<actions::ScrollUp>("ScrollUp"),
@@ -77,10 +81,6 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::ToggleAllKeyMaps>("ToggleAllKeyMaps"),
         mapAction<actions::ToggleFullscreen>("ToggleFullscreen"),
         mapAction<actions::WriteScreen>("WriteScreen"),
-        mapAction<actions::ResetFontSize>("ResetFontSize"),
-        mapAction<actions::ReloadConfig>("ReloadConfig"),
-        mapAction<actions::ResetConfig>("ResetConfig"),
-        mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
     };
 
     auto const name = toLower(_name);
