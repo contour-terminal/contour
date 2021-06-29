@@ -41,6 +41,7 @@ optional<Decorator> to_decorator(std::string const& _value)
 {
     auto constexpr mappings = array{
         pair{"underline", Decorator::Underline},
+        pair{"dotted-underline", Decorator::DottedUnderline},
         pair{"double-underline", Decorator::DoubleUnderline},
         pair{"curly-underline", Decorator::CurlyUnderline},
         pair{"dashed-underline", Decorator::DashedUnderline},
