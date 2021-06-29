@@ -136,28 +136,43 @@ void ScrollableDisplay::updatePosition()
     debuglog(WindowTag).write("called with {}x{} in {}", width(), height(),
             session_.currentScreenType());
 
-    //terminalSession_->terminal().screen().bufferType();
+    auto const resizeMainAndScrollArea = [&]() {
+        QSize ms = mainWidget_->sizeHint();
+        QSize ss = scrollBar_->sizeHint();
+        ms.setWidth(width() - ss.width());
+        ss.setHeight(height());
+        scrollBar_->resize(ss);
+        mainWidget_->resize(ms);
+    };
+
     if (session_.currentScreenType() != terminal::ScreenType::Alternate
         || !session_.config().hideScrollbarInAltScreen)
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
+        debuglog(WindowTag).write("Scrollbar Pos: {}", session_.config().scrollbarPosition);
         switch (session_.config().scrollbarPosition)
         {
             case config::ScrollBarPosition::Right:
+                resizeMainAndScrollArea();
                 scrollBar_->show();
                 mainWidget_->move(0, 0);
                 scrollBar_->move(mainWidth, 0);
                 break;
             case config::ScrollBarPosition::Left:
+                resizeMainAndScrollArea();
                 scrollBar_->show();
                 mainWidget_->move(sbWidth, 0);
                 scrollBar_->move(0, 0);
                 break;
             case config::ScrollBarPosition::Hidden:
+            {
                 scrollBar_->hide();
+                auto const cr = contentsRect();
+                mainWidget_->resize(cr.right(), cr.bottom());
                 mainWidget_->move(0, 0);
                 break;
+            }
         }
         debuglog(WindowTag).write("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
                 mainWidget_->pos().x(),
