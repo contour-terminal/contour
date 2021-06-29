@@ -112,36 +112,10 @@ endmacro()
 
 # {{{ yaml-cpp
 macro(ThirdPartiesAdd_yaml_cpp)
-    set(3rdparty_yaml_cpp_VERSION "0.6.3" CACHE STRING "Embedded yaml-cpp version")
-    set(3rdparty_yaml_cpp_CHECKSUM "MD5=b45bf1089a382e81f6b661062c10d0c2" CACHE STRING "Embedded yaml-cpp checksum")
-    #set(yaml_cpp_patch "${CMAKE_CURRENT_SOURCE_DIR}/cmake/yaml-cpp.patch")
-    set(yaml_cpp_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/yaml-cpp.patch")
-    if(NOT EXISTS "${yaml_cpp_patch}")
-        file(WRITE "${yaml_cpp_patch}"
-[[--- CMakeLists.txt	2021-03-03 08:33:57.271688830 +0100
-+++ CMakeLists.txt.new	2021-03-03 09:32:34.817113397 +0100
-@@ -15,8 +15,8 @@
- ### Project options
- ###
- ## Project stuff
--option(YAML_CPP_BUILD_TESTS "Enable testing" ON)
--option(YAML_CPP_BUILD_TOOLS "Enable parse tools" ON)
-+option(YAML_CPP_BUILD_TESTS "Enable testing" OFF)
-+option(YAML_CPP_BUILD_TOOLS "Enable parse tools" OFF)
- option(YAML_CPP_BUILD_CONTRIB "Enable contrib stuff in library" ON)
- option(YAML_CPP_INSTALL "Enable generation of install target" ON)
-
-@@ -259,7 +259,7 @@
- endif()
-
- if (NOT CMAKE_VERSION VERSION_LESS 2.8.12)
--    target_include_directories(yaml-cpp
-+  target_include_directories(yaml-cpp SYSTEM
-         PUBLIC $<BUILD_INTERFACE:${YAML_CPP_SOURCE_DIR}/include>
-                $<INSTALL_INTERFACE:${INCLUDE_INSTALL_ROOT_DIR}>
-         PRIVATE $<BUILD_INTERFACE:${YAML_CPP_SOURCE_DIR}/src>)
-]])
-    endif()
+    set(3rdparty_yaml_cpp_VERSION "a6bbe0e50ac4074f0b9b44188c28cf00caf1a723" CACHE STRING "Embedded yaml-cpp version")
+    set(3rdparty_yaml_cpp_CHECKSUM "SHA256=03d214d71b8bac32f684756003eb47a335fef8f8152d0894cf06e541eaf1c7f4" CACHE STRING "Embedded yaml-cpp checksum")
+    set(3rdparty_yaml_cpp_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.zip" CACHE STRING "Embedded yaml-cpp download name")
+    set(3rdparty_yaml_cpp_URL "https://github.com/jbeder/yaml-cpp/archive/${3rdparty_yaml_cpp_VERSION}.zip" CACHE STRING "Embedded yaml-cpp URL")
     set(YAML_CPP_BUILD_CONTRIB OFF CACHE INTERNAL "")
     set(YAML_CPP_BUILD_TESTS OFF CACHE INTERNAL "")
     set(YAML_CPP_BUILD_TOOLS OFF CACHE INTERNAL "")
@@ -149,26 +123,22 @@ macro(ThirdPartiesAdd_yaml_cpp)
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
             yaml-cpp
-            URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            URL "${3rdparty_yaml_cpp_URL}"
             URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_yaml_cpp_NAME}"
             EXCLUDE_FROM_ALL
-            # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
-            # PATCH_COMMAND patch "${yaml_cpp_patch}"
         )
         FetchContent_MakeAvailable(yaml-cpp)
     else()
         download_project(
             PROJ yaml-cpp
-            URL "http://github.com/jbeder/yaml-cpp/archive/yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            URL "${3rdparty_yaml_cpp_URL}"
             URL_HASH "${3rdparty_yaml_cpp_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "yaml-cpp-${3rdparty_yaml_cpp_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_yaml_cpp_NAME}"
             EXCLUDE_FROM_ALL
-            PREFIX "${FETCHCONTENT_BASE_DIR}/yaml-cpp-${3rdparty_range_v3_VERSION}"
-            # PATCH_COMMAND breaks on GitHub CI for Windows (but not on local Windows machine, what?)
-            # PATCH_COMMAND patch "${yaml_cpp_patch}"
+            PREFIX "${FETCHCONTENT_BASE_DIR}/yaml-cpp-${3rdparty_yaml_cpp_VERSION}"
         )
     endif()
 endmacro()
