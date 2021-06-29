@@ -22,6 +22,7 @@
 namespace contour::actions {
 
 struct ChangeProfile{ std::string name; };
+struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
 struct CopySelection{};
 struct DecreaseFontSize{};
@@ -60,6 +61,7 @@ struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 
 using Action = std::variant<
     ChangeProfile,
+    ClearHistoryAndReset,
     CopyPreviousMarkRange,
     CopySelection,
     DecreaseFontSize,

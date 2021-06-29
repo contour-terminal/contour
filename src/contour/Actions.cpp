@@ -50,6 +50,7 @@ optional<Action> fromString(string const& _name)
 {
     auto static const mappings = array{
         mapAction<actions::ChangeProfile>("ChangeProfile"),
+        mapAction<actions::ClearHistoryAndReset>("ClearHistoryAndReset"),
         mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
         mapAction<actions::CopySelection>("CopySelection"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
