@@ -21,6 +21,8 @@
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
 #include <crispy/debuglog.h>
+#include <crispy/escape.h>
+#include <crispy/utils.h>
 
 #include <yaml-cpp/yaml.h>
 #include <yaml-cpp/ostream_wrapper.h>
@@ -32,9 +34,11 @@
 #include <array>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -42,13 +46,16 @@
 
 auto constexpr MinimumFontSize = text::font_size{ 8.0 };
 
+using namespace std;
+using crispy::escape;
+using crispy::unescape;
+
 namespace contour::config {
 
 namespace {
     auto const ConfigTag = crispy::debugtag::make("config", "Logs configuration file loading.");
 }
 
-using namespace std;
 using actions::Action;
 
 // TODO:
@@ -88,69 +95,146 @@ namespace // {{{ helper
         return result;
     }
 
-    string parseEscaped(string const& _value) {
-        string out;
-        out.reserve(_value.size());
+    optional<Permission> toPermission(string const& _value)
+    {
+        if (_value == "allow")
+            return Permission::Allow;
+        else if (_value == "deny")
+            return Permission::Deny;
+        else if (_value == "ask")
+            return Permission::Ask;
+        return nullopt;
+    }
 
-        enum class State { Text, Escape, Octal1, Octal2, Hex1, Hex2 };
-        State state = State::Text;
-        char buf[3] = {};
+    void createFileIfNotExists(FileSystem::path const& _path)
+    {
+        if (!FileSystem::is_regular_file(_path))
+            if (auto const ec = createDefaultConfig(_path); ec)
+                throw runtime_error{fmt::format("Could not create directory {}. {}",
+                                                _path.parent_path().string(),
+                                                ec.message())};
+    }
 
-        for (size_t i = 0; i < _value.size(); ++i)
+    using UsedKeys = set<string>;
+
+    template <typename T>
+    bool tryLoadValue(UsedKeys& _usedKeys,
+                      YAML::Node const& _root,
+                      vector<string_view> const& _keys,
+                      size_t _offset,
+                      T& _store)
+    {
+        string parentKey;
+        for (size_t i = 0; i < _offset; ++i)
         {
-            switch (state)
-            {
-                case State::Text:
-                    if (_value[i] == '\\')
-                        state = State::Escape;
-                    else
-                        out.push_back(_value[i]);
-                    break;
-                case State::Escape:
-                    if (_value[i] == '0')
-                        state = State::Octal1;
-                    else if (_value[i] == 'x')
-                        state = State::Hex1;
-                    else if (_value[i] == 'e')
-                    {
-                        state = State::Text;
-                        out.push_back('\033');
-                    }
-                    else if (_value[i] == '\\')
-                    {
-                        out.push_back('\\');
-                        state = State::Text;
-                    }
-                    else
-                    {
-                        // Unknown escape sequence, so just continue as text.
-                        out.push_back('\\');
-                        out.push_back(_value[i]);
-                        state = State::Text;
-                    }
-                    break;
-                case State::Octal1:
-                    buf[0] = _value[i];
-                    state = State::Octal2;
-                    break;
-                case State::Octal2:
-                    buf[1] = _value[i];
-                    out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
-                    state = State::Text;
-                    break;
-                case State::Hex1:
-                    buf[0] = _value[i];
-                    state = State::Hex2;
-                    break;
-                case State::Hex2:
-                    buf[1] = _value[i];
-                    out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
-                    state = State::Text;
-                    break;
-            }
+            if (i)
+                parentKey += '.';
+            parentKey += _keys.at(i);
         }
 
-        return out;
+        if (_offset == _keys.size())
+        {
+            _store = _root.as<T>();
+            debuglog(ConfigTag).write("Loading {} with {}", parentKey, crispy::escape(fmt::format("{}", _store)));
+            return true;
+        }
+
+        auto const currentKey = string(_keys.at(_offset));
+        debuglog(ConfigTag).write("-> key {}", currentKey);
+
+        auto const child = _root[currentKey];
+        if (!child)
+        {
+            auto const defaultStr = crispy::escape(fmt::format("{}", _store));
+            for (size_t i = _offset; i < _keys.size(); ++i)
+            {
+                parentKey += '.';
+                parentKey += _keys[i];
+            }
+            errorlog().write(
+                "Missing key {}. Using default: {}.",
+                parentKey, !defaultStr.empty() ? defaultStr : "\"\""s
+            );
+            return false;
+        }
+
+        debuglog(ConfigTag).write("Emplacing {}", parentKey);
+        _usedKeys.emplace(parentKey);
+
+        return tryLoadValue(_usedKeys, child, _keys, _offset + 1, _store);
+    }
+
+    template <typename T>
+    bool tryLoadValue(UsedKeys& _usedKeys,
+                      YAML::Node const& _root,
+                      string const& _path,
+                      T& _store)
+    {
+        debuglog(ConfigTag).write("Try load: {}\n", _path);
+        auto const keys = crispy::split(_path, '.');
+        _usedKeys.emplace(_path);
+        return tryLoadValue(_usedKeys, _root, keys, 0, _store);
+    }
+
+    template <typename T>
+    bool tryLoadChild(UsedKeys& _usedKeys,
+                      YAML::Node const& _doc,
+                      string const& _parentPath,
+                      string const& _key,
+                      T& _store)
+    {
+        auto const path = fmt::format("{}.{}", _parentPath, _key);
+        return tryLoadValue(_usedKeys, _doc, path, _store);
+    }
+
+    void checkForSuperfluousKeys(YAML::Node _root,
+                                 string const& _prefix,
+                                 UsedKeys const& _usedKeys)
+    {
+        if (_root.IsMap())
+        {
+            for (auto const& mapItem: _root)
+            {
+                auto const name = mapItem.first.as<string>();
+                auto child = mapItem.second;
+                auto prefix = _prefix.empty() ? name : fmt::format("{}.{}", _prefix, name);
+                if (!_usedKeys.count(prefix))
+                {
+                    if (!crispy::startsWith(string_view(prefix), "x-"sv))
+                        errorlog().write(
+                            "Superfluous config key found: {}",
+                            escape(prefix)
+                        );
+                    continue;
+                }
+                checkForSuperfluousKeys(child, prefix, _usedKeys);
+            }
+        }
+        else if (_root.IsSequence())
+        {
+            for (size_t i = 0; i < _root.size() && i < 8; ++i)
+            {
+                checkForSuperfluousKeys(
+                    _root[i],
+                    fmt::format("{}.{}", _prefix, i),
+                    _usedKeys
+                );
+            }
+        }
+#if 0
+        else if (_root.IsScalar())
+        {
+        }
+        else if (_root.IsNull())
+        {
+            ; // no-op
+        }
+#endif
+    }
+
+    void checkForSuperfluousKeys(YAML::Node const& _root, UsedKeys const& _usedKeys)
+    {
+        checkForSuperfluousKeys(_root, "", _usedKeys);
     }
 }
 // }}}
@@ -223,67 +307,6 @@ std::vector<FileSystem::path> configHomes(string const& _programName)
 FileSystem::path configHome()
 {
     return configHome("contour");
-}
-
-template <typename T>
-bool tryLoadValue(YAML::Node const& _root,
-                  std::string const& _path,
-                  std::vector<std::string_view> const& _keys,
-                  size_t _offset,
-                  T& _store)
-{
-    if (_offset == _keys.size())
-    {
-        _store = _root.as<T>();
-        debuglog(ConfigTag).write("Loading {} with {}", _path, crispy::escape(fmt::format("{}", _store)));
-        return true;
-    }
-
-    auto const currentKey = string(_keys.at(_offset));
-    debuglog(ConfigTag).write("-> key {}", currentKey);
-
-    auto const child = _root[currentKey];
-    if (!child)
-    {
-        auto const defaultStr = crispy::escape(fmt::format("{}", _store));
-        errorlog().write(
-            "Missing key {}. Using default: {}.",
-            _path, !defaultStr.empty() ? defaultStr : "\"\""s
-        );
-        return false;
-    }
-
-    return tryLoadValue(child, _path, _keys, _offset + 1, _store);
-}
-
-template <typename T>
-bool tryLoadValue(YAML::Node const& _root,
-                  string const& _path,
-                  T& _store)
-{
-    debuglog(ConfigTag).write("Try load: {}\n", _path);
-    auto const keys = crispy::split(_path, '.');
-    return tryLoadValue(_root, _path, keys, 0, _store);
-}
-
-optional<Permission> toPermission(string const& _value)
-{
-    if (_value == "allow")
-        return Permission::Allow;
-    else if (_value == "deny")
-        return Permission::Deny;
-    else if (_value == "ask")
-        return Permission::Ask;
-    return nullopt;
-}
-
-void createFileIfNotExists(FileSystem::path const& _path)
-{
-    if (!FileSystem::is_regular_file(_path))
-        if (auto const ec = createDefaultConfig(_path); ec)
-            throw runtime_error{fmt::format("Could not create directory {}. {}",
-                                            _path.parent_path().string(),
-                                            ec.message())};
 }
 
 std::string createDefaultConfig()
@@ -433,11 +456,14 @@ optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
     return nullopt;
 }
 
-optional<terminal::Modifier> parseModifier(YAML::Node const& _node)
+optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
+                                           string const& _prefix,
+                                           YAML::Node const& _node)
 {
     using terminal::Modifier;
     if (!_node)
         return nullopt;
+    _usedKeys.emplace(_prefix);
     if (_node.IsScalar())
         return parseModifierKey(_node.as<string>());
     if (!_node.IsSequence())
@@ -458,12 +484,18 @@ optional<terminal::Modifier> parseModifier(YAML::Node const& _node)
     return mods;
 }
 
-void parseInputMapping(Config& _config, YAML::Node const& _mapping)
+void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
+                       Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
 
-	auto const parseAction = [&](YAML::Node const& _parent) -> optional<Action> {
-        auto actionOpt = actions::fromString(_parent["action"].as<string>());
+	auto const parseAction = [&](YAML::Node const& _parent) -> optional<Action>
+    {
+        _usedKeys.emplace(_prefix + ".action");
+
+        auto actionName = _parent["action"].as<string>();
+        _usedKeys.emplace(_prefix + ".action." + actionName);
+        auto actionOpt = actions::fromString(actionName);
         if (!actionOpt)
         {
             cerr << "Unknown action: '" << _parent["action"].as<string>() << '\'' << endl;
@@ -475,7 +507,10 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (holds_alternative<actions::ChangeProfile>(action))
         {
             if (auto name = _parent["name"]; name.IsScalar())
+            {
+                _usedKeys.emplace(_prefix + ".name");
                 return actions::ChangeProfile{name.as<string>()};
+            }
             else
                 return nullopt;
         }
@@ -483,15 +518,22 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (holds_alternative<actions::NewTerminal>(action))
         {
             if (auto profile = _parent["profile"]; profile && profile.IsScalar())
+            {
+                _usedKeys.emplace(_prefix + ".profile");
                 return actions::NewTerminal{profile.as<string>()};
+            }
             else
                 return action;
         }
 
         if (holds_alternative<actions::ReloadConfig>(action))
         {
+            _usedKeys.emplace(_prefix + ".profile");
             if (auto profileName = _parent["profile"]; profileName.IsScalar())
+            {
+                _usedKeys.emplace(_prefix + ".profile");
                 return actions::ReloadConfig{profileName.as<string>()};
+            }
             else
                 return action;
         }
@@ -499,7 +541,10 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (holds_alternative<actions::SendChars>(action))
         {
             if (auto chars = _parent["chars"]; chars.IsScalar())
-                return actions::SendChars{parseEscaped(chars.as<string>())};
+            {
+                _usedKeys.emplace(_prefix + ".chars");
+                return actions::SendChars{unescape(chars.as<string>())};
+            }
             else
                 return nullopt;
         }
@@ -507,7 +552,10 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (holds_alternative<actions::WriteScreen>(action))
         {
             if (auto chars = _parent["chars"]; chars.IsScalar())
-                return actions::WriteScreen{parseEscaped(chars.as<string>())};
+            {
+                _usedKeys.emplace(_prefix + ".chars");
+                return actions::WriteScreen{unescape(chars.as<string>())};
+            }
             else
                 return nullopt;
         }
@@ -548,6 +596,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         if (!input.has_value())
             return make_pair(nullopt, false);
 
+        _usedKeys.emplace(_prefix + ".key");
         if (std::holds_alternative<terminal::Key>(*input))
             return {terminal::KeyInputEvent{std::get<terminal::Key>(*input), _mods}, true};
 
@@ -555,11 +604,12 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
     };
 
     auto const action = parseAction(_mapping);
-	auto const mods = parseModifier(_mapping["mods"]);
+	auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
     if (action && mods)
     {
         if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
         {
+            _usedKeys.emplace(_prefix + ".key");
             if (keyEvent.has_value())
             {
                 if (holds_alternative<KeyInputEvent>(*keyEvent))
@@ -570,6 +620,7 @@ void parseInputMapping(Config& _config, YAML::Node const& _mapping)
         }
         else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
         {
+            _usedKeys.emplace(_prefix + ".mouse");
             if (mouseEvent.has_value())
                 _config.inputMappings.mouseMappings[*mouseEvent].emplace_back(*action);
         }
@@ -597,90 +648,129 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
     return config;
 }
 
-terminal::ColorPalette loadColorScheme(YAML::Node const& _node)
+terminal::ColorPalette loadColorScheme(
+        UsedKeys& _usedKeys,
+        string const& _path,
+        YAML::Node const& _node)
 {
     auto colors = terminal::ColorPalette{};
+    if (!_node)
+        return colors;
 
+    _usedKeys.emplace(_path);
     using terminal::RGBColor;
     if (auto def = _node["default"]; def)
     {
+        _usedKeys.emplace(_path + ".default");
         if (auto fg = def["foreground"]; fg)
+        {
+            _usedKeys.emplace(_path + ".default.foreground");
             colors.defaultForeground = fg.as<string>();
+        }
         if (auto bg = def["background"]; bg)
+        {
+            _usedKeys.emplace(_path + ".default.background");
             colors.defaultBackground = bg.as<string>();
+        }
     }
 
     if (auto def = _node["selection"]; def && def.IsMap())
     {
+        _usedKeys.emplace(_path + ".selection");
         if (auto fg = def["foreground"]; fg && fg.IsScalar())
+        {
+            _usedKeys.emplace(_path + ".selection.foreground");
             colors.selectionForeground.emplace(fg.as<string>());
+        }
         else
             colors.selectionForeground.reset();
 
         if (auto bg = def["background"]; bg && bg.IsScalar())
+        {
+            _usedKeys.emplace(_path + ".selection.background");
             colors.selectionBackground.emplace(bg.as<string>());
+        }
         else
             colors.selectionBackground.reset();
     }
 
-    if (auto cursor = _node["cursor"]; cursor && cursor.IsScalar() && !cursor.as<string>().empty())
-        colors.cursor = cursor.as<string>();
+    if (auto cursor = _node["cursor"]; cursor)
+    {
+        _usedKeys.emplace(_path + ".cursor");
+        if (cursor.IsScalar() && !cursor.as<string>().empty())
+            colors.cursor = cursor.as<string>();
+    }
 
     if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
     {
+        _usedKeys.emplace(_path + ".hyperlink_decoration");
         if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            _usedKeys.emplace(_path + ".hyperlink_decoration.normal");
             colors.hyperlinkDecoration.normal = color.as<string>();
+        }
 
         if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            _usedKeys.emplace(_path + ".hyperlink_decoration.hover");
             colors.hyperlinkDecoration.hover = color.as<string>();
+        }
     }
 
-    auto const loadColorMap = [&](YAML::Node const& _node, size_t _offset) {
-        if (_node)
+    auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) {
+        auto node = _parent[_key];
+        if (!node)
+            return;
+
+        auto const colorKeyPath = fmt::format("{}.{}", _path, _key);
+        _usedKeys.emplace(colorKeyPath);
+        if (node.IsMap())
         {
-            if (_node.IsMap())
-            {
-                auto const assignColor = [&](size_t _index, string const& _name) {
-                    if (auto nodeValue = _node[_name]; nodeValue)
+            auto const assignColor = [&](size_t _index, string const& _name) {
+                if (auto nodeValue = node[_name]; nodeValue)
+                {
+                    _usedKeys.emplace(fmt::format("{}.{}", colorKeyPath, _name));
+                    if (auto const value = nodeValue.as<string>(); !value.empty())
                     {
-                        if (auto const value = nodeValue.as<string>(); !value.empty())
-                        {
-                            if (value[0] == '#')
-                                colors.palette[_offset + _index] = value;
-                            else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                                colors.palette[_offset + _index] = nodeValue.as<unsigned long>();
-                        }
+                        if (value[0] == '#')
+                            colors.palette[_offset + _index] = value;
+                        else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                            colors.palette[_offset + _index] = nodeValue.as<unsigned long>();
                     }
-                };
-                assignColor(0, "black");
-                assignColor(1, "red");
-                assignColor(2, "green");
-                assignColor(3, "yellow");
-                assignColor(4, "blue");
-                assignColor(5, "magenta");
-                assignColor(6, "cyan");
-                assignColor(7, "white");
-            }
-            else if (_node.IsSequence())
-            {
-                for (size_t i = 0; i < _node.size() && i < 8; ++i)
-                    if (_node.IsScalar())
-                        colors.palette[i] = _node[i].as<long>();
-                    else
-                        colors.palette[i] = _node[i].as<string>();
-            }
+                }
+            };
+            assignColor(0, "black");
+            assignColor(1, "red");
+            assignColor(2, "green");
+            assignColor(3, "yellow");
+            assignColor(4, "blue");
+            assignColor(5, "magenta");
+            assignColor(6, "cyan");
+            assignColor(7, "white");
+        }
+        else if (node.IsSequence())
+        {
+            for (size_t i = 0; i < node.size() && i < 8; ++i)
+                if (node[i].IsScalar())
+                    colors.palette[i] = node[i].as<long>();
+                else
+                    colors.palette[i] = node[i].as<string>();
         }
     };
 
-    loadColorMap(_node["normal"], 0);
-    loadColorMap(_node["bright"], 8);
+    loadColorMap(_node, "normal", 0);
+    loadColorMap(_node, "bright", 8);
     // TODO: color palette from 16..255
     // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
 
     return colors;
 }
 
-void softLoadFont(YAML::Node const& _node, string_view _key, text::font_description& _store)
+void softLoadFont(UsedKeys& _usedKeys,
+                  string_view _basePath,
+                  YAML::Node const& _node,
+                  string_view _key,
+                  text::font_description& _store)
 {
     auto node = _node[string(_key)];
     if (!node)
@@ -689,20 +779,26 @@ void softLoadFont(YAML::Node const& _node, string_view _key, text::font_descript
     if (node.IsScalar())
     {
         _store.familyName = node.as<string>();
+        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
     }
     else if (node.IsMap())
     {
         if (node["family"].IsScalar())
+        {
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "family"));
             _store.familyName = node["family"].as<string>();
+        }
 
         if (node["slant"].IsScalar())
         {
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
             if (auto const p = text::make_font_slant(node["slant"].as<string>()))
                 _store.slant = p.value();
         }
 
         if (node["weight"].IsScalar())
         {
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
             if (auto const p = text::make_font_weight(node["weight"].as<string>()))
                 _store.weight = p.value();
         }
@@ -744,17 +840,8 @@ optional<terminal::VTType> stringToVTType(std::string const& _value)
     return nullopt;
 }
 
-template <typename T>
-bool tryLoadChild(YAML::Node const& _doc,
-                  string const& _parentPath,
-                  string const& _key,
-                  T& _store)
-{
-    auto const path = fmt::format("{}.{}", _parentPath, _key);
-    return tryLoadValue(_doc, path, _store);
-}
-
-TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
+TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
+                                    YAML::Node const& _doc,
                                     std::string const& _name,
                                     unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
@@ -762,10 +849,14 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
 
     if (auto colors = _doc["profiles"][_name]["colors"]; colors)
     {
+        auto const path = fmt::format("{}.{}.{}", "profiles", _name, "colors");
         if (colors.IsMap())
-            profile.colors = loadColorScheme(colors);
+            profile.colors = loadColorScheme(_usedKeys, path, colors);
         else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
+        {
+            _usedKeys.emplace(path);
             profile.colors = i->second;
+        }
         else
             errorlog().write("scheme '{}' not found.", colors.as<string>());
     }
@@ -775,17 +866,17 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
     string const basePath = fmt::format("profiles.{}", _name);
     if (profile.shell.program.empty())
         profile.shell.program = terminal::Process::loginShell();
-    tryLoadChild(_doc, basePath, "shell", profile.shell.program);
-    tryLoadChild(_doc, basePath, "maximized", profile.maximized);
-    tryLoadChild(_doc, basePath, "fullscreen", profile.fullscreen);
-    tryLoadChild(_doc, basePath, "refresh_rate", profile.refreshRate);
+    tryLoadChild(_usedKeys, _doc, basePath, "shell", profile.shell.program);
+    tryLoadChild(_usedKeys, _doc, basePath, "maximized", profile.maximized);
+    tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);
+    tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
 
     if (auto args = _doc["profiles"][_name]["arguments"]; args && args.IsSequence())
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());
 
     string strValue = FileSystem::current_path().generic_string();
-    tryLoadChild(_doc, basePath, "initial_working_directory", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "initial_working_directory", strValue);
     if (profile.shell.workingDirectory.empty())
         profile.shell.workingDirectory = FileSystem::current_path();
     else if (strValue[0] == '~')
@@ -803,10 +894,13 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
 
     if (auto env = _doc["profiles"][_name]["environment"]; env)
     {
+        auto const envpath = basePath + ".environment";
+        _usedKeys.emplace(envpath);
         for (auto i = env.begin(); i != env.end(); ++i)
         {
             auto const name = i->first.as<string>();
             auto const value = i->second.as<string>();
+            _usedKeys.emplace(envpath + "." + name);
             profile.shell.env[name] = value;
         }
     }
@@ -818,14 +912,14 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
         profile.shell.env["COLORTERM"] = "truecolor";
 
     strValue = fmt::format("{}", profile.terminalId);
-    tryLoadChild(_doc, basePath, "terminal_id", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "terminal_id", strValue);
     if (auto const idOpt = stringToVTType(strValue))
         profile.terminalId = idOpt.value();
     else
         errorlog().write("Invalid Terminal ID \"{}\", specified", strValue);
 
-    tryLoadChild(_doc, basePath, "terminal_size.columns", profile.terminalSize.width);
-    tryLoadChild(_doc, basePath, "terminal_size.lines", profile.terminalSize.height);
+    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.columns", profile.terminalSize.width);
+    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.lines", profile.terminalSize.height);
     {
         auto constexpr MinimalTerminalSize = crispy::Size{3, 3};
         auto constexpr MaximumTerminalSize = crispy::Size{300, 200};
@@ -844,20 +938,20 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
     }
 
     strValue = "ask";
-    if (tryLoadChild(_doc, basePath, "permissions.capture_buffer", strValue))
+    if (tryLoadChild(_usedKeys, _doc, basePath, "permissions.capture_buffer", strValue))
     {
         if (auto x = toPermission(strValue))
             profile.permissions.captureBuffer = x.value();
     }
 
     strValue = "ask";
-    if (tryLoadChild(_doc, basePath, "permissions.change_font", strValue))
+    if (tryLoadChild(_usedKeys, _doc, basePath, "permissions.change_font", strValue))
     {
         if (auto x = toPermission(strValue))
             profile.permissions.changeFont = x.value();
     }
 
-    if (tryLoadChild(_doc, basePath, "font.size", profile.fonts.size.pt))
+    if (tryLoadChild(_usedKeys, _doc, basePath, "font.size", profile.fonts.size.pt))
     {
         if (profile.fonts.size < MinimumFontSize)
         {
@@ -867,10 +961,10 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
         }
     }
 
-    tryLoadChild(_doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
+    tryLoadChild(_usedKeys, _doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
 
     strValue = "complex";
-    tryLoadChild(_doc, basePath, "font.text_shaping.method", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.method", strValue);
     {
         if (strValue == "simple")
             profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Simple;
@@ -881,33 +975,35 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
     }
 
     bool onlyMonospace = true;
-    tryLoadChild(_doc, basePath, "font.only_monospace", onlyMonospace);
+    tryLoadChild(_usedKeys, _doc, basePath, "font.only_monospace", onlyMonospace);
+
+    auto const fontBasePath = fmt::format("profiles.{}.font", _name);
 
     profile.fonts.regular.familyName = "regular";
     profile.fonts.regular.spacing = text::font_spacing::mono;
     profile.fonts.regular.force_spacing = onlyMonospace;
-    softLoadFont(_doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
+    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
 
     profile.fonts.bold = profile.fonts.regular;
     profile.fonts.bold.weight = text::font_weight::bold;
-    softLoadFont(_doc["profiles"][_name]["font"], "bold", profile.fonts.bold);
+    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold", profile.fonts.bold);
 
     profile.fonts.italic = profile.fonts.regular;
     profile.fonts.italic.slant = text::font_slant::italic;
-    softLoadFont(_doc["profiles"][_name]["font"], "italic", profile.fonts.italic);
+    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "italic", profile.fonts.italic);
 
     profile.fonts.boldItalic = profile.fonts.regular;
     profile.fonts.boldItalic.weight = text::font_weight::bold;
     profile.fonts.boldItalic.slant = text::font_slant::italic;
-    softLoadFont(_doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
+    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
 
     profile.fonts.emoji.familyName = "emoji";
     profile.fonts.emoji.spacing = text::font_spacing::mono;
-    softLoadFont(_doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
+    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
 
     strValue = "gray";
     string renderModeStr;
-    tryLoadChild(_doc, basePath, "font.render_mode", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "font.render_mode", strValue);
     auto const static renderModeMap = array{
         pair{"lcd"sv, text::render_mode::lcd},
         pair{"light"sv, text::render_mode::light},
@@ -923,40 +1019,40 @@ TerminalProfile loadTerminalProfile(YAML::Node const& _doc,
         errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
 
     int intValue = profile.maxHistoryLineCount.value_or(-1);
-    tryLoadChild(_doc, basePath, "history.limit", intValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
     if (intValue < 0)
         profile.maxHistoryLineCount = nullopt;
     else
         profile.maxHistoryLineCount = static_cast<size_t>(intValue);
 
-    tryLoadChild(_doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
-    tryLoadChild(_doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
+    tryLoadChild(_usedKeys, _doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
+    tryLoadChild(_usedKeys, _doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
 
     float floatValue = 1.0;
-    tryLoadChild(_doc, basePath, "background.opacity", floatValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "background.opacity", floatValue);
     profile.backgroundOpacity = (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
-    tryLoadChild(_doc, basePath, "background.blur", profile.backgroundBlur);
+    tryLoadChild(_usedKeys, _doc, basePath, "background.blur", profile.backgroundBlur);
 
     strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
-    tryLoadChild(_doc, basePath, "hyperlink_decoration.normal", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "hyperlink_decoration.normal", strValue);
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.normal = *pdeco;
 
     strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
-    tryLoadChild(_doc, basePath, "hyperlink_decoration.hover", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "hyperlink_decoration.hover", strValue);
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 
     strValue = "block";
-    tryLoadChild(_doc, basePath, "cursor.shape", strValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "cursor.shape", strValue);
     profile.cursorShape = terminal::makeCursorShape(strValue);
 
     bool boolValue = profile.cursorDisplay == terminal::CursorDisplay::Blink;
-    tryLoadChild(_doc, basePath, "cursor.blinking", boolValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "cursor.blinking", boolValue);
     profile.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
     unsigned uintValue = profile.cursorBlinkInterval.count();
-    tryLoadChild(_doc, basePath, "cursor.blinking_interval", uintValue);
+    tryLoadChild(_usedKeys, _doc, basePath, "cursor.blinking_interval", uintValue);
     profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
 
     return profile;
@@ -969,12 +1065,15 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
+    auto usedKeys = UsedKeys{};
 
     YAML::Node doc = YAML::LoadFile(_fileName.string());
 
-    tryLoadValue(doc, "word_delimiters", _config.wordDelimiters);
+    tryLoadValue(usedKeys, doc, "word_delimiters", _config.wordDelimiters);
 
-    if (auto opt = parseModifier(doc["bypass_mouse_protocol_modifier"]); opt.has_value())
+    if (auto opt = parseModifier(usedKeys,
+                "bypass_mouse_protocol_modifier",
+                doc["bypass_mouse_protocol_modifier"]); opt.has_value())
         _config.bypassMouseProtocolModifier = opt.value();
 
     auto constexpr KnownExperimentalFeatures = array{
@@ -983,6 +1082,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     if (auto experimental = doc["experimental"]; experimental.IsMap())
     {
+        usedKeys.emplace("experimental");
         for (auto const& x: experimental)
         {
             auto const key = x.first.as<string>();
@@ -992,6 +1092,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                 continue;
             }
 
+            usedKeys.emplace("experimental." + x.first.as<string>());
             if (!x.second.as<bool>())
                 continue;
 
@@ -1000,14 +1101,14 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(doc, "images.sixel_scrolling", _config.sixelScrolling);
-    tryLoadValue(doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
-    tryLoadValue(doc, "images.sixel_register_count", _config.maxImageColorRegisters);
-    tryLoadValue(doc, "images.max_width", _config.maxImageSize.width);
-    tryLoadValue(doc, "images.max_height", _config.maxImageSize.height);
+    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
+    tryLoadValue(usedKeys, doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
+    tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);
+    tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width);
+    tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height);
 
     string strValue = fmt::format("{}", ScrollBarPosition::Right);
-    if (tryLoadValue(doc, "scrollbar.position", strValue))
+    if (tryLoadValue(usedKeys, doc, "scrollbar.position", strValue))
     {
         auto const literal = toLower(strValue);
         if (literal == "left")
@@ -1021,50 +1122,62 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                              "scrollbar.position",
                              strValue);
     }
-    tryLoadValue(doc, "scrollbar.hide_in_alt_screen", _config.hideScrollbarInAltScreen);
+    tryLoadValue(usedKeys, doc, "scrollbar.hide_in_alt_screen", _config.hideScrollbarInAltScreen);
 
-    if (auto profiles = doc["color_schemes"]; profiles)
+    if (auto colorschemes = doc["color_schemes"]; colorschemes)
     {
-        for (auto i = profiles.begin(); i != profiles.end(); ++i)
+        usedKeys.emplace("color_schemes");
+        for (auto i = colorschemes.begin(); i != colorschemes.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            _config.colorschemes[name] = loadColorScheme(i->second);
+            auto const path = "color_schemes." + name;
+            _config.colorschemes[name] = loadColorScheme(usedKeys, path, i->second);
         }
     }
 
-    tryLoadValue(doc, "read_buffer_size", _config.ptyReadBufferSize);
+    tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
 
     if (auto profiles = doc["profiles"]; profiles)
     {
+        usedKeys.emplace("profiles");
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            _config.profiles[name] = loadTerminalProfile(doc, name, _config.colorschemes);
+            usedKeys.emplace("profiles." + name);
+            _config.profiles[name] = loadTerminalProfile(usedKeys, doc, name, _config.colorschemes);
         }
     }
 
-    tryLoadValue(doc, "default_profile", _config.defaultProfileName);
+    // TODO: If there is only one profile, prefill default_profile with that name.
+    // TODO: If there are more than one profile, prefill with the top-most one.
+    tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName);
     if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
     {
-        cerr << fmt::format("default_profile \"{}\" not found in profiles list.",
-                            _config.defaultProfileName) << '\n';
+        errorlog().write("default_profile \"{}\" not found in profiles list.",
+                         escape(_config.defaultProfileName));
     }
 
 	if (auto mapping = doc["input_mapping"]; mapping)
     {
+        usedKeys.emplace("input_mapping");
 		if (mapping.IsSequence())
 			for (size_t i = 0; i < mapping.size(); ++i)
-				parseInputMapping(_config, mapping[i]);
+            {
+                auto prefix = fmt::format("{}.{}", "input_mapping", i);
+				parseInputMapping(usedKeys, prefix, _config, mapping[i]);
+            }
     }
 
-    auto const logMappings = [](auto const& _mapping) {
-        for (auto const& m: _mapping)
-            for (auto const& a: m.second)
-                debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
-    };
-    logMappings(_config.inputMappings.keyMappings);
-    logMappings(_config.inputMappings.charMappings);
-    logMappings(_config.inputMappings.mouseMappings);
+    checkForSuperfluousKeys(doc, usedKeys);
+
+    // auto const logMappings = [](auto const& _mapping) {
+    //     for (auto const& m: _mapping)
+    //         for (auto const& a: m.second)
+    //             debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
+    // };
+    // logMappings(_config.inputMappings.keyMappings);
+    // logMappings(_config.inputMappings.charMappings);
+    // logMappings(_config.inputMappings.mouseMappings);
 }
 
 optional<std::string> readConfigFile(std::string const& _filename)
