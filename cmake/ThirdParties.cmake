@@ -148,59 +148,30 @@ endmacro()
 
 # {{{ libunicode
 macro(ThirdPartiesAdd_libunicode)
-    set(3rdparty_libunicode_VERSION "1ece4f3d3c49abc48f781d85943f6153b3aa29bb" CACHE STRING "libunicode: commit hash")
-    set(3rdparty_libunicode_CHECKSUM "SHA256=a385d35a4c5d31e506b92be64459ad278e97cd4f1f37a0bbb2ea25aa1f3d7a2f" CACHE STRING "libunicode: download checksum")
-    # XXX: temporary patch until libunicode gets rid of sumbodules.
-    set(libunicode_patch "${CMAKE_CURRENT_BINARY_DIR}/patches/libunicode.patch")
-    if(NOT EXISTS "${libunicode_patch}")
-        file(WRITE "${libunicode_patch}" [[
---- CMakeLists.txt	2021-03-03 08:40:11.184332244 +0100
-+++ CMakeLists.txt.new	2021-03-03 08:49:06.336734764 +0100
-@@ -48,18 +48,6 @@
- # ----------------------------------------------------------------------------
- # 3rdparty dependencies
-
--if(LIBUNICODE_EMBEDDED_FMTLIB)
--    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/fmt" EXCLUDE_FROM_ALL)
--    add_definitions(-DFMT_USE_WINDOWS_H=0)
--else()
--    # master project must provide its own fmtlib
--endif()
--
--if(LIBUNICODE_TESTING AND LIBUNICODE_EMBEDDED_CATCH2)
--    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/catch2")
--else()
--    # master project must provide its own fmtlib
--endif()
-
- add_subdirectory(src/unicode)
- add_subdirectory(src/tools)
-]])
-    endif()
+    set(3rdparty_libunicode_VERSION "efd6d1cc29f73109af846f29d30c6977f5beb4e3" CACHE STRING "libunicode: commit hash")
+    set(3rdparty_libunicode_CHECKSUM "SHA256=8151bbe809f0e4c26fc0f6c9a350550865e93b9bab69d4e8f287fc6113f27c59" CACHE STRING "libunicode: download checksum")
+    set(3rdparty_libunicode_NAME "libunicode-${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode download name")
+    set(3rdparty_libunicode_URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode URL")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
             libunicode
-            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.tar.gz"
+            URL "${3rdparty_libunicode_URL}"
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_libunicode_NAME}"
             UPDATE_DISCONNECTED 0
             EXCLUDE_FROM_ALL
-            # same here
-            #PATCH_COMMAND patch "${libunicode_patch}"
         )
         FetchContent_MakeAvailable(libunicode)
     else()
         download_project(
             PROJ libunicode
-            URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip"
+            URL "${3rdparty_libunicode_URL}"
             URL_HASH "${3rdparty_libunicode_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "libunicode-${3rdparty_libunicode_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_libunicode_NAME}"
             EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/libunicode-${3rdparty_libunicode_VERSION}"
-            # same here
-            #PATCH_COMMAND patch "${libunicode_patch}"
         )
     endif()
 endmacro()
