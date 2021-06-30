@@ -140,6 +140,7 @@ void ScrollableDisplay::updatePosition()
         QSize ms = mainWidget_->sizeHint();
         QSize ss = scrollBar_->sizeHint();
         ms.setWidth(width() - ss.width());
+        ms.setHeight(height());
         ss.setHeight(height());
         scrollBar_->resize(ss);
         mainWidget_->resize(ms);
