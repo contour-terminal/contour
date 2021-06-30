@@ -38,8 +38,6 @@ using std::string_view;
 
 namespace CLI = crispy::cli;
 
-namespace crispy {
-
 namespace // {{{ helper
 {
     CLI::HelpStyle helpStyle()
@@ -119,7 +117,7 @@ namespace // {{{ helper
                     else
                     {
                         result += fmt::format("[{}:{}:{}] ",
-                                              debugtag::get(_msg.tag()).name,
+                                              crispy::debugtag::get(_msg.tag()).name,
                                               fileName,
                                               _msg.location().line()
                                 );
@@ -137,6 +135,8 @@ namespace // {{{ helper
         });
     }
 } // }}}
+
+namespace crispy {
 
 App::App(std::string _appName, std::string _appTitle, std::string _appVersion) :
     appName_{ std::move(_appName) },
