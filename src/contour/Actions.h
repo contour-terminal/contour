@@ -21,76 +21,78 @@
 
 namespace contour::actions {
 
-struct FollowHyperlink{};
-struct ToggleAllKeyMaps{};
-struct ToggleFullscreen{};
-struct ScreenshotVT{};
-struct IncreaseFontSize{};
-struct DecreaseFontSize{};
-struct IncreaseOpacity{};
-struct DecreaseOpacity{};
-struct SendChars{ std::string chars; };
-struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
-struct ScrollOneUp{};
-struct ScrollOneDown{};
-struct ScrollUp{};
-struct ScrollDown{};
-struct ScrollPageUp{};
-struct ScrollPageDown{};
-struct ScrollMarkUp{};
-struct ScrollMarkDown{};
-struct ScrollToTop{};
-struct ScrollToBottom{};
-struct PasteClipboard{};
-struct CopySelection{};
-struct PasteSelection{};
 struct ChangeProfile{ std::string name; };
+struct ClearHistoryAndReset{};
+struct CopyPreviousMarkRange{};
+struct CopySelection{};
+struct DecreaseFontSize{};
+struct DecreaseOpacity{};
+struct FollowHyperlink{};
+struct IncreaseFontSize{};
+struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
 struct OpenConfiguration{};
 struct OpenFileManager{};
+struct PasteClipboard{};
+struct PasteSelection{};
 struct Quit{};
-struct ResetFontSize{};
 struct ReloadConfig{ std::optional<std::string> profileName; };
 struct ResetConfig{};
-struct CopyPreviousMarkRange{};
+struct ResetFontSize{};
+struct ScreenshotVT{};
+struct ScrollDown{};
+struct ScrollMarkDown{};
+struct ScrollMarkUp{};
+struct ScrollOneDown{};
+struct ScrollOneUp{};
+struct ScrollPageDown{};
+struct ScrollPageUp{};
+struct ScrollToBottom{};
+struct ScrollToTop{};
+struct ScrollUp{};
+struct SendChars{ std::string chars; };
+struct ToggleAllKeyMaps{};
+struct ToggleFullscreen{};
+struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 // CloseTab
-// OpenTab
 // FocusNextTab
 // FocusPreviousTab
+// OpenTab
 
 using Action = std::variant<
-    FollowHyperlink,
-    ResetFontSize,
-    ReloadConfig,
-    ResetConfig,
-    ToggleAllKeyMaps,
-    ToggleFullscreen,
-    ScreenshotVT,
-    IncreaseFontSize,
-    DecreaseFontSize,
-    IncreaseOpacity,
-    DecreaseOpacity,
-    SendChars,
-    WriteScreen,
-    ScrollOneUp,
-    ScrollOneDown,
-    ScrollUp,
-    ScrollDown,
-    ScrollPageUp,
-    ScrollPageDown,
-    ScrollMarkUp,
-    ScrollMarkDown,
-    ScrollToTop,
-    ScrollToBottom,
-    CopySelection,
-    PasteSelection,
-    PasteClipboard,
     ChangeProfile,
+    ClearHistoryAndReset,
+    CopyPreviousMarkRange,
+    CopySelection,
+    DecreaseFontSize,
+    DecreaseOpacity,
+    FollowHyperlink,
+    IncreaseFontSize,
+    IncreaseOpacity,
     NewTerminal,
     OpenConfiguration,
     OpenFileManager,
+    PasteClipboard,
+    PasteSelection,
     Quit,
-    CopyPreviousMarkRange
+    ReloadConfig,
+    ResetConfig,
+    ResetFontSize,
+    ScreenshotVT,
+    ScrollDown,
+    ScrollMarkDown,
+    ScrollMarkUp,
+    ScrollOneDown,
+    ScrollOneUp,
+    ScrollPageDown,
+    ScrollPageUp,
+    ScrollToBottom,
+    ScrollToTop,
+    ScrollUp,
+    SendChars,
+    ToggleAllKeyMaps,
+    ToggleFullscreen,
+    WriteScreen
 >;
 
 std::optional<Action> fromString(std::string const& _name);

@@ -412,6 +412,19 @@ void TerminalSession::operator()(actions::ChangeProfile const& _action)
     activateProfile(_action.name);
 }
 
+void TerminalSession::operator()(actions::ClearHistoryAndReset)
+{
+    debuglog(WidgetTag).write("Clearing history and perform terminal hard reset");
+
+    auto const screenSize = terminal_.screenSize();
+    auto const pixelSize = display_->pixelSize();
+
+    terminal_.resizeScreen(screenSize + crispy::Size{1, 0}, pixelSize);
+    terminal_.screen().resetHard();
+    this_thread::yield();
+    terminal_.resizeScreen(screenSize, pixelSize);
+}
+
 void TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
     copyToClipboard(terminal().extractLastMarkRange());
