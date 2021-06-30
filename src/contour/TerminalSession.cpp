@@ -419,8 +419,8 @@ void TerminalSession::operator()(actions::ClearHistoryAndReset)
     auto const screenSize = terminal_.screenSize();
     auto const pixelSize = display_->pixelSize();
 
-    terminal_.resizeScreen(screenSize + crispy::Size{1, 0}, pixelSize);
     terminal_.screen().resetHard();
+    terminal_.resizeScreen(screenSize + crispy::Size{1, 0}, pixelSize);
     this_thread::yield();
     terminal_.resizeScreen(screenSize, pixelSize);
 }
