@@ -440,6 +440,7 @@ bool Terminal::sendMousePressEvent(MousePressEvent const& _mousePress, chrono::s
 
     MousePressEvent const withPosition{_mousePress.button,
                                        _mousePress.modifier,
+                                       {},
                                        currentMousePosition_.row,
                                        currentMousePosition_.column};
     if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
@@ -547,6 +548,7 @@ bool Terminal::sendMouseReleaseEvent(MouseReleaseEvent const& _mouseRelease, chr
 {
     MouseReleaseEvent const withPosition{_mouseRelease.button,
                                          _mouseRelease.modifier,
+                                         {},
                                          currentMousePosition_.row,
                                          currentMousePosition_.column};
 

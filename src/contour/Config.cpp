@@ -456,6 +456,54 @@ optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
     return nullopt;
 }
 
+optional<terminal::MatchMode> parseMode(UsedKeys& _usedKeys,
+                                        string const& _prefix,
+                                        YAML::Node const& _node)
+{
+    using terminal::MatchMode;
+    if (!_node)
+        return MatchMode::Default;
+    _usedKeys.emplace(_prefix);
+    if (!_node.IsScalar())
+        return nullopt;
+
+    MatchMode mode = MatchMode::Default;
+
+    auto const modeStr = _node.as<string>();
+    auto const args = crispy::split(modeStr, '|');
+    for (string_view arg: args)
+    {
+        if (arg.empty())
+            continue;
+        bool negate = false;
+        if (arg.front() == '~')
+        {
+            negate = true;
+            arg.remove_prefix(1);
+        }
+
+        MatchMode thisMode = MatchMode::Default;
+        if (arg == "Alt"sv)
+            thisMode = MatchMode::AlternateScreen;
+        else if (arg == "AppCursor")
+            thisMode = MatchMode::AppCursor;
+        else if (arg == "AppKeyPad")
+            thisMode = MatchMode::AppKeyPad;
+        else
+        {
+            errorlog().write("Unknown input_mapping mode: {}", arg);
+            continue;
+        }
+
+        if (negate)
+            mode = mode & ~thisMode;
+        else
+            mode = mode | thisMode;
+    }
+
+    return mode;
+}
+
 optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
                                            string const& _prefix,
                                            YAML::Node const& _node)
@@ -585,7 +633,7 @@ void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
         }
     };
 
-	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods) -> pair<optional<variant<terminal::KeyInputEvent, terminal::CharInputEvent>>, bool> {
+	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods, MatchMode _mode) -> pair<optional<variant<terminal::KeyInputEvent, terminal::CharInputEvent>>, bool> {
         if (!_node)
             return make_pair(nullopt, false);
 
@@ -598,16 +646,17 @@ void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
 
         _usedKeys.emplace(_prefix + ".key");
         if (std::holds_alternative<terminal::Key>(*input))
-            return {terminal::KeyInputEvent{std::get<terminal::Key>(*input), _mods}, true};
+            return {terminal::KeyInputEvent{std::get<terminal::Key>(*input), _mods, _mode}, true};
 
-        return {terminal::CharInputEvent{std::get<char32_t>(*input), _mods}, true};
+        return {terminal::CharInputEvent{std::get<char32_t>(*input), _mods, _mode}, true};
     };
 
     auto const action = parseAction(_mapping);
 	auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
-    if (action && mods)
+    auto const mode = parseMode(_usedKeys, _prefix + ".mode", _mapping["mode"]);
+    if (action && mods && mode)
     {
-        if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value()); ok)
+        if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value(), mode.value()); ok)
         {
             _usedKeys.emplace(_prefix + ".key");
             if (keyEvent.has_value())
