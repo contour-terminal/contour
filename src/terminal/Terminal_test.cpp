@@ -14,7 +14,7 @@
 #include <terminal/Terminal.h>
 #include <terminal/pty/MockPty.h>
 #include <crispy/times.h>
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 
 #include <unicode/convert.h>
 
