@@ -1,6 +1,6 @@
 # Contour - A modern C++ Terminal Emulator
-[![CI Build](https://github.com/christianparpart/contour/workflows/Build/badge.svg)](https://github.com/christianparpart/contour/actions?query=workflow%3ABuild)
-[![codecov](https://codecov.io/gh/christianparpart/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/christianparpart/contour)
+[![CI Build](https://github.com/contour-terminal/contour/workflows/Build/badge.svg)](https://github.com/contour-terminal/contour/actions?query=workflow%3ABuild)
+[![codecov](https://codecov.io/gh/contour-terminal/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/contour-terminal/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
 [![Discord](https://img.shields.io/discord/479301317337284608.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2)](https://discord.gg/https://discord.gg/ktvcTUkc)
 [![Twitch Live Stream](https://img.shields.io/badge/Twitch-Live%20Stream-blue?style=flat-square)](https://twitch.tv/christianparpart)
@@ -28,12 +28,12 @@ for power users with a modern feature mindset.
 - ✅ Key binding customization
 - ✅ Color Schemes
 - ✅ Profiles (grouped customization of: color scheme, login shell, and related behaviours)
-- ✅ [Synchronized rendering](https://github.com/christianparpart/contour/wiki/VTExtensions#synchronized-output) (via `DECSM 2026` / `DECRM 2026`)
+- ✅ [Synchronized rendering](https://github.com/contour-terminal/contour/wiki/VTExtensions#synchronized-output) (via `DECSM 2026` / `DECRM 2026`)
 - ✅ Text reflow (configurable via `DECSM 2027` / `DECRM 2027`)
 - ✅ Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
 - ✅ Clipboard setting via OSC 52
 - ✅ Sixel inline images
-- ✅ Terminal page [buffer capture VT extension](https://github.com/christianparpart/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
+- ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
 
 ## CLI - Command Line Interface
 

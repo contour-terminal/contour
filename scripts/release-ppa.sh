@@ -30,7 +30,7 @@ function main()
     mkdir -p "${BASEDIR}"
 
     einfo "Prepare source directory for branch ${BRANCH}"
-    git clone -b "${BRANCH}" https://github.com/christianparpart/contour.git ${SRCDIR}
+    git clone -b "${BRANCH}" https://github.com/contour-terminal/contour.git ${SRCDIR}
     cd "${SRCDIR}"
 
     # {{{ set source dir related properties

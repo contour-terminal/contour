@@ -25,7 +25,7 @@ Section: x11
 Priority: optional
 Description: terminfo file for Contour terminal emulator.
   A GPU accelerated modern terminal emulator.
-Homepage: https://github.com/christianparpart/contour/
+Homepage: https://github.com/contour-terminal/contour/
 Depends: ${shlibs:Depends}, ${misc:Depends},
   ncurses-bin,
 
@@ -35,7 +35,7 @@ Section: x11
 Priority: optional
 Description: Contour terminal emulator.
   A GPU accelerated modern terminal emulator.
-Homepage: https://github.com/christianparpart/contour/
+Homepage: https://github.com/contour-terminal/contour/
 Recommends:
   xdg-utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
