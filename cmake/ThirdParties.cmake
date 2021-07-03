@@ -19,8 +19,8 @@ message(STATUS "base dir: ${FETCHCONTENT_BASE_DIR}")
 message(STATUS "dnld dir: ${3rdparty_DOWNLOAD_DIR}")
 
 macro(ThirdPartiesAdd_fmtlib)
-    set(3rdparty_fmtlib_VERSION "8.0.0" CACHE STRING "fmtlib version")
-    set(3rdparty_fmtlib_CHECKSUM "SHA256=7bce0e9e022e586b178b150002e7c2339994e3c2bbe44027e9abb0d60f9cce83" CACHE STRING "fmtlib checksum")
+    set(3rdparty_fmtlib_VERSION "8.0.1" CACHE STRING "fmtlib version")
+    set(3rdparty_fmtlib_CHECKSUM "SHA256=b06ca3130158c625848f3fb7418f235155a4d389b2abc3a6245fb01cb0eb1e01" CACHE STRING "fmtlib checksum")
     set(3rdparty_fmtlib_URL "https://github.com/fmtlib/fmt/archive/refs/tags/${3rdparty_fmtlib_VERSION}.tar.gz")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
