@@ -9,6 +9,6 @@ add_subdirectory(text_shaper)
 add_subdirectory(terminal)
 add_subdirectory(terminal_renderer)
 
-if(CONTOUR_CLIENT)
+if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(contour)
 endif()
