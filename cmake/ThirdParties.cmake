@@ -151,7 +151,7 @@ macro(ThirdPartiesAdd_libunicode)
     set(3rdparty_libunicode_VERSION "efd6d1cc29f73109af846f29d30c6977f5beb4e3" CACHE STRING "libunicode: commit hash")
     set(3rdparty_libunicode_CHECKSUM "SHA256=8151bbe809f0e4c26fc0f6c9a350550865e93b9bab69d4e8f287fc6113f27c59" CACHE STRING "libunicode: download checksum")
     set(3rdparty_libunicode_NAME "libunicode-${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode download name")
-    set(3rdparty_libunicode_URL "https://github.com/christianparpart/libunicode/archive/${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode URL")
+    set(3rdparty_libunicode_URL "https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_VERSION}.zip" CACHE STRING "Embedded libunicode URL")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
             libunicode

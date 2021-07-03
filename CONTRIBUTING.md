@@ -13,10 +13,10 @@ You can also see some live development on [Twitch](https://www.twitch.tv/christi
 
 - Please keep in mind, this project is still in its very early stages (started Augost 2019) and thus
   under very active development. It's not perfect nor bug-free yet.
-- Please fork the main repository at [github.com/christianparpart/contour](https://github.com/christianparpart/contour.git)
+- Please fork the main repository at [github.com/contour-terminal/contour](https://github.com/contour-terminal/contour.git)
   then git clone your repository into your preferred location.
 - Always work on a branch based off the master branch, if it is a feature or a bugfix.
-- Please have a look at the [coding style guidelines](https://github.com/christianparpart/contour/blob/master/docs/CODING_STYLE.md).
+- Please have a look at the [coding style guidelines](https://github.com/contour-terminal/contour/blob/master/docs/CODING_STYLE.md).
 - When creating a pull request, please see if you can keep the commits as atomic as possible.
   That is, a single reasonabily sized feature or functionality should be committed as
   one single commit. If you can branch out a some functionality, let it be a more generalized API or
