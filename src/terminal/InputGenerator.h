@@ -192,6 +192,20 @@ enum class Key {
 
 std::string to_string(Key _key);
 
+enum class MatchMode : uint8_t
+{
+    Default             = 0x00,
+    AlternateScreen     = 0x01,
+    AppCursor           = 0x02,
+    AppKeyPad           = 0x04,
+    // future modes
+    ViSearch            = 0x08, // TODO: This mode we want.
+};
+constexpr MatchMode operator|(MatchMode a, MatchMode b) noexcept { return static_cast<MatchMode>(static_cast<unsigned>(a) | static_cast<unsigned>(b)); }
+constexpr MatchMode operator&(MatchMode a, MatchMode b) noexcept { return static_cast<MatchMode>(static_cast<unsigned>(a) & static_cast<unsigned>(b)); }
+constexpr MatchMode operator~(MatchMode a) noexcept { return static_cast<MatchMode>(~static_cast<unsigned>(a)); }
+constexpr uint8_t operator*(MatchMode a) noexcept { return static_cast<uint8_t>(a); }
+
 enum class KeyMode {
     Normal,
     Application
@@ -200,12 +214,14 @@ enum class KeyMode {
 struct KeyInputEvent {
     Key key{};
     Modifier modifier{};
+    MatchMode mode = MatchMode::Default;
 };
 
 constexpr bool operator==(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
 {
     return _lhs.key == _rhs.key &&
-           _lhs.modifier == _rhs.modifier;
+           _lhs.modifier == _rhs.modifier &&
+           _lhs.mode == _rhs.mode;
 }
 
 constexpr bool operator!=(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
@@ -216,12 +232,14 @@ constexpr bool operator!=(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
 struct CharInputEvent {
     char32_t value{};
     Modifier modifier{};
+    MatchMode mode = MatchMode::Default;
 };
 
 constexpr bool operator==(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
 {
     return _lhs.value == _rhs.value &&
-           _lhs.modifier == _rhs.modifier;
+           _lhs.modifier == _rhs.modifier &&
+           _lhs.mode == _rhs.mode;
 }
 
 constexpr bool operator!=(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
@@ -242,6 +260,7 @@ std::string to_string(MouseButton _button);
 struct MousePressEvent {
     MouseButton button;
     Modifier modifier{};
+    MatchMode mode = MatchMode::Default;
     int row = 1;
     int column = 1;
 };
@@ -250,6 +269,7 @@ constexpr bool operator==(MousePressEvent a, MousePressEvent b) noexcept
 {
     return a.button == b.button
         && a.modifier == b.modifier
+        && a.mode == b.mode
         && a.column == b.column
         && a.row == b.row;
 }
@@ -267,6 +287,7 @@ struct MouseMoveEvent {
     int column;
 
     Modifier modifier{};
+    MatchMode mode = MatchMode::Default;
 
     constexpr auto as_pair() const noexcept { return std::pair{ row, column }; }
 
@@ -276,6 +297,7 @@ struct MouseMoveEvent {
 struct MouseReleaseEvent {
     MouseButton button;
     Modifier modifier{};
+    MatchMode mode = MatchMode::Default;
     int row = 1;
     int column = 1;
 };
@@ -423,6 +445,31 @@ inline std::string to_string(InputGenerator::MouseEventType _value)
 }  // namespace terminal
 
 namespace fmt { // {{{
+    template <>
+    struct formatter<terminal::MatchMode> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::MatchMode _mode, FormatContext& _ctx)
+        {
+            std::string s;
+            auto const advance = [&](terminal::MatchMode _cond, std::string_view _text) {
+                if (!*(_mode & _cond))
+                    return;
+                if (!s.empty())
+                    s += '+';
+                s += _text;
+            };
+            advance(terminal::MatchMode::AppCursor, "AppCursor");
+            advance(terminal::MatchMode::AppKeyPad, "AppKeyPad");
+            advance(terminal::MatchMode::AlternateScreen, "AltScreen");
+            advance(terminal::MatchMode::ViSearch, "ViSearch");
+            if (s.empty())
+                s = "Default";
+            return format_to(_ctx.out(), "{}", s);
+        }
+    };
+
     template <>
     struct formatter<terminal::Modifier> {
         template <typename ParseContext>
@@ -602,11 +649,14 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::KeyInputEvent _event, FormatContext& _ctx)
         {
+            std::string s;
+            if (*_event.mode)
+                s += fmt::format("{}", _event.mode);
             return format_to(_ctx.out(),
                 _event.modifier.any()
-                    ? "{}+{}"
-                    : "{}",
-                _event.key, _event.modifier
+                    ? "{}+{}+{}"
+                    : "{}+{}",
+                s, _event.key, _event.modifier
             );
         }
     };
@@ -619,10 +669,13 @@ namespace fmt { // {{{
         auto format(terminal::CharInputEvent _event, FormatContext& _ctx)
         {
             auto const u8str = unicode::convert_to<char>(_event.value);
+            std::string s;
+            if (*_event.mode)
+                s += fmt::format("{}", _event.mode);
             if (_event.modifier.any())
-                return format_to(_ctx.out(), "\"{}\"+{}", crispy::escape(u8str), _event.modifier);
+                return format_to(_ctx.out(), "{}+\"{}\"+{}", crispy::escape(u8str), _event.modifier);
             else
-                return format_to(_ctx.out(), "\"{}\"", crispy::escape(u8str), _event.modifier);
+                return format_to(_ctx.out(), "{}+\"{}\"", crispy::escape(u8str), _event.modifier);
         }
     };
 

@@ -262,6 +262,17 @@ color_schemes:
 # whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as
 # the `key` or `mouse` -  in order to activate the corresponding action,
 #
+# Additionally one can filter input mappings based on special terminal modes using the `modes` option:
+# - Alt       : The terminal is currently in alternate screen buffer, otherwise it is in primary screen buffer.
+# - AppCursor : The application key cursor mode is enabled (otherwise it's normal cursor mode).
+# - AppKeyPad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
+#
+# You can combine these modes by concatenating them via | and negate a single one
+# by prefixing with ~.
+#
+# The `modes` option defaults to no filter at all (the input mappings always
+# match based on modifier and key press / mouse event).
+#
 # `key` represents keys on your keyboard, and `mouse` represents buttons
 # as well as the scroll wheel.
 #
@@ -346,8 +357,8 @@ input_mapping:
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
     - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
     - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
-    - { mods: [Shift, Alt],     key: 'k',           action: ScrollMarkUp }
-    - { mods: [Shift, Alt],     key: 'j',           action: ScrollMarkDown }
+    - { mods: [Shift],          key: '{',           action: ScrollMarkUp,   mode: "~Alt"}
+    - { mods: [Shift],          key: '}',           action: ScrollMarkDown, mode: "~Alt"}
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Control],        key: O,             action: OpenFileManager }

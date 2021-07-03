@@ -105,6 +105,9 @@ class Terminal : public ScreenEvents {
     bool sendFocusOutEvent();
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
     void sendRaw(std::string_view _text);   // Sends raw string to the application.
+
+    bool applicationCursorKeys() const noexcept { return inputGenerator_.applicationCursorKeys(); }
+    bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
     // }}}
 
     // {{{ screen proxy

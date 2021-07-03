@@ -19,8 +19,8 @@ message(STATUS "base dir: ${FETCHCONTENT_BASE_DIR}")
 message(STATUS "dnld dir: ${3rdparty_DOWNLOAD_DIR}")
 
 macro(ThirdPartiesAdd_fmtlib)
-    set(3rdparty_fmtlib_VERSION "8.0.0" CACHE STRING "fmtlib version")
-    set(3rdparty_fmtlib_CHECKSUM "SHA256=7bce0e9e022e586b178b150002e7c2339994e3c2bbe44027e9abb0d60f9cce83" CACHE STRING "fmtlib checksum")
+    set(3rdparty_fmtlib_VERSION "8.0.1" CACHE STRING "fmtlib version")
+    set(3rdparty_fmtlib_CHECKSUM "SHA256=b06ca3130158c625848f3fb7418f235155a4d389b2abc3a6245fb01cb0eb1e01" CACHE STRING "fmtlib checksum")
     set(3rdparty_fmtlib_URL "https://github.com/fmtlib/fmt/archive/refs/tags/${3rdparty_fmtlib_VERSION}.tar.gz")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_Declare(
@@ -82,17 +82,19 @@ macro(ThirdPartiesAdd_Catch2)
 endmacro()
 
 macro(ThirdPartiesAdd_range_v3)
-    set(3rdparty_range_v3_VERSION "0.11.0" CACHE STRING "Embedded range-v3 version")
-    set(3rdparty_range_v3_CHECKSUM "MD5=97ab1653f3aa5f9e3d8200ee2a4911d3" CACHE STRING "Embedded range-v3 hash")
+    set(3rdparty_range_v3_VERSION "0487cca29e352e8f16bbd91fda38e76e39a0ed28" CACHE STRING "Embedded range-v3 version")
+    set(3rdparty_range_v3_CHECKSUM "SHA256=e3992d30629d058e5918b9721d6fbdbc20f72b298cdf5cfb96e798fc4b5b54fe" CACHE STRING "Embedded range-v3 hash")
+    set(3rdparty_range_v3_NAME "range-v3-${3rdparty_range_v3_VERSION}.zip" CACHE STRING "Embedded range-v3 download name")
+    set(3rdparty_range_v3_URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.zip" CACHE STRING "Embedded range-v3 URL")
     if(THIRDPARTIES_HAS_FETCHCONTENT)
         FetchContent_GetProperties(range_v3)
         if(NOT "${range_v3_POPULATED}")
             FetchContent_Declare(
                 range_v3
-                URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+                URL "${3rdparty_range_v3_URL}"
                 URL_HASH "${3rdparty_range_v3_CHECKSUM}"
                 DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-                DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+                DOWNLOAD_NAME "${3rdparty_range_v3_NAME}"
                 EXCLUDE_FROM_ALL
             )
             FetchContent_Populate(range_v3)
@@ -102,10 +104,10 @@ macro(ThirdPartiesAdd_range_v3)
     else()
         download_project(
             PROJ range-v3
-            URL "https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_VERSION}.tar.gz"
+            URL "${3rdparty_range_v3_URL}"
             URL_HASH "${3rdparty_range_v3_CHECKSUM}"
             DOWNLOAD_DIR "${3rdparty_DOWNLOAD_DIR}"
-            DOWNLOAD_NAME "range-v3-${3rdparty_range_v3_VERSION}.tar.gz"
+            DOWNLOAD_NAME "${3rdparty_range_v3_NAME}"
             EXCLUDE_FROM_ALL
             PREFIX "${FETCHCONTENT_BASE_DIR}/range-v3-${3rdparty_range_v3_VERSION}"
         )
