@@ -316,21 +316,13 @@ jobs:
         --load \
         .
         docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
-        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.tar.zst contour-${{ steps.tags.outputs.ARCH }}.tar.zst
+        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
         docker container rm contour-${{ steps.tags.outputs.ARCH }}
-    - name: "test: libcrispy"
-      shell: bash
-      run: |
-        docker run --rm contour:${{ steps.tags.outputs.ARCH }} build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      shell: bash
-      run: |
-        docker run --rm contour:${{ steps.tags.outputs.ARCH }} build/src/terminal/terminal_test
-    - name: "Uploading Archlinux .tar.zst package"
+    - name: "Uploading Archlinux .pkg.tar.zst package"
       uses: actions/upload-artifact@v2
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-archlinux_${{ steps.tags.outputs.ARCH }}"
-        path: "contour-${{ steps.tags.outputs.ARCH }}.tar.zst"
+        path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
         if-no-files-found: error
         retention-days: 30
 
