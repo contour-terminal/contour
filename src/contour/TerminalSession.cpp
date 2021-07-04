@@ -336,12 +336,13 @@ void TerminalSession::sendCharPressEvent(terminal::CharInputEvent const& _event,
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
     auto e = _event;
-    if (terminal_.screen().isAlternateScreen())
-        e.mode = e.mode | MatchMode::AlternateScreen;
-    if (terminal_.applicationCursorKeys())
-        e.mode = e.mode | MatchMode::AppCursor;
-    if (terminal_.applicationKeypad())
-        e.mode = e.mode | MatchMode::AppKeyPad;
+    // FIXME: Temporarily disabled until fixed.
+    // if (terminal_.screen().isAlternateScreen())
+    //     e.mode = e.mode | MatchMode::AlternateScreen;
+    // if (terminal_.applicationCursorKeys())
+    //     e.mode = e.mode | MatchMode::AppCursor;
+    // if (terminal_.applicationKeypad())
+    //     e.mode = e.mode | MatchMode::AppKeyPad;
 
     if (auto const* actions = config::apply(config_.inputMappings, e))
         executeAllActions(*actions);
