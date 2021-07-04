@@ -55,7 +55,7 @@ class CursorRenderer : public Renderable {
 
     CursorShape shape_;
     RGBColor const& color_;
-    int columnWidth_;
+    uint8_t columnWidth_;
 };
 
 } // namespace terminal::view

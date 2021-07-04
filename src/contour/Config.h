@@ -124,11 +124,11 @@ struct TerminalProfile {
     bool fullscreen = false;
     double refreshRate = 0.0; // 0=auto
 
-    crispy::Size terminalSize;
+    terminal::PageSize terminalSize = {terminal::LineCount(10), terminal::ColumnCount(40)};
     terminal::VTType terminalId = terminal::VTType::VT525;
 
-    std::optional<int> maxHistoryLineCount;
-    int historyScrollMultiplier;
+    std::optional<terminal::LineCount> maxHistoryLineCount;
+    terminal::LineCount historyScrollMultiplier;
     bool autoScrollOnUpdate;
 
     terminal::renderer::FontDescriptions fonts;
@@ -201,7 +201,7 @@ struct Config {
 
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;
-    crispy::Size maxImageSize = {1280, 720};
+    terminal::ImageSize maxImageSize = {terminal::Width(1280), terminal::Height(720)};
     int maxImageColorRegisters = 4096;
 
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;

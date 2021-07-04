@@ -26,6 +26,9 @@
 #include <iostream>
 
 using namespace std;
+using terminal::PageSize;
+using terminal::LineCount;
+using terminal::ColumnCount;
 
 namespace // {{{ helpers
 {
@@ -35,7 +38,7 @@ namespace // {{{ helpers
         terminal::RenderBufferRef renderBuffer = _terminal.renderBuffer();
 
         vector<string> lines;
-        lines.resize(_terminal.screenSize().height);
+        lines.resize(unbox<size_t>(_terminal.screenSize().lines));
 
         terminal::Coordinate lastPos = {};
         size_t lastCount = 0;
@@ -76,13 +79,18 @@ namespace // {{{ helpers
     class MockTerm: public terminal::Terminal::Events
     {
     public:
-        explicit MockTerm(crispy::Size _size):
+        MockTerm(ColumnCount _columns, LineCount _lines):
+            MockTerm{PageSize{_lines, _columns}}
+        {
+        }
+
+        explicit MockTerm(PageSize _size):
             pty_{_size},
             terminal_{
                 pty_,
                 1024,
                 *this,
-                1024, // max history line count
+                LineCount(1024), // max history line count
                 chrono::milliseconds(500), // cursor blink interval
                 chrono::steady_clock::time_point(), // initial time point
             }
@@ -111,7 +119,7 @@ namespace // {{{ helpers
             else
                 UNSCOPED_INFO(headline + ":");
 
-            for (int row = 1; row <= terminal().screen().size().height; ++row)
+            for (int row = 1; row <= unbox<int>(terminal().screen().size().lines); ++row)
                 UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, terminal().screen().renderTextLine(row)));
         }
 
@@ -140,7 +148,7 @@ namespace // {{{ helpers
 
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
-    auto mc = MockTerm{{6, 4}};
+    auto mc = MockTerm{ColumnCount{6}, LineCount{4}};
     auto& terminal = mc.terminal();
     terminal.setCursorDisplay(terminal::CursorDisplay::Blink);
     auto constexpr BlinkInterval = chrono::milliseconds(500);
@@ -186,7 +194,7 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     constexpr auto BatchOff = "\033[?2026l"sv;
 
     auto const now = chrono::steady_clock::now();
-    auto mc = MockTerm{{20, 1}};
+    auto mc = MockTerm{ColumnCount(20), LineCount(1)};
 
     mc.writeToStdout(BatchOn);
     mc.writeToStdout("Hello ");

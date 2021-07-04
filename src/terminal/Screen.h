@@ -142,33 +142,33 @@ class Screen : public capabilities::StaticDatabase {
      * @param _logTrace whether or not to log VT sequences in trace mode.
      * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
-    Screen(crispy::Size const& _size,
+    Screen(PageSize _size,
            ScreenEvents& _eventListener,
            bool _logRaw = false,
            bool _logTrace = false,
-           std::optional<int> _maxHistoryLineCount = std::nullopt,
-           crispy::Size _maxImageSize = crispy::Size{800, 600},
+           std::optional<LineCount> _maxHistoryLineCount = std::nullopt,
+           ImageSize _maxImageSize = ImageSize{Width(800), Height(600)},
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true,
            ColorPalette _colorPalette = {}
     );
 
     using StaticDatabase::numericCapability;
-    int numericCapability(capabilities::Code _cap) const override;
+    unsigned numericCapability(capabilities::Code _cap) const override;
 
     void setLogTrace(bool _enabled) { logTrace_ = _enabled; }
     bool logTrace() const noexcept { return logTrace_; }
     void setLogRaw(bool _enabled) { logRaw_ = _enabled; }
     bool logRaw() const noexcept { return logRaw_; }
 
-    void setMaxImageColorRegisters(int _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
+    void setMaxImageColorRegisters(unsigned _value) noexcept { sequencer_.setMaxImageColorRegisters(_value); }
     void setSixelCursorConformance(bool _value) noexcept { sixelCursorConformance_ = _value; }
 
     void setRespondToTCapQuery(bool _enable) { respondToTCapQuery_ = _enable; }
 
-    constexpr crispy::Size cellPixelSize() const noexcept { return cellPixelSize_; }
+    constexpr ImageSize cellPixelSize() const noexcept { return cellPixelSize_; }
 
-    constexpr void setCellPixelSize(crispy::Size _cellPixelSize)
+    constexpr void setCellPixelSize(ImageSize _cellPixelSize)
     {
         cellPixelSize_ = _cellPixelSize;
     }
@@ -178,10 +178,10 @@ class Screen : public capabilities::StaticDatabase {
         terminalId_ = _id;
     }
 
-    void setMaxHistoryLineCount(std::optional<int> _maxHistoryLineCount);
-    std::optional<int> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
+    void setMaxHistoryLineCount(std::optional<LineCount> _maxHistoryLineCount);
+    std::optional<LineCount> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
 
-    int historyLineCount() const noexcept { return grid().historyLineCount(); }
+    LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
     /// Writes given data into the screen.
     void write(char const* _data, size_t _size);
@@ -195,7 +195,7 @@ class Screen : public capabilities::StaticDatabase {
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
-    void render(Renderer&& _render, std::optional<int> _scrollOffset = std::nullopt) const
+    void render(Renderer&& _render, std::optional<StaticScrollbackPosition> _scrollOffset = std::nullopt) const
     {
         activeGrid_->render(std::forward<Renderer>(_render), _scrollOffset);
     }
@@ -230,12 +230,12 @@ class Screen : public capabilities::StaticDatabase {
 
     void clearScrollbackBuffer();
 
-    void eraseCharacters(int _n);  // ECH
-    void insertCharacters(int _n); // ICH
-    void deleteCharacters(int _n); // DCH
-    void deleteColumns(int _n);    // DECDC
-    void insertLines(int _n);      // IL
-    void insertColumns(int _n);    // DECIC
+    void eraseCharacters(ColumnCount _n);  // ECH
+    void insertCharacters(ColumnCount _n); // ICH
+    void deleteCharacters(ColumnCount _n); // DCH
+    void deleteColumns(ColumnCount _n);    // DECDC
+    void insertLines(LineCount _n);      // IL
+    void insertColumns(ColumnCount _n);    // DECIC
 
     void copyArea(
         int _top, int _left, int _bottom, int _right, int _page,
@@ -246,28 +246,27 @@ class Screen : public capabilities::StaticDatabase {
 
     void fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right);
 
-    void deleteLines(int _n);      // DL
+    void deleteLines(LineCount _n);      // DL
 
     void backIndex();    // DECBI
     void forwardIndex(); // DECFI
 
-    void moveCursorBackward(int _n);      // CUB
-    void moveCursorDown(int _n);          // CUD
-    void moveCursorForward(int _n);       // CUF
-    void moveCursorTo(int _n);            // CUP
-    void moveCursorToBeginOfLine();       // CR
-    void moveCursorToColumn(int _n);      // CHA
-    void moveCursorToLine(int _n);        // VPA
-    void moveCursorToNextLine(int _n);    // CNL
-    void moveCursorToNextTab();           // HT
-    void moveCursorToPrevLine(int _n);    // CPL
-    void moveCursorUp(int _n);            // CUU
+    void moveCursorBackward(ColumnCount _n);    // CUB
+    void moveCursorDown(LineCount _n);          // CUD
+    void moveCursorForward(ColumnCount _n);     // CUF
+    void moveCursorToBeginOfLine();             // CR
+    void moveCursorToColumn(ColumnPosition _n); // CHA
+    void moveCursorToLine(LinePosition _n);     // VPA
+    void moveCursorToNextLine(LineCount _n);    // CNL
+    void moveCursorToNextTab();                 // HT
+    void moveCursorToPrevLine(LineCount _n);    // CPL
+    void moveCursorUp(LineCount _n);            // CUU
 
-    void cursorBackwardTab(int _n);       // CBT
-    void cursorForwardTab(int _n);        // CHT
-    void backspace();                     // BS
+    void cursorBackwardTab(TabStopCount _n);    // CBT
+    void cursorForwardTab(TabStopCount _n);     // CHT
+    void backspace();                           // BS
     void horizontalTabClear(HorizontalTabClear _which); // TBC
-    void horizontalTabSet();              // HTS
+    void horizontalTabSet();                    // HTS
 
     void index(); // IND
     void reverseIndex(); // RI
@@ -308,7 +307,7 @@ class Screen : public capabilities::StaticDatabase {
     void singleShiftSelect(CharsetTable _table);
     void requestPixelSize(RequestPixelSize _area);
     void requestCharacterSize(RequestPixelSize _area);
-    void sixelImage(crispy::Size _pixelSize, Image::Data&& _rgba);
+    void sixelImage(ImageSize _pixelSize, Image::Data&& _rgba);
     void requestStatusString(RequestStatusString _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
@@ -317,16 +316,16 @@ class Screen : public capabilities::StaticDatabase {
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
-    void setMaxImageSize(crispy::Size _effective, crispy::Size _limit)
+    void setMaxImageSize(ImageSize _effective, ImageSize _limit)
     {
         maxImageSize_ = _effective;
         maxImageSizeLimit_ = _limit;
     }
 
-    crispy::Size maxImageSize() const noexcept { return maxImageSize_; }
-    crispy::Size maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
+    ImageSize maxImageSize() const noexcept { return maxImageSize_; }
+    ImageSize maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
 
-    std::shared_ptr<Image const> uploadImage(ImageFormat _format, crispy::Size _imageSize, Image::Data&& _pixmap);
+    std::shared_ptr<Image const> uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap);
 
     /**
      * Renders an image onto the screen.
@@ -342,9 +341,9 @@ class Screen : public capabilities::StaticDatabase {
      */
     void renderImage(std::shared_ptr<Image const> const& _imageRef,
                      Coordinate _topLeft,
-                     crispy::Size _gridSize,
+                     GridSize _gridSize,
                      Coordinate _imageOffset,
-                     crispy::Size _imageSize,
+                     ImageSize _imageSize,
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,
                      bool _autoScroll);
@@ -366,11 +365,11 @@ class Screen : public capabilities::StaticDatabase {
     void requestAnsiMode(int _mode);
     void requestDECMode(int _mode);
 
-    crispy::Size const& size() const noexcept { return size_; }
-    void resize(crispy::Size const& _newSize);
+    PageSize size() const noexcept { return size_; }
+    void resize(PageSize _newSize);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
-    void resizeColumns(int _newColumnCount, bool _clear);
+    void resizeColumns(ColumnCount _newColumnCount, bool _clear);
 
     bool isCursorInsideMargins() const noexcept
     {
@@ -433,16 +432,16 @@ class Screen : public capabilities::StaticDatabase {
     Coordinate clampToScreen(Coordinate const& coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{ 1 }, size_.height),
-            std::clamp(coord.column, int{ 1 }, size_.width)
+            std::clamp(coord.row, int{1}, unbox<int>(size_.lines)),
+            std::clamp(coord.column, int{1}, unbox<int>(size_.columns))
         };
     }
 
     // Tests if given coordinate is within the visible screen area.
-    constexpr bool contains(Coordinate const& _coord) const noexcept
+    constexpr bool contains(Coordinate _coord) const noexcept
     {
-        return 1 <= _coord.row && _coord.row <= size_.height
-            && 1 <= _coord.column && _coord.column <= size_.width;
+        return 1 <= _coord.row && _coord.row <= unbox<int>(size_.lines)
+            && 1 <= _coord.column && _coord.column <= unbox<int>(size_.columns);
     }
 
     Cell const& currentCell() const noexcept
@@ -489,10 +488,7 @@ class Screen : public capabilities::StaticDatabase {
 
     auto scrollbackLines() const noexcept { return grid().scrollbackLines(); }
 
-    void setTabWidth(int _value)
-    {
-        tabWidth_ = _value;
-    }
+    void setTabWidth(uint8_t _value) { tabWidth_ = _value; }
 
     /**
      * Returns the n'th saved line into the history scrollback buffer.
@@ -533,10 +529,10 @@ class Screen : public capabilities::StaticDatabase {
     void saveWindowTitle();
     void restoreWindowTitle();
 
-    void setMaxImageSize(crispy::Size _size) noexcept { sequencer_.setMaxImageSize(_size); }
+    void setMaxImageSize(ImageSize _size) noexcept { sequencer_.setMaxImageSize(_size); }
 
-    void scrollUp(int n) { scrollUp(n, margin_); }
-    void scrollDown(int n) { scrollDown(n, margin_); }
+    void scrollUp(LineCount n) { scrollUp(n, margin_); }
+    void scrollDown(LineCount n) { scrollDown(n, margin_); }
 
     void verifyState() const;
 
@@ -626,22 +622,23 @@ class Screen : public capabilities::StaticDatabase {
         return const_cast<Screen*>(this)->columnIteratorAt(_n);
     }
 
-    void scrollUp(int n, Margin const& margin);
-    void scrollDown(int n, Margin const& margin);
-    void insertChars(int _lineNo, int _n);
-    void deleteChars(int _lineNo, int _n);
+    void scrollUp(LineCount n, Margin const& margin);
+    void scrollDown(LineCount n, Margin const& margin);
+    void insertChars(int _lineNo, ColumnCount _n);
+    void deleteChars(int _lineNo, ColumnCount _n);
 
     /// Sets the current column to given logical column number.
-    void setCurrentColumn(int _n);
+    void setCurrentColumn(ColumnPosition _n);
 
-  private:
+    // private fields
+    //
     ScreenEvents& eventListener_;
 
     bool logRaw_ = false;
     bool logTrace_ = false;
     bool focused_ = true;
 
-    crispy::Size cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
+    ImageSize cellPixelSize_; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
 
     VTType terminalId_ = VTType::VT525;
 
@@ -652,8 +649,8 @@ class Screen : public capabilities::StaticDatabase {
     ColorPalette colorPalette_;
 
     int maxImageColorRegisters_;
-    crispy::Size maxImageSize_;
-    crispy::Size maxImageSizeLimit_;
+    ImageSize maxImageSize_;
+    ImageSize maxImageSizeLimit_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
 
@@ -661,7 +658,7 @@ class Screen : public capabilities::StaticDatabase {
     parser::Parser parser_;
     int64_t instructionCounter_ = 0;
 
-    crispy::Size size_;
+    PageSize size_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
@@ -670,8 +667,8 @@ class Screen : public capabilities::StaticDatabase {
     // XXX moved from ScreenBuffer
     Margin margin_;
     int wrapPending_ = 0;
-    int tabWidth_{8};
-    std::vector<int> tabs_;
+    uint8_t tabWidth_{8};
+    std::vector<ColumnPosition> tabs_;
 
     // main/alt screen and history
     //

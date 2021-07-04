@@ -15,6 +15,7 @@
 
 #include <crispy/size.h>
 #include <crispy/debuglog.h>
+#include <terminal/primitives.h>
 
 #include <fmt/format.h>
 
@@ -57,7 +58,7 @@ struct AtlasID
 
 struct CreateAtlas {
     AtlasID atlas;
-    crispy::Size size;
+    ImageSize size;
     Format format;                // internal texture format (such as GL_R8 or GL_RGBA8 when using OpenGL)
     int user;
 };
@@ -80,8 +81,8 @@ struct TextureInfo {
     TextureInfo(AtlasID _atlas,
                 std::reference_wrapper<std::string const> _atlasName,
                 crispy::Point _offset,
-                crispy::Size _bitmapSize,
-                crispy::Size _targetSize,
+                ImageSize _bitmapSize,
+                ImageSize _targetSize,
                 float _relativeX,
                 float _relativeY,
                 float _relativeWidth,
@@ -102,8 +103,8 @@ struct TextureInfo {
     AtlasID atlas;                  // for example 0 for GL_TEXTURE0
     std::reference_wrapper<std::string const> atlasName;
     crispy::Point offset;           // Offset into the 2D texture atlas.
-    crispy::Size bitmapSize;        // width/height of sub-image in pixels
-    crispy::Size targetSize;        // width/height of sub-image when being rendered
+    ImageSize bitmapSize;           // width/height of sub-image in pixels
+    ImageSize targetSize;           // width/height of sub-image when being rendered
     float relativeX;
     float relativeY;
     float relativeWidth;            // width relative to Atlas::width_
@@ -135,7 +136,7 @@ class AtlasBackend {
     virtual ~AtlasBackend() = default;
 
     /// Creates a new (3D) texture atlas.
-    virtual AtlasID createAtlas(crispy::Size _size, Format _textureFormat, int _user) = 0;
+    virtual AtlasID createAtlas(ImageSize _size, Format _textureFormat, int _user) = 0;
 
     /// Uploads given texture to the atlas.
     virtual void uploadTexture(UploadTexture _texture) = 0;
@@ -173,7 +174,7 @@ class TextureAtlasAllocator {
      *                      such as GL_R8 or GL_RBGA8 when using OpenGL
      */
     TextureAtlasAllocator(AtlasBackend& _backend,
-                          crispy::Size _atlasTextureSize,
+                          ImageSize _atlasTextureSize,
                           int _maxInstances,
                           Format _format, // such as GL_R8 or GL_RGBA8
                           int _user,
@@ -188,8 +189,8 @@ class TextureAtlasAllocator {
 
     constexpr int user() const noexcept { return user_; }
     std::string const& name() const noexcept { return name_; }
-    constexpr int maxInstances() const noexcept { return maxInstances_; }
-    constexpr crispy::Size size() const noexcept { return size_; }
+    constexpr size_t maxInstances() const noexcept { return maxInstances_; }
+    constexpr ImageSize size() const noexcept { return size_; }
     constexpr Format format() const noexcept { return format_; }
 
     std::vector<AtlasID> const& activeAtlasTextures() const noexcept { return atlasIDs_; }
@@ -203,11 +204,14 @@ class TextureAtlasAllocator {
     /// @return current Y offset into the current 3D texture atlas.
     constexpr int currentY() const noexcept { return cursor_.position.y; }
 
-    constexpr int maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
+    constexpr unsigned maxTextureHeightInCurrentRow() const noexcept { return maxTextureHeightInCurrentRow_; }
 
     void clear();
 
-    TextureInfo const& get(size_t _index) const { return *std::next(std::begin(textureInfos_), _index); }
+    TextureInfo const& get(size_t _index) const
+    {
+        return *std::next(std::begin(textureInfos_), static_cast<long>(_index));
+    }
 
     // Configure some enforced horizontal/vertical gap between the subtextures.
     auto inline static constexpr HorizontalGap = 0;
@@ -223,8 +227,8 @@ class TextureAtlasAllocator {
     /// @param _user     user defined data that is supplied along with TexCoord's 4th component
     ///
     /// @return index to the created TextureInfo or std::nullopt if failed.
-    TextureInfo const* insert(crispy::Size _bitmapSize,
-                              crispy::Size _targetSize,
+    TextureInfo const* insert(ImageSize _bitmapSize,
+                              ImageSize _targetSize,
                               Format _format,
                               Buffer _data,
                               int _user = 0);
@@ -235,7 +239,7 @@ class TextureAtlasAllocator {
     constexpr Cursor cursor() const noexcept { return cursor_; }
 
   private:
-    std::optional<Cursor> getOffsetAndAdvance(crispy::Size _bitmapSize);
+    std::optional<Cursor> getOffsetAndAdvance(ImageSize _bitmapSize);
 
     void getOrCreateNewAtlas()
     {
@@ -253,8 +257,8 @@ class TextureAtlasAllocator {
         cursor_.position.y = 0;
     }
 
-    TextureInfo const& appendTextureInfo(crispy::Size _bitmapSize,
-                                         crispy::Size _targetSize,
+    TextureInfo const& appendTextureInfo(ImageSize _bitmapSize,
+                                         ImageSize _targetSize,
                                          Cursor _offset,
                                          int _user);
 
@@ -263,17 +267,17 @@ class TextureAtlasAllocator {
     //
     AtlasBackend& atlasBackend_;   // atlas event listener (used to perform allocation/modification actions)
     size_t const maxInstances_;    // maximum number of atlas instances (e.g. maximum number of OpenGL 3D textures)
-    crispy::Size size_;            // total atlas texture size in pixels
+    ImageSize size_;            // total atlas texture size in pixels
     Format const format_;          // internal storage format, such as GL_R8 or GL_RGBA8
 
     int const user_;               // user-defined arbitrary data that relates to this atlas.
     std::string const name_;       // atlas human readable name (only for debugging)
 
     Cursor cursor_;                // current texture ID and cursor for the next sub texture
-    int maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
+    unsigned maxTextureHeightInCurrentRow_ = 0; // current maximum height in the current row (used to increment currentY_ to get to the next row)
 
     // TODO: make this an unordered_map
-    std::map<crispy::Size, std::vector<Cursor>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
+    std::map<ImageSize, std::vector<Cursor>> discarded_; // map of texture size to list of atlas texture offsets of regions that have been discarded and are available for reuse.
     std::vector<AtlasID> atlasIDs_;
     std::vector<AtlasID> unusedAtlasIDs_;
 
@@ -295,7 +299,7 @@ class MetadataTextureAtlas {
 
     //std::string const& name() const noexcept { return name_; }
     constexpr int maxInstances() const noexcept { return atlas_.maxInstances(); }
-    constexpr crispy::Size size() const noexcept { return atlas_.size(); }
+    constexpr ImageSize size() const noexcept { return atlas_.size(); }
 
     /// @return number of textures stored in this texture atlas.
     //TODO: (do we need you?) constexpr size_t allocationCount() const noexcept { return allocations_.size(); }
@@ -336,8 +340,8 @@ class MetadataTextureAtlas {
     ///
     /// @return index to the corresponding DataRef or std::nullopt if failed.
     std::optional<DataRef> insert(Key const& _id,
-                                  crispy::Size _bitmapSize,
-                                  crispy::Size _targetSize,
+                                  ImageSize _bitmapSize,
+                                  ImageSize _targetSize,
                                   Buffer&& _data,
                                   int _user = 0,
                                   Metadata _metadata = {})

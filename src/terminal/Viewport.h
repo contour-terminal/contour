@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Screen.h>
+#include <terminal/primitives.h>
 
 #include <algorithm>
 #include <optional>
@@ -22,7 +23,8 @@ namespace terminal {
 
 class Screen;
 
-class Viewport {
+class Viewport
+{
   public:
     using ModifyEvent = std::function<void()>;
 
@@ -32,7 +34,7 @@ class Viewport {
     {}
 
     /// Returns the absolute offset where 0 is the top of scrollback buffer, and the maximum value the bottom of the screeen (plus history).
-    std::optional<int> absoluteScrollOffset() const noexcept
+    std::optional<StaticScrollbackPosition> absoluteScrollOffset() const noexcept
     {
         return scrollOffset_;
     }
@@ -47,40 +49,47 @@ class Viewport {
     }
 
     /// @returns scroll offset relative to the main screen buffer
-    int relativeScrollOffset() const noexcept
+    RelativeScrollbackPosition relativeScrollOffset() const noexcept
     {
-        return scrollOffset_.has_value()
-            ? historyLineCount() - scrollOffset_.value()
-            : 0;
+        if (!scrollOffset_)
+            return RelativeScrollbackPosition{0};
+
+        return RelativeScrollbackPosition::cast_from(
+            historyLineCount().as<int>() - scrollOffset_->as<int>()
+        );
     }
 
     bool isLineVisible(int _row) const noexcept
     {
-        return crispy::ascending(1 - relativeScrollOffset(), _row, screenLineCount() - relativeScrollOffset());
+        return crispy::ascending(
+            long{1} - *relativeScrollOffset(),
+            static_cast<long>(_row),
+            static_cast<long>(*screenLineCount()) - *relativeScrollOffset()
+        );
     }
 
-    bool scrollUp(int _numLines)
+    bool scrollUp(LineCount _numLines)
     {
-        if (_numLines <= 0)
-            return false;
-
-        auto const newOffset = std::max(absoluteScrollOffset().value_or(historyLineCount()) - _numLines, 0);
+        auto const newOffset = std::max(
+            absoluteScrollOffset().value_or(boxed_cast<StaticScrollbackPosition>(historyLineCount())) - boxed_cast<StaticScrollbackPosition>(_numLines),
+            StaticScrollbackPosition(0)
+        );
         return scrollToAbsolute(newOffset);
     }
 
-    bool scrollDown(int _numLines)
+    bool scrollDown(LineCount _numLines)
     {
-        if (_numLines <= 0)
-            return false;
+        auto const newOffset =
+            absoluteScrollOffset().value_or(boxed_cast<StaticScrollbackPosition>(historyLineCount()))
+          + boxed_cast<StaticScrollbackPosition>(_numLines);
 
-        auto const newOffset = absoluteScrollOffset().value_or(historyLineCount()) + _numLines;
         return scrollToAbsolute(newOffset);
     }
 
     bool scrollToTop()
     {
-        if (absoluteScrollOffset() != 0)
-            return scrollToAbsolute(0);
+        if (absoluteScrollOffset())
+            return scrollToAbsolute(StaticScrollbackPosition{0});
         else
             return false;
     }
@@ -103,19 +112,19 @@ class Viewport {
         return true;
     }
 
-    bool scrollToAbsolute(int _absoluteScrollOffset)
+    bool scrollToAbsolute(StaticScrollbackPosition _absoluteScrollOffset)
     {
         if (scrollingDisabled())
             return false;
 
-        if (0 <= _absoluteScrollOffset && _absoluteScrollOffset < historyLineCount())
+        if (StaticScrollbackPosition{0} <= _absoluteScrollOffset && _absoluteScrollOffset < boxed_cast<StaticScrollbackPosition>(historyLineCount()))
         {
             scrollOffset_.emplace(_absoluteScrollOffset);
             modified_();
             return true;
         }
 
-        if (_absoluteScrollOffset >= historyLineCount())
+        if (_absoluteScrollOffset >= boxed_cast<StaticScrollbackPosition>(historyLineCount()))
             return forceScrollToBottom();
 
         return false;
@@ -126,9 +135,13 @@ class Viewport {
         if (scrollingDisabled())
             return false;
 
-        auto const newScrollOffset = screen_.findMarkerBackward(absoluteScrollOffset().value_or(historyLineCount()));
+        auto const newScrollOffset = screen_.findMarkerBackward(
+            absoluteScrollOffset().
+            value_or(historyLineCount().as<StaticScrollbackPosition>()).
+            as<int>()
+        );
         if (newScrollOffset.has_value())
-            return scrollToAbsolute(newScrollOffset.value());
+            return scrollToAbsolute(StaticScrollbackPosition::cast_from(*newScrollOffset));
 
         return false;
     }
@@ -138,10 +151,12 @@ class Viewport {
         if (scrollingDisabled())
             return false;
 
-        auto const newScrollOffset = screen_.findMarkerForward(absoluteScrollOffset().value_or(historyLineCount()));
+        auto const newScrollOffset = screen_.findMarkerForward(
+            static_cast<int>(*absoluteScrollOffset().value_or(boxed_cast<StaticScrollbackPosition>(historyLineCount())))
+        );
 
         if (newScrollOffset.has_value())
-            return scrollToAbsolute(newScrollOffset.value());
+            return scrollToAbsolute(StaticScrollbackPosition{static_cast<StaticScrollbackPosition::inner_type>(*newScrollOffset)});
         else
             return forceScrollToBottom();
 
@@ -149,8 +164,8 @@ class Viewport {
     }
 
   private:
-    int historyLineCount() const noexcept { return screen_.historyLineCount(); }
-    int screenLineCount() const noexcept { return screen_.size().height; }
+    LineCount historyLineCount() const noexcept { return screen_.historyLineCount(); }
+    LineCount screenLineCount() const noexcept { return screen_.size().lines; }
 
     bool scrollingDisabled() const noexcept
     {
@@ -158,10 +173,11 @@ class Viewport {
         return screen_.isAlternateScreen();
     }
 
-  private:
+    // private fields
+    //
     Screen& screen_;
     ModifyEvent modified_;
-    std::optional<int> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    std::optional<StaticScrollbackPosition> scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
 };
 
 }

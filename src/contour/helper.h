@@ -169,12 +169,14 @@ bool requestPermission(PermissionCache& _cache,
 
 terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer);
 
-terminal::renderer::PageMargin computeMargin(crispy::Size _cellSize, crispy::Size _charCells, crispy::Size _pixels) noexcept;
+terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
+                                             terminal::PageSize _charCells,
+                                             terminal::ImageSize _pixels) noexcept;
 
 bool applyFontDescription(
-    crispy::Size _cellSize,
-    crispy::Size _screenSize,
-    crispy::Size _pixelSize,
+    terminal::ImageSize _cellSize,
+    terminal::PageSize _screenSize,
+    terminal::ImageSize _pixelSize,
     crispy::Point _screenDPI,
     terminal::renderer::Renderer& _renderer,
     terminal::renderer::FontDescriptions _fontDescriptions);

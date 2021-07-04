@@ -17,10 +17,9 @@
 #include <string_view>
 #include <array>
 
-using crispy::Size;
 using namespace terminal;
 
-SixelImageBuilder sixelImageBuilder(Size _size, RGBAColor _defaultColor)
+SixelImageBuilder sixelImageBuilder(ImageSize _size, RGBAColor _defaultColor)
 {
     return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
 }
@@ -30,7 +29,7 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = sixelImageBuilder(Size{4, 10}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(4), Height(10)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -40,9 +39,9 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 1});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             auto const& actualColor = ib.at(Coordinate{y, x});
             CHECK(actualColor == defaultColor);
@@ -55,7 +54,7 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
     auto constexpr pinColor = RGBColor{0x10, 0x20, 0x40};
 
-    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(2), Height(8)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -66,9 +65,9 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 1});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             auto const& actualColor = ib.at(Coordinate{y, x});
             auto const pinned = x == 0 && y >= 0 && y <= 5;
@@ -86,7 +85,7 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = sixelImageBuilder(Size{4, 10}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(4), Height(10)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -97,9 +96,9 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 1});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(fmt::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(Coordinate{y, x});
@@ -117,7 +116,7 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(2), Height(8)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -128,9 +127,9 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 1});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(fmt::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(Coordinate{y, x});
@@ -148,7 +147,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
     auto constexpr defaultColor = RGBAColor{0x10, 0x20, 0x30, 0xFF};
     auto constexpr pinColor = RGBColor{0xFF, 0xFF, 0x42};
 
-    auto ib = sixelImageBuilder(Size{2, 8}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(2), Height(8)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -159,9 +158,9 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 1});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             INFO(fmt::format("x={}, y={}", x, y));
             auto const& actualColor = ib.at(Coordinate{y, x});
@@ -177,7 +176,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
 TEST_CASE("SixelParser.raster", "[sixel]")
 {
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
-    auto ib = sixelImageBuilder(Size{640, 480}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(640), Height(480)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -188,15 +187,15 @@ TEST_CASE("SixelParser.raster", "[sixel]")
     CHECK(ib.sixelCursor() == Coordinate{0, 0});
     CHECK(ib.aspectRatioNominator() == 123);
     CHECK(ib.aspectRatioDenominator() == 234);
-    CHECK(ib.size().width == 320);
-    CHECK(ib.size().height == 240);
+    CHECK(*ib.size().width == 320);
+    CHECK(*ib.size().height == 240);
 }
 
 TEST_CASE("SixelParser.rep", "[sixel]")
 {
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
     auto constexpr pinColor = RGBColor{0x10, 0x20, 0x30};
-    auto ib = sixelImageBuilder(Size{14, 8}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(14), Height(8)}, defaultColor);
     auto sp = SixelParser{ib};
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 0});
@@ -207,9 +206,9 @@ TEST_CASE("SixelParser.rep", "[sixel]")
 
     CHECK(ib.sixelCursor() == Coordinate{0, 12});
 
-    for (int x = 0; x < ib.size().width; ++x)
+    for (int x = 0; x < ib.size().width.as<int>(); ++x)
     {
-        for (int y = 0; y < ib.size().height; ++y)
+        for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             auto const& actualColor = ib.at(Coordinate{y, x});
             auto const pinned = x < 12 && y < 6;
@@ -231,7 +230,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     };
 
     auto constexpr defaultColor = RGBAColor{0, 0, 0, 0xFF};
-    auto ib = sixelImageBuilder(Size{/*5, 7*/ 4, 6}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(4), Height(6)}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;0;0");
@@ -247,7 +246,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 
     REQUIRE(ib.sixelCursor() == Coordinate{0, 4});
 
-    for (auto const [x, y] : crispy::times(ib.size().width) * crispy::times(ib.size().height))
+    for (auto const [x, y] : crispy::times(ib.size().width.as<int>()) * crispy::times(ib.size().height.as<int>()))
     {
         auto const& expectedColor = x < 4 && y < 6 ? pinColors.at(x) : defaultColor;
         auto const& actualColor = ib.at(Coordinate{y, x});
@@ -265,7 +264,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
     };
 
     auto constexpr defaultColor = pinColors[0];
-    auto ib = sixelImageBuilder(Size{4, 6}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(4), Height(6)}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;100;0");
@@ -300,7 +299,7 @@ TEST_CASE("SixelParser.newline", "[sixel]")
     };
 
     auto constexpr defaultColor = pinColors[0];
-    auto ib = sixelImageBuilder(Size{5, 13}, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize{Width(5), Height(13)}, defaultColor);
     auto sp = SixelParser{ib};
 
     sp.parseFragment("#1;2;100;100;0");
@@ -313,9 +312,9 @@ TEST_CASE("SixelParser.newline", "[sixel]")
 
     REQUIRE(ib.sixelCursor() == Coordinate{6, 4});
 
-    for (int y = 0; y < ib.size().height; ++y)
+    for (int y = 0; y < ib.size().height.as<int>(); ++y)
     {
-        for (int x = 0; x < ib.size().width; ++x)
+        for (int x = 0; x < ib.size().width.as<int>(); ++x)
         {
             auto const expectedColor = y < 6  && x < 4 ? pinColors[1]
                                      : y < 12 && x < 4 ? pinColors[2]

@@ -48,7 +48,7 @@ class CharsetMapping {
 
     char32_t map(CharsetTable _table, char _code) const noexcept
     {
-        return (*tables_[static_cast<size_t>(_table)])[_code];
+        return (*tables_[static_cast<size_t>(_table)])[static_cast<uint8_t>(_code)];
     }
 
     constexpr void singleShift(CharsetTable _table) noexcept

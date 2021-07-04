@@ -15,20 +15,22 @@
 
 #include <terminal/pty/Pty.h>
 
+#include <string>
+
 namespace terminal {
 
 /// Mock-PTY, to be used in unit tests.
 class MockPty : public Pty
 {
   public:
-    explicit MockPty(crispy::Size const& windowSize);
+    explicit MockPty(PageSize windowSize);
     ~MockPty() override;
 
     int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    crispy::Size screenSize() const noexcept override;
-    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;
+    PageSize screenSize() const noexcept override;
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     void prepareChildProcess() override;
     void prepareParentProcess() override;
@@ -39,8 +41,8 @@ class MockPty : public Pty
     bool isClosed() const noexcept { return closed_; }
 
   private:
-    crispy::Size screenSize_;
-    std::optional<crispy::Size> pixelSize_;
+    PageSize screenSize_;
+    std::optional<ImageSize> pixelSize_;
     std::string inputBuffer_;
     std::string outputBuffer_;
     bool closed_ = false;

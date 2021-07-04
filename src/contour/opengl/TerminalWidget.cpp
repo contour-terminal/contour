@@ -58,8 +58,15 @@
 // #define CONTOUR_DEBUG_OPENGL 1
 
 using crispy::Point;
-using crispy::Size;
 using crispy::Zero;
+
+using terminal::ImageSize;
+using terminal::Width;
+using terminal::Height;
+
+using terminal::PageSize;
+using terminal::LineCount;
+using terminal::ColumnCount;
 
 using namespace std::string_literals;
 using namespace std;
@@ -270,8 +277,8 @@ TerminalWidget::TerminalWidget(
         //TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
     },
     size_{
-        static_cast<int>(terminal().screenSize().width * gridMetrics().cellSize.width),
-        static_cast<int>(terminal().screenSize().height * gridMetrics().cellSize.height)
+        terminal::Width(*terminal().screenSize().columns * *gridMetrics().cellSize.width),
+        terminal::Height(*terminal().screenSize().lines * *gridMetrics().cellSize.height)
     }
 {
     debuglog(WidgetTag).write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
@@ -289,8 +296,8 @@ TerminalWidget::TerminalWidget(
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
 
-    setMinimumSize(gridMetrics().cellSize.width * 3,
-                   gridMetrics().cellSize.height * 2);
+    setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3,
+                   gridMetrics().cellSize.height.as<int>() * 2);
 
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
@@ -335,12 +342,12 @@ bool TerminalWidget::isFullScreen() const
     return window()->isFullScreen();
 }
 
-crispy::Size TerminalWidget::pixelSize() const
+terminal::ImageSize TerminalWidget::pixelSize() const
 {
     return size_;
 }
 
-crispy::Size TerminalWidget::cellSize() const
+terminal::ImageSize TerminalWidget::cellSize() const
 {
     return gridMetrics().cellSize;
 }
@@ -383,26 +390,29 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 
 QSize TerminalWidget::minimumSizeHint() const
 {
-    auto constexpr MinimumScreenSize = Size{3, 2};
+    auto constexpr MinimumScreenSize = PageSize{LineCount(2), ColumnCount(3)};
 
     auto const cellSize = gridMetrics().cellSize;
-    auto const viewSize = MinimumScreenSize * cellSize;
 
-    return QSize(viewSize.width, viewSize.height);
+    return QSize(
+        cellSize.width.as<int>() * MinimumScreenSize.columns.as<int>(),
+        cellSize.height.as<int>() * MinimumScreenSize.lines.as<int>()
+    );
 }
 
 QSize TerminalWidget::sizeHint() const
 {
     auto const cellSize = renderer_.gridMetrics().cellSize;
-    auto const viewSize = cellSize * profile_.terminalSize;
-
+    auto const viewSize = ImageSize{
+        Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
+        Height(*gridMetrics().cellSize.height * *profile_.terminalSize.lines)
+    };
 
     debuglog(WidgetTag).write("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
                               viewSize, cellSize, profile_.terminalSize,
-                              renderer_.fontDescriptions().dpi
-                              );
+                              renderer_.fontDescriptions().dpi);
 
-    return QSize(viewSize.width, viewSize.height);
+    return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
 
 void TerminalWidget::initializeGL()
@@ -412,7 +422,7 @@ void TerminalWidget::initializeGL()
     renderTarget_ = make_unique<terminal::renderer::opengl::OpenGLRenderer>(
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
-        Size{width(), height()},
+        ImageSize{Width(width()), Height(height())},
         terminal::renderer::PageMargin{} // TODO margin
     );
 
@@ -475,13 +485,13 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-    debuglog(WidgetTag).write("resizing to {}", Size{_width, _height});
+    debuglog(WidgetTag).write("resizing to {}", ImageSize{Width(_width), Height(_height)});
     QOpenGLWidget::resizeGL(_width, _height);
 
     if (_width == 0 || _height == 0)
         return;
 
-    size_ = Size{_width, _height};
+    size_ = ImageSize{Width(_width), Height(_height)};
     auto const newScreenSize = screenSize();
 
     renderer_.setRenderSize(size_);
@@ -491,7 +501,11 @@ void TerminalWidget::resizeGL(int _width, int _height)
 
     if (newScreenSize != terminal().screenSize())
     {
-        terminal().resizeScreen(newScreenSize, newScreenSize * gridMetrics().cellSize);
+        auto const viewSize = ImageSize{
+            Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
+            Height(*gridMetrics().cellSize.height * *profile_.terminalSize.lines)
+        };
+        terminal().resizeScreen(newScreenSize, viewSize);
         terminal().clearSelection();
     }
 }
@@ -745,15 +759,15 @@ void TerminalWidget::dumpState()
         auto const theImageFormat = qImageFormat;
         auto const theElementCount = elementCount;
 
-        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, Size _size) {
-            auto image = make_unique<QImage>(_size.width, _size.height, theImageFormat);
+        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
+            auto image = make_unique<QImage>(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
             // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is inverse.
             crispy::for_each(
                 // TODO: std::execution::seq,
-                crispy::times(_size.height),
+                crispy::times(_size.height.as<int>()),
                 [&_buffer, &image, theElementCount, _size](int i) {
-                    uint8_t const* sourceLine = &_buffer.data()[i * _size.width * theElementCount];
-                    copy(sourceLine, sourceLine + _size.width * theElementCount, image->scanLine(_size.height - i - 1));
+                    uint8_t const* sourceLine = &_buffer.data()[i * _size.width.as<int>() * theElementCount];
+                    copy(sourceLine, sourceLine + _size.width.as<int>() * theElementCount, image->scanLine(_size.height.as<int>() - i - 1));
                 }
             );
             image->save(QString::fromStdString(_filename.generic_string()));
@@ -763,7 +777,7 @@ void TerminalWidget::dumpState()
     auto const atlasScreenshotSaver = [&screenshotSaver, &targetDir](std::string const& _allocatorName,
                                                                      unsigned _instanceId,
                                                                      vector<uint8_t> const& _buffer,
-                                                                     Size _size) {
+                                                                     ImageSize _size) {
         return [&screenshotSaver, &targetDir, &_buffer, _size, _allocatorName, _instanceId](ImageBufferFormat _format) {
             auto const formatText = [&]() {
                 switch (_format) {
@@ -813,7 +827,7 @@ void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_bod
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
+void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _height)
 {
     if (isFullScreen())
     {
@@ -822,28 +836,47 @@ void TerminalWidget::resizeWindow(int _width, int _height, bool _inPixels)
     }
 
     auto requestedScreenSize = terminal().screenSize();
-
-    if (_inPixels)
-    {
-        auto const pixelSize = crispy::Size{
-            _width ? _width : width(),
-            _height ? _height : height()
-        };
-        requestedScreenSize = pixelSize / gridMetrics().cellSize;
-    }
-    else
-    {
-        if (_width)
-            requestedScreenSize.width = _width;
-
-        if (_height)
-            requestedScreenSize.height = _height;
-    }
+    auto const pixelSize = terminal::ImageSize{
+        terminal::Width(*_width ? *_width : width()),
+        terminal::Height(*_height ? *_height : height())
+    };
+    requestedScreenSize.columns = terminal::ColumnCount(*pixelSize.width / *gridMetrics().cellSize.width);
+    requestedScreenSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
 
     //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile_).terminalSize = requestedScreenSize;
     renderer_.setScreenSize(requestedScreenSize);
-    terminal().resizeScreen(requestedScreenSize, requestedScreenSize * gridMetrics().cellSize);
+    auto const pixels = terminal::ImageSize{
+        terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
+        terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height)
+    };
+    terminal().resizeScreen(requestedScreenSize, pixels);
+    updateGeometry();
+    adaptSize_();
+}
+
+void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCount _columns)
+{
+    if (isFullScreen())
+    {
+        debuglog(WidgetTag).write("Application request to resize window in full screen mode denied.");
+        return;
+    }
+
+    auto requestedScreenSize = terminal().screenSize();
+    if (*_columns)
+        requestedScreenSize.columns = _columns;
+    if (*_lines)
+        requestedScreenSize.lines = _lines;
+
+    //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
+    const_cast<config::TerminalProfile&>(profile_).terminalSize = requestedScreenSize;
+    renderer_.setScreenSize(requestedScreenSize);
+    auto const pixels = terminal::ImageSize{
+        terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
+        terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height)
+    };
+    terminal().resizeScreen(requestedScreenSize, pixels);
     updateGeometry();
     adaptSize_();
 }
@@ -867,13 +900,17 @@ bool TerminalWidget::setFontSize(text::font_size _size)
     return true;
 }
 
-bool TerminalWidget::setScreenSize(crispy::Size _newScreenSize)
+bool TerminalWidget::setScreenSize(PageSize _newScreenSize)
 {
     if (_newScreenSize == terminal().screenSize())
         return false;
 
+    auto const viewSize = ImageSize{
+        Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
+        Height(*gridMetrics().cellSize.width * *profile_.terminalSize.columns)
+    };
     renderer_.setScreenSize(_newScreenSize);
-    terminal().resizeScreen(_newScreenSize, _newScreenSize * cellSize());
+    terminal().resizeScreen(_newScreenSize, viewSize);
     return true;
 }
 
@@ -1032,7 +1069,7 @@ void TerminalWidget::assertInitialized()
 
 void TerminalWidget::onScrollBarValueChanged(int _value)
 {
-    terminal().viewport().scrollToAbsolute(_value);
+    terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition::cast_from(_value));
     scheduleRedraw();
 }
 
@@ -1049,7 +1086,7 @@ float TerminalWidget::contentScale() const
     return window()->windowHandle()->screen()->devicePixelRatio();
 }
 
-void TerminalWidget::resize(Size _size)
+void TerminalWidget::resize(ImageSize _size)
 {
     size_ = _size;
 
@@ -1062,16 +1099,23 @@ void TerminalWidget::resize(Size _size)
 
     if (newScreenSize != terminal().screenSize())
     {
-        terminal().resizeScreen(newScreenSize, newScreenSize * gridMetrics().cellSize);
+        auto const viewSize = ImageSize{
+            Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
+            Height(*gridMetrics().cellSize.width * *profile_.terminalSize.columns)
+        };
+        terminal().resizeScreen(newScreenSize, viewSize);
         terminal().clearSelection();
     }
 }
 
 void TerminalWidget::updateMinimumSize()
 {
-    auto const MinimumGridSize = Size{3, 2};
-    auto const minSize = gridMetrics().cellSize * MinimumGridSize;
-    setMinimumSize(minSize.width, minSize.height);
+    auto const MinimumGridSize = PageSize{LineCount(2), ColumnCount(3)};
+    auto const minSize = ImageSize{
+        Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
+        Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns)
+    };
+    setMinimumSize(minSize.width.as<int>(), minSize.height.as<int>());
 }
 // }}}
 

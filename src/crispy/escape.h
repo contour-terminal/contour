@@ -53,7 +53,7 @@ template <typename T>
 inline std::string escape(T begin, T end)
 {
     static_assert(sizeof(*std::declval<T>()) == 1, "should be only 1 byte, such as: char, char8_t, uint8_t, byte, ...");
-    return std::accumulate(begin, end, std::string{}, [](auto const& a, auto ch) { return a + escape(ch); });
+    return std::accumulate(begin, end, std::string{}, [](auto const& a, auto ch) { return a + escape(static_cast<uint8_t>(ch)); });
     // auto result = std::string{};
     // for (T cur = begin; cur != end; ++cur)
     //     result += *cur;

@@ -15,7 +15,6 @@
 
 #include <Windows.h>
 
-using crispy::Size;
 using namespace std;
 
 namespace {
@@ -46,7 +45,7 @@ namespace {
 
 namespace terminal {
 
-ConPty::ConPty(Size const& _windowSize) :
+ConPty::ConPty(PageSize const& _windowSize) :
     size_{ _windowSize }
 {
     master_ = INVALID_HANDLE_VALUE;
@@ -68,7 +67,7 @@ ConPty::ConPty(Size const& _windowSize) :
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
     HRESULT hr = CreatePseudoConsole(
-        { static_cast<SHORT>(_windowSize.width), static_cast<SHORT>(_windowSize.height) },
+        { unbox<SHORT>(_windowSize.columns), unbox<SHORT>(_windowSize.lines) },
         hPipePTYIn,
         hPipePTYOut,
         0,
@@ -146,16 +145,18 @@ int ConPty::write(char const* buf, size_t size)
         return -1;
 }
 
-Size ConPty::screenSize() const noexcept
+PageSize ConPty::screenSize() const noexcept
 {
     return size_;
 }
 
-void ConPty::resizeScreen(Size _cells, std::optional<Size> _pixels)
+void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
+    (void) _pixels; // TODO Can we pass that information, too?
+
     COORD coords;
-    coords.X = _cells.width;
-    coords.Y = _cells.height;
+    coords.X = unbox<unsigned short>(_cells.columns);
+    coords.Y = unbox<unsigned short>(_cells.lines);
 
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)

@@ -101,17 +101,17 @@ void DecorationRenderer::rebuild()
         auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const thickness = min(1, thickness_half * 2);
         auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
-        auto const height = y0 + thickness;
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(y0 + thickness);
+        auto image = atlas::Buffer(*width * *height, 0);
 
         for (int y = 1; y <= thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                image[(height - y0 - y) * width + x] = 0xFF;
+            for (int x = 0; x < *width; ++x)
+                image[(*height - y0 - y) * *width + x] = 0xFF;
 
         atlas_->insert(
             Decorator::Underline,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
@@ -120,45 +120,45 @@ void DecorationRenderer::rebuild()
         auto const thickness = min(1, thickness_half * 2);
         auto const y1 = max(0, gridMetrics_.underline.position - thickness_half);
         auto const y0 = max(0, y1 - 2 * thickness);
-        auto const height = y1 + thickness;
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(y1 + thickness);
+        auto image = atlas::Buffer(*width * *height, 0);
 
         for (int y = 1; y <= thickness; ++y)
         {
-            for (int x = 0; x < width; ++x)
+            for (int x = 0; x < *width; ++x)
             {
-                image[(height - y1 - y) * width + x] = 0xFF; // top line
-                image[(height - y0 - y) * width + x] = 0xFF; // bottom line
+                image[(*height - y1 - y) * *width + x] = 0xFF; // top line
+                image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
             }
         }
 
         atlas_->insert(
             Decorator::DoubleUnderline,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = int(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
+        auto image = atlas::Buffer(*width * *height, 0);
 
-        for (int x = 0; x < width; ++x)
+        for (int x = 0; x < *width; ++x)
         {
-            auto const normalizedX = static_cast<double>(x) / static_cast<double>(width);
+            auto const normalizedX = static_cast<double>(x) / unbox<double>(width);
             auto const sin_x = normalizedX * 2.0 * M_PI;
             auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
-            auto const y = static_cast<int>(normalizedY * static_cast<float>(height - gridMetrics_.underline.thickness));
-            assert(y < height);
+            auto const y = static_cast<int>(normalizedY * static_cast<float>(*height - gridMetrics_.underline.thickness));
+            assert(y < *height);
             for (int yi = 0; yi < gridMetrics_.underline.thickness; ++yi)
-                image[(y + yi) * width + x] = 0xFF;
+                image[(y + yi) * *width + x] = 0xFF;
         }
 
         atlas_->insert(
             Decorator::CurlyUnderline,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
@@ -166,10 +166,10 @@ void DecorationRenderer::rebuild()
         auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const diameter = radius * 2;
         auto const y0 = max(radius, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
-        auto const height = 1 + y0 + radius;
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(1 + y0 + radius);
+        auto image = atlas::Buffer(*width * *height, 0);
 
-        auto const numberOfCircles = int(ceil(double(width) / double(diameter) / 3.0));
+        auto const numberOfCircles = int(ceil(unbox<double>(width) / double(diameter) / 3.0));
 
         auto const xOffsetStart = radius;
         for (int circle = 0; circle < numberOfCircles; ++circle)
@@ -183,8 +183,8 @@ void DecorationRenderer::rebuild()
                     if (pointVisibleInCircle(x, y, radius))
                     {
                         auto const bitmapX = bitmapStartX + x;
-                        auto const bitmapY = (height - 1 - y0 - (y));
-                        image.at(bitmapY * width + bitmapX) = 0xFF;
+                        auto const bitmapY = (*height - 1 - y0 - (y));
+                        image.at(bitmapY * *width + bitmapX) = 0xFF;
                     }
                 }
             }
@@ -192,8 +192,8 @@ void DecorationRenderer::rebuild()
 
         atlas_->insert(
             Decorator::DottedUnderline,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
@@ -203,79 +203,79 @@ void DecorationRenderer::rebuild()
         auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
         auto const thickness = min(1, thickness_half * 2);
         auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
-        auto const height = y0 + thickness;
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(y0 + thickness);
+        auto image = atlas::Buffer(*width * *height, 0);
 
         for (int y = 1; y <= thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                if (fabsf(float(x) / float(width) - 0.5f) >= 0.25f)
-                    image[(height - y0 - y) * width + x] = 0xFF;
+            for (int x = 0; x < *width; ++x)
+                if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
+                    image[(*height - y0 - y) * *width + x] = 0xFF;
 
         atlas_->insert(
             Decorator::DashedUnderline,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
     { // {{{ framed
         auto const cellHeight = gridMetrics_.cellSize.height;
         auto const thickness = max(1, gridMetrics_.underline.thickness / 2);
-        auto image = atlas::Buffer(width * cellHeight, 0u);
+        auto image = atlas::Buffer(*width * *cellHeight, 0u);
         auto const gap = 0; // thickness;
 
         // Draws the top and bottom horizontal lines
         for (int y = gap; y < thickness + gap; ++y)
-            for (int x = gap; x < width - gap; ++x)
+            for (int x = gap; x < *width - gap; ++x)
             {
-                image[y * width + x] = 0xFF;
-                image[(cellHeight - 1 - y) * width + x] = 0xFF;
+                image[y * *width + x] = 0xFF;
+                image[(*cellHeight - 1 - y) * *width + x] = 0xFF;
             }
 
         // Draws the left and right vertical lines
-        for (int y = gap; y < cellHeight - gap; y++)
+        for (int y = gap; y < *cellHeight - gap; y++)
             for (int x = gap; x < thickness + gap; ++x)
             {
-                image[y * width + x] = 0xFF;
-                image[y * width + (width - 1 - x)] = 0xFF;
+                image[y * *width + x] = 0xFF;
+                image[y * *width + (*width - 1 - x)] = 0xFF;
             }
 
         atlas_->insert(
             Decorator::Framed,
-            Size{width, cellHeight},
-            Size{width, cellHeight},
+            ImageSize{width, cellHeight},
+            ImageSize{width, cellHeight},
             move(image)
         );
     } // }}}
     { // {{{ overline
         auto const cellHeight = gridMetrics_.cellSize.height;
         auto const thickness = gridMetrics_.underline.thickness;
-        auto image = atlas::Buffer(width * cellHeight, 0);
+        auto image = atlas::Buffer(*width * *cellHeight, 0);
 
         for (int y = 0; y < thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                image[(cellHeight - y - 1) * width + x] = 0xFF;
+            for (int x = 0; x < *width; ++x)
+                image[(*cellHeight - y - 1) * *width + x] = 0xFF;
 
         atlas_->insert(
             Decorator::Overline,
-            Size{width, cellHeight},
-            Size{width, cellHeight},
+            ImageSize{width, cellHeight},
+            ImageSize{width, cellHeight},
             move(image)
         );
     } // }}}
     { // {{{ crossed-out
-        auto const height = gridMetrics_.cellSize.height / 2;
+        auto const height = Height(*gridMetrics_.cellSize.height / 2);
         auto const thickness = gridMetrics_.underline.thickness;
-        auto image = atlas::Buffer(width * height, 0u);
+        auto image = atlas::Buffer(*width * *height, 0u);
 
         for (int y = 1; y <= thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                image[(height - y) * width + x] = 0xFF;
+            for (int x = 0; x < *width; ++x)
+                image[(*height - y) * *width + x] = 0xFF;
 
         atlas_->insert(
             Decorator::CrossedOut,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
@@ -349,7 +349,7 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
         1.0f
     };
     atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
-    auto const advanceX = static_cast<int>(gridMetrics_.cellSize.width);
+    auto const advanceX = unbox<int>(gridMetrics_.cellSize.width);
     for (int const i : crispy::times(_columnCount))
         textureScheduler().renderTexture({textureInfo, i * advanceX + x, y, z, color});
 }

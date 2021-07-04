@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <memory>
 
-using crispy::Size;
 using std::copy;
 using std::min;
 using std::move;
@@ -29,14 +28,14 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     // TODO: respect alignment hint
     // TODO: respect resize hint
 
-    auto const xOffset = _pos.column * cellSize_.width;
-    auto const yOffset = _pos.row * cellSize_.height;
+    auto const xOffset = _pos.column * unbox<int>(cellSize_.width);
+    auto const yOffset = _pos.row * unbox<int>(cellSize_.height);
     auto const pixelOffset = Coordinate{yOffset, xOffset};
 
     Image::Data fragData;
-    fragData.resize(cellSize_.width * cellSize_.height * 4); // RGBA
-    auto const availableWidth = min(image_->width() - pixelOffset.column, cellSize_.width);
-    auto const availableHeight = min(image_->height() - pixelOffset.row, cellSize_.height);
+    fragData.resize(*cellSize_.width * *cellSize_.height * 4); // RGBA
+    auto const availableWidth = min(unbox<int>(image_->width()) - pixelOffset.column, unbox<int>(cellSize_.width));
+    auto const availableHeight = min(unbox<int>(image_->height()) - pixelOffset.row, unbox<int>(cellSize_.height));
 
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
@@ -62,7 +61,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     auto target = &fragData[0];
 
     // fill horizontal gap at the bottom
-    for (int y = availableHeight * cellSize_.width; y < cellSize_.height * cellSize_.width; ++y)
+    for (int y = availableHeight * unbox<int>(cellSize_.width); y < *cellSize_.height * *cellSize_.width; ++y)
     {
         *target++ = defaultColor_.red();
         *target++ = defaultColor_.green();
@@ -72,12 +71,12 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset = ((pixelOffset.row + (availableHeight - 1 - y)) * image_->width() + pixelOffset.column) * 4;
+        auto const startOffset = ((pixelOffset.row + (availableHeight - 1 - y)) * *image_->width() + pixelOffset.column) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 
         // fill vertical gap on right
-        for (int x = availableWidth; x < cellSize_.width; ++x)
+        for (int x = availableWidth; x < *cellSize_.width; ++x)
         {
             *target++ = defaultColor_.red();
             *target++ = defaultColor_.green();
@@ -89,7 +88,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(ImageFormat _format, Size _size, Image::Data&& _data)
+shared_ptr<Image const> ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data&& _data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a reference to that.
     images_.emplace_back(nextImageId_++, _format, move(_data), _size);
@@ -101,8 +100,8 @@ shared_ptr<RasterizedImage const> ImagePool::rasterize(shared_ptr<Image const> _
                                                        ImageAlignment _alignmentPolicy,
                                                        ImageResize _resizePolicy,
                                                        RGBAColor _defaultColor,
-                                                       Size _cellSpan,
-                                                       Size _cellSize)
+                                                       GridSize _cellSpan,
+                                                       ImageSize _cellSize)
 {
     rasterizedImages_.emplace_back(move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
     return shared_ptr<RasterizedImage>(&rasterizedImages_.back(),

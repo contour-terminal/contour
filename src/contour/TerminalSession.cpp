@@ -85,12 +85,12 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
         *pty_,
         config_.ptyReadBufferSize,
         *this,
-        4000, // _maxHistoryLineCount,
+        LineCount{4000}, // _maxHistoryLineCount,
         {}, // TODO: that's actually dead param (_cursorBlinkInterval,)
         steady_clock::now(),
         config_.wordDelimiters, // TODO: move to profile!
         config_.bypassMouseProtocolModifier, // TODO: you too
-        {800, 600},     // maxImageSize
+        ImageSize{Width(800), Height(600)},     // maxImageSize
         256,            // maxImageColorRegisters
         true,           // sixelCursorConformance
         profile_.colors,
@@ -126,7 +126,11 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
 
     // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-    terminal_.resizeScreen(terminal_.screenSize(), terminal_.screenSize() * display_->cellSize());
+    auto const pixels = ImageSize{
+        display_->cellSize().width * boxed_cast<Width>(terminal_.screenSize().columns),
+        display_->cellSize().height * boxed_cast<Height>(terminal_.screenSize().lines)
+    };
+    terminal_.resizeScreen(terminal_.screenSize(), pixels);
 }
 
 void TerminalSession::displayInitialized()
@@ -278,17 +282,22 @@ void TerminalSession::onSelectionCompleted()
     }
 }
 
-void TerminalSession::resizeWindow(int _width, int _height, bool _inPixels)
+void TerminalSession::resizeWindow(LineCount _lines, ColumnCount _columns)
 {
     if (!display_)
         return;
 
-    debuglog(WidgetTag).write("Application request to resize window: {}x{} {}", _width, _height, _inPixels ? "px" : "cells");
+    debuglog(WidgetTag).write("Application request to resize window: {}x{} px", _columns, _lines);
+    display_->post([this, _lines, _columns]() { display_->resizeWindow(_lines, _columns); });
+}
 
-    display_->post([this, _width, _height, _inPixels]()
-    {
-        display_->resizeWindow(_width, _height, _inPixels);
-    });
+void TerminalSession::resizeWindow(Width _width, Height _height)
+{
+    if (!display_)
+        return;
+
+    debuglog(WidgetTag).write("Application request to resize window: {}x{} px", _width, _height);
+    display_->post([this, _width, _height]() { display_->resizeWindow(_width, _height); });
 }
 
 void TerminalSession::setWindowTitle(string_view _title)
@@ -432,7 +441,11 @@ void TerminalSession::operator()(actions::ClearHistoryAndReset)
     auto const pixelSize = display_->pixelSize();
 
     terminal_.screen().resetHard();
-    terminal_.resizeScreen(screenSize + crispy::Size{1, 0}, pixelSize);
+    auto const tmpScreenSize = PageSize{
+        screenSize.lines,
+        screenSize.columns + ColumnCount(1)
+    };
+    terminal_.resizeScreen(tmpScreenSize, pixelSize);
     this_thread::yield();
     terminal_.resizeScreen(screenSize, pixelSize);
 }
@@ -470,7 +483,7 @@ void TerminalSession::operator()(actions::FollowHyperlink)
     auto const _l = scoped_lock{terminal()};
     auto const currentMousePosition = terminal().currentMousePosition();
     auto const currentMousePositionRel = terminal::Coordinate{
-        currentMousePosition.row - terminal().viewport().relativeScrollOffset(),
+        currentMousePosition.row - terminal().viewport().relativeScrollOffset().as<int>(),
         currentMousePosition.column
     };
     if (terminal().screen().contains(currentMousePosition))
@@ -588,24 +601,24 @@ void TerminalSession::operator()(actions::ScrollMarkUp)
 
 void TerminalSession::operator()(actions::ScrollOneDown)
 {
-    terminal().viewport().scrollDown(1);
+    terminal().viewport().scrollDown(LineCount(1));
 }
 
 void TerminalSession::operator()(actions::ScrollOneUp)
 {
-    terminal().viewport().scrollUp(1);
+    terminal().viewport().scrollUp(LineCount(1));
 }
 
 void TerminalSession::operator()(actions::ScrollPageDown)
 {
-    auto const terminalSize = terminal().screenSize();
-    terminal().viewport().scrollDown(terminalSize.height / 2);
+    auto const stepSize = terminal().screenSize().lines / LineCount(2);
+    terminal().viewport().scrollDown(stepSize);
 }
 
 void TerminalSession::operator()(actions::ScrollPageUp)
 {
-    auto const terminalSize = terminal().screenSize();
-    terminal().viewport().scrollUp(terminalSize.height / 2);
+    auto const stepSize = terminal().screenSize().lines / LineCount(2);
+    terminal().viewport().scrollUp(stepSize);
 }
 
 void TerminalSession::operator()(actions::ScrollToBottom)
@@ -811,7 +824,11 @@ void TerminalSession::configureDisplay()
         display_->toggleFullScreen();
 
     terminal_.setRefreshRate(display_->refreshRate());
-    display_->setScreenSize(display_->pixelSize() / display_->cellSize());
+    auto const pageSize = PageSize {
+        LineCount(*display_->pixelSize().height / *display_->cellSize().height),
+        ColumnCount(*display_->pixelSize().width / *display_->cellSize().width),
+    };
+    display_->setScreenSize(pageSize);
     display_->setFonts(profile_.fonts);
     // TODO: maybe update margin after this call?
 

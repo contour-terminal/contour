@@ -833,8 +833,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     }
 
     rasterized_glyph output{};
-    output.size.width = static_cast<int>(ftFace->glyph->bitmap.width);
-    output.size.height = static_cast<int>(ftFace->glyph->bitmap.rows);
+    output.size.width = crispy::Width(ftFace->glyph->bitmap.width);
+    output.size.height = crispy::Height(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 
@@ -856,12 +856,12 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             ftBitmap.num_grays = 256;
 
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(height * width); // 8-bit channel (with values 0 or 255)
+            output.bitmap.resize(*height * *width); // 8-bit channel (with values 0 or 255)
 
             auto const pitch = abs(ftBitmap.pitch);
             for (auto i = 0; i < int(ftBitmap.rows); ++i)
                 for (auto j = 0; j < int(ftBitmap.width); ++j)
-                    output.bitmap[i * width + j] = ftBitmap.buffer[(height - 1 - i) * pitch + j] * 255;
+                    output.bitmap[i * *width + j] = ftBitmap.buffer[(*height - 1 - i) * pitch + j] * 255;
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
             break;
@@ -869,13 +869,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         case FT_PIXEL_MODE_GRAY:
         {
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(output.size.height * output.size.width);
+            output.bitmap.resize(*output.size.height * *output.size.width);
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto i = 0; i < output.size.height; ++i)
-                for (auto j = 0; j < output.size.width; ++j)
-                    output.bitmap[i * output.size.width + j] = s[(output.size.height - 1 - i) * pitch + j];
+            for (auto i = 0; i < *output.size.height; ++i)
+                for (auto j = 0; j < *output.size.width; ++j)
+                    output.bitmap[i * *output.size.width + j] = s[(*output.size.height - 1 - i) * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD:
@@ -885,7 +885,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(width * height);
-            output.size.width /= 3;
+            output.size.width /= crispy::Width(3);
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
             auto s = ftFace->glyph->bitmap.buffer;
@@ -900,15 +900,15 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const height = output.size.height;
 
             output.format = bitmap_format::rgba;
-            output.bitmap.resize(height * width * 4);
+            output.bitmap.resize(*height * *width * 4);
             auto t = output.bitmap.begin();
 
             auto const pitch = ftFace->glyph->bitmap.pitch;
-            for (auto const i : crispy::times(height))
+            for (auto const i : crispy::times(*height))
             {
-                for (auto const j : crispy::times(width))
+                for (auto const j : crispy::times(*width))
                 {
-                    auto const s = &ftFace->glyph->bitmap.buffer[(height - i - 1) * pitch + j * 4];
+                    auto const s = &ftFace->glyph->bitmap.buffer[(*height - i - 1) * pitch + j * 4];
 
                     // BGRA -> RGBA
                     *t++ = s[2];

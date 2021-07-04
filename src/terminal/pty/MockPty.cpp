@@ -1,12 +1,11 @@
 #include <terminal/pty/MockPty.h>
 
-using crispy::Size;
 using namespace std::chrono;
 
 namespace terminal
 {
 
-MockPty::MockPty(Size const& _size):
+MockPty::MockPty(PageSize _size):
     screenSize_{ _size }
 {
 }
@@ -38,12 +37,12 @@ int MockPty::write(char const* buf, size_t size)
     return size;
 }
 
-Size MockPty::screenSize() const noexcept
+PageSize MockPty::screenSize() const noexcept
 {
     return screenSize_;
 }
 
-void MockPty::resizeScreen(Size _cells, std::optional<Size> _pixels)
+void MockPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
     screenSize_ = _cells;
     pixelSize_ = _pixels;

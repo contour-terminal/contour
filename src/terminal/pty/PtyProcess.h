@@ -20,7 +20,7 @@ class PtyProcess: public Pty
     using ExecInfo = Process::ExecInfo;
     using ExitStatus = Process::ExitStatus;
 
-    PtyProcess(ExecInfo const& _exe, crispy::Size terminalSize, std::optional<crispy::Size> _pixels = std::nullopt);
+    PtyProcess(ExecInfo const& _exe, PageSize terminalSize, std::optional<ImageSize> _pixels = std::nullopt);
     ~PtyProcess();
 
     Pty& pty() noexcept { return *pty_; }
@@ -39,8 +39,8 @@ class PtyProcess: public Pty
     int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    crispy::Size screenSize() const noexcept override;
-    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels) override;
+    PageSize screenSize() const noexcept override;
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels) override;
 
   private:
     std::unique_ptr<Pty> pty_;

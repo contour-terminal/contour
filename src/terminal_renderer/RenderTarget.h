@@ -18,6 +18,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Grid.h> // cell attribs
+#include <terminal/primitives.h>
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
@@ -32,7 +33,7 @@ namespace terminal::renderer {
 struct AtlasTextureInfo {
     std::string atlasName;
     int atlasInstanceId;
-    crispy::Size size;
+    ImageSize size;
     atlas::Format format;
     atlas::Buffer buffer;
 };
@@ -47,7 +48,7 @@ class RenderTarget
   public:
     virtual ~RenderTarget() = default;
 
-    virtual void setRenderSize(crispy::Size _size) = 0;
+    virtual void setRenderSize(ImageSize _size) = 0;
     virtual void setMargin(PageMargin _margin) = 0;
 
     virtual atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept = 0;
@@ -68,7 +69,7 @@ class RenderTarget
     virtual void renderRectangle(int _x, int _y, int _width, int _height,
                                  float _r, float _g, float _b, float _a) = 0;
 
-    using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, crispy::Size /*_pixelSize*/)>;
+    using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
     virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
 
     virtual void execute() = 0;

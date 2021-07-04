@@ -264,7 +264,7 @@ class InputGenerator {
     MouseWheelMode mouseWheelMode() const noexcept { return mouseWheelMode_; }
 
     void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
-    bool generateFocusEvents() const noexcept { return generateFocusEvents_; };
+    bool generateFocusEvents() const noexcept { return generateFocusEvents_; }
 
     bool generate(char32_t _characterEvent, Modifier _modifier);
     bool generate(std::u32string const& _characterEvent, Modifier _modifier);

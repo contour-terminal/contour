@@ -31,7 +31,7 @@ namespace terminal::renderer
     {
         Image::Id const imageId;
         Coordinate const offset;
-        crispy::Size const size;
+        ImageSize const size;
 
         bool operator==(ImageFragmentKey const& b) const noexcept
         {
@@ -65,8 +65,8 @@ namespace std
                          _key.imageId,
                          _key.offset.row,
                          _key.offset.column,
-                         _key.size.width,
-                         _key.size.height);
+                         *_key.size.width,
+                         *_key.size.height);
         }
     };
 }
@@ -79,13 +79,13 @@ namespace terminal::renderer {
 class ImageRenderer : public Renderable
 {
   public:
-    explicit ImageRenderer(crispy::Size const& _cellSize);
+    explicit ImageRenderer(ImageSize _cellSize);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
-    void setCellSize(crispy::Size const& _cellSize);
+    void setCellSize(ImageSize _cellSize);
 
     void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
 
@@ -103,7 +103,7 @@ class ImageRenderer : public Renderable
     //
     ImagePool imagePool_;
     std::unordered_map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
-    crispy::Size cellSize_;
+    ImageSize cellSize_;
     std::unique_ptr<TextureAtlas> atlas_;
 };
 

@@ -26,14 +26,13 @@
 #include <vector>
 
 using crispy::Point;
-using crispy::Size;
 
 using namespace std;
 
 namespace terminal::renderer::atlas {
 
 TextureAtlasAllocator::TextureAtlasAllocator(AtlasBackend& _atlasBackend,
-                                             Size _atlasTextureSize,
+                                             ImageSize _atlasTextureSize,
                                              int _maxInstances,
                                              Format _format,
                                              int _user,
@@ -72,21 +71,21 @@ void TextureAtlasAllocator::clear()
     cursor_.position.y = 0;
 }
 
-optional<TextureAtlasAllocator::Cursor> TextureAtlasAllocator::getOffsetAndAdvance(crispy::Size _size)
+optional<TextureAtlasAllocator::Cursor> TextureAtlasAllocator::getOffsetAndAdvance(ImageSize _size)
 {
-    if (!(cursor_.position.x + HorizontalGap + _size.width < size_.width))
+    if (!(cursor_.position.x + HorizontalGap + *_size.width < *size_.width))
     {
         cursor_.position.x = 0;
-        cursor_.position.y += maxTextureHeightInCurrentRow_ + VerticalGap;
-        if (!(cursor_.position.y + _size.height < size_.height))
+        cursor_.position.y += static_cast<int>(maxTextureHeightInCurrentRow_) + VerticalGap;
+        if (!(cursor_.position.y + *_size.height < *size_.height))
         {
             cursor_.position.y = 0;
             maxTextureHeightInCurrentRow_ = 0;
 
             if (!(atlasIDs_.size() + 1 < maxInstances_))
             {
-                cursor_.position.x = size_.width;
-                cursor_.position.y = size_.height;
+                cursor_.position.x = *size_.width;
+                cursor_.position.y = *size_.height;
                 return nullopt;
             }
             getOrCreateNewAtlas();
@@ -94,13 +93,13 @@ optional<TextureAtlasAllocator::Cursor> TextureAtlasAllocator::getOffsetAndAdvan
     }
 
     auto const result = cursor_;
-    cursor_.position.x += _size.width + HorizontalGap;
-    maxTextureHeightInCurrentRow_ = max(maxTextureHeightInCurrentRow_, _size.height);
+    cursor_.position.x += unbox<int>(_size.width) + HorizontalGap;
+    maxTextureHeightInCurrentRow_ = max(maxTextureHeightInCurrentRow_, *_size.height);
     return result;
 }
 
-TextureInfo const* TextureAtlasAllocator::insert(crispy::Size _bitmapSize,
-                                                 crispy::Size _targetSize,
+TextureInfo const* TextureAtlasAllocator::insert(ImageSize _bitmapSize,
+                                                 ImageSize _targetSize,
                                                  Format _format,
                                                  Buffer _data,
                                                  int _user)
@@ -169,8 +168,8 @@ void TextureAtlasAllocator::release(TextureInfo const& _info)
     }
 }
 
-TextureInfo const& TextureAtlasAllocator::appendTextureInfo(crispy::Size _bitmapSize,
-                                                            crispy::Size _targetSize,
+TextureInfo const& TextureAtlasAllocator::appendTextureInfo(ImageSize _bitmapSize,
+                                                            ImageSize _targetSize,
                                                             Cursor _offset,
                                                             int _user)
 {
@@ -180,10 +179,10 @@ TextureInfo const& TextureAtlasAllocator::appendTextureInfo(crispy::Size _bitmap
         _offset.position,
         _bitmapSize,
         _targetSize,
-        static_cast<float>(_offset.position.x) / static_cast<float>(size_.width),
-        static_cast<float>(_offset.position.y) / static_cast<float>(size_.height),
-        static_cast<float>(_bitmapSize.width) / static_cast<float>(size_.width),
-        static_cast<float>(_bitmapSize.height) / static_cast<float>(size_.height),
+        static_cast<float>(_offset.position.x) / unbox<float>(size_.width),
+        static_cast<float>(_offset.position.y) / unbox<float>(size_.height),
+        unbox<float>(_bitmapSize.width) / unbox<float>(size_.width),
+        unbox<float>(_bitmapSize.height) / unbox<float>(size_.height),
         _user
     });
 
