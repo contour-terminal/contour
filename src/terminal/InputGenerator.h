@@ -30,7 +30,7 @@
 
 namespace terminal {
 
-class Modifier {
+class Modifier { // {{{
   public:
     enum Key : unsigned {
         None = 0,
@@ -131,6 +131,8 @@ constexpr size_t makeVirtualTerminalParam(Modifier _modifier) noexcept
 
 std::string to_string(Modifier _modifier);
 
+// }}}
+// {{{ KeyInputEvent, Key
 enum class Key {
     // function keys
     F1,
@@ -192,61 +194,12 @@ enum class Key {
 
 std::string to_string(Key _key);
 
-enum class MatchMode : uint8_t
-{
-    Default             = 0x00,
-    AlternateScreen     = 0x01,
-    AppCursor           = 0x02,
-    AppKeyPad           = 0x04,
-    // future modes
-    ViSearch            = 0x08, // TODO: This mode we want.
-};
-constexpr MatchMode operator|(MatchMode a, MatchMode b) noexcept { return static_cast<MatchMode>(static_cast<unsigned>(a) | static_cast<unsigned>(b)); }
-constexpr MatchMode operator&(MatchMode a, MatchMode b) noexcept { return static_cast<MatchMode>(static_cast<unsigned>(a) & static_cast<unsigned>(b)); }
-constexpr MatchMode operator~(MatchMode a) noexcept { return static_cast<MatchMode>(~static_cast<unsigned>(a)); }
-constexpr uint8_t operator*(MatchMode a) noexcept { return static_cast<uint8_t>(a); }
-
 enum class KeyMode {
     Normal,
     Application
 };
-
-struct KeyInputEvent {
-    Key key{};
-    Modifier modifier{};
-    MatchMode mode = MatchMode::Default;
-};
-
-constexpr bool operator==(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
-{
-    return _lhs.key == _rhs.key &&
-           _lhs.modifier == _rhs.modifier &&
-           _lhs.mode == _rhs.mode;
-}
-
-constexpr bool operator!=(KeyInputEvent _lhs, KeyInputEvent _rhs) noexcept
-{
-    return !(_lhs == _rhs);
-}
-
-struct CharInputEvent {
-    char32_t value{};
-    Modifier modifier{};
-    MatchMode mode = MatchMode::Default;
-};
-
-constexpr bool operator==(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
-{
-    return _lhs.value == _rhs.value &&
-           _lhs.modifier == _rhs.modifier &&
-           _lhs.mode == _rhs.mode;
-}
-
-constexpr bool operator!=(CharInputEvent _lhs, CharInputEvent _rhs) noexcept
-{
-    return !(_lhs == _rhs);
-}
-
+// }}}
+// {{{ Mouse
 enum class MouseButton {
     Left,
     Right,
@@ -255,55 +208,8 @@ enum class MouseButton {
     WheelUp,
     WheelDown,
 };
+
 std::string to_string(MouseButton _button);
-
-struct MousePressEvent {
-    MouseButton button;
-    Modifier modifier{};
-    MatchMode mode = MatchMode::Default;
-    int row = 1;
-    int column = 1;
-};
-
-constexpr bool operator==(MousePressEvent a, MousePressEvent b) noexcept
-{
-    return a.button == b.button
-        && a.modifier == b.modifier
-        && a.mode == b.mode
-        && a.column == b.column
-        && a.row == b.row;
-}
-
-constexpr bool operator!=(MousePressEvent a, MousePressEvent b) noexcept
-{
-    return !(a == b);
-}
-
-struct MouseMoveEvent {
-    /// Row number in screen coordinates [1..rows]
-    int row;
-
-    /// Column number in screen coordinates [1..cols]
-    int column;
-
-    Modifier modifier{};
-    MatchMode mode = MatchMode::Default;
-
-    constexpr auto as_pair() const noexcept { return std::pair{ row, column }; }
-
-    constexpr auto coordinates() const noexcept { return Coordinate{ row, column }; }
-};
-
-struct MouseReleaseEvent {
-    MouseButton button;
-    Modifier modifier{};
-    MatchMode mode = MatchMode::Default;
-    int row = 1;
-    int column = 1;
-};
-
-struct FocusInEvent {};
-struct FocusOutEvent {};
 
 enum class MouseTransport {
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
@@ -315,6 +221,7 @@ enum class MouseTransport {
     // `CSI < Cb Cx Cy M` with Cb += 0x20
     URXVT,
 };
+// }}}
 
 class InputGenerator {
   public:
@@ -359,30 +266,19 @@ class InputGenerator {
     void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
     bool generateFocusEvents() const noexcept { return generateFocusEvents_; };
 
-    /// Generates input sequence for a pressed character.
     bool generate(char32_t _characterEvent, Modifier _modifier);
     bool generate(std::u32string const& _characterEvent, Modifier _modifier);
-
-    /// Generates input sequence for a pressed special key.
     bool generate(Key _key, Modifier _modifier);
-
-    /// Generates input sequence for bracketed paste text.
     void generatePaste(std::string_view const& _text);
+    bool generateMousePress(MouseButton _button, Modifier _modifier, int _row, int _column);
+    bool generateMouseMove(int _row, int _column, Modifier _modifier);
+    bool generateMouseRelease(MouseButton _button, Modifier _modifier, int _row, int _column);
 
-    /// Generates input sequence for a mouse button press event.
-    bool generate(MousePressEvent const& _mousePress);
-
-    /// Generates input sequence for a mouse button release event.
-    bool generate(MouseReleaseEvent const& _mousePress);
-
-    /// Generates input sequence for a mouse move event.
-    bool generate(MouseMoveEvent const& _mouseMove);
-
-    bool generate(FocusInEvent const&);
-    bool generate(FocusOutEvent const&);
+    bool generateFocusInEvent();
+    bool generateFocusOutEvent();
 
     /// Generates raw input, usually used for sending reply VT sequences.
-    bool generate(std::string_view const& _raw);
+    bool generateRaw(std::string_view const& _raw);
 
     /// Swaps out the generated input control sequences.
     void swap(Sequence& _other);
@@ -444,32 +340,8 @@ inline std::string to_string(InputGenerator::MouseEventType _value)
 
 }  // namespace terminal
 
-namespace fmt { // {{{
-    template <>
-    struct formatter<terminal::MatchMode> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MatchMode _mode, FormatContext& _ctx)
-        {
-            std::string s;
-            auto const advance = [&](terminal::MatchMode _cond, std::string_view _text) {
-                if (!*(_mode & _cond))
-                    return;
-                if (!s.empty())
-                    s += '+';
-                s += _text;
-            };
-            advance(terminal::MatchMode::AppCursor, "AppCursor");
-            advance(terminal::MatchMode::AppKeyPad, "AppKeyPad");
-            advance(terminal::MatchMode::AlternateScreen, "AltScreen");
-            advance(terminal::MatchMode::ViSearch, "ViSearch");
-            if (s.empty())
-                s = "Default";
-            return format_to(_ctx.out(), "{}", s);
-        }
-    };
-
+namespace fmt // {{{
+{
     template <>
     struct formatter<terminal::Modifier> {
         template <typename ParseContext>
@@ -568,187 +440,6 @@ namespace fmt { // {{{
                 case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
             }
             return format_to(_ctx.out(), "<{}>", unsigned(_value));
-        }
-    };
-
-    template <>
-    struct formatter<terminal::InputGenerator::MouseEventType> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::InputGenerator::MouseEventType _value, FormatContext& _ctx)
-        {
-            switch (_value)
-            {
-                case terminal::InputGenerator::MouseEventType::Press: return format_to(_ctx.out(), "Press");
-                case terminal::InputGenerator::MouseEventType::Drag: return format_to(_ctx.out(), "Drag");
-                case terminal::InputGenerator::MouseEventType::Release: return format_to(_ctx.out(), "Release");
-            }
-            return format_to(_ctx.out(), "<{}>", unsigned(_value));
-        }
-    };
-
-    template <>
-    struct formatter<terminal::MousePressEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MousePressEvent const& ev, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(),
-                ev.modifier.any()
-                    ? "Mouse button press {}+{} ({}:{})"
-                    : "Mouse button press {} ({}:{})",
-                ev.button,
-                ev.modifier,
-                ev.row,
-                ev.column
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::MouseMoveEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MouseMoveEvent ev, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(),
-                ev.modifier.any()
-                    ? "MouseMoveEvent to {}:{} +{}"
-                    : "MouseMoveEvent to {}:{}",
-                ev.row,
-                ev.column,
-                ev.modifier
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::MouseReleaseEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MouseReleaseEvent ev, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(),
-                "MouseReleaseEvent {} at {}:{} {}",
-                ev.button,
-                ev.row,
-                ev.column,
-                ev.modifier
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::KeyInputEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::KeyInputEvent _event, FormatContext& _ctx)
-        {
-            std::string s;
-            if (*_event.mode)
-                s += fmt::format("{}", _event.mode);
-            return format_to(_ctx.out(),
-                _event.modifier.any()
-                    ? "{}+{}+{}"
-                    : "{}+{}",
-                s, _event.key, _event.modifier
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::CharInputEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::CharInputEvent _event, FormatContext& _ctx)
-        {
-            auto const u8str = unicode::convert_to<char>(_event.value);
-            std::string s;
-            if (*_event.mode)
-                s += fmt::format("{}+", _event.mode);
-            if (_event.modifier.any())
-                return format_to(_ctx.out(), "{}\"{}\"+{}", s, crispy::escape(u8str), _event.modifier);
-            else
-                return format_to(_ctx.out(), "{}\"{}\"", s, crispy::escape(u8str), _event.modifier);
-        }
-    };
-
-    template <>
-    struct formatter<terminal::FocusInEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::FocusInEvent, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(), "FocusInEvent");
-        }
-    };
-
-    template <>
-    struct formatter<terminal::FocusOutEvent> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::FocusOutEvent, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(), "FocusOutEvent");
-        }
-    };
-} // }}}
-
-namespace std { // {{{
-    template<>
-    struct hash<terminal::KeyInputEvent> {
-        constexpr size_t operator()(terminal::KeyInputEvent const& _input) const noexcept {
-            return (1 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.key) & 0xFF);
-        }
-    };
-
-    template<>
-    struct hash<terminal::CharInputEvent> {
-        size_t operator()(terminal::CharInputEvent const& _input) const noexcept {
-            return (2 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.value) & 0xFF);
-        }
-    };
-
-    template<>
-    struct hash<terminal::MousePressEvent> {
-        constexpr size_t operator()(terminal::MousePressEvent const& _input) const noexcept {
-            return (3 << 16) | _input.modifier << 8 | (static_cast<unsigned>(_input.button) & 0xFF);
-        }
-    };
-
-    template<>
-    struct hash<terminal::MouseMoveEvent> {
-        constexpr size_t operator()(terminal::MouseMoveEvent const& _input) const noexcept {
-            return (4 << 16) | (_input.row << 8) | (_input.column & 0xFF);
-        }
-    };
-
-    template<>
-    struct hash<terminal::MouseReleaseEvent> {
-        constexpr size_t operator()(terminal::MouseReleaseEvent const& _input) const noexcept {
-            return (5 << 16) | (static_cast<unsigned>(_input.button) & 0xFF);
-        }
-    };
-
-    template<>
-    struct hash<terminal::FocusInEvent> {
-        constexpr size_t operator()(terminal::FocusInEvent const&) const noexcept {
-            return (6 << 16) | 1;
-        }
-    };
-
-    template<>
-    struct hash<terminal::FocusOutEvent> {
-        constexpr size_t operator()(terminal::FocusOutEvent const&) const noexcept {
-            return (6 << 16) | 2;
         }
     };
 } // }}}

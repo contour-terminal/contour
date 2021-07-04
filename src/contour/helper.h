@@ -136,13 +136,6 @@ constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
     }
 }
 
-std::variant<
-    std::monostate,
-    terminal::KeyInputEvent,
-    std::vector<terminal::CharInputEvent>
->
-mapQtToTerminalKeyEvent(QKeyEvent* _event);
-
 class TerminalSession;
 bool sendKeyEvent(QKeyEvent* _keyEvent, TerminalSession& _session);
 void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session);

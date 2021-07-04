@@ -14,6 +14,7 @@
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
+#include <terminal/MatchModes.h>
 #include <terminal/Terminal.h>
 #include <terminal/pty/Pty.h>
 
@@ -317,57 +318,59 @@ void TerminalSession::discardImage(terminal::Image const& _image)
 
 // }}}
 // {{{ Input Events
-void TerminalSession::sendKeyPressEvent(terminal::KeyInputEvent const& _event, Timestamp _now)
+void TerminalSession::sendKeyPressEvent(Key _key,
+                                        Modifier _modifier,
+                                        Timestamp _now)
 {
-    debuglog(KeyboardTag).write("{}", _event);
+    debuglog(KeyboardTag).write("{} {}", _modifier, _key);
 
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (auto const* actions = config::apply(config_.inputMappings, _event))
+    if (auto const* actions = config::apply(config_.inputMappings.keyMappings,
+                                            _key,
+                                            _modifier,
+                                            matchModeFlags()))
         executeAllActions(*actions);
     else
-        terminal().sendKeyPressEvent(_event, _now);
+        terminal().sendKeyPressEvent(_key, _modifier, _now);
 }
 
-void TerminalSession::sendCharPressEvent(terminal::CharInputEvent const& _event, Timestamp _now)
+void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
-    debuglog(KeyboardTag).write("{}", _event);
+    debuglog(KeyboardTag).write("{} {}", _modifier, _value);
 
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    auto e = _event;
-    // FIXME: Temporarily disabled until fixed.
-    // if (terminal_.screen().isAlternateScreen())
-    //     e.mode = e.mode | MatchMode::AlternateScreen;
-    // if (terminal_.applicationCursorKeys())
-    //     e.mode = e.mode | MatchMode::AppCursor;
-    // if (terminal_.applicationKeypad())
-    //     e.mode = e.mode | MatchMode::AppKeyPad;
-
-    if (auto const* actions = config::apply(config_.inputMappings, e))
+    if (auto const* actions = config::apply(config_.inputMappings.charMappings,
+                                            _value,
+                                            _modifier,
+                                            matchModeFlags()))
         executeAllActions(*actions);
     else
-        terminal().sendCharPressEvent(e, _now);
+        terminal().sendCharPressEvent(_value, _modifier, _now); // TODO: get rid of Event{} struct here, too!
 }
 
-void TerminalSession::sendMousePressEvent(terminal::MousePressEvent const& _event, Timestamp _now)
+void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
 {
     // debuglog(MouseInputTag).write("sendMousePressEvent: {}", _event);
 
     // First try to pass the mouse event to the application, as it might have requested that.
-    if (terminal().sendMousePressEvent(_event, _now))
+    if (terminal().sendMousePressEvent(_button, _modifier, _now))
     {
         scheduleRedraw();
         return;
     }
 
-    if (auto const* actions = config::apply(config_.inputMappings, _event))
+    if (auto const* actions = config::apply(config_.inputMappings.mouseMappings,
+                                            _button,
+                                            _modifier,
+                                            matchModeFlags()))
         executeAllActions(*actions);
 }
 
-void TerminalSession::sendMouseMoveEvent(terminal::MouseMoveEvent const& _event, Timestamp _now)
+void TerminalSession::sendMouseMoveEvent(int _row, int _column, terminal::Modifier _modifier, Timestamp _now)
 {
-    auto const handled = terminal().sendMouseMoveEvent(_event, _now);
+    auto const handled = terminal().sendMouseMoveEvent(_row, _column, _modifier, _now);
 
     bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
     if (mouseHoveringHyperlink)
@@ -382,9 +385,9 @@ void TerminalSession::sendMouseMoveEvent(terminal::MouseMoveEvent const& _event,
     }
 }
 
-void TerminalSession::sendMouseReleaseEvent(terminal::MouseReleaseEvent const& _event, Timestamp _now)
+void TerminalSession::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
 {
-    terminal().sendMouseReleaseEvent(_event, _now);
+    terminal().sendMouseReleaseEvent(_button, _modifier, _now);
     scheduleRedraw();
 }
 
@@ -623,15 +626,12 @@ void TerminalSession::operator()(actions::ScrollUp)
 void TerminalSession::operator()(actions::SendChars const& _event)
 {
     auto const now = steady_clock::now();
+
     for (auto const ch: _event.chars)
     {
-        terminal().sendCharPressEvent(
-            terminal::CharInputEvent{
-                static_cast<char32_t>(ch),
-                terminal::Modifier::None
-            },
-            now
-        );
+        terminal().sendCharPressEvent(static_cast<char32_t>(ch),
+                                      terminal::Modifier::None,
+                                      now);
     }
 }
 
@@ -730,6 +730,7 @@ void TerminalSession::executeAllActions(std::vector<actions::Action> const& _act
 
 void TerminalSession::executeAction(actions::Action const& _action)
 {
+    debuglog(WidgetTag).write("executeAction: {}", _action);
     visit(*this, _action);
 }
 
@@ -819,6 +820,22 @@ void TerminalSession::configureDisplay()
 
     display_->setWindowTitle(terminal_.screen().windowTitle());
 
+}
+
+uint8_t TerminalSession::matchModeFlags() const
+{
+    uint8_t flags = 0;
+
+    if (terminal_.screen().isAlternateScreen())
+        flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
+
+    if (terminal_.applicationCursorKeys())
+        flags |= static_cast<uint8_t>(MatchModes::Flag::AppCursor);
+
+    if (terminal_.applicationKeypad())
+        flags |= static_cast<uint8_t>(MatchModes::Flag::AppKeypad);
+
+    return flags;
 }
 
 void TerminalSession::setFontSize(text::font_size _size)

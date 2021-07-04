@@ -452,7 +452,7 @@ inline bool InputGenerator::append(unsigned int _number)
     return append(string_view(buf, n));
 }
 
-bool InputGenerator::generate(FocusInEvent const&)
+bool InputGenerator::generateFocusInEvent()
 {
     if (generateFocusEvents())
     {
@@ -462,7 +462,7 @@ bool InputGenerator::generate(FocusInEvent const&)
     return false;
 }
 
-bool InputGenerator::generate(FocusOutEvent const&)
+bool InputGenerator::generateFocusOutEvent()
 {
     if (generateFocusEvents())
     {
@@ -472,7 +472,7 @@ bool InputGenerator::generate(FocusOutEvent const&)
     return true;
 }
 
-bool InputGenerator::generate(std::string_view const& _raw)
+bool InputGenerator::generateRaw(std::string_view const& _raw)
 {
     append(_raw);
     return true;
@@ -693,14 +693,14 @@ bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int
     return true;
 };
 
-bool InputGenerator::generate(MousePressEvent const& _mouse)
+bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, int _row, int _column)
 {
-    currentMousePosition_ = {_mouse.row, _mouse.column};
+    currentMousePosition_ = {_row, _column};
 
     switch (mouseWheelMode())
     {
         case MouseWheelMode::NormalCursorKeys:
-            switch (_mouse.button)
+            switch (_button)
             {
                 case MouseButton::WheelUp:
                     append("\033[A");
@@ -713,7 +713,7 @@ bool InputGenerator::generate(MousePressEvent const& _mouse)
             }
             break;
         case MouseWheelMode::ApplicationCursorKeys:
-            switch (_mouse.button)
+            switch (_button)
             {
                 case MouseButton::WheelUp:
                     append("\033OA");
@@ -729,32 +729,32 @@ bool InputGenerator::generate(MousePressEvent const& _mouse)
             break;
     }
 
-    if (!isMouseWheel(_mouse.button))
-        if (!currentlyPressedMouseButtons_.count(_mouse.button))
-            currentlyPressedMouseButtons_.insert(_mouse.button);
+    if (!isMouseWheel(_button))
+        if (!currentlyPressedMouseButtons_.count(_button))
+            currentlyPressedMouseButtons_.insert(_button);
 
-    return generateMouse(_mouse.button, _mouse.modifier, _mouse.row, _mouse.column, MouseEventType::Press);
+    return generateMouse(_button, _modifier, _row, _column, MouseEventType::Press);
 }
 
-bool InputGenerator::generate(MouseReleaseEvent const& _mouse)
+bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifier, int _row, int _column)
 {
-    currentMousePosition_ = {_mouse.row, _mouse.column};
+    currentMousePosition_ = {_row, _column};
 
-    if (auto i = currentlyPressedMouseButtons_.find(_mouse.button); i != currentlyPressedMouseButtons_.end())
+    if (auto i = currentlyPressedMouseButtons_.find(_button); i != currentlyPressedMouseButtons_.end())
         currentlyPressedMouseButtons_.erase(i);
 
-    return generateMouse(_mouse.button, _mouse.modifier, _mouse.row, _mouse.column, MouseEventType::Release);
+    return generateMouse(_button, _modifier, _row, _column, MouseEventType::Release);
 }
 
-bool InputGenerator::generate(MouseMoveEvent const& _mouse)
+bool InputGenerator::generateMouseMove(int _row, int _column, Modifier _modifier)
 {
     if (!mouseProtocol_.has_value())
         return false;
 
-    if (currentMousePosition_ == _mouse.coordinates())
+    if (currentMousePosition_ == Coordinate{_row, _column})
         return true;
 
-    currentMousePosition_ = {_mouse.row, _mouse.column};
+    currentMousePosition_ = {_row, _column};
 
     bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
 
@@ -764,9 +764,9 @@ bool InputGenerator::generate(MouseMoveEvent const& _mouse)
     if (report)
         return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
                                             : MouseButton::Release,
-                             _mouse.modifier,
-                             _mouse.row,
-                             _mouse.column,
+                             _modifier,
+                             _row,
+                             _column,
                              MouseEventType::Drag);
 
     return false;

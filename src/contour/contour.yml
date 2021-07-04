@@ -265,7 +265,7 @@ color_schemes:
 # Additionally one can filter input mappings based on special terminal modes using the `modes` option:
 # - Alt       : The terminal is currently in alternate screen buffer, otherwise it is in primary screen buffer.
 # - AppCursor : The application key cursor mode is enabled (otherwise it's normal cursor mode).
-# - AppKeyPad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
+# - AppKeypad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
 #
 # You can combine these modes by concatenating them via | and negate a single one
 # by prefixing with ~.

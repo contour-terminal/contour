@@ -96,11 +96,11 @@ class Terminal : public ScreenEvents {
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
-    bool sendKeyPressEvent(KeyInputEvent const& _event, Timestamp _now);
-    bool sendCharPressEvent(CharInputEvent const& _event, Timestamp _now);
-    bool sendMousePressEvent(MousePressEvent const& _event, Timestamp _now);
-    bool sendMouseMoveEvent(MouseMoveEvent const& _event, Timestamp _now);
-    bool sendMouseReleaseEvent(MouseReleaseEvent const& _event, Timestamp _now);
+    bool sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now);
+    bool sendCharPressEvent(char32_t _char, Modifier _modifier, Timestamp _now);
+    bool sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
+    bool sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Timestamp _now);
+    bool sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.

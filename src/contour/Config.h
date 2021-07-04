@@ -21,6 +21,7 @@
 #include <terminal_renderer/DecorationRenderer.h>   // Decorator
 
 #include <terminal/Color.h>
+#include <terminal/InputBinding.h>
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h>                 // CursorDisplay
 
@@ -53,16 +54,69 @@ enum class Permission
     Ask
 };
 
+using ActionList = std::vector<actions::Action>;
+using KeyInputMapping = terminal::InputBinding<terminal::Key, ActionList>;
+using CharInputMapping = terminal::InputBinding<char32_t, ActionList>;
+using MouseInputMapping = terminal::InputBinding<terminal::MouseButton, ActionList>;
+
 struct InputMappings
 {
-    std::unordered_map<terminal::KeyInputEvent, std::vector<actions::Action>> keyMappings;
-    std::unordered_map<terminal::CharInputEvent, std::vector<actions::Action>> charMappings;
-    std::unordered_map<terminal::MousePressEvent, std::vector<actions::Action>> mouseMappings;
+    std::vector<KeyInputMapping> keyMappings;
+    std::vector<CharInputMapping> charMappings;
+    std::vector<MouseInputMapping> mouseMappings;
 };
 
-std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::KeyInputEvent const& _event);
-std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::CharInputEvent const& _event);
-std::vector<actions::Action> const* apply(InputMappings const& _mappings, terminal::MousePressEvent const& _event);
+namespace helper
+{
+    inline bool testMatchMode(uint8_t _actualModeFlags,
+                       terminal::MatchModes _expected,
+                       terminal::MatchModes::Flag _testFlag)
+    {
+        using MatchModes = terminal::MatchModes;
+        switch (_expected.status(_testFlag))
+        {
+            case MatchModes::Status::Enabled:
+                if (!(_actualModeFlags & _testFlag))
+                    return false;
+                break;
+            case MatchModes::Status::Disabled:
+                if ((_actualModeFlags & _testFlag))
+                    return false;
+            case MatchModes::Status::Any:
+                break;
+        }
+        return true;
+    }
+
+    inline bool testMatchMode(uint8_t _actualModeFlags,
+                       terminal::MatchModes _expected)
+    {
+        using Flag = terminal::MatchModes::Flag;
+        return testMatchMode(_actualModeFlags, _expected, Flag::AlternateScreen)
+            && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
+            && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad);
+    }
+}
+
+template <typename Input>
+std::vector<actions::Action> const* apply(
+    std::vector<terminal::InputBinding<Input, ActionList>> const& _mappings,
+    Input _input,
+    terminal::Modifier _modifier,
+    uint8_t _actualModeFlags
+)
+{
+    for (terminal::InputBinding<Input, ActionList> const& mapping: _mappings)
+    {
+        if (mapping.modifier == _modifier &&
+            mapping.input == _input &&
+            helper::testMatchMode(_actualModeFlags, mapping.modes))
+        {
+            return &mapping.binding;
+        }
+    }
+    return nullptr;
+}
 
 struct TerminalProfile {
     terminal::Process::ExecInfo shell;

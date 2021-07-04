@@ -30,7 +30,9 @@ set(terminal_HEADERS
     Hyperlink.h
     Functions.h
     Image.h
+    InputBinding.h
     InputGenerator.h
+    MatchModes.h
     Parser.h
     Process.h
     pty/Pty.h
@@ -57,7 +59,9 @@ set(terminal_SOURCES
     Grid.cpp
     Functions.cpp
     Image.cpp
+    InputBinding.cpp
     InputGenerator.cpp
+    MatchModes.cpp
     Parser.cpp
     Process.cpp
     RenderBuffer.cpp

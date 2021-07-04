@@ -396,7 +396,7 @@ optional<RenderCursor> Terminal::renderCursor()
 }
 // }}}
 
-bool Terminal::sendKeyPressEvent(KeyInputEvent const& _keyEvent, chrono::steady_clock::time_point _now)
+bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 {
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
@@ -406,16 +406,16 @@ bool Terminal::sendKeyPressEvent(KeyInputEvent const& _keyEvent, chrono::steady_
         return true;
 
     viewport_.scrollToBottom();
-    bool const success = inputGenerator_.generate(_keyEvent.key, _keyEvent.modifier);
+    bool const success = inputGenerator_.generate(_key, _modifier);
     if (success)
-        debuglog(InputTag).write("Sending {}.", _keyEvent);
+        debuglog(InputTag).write("Sending {} {}.", _key, _modifier);
 
     flushInput();
     viewport_.scrollToBottom();
     return success;
 }
 
-bool Terminal::sendCharPressEvent(CharInputEvent const& _charEvent, steady_clock::time_point _now)
+bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
@@ -424,35 +424,32 @@ bool Terminal::sendCharPressEvent(CharInputEvent const& _charEvent, steady_clock
     if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    auto const success = inputGenerator_.generate(_charEvent.value, _charEvent.modifier);
+    auto const success = inputGenerator_.generate(_value, _modifier);
     if (success)
-        debuglog(InputTag).write("Sending {}.", _charEvent);
+        debuglog(InputTag).write("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(_value)), _modifier);
 
     flushInput();
     viewport_.scrollToBottom();
     return success;
 }
 
-bool Terminal::sendMousePressEvent(MousePressEvent const& _mousePress, chrono::steady_clock::time_point _now)
+bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
 {
     respectMouseProtocol_ = mouseProtocolBypassModifier_ == Modifier::None
-                         || !_mousePress.modifier.contains(mouseProtocolBypassModifier_);
+                         || !_modifier.contains(mouseProtocolBypassModifier_);
 
-    MousePressEvent const withPosition{_mousePress.button,
-                                       _mousePress.modifier,
-                                       {},
-                                       currentMousePosition_.row,
-                                       currentMousePosition_.column};
-    if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
+    if (respectMouseProtocol_ && inputGenerator_.generateMousePress(
+                _button, _modifier,
+                currentMousePosition_.row, currentMousePosition_.column))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
-        debuglog(InputTag).write("Sending {}.", withPosition);
+        debuglog(InputTag).write("Sending mouse press {} {} at {}.", _button, _modifier, currentMousePosition_);
         flushInput();
         return true;
     }
 
-    if (_mousePress.button != MouseButton::Left)
+    if (_button != MouseButton::Left)
         return false;
 
     double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
@@ -469,7 +466,7 @@ bool Terminal::sendMousePressEvent(MousePressEvent const& _mousePress, chrono::s
             return Selector::Mode::LinearWordWise;
         else
             return Selector::Mode::Linear;
-    }(speedClicks_, _mousePress.modifier);
+    }(speedClicks_, _modifier);
 
     if (!selectionAvailable()
         || selector()->state() == Selector::State::Waiting
@@ -498,9 +495,9 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::sendMouseMoveEvent(MouseMoveEvent const& _mouseMove, chrono::steady_clock::time_point /*_now*/)
+bool Terminal::sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Timestamp /*_now*/)
 {
-    auto const newPosition = _mouseMove.coordinates();
+    auto const newPosition = Coordinate{_row, _column};
     bool const positionChanged = newPosition != currentMousePosition_;
 
     currentMousePosition_ = newPosition;
@@ -508,9 +505,12 @@ bool Terminal::sendMouseMoveEvent(MouseMoveEvent const& _mouseMove, chrono::stea
     bool changed = updateCursorHoveringState();
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (respectMouseProtocol_ && inputGenerator_.generate(_mouseMove))
+    if (respectMouseProtocol_ && inputGenerator_.generateMouseMove(
+                                                    currentMousePosition_.row,
+                                                    currentMousePosition_.column,
+                                                    _modifier))
     {
-        debuglog(InputTag).write("Sending {}.", _mouseMove);
+        debuglog(InputTag).write("Sending mouse move at {}:{} {}.", _row, _column, _modifier);
         flushInput();
         return true;
     }
@@ -544,23 +544,21 @@ bool Terminal::sendMouseMoveEvent(MouseMoveEvent const& _mouseMove, chrono::stea
     return changed;
 }
 
-bool Terminal::sendMouseReleaseEvent(MouseReleaseEvent const& _mouseRelease, chrono::steady_clock::time_point /*_now*/)
+bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp /*_now*/)
 {
-    MouseReleaseEvent const withPosition{_mouseRelease.button,
-                                         _mouseRelease.modifier,
-                                         {},
-                                         currentMousePosition_.row,
-                                         currentMousePosition_.column};
-
-    if (respectMouseProtocol_ && inputGenerator_.generate(withPosition))
+    if (respectMouseProtocol_ && inputGenerator_.generateMouseRelease(
+                                                    _button,
+                                                    _modifier,
+                                                    currentMousePosition_.row,
+                                                    currentMousePosition_.column))
     {
-        debuglog(InputTag).write("Sending {}.", withPosition);
+        debuglog(InputTag).write("Sending mouse release {} {} at {}.", _button, _modifier, currentMousePosition_);
         flushInput();
         return true;
     }
     respectMouseProtocol_ = true;
 
-    if (_mouseRelease.button == MouseButton::Left)
+    if (_button == MouseButton::Left)
     {
         leftMouseButtonPressed_ = false;
         if (selectionAvailable())
@@ -588,9 +586,9 @@ bool Terminal::sendFocusInEvent()
     screen_.setFocus(true);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generate(FocusInEvent{}))
+    if (inputGenerator_.generateFocusInEvent())
     {
-        debuglog(InputTag).write("Sending {}.", FocusInEvent{});
+        debuglog(InputTag).write("Sending focus-in event.");
         flushInput();
         return true;
     }
@@ -603,9 +601,9 @@ bool Terminal::sendFocusOutEvent()
     screen_.setFocus(false);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generate(FocusOutEvent{}))
+    if (inputGenerator_.generateFocusOutEvent())
     {
-        debuglog(InputTag).write("Sending {}.", FocusOutEvent{});
+        debuglog(InputTag).write("Sending focus-out event.");
         flushInput();
         return true;
     }
@@ -622,7 +620,7 @@ void Terminal::sendPaste(string_view _text)
 
 void Terminal::sendRaw(string_view _text)
 {
-    inputGenerator_.generate(_text);
+    inputGenerator_.generateRaw(_text);
     flushInput();
 }
 
