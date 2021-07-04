@@ -671,11 +671,11 @@ namespace fmt { // {{{
             auto const u8str = unicode::convert_to<char>(_event.value);
             std::string s;
             if (*_event.mode)
-                s += fmt::format("{}", _event.mode);
+                s += fmt::format("{}+", _event.mode);
             if (_event.modifier.any())
-                return format_to(_ctx.out(), "{}+\"{}\"+{}", crispy::escape(u8str), _event.modifier);
+                return format_to(_ctx.out(), "{}\"{}\"+{}", s, crispy::escape(u8str), _event.modifier);
             else
-                return format_to(_ctx.out(), "{}+\"{}\"", crispy::escape(u8str), _event.modifier);
+                return format_to(_ctx.out(), "{}\"{}\"", s, crispy::escape(u8str), _event.modifier);
         }
     };
 
