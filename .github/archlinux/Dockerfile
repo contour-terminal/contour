@@ -1,11 +1,15 @@
-FROM archlinux/archlinux:latest
+FROM archlinux/archlinux:base-devel
 
 WORKDIR /app
 
-COPY . .
+RUN pacman -Syu --noconfirm --noprogressbar git
 
-RUN pacman -Sy --noconfirm archlinux-keyring
+RUN useradd -d /app builder
+RUN echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+USER builder
 
-RUN pacman -Su --noconfirm gcc ninja cmake extra-cmake-modules qt5-base fontconfig harfbuzz git base-devel
+RUN sudo chown builder:builder .
 
-RUN ./.github/archlinux/build
+RUN git clone https://aur.archlinux.org/contour-git.git .
+
+RUN makepkg -sf --noconfirm --needed && mv $(find . -regex '.*\.\(zst\)') contour.pkg.tar.zst
