@@ -89,11 +89,11 @@ class TerminalSession: public terminal::Terminal::Events
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
-    void sendKeyPressEvent(terminal::KeyInputEvent const& _event, Timestamp _now);
-    void sendCharPressEvent(terminal::CharInputEvent const& _event, Timestamp _now);
-    void sendMousePressEvent(terminal::MousePressEvent const& _event, Timestamp _now);
-    void sendMouseMoveEvent(terminal::MouseMoveEvent const& _event, Timestamp _now);
-    void sendMouseReleaseEvent(terminal::MouseReleaseEvent const& _event, Timestamp _now);
+    void sendKeyPressEvent(terminal::Key _key, terminal::Modifier _modifier, Timestamp _now);
+    void sendCharPressEvent(char32_t _value, terminal::Modifier _modifier, Timestamp _now);
+    void sendMousePressEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
+    void sendMouseMoveEvent(int _row, int _column, terminal::Modifier _modifier, Timestamp _now);
+    void sendMouseReleaseEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
     void sendFocusInEvent();
     void sendFocusOutEvent();
 
@@ -157,6 +157,7 @@ class TerminalSession: public terminal::Terminal::Events
     config::TerminalProfile& profile() noexcept { return profile_; }
     void configureTerminal();
     void configureDisplay();
+    uint8_t matchModeFlags() const;
 
     // private data
     //

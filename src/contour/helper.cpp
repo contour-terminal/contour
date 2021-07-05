@@ -52,8 +52,6 @@ namespace contour {
 bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 {
     using terminal::Key;
-    using terminal::KeyInputEvent;
-    using terminal::CharInputEvent;
     using terminal::Modifier;
 
     auto const now = steady_clock::now();
@@ -109,19 +107,19 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     if (auto i = find_if(begin(keyMappings), end(keyMappings), [_event](auto const& x) { return x.first == _event->key(); }); i != end(keyMappings))
     {
-        _session.sendKeyPressEvent(KeyInputEvent{i->second, modifiers}, now);
+        _session.sendKeyPressEvent(i->second, modifiers, now);
         return true;
     }
 
     if (auto i = find_if(begin(charMappings), end(charMappings), [_event](auto const& x) { return x.first == _event->key(); }); i != end(charMappings))
     {
-        _session.sendCharPressEvent(CharInputEvent{static_cast<char32_t>(i->second), modifiers}, now);
+        _session.sendCharPressEvent(static_cast<char32_t>(i->second), modifiers, now);
         return true;
     }
 
     if (key == Qt::Key_Backtab)
     {
-        _session.sendCharPressEvent(CharInputEvent{U'\t', modifiers.with(Modifier::Shift)}, now);
+        _session.sendCharPressEvent(U'\t', modifiers.with(Modifier::Shift), now);
         return true;
     }
 
@@ -129,21 +127,20 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
     {
         if (key >= 0x20 && key < 0x7F)
         {
-            _session.sendCharPressEvent(
-                CharInputEvent{static_cast<char32_t>(key), modifiers},
-                now
-            );
+            _session.sendCharPressEvent(static_cast<char32_t>(key),
+                                        modifiers,
+                                        now);
             return true;
         }
         switch (key)
         {
-            case Qt::Key_BraceLeft: _session.sendCharPressEvent(CharInputEvent{L'[', modifiers}, now);
+            case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now);
                 return true;
             case Qt::Key_Equal:
-                _session.sendCharPressEvent(CharInputEvent{L'=', modifiers}, now);
+                _session.sendCharPressEvent(L'=', modifiers, now);
                 return true;
             case Qt::Key_BraceRight:
-                _session.sendCharPressEvent(CharInputEvent{L']', modifiers}, now);
+                _session.sendCharPressEvent(L']', modifiers, now);
                 return true;
         }
     }
@@ -151,7 +148,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
     if (!_event->text().isEmpty())
     {
         for (auto const ch: _event->text().toUcs4())
-            _session.sendCharPressEvent(CharInputEvent{ch, modifiers}, now);
+            _session.sendCharPressEvent(ch, modifiers, now);
         return true;
     }
 
@@ -168,44 +165,41 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
         auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp
                                        : terminal::MouseButton::WheelDown;
 
-        auto const mouseEvent = terminal::MousePressEvent{
-            button,
-            makeModifier(_event->modifiers())
-        };
+        auto const modifier = makeModifier(_event->modifiers());
 
-        _session.sendMousePressEvent(mouseEvent,  steady_clock::now());
+        _session.sendMousePressEvent(button, modifier, steady_clock::now());
     }
 }
 
 void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
-    auto const mousePressEvent = terminal::MousePressEvent{
-        makeMouseButton(_event->button()),
-        makeModifier(_event->modifiers())};
-
-    _session.sendMousePressEvent(mousePressEvent, steady_clock::now());
+    _session.sendMousePressEvent(makeMouseButton(_event->button()),
+                                 makeModifier(_event->modifiers()),
+                                 steady_clock::now());
     _event->accept();
 }
 
 void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
-    auto const mouseButton = makeMouseButton(_event->button());
-    auto const mouseEvent = terminal::MouseReleaseEvent{mouseButton};
-    _session.sendMouseReleaseEvent(mouseEvent, steady_clock::now());
+    _session.sendMouseReleaseEvent(makeMouseButton(_event->button()),
+                                   makeModifier(_event->modifiers()),
+                                   steady_clock::now());
     _event->accept();
 }
 
 void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
 {
+    // NB: This translation depends on the display's margin, so maybe
+    //     the display should provide the translation?
     auto constexpr MarginTop = 0;
     auto constexpr MarginLeft = 0;
-
     auto const cellSize = _session.display()->cellSize();
     auto const row = int{1 + (max(_event->y(), 0) - MarginTop) /  cellSize.height};
     auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / cellSize.width};
-    auto const mouseEvent = terminal::MouseMoveEvent{row, col, makeModifier(_event->modifiers())};
 
-    _session.sendMouseMoveEvent(mouseEvent, steady_clock::now());
+    _session.sendMouseMoveEvent(row, col,
+                                makeModifier(_event->modifiers()),
+                                steady_clock::now());
 }
 
 void spawnNewTerminal(string const& _programPath,

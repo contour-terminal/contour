@@ -239,31 +239,6 @@ namespace // {{{ helper
 }
 // }}}
 
-vector<actions::Action> const* apply(InputMappings const& _mappings,
-                                     terminal::KeyInputEvent const& _event)
-{
-    if (auto const i = _mappings.keyMappings.find(_event); i != _mappings.keyMappings.end())
-        return &i->second;
-    return nullptr;
-}
-
-vector<actions::Action> const* apply(InputMappings const& _mappings,
-                                     terminal::CharInputEvent const& _event)
-{
-    if (auto const i = _mappings.charMappings.find(_event); i != _mappings.charMappings.end())
-        return &i->second;
-    return nullptr;
-}
-
-
-vector<actions::Action> const* apply(InputMappings const& _mappings,
-                                     terminal::MousePressEvent const& _event)
-{
-    if (auto const i = _mappings.mouseMappings.find(_event); i != _mappings.mouseMappings.end())
-        return &i->second;
-    return nullptr;
-}
-
 FileSystem::path configHome(string const& _programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
@@ -456,18 +431,18 @@ optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
     return nullopt;
 }
 
-optional<terminal::MatchMode> parseMode(UsedKeys& _usedKeys,
-                                        string const& _prefix,
-                                        YAML::Node const& _node)
+optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
+                                               string const& _prefix,
+                                               YAML::Node const& _node)
 {
-    using terminal::MatchMode;
+    using terminal::MatchModes;
     if (!_node)
-        return MatchMode::Default;
+        return terminal::MatchModes{};
     _usedKeys.emplace(_prefix);
     if (!_node.IsScalar())
         return nullopt;
 
-    MatchMode mode = MatchMode::Default;
+    auto matchModes = MatchModes{};
 
     auto const modeStr = _node.as<string>();
     auto const args = crispy::split(modeStr, '|');
@@ -482,13 +457,14 @@ optional<terminal::MatchMode> parseMode(UsedKeys& _usedKeys,
             arg.remove_prefix(1);
         }
 
-        MatchMode thisMode = MatchMode::Default;
-        if (arg == "Alt"sv)
-            thisMode = MatchMode::AlternateScreen;
-        else if (arg == "AppCursor")
-            thisMode = MatchMode::AppCursor;
-        else if (arg == "AppKeyPad")
-            thisMode = MatchMode::AppKeyPad;
+        MatchModes::Flag flag = MatchModes::Flag::Default;
+        string const upperArg = toUpper(arg);
+        if (upperArg == "ALT"sv)
+            flag = MatchModes::AlternateScreen;
+        else if (upperArg == "APPCURSOR")
+            flag = MatchModes::AppCursor;
+        else if (upperArg == "APPKEYPAD")
+            flag = MatchModes::AppKeypad;
         else
         {
             errorlog().write("Unknown input_mapping mode: {}", arg);
@@ -496,12 +472,12 @@ optional<terminal::MatchMode> parseMode(UsedKeys& _usedKeys,
         }
 
         if (negate)
-            mode = mode & ~thisMode;
+            matchModes.disable(flag);
         else
-            mode = mode | thisMode;
+            matchModes.enable(flag);
     }
 
-    return mode;
+    return matchModes;
 }
 
 optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
@@ -532,153 +508,205 @@ optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
     return mods;
 }
 
+namespace // {{{ helper
+{
+
+template <typename Input>
+void appendOrCreateBinding(
+    vector<terminal::InputBinding<Input, ActionList>>& _bindings,
+    terminal::MatchModes _modes,
+    terminal::Modifier _modifier,
+    Input _input,
+    Action _action)
+{
+    for (auto& binding: _bindings)
+    {
+        if (match(binding, _modes, _modifier, _input))
+        {
+            binding.binding.emplace_back(move(_action));
+            return;
+        }
+    }
+
+    _bindings.emplace_back(terminal::InputBinding<Input, ActionList>{
+        _modes, _modifier, _input, ActionList{move(_action)}
+    });
+}
+
+bool tryAddKey(InputMappings& _inputMappings,
+               terminal::MatchModes _modes,
+               terminal::Modifier _modifier,
+               YAML::Node const& _node,
+               Action _action)
+{
+    if (!_node)
+        return false;
+
+    if (!_node.IsScalar())
+        return false;
+
+    auto const input = parseKeyOrChar(_node.as<string>());
+    if (!input.has_value())
+        return false;
+
+    if (holds_alternative<terminal::Key>(*input))
+    {
+        appendOrCreateBinding(_inputMappings.keyMappings, _modes, _modifier,
+                              get<terminal::Key>(*input), move(_action));
+    }
+    else if (holds_alternative<char32_t>(*input))
+    {
+        appendOrCreateBinding(_inputMappings.charMappings, _modes, _modifier,
+                              get<char32_t>(*input), move(_action));
+    }
+    else
+        assert(false && "The impossible happened.");
+
+    return true;
+}
+
+optional<terminal::MouseButton> parseMouseButton(YAML::Node const& _node)
+{
+    if (!_node)
+        return nullopt;
+
+    if (!_node.IsScalar())
+        return nullopt;
+
+    auto constexpr static mappings = array{
+        pair{"WHEELUP"sv, terminal::MouseButton::WheelUp},
+        pair{"WHEELDOWN"sv, terminal::MouseButton::WheelDown},
+        pair{"LEFT"sv, terminal::MouseButton::Left},
+        pair{"MIDDLE"sv, terminal::MouseButton::Middle},
+        pair{"RIGHT"sv, terminal::MouseButton::Right},
+    };
+    auto const name = toUpper(_node.as<string>());
+    for (auto const& mapping: mappings)
+        if (name == mapping.first)
+            return mapping.second;
+    return nullopt;
+}
+
+bool tryAddMouse(vector<MouseInputMapping>& _bindings,
+                 terminal::MatchModes _modes,
+                 terminal::Modifier _modifier,
+                 YAML::Node const& _node,
+                 Action _action)
+{
+    auto mouseButton = parseMouseButton(_node);
+    if (!mouseButton)
+        return false;
+
+    appendOrCreateBinding(_bindings, _modes, _modifier, *mouseButton, move(_action));
+    return true;
+}
+
+optional<Action> parseAction(UsedKeys& _usedKeys,
+                             string const& _prefix,
+                             Config& _config,
+                             YAML::Node const& _parent)
+{
+    _usedKeys.emplace(_prefix + ".action");
+
+    auto actionName = _parent["action"].as<string>();
+    _usedKeys.emplace(_prefix + ".action." + actionName);
+    auto actionOpt = actions::fromString(actionName);
+    if (!actionOpt)
+    {
+        cerr << "Unknown action: '" << _parent["action"].as<string>() << '\'' << endl;
+        return nullopt;
+    }
+
+    auto action = actionOpt.value();
+
+    if (holds_alternative<actions::ChangeProfile>(action))
+    {
+        if (auto name = _parent["name"]; name.IsScalar())
+        {
+            _usedKeys.emplace(_prefix + ".name");
+            return actions::ChangeProfile{name.as<string>()};
+        }
+        else
+            return nullopt;
+    }
+
+    if (holds_alternative<actions::NewTerminal>(action))
+    {
+        if (auto profile = _parent["profile"]; profile && profile.IsScalar())
+        {
+            _usedKeys.emplace(_prefix + ".profile");
+            return actions::NewTerminal{profile.as<string>()};
+        }
+        else
+            return action;
+    }
+
+    if (holds_alternative<actions::ReloadConfig>(action))
+    {
+        _usedKeys.emplace(_prefix + ".profile");
+        if (auto profileName = _parent["profile"]; profileName.IsScalar())
+        {
+            _usedKeys.emplace(_prefix + ".profile");
+            return actions::ReloadConfig{profileName.as<string>()};
+        }
+        else
+            return action;
+    }
+
+    if (holds_alternative<actions::SendChars>(action))
+    {
+        if (auto chars = _parent["chars"]; chars.IsScalar())
+        {
+            _usedKeys.emplace(_prefix + ".chars");
+            return actions::SendChars{unescape(chars.as<string>())};
+        }
+        else
+            return nullopt;
+    }
+
+    if (holds_alternative<actions::WriteScreen>(action))
+    {
+        if (auto chars = _parent["chars"]; chars.IsScalar())
+        {
+            _usedKeys.emplace(_prefix + ".chars");
+            return actions::WriteScreen{unescape(chars.as<string>())};
+        }
+        else
+            return nullopt;
+    }
+
+    return action;
+}
+
 void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
                        Config& _config, YAML::Node const& _mapping)
 {
 	using namespace terminal;
 
-	auto const parseAction = [&](YAML::Node const& _parent) -> optional<Action>
-    {
-        _usedKeys.emplace(_prefix + ".action");
-
-        auto actionName = _parent["action"].as<string>();
-        _usedKeys.emplace(_prefix + ".action." + actionName);
-        auto actionOpt = actions::fromString(actionName);
-        if (!actionOpt)
-        {
-            cerr << "Unknown action: '" << _parent["action"].as<string>() << '\'' << endl;
-            return nullopt;
-        }
-
-        auto action = actionOpt.value();
-
-        if (holds_alternative<actions::ChangeProfile>(action))
-        {
-            if (auto name = _parent["name"]; name.IsScalar())
-            {
-                _usedKeys.emplace(_prefix + ".name");
-                return actions::ChangeProfile{name.as<string>()};
-            }
-            else
-                return nullopt;
-        }
-
-        if (holds_alternative<actions::NewTerminal>(action))
-        {
-            if (auto profile = _parent["profile"]; profile && profile.IsScalar())
-            {
-                _usedKeys.emplace(_prefix + ".profile");
-                return actions::NewTerminal{profile.as<string>()};
-            }
-            else
-                return action;
-        }
-
-        if (holds_alternative<actions::ReloadConfig>(action))
-        {
-            _usedKeys.emplace(_prefix + ".profile");
-            if (auto profileName = _parent["profile"]; profileName.IsScalar())
-            {
-                _usedKeys.emplace(_prefix + ".profile");
-                return actions::ReloadConfig{profileName.as<string>()};
-            }
-            else
-                return action;
-        }
-
-        if (holds_alternative<actions::SendChars>(action))
-        {
-            if (auto chars = _parent["chars"]; chars.IsScalar())
-            {
-                _usedKeys.emplace(_prefix + ".chars");
-                return actions::SendChars{unescape(chars.as<string>())};
-            }
-            else
-                return nullopt;
-        }
-
-        if (holds_alternative<actions::WriteScreen>(action))
-        {
-            if (auto chars = _parent["chars"]; chars.IsScalar())
-            {
-                _usedKeys.emplace(_prefix + ".chars");
-                return actions::WriteScreen{unescape(chars.as<string>())};
-            }
-            else
-                return nullopt;
-        }
-
-		return action;
-	};
-
-    auto const parseMouseEvent = [](YAML::Node const& _node, Modifier _mods) -> pair<optional<MousePressEvent>, bool> {
-        if (!_node)
-            return make_pair(nullopt, true);
-        else if (!_node.IsScalar())
-            return make_pair(nullopt, false);
-        else
-        {
-            auto constexpr static mappings = array{
-                pair{"WHEELUP"sv, terminal::MouseButton::WheelUp},
-                pair{"WHEELDOWN"sv, terminal::MouseButton::WheelDown},
-                pair{"LEFT"sv, terminal::MouseButton::Left},
-                pair{"MIDDLE"sv, terminal::MouseButton::Middle},
-                pair{"RIGHT"sv, terminal::MouseButton::Right},
-            };
-            auto const name = toUpper(_node.as<string>());
-            for (auto const& mapping: mappings)
-                if (name == mapping.first)
-                    return make_pair(MousePressEvent{mapping.second, _mods}, true);
-            return make_pair(nullopt, true);
-        }
-    };
-
-	auto const makeKeyEvent = [&](YAML::Node const& _node, Modifier _mods, MatchMode _mode) -> pair<optional<variant<terminal::KeyInputEvent, terminal::CharInputEvent>>, bool> {
-        if (!_node)
-            return make_pair(nullopt, false);
-
-        if (!_node.IsScalar())
-            return make_pair(nullopt, true);
-
-        auto const input = parseKeyOrChar(_node.as<string>());
-        if (!input.has_value())
-            return make_pair(nullopt, false);
-
-        _usedKeys.emplace(_prefix + ".key");
-        if (std::holds_alternative<terminal::Key>(*input))
-            return {terminal::KeyInputEvent{std::get<terminal::Key>(*input), _mods, _mode}, true};
-
-        return {terminal::CharInputEvent{std::get<char32_t>(*input), _mods, _mode}, true};
-    };
-
-    auto const action = parseAction(_mapping);
+    auto const action = parseAction(_usedKeys, _prefix, _config, _mapping);
 	auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
-    auto const mode = parseMode(_usedKeys, _prefix + ".mode", _mapping["mode"]);
+    auto const mode = parseMatchModes(_usedKeys, _prefix + ".mode", _mapping["mode"]);
+    debuglog(ConfigTag).write("input_mapping: {} {} {}\n", !!action, !!mods, !!mode);
     if (action && mods && mode)
     {
-        if (auto const [keyEvent, ok] = makeKeyEvent(_mapping["key"], mods.value(), mode.value()); ok)
+        if (tryAddKey(_config.inputMappings, *mode, *mods, _mapping["key"], *action))
         {
             _usedKeys.emplace(_prefix + ".key");
-            if (keyEvent.has_value())
-            {
-                if (holds_alternative<KeyInputEvent>(*keyEvent))
-                    _config.inputMappings.keyMappings[get<KeyInputEvent>(*keyEvent)].emplace_back(*action);
-                else
-                    _config.inputMappings.charMappings[get<CharInputEvent>(*keyEvent)].emplace_back(*action);
-            }
         }
-        else if (auto const [mouseEvent, ok] = parseMouseEvent(_mapping["mouse"], mods.value()); ok)
+        else if (tryAddMouse(_config.inputMappings.mouseMappings, *mode, *mods, _mapping["mouse"], *action))
         {
             _usedKeys.emplace(_prefix + ".mouse");
-            if (mouseEvent.has_value())
-                _config.inputMappings.mouseMappings[*mouseEvent].emplace_back(*action);
         }
         else
         {
             // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
+            debuglog(ConfigTag).write("Could not add some input mapping.");
         }
     }
 }
+
+}
+// }}}
 
 std::string defaultConfigFilePath()
 {
@@ -949,7 +977,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         {
             auto const name = i->first.as<string>();
             auto const value = i->second.as<string>();
-            _usedKeys.emplace(envpath + "." + name);
+            _usedKeys.emplace(fmt::format("{}.{}", envpath, name));
             profile.shell.env[name] = value;
         }
     }
@@ -1219,11 +1247,18 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     checkForSuperfluousKeys(doc, usedKeys);
 
-    // auto const logMappings = [](auto const& _mapping) {
-    //     for (auto const& m: _mapping)
-    //         for (auto const& a: m.second)
-    //             debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
-    // };
+    auto const logMappings = [](auto const& _mapping) {
+        for (auto const& m: _mapping)
+        {
+            debuglog(ConfigTag).write("{} {} {}", m.modes, m.modifier, m.input);
+            // for (auto const& a: m.second)
+            //     debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
+        }
+    };
+    debuglog(ConfigTag).write("Write parsed input mappings {} / {} / {}.",
+                              _config.inputMappings.keyMappings.size(),
+                              _config.inputMappings.charMappings.size(),
+                              _config.inputMappings.mouseMappings.size());
     // logMappings(_config.inputMappings.keyMappings);
     // logMappings(_config.inputMappings.charMappings);
     // logMappings(_config.inputMappings.mouseMappings);
