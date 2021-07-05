@@ -686,7 +686,6 @@ void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
     auto const action = parseAction(_usedKeys, _prefix, _config, _mapping);
 	auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
     auto const mode = parseMatchModes(_usedKeys, _prefix + ".mode", _mapping["mode"]);
-    debuglog(ConfigTag).write("input_mapping: {} {} {}\n", !!action, !!mods, !!mode);
     if (action && mods && mode)
     {
         if (tryAddKey(_config.inputMappings, *mode, *mods, _mapping["key"], *action))
