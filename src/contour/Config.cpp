@@ -50,6 +50,15 @@ using namespace std;
 using crispy::escape;
 using crispy::unescape;
 
+using terminal::ImageSize;
+using terminal::Width;
+using terminal::Height;
+
+using terminal::PageSize;
+using terminal::LineCount;
+using terminal::ColumnCount;
+
+
 namespace contour::config {
 
 namespace {
@@ -164,6 +173,16 @@ namespace // {{{ helper
         return tryLoadValue(_usedKeys, child, _keys, _offset + 1, _store);
     }
 
+    template <typename T, typename U>
+    bool tryLoadValue(UsedKeys& _usedKeys,
+                      YAML::Node const& _root,
+                      vector<string_view> const& _keys,
+                      size_t _offset,
+                      crispy::boxed<T, U>& _store)
+    {
+        return tryLoadValue(_usedKeys, _root, _keys, _offset, _store.value);
+    }
+
     template <typename T>
     bool tryLoadValue(UsedKeys& _usedKeys,
                       YAML::Node const& _root,
@@ -176,6 +195,15 @@ namespace // {{{ helper
         return tryLoadValue(_usedKeys, _root, keys, 0, _store);
     }
 
+    template <typename T, typename U>
+    bool tryLoadValue(UsedKeys& _usedKeys,
+                      YAML::Node const& _root,
+                      string const& _path,
+                      crispy::boxed<T, U>& _store)
+    {
+        return tryLoadValue(_usedKeys, _root, _path, _store.value);
+    }
+
     template <typename T>
     bool tryLoadChild(UsedKeys& _usedKeys,
                       YAML::Node const& _doc,
@@ -185,6 +213,16 @@ namespace // {{{ helper
     {
         auto const path = fmt::format("{}.{}", _parentPath, _key);
         return tryLoadValue(_usedKeys, _doc, path, _store);
+    }
+
+    template <typename T, typename U>
+    bool tryLoadChild(UsedKeys& _usedKeys,
+                      YAML::Node const& _doc,
+                      string const& _parentPath,
+                      string const& _key,
+                      crispy::boxed<T, U>& _store)
+    {
+        return tryLoadChild(_usedKeys, _doc, _parentPath, _key, _store.value);
     }
 
     void checkForSuperfluousKeys(YAML::Node _root,
@@ -686,7 +724,6 @@ void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
     auto const action = parseAction(_usedKeys, _prefix, _config, _mapping);
 	auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
     auto const mode = parseMatchModes(_usedKeys, _prefix + ".mode", _mapping["mode"]);
-    debuglog(ConfigTag).write("input_mapping: {} {} {}\n", !!action, !!mods, !!mode);
     if (action && mods && mode)
     {
         if (tryAddKey(_config.inputMappings, *mode, *mods, _mapping["key"], *action))
@@ -887,7 +924,8 @@ void softLoadFont(UsedKeys& _usedKeys,
     }
 }
 
-bool sanitizeRange(std::reference_wrapper<int> _value, int _min, int _max)
+template <typename T>
+bool sanitizeRange(std::reference_wrapper<T> _value, T _min, T _max)
 {
     if (_min <= _value.get() && _value.get() <= _max)
         return true;
@@ -995,22 +1033,22 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     else
         errorlog().write("Invalid Terminal ID \"{}\", specified", strValue);
 
-    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.columns", profile.terminalSize.width);
-    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.lines", profile.terminalSize.height);
+    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.columns", profile.terminalSize.columns);
+    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.lines", profile.terminalSize.lines);
     {
-        auto constexpr MinimalTerminalSize = crispy::Size{3, 3};
-        auto constexpr MaximumTerminalSize = crispy::Size{300, 200};
+        auto constexpr MinimalTerminalSize = PageSize{LineCount(3), ColumnCount(3)};
+        auto constexpr MaximumTerminalSize = PageSize{LineCount(200), ColumnCount(300)};
 
-        if (!sanitizeRange(ref(profile.terminalSize.width), MinimalTerminalSize.width, MaximumTerminalSize.width))
+        if (!sanitizeRange(ref(profile.terminalSize.columns.value), *MinimalTerminalSize.columns, *MaximumTerminalSize.columns))
             errorlog().write(
                 "Terminal width {} out of bounds. Should be between {} and {}.",
-                profile.terminalSize.width, MinimalTerminalSize.width, MaximumTerminalSize.width
+                profile.terminalSize.columns, MinimalTerminalSize.columns, MaximumTerminalSize.columns
             );
 
-        if (!sanitizeRange(ref(profile.terminalSize.height), MinimalTerminalSize.height, MaximumTerminalSize.height))
+        if (!sanitizeRange(ref(profile.terminalSize.lines), MinimalTerminalSize.lines, MaximumTerminalSize.lines))
             errorlog().write(
                 "Terminal height {} out of bounds. Should be between {} and {}.",
-                profile.terminalSize.height, MinimalTerminalSize.height, MaximumTerminalSize.height
+                profile.terminalSize.lines, MinimalTerminalSize.lines, MaximumTerminalSize.lines
             );
     }
 
@@ -1095,12 +1133,12 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     else
         errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
 
-    int intValue = profile.maxHistoryLineCount.value_or(-1);
+    auto intValue = profile.maxHistoryLineCount.value_or(std::numeric_limits<LineCount>::max());
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
-    if (intValue < 0)
+    if (intValue == std::numeric_limits<LineCount>::max())
         profile.maxHistoryLineCount = nullopt;
     else
-        profile.maxHistoryLineCount = static_cast<size_t>(intValue);
+        profile.maxHistoryLineCount = intValue;
 
     tryLoadChild(_usedKeys, _doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
     tryLoadChild(_usedKeys, _doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);

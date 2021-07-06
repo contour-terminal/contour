@@ -39,12 +39,12 @@ class OpenGLRenderer final :
   public:
     OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                    ShaderConfig const& _rectShaderConfig,
-                   crispy::Size _size,
+                   crispy::ImageSize _size,
                    terminal::renderer::PageMargin _margin);
 
     ~OpenGLRenderer() override;
 
-    void setRenderSize(crispy::Size _size) override;
+    void setRenderSize(crispy::ImageSize _size) override;
     void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
 
     atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
@@ -73,10 +73,10 @@ class OpenGLRenderer final :
     int maxTextureDepth();
     int maxTextureSize();
     int maxTextureUnits();
-    crispy::Size renderBufferSize();
+    crispy::ImageSize renderBufferSize();
 
-    crispy::Size colorTextureSizeHint();
-    crispy::Size monochromeTextureSizeHint();
+    crispy::ImageSize colorTextureSizeHint();
+    crispy::ImageSize monochromeTextureSizeHint();
 
     void executeRenderTextures();
     void createAtlas(atlas::CreateAtlas const& _param);
@@ -94,7 +94,7 @@ class OpenGLRenderer final :
     // private data members
     //
     bool initialized_ = false;
-    crispy::Size size_;
+    crispy::ImageSize size_;
     QMatrix4x4 projectionMatrix_;
 
     terminal::renderer::PageMargin margin_{};

@@ -58,7 +58,8 @@ class Terminal : public ScreenEvents {
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionCompleted() {}
-        virtual void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) {}
+        virtual void resizeWindow(LineCount, ColumnCount) {}
+        virtual void resizeWindow(Width, Height) {}
         virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
@@ -67,12 +68,12 @@ class Terminal : public ScreenEvents {
     Terminal(Pty& _pty,
              int _ptyReadBufferSize,
              Events& _eventListener,
-             std::optional<size_t> _maxHistoryLineCount = std::nullopt,
+             std::optional<LineCount> _maxHistoryLineCount = std::nullopt,
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              std::string const& _wordDelimiters = "",
              Modifier _mouseProtocolBypassModifier = Modifier::Shift,
-             crispy::Size _maxImageSize = crispy::Size{800, 600},
+             ImageSize _maxImageSize = ImageSize{Width(800), Height(600)},
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true,
              ColorPalette _colorPalette = {},
@@ -89,8 +90,8 @@ class Terminal : public ScreenEvents {
     /// Retrieves reference to the underlying PTY device.
     Pty& device() noexcept { return pty_; }
 
-    crispy::Size screenSize() const noexcept { return pty_.screenSize(); }
-    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels);
+    PageSize screenSize() const noexcept { return pty_.screenSize(); }
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
 
@@ -115,9 +116,11 @@ class Terminal : public ScreenEvents {
     Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
     {
         // TODO: unit test case me BEFORE merge, yo !
-        auto const row = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount()) + (_pos.row - 1);
+        auto const row = viewport_.absoluteScrollOffset().value_or(
+            boxed_cast<StaticScrollbackPosition>(screen_.historyLineCount())) +
+            StaticScrollbackPosition::cast_from(_pos.row - 1);
         auto const col = _pos.column;
-        return Coordinate{row, col};
+        return Coordinate{unbox<int>(row), col};
     }
 
     /// Writes a given VT-sequence to screen.
@@ -316,7 +319,8 @@ class Terminal : public ScreenEvents {
     void dumpState() override;
     void notify(std::string_view _title, std::string_view _body) override;
     void reply(std::string_view _response) override;
-    void resizeWindow(int _width, int _height, bool _unitInPixels) override;
+    void resizeWindow(PageSize) override;
+    void resizeWindow(ImageSize) override;
     void setApplicationkeypadMode(bool _enabled) override;
     void setBracketedPaste(bool _enabled) override;
     void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;

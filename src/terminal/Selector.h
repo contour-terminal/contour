@@ -81,8 +81,8 @@ class Selector {
 			 GetCellAt _at,
              GetWrappedFlag _wrappedFlag,
 			 std::u32string const& _wordDelimiters,
-			 int _totalRowCount,
-             int _columnCount,
+			 LineCount _totalRowCount,
+             ColumnCount _columnCount,
 			 Coordinate _from);
 
 	/// Convenience constructor when access to Screen is available.
@@ -186,8 +186,8 @@ class Selector {
 	GetCellAt getCellAt_;
     GetWrappedFlag wrapped_;
 	std::u32string wordDelimiters_;
-	int totalRowCount_;
-    int columnCount_;
+	LineCount totalRowCount_;
+    ColumnCount columnCount_;
     Coordinate start_{};
     Coordinate from_{};
     Coordinate to_{};

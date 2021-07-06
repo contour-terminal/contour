@@ -23,10 +23,10 @@ namespace detail
     template <typename Container, typename Comp, typename size_type>
     constexpr size_type partition(Container& _container, Comp _compare, size_type _low, size_type _high)
     {
-        int i = static_cast<int>(_low) - 1;
+        auto i = _low - 1;
         auto& pivot = _container[_high];
 
-        for (int const j : crispy::times(static_cast<int>(_low), static_cast<int>(_high - _low)))
+        for (auto const j : crispy::times(_low, static_cast<decltype(_low)>(_high - _low)))
         {
             if (_compare(_container[j], pivot) <= 0)
             {

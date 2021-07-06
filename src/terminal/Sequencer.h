@@ -18,7 +18,7 @@
 #include <terminal/ParserExtension.h>
 #include <terminal/Functions.h>
 #include <terminal/SixelParser.h>
-#include <crispy/size.h>
+#include <terminal/primitives.h>
 
 #include <cassert>
 #include <memory>
@@ -228,7 +228,7 @@ std::string to_string(CharsetTable i);
 std::string to_string(CharsetId charset);
 std::string to_string(GraphicsRendition s);
 
-constexpr int toAnsiModeNum(AnsiMode m)
+constexpr unsigned toAnsiModeNum(AnsiMode m)
 {
     switch (m)
     {
@@ -237,10 +237,10 @@ constexpr int toAnsiModeNum(AnsiMode m)
         case AnsiMode::SendReceive: return 12;
         case AnsiMode::AutomaticNewLine: return 20;
     }
-    return static_cast<int>(m);
+    return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidAnsiMode(int _mode) noexcept
+constexpr bool isValidAnsiMode(unsigned _mode) noexcept
 {
     switch (static_cast<AnsiMode>(_mode))
     {
@@ -253,10 +253,10 @@ constexpr bool isValidAnsiMode(int _mode) noexcept
     return false;
 }
 
-
 std::string to_string(DECMode _mode);
+std::string to_string(AnsiMode _mode);
 
-constexpr int toDECModeNum(DECMode m)
+constexpr unsigned toDECModeNum(DECMode m)
 {
     switch (m)
     {
@@ -294,10 +294,10 @@ constexpr int toDECModeNum(DECMode m)
         case DECMode::BatchedRendering: return 2026;
         case DECMode::TextReflow: return 2027;
     }
-    return static_cast<int>(m);
+    return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidDECMode(int _mode) noexcept
+constexpr bool isValidDECMode(unsigned _mode) noexcept
 {
     switch (static_cast<DECMode>(_mode))
     {
@@ -341,7 +341,7 @@ constexpr bool isValidDECMode(int _mode) noexcept
 
 CursorShape makeCursorShape(std::string const& _name);
 
-constexpr DynamicColorName getChangeDynamicColorCommand(int value)
+constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
 {
     switch (value)
     {
@@ -357,7 +357,7 @@ constexpr DynamicColorName getChangeDynamicColorCommand(int value)
     }
 }
 
-constexpr int setDynamicColorCommand(DynamicColorName name)
+constexpr unsigned setDynamicColorCommand(DynamicColorName name)
 {
     switch (name)
     {
@@ -392,8 +392,8 @@ namespace XtSmGraphics
         ReadLimit = 4
     };
 
-    using Value = std::variant<std::monostate, int, crispy::Size>;
-};
+    using Value = std::variant<std::monostate, unsigned, ImageSize>;
+}
 
 /// TBC - Tab Clear
 ///
@@ -433,7 +433,7 @@ enum class RequestStatusString {
 /// DECSIXEL - Sixel Graphics Image.
 struct SixelImage { // TODO: this struct is only used internally in Sequencer, make it private
     /// Size in pixels for this image
-    crispy::Size size;
+    ImageSize size;
 
     /// RGBA buffer of the image to be rendered
     Image::Data rgba;
@@ -457,7 +457,7 @@ enum class ApplyResult {
 /// Helps constructing VT functions as they're being parsed by the VT parser.
 class Sequence {
   public:
-    using Parameter = int;
+    using Parameter = unsigned;
     using ParameterList = std::vector<std::vector<Parameter>>;
     using Intermediaries = std::string;
     using DataString = std::string;
@@ -521,7 +521,7 @@ class Sequence {
         switch (category_)
         {
             case FunctionCategory::OSC:
-                return FunctionSelector{category_, 0, parameters_[0][0], 0, 0};
+                return FunctionSelector{category_, 0, static_cast<int>(parameters_[0][0]), 0, 0};
             default:
             {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
@@ -544,37 +544,42 @@ class Sequence {
     size_t parameterCount() const noexcept { return parameters_.size(); }
     size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
 
-    std::optional<Parameter> param_opt(size_t _index) const noexcept
+    template <typename T = unsigned>
+    std::optional<T> param_opt(size_t _index) const noexcept
     {
         if (_index < parameters_.size() && parameters_[_index][0])
-            return {parameters_[_index][0]};
+            return {T(parameters_[_index][0])};
         else
             return std::nullopt;
     }
 
-    Parameter param_or(size_t _index, Parameter _defaultValue) const noexcept
+    template <typename T = unsigned>
+    T param_or(size_t _index, T _defaultValue) const noexcept
     {
-        return param_opt(_index).value_or(_defaultValue);
+        return param_opt<T>(_index).value_or(_defaultValue);
     }
 
-    int param(size_t _index) const noexcept
+    template <typename T = unsigned>
+    T param(size_t _index) const noexcept
     {
         assert(_index < parameters_.size());
         assert(0 < parameters_[_index].size());
-        return parameters_[_index][0];
+        return T(parameters_[_index][0]);
     }
 
-    int subparam(size_t _index, size_t _subIndex) const noexcept
+    template <typename T = unsigned>
+    T subparam(size_t _index, size_t _subIndex) const noexcept
     {
         assert(_index < parameters_.size());
         assert(_subIndex + 1 < parameters_[_index].size());
-        return parameters_[_index][_subIndex + 1];
+        return T(parameters_[_index][_subIndex + 1]);
     }
 
-    bool containsParameter(int _value) const noexcept
+    template <typename T = unsigned>
+    bool containsParameter(T _value) const noexcept
     {
         for (size_t i = 0; i < parameterCount(); ++i)
-            if (param(i) == _value)
+            if (T(parameters_[i][0]) == _value)
                 return true;
         return false;
     }
@@ -588,12 +593,12 @@ class Sequencer : public ParserEvents {
   public:
     /// Constructs the sequencer stage.
     Sequencer(Screen& _screen,
-              crispy::Size _maxImageSize,
+              ImageSize _maxImageSize,
               RGBAColor _backgroundColor,
               std::shared_ptr<SixelColorPalette> _imageColorPalette);
 
-    void setMaxImageSize(crispy::Size _value) { maxImageSize_ = _value; }
-    void setMaxImageColorRegisters(int _value) { maxImageRegisterCount_ = _value; }
+    void setMaxImageSize(ImageSize _value) { maxImageSize_ = _value; }
+    void setMaxImageColorRegisters(unsigned _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
     int64_t instructionCounter() const noexcept { return instructionCounter_; }
@@ -644,13 +649,10 @@ class Sequencer : public ParserEvents {
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     bool usePrivateColorRegisters_ = false;
-    crispy::Size maxImageSize_;
-    int maxImageRegisterCount_;
+    ImageSize maxImageSize_;
+    unsigned maxImageRegisterCount_;
     RGBAColor backgroundColor_;
 };
-
-std::string to_string(AnsiMode _mode);
-std::string to_string(DECMode _mode);
 
 }  // namespace terminal
 
@@ -728,7 +730,7 @@ namespace fmt { // {{{
                 case DynamicColorName::HighlightBackgroundColor:
                     return format_to(ctx.out(), "HighlightBackgroundColor");
             }
-            return format_to(ctx.out(), "({})", static_cast<int>(name));
+            return format_to(ctx.out(), "({})", static_cast<unsigned>(name));
         }
     };
 

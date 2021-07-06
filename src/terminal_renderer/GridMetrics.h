@@ -16,6 +16,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 #include <terminal/Coordinate.h>
+#include <terminal/primitives.h>
 
 #include <fmt/format.h>
 
@@ -38,8 +39,8 @@ struct PageMargin
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
-    crispy::Size pageSize;  // page size in column- and line count
-    crispy::Size cellSize;  // grid cell size in pixels
+    PageSize pageSize;  // page size in column- and line count
+    ImageSize cellSize;  // grid cell size in pixels
 
     int baseline;           // glyph's baseline position relative to cell bottom.
 
@@ -64,8 +65,8 @@ struct GridMetrics
 
     constexpr crispy::Point map(Coordinate const& _pos) const noexcept
     {
-        auto const x = pageMargin.left + (_pos.column - 1) * cellSize.width;
-        auto const y = pageMargin.bottom + (pageSize.height - _pos.row) * cellSize.height;
+        auto const x = pageMargin.left + (_pos.column - 1) * cellSize.width.as<int>();
+        auto const y = pageMargin.bottom + (pageSize.lines.as<int>() - _pos.row) * cellSize.height.as<int>();
 
         return {x, y};
     }

@@ -194,8 +194,8 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
     auto constexpr MarginTop = 0;
     auto constexpr MarginLeft = 0;
     auto const cellSize = _session.display()->cellSize();
-    auto const row = int{1 + (max(_event->y(), 0) - MarginTop) /  cellSize.height};
-    auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / cellSize.width};
+    auto const row = int{1 + (max(_event->y(), 0) - MarginTop) /  cellSize.height.as<int>()};
+    auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / cellSize.width.as<int>()};
 
     _session.sendMouseMoveEvent(row, col,
                                 makeModifier(_event->modifiers()),
@@ -314,10 +314,12 @@ terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer)
     };
 }
 
-terminal::renderer::PageMargin computeMargin(Size _cellSize, Size _charCells, Size _pixels) noexcept
+terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
+                                             terminal::PageSize _charCells,
+                                             terminal::ImageSize _pixels) noexcept
 {
-    auto const usedHeight = static_cast<int>(_charCells.height * _cellSize.height);
-    auto const freeHeight = static_cast<int>(_pixels.height - usedHeight);
+    auto const usedHeight = static_cast<int>(*_charCells.lines * *_cellSize.height);
+    auto const freeHeight = static_cast<int>(*_pixels.height - usedHeight);
     auto const bottomMargin = freeHeight;
 
     //auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();
@@ -327,9 +329,9 @@ terminal::renderer::PageMargin computeMargin(Size _cellSize, Size _charCells, Si
     return {leftMargin, bottomMargin};
 }
 
-bool applyFontDescription(Size _cellSize,
-                          Size _screenSize,
-                          Size _pixelSize,
+bool applyFontDescription(terminal::ImageSize _cellSize,
+                          terminal::PageSize _screenSize,
+                          terminal::ImageSize _pixelSize,
                           Point _screenDPI,
                           terminal::renderer::Renderer& _renderer,
                           terminal::renderer::FontDescriptions _fontDescriptions)

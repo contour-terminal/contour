@@ -48,7 +48,7 @@ namespace
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents{};
-    auto screen = Screen{Size{11, 3}, screenEvents};
+    auto screen = Screen{PageSize{LineCount(3), ColumnCount(11)}, screenEvents};
     screen.write(
         //       123456789AB
         /* 0 */ "12345,67890"s +

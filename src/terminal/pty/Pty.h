@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <crispy/size.h>
+#include <terminal/primitives.h>
 
 #include <chrono>
 #include <optional>
@@ -65,10 +65,10 @@ class Pty {
     virtual int write(char const* buf, size_t size) = 0;
 
     /// @returns current underlying window size in characters width and height.
-    virtual crispy::Size screenSize() const noexcept = 0;
+    virtual PageSize screenSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) = 0;
+    virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;
 };
 
 }  // namespace terminal

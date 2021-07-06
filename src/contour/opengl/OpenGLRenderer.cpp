@@ -25,7 +25,6 @@
 #include <vector>
 #include <utility>
 
-using crispy::Size;
 using std::min;
 using std::optional;
 using std::nullopt;
@@ -118,7 +117,7 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
         return id;
     }
 
-    atlas::AtlasID createAtlas(Size _size, atlas::Format _format, int _user) override
+    atlas::AtlasID createAtlas(ImageSize _size, atlas::Format _format, int _user) override
     {
         auto const id = allocateAtlasID(_user);
         createAtlases.emplace_back(atlas::CreateAtlas{id, _size, _format, _user});
@@ -143,8 +142,8 @@ struct OpenGLRenderer::TextureScheduler : public atlas::AtlasBackend
         GLfloat const y = _render.y;
         GLfloat const z = _render.z;
       //GLfloat const w = _render.w;
-        GLfloat const r = _render.texture.get().targetSize.width;
-        GLfloat const s = _render.texture.get().targetSize.height;
+        GLfloat const r = *_render.texture.get().targetSize.width;
+        GLfloat const s = *_render.texture.get().targetSize.height;
 
         // TexCoords
         GLfloat const rx = _render.texture.get().relativeX;
@@ -203,12 +202,12 @@ inline void bound(T& _bindable, Fn&& _callable)
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
                                ShaderConfig const& _rectShaderConfig,
-                               Size _size,
+                               ImageSize _size,
                                terminal::renderer::PageMargin _margin):
     size_{ _size },
     projectionMatrix_{ortho(
-        0.0f, float(_size.width),      // left, right
-        0.0f, float(_size.height)      // bottom, top
+        0.0f, float(*_size.width),      // left, right
+        0.0f, float(*_size.height)      // bottom, top
     )},
     margin_{ _margin },
     textShader_{ createShader(_textShaderConfig) },
@@ -258,35 +257,35 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& _textShaderConfig,
         CHECKED_GL( textShader_->setUniformValue("fs_monochromeTextures", monochromeAtlasAllocator_.user()) );
         CHECKED_GL( textShader_->setUniformValue("fs_colorTextures", coloredAtlasAllocator_.user()) );
         CHECKED_GL( textShader_->setUniformValue("fs_lcdTexture", lcdAtlasAllocator_.user()) );
-        CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(lcdAtlasAllocator_.size().width)) );
+        CHECKED_GL( textShader_->setUniformValue("pixel_x", 1.0f / float(*lcdAtlasAllocator_.size().width)) );
     });
 
     initializeRectRendering();
     initializeTextureRendering();
 }
 
-crispy::Size OpenGLRenderer::colorTextureSizeHint()
+crispy::ImageSize OpenGLRenderer::colorTextureSizeHint()
 {
-    return Size{
-        min(MaxColorTextureSize, maxTextureSize()),
-        min(MaxColorTextureSize, maxTextureSize())
+    return ImageSize{
+        Width(min(MaxColorTextureSize, maxTextureSize())),
+        Height(min(MaxColorTextureSize, maxTextureSize()))
     };
 }
 
-crispy::Size OpenGLRenderer::monochromeTextureSizeHint()
+crispy::ImageSize OpenGLRenderer::monochromeTextureSizeHint()
 {
-    return Size{
-        min(MaxMonochromeTextureSize, maxTextureSize()),
-        min(MaxMonochromeTextureSize, maxTextureSize())
+    return ImageSize{
+        Width(min(MaxMonochromeTextureSize, maxTextureSize())),
+        Height(min(MaxMonochromeTextureSize, maxTextureSize()))
     };
 }
 
-void OpenGLRenderer::setRenderSize(Size _size)
+void OpenGLRenderer::setRenderSize(ImageSize _size)
 {
     size_ = _size;
     projectionMatrix_ = ortho(
-        0.0f, float(size_.width),      // left, right
-        0.0f, float(size_.height)      // bottom, top
+        0.0f, float(*size_.width),      // left, right
+        0.0f, float(*size_.height)      // bottom, top
     );
 }
 
@@ -470,7 +469,7 @@ void OpenGLRenderer::createAtlas(atlas::CreateAtlas const& _param)
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE) );
     CHECKED_GL( glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE) );
 
-    clearTextureAtlas(textureId, _param.size.width, _param.size.height, _param.format);
+    clearTextureAtlas(textureId, *_param.size.width, *_param.size.height, _param.format);
 
     atlasMap_.insert(pair{_param.atlas, textureId});
 }
@@ -506,7 +505,7 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
             break;
     }
 
-    CHECKED_GL( glTexSubImage2D(target, levelOfDetail, x0, y0, texture.bitmapSize.width, texture.bitmapSize.height, glFormat(_param.format), type, _param.data.data()) );
+    CHECKED_GL( glTexSubImage2D(target, levelOfDetail, x0, y0, *texture.bitmapSize.width, *texture.bitmapSize.height, glFormat(_param.format), type, _param.data.data()) );
 }
 
 GLuint OpenGLRenderer::textureAtlasID(atlas::AtlasID _atlasID) const noexcept
@@ -577,14 +576,14 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
     output.atlasInstanceId = _instanceID.value;
     output.size = _allocator.size();
     output.format = atlas::Format::RGBA;
-    output.buffer.resize(_allocator.size().width * _allocator.size().height * 4);
+    output.buffer.resize(*_allocator.size().width * *_allocator.size().height * 4);
 
     // Reading texture data to host CPU (including for RGB textures) only works via framebuffers
     GLuint fbo;
     CHECKED_GL( glGenFramebuffers(1, &fbo) );
     CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, fbo) );
     CHECKED_GL( glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0) );
-    CHECKED_GL( glReadPixels(0, 0, output.size.width, output.size.height, GL_RGBA, GL_UNSIGNED_BYTE, output.buffer.data()) );
+    CHECKED_GL( glReadPixels(0, 0, *output.size.width, *output.size.height, GL_RGBA, GL_UNSIGNED_BYTE, output.buffer.data()) );
     CHECKED_GL( glBindFramebuffer(GL_FRAMEBUFFER, 0) );
     CHECKED_GL( glDeleteFramebuffers(1, &fbo) );
 
@@ -631,29 +630,29 @@ void OpenGLRenderer::execute()
 
     if (pendingScreenshotCallback_)
     {
-        Size bufferSize = renderBufferSize();
+        ImageSize bufferSize = renderBufferSize();
         vector<uint8_t> buffer;
-        buffer.resize(bufferSize.width * bufferSize.height * 4);
+        buffer.resize(*bufferSize.width * *bufferSize.height * 4);
 
         debuglog(OpenGLRendererTag).write("Capture screenshot ({}/{}).", bufferSize, size_);
 
-        CHECKED_GL( glReadPixels(0, 0, bufferSize.width, bufferSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+        CHECKED_GL( glReadPixels(0, 0, *bufferSize.width, *bufferSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
 
         pendingScreenshotCallback_.value()(buffer, bufferSize);
         pendingScreenshotCallback_.reset();
     }
 }
 
-Size OpenGLRenderer::renderBufferSize()
+ImageSize OpenGLRenderer::renderBufferSize()
 {
 #if 0
     return size_;
 #else
-    auto width = GLint(size_.width);
-    auto height = GLint(size_.height);
+    auto width = unbox<GLint>(size_.width);
+    auto height = unbox<GLint>(size_.height);
     CHECKED_GL( glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width) );
     CHECKED_GL( glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height) );
-    return Size{width, height};
+    return ImageSize{Width(width), Height(height)};
 #endif
 }
 

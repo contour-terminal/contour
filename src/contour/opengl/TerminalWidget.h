@@ -21,6 +21,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Metrics.h>
+#include <terminal/primitives.h>
 #include <terminal_renderer/Renderer.h>
 
 #include <QtCore/QPoint>
@@ -86,8 +87,8 @@ public:
     double refreshRate() const override;
     crispy::Point screenDPI() const override;
     bool isFullScreen() const override;
-    crispy::Size pixelSize() const override;
-    crispy::Size cellSize() const override;
+    terminal::ImageSize pixelSize() const override;
+    terminal::ImageSize cellSize() const override;
 
     // (user requested) actions
     bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText) override;
@@ -96,10 +97,11 @@ public:
     void copyToClipboard(std::string_view /*_data*/) override;
     void dumpState() override;
     void notify(std::string_view /*_title*/, std::string_view /*_body*/) override;
-    void resizeWindow(int /*_width*/, int /*_height*/, bool /*_unitInPixels*/) override;
+    void resizeWindow(terminal::LineCount, terminal::ColumnCount) override;
+    void resizeWindow(terminal::Width, terminal::Height) override;
     void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) override;
     bool setFontSize(text::font_size _size) override;
-    bool setScreenSize(crispy::Size _newScreenSize) override;
+    bool setScreenSize(terminal::PageSize _newScreenSize) override;
     void setMouseCursorShape(MouseCursorShape _shape) override;
     void setTerminalProfile(config::TerminalProfile _profile) override;
     void setWindowTitle(std::string_view /*_title*/) override;
@@ -143,11 +145,17 @@ public:
     // helper methods
     //
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
-    crispy::Size screenSize() const { return size_ / gridMetrics().cellSize; }
+    terminal::PageSize screenSize() const {
+        auto tmp = size_ / gridMetrics().cellSize;
+        return terminal::PageSize{
+            boxed_cast<terminal::LineCount>(tmp.height),
+            boxed_cast<terminal::ColumnCount>(tmp.width)
+        };
+    }
     void assertInitialized();
-    float contentScale() const;
+    double contentScale() const;
     void blinkingCursorUpdate();
-    void resize(crispy::Size _pixels);
+    void resize(terminal::ImageSize _pixels);
     void updateMinimumSize();
 
     void statsSummary();
@@ -203,7 +211,7 @@ public:
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBackgroundBlur_;
     terminal::renderer::Renderer renderer_;
-    crispy::Size size_;                     // view size in pixels
+    crispy::ImageSize size_;                     // view size in pixels
     text::font_size fontSize_{};
 
     // ======================================================================

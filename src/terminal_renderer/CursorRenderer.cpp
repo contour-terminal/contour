@@ -24,8 +24,6 @@ using std::optional;
 using std::runtime_error;
 using std::string;
 
-using crispy::Size;
-
 namespace terminal::renderer {
 
 CursorRenderer::CursorRenderer(GridMetrics const& _gridMetrics,
@@ -59,35 +57,35 @@ void CursorRenderer::rebuild()
 {
     clearCache();
 
-    auto const width = gridMetrics_.cellSize.width * columnWidth_;
+    auto const width = Width(*gridMetrics_.cellSize.width * columnWidth_);
     auto const baseline = gridMetrics_.baseline;
     auto constexpr LineThickness = 1;
 
     { // {{{ CursorShape::Block
         auto const height = gridMetrics_.cellSize.height;
-        auto image = atlas::Buffer(width * height, 0xFFu);
+        auto image = atlas::Buffer(*width * *height, 0xFFu);
 
         textureAtlas_->insert(
             CursorShape::Block,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
     { // {{{ CursorShape::Underscore
         auto const thickness = max(LineThickness * baseline / 3, 1);
-        auto const height = baseline;
-        auto const base_y = max((height - thickness) / 2, 0);
-        auto image = atlas::Buffer(width * height, 0);
+        auto const height = Height(baseline);
+        auto const base_y = max((*height - thickness) / 2, 0u);
+        auto image = atlas::Buffer(*width * *height, 0);
 
         for (int y = 1; y <= thickness; ++y)
-            for (int x = 0; x < width; ++x)
-                image[(base_y + y) * width + x] = 0xFF;
+            for (int x = 0; x < width.as<int>(); ++x)
+                image[(base_y + y) * width.as<int>() + x] = 0xFF;
 
         textureAtlas_->insert(
             CursorShape::Underscore,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
@@ -95,35 +93,35 @@ void CursorRenderer::rebuild()
         auto const thickness = max(LineThickness * baseline / 3, 1);
         auto const height = gridMetrics_.cellSize.height;
         //auto const base_y = max((height - thickness) / 2, 0);
-        auto image = atlas::Buffer(width * height, 0);
+        auto image = atlas::Buffer(*width * *height, 0);
 
         for (int x = 0; x < thickness; ++x)
-            for (int y = 0; y < height; ++y)
-                image[y * width + x] = 0xFF;
+            for (int y = 0; y < *height; ++y)
+                image[y * *width + x] = 0xFF;
 
         textureAtlas_->insert(
             CursorShape::Bar,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}
     { // {{{ CursorShape::Rectangle
         auto const height = gridMetrics_.cellSize.height;
-        auto image = atlas::Buffer(width * height, 0xFFu);
-        auto const thickness = max(width / 12, 1);
+        auto image = atlas::Buffer(*width * *height, 0xFFu);
+        auto const thickness = max(*width / 12, 1u);
 
         auto const innerWidth = width - 2 * thickness;
         auto const innerHeight = height - 2 * thickness;
 
-        for (int y = thickness; y <= innerHeight; ++y)
-            for (int x = thickness; x <= innerWidth; ++x)
-                image[y * width + x] = 0;
+        for (int y = thickness; y <= *innerHeight; ++y)
+            for (int x = thickness; x <= *innerWidth; ++x)
+                image[y * *width + x] = 0;
 
         textureAtlas_->insert(
             CursorShape::Rectangle,
-            Size{width, height},
-            Size{width, height},
+            ImageSize{width, height},
+            ImageSize{width, height},
             move(image)
         );
     } // }}}

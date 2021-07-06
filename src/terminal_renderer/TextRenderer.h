@@ -248,8 +248,8 @@ private:
     RGBColor color_{};
 
     std::vector<char32_t> codepoints_;
-    std::vector<int> clusters_;
-    int cellCount_ = 0;
+    std::vector<unsigned> clusters_;
+    unsigned cellCount_ = 0;
     bool textStartFound_ = false;
 
     // text shaping cache
@@ -269,8 +269,8 @@ public:
                      text::shaper& _textShaper,
                      FontKeys const& _fonts,
                      RenderGlyphs _renderGlyphs);
-    void clearCache() override {};
-    void beginFrame() override {};
+    void clearCache() override {}
+    void beginFrame() override {}
     void setTextPosition(crispy::Point _position) override;
     void appendCell(crispy::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color) override;
     void endSequence() override;
@@ -334,7 +334,7 @@ class TextRenderer : public Renderable {
     // rendering
     //
     struct GlyphMetrics {
-        crispy::Size bitmapSize;    // glyph size in pixels
+        ImageSize bitmapSize;    // glyph size in pixels
         crispy::Point bearing;      // offset baseline and left to top and left of the glyph's bitmap
     };
     friend struct fmt::formatter<GlyphMetrics>;

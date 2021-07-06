@@ -47,19 +47,20 @@ public:
     virtual double refreshRate() const = 0;
     virtual crispy::Point screenDPI() const = 0;
     virtual bool isFullScreen() const = 0;
-    virtual crispy::Size pixelSize() const = 0;
-    virtual crispy::Size cellSize() const = 0;
+    virtual crispy::ImageSize pixelSize() const = 0;
+    virtual crispy::ImageSize cellSize() const = 0;
 
     // (user requested) actions
     virtual bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText) = 0;
     virtual bool setFontSize(text::font_size _size) = 0;
-    virtual bool setScreenSize(crispy::Size _size) = 0;
+    virtual bool setScreenSize(terminal::PageSize _size) = 0;
     virtual terminal::FontDef getFontDef() = 0;
     virtual void bell() = 0;
     virtual void copyToClipboard(std::string_view _data) = 0;
     virtual void dumpState() = 0;
     virtual void notify(std::string_view _title, std::string_view _body) = 0;
-    virtual void resizeWindow(int _width, int _height, bool _unitInPixels) = 0;
+    virtual void resizeWindow(terminal::LineCount, terminal::ColumnCount) = 0;
+    virtual void resizeWindow(terminal::Width, terminal::Height) = 0;
     virtual void setBackgroundBlur(bool _enabled) = 0;
     virtual void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) = 0;
     virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover) = 0;

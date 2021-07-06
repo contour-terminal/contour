@@ -88,7 +88,7 @@ public:
 
     constexpr uint16_t hashcode() const noexcept
     {
-        return (enabled_ << 8) | disabled_;
+        return static_cast<uint16_t>(enabled_ << 8) | disabled_;
     }
 
 private:

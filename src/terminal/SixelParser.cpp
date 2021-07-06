@@ -16,7 +16,6 @@
 
 #include <algorithm>
 
-using crispy::Size;
 using std::clamp;
 using std::fill;
 using std::max;
@@ -259,9 +258,9 @@ void SixelParser::leaveState()
             {
                 auto const pan = params_[0];
                 auto const pad = params_[1];
-                auto const xPixels = params_[2];
-                auto const yPixels = params_[3];
-                events_.setRaster(pan, pad, Size{xPixels, yPixels});
+                auto const xPixels = Width(params_[2]);
+                auto const yPixels = Height(params_[3]);
+                events_.setRaster(pan, pad, ImageSize{xPixels, yPixels});
                 state_ = State::Ground;
             }
             break;
@@ -310,7 +309,7 @@ void SixelParser::finalize()
 
 // =================================================================================
 
-SixelImageBuilder::SixelImageBuilder(Size const& _maxSize,
+SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
                                      int _aspectVertical,
                                      int _aspectHorizontal,
                                      RGBAColor _backgroundColor,
@@ -318,7 +317,7 @@ SixelImageBuilder::SixelImageBuilder(Size const& _maxSize,
     maxSize_{ _maxSize },
     colors_{ std::move(_colorPalette) },
     size_{ _maxSize },
-    buffer_(size_.width * size_.height * 4),
+    buffer_(*size_.width * *size_.height * 4),
     sixelCursor_{ 0, 0 },
     currentColor_{0},
     aspectRatio_{ _aspectVertical, _aspectHorizontal }
@@ -331,7 +330,7 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
     sixelCursor_ = {0, 0};
 
     auto p = &buffer_[0];
-    for (int i = 0; i < size_.width * size_.height; ++i)
+    for (int i = 0; i < *size_.width * *size_.height; ++i)
     {
         *p++ = _fillColor.red();
         *p++ = _fillColor.green();
@@ -342,18 +341,18 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
 
 RGBAColor SixelImageBuilder::at(Coordinate _coord) const noexcept
 {
-    auto const row = _coord.row % size_.height;
-    auto const col = _coord.column % size_.width;
-    auto const base = row * size_.width * 4 + col * 4;
+    auto const row = _coord.row % *size_.height;
+    auto const col = _coord.column % *size_.width;
+    auto const base = row * *size_.width * 4 + col * 4;
     auto const color = &buffer_[base];
     return RGBAColor{color[0], color[1], color[2], color[3]};
 }
 
 void SixelImageBuilder::write(Coordinate const& _coord, RGBColor const& _value) noexcept
 {
-    if (_coord.row >= 0 && _coord.row < size_.height && _coord.column >= 0 && _coord.column < size_.width)
+    if (_coord.row >= 0 && _coord.row < *size_.height && _coord.column >= 0 && _coord.column < *size_.width)
     {
-        auto const base = _coord.row * size_.width * 4 + _coord.column * 4;
+        auto const base = _coord.row * *size_.width * 4 + _coord.column * 4;
         buffer_[base + 0] = _value.red;
         buffer_[base + 1] = _value.green;
         buffer_[base + 2] = _value.blue;
@@ -380,25 +379,25 @@ void SixelImageBuilder::newline()
 {
     sixelCursor_.column = 0;
 
-    if (sixelCursor_.row + 6 < size_.height)
+    if (sixelCursor_.row + 6 < *size_.height)
         sixelCursor_.row += 6;
 }
 
-void SixelImageBuilder::setRaster(int _pan, int _pad, Size const& _imageSize)
+void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
 {
     aspectRatio_.nominator = _pan;
     aspectRatio_.denominator = _pad;
-    size_.width = clamp(_imageSize.width, 0, maxSize_.width);
-    size_.height = clamp(_imageSize.height, 0, maxSize_.height);
+    size_.width = clamp(_imageSize.width, Width(0), maxSize_.width);
+    size_.height = clamp(_imageSize.height, Height(0), maxSize_.height);
 
-    buffer_.resize(size_.width * size_.height * 4);
+    buffer_.resize(*size_.width * *size_.height * 4);
 }
 
 void SixelImageBuilder::render(int8_t _sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = sixelCursor_.column;
-    if (x < size_.width)
+    if (x < *size_.width)
     {
         for (int i = 0; i < 6; ++i)
         {

@@ -44,8 +44,8 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
     renderTarget().renderRectangle(
         pos.x,
         pos.y,
-        gridMetrics_.cellSize.width,
-        gridMetrics_.cellSize.height,
+        gridMetrics_.cellSize.width.as<int>(),
+        gridMetrics_.cellSize.height.as<int>(),
         static_cast<float>(_cell.backgroundColor.red) / 255.0f,
         static_cast<float>(_cell.backgroundColor.green) / 255.0f,
         static_cast<float>(_cell.backgroundColor.blue) / 255.0f,

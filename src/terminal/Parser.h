@@ -455,6 +455,14 @@ namespace std { // {{{
 
 namespace terminal::parser {
 
+namespace helper
+{
+    constexpr uint8_t operator "" _b(unsigned long long  _value)
+    {
+        return static_cast<uint8_t>(_value);
+    }
+}
+
 struct ParserTable {
     enum UnicodeCodepoint { Value = 256 };
 
@@ -561,141 +569,143 @@ struct ParserTable {
 
 constexpr ParserTable ParserTable::get() // {{{
 {
+    using namespace helper;
+
     auto t = ParserTable{};
 
     // Ground
-    t.event(State::Ground, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::Ground, Action::Print, Range{0x20, 0x7F});
-    t.event(State::Ground, Action::Print, Range{0xA0, 0xFF});
+    t.event(State::Ground, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::Ground, Action::Print, Range{0x20_b, 0x7F_b});
+    t.event(State::Ground, Action::Print, Range{0xA0_b, 0xFF_b});
     t.event(State::Ground, Action::Print, UnicodeCodepoint::Value);
 
     // EscapeIntermediate
-    t.event(State::EscapeIntermediate, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::EscapeIntermediate, Action::Collect, Range{0x20, 0x2F});
-    t.event(State::EscapeIntermediate, Action::Ignore, 0x7F);
-    t.transition(State::EscapeIntermediate, State::Ground, Action::ESC_Dispatch, Range{0x30, 0x7E});
+    t.event(State::EscapeIntermediate, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::EscapeIntermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.event(State::EscapeIntermediate, Action::Ignore, 0x7F_b);
+    t.transition(State::EscapeIntermediate, State::Ground, Action::ESC_Dispatch, Range{0x30_b, 0x7E_b});
 
     // Escape
     t.entry(State::Escape, Action::Clear);
-    t.event(State::Escape, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::Escape, Action::Ignore, 0x7F);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x58);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5E);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5F);
-    t.transition(State::Escape, State::DCS_Entry, 0x50);
-    t.transition(State::Escape, State::OSC_String, 0x5D);
-    t.transition(State::Escape, State::CSI_Entry, 0x5B);
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x30, 0x4F});
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x51, 0x57});
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x59);
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x5A);
-    t.transition(State::Escape, State::Ground, Action::Ignore, 0x5C); // ST for OSC, DCS, ...
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x60, 0x7E});
-    t.transition(State::Escape, State::EscapeIntermediate, Action::Collect, Range{0x20, 0x2F});
+    t.event(State::Escape, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::Escape, Action::Ignore, 0x7F_b);
+    t.transition(State::Escape, State::SOS_PM_APC_String, 0x58_b);
+    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5E_b);
+    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5F_b);
+    t.transition(State::Escape, State::DCS_Entry, 0x50_b);
+    t.transition(State::Escape, State::OSC_String, 0x5D_b);
+    t.transition(State::Escape, State::CSI_Entry, 0x5B_b);
+    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x30_b, 0x4F_b});
+    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x51_b, 0x57_b});
+    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x59_b);
+    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x5A_b);
+    t.transition(State::Escape, State::Ground, Action::Ignore, 0x5C_b); // ST for OSC, DCS, ...
+    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x60_b, 0x7E_b});
+    t.transition(State::Escape, State::EscapeIntermediate, Action::Collect, Range{0x20_b, 0x2F_b});
 
     // SOS_PM_APC_String
-    t.event(State::SOS_PM_APC_String, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.transition(State::SOS_PM_APC_String, State::Ground, 0x9C);
+    t.event(State::SOS_PM_APC_String, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.transition(State::SOS_PM_APC_String, State::Ground, 0x9C_b);
 
     // DCS_Entry
     t.entry(State::DCS_Entry, Action::Clear);
-    t.event(State::DCS_Entry, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::DCS_Entry, Action::Ignore, 0x7F);
-    t.transition(State::DCS_Entry, State::DCS_Intermediate, Action::Collect, Range{0x20, 0x2F});
-    t.transition(State::DCS_Entry, State::DCS_Ignore, 0x3A);
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, Range{0x30, 0x39});
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, 0x3B);
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::CollectLeader, Range{0x3C, 0x3F});
-    t.transition(State::DCS_Entry, State::DCS_PassThrough, Range{0x40, 0x7E});
+    t.event(State::DCS_Entry, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::DCS_Entry, Action::Ignore, 0x7F_b);
+    t.transition(State::DCS_Entry, State::DCS_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.transition(State::DCS_Entry, State::DCS_Ignore, 0x3A_b);
+    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, Range{0x30_b, 0x39_b});
+    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, 0x3B_b);
+    t.transition(State::DCS_Entry, State::DCS_Param, Action::CollectLeader, Range{0x3C_b, 0x3F_b});
+    t.transition(State::DCS_Entry, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
 
     // DCS_Ignore
-    t.event(State::DCS_Ignore, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F}, Range{0x20, 0x7F});
-    t.event(State::DCS_Ignore, Action::Print, Range{0xA0, 0xFF});
+    t.event(State::DCS_Ignore, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b}, Range{0x20_b, 0x7F_b});
+    t.event(State::DCS_Ignore, Action::Print, Range{0xA0_b, 0xFF_b});
     t.event(State::DCS_Ignore, Action::Print, UnicodeCodepoint::Value);
-    t.transition(State::DCS_Ignore, State::Ground, 0x9C);
+    t.transition(State::DCS_Ignore, State::Ground, 0x9C_b);
 
     // DCS_Intermediate
-    t.event(State::DCS_Intermediate, Action::Ignore, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::DCS_Intermediate, Action::Collect, Range{0x20, 0x2F});
-    t.event(State::DCS_Intermediate, Action::Ignore, 0x7F);
-    t.transition(State::DCS_Intermediate, State::DCS_PassThrough, Range{0x40, 0x7E});
+    t.event(State::DCS_Intermediate, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::DCS_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.event(State::DCS_Intermediate, Action::Ignore, 0x7F_b);
+    t.transition(State::DCS_Intermediate, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
 
     // DCS_PassThrough
     t.entry(State::DCS_PassThrough, Action::Hook);
-    t.event(State::DCS_PassThrough, Action::Put, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F}, Range{0x20, 0x7E});
-    t.event(State::DCS_PassThrough, Action::Ignore, 0x7F);
+    t.event(State::DCS_PassThrough, Action::Put, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b}, Range{0x20_b, 0x7E_b});
+    t.event(State::DCS_PassThrough, Action::Ignore, 0x7F_b);
     t.exit(State::DCS_PassThrough, Action::Unhook);
-    t.transition(State::DCS_PassThrough, State::Ground, 0x9C);
+    t.transition(State::DCS_PassThrough, State::Ground, 0x9C_b);
 
     // DCS_Param
-    t.event(State::DCS_Param, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::DCS_Param, Action::Param, Range{0x30, 0x39}, 0x3B);
-    t.event(State::DCS_Param, Action::Ignore, 0x7F);
-    t.transition(State::DCS_Param, State::DCS_Ignore, 0x3A);
-    t.transition(State::DCS_Param, State::DCS_Ignore, Range{0x3C, 0x3F});
-    t.transition(State::DCS_Param, State::DCS_Intermediate, Range{0x20, 0x2F});
-    t.transition(State::DCS_Param, State::DCS_PassThrough, Range{0x40, 0x7E});
+    t.event(State::DCS_Param, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::DCS_Param, Action::Param, Range{0x30_b, 0x39_b}, 0x3B_b);
+    t.event(State::DCS_Param, Action::Ignore, 0x7F_b);
+    t.transition(State::DCS_Param, State::DCS_Ignore, 0x3A_b);
+    t.transition(State::DCS_Param, State::DCS_Ignore, Range{0x3C_b, 0x3F_b});
+    t.transition(State::DCS_Param, State::DCS_Intermediate, Range{0x20_b, 0x2F_b});
+    t.transition(State::DCS_Param, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
 
     // OSC_String
 	// (xterm extension to also allow BEL (0x07) as OSC terminator)
     t.entry(State::OSC_String, Action::OSC_Start);
-    t.event(State::OSC_String, Action::Ignore, Range{0x00, 0x06}, Range{0x08, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::OSC_String, Action::OSC_Put, Range{0x20, 0x7F});
-    t.event(State::OSC_String, Action::OSC_Put, Range{0xA0, 0xFF});
+    t.event(State::OSC_String, Action::Ignore, Range{0x00_b, 0x06_b}, Range{0x08_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::OSC_String, Action::OSC_Put, Range{0x20_b, 0x7F_b});
+    t.event(State::OSC_String, Action::OSC_Put, Range{0xA0_b, 0xFF_b});
     t.event(State::OSC_String, Action::OSC_Put, UnicodeCodepoint::Value);
     t.exit(State::OSC_String, Action::OSC_End);
-    t.transition(State::OSC_String, State::Ground, 0x9C);
-    t.transition(State::OSC_String, State::Ground, 0x07);
+    t.transition(State::OSC_String, State::Ground, 0x9C_b);
+    t.transition(State::OSC_String, State::Ground, 0x07_b);
 
     // CSI_Entry
     t.entry(State::CSI_Entry, Action::Clear);
-    t.event(State::CSI_Entry, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::CSI_Entry, Action::Ignore, 0x7F);
-    t.transition(State::CSI_Entry, State::Ground, Action::CSI_Dispatch, Range{0x40, 0x7E});
-    t.transition(State::CSI_Entry, State::CSI_Intermediate, Action::Collect, Range{0x20, 0x2F});
-    t.transition(State::CSI_Entry, State::CSI_Ignore, 0x3A);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, Range{0x30, 0x39});
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, 0x3B);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::CollectLeader, Range{0x3C, 0x3F});
+    t.event(State::CSI_Entry, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::CSI_Entry, Action::Ignore, 0x7F_b);
+    t.transition(State::CSI_Entry, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
+    t.transition(State::CSI_Entry, State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.transition(State::CSI_Entry, State::CSI_Ignore, 0x3A_b);
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, Range{0x30_b, 0x39_b});
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, 0x3B_b);
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::CollectLeader, Range{0x3C_b, 0x3F_b});
 
     // CSI_Param
-    t.event(State::CSI_Param, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::CSI_Param, Action::Param, Range{0x30, 0x39});
-    t.event(State::CSI_Param, Action::Param, 0x3A);
-    t.event(State::CSI_Param, Action::Param, 0x3B);
-    t.event(State::CSI_Param, Action::Ignore, 0x7F);
-    t.transition(State::CSI_Param, State::CSI_Ignore, Range{0x3C, 0x3F});
-    t.transition(State::CSI_Param, State::CSI_Intermediate, Action::Collect, Range{0x20, 0x2F});
-    t.transition(State::CSI_Param, State::Ground, Action::CSI_Dispatch, Range{0x40, 0x7E});
+    t.event(State::CSI_Param, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::CSI_Param, Action::Param, Range{0x30_b, 0x39_b});
+    t.event(State::CSI_Param, Action::Param, 0x3A_b);
+    t.event(State::CSI_Param, Action::Param, 0x3B_b);
+    t.event(State::CSI_Param, Action::Ignore, 0x7F_b);
+    t.transition(State::CSI_Param, State::CSI_Ignore, Range{0x3C_b, 0x3F_b});
+    t.transition(State::CSI_Param, State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.transition(State::CSI_Param, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
 
     // CSI_Ignore
-    t.event(State::CSI_Ignore, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::CSI_Ignore, Action::Ignore, Range{0x20, 0x3F}, 0x7F);
-    t.transition(State::CSI_Ignore, State::Ground, Range{0x40, 0x7E});
+    t.event(State::CSI_Ignore, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::CSI_Ignore, Action::Ignore, Range{0x20_b, 0x3F_b}, 0x7F_b);
+    t.transition(State::CSI_Ignore, State::Ground, Range{0x40_b, 0x7E_b});
 
     // CSI_Intermediate
-    t.event(State::CSI_Intermediate, Action::Execute, Range{0x00, 0x17}, 0x19, Range{0x1C, 0x1F});
-    t.event(State::CSI_Intermediate, Action::Collect, Range{0x20, 0x2F});
-    t.event(State::CSI_Intermediate, Action::Ignore, 0x7F);
-    t.transition(State::CSI_Intermediate, State::CSI_Ignore, Range{0x30, 0x3F});
-    t.transition(State::CSI_Intermediate, State::Ground, Action::CSI_Dispatch, Range{0x40, 0x7E});
+    t.event(State::CSI_Intermediate, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.event(State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
+    t.event(State::CSI_Intermediate, Action::Ignore, 0x7F_b);
+    t.transition(State::CSI_Intermediate, State::CSI_Ignore, Range{0x30_b, 0x3F_b});
+    t.transition(State::CSI_Intermediate, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
 
     // * -> Ground
     for (State anywhere = std::numeric_limits<State>::min(); anywhere <= std::numeric_limits<State>::max(); ++anywhere)
     {
-        t.transition(anywhere, State::Ground, 0x18);
-        t.transition(anywhere, State::Ground, 0x1A);
-        t.transition(anywhere, State::Ground, 0x9C);
-        t.transition(anywhere, State::Ground, Range{0x80, 0x8F});
-        t.transition(anywhere, State::Ground, Range{0x91, 0x97});
+        t.transition(anywhere, State::Ground, 0x18_b);
+        t.transition(anywhere, State::Ground, 0x1A_b);
+        t.transition(anywhere, State::Ground, 0x9C_b);
+        t.transition(anywhere, State::Ground, Range{0x80_b, 0x8F_b});
+        t.transition(anywhere, State::Ground, Range{0x91_b, 0x97_b});
 
-        t.transition(anywhere, State::Escape, 0x1B);
+        t.transition(anywhere, State::Escape, 0x1B_b);
 
-        t.transition(anywhere, State::DCS_Entry, 0x90);
+        t.transition(anywhere, State::DCS_Entry, 0x90_b);
 
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x98);
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x9E);
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x9F);
+        t.transition(anywhere, State::SOS_PM_APC_String, 0x98_b);
+        t.transition(anywhere, State::SOS_PM_APC_String, 0x9E_b);
+        t.transition(anywhere, State::SOS_PM_APC_String, 0x9F_b);
     }
 
     // TODO: verify the above is correct (programatically as much as possible)

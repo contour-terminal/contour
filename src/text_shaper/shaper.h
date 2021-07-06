@@ -17,6 +17,7 @@
 #include <text_shaper/font.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
+#include <crispy/ImageSize.h>
 #include <crispy/span.h>
 #include <crispy/debuglog.h>
 
@@ -52,18 +53,18 @@ constexpr int pixel_size(bitmap_format _format) noexcept
             return 1;
     }
     return 1;
-};
+}
 
 struct rasterized_glyph
 {
     glyph_index index;
-    crispy::Size size;      // Glyph bitmap size in pixels.
+    crispy::ImageSize size; // Glyph bitmap size in pixels.
     crispy::Point position; // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Size _newSize);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::ImageSize _newSize);
 
 struct glyph_position
 {
@@ -120,7 +121,7 @@ class shaper {
      */
     virtual void shape(font_key _font,
                        std::u32string_view _text,
-                       crispy::span<int> _clusters,
+                       crispy::span<unsigned> _clusters,
                        unicode::Script _script,
                        shape_result& _result) = 0;
 

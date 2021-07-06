@@ -643,7 +643,7 @@ bool InputGenerator::mouseTransport(uint8_t _button, uint8_t _modifier, int _row
     }
 
     return false;
-};
+}
 
 bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, int _row, int _column)
 {
@@ -653,8 +653,8 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, int _
     if (_row <= MaxCoordValue && _column <= MaxCoordValue)
     {
         uint8_t const button = SkipCount + static_cast<uint8_t>(_button | _modifier);
-        uint8_t const row = SkipCount + _row;
-        uint8_t const column = SkipCount + _column;
+        uint8_t const row = static_cast<uint8_t>(SkipCount + _row);
+        uint8_t const column = static_cast<uint8_t>(SkipCount + _column);
         append("\033[M");
         append(button);
         append(column);
@@ -663,7 +663,7 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, int _
     }
     else
         return false;
-};
+}
 
 bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _eventType)
 {
@@ -676,7 +676,7 @@ bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, int _
     append(_eventType != MouseEventType::Release ? 'M' : 'm');
 
     return true;
-};
+}
 
 bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _eventType)
 {
@@ -691,7 +691,7 @@ bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int
         append('M');
     }
     return true;
-};
+}
 
 bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, int _row, int _column)
 {

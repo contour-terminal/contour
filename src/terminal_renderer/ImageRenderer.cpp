@@ -18,7 +18,6 @@
 
 #include <array>
 
-using crispy::Size;
 using crispy::times;
 
 using std::array;
@@ -28,7 +27,7 @@ using std::optional;
 
 namespace terminal::renderer {
 
-ImageRenderer::ImageRenderer(Size const& _cellSize) :
+ImageRenderer::ImageRenderer(ImageSize _cellSize) :
     imagePool_{},
     cellSize_{ _cellSize }
 {
@@ -40,7 +39,7 @@ void ImageRenderer::setRenderTarget(RenderTarget& _renderTarget)
     clearCache();
 }
 
-void ImageRenderer::setCellSize(Size const& _cellSize)
+void ImageRenderer::setCellSize(ImageSize _cellSize)
 {
     cellSize_ = _cellSize;
     // TODO: recompute slices here?

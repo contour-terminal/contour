@@ -48,6 +48,7 @@ set(terminal_HEADERS
     Terminal.h
     Viewport.h
     VTType.h
+    primitives.h
 )
 
 set(terminal_SOURCES
@@ -71,6 +72,7 @@ set(terminal_SOURCES
     SixelParser.cpp
     Terminal.cpp
     VTType.cpp
+    primitives.cpp
 )
 
 set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3 Threads::Threads)

@@ -221,7 +221,7 @@ inline std::optional<unsigned> fromHexDigit(char _value)
     if ('A' <= _value && _value <= 'F')
         return 10 + _value - 'A';
     return std::nullopt;
-};
+}
 
 template <typename T>
 std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hexString)

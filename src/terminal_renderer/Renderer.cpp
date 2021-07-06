@@ -23,7 +23,6 @@
 #include <functional>
 #include <memory>
 
-using crispy::Size;
 using std::array;
 using std::scoped_lock;
 using std::chrono::steady_clock;
@@ -42,14 +41,14 @@ void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shape
 {
     auto const m = _textShaper.metrics(_font);
 
-    _gm.cellSize.width = m.advance;
-    _gm.cellSize.height = m.line_height;
+    _gm.cellSize.width = Width(m.advance);
+    _gm.cellSize.height = Height(m.line_height);
     _gm.baseline = m.line_height - m.ascender;
     _gm.underline.position = _gm.baseline + m.underline_position;
     _gm.underline.thickness = m.underline_thickness;
 }
 
-GridMetrics loadGridMetrics(text::font_key _font, Size _pageSize, text::shaper& _textShaper)
+GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
 {
     auto gm = GridMetrics{};
 
@@ -75,7 +74,7 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     return output;
 }
 
-Renderer::Renderer(Size _screenSize,
+Renderer::Renderer(PageSize _screenSize,
                    FontDescriptions const& _fontDescriptions,
                    terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
@@ -174,7 +173,7 @@ void Renderer::updateFontMetrics()
     clearCache();
 }
 
-void Renderer::setRenderSize(Size _size)
+void Renderer::setRenderSize(ImageSize _size)
 {
     if (!renderTargetAvailable())
         return;
@@ -284,7 +283,7 @@ optional<RenderCursor> Renderer::renderCursor(Terminal const& _terminal)
     return RenderCursor{
         gridMetrics_.map(
             _terminal.screen().cursor().position.column,
-            _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset()
+            _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset().as<int>()
         ),
         cursorShape,
         cursorCell.width()

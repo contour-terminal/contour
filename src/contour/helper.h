@@ -86,9 +86,9 @@ constexpr inline char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
     if (value >= 'A' && value <= 'Z')
     {
         if (_mods & Qt::ShiftModifier)
-            return value;
+            return static_cast<char32_t>(value);
         else
-            return std::tolower(value);
+            return static_cast<char32_t>(std::tolower(value));
     }
     return 0;
 }
@@ -169,12 +169,14 @@ bool requestPermission(PermissionCache& _cache,
 
 terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer);
 
-terminal::renderer::PageMargin computeMargin(crispy::Size _cellSize, crispy::Size _charCells, crispy::Size _pixels) noexcept;
+terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
+                                             terminal::PageSize _charCells,
+                                             terminal::ImageSize _pixels) noexcept;
 
 bool applyFontDescription(
-    crispy::Size _cellSize,
-    crispy::Size _screenSize,
-    crispy::Size _pixelSize,
+    terminal::ImageSize _cellSize,
+    terminal::PageSize _screenSize,
+    terminal::ImageSize _pixelSize,
     crispy::Point _screenDPI,
     terminal::renderer::Renderer& _renderer,
     terminal::renderer::FontDescriptions _fontDescriptions);

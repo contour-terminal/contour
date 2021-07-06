@@ -54,19 +54,19 @@ class Renderer : public Renderable {
      * @p _colorPalette user-configurable color profile to use to map terminal colors to.
      * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
      */
-    Renderer(crispy::Size _screenSize,
+    Renderer(PageSize _screenSize,
              FontDescriptions const& _fontDescriptions,
              ColorPalette const& _colorPalette,
              Opacity _backgroundOpacity,
              Decorator _hyperlinkNormal,
              Decorator _hyperlinkHover);
 
-    crispy::Size cellSize() const noexcept { return gridMetrics_.cellSize; }
+    ImageSize cellSize() const noexcept { return gridMetrics_.cellSize; }
 
     void setRenderTarget(RenderTarget& _renderTarget);
 
     void setBackgroundOpacity(terminal::Opacity _opacity);
-    void setRenderSize(crispy::Size _size);
+    void setRenderSize(ImageSize _size);
     bool setFontSize(text::font_size _fontSize);
     void updateFontMetrics();
 
@@ -80,7 +80,7 @@ class Renderer : public Renderable {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    void setScreenSize(crispy::Size const& _screenSize) noexcept
+    void setScreenSize(PageSize _screenSize) noexcept
     {
         gridMetrics_.pageSize = _screenSize;
     }

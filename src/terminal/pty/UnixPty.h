@@ -29,21 +29,21 @@ namespace terminal {
 class UnixPty : public Pty
 {
   public:
-    explicit UnixPty(crispy::Size const& windowSize, std::optional<crispy::Size> _pixels = std::nullopt);
+    explicit UnixPty(PageSize const& windowSize, std::optional<ImageSize> _pixels = std::nullopt);
     ~UnixPty() override;
 
     int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    crispy::Size screenSize() const noexcept override;
-    void resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels = std::nullopt) override;
+    PageSize screenSize() const noexcept override;
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     void prepareParentProcess() override;
     void prepareChildProcess() override;
     void close() override;
 
   private:
-    crispy::Size size_;
+    PageSize size_;
     int master_;
     int slave_;
     std::array<int, 2> pipe_;

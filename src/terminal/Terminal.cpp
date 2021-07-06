@@ -42,7 +42,7 @@ namespace // {{{ helpers
     {
         while (!value.empty() && value.back() == ' ')
             value.pop_back();
-    };
+    }
 
     tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
     {
@@ -60,12 +60,12 @@ namespace // {{{ helpers
 Terminal::Terminal(Pty& _pty,
                    int _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
-                   optional<size_t> _maxHistoryLineCount,
+                   optional<LineCount> _maxHistoryLineCount,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
                    string const& _wordDelimiters,
                    Modifier _mouseProtocolBypassModifier,
-                   Size _maxImageSize,
+                   ImageSize _maxImageSize,
                    int _maxImageColorRegisters,
                    bool _sixelCursorConformance,
                    ColorPalette _colorPalette,
@@ -100,7 +100,7 @@ Terminal::Terminal(Pty& _pty,
     screenUpdateThread_{},
     viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } }
 {
-    readBuffer_.resize(ptyReadBufferSize_);
+    readBuffer_.resize(static_cast<unsigned>(ptyReadBufferSize_));
 }
 
 Terminal::~Terminal()
@@ -155,7 +155,7 @@ bool Terminal::processInputOnce()
 
     if (n > 0)
     {
-        writeToScreen(readBuffer_.data(), n);
+        writeToScreen(readBuffer_.data(), static_cast<unsigned>(n));
 
         #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
         auto const now = std::chrono::steady_clock::now();
@@ -239,10 +239,13 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
 {
     auto const _l = lock_guard{*this};
     auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
-    auto const baseLine = viewport_.absoluteScrollOffset().value_or(screen_.historyLineCount());
+    auto const baseLine =
+        viewport_.absoluteScrollOffset().
+        value_or(boxed_cast<StaticScrollbackPosition>(screen_.historyLineCount())).
+        as<int>();
     auto const renderHyperlinks = screen_.contains(currentMousePosition_);
     auto const currentMousePositionRel = Coordinate{
-        currentMousePosition_.row - viewport_.relativeScrollOffset(),
+        currentMousePosition_.row - unbox<int>(viewport_.relativeScrollOffset()),
         currentMousePosition_.column
     };
 
@@ -387,7 +390,7 @@ optional<RenderCursor> Terminal::renderCursor()
 
     return RenderCursor{
         Coordinate(
-            screen_.cursor().position.row + viewport_.relativeScrollOffset(),
+            screen_.cursor().position.row + viewport_.relativeScrollOffset().as<int>(),
             screen_.cursor().position.column
         ),
         shape,
@@ -667,7 +670,7 @@ bool Terminal::updateCursorHoveringState()
         return false;
 
     auto const relCursorPos = terminal::Coordinate{
-        currentMousePosition_.row - viewport_.relativeScrollOffset(),
+        currentMousePosition_.row - viewport_.relativeScrollOffset().as<int>(),
         currentMousePosition_.column
     };
 
@@ -685,13 +688,17 @@ std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point 
         return chrono::milliseconds::min();
 }
 
-void Terminal::resizeScreen(Size _cells, optional<Size> _pixels)
+void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 {
     auto const _l = lock_guard{*this};
 
     screen_.resize(_cells);
     if (_pixels)
-        screen_.setCellPixelSize(*_pixels / _cells);
+    {
+        auto width = Width(*_pixels->width / _cells.columns.as<unsigned>());
+        auto height = Height(*_pixels->height / _cells.lines.as<unsigned>());
+        screen_.setCellPixelSize(ImageSize{width, height});
+    }
 
     pty_.resizeScreen(_cells, _pixels);
 }
@@ -723,7 +730,7 @@ string Terminal::extractSelectionText() const
         auto const isNewLine = _pos.column <= lastColumn;
         auto const isLineWrapped = lineWrapped(_pos.row);
         bool const touchesRightPage = _pos.row > 0
-            && isSelectedAbsolute({_pos.row - 1, screen_.size().width});
+            && isSelectedAbsolute({_pos.row - 1, screen_.size().columns.as<int>()});
         if (isNewLine && (!isLineWrapped || !touchesRightPage))
         {
             // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
@@ -749,8 +756,8 @@ string Terminal::extractLastMarkRange() const
 
     auto const _l = std::lock_guard{*this};
 
-    auto const colCount = screen_.size().width;
-    auto const bottomLine = screen_.historyLineCount() + screen_.cursor().position.row - 1;
+    auto const colCount = *screen_.size().columns;
+    auto const bottomLine = *screen_.historyLineCount() + screen_.cursor().position.row - 1;
 
     auto const marker1 = optional{bottomLine};
 
@@ -759,8 +766,8 @@ string Terminal::extractLastMarkRange() const
         return {};
 
     // +1 each for offset change from 0 to 1 and because we only want to start at the line *after* the mark.
-    auto const firstLine = *marker0 - screen_.historyLineCount() + 2;
-    auto const lastLine = *marker1 - screen_.historyLineCount();
+    auto const firstLine = *marker0 - screen_.historyLineCount().as<int>() + 2;
+    auto const lastLine = *marker1 - screen_.historyLineCount().as<int>();
 
     string text;
 
@@ -841,9 +848,14 @@ void Terminal::reply(string_view _reply)
     sendRaw(_reply);
 }
 
-void Terminal::resizeWindow(int _width, int _height, bool _unitInPixels)
+void Terminal::resizeWindow(PageSize _size)
 {
-    eventListener_.resizeWindow(_width, _height, _unitInPixels);
+    eventListener_.resizeWindow(_size.lines, _size.columns);
+}
+
+void Terminal::resizeWindow(ImageSize _size)
+{
+    eventListener_.resizeWindow(_size.width, _size.height);
 }
 
 void Terminal::setApplicationkeypadMode(bool _enabled)

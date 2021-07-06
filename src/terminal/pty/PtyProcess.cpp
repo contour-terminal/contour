@@ -13,7 +13,7 @@ namespace terminal {
 
 auto const inline ProcessTag = crispy::debugtag::make("system.process", "Logs OS process informations.");
 
-PtyProcess::PtyProcess(ExecInfo const& _exe, crispy::Size _terminalSize, optional<crispy::Size> _pixels):
+PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels):
     pty_{
         #if defined(_MSC_VER)
             make_unique<terminal::ConPty>(_terminalSize/*TODO: , _pixels*/),
@@ -55,12 +55,12 @@ void PtyProcess::close()
 
 void PtyProcess::prepareParentProcess()
 {
-    assert(!"Don't!");
+    assert(false && "Don't!");
 }
 
 void PtyProcess::prepareChildProcess()
 {
-    assert(!"Don't!");
+    assert(false && "Don't!");
 }
 
 int PtyProcess::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
@@ -78,12 +78,12 @@ int PtyProcess::write(char const* _buf, size_t _size)
     return pty_->write(_buf, _size);
 }
 
-crispy::Size PtyProcess::screenSize() const noexcept
+PageSize PtyProcess::screenSize() const noexcept
 {
     return pty_->screenSize();
 }
 
-void PtyProcess::resizeScreen(crispy::Size _cells, std::optional<crispy::Size> _pixels)
+void PtyProcess::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
     pty_->resizeScreen(_cells, _pixels);
 }

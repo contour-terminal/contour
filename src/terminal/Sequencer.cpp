@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "terminal/primitives.h"
 #include <terminal/Sequencer.h>
 
 #include <terminal/Functions.h>
@@ -736,7 +737,7 @@ namespace impl // {{{ some command generator helpers
         if (logicalLines != 0 && logicalLines != 1)
             return ApplyResult::Invalid;
 
-        auto const lineCount = _seq.param_or(1, _screen.size().height);
+        auto const lineCount = _seq.param_or(1, *_screen.size().lines);
 
         _screen.eventListener().requestCaptureBuffer(lineCount, logicalLines);
 
@@ -797,8 +798,18 @@ namespace impl // {{{ some command generator helpers
         {
             switch (_seq.param(0))
             {
-                case 4: _screen.eventListener().resizeWindow(_seq.param(2), _seq.param(1), true); break;
-                case 8: _screen.eventListener().resizeWindow(_seq.param(2), _seq.param(1), false); break;
+                case 4: // resize in pixel units
+                    _screen.eventListener().resizeWindow(ImageSize{
+                        Width(_seq.param(2)),
+                        Height(_seq.param(1))
+                    });
+                    break;
+                case 8: // resize in cell units
+                    _screen.eventListener().resizeWindow(PageSize{
+                        LineCount(_seq.param(1)),
+                        ColumnCount(_seq.param(2))
+                    });
+                    break;
                 case 22: _screen.saveWindowTitle(); break;
                 case 23: _screen.restoreWindowTitle(); break;
                 default: return ApplyResult::Unsupported;
@@ -809,11 +820,11 @@ namespace impl // {{{ some command generator helpers
         {
             switch (_seq.param(0))
             {
-                case 4: // this means, resize to full display size
-                    _screen.eventListener().resizeWindow(0, 0, true);
-                    break;
-                case 8: // i.e. full display size
-                    _screen.eventListener().resizeWindow(0, 0, false);
+                case 4:
+                case 8:
+                    // this means, resize to full display size
+                    // TODO: just create a dedicated callback for fulscreen resize!
+                    _screen.eventListener().resizeWindow(ImageSize{});
                     break;
                 case 14:
                     if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
@@ -841,10 +852,10 @@ namespace impl // {{{ some command generator helpers
 
     ApplyResult XTSMGRAPHICS(Sequence const& _seq, Screen& _screen)
     {
-        auto const Pi = _seq.param(0);
-        auto const Pa = _seq.param(1);
-        auto const Pv = _seq.param_or(2, 0);
-        auto const Pu = _seq.param_or(3, 0);
+        auto const Pi = _seq.param<unsigned>(0);
+        auto const Pa = _seq.param<unsigned>(1);
+        auto const Pv = _seq.param_or<unsigned>(2, 0);
+        auto const Pu = _seq.param_or<unsigned>(3, 0);
 
         auto const item = [&]() -> optional<XtSmGraphics::Item> {
             switch (Pi) {
@@ -879,7 +890,7 @@ namespace impl // {{{ some command generator helpers
                 case Action::SetToValue:
                     return *item == XtSmGraphics::Item::NumberOfColorRegisters
                         ? XtSmGraphics::Value{Pv}
-                        : XtSmGraphics::Value{Size{Pv, Pu}};
+                        : XtSmGraphics::Value{ImageSize{Width(Pv), Height(Pu)}};
             }
             return std::monostate{};
         }();
@@ -982,7 +993,7 @@ string Sequence::text() const
 // }}}
 
 Sequencer::Sequencer(Screen& _screen,
-                     Size _maxImageSize,
+                     ImageSize _maxImageSize,
                      RGBAColor _backgroundColor,
                      shared_ptr<SixelColorPalette> _imageColorPalette) :
     screen_{ _screen },
@@ -1177,7 +1188,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
             ? RGBAColor{0, 0, 0, 0}
             : backgroundColor_,
         usePrivateColorRegisters_
-            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0, 16384))
+            ? make_shared<SixelColorPalette>(maxImageRegisterCount_, clamp(maxImageRegisterCount_, 0u, 16384u))
             : imageColorPalette_
     );
 
@@ -1397,7 +1408,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECSC: screen_.saveCursor(); break;
         case HTS: screen_.horizontalTabSet(); break;
         case IND: screen_.index(); break;
-        case NEL: screen_.moveCursorToNextLine(1); break;
+        case NEL: screen_.moveCursorToNextLine(LineCount(1)); break;
         case RI: screen_.reverseIndex(); break;
         case RIS: screen_.resetHard(); break;
         case SS2: screen_.singleShiftSelect(CharsetTable::G2); break;
@@ -1405,35 +1416,35 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
 
         // CSI
         case ANSISYSSC: screen_.restoreCursor(); break;
-        case CBT: screen_.cursorBackwardTab(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CHA: screen_.moveCursorToColumn(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CHT: screen_.cursorForwardTab(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CNL: screen_.moveCursorToNextLine(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CPL: screen_.moveCursorToPrevLine(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case CBT: screen_.cursorBackwardTab(TabStopCount(_seq.param_or(0, Sequence::Parameter{1}))); break;
+        case CHA: screen_.moveCursorToColumn(ColumnPosition(_seq.param_or(0, Sequence::Parameter{1}))); break;
+        case CHT: screen_.cursorForwardTab(TabStopCount(_seq.param_or(0, Sequence::Parameter{1}))); break;
+        case CNL: screen_.moveCursorToNextLine(LineCount(_seq.param_or(0, Sequence::Parameter{1}))); break;
+        case CPL: screen_.moveCursorToPrevLine(LineCount(_seq.param_or(0, Sequence::Parameter{1}))); break;
         case CPR: return impl::CPR(_seq, screen_);
-        case CUB: screen_.moveCursorBackward(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CUD: screen_.moveCursorDown(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CUF: screen_.moveCursorForward(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case CUP: screen_.moveCursorTo(Coordinate{ _seq.param_or(0, 1), _seq.param_or(1, 1)}); break;
-        case CUU: screen_.moveCursorUp(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case CUB: screen_.moveCursorBackward(_seq.param_or<ColumnCount>(0, ColumnCount{1})); break;
+        case CUD: screen_.moveCursorDown(_seq.param_or<LineCount>(0, LineCount{1})); break;
+        case CUF: screen_.moveCursorForward(_seq.param_or<ColumnCount>(0, ColumnCount{1})); break;
+        case CUP: screen_.moveCursorTo(Coordinate{ _seq.param_or<int>(0, 1), _seq.param_or<int>(1, 1)}); break;
+        case CUU: screen_.moveCursorUp(_seq.param_or<LineCount>(0, LineCount{1})); break;
         case DA1: screen_.sendDeviceAttributes(); break;
         case DA2: screen_.sendTerminalId(); break;
         case DA3: return ApplyResult::Unsupported;
-        case DCH: screen_.deleteCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case DCH: screen_.deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount{1})); break;
         case DECCRA:
             {
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 // DECCRA is not affected by the page margins.
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
-                auto const bottom = _seq.param_or(2, Sequence::Parameter{ screen_.size().height });
-                auto const right = _seq.param_or(3, Sequence::Parameter{ screen_.size().width });
-                auto const page = _seq.param_or(4, Sequence::Parameter{ 0 });
+                auto const top = _seq.param_or<int>(0, origin.row);
+                auto const left = _seq.param_or<int>(1, origin.column);
+                auto const bottom = _seq.param_or<int>(2, unbox<int>(screen_.size().lines));
+                auto const right = _seq.param_or<int>(3, unbox<int>(screen_.size().columns));
+                auto const page = _seq.param_or<int>(4, 0);
 
-                auto const targetTop = _seq.param_or(5, Sequence::Parameter{ origin.row });
-                auto const targetLeft = _seq.param_or(6, Sequence::Parameter{ origin.column });
-                auto const targetPage = _seq.param_or(7, Sequence::Parameter{ 0 });
+                auto const targetTop = _seq.param_or<int>(5, origin.row);
+                auto const targetLeft = _seq.param_or<int>(6, origin.column);
+                auto const targetPage = _seq.param_or<int>(7, 0);
 
                 screen_.copyArea(top, left, bottom, right, page,
                                  targetTop, targetLeft, targetPage);
@@ -1443,13 +1454,13 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             {
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const top = _seq.param_or(0, origin.row);
+                auto const left = _seq.param_or(1, origin.column);
 
                 // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is treated as the width or height of that page.
                 auto const size = screen_.size();
-                auto const bottom = min(_seq.param_or(2, Sequence::Parameter{ size.height }), size.height);
-                auto const right = min(_seq.param_or(3, Sequence::Parameter{ size.width }), size.width);
+                auto const bottom = min(_seq.param_or<int>(2, unbox<int>(size.lines)), unbox<int>(size.lines));
+                auto const right = min(_seq.param_or<int>(3, unbox<int>(size.columns)), unbox<int>(size.columns));
 
                 screen_.eraseArea(top, left, bottom, right);
             }
@@ -1459,19 +1470,19 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                 auto const ch = _seq.param_or(0, Sequence::Parameter{ 0 });
                 // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
                 auto const origin = screen_.origin();
-                auto const top = _seq.param_or(0, Sequence::Parameter{ origin.row });
-                auto const left = _seq.param_or(1, Sequence::Parameter{ origin.column });
+                auto const top = _seq.param_or(0, origin.row);
+                auto const left = _seq.param_or(1, origin.column);
 
                 // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is treated as the width or height of that page.
                 auto const size = screen_.size();
-                auto const bottom = min(_seq.param_or(2, Sequence::Parameter{ size.height }), size.height);
-                auto const right = min(_seq.param_or(3, Sequence::Parameter{ size.width }), size.width);
+                auto const bottom = min(_seq.param_or(2, unbox<int>(size.lines)), unbox<int>(size.lines));
+                auto const right = min(_seq.param_or(3, unbox<int>(size.columns)), unbox<int>(size.columns));
 
                 screen_.fillArea(ch, top, left, bottom, right);
             }
             break;
-        case DECDC: screen_.deleteColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case DECIC: screen_.insertColumns(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case DECDC: screen_.deleteColumns(_seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
+        case DECIC: screen_.insertColumns(_seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
         case DECRM:
             {
                 ApplyResult r = ApplyResult::Ok;
@@ -1498,13 +1509,13 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             if (auto const columnCount = _seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {
                 // EXTENSION: only 80 and 132 are specced, but we allow any.
-                screen_.resizeColumns(columnCount, false);
+                screen_.resizeColumns(ColumnCount(columnCount), false);
                 return ApplyResult::Ok;
             }
             else
                 return ApplyResult::Invalid;
         case DECSNLS:
-            screen_.resize(Size{screen_.size().height, _seq.param(0)});
+            screen_.resize(PageSize{screen_.size().lines, _seq.param<ColumnCount>(0)});
             return ApplyResult::Ok;
         case DECSLRM: screen_.setLeftRightMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSM:
@@ -1520,19 +1531,24 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         case DECSTBM: screen_.setTopBottomMargin(_seq.param_opt(0), _seq.param_opt(1)); break;
         case DECSTR: screen_.resetSoft(); break;
         case DECXCPR: screen_.reportExtendedCursorPosition(); break;
-        case DL: screen_.deleteLines(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case ECH: screen_.eraseCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case DL: screen_.deleteLines(_seq.param_or<LineCount>(0, LineCount(1))); break;
+        case ECH: screen_.eraseCharacters(_seq.param_or<ColumnCount>(0, ColumnCount(1))); break;
         case ED: return impl::ED(_seq, screen_);
         case EL: return impl::EL(_seq, screen_);
-        case HPA: screen_.moveCursorToColumn(_seq.param(0)); break;
-        case HPR: screen_.moveCursorForward(_seq.param(0)); break;
-        case HVP: screen_.moveCursorTo(Coordinate{_seq.param_or(0, Sequence::Parameter{1}), _seq.param_or(1, Sequence::Parameter{1})}); break; // YES, it's like a CUP!
-        case ICH: screen_.insertCharacters(_seq.param_or(0, Sequence::Parameter{1})); break;
-        case IL:  screen_.insertLines(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case HPA: screen_.moveCursorToColumn(_seq.param<ColumnPosition>(0)); break;
+        case HPR: screen_.moveCursorForward(_seq.param<ColumnCount>(0)); break;
+        case HVP:
+            screen_.moveCursorTo(Coordinate{
+                _seq.param_or<int>(0, 1),
+                _seq.param_or<int>(1, 1)
+            });
+            break; // YES, it's like a CUP!
+        case ICH: screen_.insertCharacters(_seq.param_or<ColumnCount>(0, ColumnCount{1})); break;
+        case IL:  screen_.insertLines(_seq.param_or<LineCount>(0, LineCount{1})); break;
         case REP:
             if (precedingGraphicCharacter_)
             {
-                auto const requestedCount = _seq.param(0);
+                auto const requestedCount = _seq.param<int>(0);
                 auto const availableColumns = screen_.margin().horizontal.to - screen_.cursor().position.column + 1;
                 auto const effectiveCount = min(requestedCount, availableColumns);
                 for (int i = 0; i < effectiveCount; i++)
@@ -1551,7 +1567,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
             }
             break;
         case SCOSC: screen_.saveCursor(); break;
-        case SD: screen_.scrollDown(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case SD: screen_.scrollDown(_seq.param_or<LineCount>(0, LineCount{1})); break;
         case SETMARK: screen_.setMark(); break;
         case SGR: return impl::dispatchSGR(_seq, screen_);
         case SM:
@@ -1564,9 +1580,9 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
                 });
                 return r;
             }
-        case SU: screen_.scrollUp(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case SU: screen_.scrollUp(_seq.param_or<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(_seq, screen_);
-        case VPA: screen_.moveCursorToLine(_seq.param_or(0, Sequence::Parameter{1})); break;
+        case VPA: screen_.moveCursorToLine(_seq.param_or<LinePosition>(0, LinePosition{1})); break;
         case WINMANIP: return impl::WINDOWMANIP(_seq, screen_);
         case DECMODERESTORE: return impl::restoreDECModes(_seq, screen_);
         case DECMODESAVE: return impl::saveDECModes(_seq, screen_);

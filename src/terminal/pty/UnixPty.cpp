@@ -39,7 +39,6 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-using crispy::Size;
 using std::runtime_error;
 using std::numeric_limits;
 using std::optional;
@@ -76,18 +75,18 @@ namespace
     }
 }
 
-UnixPty::UnixPty(Size const& _windowSize, optional<Size> _pixels) :
+UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
     size_{ _windowSize }
 {
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-    assert(_windowSize.height <= numeric_limits<unsigned short>::max());
-    assert(_windowSize.width <= numeric_limits<unsigned short>::max());
+    assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
+    assert(*_windowSize.columns <= numeric_limits<unsigned short>::max());
 
     winsize const ws{
-        static_cast<unsigned short>(_windowSize.height),
-        static_cast<unsigned short>(_windowSize.width),
-        static_cast<unsigned short>(_pixels.value_or(Size{}).width),
-        static_cast<unsigned short>(_pixels.value_or(Size{}).height)
+        unbox<unsigned short>(_windowSize.lines),
+        unbox<unsigned short>(_windowSize.columns),
+        unbox<unsigned short>(_pixels.value_or(ImageSize{}).width),
+        unbox<unsigned short>(_pixels.value_or(ImageSize{}).height)
     };
 
 #if defined(__APPLE__)
@@ -206,7 +205,7 @@ int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
             for (bool done = false; !done; )
             {
                 char dummy[256];
-                rv = ::read(pipe_[0], dummy, sizeof(dummy));
+                rv = static_cast<int>(::read(pipe_[0], dummy, sizeof(dummy)));
                 done = rv > 0;
                 n += max(rv, 0);
             }
@@ -233,21 +232,21 @@ int UnixPty::write(char const* buf, size_t size)
     return static_cast<int>(rv);
 }
 
-Size UnixPty::screenSize() const noexcept
+PageSize UnixPty::screenSize() const noexcept
 {
     return size_;
 }
 
-void UnixPty::resizeScreen(Size _cells, std::optional<Size> _pixels)
+void UnixPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
     auto w = winsize{};
-    w.ws_col = _cells.width;
-    w.ws_row = _cells.height;
+    w.ws_col = unbox<unsigned short>(_cells.columns);
+    w.ws_row = unbox<unsigned short>(_cells.lines);
 
     if (_pixels.has_value())
     {
-        w.ws_xpixel = _pixels.value().width;
-        w.ws_ypixel = _pixels.value().height;
+        w.ws_xpixel = unbox<unsigned short>(_pixels.value().width);
+        w.ws_ypixel = unbox<unsigned short>(_pixels.value().height);
     }
 
     if (ioctl(master_, TIOCSWINSZ, &w) == -1)

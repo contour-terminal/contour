@@ -152,7 +152,7 @@ namespace detail {
 // TODO: give random access hints to STL algorithms
 
 template <typename I, typename T>
-constexpr inline detail::Times<I, T> times(T start, I count, T step = 1)
+constexpr inline detail::Times<I, T> times(T start, I count, T step = T(1))
 {
     return detail::Times<I, T>{start, count, step};
 }
@@ -160,7 +160,7 @@ constexpr inline detail::Times<I, T> times(T start, I count, T step = 1)
 template <typename T>
 constexpr inline detail::Times<T, T> times(T count)
 {
-    return detail::Times<T, T>{0, count, 1};
+    return detail::Times<T, T>{T(0), count, T(1)};
 }
 
 template<
