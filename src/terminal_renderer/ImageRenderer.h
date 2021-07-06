@@ -63,10 +63,10 @@ namespace std
             using FNV = crispy::FNV<uint64_t>;
             return FNV{}(FNV{}.basis(),
                          _key.imageId,
-                         _key.offset.row,
-                         _key.offset.column,
-                         *_key.size.width,
-                         *_key.size.height);
+                         static_cast<unsigned>(_key.offset.row),
+                         static_cast<unsigned>(_key.offset.column),
+                         _key.size.width.as<unsigned>(),
+                         _key.size.height.as<unsigned>());
         }
     };
 }

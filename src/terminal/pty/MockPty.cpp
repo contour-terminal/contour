@@ -20,9 +20,9 @@ int MockPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
     (void) _timeout;
 
     auto const n = std::min(outputBuffer_.size(), _size);
-    std::copy(begin(outputBuffer_), next(begin(outputBuffer_), n), _buf);
+    std::copy(begin(outputBuffer_), next(begin(outputBuffer_), static_cast<int>(n)), _buf);
     outputBuffer_.erase(0, n);
-    return n;
+    return static_cast<int>(n);
 }
 
 void MockPty::wakeupReader()
@@ -34,7 +34,7 @@ int MockPty::write(char const* buf, size_t size)
 {
     // Writing into stdin.
     inputBuffer_ += std::string_view(buf, size);
-    return size;
+    return static_cast<int>(size);
 }
 
 PageSize MockPty::screenSize() const noexcept

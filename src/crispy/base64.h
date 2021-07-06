@@ -45,11 +45,11 @@ namespace detail
 template <typename Iterator, typename Alphabet>
 std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 {
-    int const inputLength = std::distance(begin, end);
+    int const inputLength = static_cast<int>(std::distance(begin, end));
     int const outputLength = ((inputLength + 2) / 3 * 4) + 1;
 
     std::string output;
-    output.resize(outputLength);
+    output.resize(static_cast<unsigned>(outputLength));
 
     auto i = 0;
     auto const e = inputLength - 2;
@@ -90,7 +90,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
     }
 
     auto const outlen = std::distance(output.begin(), out);
-    output.resize(outlen);
+    output.resize(static_cast<unsigned>(outlen));
 
     return output;
 }
@@ -118,7 +118,7 @@ size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 
     auto const indexSize = std::size(index);
 
-    while (pos != end && index[size_t(*pos)] < indexSize)
+    while (pos != end && index[static_cast<uint8_t>(*pos)] < indexSize)
         pos++;
 
     auto const nprbytes = std::distance(begin, pos) - 1;
@@ -142,7 +142,7 @@ template <typename Iterator, typename IndexTable, typename Output>
 size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
 {
     auto const index = [indexmap](Iterator i) {
-        return indexmap[static_cast<size_t>(*i)];
+        return indexmap[static_cast<uint8_t>(*i)];
     };
 
     if (begin == end)
@@ -152,7 +152,7 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
     Iterator input = begin;
     while (input != end && index(input) <= 63)
         input++;
-    size_t nprbytes = std::distance(begin, input);
+    size_t nprbytes = static_cast<unsigned>(std::distance(begin, input));
     size_t decodedCount = ((nprbytes + 3) / 4) * 3;
 
     auto out = output;

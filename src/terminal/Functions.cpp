@@ -49,8 +49,8 @@ FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
 
     //std::cout << fmt::format("select: {}\n", _selector);
 
-    int a = 0;
-    int b = static_cast<int>(funcs.size()) - 1;
+    auto a = size_t{0};
+    auto b = funcs.size() - 1;
     while (a <= b)
     {
         auto const i = (a + b) / 2;
@@ -60,7 +60,11 @@ FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
         if (rel > 0)
             a = i + 1;
         else if (rel < 0)
+        {
+            if (i == 0)
+                return nullptr;
             b = i - 1;
+        }
         else
             return &I;
     }

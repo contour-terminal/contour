@@ -19,6 +19,8 @@
 #include <crispy/times.h>
 #include <crispy/indexed.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <ft2build.h>
 #include FT_BITMAP_H
 #include FT_ERRORS_H
@@ -48,8 +50,12 @@ using std::tuple;
 using std::u32string_view;
 using std::unique_ptr;
 using std::vector;
+using ranges::views::iota;
 
 using namespace std::string_literals;
+
+namespace
+{
 
 struct FontPathAndSize
 {
@@ -60,6 +66,8 @@ struct FontPathAndSize
 bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
 {
     return a.path == b.path && a.size.pt == b.size.pt;
+}
+
 }
 
 bool operator!=(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
@@ -197,7 +205,7 @@ namespace // {{{ helper
                 break;
         }
         return FT_RENDER_MODE_NORMAL;
-    };
+    }
 
     constexpr hb_script_t mapScriptToHarfbuzzScript(unicode::Script _script)
     {
@@ -447,7 +455,7 @@ namespace // {{{ helper
     int computeAverageAdvance(FT_Face _face) noexcept
     {
         FT_Pos maxAdvance = 0;
-        for (int i = 32; i < 128; i++)
+        for (FT_ULong i = 32; i < 128; i++)
         {
             if (auto ci = FT_Get_Char_Index(_face, i); ci == FT_Err_Ok)
                 if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
@@ -498,7 +506,9 @@ namespace // {{{ helper
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize.pt * 64.0));
 
-            if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size, _dpi.x, _dpi.y); ec != FT_Err_Ok)
+            if (FT_Error const ec = FT_Set_Char_Size(ftFace, size, size,
+                                            static_cast<FT_UInt>(_dpi.x),
+                                            static_cast<FT_UInt>(_dpi.y)); ec != FT_Err_Ok)
             {
                 debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
             }
@@ -663,10 +673,13 @@ bool open_shaper::has_color(font_key _font) const
     return FT_HAS_COLOR(d->fonts_.at(_font).ftFace.get());
 }
 
-void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span<int> _clusters, unicode::Script _script)
+namespace
+{
+
+void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span<unsigned> _clusters, unicode::Script _script)
 {
     hb_buffer_clear_contents(_hbBuf);
-    for (auto const i : crispy::times(_codepoints.size()))
+    for (auto const i: iota(0u, _codepoints.size()))
         hb_buffer_add(_hbBuf, _codepoints[i], _clusters[i]);
 
     hb_buffer_set_direction(_hbBuf, HB_DIRECTION_LTR);
@@ -682,7 +695,7 @@ bool tryShape(font_key _font,
               hb_font_t* _hbFont,
               unicode::Script _script,
               u32string_view _codepoints,
-              crispy::span<int> _clusters,
+              crispy::span<unsigned> _clusters,
               shape_result& _result)
 {
     assert(_hbFont != nullptr);
@@ -693,25 +706,27 @@ bool tryShape(font_key _font,
     hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
     hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
 
-    auto const glyphCount = static_cast<int>(hb_buffer_get_length(_hbBuf));
+    auto const glyphCount = hb_buffer_get_length(_hbBuf);
     hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(_hbBuf, nullptr);
     hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(_hbBuf, nullptr);
 
     _result.clear();
     _result.reserve(glyphCount);
 
-    for (auto const i : crispy::times(glyphCount))
+    for (auto const i: iota(0u, glyphCount))
     {
         glyph_position gpos{};
         gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
-        gpos.offset.x = int(pos[i].x_offset / 64.0f); // gpos.offset.(x,y) ?
-        gpos.offset.y = int(pos[i].y_offset / 64.0f);
-        gpos.advance.x = int(pos[i].x_advance / 64.0f);
-        gpos.advance.y = int(pos[i].y_advance / 64.0f);
+        gpos.offset.x = static_cast<int>(static_cast<double>(pos[i].x_offset) / 64.0); // gpos.offset.(x,y) ?
+        gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
+        gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0f);
+        gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
         _result.emplace_back(gpos);
     }
     return crispy::none_of(_result, glyphMissing);
 }
+
+} // end anonymous namespace
 
 optional<glyph_position> open_shaper::shape(font_key _font,
                                             char32_t _codepoint)
@@ -745,7 +760,7 @@ optional<glyph_position> open_shaper::shape(font_key _font,
 
 void open_shaper::shape(font_key _font,
                         u32string_view _codepoints,
-                        crispy::span<int> _clusters,
+                        crispy::span<unsigned> _clusters,
                         unicode::Script _script,
                         shape_result& _result)
 {
@@ -799,7 +814,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     auto const font = _glyph.font;
     auto ftFace = d->fonts_.at(font).ftFace.get();
     auto const glyphIndex = _glyph.index;
-    FT_Int32 const flags = ftRenderFlag(_mode) | (has_color(font) ? FT_LOAD_COLOR : 0);
+    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (has_color(font) ? FT_LOAD_COLOR : 0));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
     if (ec != FT_Err_Ok)
@@ -858,9 +873,9 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.format = bitmap_format::alpha_mask;
             output.bitmap.resize(*height * *width); // 8-bit channel (with values 0 or 255)
 
-            auto const pitch = abs(ftBitmap.pitch);
-            for (auto i = 0; i < int(ftBitmap.rows); ++i)
-                for (auto j = 0; j < int(ftBitmap.width); ++j)
+            auto const pitch = static_cast<unsigned>(ftBitmap.pitch);
+            for (auto const i: iota(0u, ftBitmap.rows))
+                for (auto const j: iota(0u, ftBitmap.width))
                     output.bitmap[i * *width + j] = ftBitmap.buffer[(*height - 1 - i) * pitch + j] * 255;
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
@@ -871,10 +886,10 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.format = bitmap_format::alpha_mask;
             output.bitmap.resize(*output.size.height * *output.size.width);
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
             auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto i = 0; i < *output.size.height; ++i)
-                for (auto j = 0; j < *output.size.width; ++j)
+            for (auto const i: iota(0u, *output.size.height))
+                for (auto const j: iota(0u, *output.size.width))
                     output.bitmap[i * *output.size.width + j] = s[(*output.size.height - 1 - i) * pitch + j];
             break;
         }
@@ -887,10 +902,10 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.bitmap.resize(width * height);
             output.size.width /= crispy::Width(3);
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
             auto s = ftFace->glyph->bitmap.buffer;
-            for (auto const i : crispy::times(ftFace->glyph->bitmap.rows))
-                for (auto const j : crispy::times(ftFace->glyph->bitmap.width))
+            for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
+                for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
                     output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
             break;
         }
@@ -903,10 +918,10 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.bitmap.resize(*height * *width * 4);
             auto t = output.bitmap.begin();
 
-            auto const pitch = ftFace->glyph->bitmap.pitch;
-            for (auto const i : crispy::times(*height))
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
+            for (auto const i: iota(0u, *height))
             {
-                for (auto const j : crispy::times(*width))
+                for (auto const j: iota(0u, *width))
                 {
                     auto const s = &ftFace->glyph->bitmap.buffer[(*height - i - 1) * pitch + j * 4];
 

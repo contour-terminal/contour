@@ -248,8 +248,8 @@ private:
     RGBColor color_{};
 
     std::vector<char32_t> codepoints_;
-    std::vector<int> clusters_;
-    int cellCount_ = 0;
+    std::vector<unsigned> clusters_;
+    unsigned cellCount_ = 0;
     bool textStartFound_ = false;
 
     // text shaping cache

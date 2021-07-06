@@ -86,9 +86,9 @@ constexpr inline char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
     if (value >= 'A' && value <= 'Z')
     {
         if (_mods & Qt::ShiftModifier)
-            return value;
+            return static_cast<char32_t>(value);
         else
-            return std::tolower(value);
+            return static_cast<char32_t>(std::tolower(value));
     }
     return 0;
 }

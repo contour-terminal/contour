@@ -53,7 +53,7 @@ constexpr int pixel_size(bitmap_format _format) noexcept
             return 1;
     }
     return 1;
-};
+}
 
 struct rasterized_glyph
 {
@@ -121,7 +121,7 @@ class shaper {
      */
     virtual void shape(font_key _font,
                        std::u32string_view _text,
-                       crispy::span<int> _clusters,
+                       crispy::span<unsigned> _clusters,
                        unicode::Script _script,
                        shape_result& _result) = 0;
 

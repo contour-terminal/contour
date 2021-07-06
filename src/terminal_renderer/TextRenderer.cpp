@@ -509,7 +509,7 @@ void ComplexTextShaper::endSequence()
 
     codepoints_.clear();
     clusters_.clear();
-    textPosition_.x += gridMetrics_.cellSize.width.as<int>() * cellCount_;
+    textPosition_.x += static_cast<int>(*gridMetrics_.cellSize.width * cellCount_);
     cellCount_ = 0;
     textStartFound_ = false;
 }

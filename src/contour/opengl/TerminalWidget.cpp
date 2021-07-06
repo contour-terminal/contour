@@ -1078,7 +1078,7 @@ void TerminalWidget::blinkingCursorUpdate()
     scheduleRedraw();
 }
 
-float TerminalWidget::contentScale() const
+double TerminalWidget::contentScale() const
 {
     if (!window()->windowHandle())
         return 1.0f;

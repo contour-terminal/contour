@@ -155,7 +155,7 @@ struct HelpStyle // TODO: maybe call HelpDisplayStyle?
  * @param _margin       Number of characters to write at most per line.
  * @param _cmdPrefix    Some text to prepend in front of each generated line in the output.
  */
-std::string usageText(Command const& _command, HelpStyle const& _style, int _margin,
+std::string usageText(Command const& _command, HelpStyle const& _style, unsigned _margin,
                       std::string const& _cmdPrefix = {});
 
 /**
@@ -165,7 +165,10 @@ std::string usageText(Command const& _command, HelpStyle const& _style, int _mar
  * @param _style        Determines how to format and colorize the output string.
  * @param _margin       Number of characters to write at most per line.
  */
-std::string helpText(Command const& _command, HelpStyle const& _style, int _margin);
+std::string helpText(Command const& _command, HelpStyle const& _style, unsigned _margin);
+
+// Throw if Command is not well defined.
+void validate(Command const& _command);
 
 } // end namespace crispy::cli
 

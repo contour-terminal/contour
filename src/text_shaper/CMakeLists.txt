@@ -13,6 +13,7 @@ add_library(text_shaper STATIC ${text_shaper_SRC})
 
 set(TEXT_SHAPER_LIBS unicode::core)
 list(APPEND TEXT_SHAPER_LIBS fmt::fmt-header-only)
+list(APPEND TEXT_SHAPER_LIBS range-v3)
 
 if(APPLE)
     find_package(PkgConfig REQUIRED)

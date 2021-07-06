@@ -16,6 +16,8 @@
 
 #include <crispy/debuglog.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <utility>
 #include <vector>
 
@@ -23,6 +25,8 @@ using std::tuple;
 using std::min;
 using std::max;
 using std::vector;
+
+using ranges::views::iota;
 
 namespace text {
 
@@ -39,7 +43,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     auto const ratioX = float(*_bitmap.size.width) / float(*_newSize.width);
     auto const ratioY = float(*_bitmap.size.height) / float(*_newSize.height);
     auto const ratio = max(ratioX, ratioY);
-    auto const factor = int(ceilf(ratio));
+    auto const factor = static_cast<unsigned>(ceilf(ratio));
 
     vector<uint8_t> dest;
     dest.resize(*_newSize.height * *_newSize.width * 4);
@@ -48,16 +52,16 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
                                  _bitmap.size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
-    for (int i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
+    for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
     {
-        for (int j = 0, sc = 0; j < *_newSize.width; j++, sc += factor, d += 4)
+        for (unsigned j = 0, sc = 0; j < *_newSize.width; j++, sc += factor, d += 4)
         {
             // calculate area average
             unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-            for (int y = sr; y < min(sr + factor, _bitmap.size.height.as<int>()); y++)
+            for (unsigned y = sr; y < min(sr + factor, _bitmap.size.height.as<unsigned>()); y++)
             {
                 uint8_t const* p = _bitmap.bitmap.data() + (y * *_bitmap.size.width * 4) + sc * 4;
-                for (int x = sc; x < min(sc + factor, _bitmap.size.width.as<int>()); x++, count++)
+                for (unsigned x = sc; x < min(sc + factor, _bitmap.size.width.as<unsigned>()); x++, count++)
                 {
                     b += *(p++);
                     g += *(p++);
@@ -68,12 +72,13 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
 
             if (count)
             {
-                d[0] = b / count;
-                d[1] = g / count;
-                d[2] = r / count;
-                d[3] = a / count;
+                d[0] = static_cast<uint8_t>(b / count);
+                d[1] = static_cast<uint8_t>(g / count);
+                d[2] = static_cast<uint8_t>(r / count);
+                d[3] = static_cast<uint8_t>(a / count);
             }
         }
+        sr += factor;
     }
 
     auto output = rasterized_glyph{};

@@ -153,7 +153,7 @@ public:
         };
     }
     void assertInitialized();
-    float contentScale() const;
+    double contentScale() const;
     void blinkingCursorUpdate();
     void resize(terminal::ImageSize _pixels);
     void updateMinimumSize();
