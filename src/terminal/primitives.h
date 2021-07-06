@@ -154,7 +154,7 @@ struct GridSize
     LineCount lines;
     ColumnCount columns;
 
-    struct Coordinate {
+    struct Offset {
         LinePosition line;
         ColumnPosition column;
     };
@@ -165,15 +165,15 @@ struct GridSize
         constexpr iterator(ColumnCount _width, int _next) noexcept :
             width{ _width },
             next{ _next },
-            coord{ makeCoordinate(_next) }
+            offset{ makeOffset(_next) }
         {
         }
 
-        constexpr auto operator*() const noexcept { return coord; }
+        constexpr auto operator*() const noexcept { return offset; }
 
         constexpr iterator& operator++() noexcept
         {
-            coord = makeCoordinate(++next);
+            offset = makeOffset(++next);
             return *this;
         }
 
@@ -189,22 +189,22 @@ struct GridSize
       private:
         ColumnCount width;
         int next;
-        Coordinate coord;
+        Offset offset;
 
-        constexpr Coordinate makeCoordinate(int offset) noexcept
+        constexpr Offset makeOffset(int offset) noexcept
         {
-            return Coordinate{
-                LinePosition(offset % *width),
-                ColumnPosition(offset / *width)
+            return Offset{
+                LinePosition(offset / *width),
+                ColumnPosition(offset % *width)
             };
         }
     };
 
     constexpr iterator begin() const noexcept { return iterator{columns, 0}; }
-    constexpr iterator end() const noexcept { return iterator{columns, static_cast<int>(*columns * *lines)}; }
+    constexpr iterator end() const noexcept { return iterator{columns, *columns * *lines}; }
 
     constexpr iterator begin() noexcept { return iterator{columns, 0}; }
-    constexpr iterator end() noexcept { return iterator{columns, static_cast<int>(*columns * *lines)}; }
+    constexpr iterator end() noexcept { return iterator{columns, *columns * *lines}; }
 };
 
 constexpr GridSize::iterator begin(GridSize const& s) noexcept { return s.begin(); }

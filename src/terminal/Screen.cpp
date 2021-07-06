@@ -2093,11 +2093,11 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
         crispy::for_each(
             LIBTERMINAL_EXECUTION_COMMA(par)
             GridSize{linesToBeRendered, columnsToBeRendered},
-            [&](GridSize::Coordinate offset) {
-                auto coord = _topLeft;
-                coord.column += *offset.column;
-                coord.row += *offset.line;
-                Cell& cell = at(coord);
+            [&](GridSize::Offset offset) {
+                auto const cellCoord = Coordinate{
+                    _topLeft.row + *offset.line,
+                    _topLeft.column + *offset.column};
+                Cell& cell = at(cellCoord);
                 cell.setImage(
                     ImageFragment{
                         rasterizedImage,
