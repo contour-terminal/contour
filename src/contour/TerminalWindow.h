@@ -85,6 +85,8 @@ class TerminalWindow :
 
     //QSize sizeHint() const override;
 
+    config::TerminalProfile const* profile() const { return config_.profile(profileName_); }
+
   public Q_SLOTS:
     void terminalBufferChanged(terminal::ScreenType);
     void profileChanged();

@@ -1140,6 +1140,23 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     else
         profile.maxHistoryLineCount = intValue;
 
+    strValue = fmt::format("{}", ScrollBarPosition::Right);
+    if (tryLoadChild(_usedKeys, _doc, basePath, "scrollbar.position", strValue))
+    {
+        auto const literal = toLower(strValue);
+        if (literal == "left")
+            profile.scrollbarPosition = ScrollBarPosition::Left;
+        else if (literal == "right")
+            profile.scrollbarPosition = ScrollBarPosition::Right;
+        else if (literal == "hidden")
+            profile.scrollbarPosition = ScrollBarPosition::Hidden;
+        else
+            errorlog().write("Invalid value for config entry {}: {}",
+                             "scrollbar.position",
+                             strValue);
+    }
+    tryLoadChild(_usedKeys, _doc, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
+
     tryLoadChild(_usedKeys, _doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
     tryLoadChild(_usedKeys, _doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
 
@@ -1221,23 +1238,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);
     tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width);
     tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height);
-
-    string strValue = fmt::format("{}", ScrollBarPosition::Right);
-    if (tryLoadValue(usedKeys, doc, "scrollbar.position", strValue))
-    {
-        auto const literal = toLower(strValue);
-        if (literal == "left")
-            _config.scrollbarPosition = ScrollBarPosition::Left;
-        else if (literal == "right")
-            _config.scrollbarPosition = ScrollBarPosition::Right;
-        else if (literal == "hidden")
-            _config.scrollbarPosition = ScrollBarPosition::Hidden;
-        else
-            errorlog().write("Invalid value for config entry {}: {}",
-                             "scrollbar.position",
-                             strValue);
-    }
-    tryLoadValue(usedKeys, doc, "scrollbar.hide_in_alt_screen", _config.hideScrollbarInAltScreen);
 
     if (auto colorschemes = doc["color_schemes"]; colorschemes)
     {

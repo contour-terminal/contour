@@ -129,6 +129,9 @@ struct TerminalProfile {
 
     std::optional<terminal::LineCount> maxHistoryLineCount;
     terminal::LineCount historyScrollMultiplier;
+    ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
+    bool hideScrollbarInAltScreen = true;
+
     bool autoScrollOnUpdate;
 
     terminal::renderer::FontDescriptions fonts;
@@ -203,9 +206,6 @@ struct Config {
     bool sixelCursorConformance = true;
     terminal::ImageSize maxImageSize = {terminal::Width(1280), terminal::Height(720)};
     int maxImageColorRegisters = 4096;
-
-    ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
-    bool hideScrollbarInAltScreen = true;
 
     std::set<std::string> experimentalFeatures;
 };

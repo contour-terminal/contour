@@ -147,12 +147,12 @@ void ScrollableDisplay::updatePosition()
     };
 
     if (session_.currentScreenType() != terminal::ScreenType::Alternate
-        || !session_.config().hideScrollbarInAltScreen)
+        || !session_.profile().hideScrollbarInAltScreen)
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
-        debuglog(WindowTag).write("Scrollbar Pos: {}", session_.config().scrollbarPosition);
-        switch (session_.config().scrollbarPosition)
+        debuglog(WindowTag).write("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
+        switch (session_.profile().scrollbarPosition)
         {
             case config::ScrollBarPosition::Right:
                 resizeMainAndScrollArea();
@@ -220,8 +220,8 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 
     terminalSession_ = make_unique<TerminalSession>(
         make_unique<terminal::PtyProcess>(
-            config_.profile(profileName_)->shell,
-            config_.profile(profileName_)->terminalSize
+            profile()->shell,
+            profile()->terminalSize
         ),
         config_,
         liveConfig_,
@@ -240,7 +240,7 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
     );
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
-        *config_.profile(profileName_),
+        *profile(),
         *terminalSession_,
         [this]() { centralWidget()->updateGeometry(); update(); },
         [this](bool _enable) { WindowBackgroundBlur::setEnabled(winId(), _enable); }
@@ -282,9 +282,9 @@ void TerminalWindow::profileChanged()
     scrollableDisplay_->updatePosition();
 
     if (terminalSession_->terminal().screen().isPrimaryScreen())
-        scrollableDisplay_->showScrollBar(config_.scrollbarPosition != config::ScrollBarPosition::Hidden);
+        scrollableDisplay_->showScrollBar(profile()->scrollbarPosition != config::ScrollBarPosition::Hidden);
     else
-        scrollableDisplay_->showScrollBar(!config_.hideScrollbarInAltScreen);
+        scrollableDisplay_->showScrollBar(!profile()->hideScrollbarInAltScreen);
 #endif
 }
 
@@ -293,7 +293,7 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 #if defined(CONTOUR_SCROLLBAR)
     debuglog(WindowTag).write("Screen buffer type has changed to {}.", _type);
     scrollableDisplay_->showScrollBar(
-        _type == terminal::ScreenType::Main || !config_.hideScrollbarInAltScreen
+        _type == terminal::ScreenType::Main || !profile()->hideScrollbarInAltScreen
     );
 
     scrollableDisplay_->updatePosition();

@@ -155,7 +155,6 @@ class TerminalSession: public terminal::Terminal::Events
     void setFontSize(text::font_size _size);
     void onConfigReload(FileChangeWatcher::Event _event);
     void setDefaultCursor();
-    config::TerminalProfile& profile() noexcept { return profile_; }
     void configureTerminal();
     void configureDisplay();
     uint8_t matchModeFlags() const;

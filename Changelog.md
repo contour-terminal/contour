@@ -13,6 +13,7 @@
 - Fixes SGR 1 (bold) wrongly applied on indexed background colors.
 - Preserve active profile when reloading config, and forces redraw after config reload.
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
+- Changes config entries `scrollbar.*` to `profile.*.scrollbar.*`.
 - Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter `--live-config`.
 - Changes the CLI command line interface syntax.
 - Removes `tab_width` configuration. Tab width cannot be configured anymore but remaints by default at 8.

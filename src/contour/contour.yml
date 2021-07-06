@@ -11,13 +11,6 @@ experimental:
     # Enables experimental support for termcap/terminfo queries
     tcap: false
 
-# visual scrollbar support
-scrollbar:
-    # scroll bar position: Left, Right, Hidden (ignore-case)
-    position: right
-    # whether or not to hide the scrollbar when in alt-screen.
-    hide_in_alt_screen: true
-
 # This keyboard modifier can be used to bypass the terminal's mouse protocol,
 # which can be used to select screen content even if the an application
 # mouse protocol has been activated (Default: Shift).
@@ -100,6 +93,13 @@ profiles:
             auto_scroll_on_update: true
             # Number of lines to scroll on ScrollUp & ScrollDown events.
             scroll_multiplier: 3
+
+        # visual scrollbar support
+        scrollbar:
+            # scroll bar position: Left, Right, Hidden (ignore-case)
+            position: right
+            # whether or not to hide the scrollbar when in alt-screen.
+            hide_in_alt_screen: true
 
         # Some VT sequences should need access permissions.
         #
