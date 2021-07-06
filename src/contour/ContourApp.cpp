@@ -139,7 +139,7 @@ crispy::cli::Command ContourApp::parameterDefinition() const
 {
     return CLI::Command{
         "contour",
-        "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/christianparpart/contour/ ;-)",
+        "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/contour-terminal/contour/ ;-)",
         CLI::OptionList{},
         CLI::CommandList{
             CLI::Command{"help", "Shows this help and exits."},

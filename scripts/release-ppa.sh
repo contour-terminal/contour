@@ -89,7 +89,7 @@ function main()
         debsign --re-sign -k ${KEY_ID} ../contour_${debversion}-${versionsuffix}_source.changes
 
         einfo "- Upload the package to the PPA."
-        dput ppa:christianparpart/contour-dev ../contour_${debversion}-${versionsuffix}_source.changes
+        dput ppa:contour-terminal/contour-dev ../contour_${debversion}-${versionsuffix}_source.changes
 
         git status
         git diff | cat
