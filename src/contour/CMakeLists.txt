@@ -94,7 +94,7 @@ elseif(APPLE)
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "org.christianparpart.contour"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.contour-terminal.contour"
         MACOSX_BUNDLE_LONG_VERSION_STRING "${contour_version}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${contour_version}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${contour_version}"
