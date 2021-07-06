@@ -94,7 +94,7 @@ elseif(APPLE)
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "org.christianparpart.contour"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.contour-terminal.contour"
         MACOSX_BUNDLE_LONG_VERSION_STRING "${contour_version}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${contour_version}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${contour_version}"
@@ -159,7 +159,7 @@ if(NOT(CPACK_GENERATOR))
 endif()
 
 set(CPACK_PACKAGE_NAME "Contour")
-set(CPACK_PACKAGE_VENDOR "https://github.com/christianparpart/contour/")
+set(CPACK_PACKAGE_VENDOR "https://github.com/contour-terminal/contour/")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
 set(CPACK_PACKAGE_CONTACT "Christian Parpart <christian@parpart.family>")
 set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION_STRING}")
@@ -268,7 +268,7 @@ else()
     # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libkf5windowsystem5, libqt5core5a, libqt5gui5, libqt5network5")
     set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
-    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/christianparpart/contour/")
+    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
     set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 
