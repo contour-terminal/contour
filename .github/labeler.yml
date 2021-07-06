@@ -1,9 +1,9 @@
-"CI":
+CI:
     - .github/**
-"CMake":
+CMake:
     - **CMakeLists.txt
     - cmake/**
-"OpenGL":
+OpenGL:
     - src/contour/opengl/*.cpp
     - src/contour/opengl/*.h
 "VT: backend":
@@ -12,14 +12,14 @@
 "VT: renderer":
     - src/terminal_renderer/*.cpp
     - src/terminal_renderer/*.h
-"documentation":
+documentation:
     - **/*.md
     - docs/**
-"fonts":
+fonts:
     - src/text_shaper/*.cpp
     - src/text_shaper/*.h
-"frontend":
+frontend:
     - src/contour/*.cpp
     - src/contour/*.h
-"test":
+test:
     - src/**/*_test.cpp
