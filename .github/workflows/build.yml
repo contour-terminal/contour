@@ -21,9 +21,7 @@ jobs:
     name: "Ubuntu Linux 20.04 (no KWin)"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v1
-    - name: "initialize sub modules"
-      run: git submodule update --init --recursive
+    - uses: actions/checkout@v2
     - name: "install dependencies"
       run: |
         set -ex
@@ -48,9 +46,7 @@ jobs:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v1
-    - name: "initialize sub modules"
-      run: git submodule update --init --recursive
+    - uses: actions/checkout@v2
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -110,8 +106,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
-    - name: "initialize sub modules"
-      run: git submodule update --init --recursive
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -173,9 +167,7 @@ jobs:
     name: "OS/X"
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: "Initialize sub modules"
-      run: git submodule update --init --recursive
+    - uses: actions/checkout@v2
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -224,9 +216,7 @@ jobs:
     name: "Windows"
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: "Initialize sub modules"
-      run: git submodule update --init --recursive
+    - uses: actions/checkout@v2
     - name: setup environment
       shell: powershell
       id: set_vars
@@ -285,7 +275,7 @@ jobs:
     name: "Archlinux ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v1
       with:

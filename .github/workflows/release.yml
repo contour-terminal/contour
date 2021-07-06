@@ -20,9 +20,7 @@ jobs:
     name: Build on Windows
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v1
-      - name: "Initialize sub modules"
-        run: git submodule update --init --recursive
+      - uses: actions/checkout@v2
       - name: setup environment
         shell: powershell
         id: set_vars
@@ -80,8 +78,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: "initialize sub modules"
-        run: git submodule update --init --recursive
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -128,8 +124,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: "initialize sub modules"
-        run: git submodule update --init --recursive
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -174,9 +168,7 @@ jobs:
     name: Build on OS/X
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v1
-      - name: "Initialize sub modules"
-        run: git submodule update --init --recursive
+      - uses: actions/checkout@v2
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -237,7 +229,7 @@ jobs:
     name: "Archlinux ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
         with:
@@ -283,7 +275,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build_ubuntu1804, build_ubuntu2004, build_windows, build_osx, build_archlinux]
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - name: set variables
         id: set_vars
         run: |
