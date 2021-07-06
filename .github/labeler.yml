@@ -1,7 +1,7 @@
 CI:
     - .github/**
 CMake:
-    - **CMakeLists.txt
+    - "**CMakeLists.txt"
     - cmake/**
 OpenGL:
     - src/contour/opengl/*.cpp
@@ -13,7 +13,7 @@ OpenGL:
     - src/terminal_renderer/*.cpp
     - src/terminal_renderer/*.h
 documentation:
-    - **/*.md
+    - "**/*.md"
     - docs/**
 fonts:
     - src/text_shaper/*.cpp
