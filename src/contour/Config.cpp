@@ -1135,7 +1135,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     auto intValue = profile.maxHistoryLineCount.value_or(std::numeric_limits<LineCount>::max());
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
-    if (intValue == std::numeric_limits<LineCount>::max())
+    if (unbox<int>(intValue) < 0 || intValue == std::numeric_limits<LineCount>::max())
         profile.maxHistoryLineCount = nullopt;
     else
         profile.maxHistoryLineCount = intValue;

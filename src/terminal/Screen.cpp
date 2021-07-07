@@ -2095,13 +2095,13 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
             GridSize{linesToBeRendered, columnsToBeRendered},
             [&](GridSize::Offset offset) {
                 auto const cellCoord = Coordinate{
-                    _topLeft.row + *offset.line,
-                    _topLeft.column + *offset.column};
+                    _topLeft.row + *offset.lines,
+                    _topLeft.column + *offset.columns};
                 Cell& cell = at(cellCoord);
                 cell.setImage(
                     ImageFragment{
                         rasterizedImage,
-                        Coordinate(*offset.line, *offset.column)
+                        Coordinate(*offset.lines, *offset.columns)
                     }
                 );
 #if defined(LIBTERMINAL_HYPERLINKS)

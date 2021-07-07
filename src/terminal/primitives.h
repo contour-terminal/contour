@@ -155,8 +155,8 @@ struct GridSize
     ColumnCount columns;
 
     struct Offset {
-        LinePosition line;
-        ColumnPosition column;
+        LineCount lines;
+        ColumnCount columns;
     };
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
@@ -194,8 +194,8 @@ struct GridSize
         constexpr Offset makeOffset(int offset) noexcept
         {
             return Offset{
-                LinePosition(offset / *width),
-                ColumnPosition(offset % *width)
+                LineCount(offset / *width),
+                ColumnCount(offset % *width)
             };
         }
     };
