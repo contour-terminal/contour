@@ -1,9 +1,10 @@
 # RELEASE CHECKLIST
 
-- [ ] errors always shown on stderr (no need to explicitly enable via `debug error`)
-- [ ] Ubuntu PPAs working
+- [x] errors always shown on stderr (no need to explicitly enable via `debug error`)
+- [ ] print stack trace upon SEGV
 - [ ] opacity change via shortcut
 - [ ] profile change upon shortcut
+- [ ] Ubuntu PPAs working
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
 - [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
 - [ ] BUG? eval need of `Terminal::shouldRender` and friends
