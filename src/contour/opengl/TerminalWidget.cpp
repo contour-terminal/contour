@@ -368,7 +368,7 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 
     if (forceOpenGLES || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
     {
-        format.setVersion(3, 2);
+        format.setVersion(3, 1);
         format.setRenderableType(QSurfaceFormat::OpenGLES);
     }
     else
