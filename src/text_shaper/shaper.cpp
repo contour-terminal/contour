@@ -78,7 +78,6 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
                 d[3] = static_cast<uint8_t>(a / count);
             }
         }
-        sr += factor;
     }
 
     auto output = rasterized_glyph{};
