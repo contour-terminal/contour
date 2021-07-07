@@ -49,7 +49,7 @@ constexpr bool is_boxed = helper::is_boxed<T>::value;
 template <typename T, typename Tag> struct boxed
 {
     static_assert(
-        std::is_integral_v<T> || std::is_floating_point_v<T>,
+        std::is_enum_v<T> || std::is_integral_v<T> || std::is_floating_point_v<T>,
         "Boxing is only useful on integral & floating point types."
     );
 
