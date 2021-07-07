@@ -33,6 +33,7 @@
 - Adds config option `profile.*.font.TYPE.weight: WEIGHT` and `profile.*.fonts.TYPE.slant: SLANT` options (optional) along with `profile.*.fonts.TYPE.family: STRING`.
 - Adds config option `profile.*.font.TYPE.weight: WEIGHT` and `profile.*.fonts.TYPE.slant: SLANT` options (optional) along with `profile.*.fonts.TYPE.family: STRING`.
 - Adds config option `profile.*.font.dpi_scale: FLOAT` to apply some additional DPI scaling on fonts.
+- Adds config option `profile.*.font.builtin_box_drawing: BOOL` to use pixel-perfect builtin box drawing instead of font provided box drawing characters.
 - Adds config option `profile.*.refresh_rate: FLOAT` to configure how often the terminal screen will be rendered at most when currently under heavy screen changes. A value of `"auto"` will use the currently connected monitor's refresh rate.
 - Adds configuration's action `ToggleAllKeyMaps` to enable/disable intercepting and interpreting keybinds. The one that did toggle it will not be disabled.
 - Adds configuration's action `ClearHistoryAndReset` to clear the history, and resetting the terminal.

@@ -15,6 +15,7 @@
 
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/BoxDrawingRenderer.h>
 
 #include <terminal/Color.h>
 #include <terminal/RenderBuffer.h>
@@ -155,6 +156,7 @@ struct FontDescriptions
     text::font_description emoji;
     text::render_mode renderMode;
     TextShapingMethod textShapingMethod;
+    bool builtinBoxDrawing = true;
 };
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
@@ -374,6 +376,9 @@ class TextRenderer : public Renderable {
             default: return nullptr; // Should NEVER EVER happen.
         }
     }
+
+    BoxDrawingRenderer boxDrawingRenderer_;
+    bool lastWasBoxDrawing_ = false;
 
     // target surface rendering
     //

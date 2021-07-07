@@ -13,7 +13,9 @@
  */
 
 #include <terminal_renderer/TextRenderer.h>
+#include <terminal_renderer/BoxDrawingRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
+#include <terminal_renderer/utils.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/debuglog.h>
@@ -48,8 +50,6 @@ namespace terminal::renderer {
 
 namespace // {{{ helpers
 {
-    auto const TextRendererTag = crispy::debugtag::make("renderer.text", "Logs details about text rendering.");
-
     text::font_key getFontForStyle(FontKeys const& _fonts, TextStyle _style)
     {
         switch (_style)
@@ -76,7 +76,8 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     gridMetrics_{ _gridMetrics },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
-    textShaper_{ _textShaper }
+    textShaper_{ _textShaper },
+    boxDrawingRenderer_{ _gridMetrics }
 {
     setTextShapingMethod(fontDescriptions_.textShapingMethod);
 }
@@ -107,6 +108,7 @@ void TextRenderer::setTextShapingMethod(TextShapingMethod _method)
 void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
 {
     Renderable::setRenderTarget(_renderTarget);
+    boxDrawingRenderer_.setRenderTarget(_renderTarget);
     clearCache();
 }
 
@@ -117,6 +119,7 @@ void TextRenderer::clearCache()
     lcdAtlas_ = make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
 
     textRenderingEngine_->clearCache();
+    boxDrawingRenderer_.clearCache();
 }
 
 void TextRenderer::updateFontMetrics()
@@ -128,6 +131,9 @@ void TextRenderer::updateFontMetrics()
 
     clearCache();
 }
+
+/// Should box drawing fall back to font based box drawing?
+// XXX #define BOXDRAWING_FONT_FALLBACK
 
 void TextRenderer::renderCell(RenderCell const& _cell)
 {
@@ -143,8 +149,35 @@ void TextRenderer::renderCell(RenderCell const& _cell)
 
     auto const codepoints = crispy::span(_cell.codepoints.data(), _cell.codepoints.size());
 
-    if (_cell.flags & CellFlags::CellSequenceStart)
+    bool const isBoxDrawingCharacter =
+        fontDescriptions_.builtinBoxDrawing &&
+        _cell.codepoints.size() == 1 &&
+        crispy::ascending(char32_t{0x2500}, codepoints[0], char32_t{0x257F});
+
+    if (isBoxDrawingCharacter)
+    {
+        [[maybe_unused]] bool const couldRender = boxDrawingRenderer_.render(
+            LinePosition::cast_from(_cell.position.row),
+            ColumnPosition::cast_from(_cell.position.column),
+            codepoints[0] % 0x2500,
+            _cell.foregroundColor
+        );
+#if defined(BOXDRAWING_FONT_FALLBACK)
+        if (couldRender)
+#endif
+        {
+            if (!lastWasBoxDrawing_)
+                textRenderingEngine_->endSequence();
+            lastWasBoxDrawing_ = true;
+            return;
+        }
+    }
+
+    if (lastWasBoxDrawing_ || (_cell.flags & CellFlags::CellSequenceStart))
+    {
+        lastWasBoxDrawing_ = false;
         textRenderingEngine_->setTextPosition(gridMetrics_.map(_cell.position));
+    }
 
     textRenderingEngine_->appendCell(codepoints, style, _cell.foregroundColor);
 

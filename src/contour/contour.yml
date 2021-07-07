@@ -133,6 +133,11 @@ profiles:
                 # Default: complex
                 method: complex
 
+            # Uses builtin textures for pixel-perfect box drawing.
+            # If disabled, the font's provided box drawing characters
+            # will be used (Default: true).
+            builtin_box_drawing: true
+
             # Font render modes tell the font rasterizer engine what rendering technique to use.
             #
             # Modes availabe are:

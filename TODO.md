@@ -1,3 +1,8 @@
+# Current PR (box drawings)
+
+- [ ] `builtin_box_drawing: false` ignored? check!
+- [ ]  top-left and bottom-left arc show artifacts on very left side. why? most likely overflow in pixel painting.
+
 # RELEASE CHECKLIST
 
 - [x] errors always shown on stderr (no need to explicitly enable via `debug error`)
