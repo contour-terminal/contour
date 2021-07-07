@@ -334,6 +334,7 @@ class Terminal : public ScreenEvents {
     void useApplicationCursorKeys(bool _enabled) override;
     void hardReset() override;
     void discardImage(Image const&) override;
+    void markRegionDirty(LinePosition _line, ColumnPosition _column) override;
 
     // private data
     //

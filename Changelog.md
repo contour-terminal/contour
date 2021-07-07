@@ -1,6 +1,7 @@
 ### 0.2.0 (unreleased)
 
 - Improved performance (optimized render loop, optimized grapheme cluster segmentation algorithm)
+- Improves selection to better automatically deselect on selected area corruption.
 - Fixes `ioctl(..., TIOCGWINSZ, ...)` pixel values that were only set during resize but not initially.
 - Fixes mouse in VIM+Vimspector to also change the document position when moving the mouse.
 - Fixes SGR decorations to use designated underline thickness and underline position.

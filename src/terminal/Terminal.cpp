@@ -925,6 +925,17 @@ void Terminal::discardImage(Image const& _image)
 {
     eventListener_.discardImage(_image);
 }
+
+void Terminal::markRegionDirty(LinePosition _line, ColumnPosition _column)
+{
+    if (!selector_)
+        return;
+
+    auto const y = screen_.toAbsoluteLine(*_line);
+    auto const coord = Coordinate{y, *_column};
+    if (selector_->contains(coord))
+        clearSelection();
+}
 // }}}
 
 }  // namespace terminal

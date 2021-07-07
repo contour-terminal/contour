@@ -614,6 +614,11 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     }
     else if (cursor_.autoWrap)
         wrapPending_ = 1;
+
+    eventListener_.markRegionDirty(
+        LinePosition::cast_from(cursor_.position.row),
+        ColumnPosition::cast_from(cursor_.position.column)
+    );
 }
 
 void Screen::clearAndAdvance(int _offset)

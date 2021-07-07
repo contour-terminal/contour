@@ -67,6 +67,7 @@ class ScreenEvents {
     virtual void setWindowTitle(std::string_view /*_title*/) {}
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
     virtual void hardReset() {}
+    virtual void markRegionDirty(LinePosition _line, ColumnPosition _column) {}
 
     // Invoked by screen buffer when an image is not being referenced by any grid cell anymore.
     virtual void discardImage(Image const&) {}
