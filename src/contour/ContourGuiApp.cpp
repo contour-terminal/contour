@@ -90,14 +90,12 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     {
         if (filterString == "all")
         {
-            crispy::logging_sink::for_debug().enable(true);
             for (auto& tag: crispy::debugtag::store())
                 tag.enabled = true;
         }
         else
         {
             auto const filters = crispy::split(filterString, ',');
-            crispy::logging_sink::for_debug().enable(true);
             for (auto& tag: crispy::debugtag::store())
             {
                 tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {

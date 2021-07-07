@@ -528,7 +528,7 @@ void Screen::write(char const * _data, size_t _size)
     if (!_size)
         return;
 #if defined(LIBTERMINAL_LOG_RAW)
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(ScreenRawOutputTag))
         debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data, _data + _size));
 #endif
 
@@ -1823,7 +1823,6 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::DebugLogging:
             // Since this mode (Xterm extension) does not support finer graind control,
             // we'll be just globally enable/disable all debug logging.
-            crispy::logging_sink::for_debug().enable(_enable);
             for (auto& tag: crispy::debugtag::store())
                 tag.enabled = _enable;
             break;

@@ -768,7 +768,7 @@ void open_shaper::shape(font_key _font,
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = d->hb_buf_.get();
 
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(TextShapingTag))
     {
         auto logMessage = debuglog(TextShapingTag);
         logMessage.write("Shaping codepoints:");
@@ -826,7 +826,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
         if (ec != FT_Err_Ok)
         {
-            if (crispy::logging_sink::for_debug().enabled())
+            if (crispy::debugtag::enabled(TextShapingTag))
             {
                 debuglog(FontFallbackTag).write(
                     "Error loading glyph index {} for font {} {}. {}",

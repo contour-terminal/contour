@@ -122,7 +122,8 @@ namespace debugtag
 
     inline bool enabled(tag_id _tag) noexcept
     {
-        return _tag.value < store().size() && store().at(_tag.value).enabled;
+        assert(_tag.value < store().size());
+        return store().at(_tag.value).enabled;
     }
 }
 
@@ -172,13 +173,11 @@ class logging_sink {
     using Writer = std::function<void(std::string_view const&)>;
 
     logging_sink(bool _enabled, Writer _writer, Transform _transform) :
-        enabled_{ _enabled },
         transform_{ std::move(_transform) },
         writer_{ std::move(_writer) }
     {}
 
     logging_sink(bool _enabled, Writer _writer) :
-        enabled_{ _enabled },
         transform_{ [this](auto const& x) { return standard_transform(x); } },
         writer_{ std::move(_writer) }
     {}
@@ -193,13 +192,9 @@ class logging_sink {
     void set_transform(Transform _transform) { transform_ = std::move(_transform); }
     void set_writer(Writer _writer) { writer_ = std::move(_writer); }
 
-    bool enabled() const noexcept { return enabled_; }
-    void enable(bool _enabled) { enabled_ = _enabled; }
-    void toggle() noexcept { enabled_ = !enabled_; }
-
     void write(log_message const& _message)
     {
-        if (enabled())
+        if (debugtag::enabled(_message.tag()))
             writer_(transform_(_message));
     }
 
@@ -221,12 +216,11 @@ class logging_sink {
     }
 
   private:
-    bool enabled_;
     Transform transform_;
     Writer writer_;
 };
 
-auto const inline ErrorTag = crispy::debugtag::make("error", "Logs general errors.");
+auto const inline ErrorTag = crispy::debugtag::make("error", "Logs general errors.", true);
 
 }
 

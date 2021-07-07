@@ -112,11 +112,18 @@ namespace // {{{ helper
                 else
                 {
                     result += sgrTag;
-                    result += fmt::format("[{}:{}:{}] ",
-                                          debugtag::get(_msg.tag()).name,
-                                          fileName,
-                                          _msg.location().line()
-                            );
+                    if (_msg.tag().value == crispy::ErrorTag.value)
+                    {
+                        result += fmt::format("[{}] ", "error");
+                    }
+                    else
+                    {
+                        result += fmt::format("[{}:{}:{}] ",
+                                              debugtag::get(_msg.tag()).name,
+                                              fileName,
+                                              _msg.location().line()
+                                );
+                    }
                     result += sgrReset;
                 }
 

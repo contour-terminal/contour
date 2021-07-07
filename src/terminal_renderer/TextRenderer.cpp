@@ -290,7 +290,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                            float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
 
     auto const yOverflow = gridMetrics_.cellSize.height.as<int>() - yMax;
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(TextRendererTag))
         debuglog(TextRendererTag).write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
                                         _id.index,
                                         colored ? "emoji" : "text",
@@ -339,7 +339,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     metrics.bitmapSize = glyph.size;
     metrics.bearing = glyph.position;
 
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(TextRendererTag))
         debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
                                         targetAtlas.allocator().name(),
                                         _id.index,
@@ -394,7 +394,7 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
     }
 
 #if 0
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(TextRendererTag))
         debuglog(TextRendererTag).write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
                                         x, y,
                                         _pos.x(), _pos.y(),
@@ -557,7 +557,7 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
         gpos
     );
 
-    if (crispy::logging_sink::for_debug().enabled() && !gpos.empty())
+    if (crispy::debugtag::enabled(TextRendererTag) && !gpos.empty())
     {
         auto msg = debuglog(TextRendererTag);
         msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));

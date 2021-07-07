@@ -1109,7 +1109,7 @@ void Sequencer::hook(char _finalChar)
     sequence_.setFinalChar(_finalChar);
 
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(VTParserTraceTag))
         debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
 #endif
 
@@ -1325,7 +1325,7 @@ void Sequencer::executeControlFunction(char _c0)
 void Sequencer::handleSequence()
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (crispy::logging_sink::for_debug().enabled())
+    if (crispy::debugtag::enabled(VTParserTraceTag))
         debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
 #endif
     // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,
