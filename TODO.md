@@ -1,58 +1,33 @@
-# TODAY/TOSTREAM :-D
+# RELEASE CHECKLIST
 
-
-- [ ] code health (get compiler warnings branch merged, have it compile-time optional `CONTOUR_PEDANTIC=OFF/ON`
-- [x] Ubuntu 18.04 ppa (fontconfig)
-- [ ] improve unit tests (InputGenerator)
-
-# current PR checklist
-
-- [ ] LIVE: create a neofetch-patch for contour support
-  - show font (OSC 50)
-  - version: (XTVERSION)
-  - test 2026 synchronized output support (DECRQM)
-  - show sixel
-  - distor (`lsb_release`)
-
-- [ ] CHECK: profile change upon shortcut
-- [ ] config: warn on unknown yaml keys
-- [x] TEST: RenderBuffer ops testable (esp. 2026)?
+- [ ] errors always shown on stderr (no need to explicitly enable via `debug error`)
+- [ ] Ubuntu PPAs working
+- [ ] opacity change via shortcut
+- [ ] profile change upon shortcut
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
 - [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
 - [ ] BUG? eval need of `Terminal::shouldRender` and friends
 - [ ] CHECK: CopyLastMarkRange seems to not copy last 2 lines instead (due to zsh double line prompt?)
   - try with zsh single line prompts
   - ensure unit tests for that
-- [ ] CHECK: PPA does not have latest builds anyamore?
-- [ ] QA: Session.send...Event: pass args directly, don't use ..Event{} structs for that.
 - [ ] RENDER-BUG: "template..." is segmented as "template." and ".." but should be "template..." (or "template" and "...")
 - [ ] BUG? showNotification: not working (because not connected, not ported)
-- [x] BUG: Alt+Left/Right at least in tmux/vim are not working?
-- [x] BUG: tab is generating Shift+tab.
-- [x] BUG: mouse-scroll ignored inside vim
-- [x] BUG: mouse shift-click events ignored?
-- [x] TerminalSession: debuglog() should use better tag
-- [x] debuglog rework debug tags. group them better. reduce complexity
-- [x] DEB package installs /usr/include/ragnes and such
-- [x] BUG? verify OSC 50 set font.
-- [x] BUG? verify DEC mode 2026 working as expected?
+- [ ] move scrollbar into profile
+- [ ] FIXME: `reset` resets screen size to 80x25, should remain actual one.
+- [ ] dotted underline could be prettier. Not as circles but as squares (because circles w/o AA look bad)
 
 # Milestone 0.2.0 checklist
 
 - [ ] BUG/SECURITY: DCS without ST is problematic (what are other TEs doing?)
-- [x] BUG: audo-hide mouse only on char, but not on non-char keys.
 - [ ] resizing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
 - [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)
 - [ ] config option to disable reflow entirely
 
-- [ ] move scrollbar into profile
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
 - [ ] vim's wrap mode with multiline text seems to have rendering issues.
 - [ ] CI: build with parallel support (STL then requires tbb apparently)
-- [ ] FIXME: `reset` resets screen size to 80x25, should remain actual one.
 - [ ] debuglog: filter by logging tags (in a somewhat performant way), so the debuglog (when enabled) is not flooding.
-- [ ] CopyLastMarkRange seems not to work (at least for double-line prompts in zsh/p10k)
 
 - [ ] Font: support DirectWrite backend
 - [ ] Font: fix framed underline
