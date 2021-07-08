@@ -25,7 +25,7 @@
 - Adds experimental text reflow.
 - Adds OpenFileManager action to configuration.
 - Adds terminal identification environment variables `TERMINAL_NAME`, `TERMINAL_VERSION_TRIPLE` and `TERMINAL_VERSION_STRING`.
-- Adds config option `mode` to input modifiers for additionally filtering based on modes (alt screen, app cursor/keypad modes, ...).
+- Adds config option `mode` to input modifiers for additionally filtering based on modes (alt screen, app cursor/keypad, text selection modes, ...).
 - Adds config option `profile.*.terminal_id: STR` to set the terminal identification to one of VT100, VT220, VT340, etc.
 - Adds config option `profile.*.maximized: BOOL` to indicate maximized state during profile activation.
 - Adds config option `profile.*.fullscreen: BOOL` to indicate fullscreen state during profile activation.

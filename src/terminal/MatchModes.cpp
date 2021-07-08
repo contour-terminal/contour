@@ -12,6 +12,8 @@ MatchModes constructMatchModes(Terminal const& _terminal)
         mm.enable(MatchModes::AppCursor);
     if (_terminal.applicationKeypad())
         mm.enable(MatchModes::AppKeypad);
+    if (_terminal.selectionAvailable())
+        mm.enable(MatchModes::Select);
     return mm;
 }
 

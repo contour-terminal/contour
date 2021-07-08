@@ -28,8 +28,9 @@ public:
         AlternateScreen     = 0x01,
         AppCursor           = 0x02,
         AppKeypad           = 0x04,
+        Select              = 0x08,
         // future modes
-        ViSearch            = 0x08, // TODO: This mode we want.
+        // ViSearch            = 0x10, // TODO: This mode we want.
     };
 
     enum class Status
@@ -135,7 +136,7 @@ namespace fmt { // {{{
             advance(terminal::MatchModes::AppCursor, "AppCursor");
             advance(terminal::MatchModes::AppKeypad, "AppKeypad");
             advance(terminal::MatchModes::AlternateScreen, "AltScreen");
-            advance(terminal::MatchModes::ViSearch, "ViSearch");
+            advance(terminal::MatchModes::Select, "Select");
             if (s.empty())
                 s = "Any";
             return format_to(_ctx.out(), "{}", s);
