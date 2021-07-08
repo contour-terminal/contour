@@ -18,6 +18,8 @@
 #include <terminal/Terminal.h>
 #include <terminal/pty/Pty.h>
 
+#include <crispy/StackTrace.h>
+
 #include <range/v3/all.hpp>
 
 #include <QtCore/QDebug>
@@ -39,6 +41,11 @@
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
 #include <KWindowEffects>
+#endif
+
+#if !defined(_MSC_VER)
+#include <unistd.h>
+#include <signal.h>
 #endif
 
 #if defined(_MSC_VER)

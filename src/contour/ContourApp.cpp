@@ -20,13 +20,23 @@
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
 
+#include <crispy/StackTrace.h>
 #include <crispy/debuglog.h>
 #include <crispy/utils.h>
 
+#include <iostream>
 #include <fstream>
 #include <memory>
 
+#include <signal.h>
+
+#if !defined(_WIN32)
+#include <unistd.h>
+#include <sys/ioctl.h>
+#endif
+
 using std::bind;
+using std::cerr;
 using std::cout;
 using std::make_unique;
 using std::ofstream;
@@ -40,9 +50,165 @@ namespace CLI = crispy::cli;
 
 namespace contour {
 
+namespace // {{{ helper
+{
+    CLI::HelpStyle helpStyle()
+    {
+        auto style = CLI::HelpStyle{};
+
+        style.optionStyle = CLI::OptionStyle::Natural;
+
+#if !defined(_WIN32)
+        if (!isatty(STDOUT_FILENO))
+        {
+            style.colors.reset();
+            style.hyperlink = false;
+        }
+#endif
+
+         return style;
+    }
+
+    int screenWidth()
+    {
+        constexpr auto DefaultWidth = 80;
+
+#if !defined(_WIN32)
+        auto ws = winsize{};
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
+            return ws.ws_col;
+#endif
+
+        return DefaultWidth;
+    }
+
+    void customizeDebugLog()
+    {
+        // A curated list of colors.
+        static const bool colorized =
+#if !defined(_WIN32)
+            isatty(STDOUT_FILENO);
+#else
+            true;
+#endif
+        static constexpr auto colors = std::array<int, 23>{
+            2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
+            150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
+        };
+        crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
+        {
+            auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
+            {
+                if (!colorized)
+                    return {"", "", ""};
+                auto const tagStart = "\033[1m";
+                auto const colorIndex = colors.at((_msg.tag().value) % colors.size());
+                auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
+                auto const resetSGR = fmt::format("\033[m");
+                return {tagStart, msgStart, resetSGR};
+            }();
+
+            auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+            auto const fileName = string(srcIndex != string_view::npos
+                ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                : string(_msg.location().file_name()));
+
+            auto result = string{};
+
+            for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
+            {
+                if (i != 0)
+                    result += "        ";
+                else
+                {
+                    result += sgrTag;
+                    if (_msg.tag().value == crispy::ErrorTag.value)
+                    {
+                        result += fmt::format("[{}] ", "error");
+                    }
+                    else
+                    {
+                        result += fmt::format("[{}:{}:{}] ",
+                                              crispy::debugtag::get(_msg.tag()).name,
+                                              fileName,
+                                              _msg.location().line()
+                                );
+                    }
+                    result += sgrReset;
+                }
+
+                result += sgrMessage;
+                result += line;
+                result += sgrReset;
+                result += '\n';
+            }
+
+            return result;
+        });
+    }
+
+#if defined(__linux__)
+    void crashLogger(std::ostream& out)
+    {
+        out
+            << "Contour version: " << CONTOUR_VERSION_STRING << "\r\n"
+            << "\r\n"
+            << "Stack Trace:\r\n"
+            << "------------\r\n"
+            ;
+
+        auto stackTrace = crispy::StackTrace();
+        auto symbols = stackTrace.symbols();
+        for (size_t i = 0; i < symbols.size(); ++i)
+            out << symbols[i] << "\r\n";
+    }
+
+    void segvHandler(int)
+    {
+        std::stringstream sstr;
+        crashLogger(sstr);
+        string crashLog = sstr.str();
+
+        auto const logFileName = fmt::format("/tmp/contour.crash.{}.log", getpid());
+        char hostname[80] = {0};
+        gethostname(hostname, sizeof(hostname));
+
+        cerr
+            << "\r\n"
+            << "========================================================================\r\n"
+            << "  An internal error caused the terminal to crash ;-( 😭\r\n"
+            << "-------------------------------------------------------\r\n"
+            << "\r\n"
+            << "Please report this to https://github.com/contour-terminal/contour/isues/\r\n"
+            << "\r\n"
+            << crashLog
+            << "========================================================================\r\n"
+            << "\r\n"
+            << "Please report the above information and help making this project better.\r\n"
+            << "\r\n"
+            << "This log will also be written to: \033[1m"
+                << "\033]8;;file://" << hostname << "/" << logFileName << "\033\\"
+                << logFileName << "\033]8;;\033\\"
+                << "\033[m\r\n"
+            << "\r\n"
+            ;
+        cerr.flush();
+
+        ofstream logFile(logFileName);
+        logFile << crashLog;
+
+        abort();
+    }
+#endif
+} // }}}
+
 ContourApp::ContourApp() :
     App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING)
 {
+#if defined(__linux__)
+    signal(SIGSEGV, segvHandler);
+#endif
+
     link("contour.capture", bind(&ContourApp::captureAction, this));
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));

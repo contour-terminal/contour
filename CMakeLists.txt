@@ -32,6 +32,7 @@ option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ON]" ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
+option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." OFF)
 
 # ----------------------------------------------------------------------------
 # code coverage

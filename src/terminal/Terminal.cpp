@@ -26,6 +26,9 @@
 
 #include <iostream>
 
+#include <sys/types.h>
+#include <signal.h>
+
 using crispy::Size;
 
 using namespace std;

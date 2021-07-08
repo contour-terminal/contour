@@ -5,6 +5,24 @@
 - [ ] opacity change via shortcut
 - [ ] profile change upon shortcut
 - [ ] Ubuntu PPAs working
+- [ ] verify why (maybe due to my config) clickable links are not working. MAKE IT UNIT-TESTABLE
+- [ ] code health (get compiler warnings branch merged, have it compile-time optional `CONTOUR_PEDANTIC=OFF/ON`
+- [x] Ubuntu 18.04 ppa (fontconfig)
+- [ ] improve unit tests (InputGenerator)
+
+# current PR checklist
+
+- [ ] LIVE: create a neofetch-patch for contour support
+  - show font (OSC 50)
+  - version: (XTVERSION)
+  - test 2026 synchronized output support (DECRQM)
+  - show sixel
+  - distor (`lsb_release`)
+
+- [x] CHECK: profile change upon shortcut
+- [ ] config: warn on unknown yaml keys
+- [x] TEST: RenderBuffer ops testable (esp. 2026)?
+>>>>>>> 1482076... snip
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
 - [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
 - [ ] BUG? eval need of `Terminal::shouldRender` and friends
