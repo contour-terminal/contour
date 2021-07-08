@@ -266,6 +266,7 @@ color_schemes:
 # - Alt       : The terminal is currently in alternate screen buffer, otherwise it is in primary screen buffer.
 # - AppCursor : The application key cursor mode is enabled (otherwise it's normal cursor mode).
 # - AppKeypad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
+# - Select    : The terminal has currently an active grid cell selection (such as selected text).
 #
 # You can combine these modes by concatenating them via | and negate a single one
 # by prefixing with ~.

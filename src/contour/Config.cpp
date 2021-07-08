@@ -503,6 +503,8 @@ optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
             flag = MatchModes::AppCursor;
         else if (upperArg == "APPKEYPAD")
             flag = MatchModes::AppKeypad;
+        else if (upperArg == "SELECT")
+            flag = MatchModes::Select;
         else
         {
             errorlog().write("Unknown input_mapping mode: {}", arg);
