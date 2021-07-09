@@ -7,7 +7,7 @@ option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent back
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
-   find_package(Qt6 COMPONENTS Core Core5Compat Gui Network OpenGL OpenGLWidgets Widgets REQUIRED)
+   find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets REQUIRED)
    set(CONTOUR_BLUR_PLATFORM_KWIN OFF)
 else()
    find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
@@ -117,7 +117,7 @@ endif()
 
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
-        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt6::Core Qt6::Core5Compat Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
+        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
     else()
         target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets)
     endif()
