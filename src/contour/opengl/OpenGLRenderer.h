@@ -18,9 +18,9 @@
 
 #include <crispy/debuglog.h>
 
-#include <QtGui/QMatrix4x4>
-#include <QtGui/QOpenGLExtraFunctions>
-#include <QtGui/QOpenGLShaderProgram>
+#include <QMatrix4x4>
+#include <QOpenGLExtraFunctions>
+#include <QOpenGLShaderProgram>
 
 #include <memory>
 #include <optional>

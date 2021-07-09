@@ -25,7 +25,7 @@
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
-#include <QtGui/QOpenGLWindow>
+#include <QOpenGLWindow>
 #include <QtGui/QVector4D>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>

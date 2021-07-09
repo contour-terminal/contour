@@ -28,7 +28,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#include <QtWidgets/QOpenGLWidget>
+#include <QOpenGLWidget>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QScrollBar>
