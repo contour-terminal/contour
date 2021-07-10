@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -12,20 +12,20 @@ project(contour VERSION "${CONTOUR_VERSION}" LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+find_package(Threads)
 option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
 
 include(EnableCcache)
 include(ClangTidy)
 include(CIncludeMe)
-find_package(Threads)
 
 if(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ON" ON)
 option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
@@ -46,27 +46,19 @@ else()
 endif()
 
 if(SANITIZE)
-	string(TOLOWER "${SANITIZE}" san)
-	if (san STREQUAL "address")
+    string(TOLOWER "${SANITIZE}" san)
+    if (san STREQUAL "address")
         message(STATUS "Enabling ${san} sanitizer.")
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
     else()
         message(STATUS "No sanitizer enabled.")
-	endif()
+    endif()
 endif()
 
 # ----------------------------------------------------------------------------
-# 3rdparty dependencies
-include(ThirdParties)
-
-ThirdPartiesAdd_Catch2()
-ThirdPartiesAdd_fmtlib()
-ThirdPartiesAdd_libunicode()
-ThirdPartiesAdd_range_v3()
-ThirdPartiesAdd_yaml_cpp()
-
-# ----------------------------------------------------------------------------
 add_subdirectory(src)
+
+include(ThirdParties)
 
 if(CONTOUR_EXAMPLES)
     add_subdirectory(examples)
