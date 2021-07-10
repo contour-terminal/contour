@@ -25,7 +25,7 @@
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
-#if defined(CONTOUR_BUILD_WITH_QT6)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLWindow>
 #else
     #include <QtGui/QOpenGLWindow>

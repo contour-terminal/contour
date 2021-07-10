@@ -28,7 +28,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#if defined(CONTOUR_BUILD_WITH_QT6)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGLWidgets/QOpenGLWidget>
 #else
     #include <QtWidgets/QOpenGLWidget>

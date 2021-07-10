@@ -16,7 +16,8 @@
 #include <crispy/debuglog.h>
 
 #include <fmt/format.h>
-#if defined(CONTOUR_BUILD_WITH_QT6)
+#include <QtCore/QtGlobal>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLShaderProgram>
 #else
     #include <QtGui/QOpenGLShaderProgram>
