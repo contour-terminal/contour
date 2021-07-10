@@ -1078,6 +1078,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         }
     }
 
+    tryLoadChild(_usedKeys, _doc, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
     tryLoadChild(_usedKeys, _doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
 
     strValue = "complex";
