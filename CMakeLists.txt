@@ -26,13 +26,19 @@ if(DEFINED MSVC)
     add_definitions(-D_USE_MATH_DEFINES)
 endif()
 
+find_program(ADDR2LINE "addr2line")
+set(ADDR2LINE_DEFAULT OFF)
+if(NOT("${ADDR2LINE}" STREQUAL ""))
+    set(ADDR2LINE_DEFAULT ON)
+endif()
+message(STATUS "addr2line: ${ADDR2LINE}")
 
 option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ON" ON)
 option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ON]" ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
-option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." OFF)
+option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
 
 # ----------------------------------------------------------------------------
 # code coverage
