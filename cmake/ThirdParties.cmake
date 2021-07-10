@@ -4,7 +4,7 @@ set(3rdparty_catch2_version "bf61a418cbc4d3b430e3d258c5287780944ad505" CACHE STR
 set(3rdparty_fmt_version "8465869d7b04ae00f657332b3374ecf95b5e49c0" CACHE STRING "fmt: commit hash")
 set(3rdparty_libunicode_version "a0f72919e4520ee1a02890ea77f19ff16c92d4f8" CACHE STRING "libunicode: commit hash")
 set(3rdparty_range_v3_version "0487cca29e352e8f16bbd91fda38e76e39a0ed28" CACHE STRING "range_v3: commit hash")
-set(3rdparty_yaml_cpp_version "9ee3928754693565fa561e2b6fda4058948d1d56" CACHE STRING "yaml-cpp: commit hash")
+set(3rdparty_yaml_cpp_version "b591d8ae2ad1ff373273c3e05973adf6c46abfa8" CACHE STRING "yaml-cpp: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
   set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")
@@ -19,6 +19,7 @@ if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
     VERSION ${3rdparty_catch2_version}
     URL https://github.com/catchorg/Catch2/archive/${3rdparty_catch2_version}.zip
     URL_HASH SHA256=7521e7e7ee7f2d301a639bdfe4a95855fbe503417d73af0934f9d1933ca38407
+    EXCLUDE_FROM_ALL YES
   )
 endif()
 
@@ -27,6 +28,7 @@ CPMAddPackage(
   VERSION ${3rdparty_fmt_version}
   URL https://github.com/fmtlib/fmt/archive/${3rdparty_fmt_version}.zip
   URL_HASH SHA256=3c0a45ee3e3688b407b4243e38768f346e75ec4a9b16cefbebf17252048395da
+  EXCLUDE_FROM_ALL YES
 )
 
 CPMAddPackage(
@@ -34,6 +36,7 @@ CPMAddPackage(
   VERSION ${3rdparty_libunicode_version}
   URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
   URL_HASH SHA256=11c64919dbfb25b040b774e25ac8cfa7823216298bdd9131e21bd09556790dc1
+  EXCLUDE_FROM_ALL YES
 )
 
 CPMAddPackage(
@@ -41,6 +44,7 @@ CPMAddPackage(
   VERSION ${3rdparty_range_v3_version}
   URL https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_version}.zip
   URL_HASH SHA256=e3992d30629d058e5918b9721d6fbdbc20f72b298cdf5cfb96e798fc4b5b54fe
+  EXCLUDE_FROM_ALL YES
 )
 
 set(YAML_CPP_BUILD_CONTRIB OFF CACHE INTERNAL "")
@@ -52,6 +56,6 @@ CPMAddPackage(
   NAME yaml_cpp
   VERSION ${3rdparty_yaml_cpp_version}
   URL https://github.com/jbeder/yaml-cpp/archive/${3rdparty_yaml_cpp_version}.zip
-  URL_HASH SHA256=73145216ee7a0fd2dd45bf8c62b3d9b805e99f538329620df41457bd9da6e506
+  URL_HASH SHA256=a047cb1266bd994b60980fdc48cf0bb63880dc62a6997849014aebdaaeaf4495
+  EXCLUDE_FROM_ALL YES
 )
-
