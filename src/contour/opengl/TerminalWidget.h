@@ -28,7 +28,11 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#include <QOpenGLWidget>
+#if defined(CONTOUR_BUILD_WITH_QT6)
+    #include <QtOpenGLWidgets/QOpenGLWidget>
+#else
+    #include <QtWidgets/QOpenGLWidget>
+#endif
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QScrollBar>

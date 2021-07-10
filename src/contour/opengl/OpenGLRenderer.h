@@ -19,8 +19,12 @@
 #include <crispy/debuglog.h>
 
 #include <QtGui/QMatrix4x4>
-#include <QOpenGLExtraFunctions>
-#include <QOpenGLShaderProgram>
+#include <QtGui/QOpenGLExtraFunctions>
+#if defined(CONTOUR_BUILD_WITH_QT6)
+    #include <QtOpenGL/QOpenGLShaderProgram>
+#else
+    #include <QtGui/QOpenGLShaderProgram>
+#endif
 
 #include <memory>
 #include <optional>

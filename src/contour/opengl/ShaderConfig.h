@@ -16,8 +16,11 @@
 #include <crispy/debuglog.h>
 
 #include <fmt/format.h>
-
-#include <QOpenGLShaderProgram>
+#if defined(CONTOUR_BUILD_WITH_QT6)
+    #include <QtOpenGL/QOpenGLShaderProgram>
+#else
+    #include <QtGui/QOpenGLShaderProgram>
+#endif
 
 #include <memory>
 #include <string>

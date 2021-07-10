@@ -27,9 +27,10 @@ add_library(contour_frontend_opengl
 )
 
 target_include_directories(contour_frontend_opengl PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../..")
+target_link_libraries(contour_frontend_opengl terminal_renderer OpenGL::GL)
 if(CONTOUR_BUILD_WITH_QT6)
-   target_link_libraries(contour_frontend_opengl terminal_renderer Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets OpenGL::GL)
+   target_link_libraries(contour_frontend_opengl Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
 else()
-   target_link_libraries(contour_frontend_opengl terminal_renderer Qt5::Gui Qt5::Widgets OpenGL::GL)
+   target_link_libraries(contour_frontend_opengl Qt5::Gui Qt5::Widgets)
 endif()
 set_target_properties(contour_frontend_opengl PROPERTIES AUTOMOC ON)
