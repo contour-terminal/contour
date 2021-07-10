@@ -16,12 +16,20 @@ on:
     branches:
     - master
 
+env:
+  CTEST_OUTPUT_ON_FAILURE: 1
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
+
 jobs:
   ubuntu_2004_no_kwin:
     name: "Ubuntu Linux 20.04 (no KWin)"
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: "install dependencies"
       run: |
         set -ex
@@ -47,6 +55,10 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -106,6 +118,10 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -168,6 +184,10 @@ jobs:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -217,6 +237,10 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: setup environment
       shell: powershell
       id: set_vars
