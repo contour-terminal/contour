@@ -16,8 +16,12 @@
 #include <crispy/debuglog.h>
 
 #include <fmt/format.h>
-
-#include <QOpenGLShaderProgram>
+#include <QtCore/QtGlobal>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtOpenGL/QOpenGLShaderProgram>
+#else
+    #include <QtGui/QOpenGLShaderProgram>
+#endif
 
 #include <memory>
 #include <string>

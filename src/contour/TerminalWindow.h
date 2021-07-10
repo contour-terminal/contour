@@ -25,7 +25,11 @@
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
-#include <QtGui/QOpenGLWindow>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtOpenGL/QOpenGLWindow>
+#else
+    #include <QtGui/QOpenGLWindow>
+#endif
 #include <QtGui/QVector4D>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>

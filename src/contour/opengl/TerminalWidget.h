@@ -28,7 +28,11 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#include <QtWidgets/QOpenGLWidget>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtOpenGLWidgets/QOpenGLWidget>
+#else
+    #include <QtWidgets/QOpenGLWidget>
+#endif
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QScrollBar>

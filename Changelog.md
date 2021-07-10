@@ -56,6 +56,7 @@
 - Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.
 - Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and OS/X) to `/usr/share/contour/shell-integration.zsh`.
 - Unicode data updated to version 14.0 beta. See https://home.unicode.org/unicode-14-0-beta-review.
+- Adds support for building with Qt 6 (disabled by default).
 
 ### 0.1.1 (2020-12-31)
 

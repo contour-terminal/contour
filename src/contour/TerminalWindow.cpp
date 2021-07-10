@@ -53,7 +53,7 @@ using namespace std::placeholders;
 #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
-#include <QStatusBar>
+#include <QtWidgets/QStatusBar>
 
 namespace contour {
 
