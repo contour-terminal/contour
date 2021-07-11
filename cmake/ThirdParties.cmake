@@ -32,14 +32,6 @@ CPMAddPackage(
 )
 
 CPMAddPackage(
-  NAME libunicode
-  VERSION ${3rdparty_libunicode_version}
-  URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
-  URL_HASH SHA256=11c64919dbfb25b040b774e25ac8cfa7823216298bdd9131e21bd09556790dc1
-  EXCLUDE_FROM_ALL YES
-)
-
-CPMAddPackage(
   NAME range_v3
   VERSION ${3rdparty_range_v3_version}
   URL https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_version}.zip
@@ -59,3 +51,12 @@ CPMAddPackage(
   URL_HASH SHA256=a047cb1266bd994b60980fdc48cf0bb63880dc62a6997849014aebdaaeaf4495
   EXCLUDE_FROM_ALL YES
 )
+
+CPMAddPackage(
+  NAME libunicode
+  VERSION ${3rdparty_libunicode_version}
+  URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
+  URL_HASH SHA256=11c64919dbfb25b040b774e25ac8cfa7823216298bdd9131e21bd09556790dc1
+  EXCLUDE_FROM_ALL YES
+)
+
