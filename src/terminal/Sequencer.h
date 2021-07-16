@@ -608,6 +608,7 @@ class Sequencer : public ParserEvents {
     //
     void error(std::string_view const& _errorString) override;
     void print(char32_t _text) override;
+    void print(std::string_view _chars) override;
     void execute(char _controlCode) override;
     void clear() override;
     void collect(char _char) override;
