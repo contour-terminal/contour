@@ -326,7 +326,8 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
                                 && !_cell.imageFragment().has_value()
 #endif
                                 ;
-            auto const customBackground = bg != screen_.colorPalette().defaultBackground;
+            auto const customBackground = bg != screen_.colorPalette().defaultBackground
+                                       || !!_cell.attributes().styles;
 
             bool isNewLine = false;
             if (lineNr != _pos.row)
