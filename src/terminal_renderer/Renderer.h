@@ -66,6 +66,8 @@ class Renderer : public Renderable {
     void setRenderTarget(RenderTarget& _renderTarget);
 
     void setBackgroundOpacity(terminal::Opacity _opacity);
+    terminal::Opacity backgroundOpacity() const noexcept { return backgroundOpacity_; }
+
     void setRenderSize(ImageSize _size);
     bool setFontSize(text::font_size _fontSize);
     void updateFontMetrics();
