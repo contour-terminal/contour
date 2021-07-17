@@ -104,6 +104,10 @@ endif()
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_TRACE=1)
 endif()
+if(CONTOUR_PERF_STATS)
+    target_compile_definitions(terminal PUBLIC CONTOUR_PERF_STATS=1)
+endif()
+
 
 if(LIBTERMINAL_IMAGES)
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_IMAGES=1)

@@ -46,6 +46,7 @@ struct RenderBuffer
 {
     std::vector<RenderCell> screen{};
     std::optional<RenderCursor> cursor{};
+    uint64_t frameCount{};
 
     void clear() { screen.clear(); cursor.reset(); }
 };
@@ -104,6 +105,8 @@ struct RenderDoubleBuffer
 
     RenderBufferRef frontBuffer() const
     {
+        // if (state == RenderBufferState::TrySwapBuffers)
+        //     const_cast<RenderDoubleBuffer*>(this)->swapBuffers(lastUpdate);
         RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
         return RenderBufferRef(frontBuffer, readerLock);
     }

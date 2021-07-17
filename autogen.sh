@@ -27,7 +27,7 @@ exec cmake "${ROOTDIR}" \
            -DLIBTERMINAL_LOG_TRACE="ON" \
            -DLIBTERMINAL_EXECUTION_PAR="OFF" \
            -DCONTOUR_COVERAGE="OFF" \
-           -DCONTOUR_PERF_STATS="OFF" \
+           -DCONTOUR_PERF_STATS="ON" \
            -DCONTOUR_BLUR_PLATFORM_KWIN="ON" \
            -GNinja
 

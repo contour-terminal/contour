@@ -194,30 +194,30 @@ uint64_t Renderer::render(Terminal& _terminal,
 
     auto const changes = _terminal.tick(_now);
 
+    executeImageDiscards();
+
+    #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{
+    // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
+    // so we have to explicitly refresh the render buffer
+    // from within the render (reader) thread instead ofthe terminal (writer) thread.
+    _terminal.refreshRenderBuffer(_now);
+    #endif // }}}
+
+    optional<terminal::RenderCursor> cursorOpt;
+    textRenderer_.start();
+    textRenderer_.setPressure(_pressure && _terminal.screen().isPrimaryScreen());
     {
-        #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE) // {{{
-        // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
-        // so we have to explicitly refresh the render buffer
-        // from within the render (reader) thread instead ofthe terminal (writer) thread.
-        _terminal.refreshRenderBuffer(_now);
-        #endif // }}}
-
-        auto const pressure = _pressure && _terminal.screen().isPrimaryScreen();
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
-        auto const& cursorOpt = renderBuffer.get().cursor;
-
-        executeImageDiscards();
-        textRenderer_.start();
-        textRenderer_.setPressure(pressure);
+        cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().screen);
-        textRenderer_.finish();
+    }
+    textRenderer_.finish();
 
-        if (cursorOpt && _terminal.cursorCurrentlyVisible())
-        {
-            auto const& cursor = *cursorOpt;
-            cursorRenderer_.setShape(cursor.shape);
-            cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width);
-        }
+    if (cursorOpt && _terminal.cursorCurrentlyVisible())
+    {
+        auto const cursor = *cursorOpt;
+        cursorRenderer_.setShape(cursor.shape);
+        cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width);
     }
 
     renderTarget().execute();

@@ -230,6 +230,9 @@ public:
     };
     std::atomic<bool> initialized_ = false;
     Stats stats_;
+#if defined(CONTOUR_PERF_STATS)
+    std::atomic<uint64_t> renderCount_ = 0;
+#endif
 #if defined(CONTOUR_VT_METRICS)
     terminal::Metrics terminalMetrics_{};
 #endif
