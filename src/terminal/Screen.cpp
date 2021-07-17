@@ -550,7 +550,8 @@ void Screen::write(std::u32string_view const& _text)
 void Screen::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    debuglog(VTParserTraceTag).write("text: {}", unicode::convert_to<char>(_char));
+    if (debugtag::enabled(VTParserTraceTag))
+        debuglog(VTParserTraceTag).write("text: {}", unicode::convert_to<char>(_char));
 #endif
     bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
 
