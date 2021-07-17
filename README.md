@@ -217,6 +217,7 @@ brew install freetype fontconfig harfbuzz boost qt5
 * [console\_codes](http://man.he.net/man4/console_codes) Linux console codes
 * [Summary of ANSI standards for ASCII terminals](http://www.inwap.com/pdp10/ansicode.txt)
 * [Text Terminal HOWTO (Chapter 7.2, PTY)](http://tldp.org/HOWTO/Text-Terminal-HOWTO-7.html#ss7.2)
+* [ANSI escape code](https://en.wikipedia.org/wiki/ANSI_escape_code) in Wikipedia
 
 ### License
 

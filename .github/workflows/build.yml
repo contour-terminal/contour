@@ -6,7 +6,9 @@ on:
     - 'docs/**'
     - '.github/ISSUE_TEMPLATE/**'
     - '.github/*.yml'
-    - 'TODO.md'
+    - 'LICENSE.txt'
+    - '*.md'
+    - '*.sh'
     branches:
     - master
     - feature/**
