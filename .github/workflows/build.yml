@@ -261,7 +261,11 @@ jobs:
         vcpkgTriplet: x64-windows
     - name: "create build directory"
       shell: powershell
-      run: mkdir -p build
+      run: |
+        If (!(Test-Path build))
+        {
+              New-Item -ItemType Directory -Force -Path build
+        }
     - name: "Generate build files"
       run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
     - name: "Build"
