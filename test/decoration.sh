@@ -10,8 +10,9 @@ function decoration() {
     local name="${2}"
     local off="${3}"
     local color="${4:-250:250:70}"
+    local bar="║" # │
     decoration_color "${color}"
-    echo -ne "${on}\t| \033[${on}m${name}\033[${off}m\n"
+    echo -ne "${on}\t${bar} \033[${on}m${name}\033[${off}m\n"
 }
 
 # Reference: https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
