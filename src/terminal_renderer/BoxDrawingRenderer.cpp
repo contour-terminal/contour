@@ -472,12 +472,19 @@ bool BoxDrawingRenderer::render(LinePosition _line,
     return true;
 }
 
+constexpr inline bool containsNonCanonicalLines(uint8_t _id)
+{
+    auto const box = detail::boxDrawingDefinitions[_id];
+    return box.diagonal_ != detail::NoDiagonal
+        || box.arc_ != detail::NoArc;
+}
+
 optional<BoxDrawingRenderer::DataRef> BoxDrawingRenderer::getDataRef(uint8_t _id)
 {
     if (optional<DataRef> const dataRef = textureAtlas_->get(_id); dataRef.has_value())
         return dataRef;
 
-    auto constexpr antialiasing = true;
+    auto const antialiasing = containsNonCanonicalLines(_id);
     atlas::Buffer buffer;
     if (antialiasing)
     {
@@ -492,7 +499,7 @@ optional<BoxDrawingRenderer::DataRef> BoxDrawingRenderer::getDataRef(uint8_t _id
             return val;
         }();
         auto const supersamplingSize = gridMetrics_.cellSize * supersamplingFactor;
-        auto const supersamplingLineThickness = gridMetrics_.underline.thickness;
+        auto const supersamplingLineThickness = gridMetrics_.underline.thickness * 2;
         auto tmp = build(_id, supersamplingSize, supersamplingLineThickness);
         if (!tmp)
             return nullopt;
@@ -526,7 +533,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
     auto const horizontalOffset = *height / 2;
     auto const verticalOffset = *width / 2;
     auto const lightThickness = _lineThickness;
-    auto const heavyThickness = _lineThickness * 3;
+    auto const heavyThickness = _lineThickness * 2;
 
     auto image = atlas::Buffer(*width * *height, 0x00);
 
@@ -613,7 +620,6 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
                 }
                 case detail::Double:
                 {
-                    debuglog(BoxDrawingTag).write("LR: Double {}", isFirst ? "left" : "right");
                     auto y0 = offset - lightThickness / 2 - lightThickness;
                     for (auto const yi: iota(0, lightThickness))
                         for (auto const xi: iota(0u, x1 - x0))
@@ -677,7 +683,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
                         for (auto const xi: iota(0, lightThickness))
                             image[(y0 + yi) * *width + x0 + xi] = 0xFF;
 
-                    x0 = offset + lightThickness / 2;
+                    x0 = offset - lightThickness / 2 + lightThickness;
                     for (auto const yi: iota(0u, y1 - y0))
                         for (auto const xi: iota(0, lightThickness))
                             image[(y0 + yi) * *width + x0 + xi] = 0xFF;
@@ -729,7 +735,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
     }
 
     if (box.arc_ != detail::NoArc)
-        drawArc(image, *width, *height, gridMetrics_.underline.thickness, box.arc_);
+        drawArc(image, *width, *height, lightThickness, box.arc_);
 
     debuglog(BoxDrawingTag).write("BoxDrawing: build U+{:04X} ({})", 0x2500 + _id, _size);
 
