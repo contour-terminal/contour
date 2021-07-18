@@ -157,8 +157,19 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
 void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 {
-    auto const yDelta = _event->pixelDelta().y() ? _event->pixelDelta().y()
-                                                 : _event->angleDelta().y();
+    auto const yDelta = [&]() -> int
+    {
+        switch (_event->orientation())
+        {
+            case Qt::Orientation::Horizontal:
+                return _event->pixelDelta().x() ? _event->pixelDelta().x()
+                                                : _event->angleDelta().x();
+            case Qt::Orientation::Vertical:
+                return _event->pixelDelta().y() ? _event->pixelDelta().y()
+                                                : _event->angleDelta().y();
+        }
+        return 0;
+    }();
 
     if (yDelta)
     {

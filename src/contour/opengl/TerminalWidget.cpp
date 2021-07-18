@@ -532,8 +532,8 @@ void TerminalWidget::paintGL()
 
         auto const bg =
             reverseVideo
-                ? terminal::RGBAColor(profile_.colors.defaultForeground, uint8_t(profile_.backgroundOpacity))
-                : terminal::RGBAColor(profile_.colors.defaultBackground, uint8_t(profile_.backgroundOpacity));
+                ? terminal::RGBAColor(profile_.colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
+                : terminal::RGBAColor(profile_.colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()));
 
         if (bg != renderStateCache_.backgroundColor)
         {
