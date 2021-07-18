@@ -20,10 +20,16 @@
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
 
+#include <crispy/App.h>
 #include <crispy/StackTrace.h>
 #include <crispy/debuglog.h>
 #include <crispy/utils.h>
 
+#include <fmt/format.h>
+#include <fmt/chrono.h>
+
+#include <cstdio>
+#include <chrono>
 #include <iostream>
 #include <fstream>
 #include <memory>
@@ -163,13 +169,23 @@ namespace // {{{ helper
             out << symbols[i] << "\r\n";
     }
 
+    // Have this directory string already pre-created, as in case of a SEGV
+    // it may very well be that the memory was corrupted too.
+    std::string crashLogDir;
+
     void segvHandler(int)
     {
         std::stringstream sstr;
         crashLogger(sstr);
         string crashLog = sstr.str();
 
-        auto const logFileName = fmt::format("/tmp/contour.crash.{}.log", getpid());
+        auto const logFileName = fmt::format(
+            "contour-crash-{:%Y-%m-%d-%H-%M-%S}-pid-{}.log",
+            std::chrono::system_clock::now(),
+            getpid()
+        );
+        if (chdir(crashLogDir.c_str()) < 0)
+            perror("chdir");
         char hostname[80] = {0};
         gethostname(hostname, sizeof(hostname));
 
@@ -187,8 +203,11 @@ namespace // {{{ helper
             << "Please report the above information and help making this project better.\r\n"
             << "\r\n"
             << "This log will also be written to: \033[1m"
-                << "\033]8;;file://" << hostname << "/" << logFileName << "\033\\"
-                << logFileName << "\033]8;;\033\\"
+                << "\033]8;;file://" << hostname << "/"
+                    << crashLogDir << "/" << logFileName
+                << "\033\\"
+                << crashLogDir << "/" << logFileName
+                << "\033]8;;\033\\"
                 << "\033[m\r\n"
             << "\r\n"
             ;
@@ -206,6 +225,9 @@ ContourApp::ContourApp() :
     App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING)
 {
 #if defined(__linux__)
+    auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
+    FileSystem::create_directories(crashLogDirPath);
+    crashLogDir = crashLogDirPath.string();
     signal(SIGSEGV, segvHandler);
 #endif
 

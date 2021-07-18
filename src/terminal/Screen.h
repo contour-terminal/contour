@@ -348,7 +348,7 @@ class Screen : public capabilities::StaticDatabase {
                      ImageResize _resizePolicy,
                      bool _autoScroll);
 
-    void dumpState(std::string const& _message) const;
+    void dumpState(std::string const& _message, std::ostream& _os) const;
 
     // reset screen
     void resetSoft();

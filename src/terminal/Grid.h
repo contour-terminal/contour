@@ -277,7 +277,7 @@ class Cell {
 
     constexpr int width() const noexcept { return width_; }
 
-    constexpr GraphicsAttributes attributes() const noexcept { return attributes_; }
+    constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
 
 #if defined(LIBTERMINAL_IMAGES)
     std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }

@@ -22,8 +22,9 @@
 #include <optional>
 
 #if !defined(_WIN32)
-#include <unistd.h>
+#include <pwd.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 #endif
 
 using std::bind;
@@ -134,17 +135,43 @@ namespace // {{{ helper
             return result;
         });
     }
+
+    FileSystem::path xdgStateHome()
+    {
+        if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
+            return FileSystem::path(p);
+
+#if defined(_WIN32)
+        if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
+            return FileSystem::path(p);
+#else
+        if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
+            return FileSystem::path(pw->pw_dir) / ".local" / "state";
+#endif
+
+        return FileSystem::temp_directory_path();
+    }
 } // }}}
 
 namespace crispy {
 
+App* App::instance_ = nullptr;
+
 App::App(std::string _appName, std::string _appTitle, std::string _appVersion) :
     appName_{ std::move(_appName) },
     appTitle_{ std::move(_appTitle) },
-    appVersion_{ std::move(_appVersion) }
+    appVersion_{ std::move(_appVersion) },
+    localStateDir_{xdgStateHome() / appName_}
 {
+    instance_ = this;
+
     link(appName_ + ".help", bind(&App::helpAction, this));
     link(appName_ + ".version", bind(&App::versionAction, this));
+}
+
+App::~App()
+{
+    instance_ = nullptr;
 }
 
 void App::link(std::string _command, std::function<int()> _handler)
