@@ -5,6 +5,8 @@
     "--enable=sensitive",
     "--disable=google",
     "--enable=google-build-namespaces",
+    "--enable=bugprone-easily-swappable-parameters",
+    "--enable=readability-suspicious-call-argument",
     "--skip=.github/codechecker/skipfile.txt"
   ],
   "parse": [
