@@ -159,16 +159,16 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 {
     auto const yDelta = [&]() -> int
     {
-        switch (_event->orientation())
-        {
-            case Qt::Orientation::Horizontal:
-                return _event->pixelDelta().x() ? _event->pixelDelta().x()
-                                                : _event->angleDelta().x();
-            case Qt::Orientation::Vertical:
-                return _event->pixelDelta().y() ? _event->pixelDelta().y()
-                                                : _event->angleDelta().y();
-        }
-        return 0;
+//        switch (_event->orientation())
+//        {
+//            case Qt::Orientation::Horizontal:
+//                return _event->pixelDelta().x() ? _event->pixelDelta().x()
+//                                                : _event->angleDelta().x();
+//            case Qt::Orientation::Vertical:
+//                return _event->pixelDelta().y() ? _event->pixelDelta().y()
+//                                                : _event->angleDelta().y();
+//        }
+        return _event->angleDelta().y();
     }();
 
     if (yDelta)
@@ -205,8 +205,8 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
     auto constexpr MarginTop = 0;
     auto constexpr MarginLeft = 0;
     auto const cellSize = _session.display()->cellSize();
-    auto const row = int{1 + (max(_event->y(), 0) - MarginTop) /  cellSize.height.as<int>()};
-    auto const col = int{1 + (max(_event->x(), 0) - MarginLeft) / cellSize.width.as<int>()};
+    auto const row = int{1 + (max(_event->pos().y(), 0) - MarginTop) /  cellSize.height.as<int>()};
+    auto const col = int{1 + (max(_event->pos().x(), 0) - MarginLeft) / cellSize.width.as<int>()};
 
     _session.sendMouseMoveEvent(row, col,
                                 makeModifier(_event->modifiers()),
