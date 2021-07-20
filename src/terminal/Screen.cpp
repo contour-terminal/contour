@@ -533,12 +533,20 @@ void Screen::write(char const * _data, size_t _size)
 #endif
 
     parser_.parseFragment(string_view(_data, _size));
+
+    if (modes_.enabled(DECMode::BatchedRendering))
+        return;
+
     eventListener_.screenUpdated();
 }
 
 void Screen::write(std::u32string_view const& _text)
 {
     parser_.parseFragment(_text);
+
+    if (modes_.enabled(DECMode::BatchedRendering))
+        return;
+
     eventListener_.screenUpdated();
 }
 
@@ -1792,8 +1800,8 @@ void Screen::setMode(DECMode _mode, bool _enable)
             }
             break;
         case DECMode::BatchedRendering:
-            // Only perform batched rendering when NOT in debugging mode.
-            // TODO: also, do I still need this here?
+            if (modes_.enabled(DECMode::BatchedRendering) != _enable)
+                eventListener_.synchronizedOutput(_enable);
             break;
         case DECMode::TextReflow:
             if (isPrimaryScreen())

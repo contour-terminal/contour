@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/RenderBuffer.h>
+#include <crispy/debuglog.h>
 
 #include <mutex>
 

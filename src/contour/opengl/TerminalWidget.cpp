@@ -516,15 +516,21 @@ void TerminalWidget::paintGL()
     {
         [[maybe_unused]] auto const lastState = state_.exchange(State::CleanPainting);
 
-#if 0
-        auto const updateCount = stats_.updatesSinceRendering.exchange(0);
-        auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
-        debuglog(WidgetTag).write(
-            "paintGL#{}: {} updates since last paint (state: {}).",
-            renderCount,
-            updateCount,
-            lastState
-        );
+#if defined(CONTOUR_PERF_STATS)
+        {
+            ++renderCount_;
+            auto const updateCount = stats_.updatesSinceRendering.exchange(0);
+            auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
+            if (crispy::debugtag::enabled(WidgetTag))
+                debuglog(WidgetTag).write(
+                    "paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
+                    renderCount_.load(),
+                    renderCount,
+                    updateCount,
+                    lastState,
+                    to_string(session_.terminal().renderBufferState())
+                );
+        }
 #endif
 
         bool const reverseVideo =

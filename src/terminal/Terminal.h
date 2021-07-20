@@ -170,6 +170,9 @@ class Terminal : public ScreenEvents {
     /// and it is attempted to swap the back/front buffers.
     /// but the swap has NOT been invoked yet.
     ///
+    /// @param _now    the current time
+    /// @param _locked whether or not the Terminal object's lock is already held by the caller.
+    ///
     /// @retval true   front buffer now contains the refreshed render buffer.
     /// @retval false  back buffer contains the refreshed render buffer,
     ///                and RenderDoubleBuffer::swapBuffers() must again
@@ -179,16 +182,19 @@ class Terminal : public ScreenEvents {
     /// @see RenderDoubleBuffer::swapBuffers()
     /// @see renderBuffer()
     ///
-    bool refreshRenderBuffer(std::chrono::steady_clock::time_point _now);
+    bool refreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked = false);
 
     /// Eventually refreshes the render buffer iff
     /// - the screen contents has changed AND refresh rate satisfied,
     /// - viewport has changed, or
     /// - refreshing the render buffer was explicitly requested.
     ///
+    /// @param _now    the current time
+    /// @param _locked whether or not the Terminal object's lock is already held by the caller.
+    ///
     /// @see RenderDoubleBuffer::swapBuffers()
     /// @see renderBuffer()
-    void ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now);
+    bool ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked = false);
 
     /// Aquuires read-access handle to front render buffer.
     ///
@@ -198,6 +204,8 @@ class Terminal : public ScreenEvents {
     /// @see ensureFreshRenderBuffer()
     /// @see refreshRenderBuffer()
     RenderBufferRef renderBuffer() const { return renderBuffer_.frontBuffer(); }
+
+    RenderBufferState renderBufferState() const noexcept { return renderBuffer_.state; }
     // }}}
 
     void lock() const { outerLock_.lock(); innerLock_.lock(); }
@@ -289,10 +297,20 @@ class Terminal : public ScreenEvents {
 
     void markScreenDirty() { screenDirty_ = true; }
 
+    uint64_t frameCount() const noexcept
+    {
+#if defined(CONTOUR_PERF_STATS)
+        return frameCount_.load();
+#else
+        return 0;
+#endif
+    }
+
   private:
     void flushInput();
     void mainLoop();
-    void refreshRenderBuffer(RenderBuffer& _output);
+    void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
+    void refreshRenderBufferInternal(RenderBuffer& _output);
     std::optional<RenderCursor> renderCursor();
     void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
     bool updateCursorHoveringState();
@@ -335,6 +353,7 @@ class Terminal : public ScreenEvents {
     void hardReset() override;
     void discardImage(Image const&) override;
     void markRegionDirty(LinePosition _line, ColumnPosition _column) override;
+    void synchronizedOutput(bool _enabled) override;
 
     // private data
     //
@@ -382,6 +401,10 @@ class Terminal : public ScreenEvents {
     std::unique_ptr<Selector> selector_;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;
+
+#if defined(CONTOUR_PERF_STATS)
+    std::atomic<uint64_t> frameCount_ = 0;
+#endif
 };
 
 }  // namespace terminal
