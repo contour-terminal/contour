@@ -44,6 +44,7 @@ set(terminal_HEADERS
     RenderBuffer.h
     Screen.h
     Selector.h
+    Sequence.h
     Sequencer.h
     SixelParser.h
     Terminal.h
@@ -69,6 +70,7 @@ set(terminal_SOURCES
     Process.cpp
     RenderBuffer.cpp
     Screen.cpp
+    Sequence.cpp
     Sequencer.cpp
     Selector.cpp
     SixelParser.cpp
