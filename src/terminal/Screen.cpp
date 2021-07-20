@@ -32,14 +32,13 @@
 #include <unicode/utf8.h>
 
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <iterator>
 #include <sstream>
 #include <string_view>
 #include <tuple>
 #include <variant>
-
-#include <assert.h>
 
 #if defined(LIBTERMINAL_EXECUTION_PAR)
 #include <execution>
@@ -54,7 +53,6 @@ using namespace std::string_view_literals;
 using std::accumulate;
 using std::clamp;
 using std::array;
-using std::cerr;
 using std::distance;
 using std::endl;
 using std::function;
@@ -184,12 +182,9 @@ namespace // {{{ helper
         explicit VTWriter(std::ostream& output) : VTWriter{[&](auto d, auto n) { output.write(d, n); }} {}
         explicit VTWriter(std::vector<char>& output) : VTWriter{[&](auto d, auto n) { output.insert(output.end(), d, d + n); }} {}
 
-        void setCursorKeysMode(KeyMode _mode) noexcept { cursorKeysMode_ = _mode; }
-        bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
-        bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
-
         void write(char32_t v)
         {
+            flush();
             char buf[4];
             auto enc = unicode::encoder<char>{};
             auto count = distance(buf, enc(v, buf));
@@ -210,12 +205,13 @@ namespace // {{{ helper
 
         void flush()
         {
-            if (!sgr_.empty())
-            {
-                auto const f = flush(sgr_);
-                sgr_.clear();
+            if (sgr_.empty())
+                return;
+
+            auto const f = flush(sgr_);
+            if (sgr_ != lastSGR_)
                 writer_(f.data(), f.size());
-            }
+            sgr_rewind();
         }
 
         string flush(vector<unsigned> const& _sgr)
@@ -251,8 +247,7 @@ namespace // {{{ helper
 
                 if (sgr_.size() == 16)
                 {
-                    write(flush(sgr_));
-                    sgr_.clear();
+                    flush();
                 }
             }
         }
@@ -270,80 +265,82 @@ namespace // {{{ helper
 
         void setForegroundColor(Color const& _color)
         {
-            //if (true) // _color != currentForegroundColor_)
-            if (_color != currentForegroundColor_)
+            // if (_color == currentForegroundColor_)
+            //     return;
+
+            currentForegroundColor_ = _color;
+            switch (_color.type)
             {
-                currentForegroundColor_ = _color;
-                if (isIndexedColor(_color))
-                {
-                    auto const colorValue = getIndexedColor(_color);
-                    if (static_cast<unsigned>(colorValue) < 8)
-                        sgr_add(30 + static_cast<unsigned>(colorValue));
+                case ColorType::Default:
+                    sgr_add(39);
+                    break;
+                case ColorType::Indexed:
+                    if (static_cast<unsigned>(_color.index) < 8)
+                        sgr_add(30 + static_cast<unsigned>(_color.index));
                     else
                     {
                         sgr_add(38);
                         sgr_add(5);
-                        sgr_add(static_cast<unsigned>(colorValue));
+                        sgr_add(static_cast<unsigned>(_color.index));
                     }
-                }
-                else if (isDefaultColor(_color))
-                    sgr_add(39);
-                else if (isBrightColor(_color))
+                    break;
+                case ColorType::Bright:
                     sgr_add(90 + static_cast<unsigned>(getBrightColor(_color)));
-                else if (isRGBColor(_color))
-                {
-                    auto const rgb = getRGBColor(_color);
+                    break;
+                case ColorType::RGB:
                     sgr_add(38);
                     sgr_add(2);
-                    sgr_add(static_cast<unsigned>(rgb.red));
-                    sgr_add(static_cast<unsigned>(rgb.green));
-                    sgr_add(static_cast<unsigned>(rgb.blue));
-                }
+                    sgr_add(static_cast<unsigned>(_color.rgb.red));
+                    sgr_add(static_cast<unsigned>(_color.rgb.green));
+                    sgr_add(static_cast<unsigned>(_color.rgb.blue));
+                case ColorType::Undefined:
+                    break;
             }
         }
 
         void setBackgroundColor(Color const& _color)
         {
-            if (true)//_color != currentBackgroundColor_)
+            // if (_color == currentBackgroundColor_)
+            //     return;
+
+            currentBackgroundColor_ = _color;
+            switch (_color.type)
             {
-                currentBackgroundColor_ = _color;
-                if (isIndexedColor(_color))
-                {
-                    auto const colorValue = getIndexedColor(_color);
-                    if (static_cast<unsigned>(colorValue) < 8)
-                        sgr_add(40 + static_cast<unsigned>(colorValue));
+                case ColorType::Default:
+                    sgr_add(49);
+                    break;
+                case ColorType::Indexed:
+                    if (static_cast<unsigned>(_color.index) < 8)
+                        sgr_add(40 + static_cast<unsigned>(_color.index));
                     else
                     {
                         sgr_add(48);
                         sgr_add(5);
-                        sgr_add(static_cast<unsigned>(colorValue));
+                        sgr_add(static_cast<unsigned>(_color.index));
                     }
-                }
-                else if (isDefaultColor(_color))
-                    sgr_add(49);
-                else if (isBrightColor(_color))
+                    break;
+                case ColorType::Bright:
                     sgr_add(100 + static_cast<unsigned>(getBrightColor(_color)));
-                else if (isRGBColor(_color))
-                {
-                    auto const& rgb = getRGBColor(_color);
+                    break;
+                case ColorType::RGB:
                     sgr_add(48);
                     sgr_add(2);
-                    sgr_add(static_cast<unsigned>(rgb.red));
-                    sgr_add(static_cast<unsigned>(rgb.green));
-                    sgr_add(static_cast<unsigned>(rgb.blue));
-                }
+                    sgr_add(static_cast<unsigned>(_color.rgb.red));
+                    sgr_add(static_cast<unsigned>(_color.rgb.green));
+                    sgr_add(static_cast<unsigned>(_color.rgb.blue));
+                case ColorType::Undefined:
+                    break;
             }
         }
 
       private:
         Writer writer_;
-        std::vector<unsigned> lastSGR_;
         std::vector<unsigned> sgr_;
         std::stringstream sstr;
+        std::vector<unsigned> lastSGR_;
         Color currentForegroundColor_ = DefaultColor();
         Color currentUnderlineColor_ = DefaultColor();
         Color currentBackgroundColor_ = DefaultColor();
-        KeyMode cursorKeysMode_ = KeyMode::Normal;
     };
 
     constexpr bool GridTextReflowEnabled = true;
@@ -519,8 +516,8 @@ void Screen::verifyState() const
 
 void Screen::fail(std::string const& _message) const
 {
-    dumpState(_message);
-    assert(false);
+    dumpState(_message, std::cerr);
+    abort();
 }
 
 void Screen::write(char const * _data, size_t _size)
@@ -2487,26 +2484,29 @@ void Screen::dumpState()
     eventListener_.dumpState();
 }
 
-void Screen::dumpState(std::string const& _message) const
+void Screen::dumpState(std::string const& _message, std::ostream& _os) const
 {
     auto const hline = [&]() {
-        for_each(crispy::times(*size_.columns), [](auto) { cerr << '='; });
-        cerr << endl;
+        for_each(crispy::times(*size_.columns), [&](auto) { _os << '='; });
+        _os << endl;
     };
 
-    hline();
-    cerr << "\033[1;37;41m" << _message << "\033[m" << endl;
-    hline();
+    if (_message.empty())
+    {
+        hline();
+        _os << "\033[1;37;41m" << _message << "\033[m" << endl;
+        hline();
+    }
 
-    cerr << fmt::format("Rendered screen at the time of failure: {}\n", size_);
-    cerr << fmt::format("cursor position      : {}\n", cursor_);
+    _os << fmt::format("Rendered screen at the time of failure: {}\n", size_);
+    _os << fmt::format("cursor position      : {}\n", cursor_);
     if (cursor_.originMode)
-        cerr << fmt::format("real cursor position : {})\n", toRealCoordinate(cursor_.position));
-    cerr << fmt::format("vertical margins     : {}\n", margin_.vertical);
-    cerr << fmt::format("horizontal margins   : {}\n", margin_.horizontal);
+        _os << fmt::format("real cursor position : {})\n", toRealCoordinate(cursor_.position));
+    _os << fmt::format("vertical margins     : {}\n", margin_.vertical);
+    _os << fmt::format("horizontal margins   : {}\n", margin_.horizontal);
 
     hline();
-    cerr << screenshot([this](int _lineNo) -> string {
+    _os << screenshot([this](int _lineNo) -> string {
         //auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
         return fmt::format("| {:>4}: {}", _lineNo, grid().lineAt(_lineNo).flags());
     });
