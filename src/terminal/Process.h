@@ -134,7 +134,8 @@ namespace fmt
                     return format_to(_ctx.out(), "NormalExit:{}", _exit.exitCode);
                 },
                 [&](terminal::Process::SignalExit _exit) {
-                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, strerror(_exit.signum));
+                    char buf[256];
+                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, strerror_r(_exit.signum, buf, sizeof(buf)));
                 }
             }, _status);
         }
