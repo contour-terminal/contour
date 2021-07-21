@@ -37,6 +37,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <bitset>
 #include <deque>
 #include <functional>
 #include <list>
@@ -68,15 +69,12 @@ class Modes {
 
     void set(DECMode  _mode, bool _enabled)
     {
-        if (_enabled)
-            dec_.insert(_mode);
-        else if (auto i = dec_.find(_mode); i != dec_.end())
-            dec_.erase(i);
+        dec_.set(size_t(_mode), _enabled);
     }
 
     bool enabled(AnsiMode _mode) const noexcept { return ansi_.find(_mode) != ansi_.end(); }
 
-    bool enabled(DECMode _mode) const noexcept { return dec_.find(_mode) != dec_.end(); }
+    bool enabled(DECMode _mode) const noexcept { return dec_.test(size_t(_mode)); }
 
     void save(std::vector<DECMode> const& _modes)
     {
@@ -100,7 +98,7 @@ class Modes {
   private:
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode enum values.
     std::set<AnsiMode> ansi_;
-    std::set<DECMode> dec_;
+    std::bitset<2048> dec_;
     std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 };
 // }}}
@@ -445,20 +443,32 @@ class Screen : public capabilities::StaticDatabase {
             && 1 <= _coord.column && _coord.column <= unbox<int>(size_.columns);
     }
 
+    Cell& lastPosition() noexcept { return grid().at(lastCursorPosition_); }
+    Cell const& lastPosition() const noexcept { return grid().at(lastCursorPosition_); }
+
+    auto currentColumn() noexcept
+    {
+        return std::next(currentLine_->begin(), cursor_.position.column - 1);
+    }
+
+    auto currentColumn() const noexcept
+    {
+        return std::next(currentLine_->cbegin(), cursor_.position.column - 1);
+    }
+
     Cell const& currentCell() const noexcept
     {
-        return *currentColumn_;
+        return (*currentLine_)[cursor_.position.column - 1];
     }
 
     Cell& currentCell() noexcept
     {
-        return *currentColumn_;
+        return (*currentLine_)[cursor_.position.column - 1];
     }
 
     Cell& currentCell(Cell value)
     {
-        *currentColumn_ = std::move(value);
-        return *currentColumn_;
+        return (*currentLine_)[cursor_.position.column - 1] = std::move(value);
     }
 
     void moveCursorTo(Coordinate to);
@@ -597,12 +607,6 @@ class Screen : public capabilities::StaticDatabase {
     void updateCursorIterators()
     {
         currentLine_ = next(begin(grid().mainPage()), cursor_.position.row - 1);
-        updateColumnIterator();
-    }
-
-    void updateColumnIterator()
-    {
-        currentColumn_ = columnIteratorAt(cursor_.position.column);
     }
 
     /// @returns an iterator to @p _n columns after column @p _begin.
@@ -687,8 +691,6 @@ class Screen : public capabilities::StaticDatabase {
     Cursor savedCursor_;
     Cursor savedPrimaryCursor_; //!< saved cursor of primary-screen when switching to alt-screen.
     LineIterator currentLine_;
-    ColumnIterator currentColumn_;
-    ColumnIterator lastColumn_;
     Coordinate lastCursorPosition_;
 
     CursorDisplay cursorDisplay_ = CursorDisplay::Steady;

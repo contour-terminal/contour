@@ -204,20 +204,35 @@ class Cell {
     static size_t constexpr MaxCodepoints = 9;
 
     Cell(char32_t _codepoint, GraphicsAttributes _attrib) noexcept :
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         codepoints_{},
+#else
+        codepointCount_{0},
+        codepoints_{},
+#endif
         width_{1},
         attributes_{_attrib}
     {
         // setCharacter(_codepoint);
         if (_codepoint)
         {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
             codepoints_.assign(1, _codepoint);
+#else
+            codepointCount_ = 1;
+            codepoints_[0] = _codepoint;
+#endif
             width_ = static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1));
         }
     }
 
     Cell() noexcept :
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         codepoints_{},
+#else
+        codepointCount_{0},
+        codepoints_{},
+#endif
         width_{1},
         attributes_{}
     {}
@@ -229,7 +244,11 @@ class Cell {
 #if defined(LIBTERMINAL_HYPERLINKS)
         hyperlink_ = nullptr;
 #endif
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         codepoints_.clear();
+#else
+        codepointCount_ = 0;
+#endif
 #if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
 #endif
@@ -240,7 +259,11 @@ class Cell {
     {
         attributes_ = _attribs;
         width_ = 1;
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         codepoints_.clear();
+#else
+        codepointCount_ = 0;
+#endif
         hyperlink_ = _hyperlink;
 #if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
@@ -255,7 +278,11 @@ class Cell {
 
     std::u32string_view codepoints() const noexcept
     {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         return codepoints_;
+#else
+        return {codepoints_.data(), codepointCount_};
+#endif
     }
 
     char32_t codepoint(size_t i) const noexcept
@@ -267,12 +294,19 @@ class Cell {
 #endif
     }
 
-    std::size_t codepointCount() const noexcept { return codepoints_.size(); }
+    std::size_t codepointCount() const noexcept
+    {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
+        return codepoints_.size();
+#else
+        return codepointCount_;
+#endif
+    }
 
 #if defined(LIBTERMINAL_IMAGES)
-    bool empty() const noexcept { return codepoints_.empty() && !imageFragment_; }
+    bool empty() const noexcept { return codepointCount() == 0 && !imageFragment_; }
 #else
-    bool empty() const noexcept { return codepoints_.empty(); }
+    bool empty() const noexcept { return codepointCount() == 0; }
 #endif
 
     constexpr int width() const noexcept { return width_; }
@@ -286,7 +320,11 @@ class Cell {
     {
         imageFragment_.emplace(std::move(_imageFragment));
         width_ = 1;
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
         codepoints_.clear();
+#else
+        codepointCount_ = 0;
+#endif
     }
 
 #if defined(LIBTERMINAL_HYPERLINKS)
@@ -305,12 +343,21 @@ class Cell {
 #endif
         if (_codepoint)
         {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
             codepoints_.assign(1, _codepoint);
+#else
+            codepointCount_ = 1;
+            codepoints_[0] = _codepoint;
+#endif
             width_ = static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1));
         }
         else
         {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
             codepoints_.clear();
+#else
+            codepointCount_ = 0;
+#endif
             width_ = 1;
         }
     }
@@ -325,9 +372,13 @@ class Cell {
 #if defined(LIBTERMINAL_IMAGES)
         imageFragment_.reset();
 #endif
-        if (codepoints_.size() < MaxCodepoints)
+        if (codepointCount() < MaxCodepoints)
         {
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
             codepoints_.push_back(_codepoint);
+#else
+            codepoints_[codepointCount_++] = _codepoint;
+#endif
 
             constexpr bool AllowWidthChange = false; // TODO: make configurable
 
@@ -367,7 +418,12 @@ class Cell {
 
   private:
     /// Unicode codepoint to be displayed.
+#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
     std::u32string codepoints_;
+#else
+    uint8_t codepointCount_;
+    std::array<char32_t, 8> codepoints_;
+#endif
 
     /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
     uint8_t width_;
