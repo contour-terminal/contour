@@ -831,7 +831,9 @@ void Screen::resetHard()
 
     grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();
-    moveCursorTo(Coordinate{1, 1});
+
+    cursor_ = {};
+    updateCursorIterators();
 
     lastColumn_ = currentColumn_;
     lastCursorPosition_ = cursor_.position;

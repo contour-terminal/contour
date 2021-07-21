@@ -370,7 +370,6 @@ class Terminal : public ScreenEvents {
     RenderDoubleBuffer renderBuffer_{};
 
     Pty& pty_;
-    std::vector<char> readBuffer_;
 
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;

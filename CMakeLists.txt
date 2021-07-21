@@ -35,7 +35,6 @@ message(STATUS "addr2line: ${ADDR2LINE}")
 
 option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ON" ON)
 option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
-option(CONTOUR_EXAMPLES "Enables building of example programs. [default: ON]" ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
 option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
@@ -65,10 +64,6 @@ endif()
 add_subdirectory(src)
 
 include(ThirdParties)
-
-if(CONTOUR_EXAMPLES)
-    add_subdirectory(examples)
-endif()
 
 # ----------------------------------------------------------------------------
 # Summary

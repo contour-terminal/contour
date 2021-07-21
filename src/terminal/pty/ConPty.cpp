@@ -118,16 +118,18 @@ void ConPty::prepareChildProcess()
 {
 }
 
-int ConPty::read(char* buf, size_t size, std::chrono::milliseconds _timeout)
+optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
 {
     // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
     (void) _timeout;
 
+    auto const n = static_cast<DWORD>(min(size, buffer_.size()));
+
     DWORD nread{};
-    if (ReadFile(input_, buf, static_cast<DWORD>(size), &nread, nullptr))
-        return static_cast<int>(nread);
-    else
-        return -1;
+    if (!ReadFile(input_, buffer_.data(), n, &nread, nullptr))
+        return nullopt;
+
+    return string_view{buffer_.data(), nread};
 }
 
 void ConPty::wakeupReader()

@@ -112,7 +112,7 @@ class Modes {
 struct Cursor
 {
     Coordinate position{1, 1};
-    bool autoWrap = false;
+    bool autoWrap = true; // false;
     bool originMode = false;
     bool visible = true;
     GraphicsAttributes graphicsRendition{};

@@ -63,9 +63,9 @@ void PtyProcess::prepareChildProcess()
     assert(false && "Don't!");
 }
 
-int PtyProcess::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
+optional<string_view> PtyProcess::read(size_t _size, std::chrono::milliseconds _timeout)
 {
-    return pty_->read(_buf, _size, _timeout);
+    return pty_->read(_size, _timeout);
 }
 
 void PtyProcess::wakeupReader()

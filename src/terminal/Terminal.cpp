@@ -103,7 +103,6 @@ Terminal::Terminal(Pty& _pty,
     screenUpdateThread_{},
     viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } }
 {
-    readBuffer_.resize(static_cast<unsigned>(ptyReadBufferSize_));
 }
 
 Terminal::~Terminal()
@@ -154,26 +153,26 @@ bool Terminal::processInputOnce()
             : refreshInterval_ // std::chrono::seconds(0)
             ;
 
-    auto const n = pty_.read(readBuffer_.data(), readBuffer_.size(), timeout);
-
-    if (n > 0)
-    {
-        writeToScreen(readBuffer_.data(), static_cast<unsigned>(n));
-
-        #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-        auto const now = std::chrono::steady_clock::now();
-        ensureFreshRenderBuffer(now);
-        #endif
-    }
-    else if (n == 0)
-    {
-        debuglog(TerminalTag).write("PTY read returned with zero bytes.");
-    }
-    else if (n < 0 && (errno != EINTR && errno != EAGAIN))
+    auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
+    if (!bufOpt)
     {
         debuglog(TerminalTag).write("PTY read failed. {}", strerror(errno));
-        return false;
+        return errno == EINTR || errno == EAGAIN;
     }
+    auto const buf = *bufOpt;
+
+    if (buf.empty())
+    {
+        debuglog(TerminalTag).write("PTY read returned with zero bytes.");
+        return true;
+    }
+
+    writeToScreen(buf);
+
+    #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+    auto const now = std::chrono::steady_clock::now();
+    ensureFreshRenderBuffer(now);
+    #endif
 
     return true;
 }
