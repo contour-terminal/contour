@@ -190,25 +190,38 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     pty_.wakeupReader();
 }
 
-bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now)
+bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked)
 {
     renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
-    ensureFreshRenderBuffer(_now);
+    ensureFreshRenderBuffer(_now, _locked);
     return renderBuffer_.state == RenderBufferState::WaitingForRefresh;
 }
 
-void Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now)
+#if defined(CONTOUR_PERF_STATS)
+static void logRenderBufferSwap(bool _success, uint64_t _frameCount)
+{
+    if (crispy::debugtag::enabled(crispy::PerfMetricsTag))
+    {
+        if (_success)
+            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapped.", _frameCount);
+        else
+            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapping failed.", _frameCount);
+    }
+}
+#endif
+
+bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked)
 {
     if (!renderBufferUpdateEnabled_)
     {
-        renderBuffer_.state = RenderBufferState::WaitingForRefresh;
-        return;
+        //renderBuffer_.state = RenderBufferState::WaitingForRefresh;
+        return false;
     }
 
     if (!screenDirty_)
     {
         renderBuffer_.state = RenderBufferState::WaitingForRefresh;
-        return;
+        return false;
     }
 
     auto const elapsed = _now - renderBuffer_.lastUpdate;
@@ -222,25 +235,39 @@ void Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
             renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
             [[fallthrough]];
         case RenderBufferState::RefreshBuffersAndTrySwap:
-            refreshRenderBuffer(renderBuffer_.backBuffer());
+            if (!_locked)
+                refreshRenderBuffer(renderBuffer_.backBuffer());
+            else
+                refreshRenderBufferInternal(renderBuffer_.backBuffer());
             renderBuffer_.state = RenderBufferState::TrySwapBuffers;
             [[fallthrough]];
         case RenderBufferState::TrySwapBuffers:
-            #if !defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-                // We have been actively invoked by the render thread, so don't inform it about updates.
-                renderBuffer_.swapBuffers(_now);
-            #else
-                // Passively invoked by the terminal thread, so do inform render thread about updates.
-                if (renderBuffer_.swapBuffers(_now))
+            {
+                [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(_now);
+
+                #if defined(CONTOUR_PERF_STATS)
+                logRenderBufferSwap(success, frameCount_);
+                #endif
+
+                #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
+                // Passively invoked by the terminal thread -> do inform render thread about updates.
+                if (success)
                     eventListener_.renderBufferUpdated();
-            #endif
+                #endif
+            }
             break;
     }
+    return true;
 }
 
 void Terminal::refreshRenderBuffer(RenderBuffer& _output)
 {
     auto const _l = lock_guard{*this};
+    refreshRenderBufferInternal(_output);
+}
+
+void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
+{
     auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
     auto const baseLine =
         viewport_.absoluteScrollOffset().
@@ -253,6 +280,13 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
     };
 
     changes_.store(0);
+
+#if defined(CONTOUR_PERF_STATS)
+    ++frameCount_;
+    _output.frameCount = frameCount_;
+    if (crispy::debugtag::enabled(TerminalTag))
+        debuglog(TerminalTag).write("{}: Refreshing render buffer.\n", frameCount_.load());
+#endif
 
     if (renderHyperlinks)
     {
@@ -647,7 +681,6 @@ void Terminal::writeToScreen(char const* data, size_t size)
 {
     auto const _l = lock_guard{*this};
     screen_.write(data, size);
-    renderBufferUpdateEnabled_ = !screen_.isModeEnabled(DECMode::BatchedRendering);
 }
 
 // TODO: this family of functions seems we don't need anymore
@@ -813,8 +846,18 @@ void Terminal::scrollbackBufferCleared()
 
 void Terminal::screenUpdated()
 {
-    screenDirty_ = true;
     //pty_.wakeupReader();
+
+    if (!renderBufferUpdateEnabled_)
+        return;
+
+    if (renderBuffer_.state == RenderBufferState::TrySwapBuffers)
+    {
+        renderBuffer_.swapBuffers(renderBuffer_.lastUpdate);
+        return;
+    }
+
+    screenDirty_ = true;
     eventListener_.screenUpdated();
 }
 
@@ -939,6 +982,23 @@ void Terminal::markRegionDirty(LinePosition _line, ColumnPosition _column)
     auto const coord = Coordinate{y, *_column};
     if (selector_->contains(coord))
         clearSelection();
+}
+
+void Terminal::synchronizedOutput(bool _enabled)
+{
+    renderBufferUpdateEnabled_ = !_enabled;
+    if (_enabled)
+        return;
+
+    auto const diff = steady_clock::now() - renderBuffer_.lastUpdate;
+    if (diff < refreshInterval_)
+        return;
+
+    if (renderBuffer_.state == RenderBufferState::TrySwapBuffers)
+        return;
+
+    refreshRenderBuffer(steady_clock::now(), true);
+    eventListener_.screenUpdated();
 }
 // }}}
 

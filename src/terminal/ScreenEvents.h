@@ -68,6 +68,7 @@ class ScreenEvents {
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
     virtual void hardReset() {}
     virtual void markRegionDirty(LinePosition _line, ColumnPosition _column) {}
+    virtual void synchronizedOutput(bool _enabled) {}
 
     // Invoked by screen buffer when an image is not being referenced by any grid cell anymore.
     virtual void discardImage(Image const&) {}

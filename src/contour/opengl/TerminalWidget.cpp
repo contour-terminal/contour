@@ -21,6 +21,7 @@
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
 
+#include <crispy/App.h>
 #include <crispy/debuglog.h>
 #include <crispy/stdfs.h>
 
@@ -43,6 +44,11 @@
 #include <KWindowEffects>
 #endif
 
+#include <fmt/format.h>
+#include <fmt/chrono.h>
+
+#include <range/v3/all.hpp>
+
 #include <algorithm>
 #include <cstring>
 // #include <execution>
@@ -51,8 +57,6 @@
 #include <string_view>
 #include <tuple>
 #include <vector>
-
-#include <range/v3/all.hpp>
 
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
@@ -516,15 +520,21 @@ void TerminalWidget::paintGL()
     {
         [[maybe_unused]] auto const lastState = state_.exchange(State::CleanPainting);
 
-#if 0
-        auto const updateCount = stats_.updatesSinceRendering.exchange(0);
-        auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
-        debuglog(WidgetTag).write(
-            "paintGL#{}: {} updates since last paint (state: {}).",
-            renderCount,
-            updateCount,
-            lastState
-        );
+#if defined(CONTOUR_PERF_STATS)
+        {
+            ++renderCount_;
+            auto const updateCount = stats_.updatesSinceRendering.exchange(0);
+            auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
+            if (crispy::debugtag::enabled(WidgetTag))
+                debuglog(WidgetTag).write(
+                    "paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
+                    renderCount_.load(),
+                    renderCount,
+                    updateCount,
+                    lastState,
+                    to_string(session_.terminal().renderBufferState())
+                );
+        }
 #endif
 
         bool const reverseVideo =
@@ -732,16 +742,34 @@ void TerminalWidget::copyToClipboard(std::string_view _data)
 void TerminalWidget::dumpState()
 {
     makeCurrent();
-    auto const tmpDir = FileSystem::path(QStandardPaths::writableLocation(QStandardPaths::TempLocation).toStdString());
-    auto const targetDir = tmpDir / FileSystem::path("contour-debug");
+
+    auto const targetDir = crispy::App::instance()->localStateDir()
+                         / "dump"
+                         / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
+                                       std::chrono::system_clock::now());
+
     FileSystem::create_directories(targetDir);
+
     debuglog(WidgetTag).write("Dumping state into directory: {}", targetDir.generic_string());
+
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
 
     // TODO: use this file store for everything that needs to be dumped.
-    terminal().screen().dumpState("Dump screen state.");
-    renderer_.dumpState(std::cout);
+    {
+        auto const screenStateDump = [&]() {
+            auto os = std::stringstream{};
+            terminal().screen().dumpState("Screen state dump.", os);
+            renderer_.dumpState(os);
+            return os.str();
+        }();
+
+        std::cout << screenStateDump;
+
+        auto const screenStateDumpFilePath = targetDir / "screen-state-dump.vt";
+        auto fs = ofstream{screenStateDumpFilePath.string(), ios::trunc | ios::binary};
+        fs << screenStateDump;
+    }
 
     enum class ImageBufferFormat { RGBA, RGB, Alpha };
 

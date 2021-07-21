@@ -14,6 +14,7 @@
 #pragma once
 
 #include <crispy/CLI.h>
+#include <crispy/stdfs.h>
 
 #include <functional>
 #include <map>
@@ -27,7 +28,9 @@ class App
 {
   public:
     App(std::string _appName, std::string _appTitle, std::string _appVersion);
-    virtual ~App() = default;
+    virtual ~App();
+
+    static App* instance() noexcept { return instance_; }
 
     virtual crispy::cli::Command parameterDefinition() const = 0;
     crispy::cli::FlagStore const& parameters() const noexcept { return flags_.value(); }
@@ -38,6 +41,7 @@ class App
 
     std::string const& appName() const noexcept { return appName_; }
     std::string const& appVersion() const noexcept { return appVersion_; }
+    FileSystem::path const& localStateDir() const noexcept { return localStateDir_; }
 
   protected:
     void listDebugTags();
@@ -46,9 +50,12 @@ class App
     int versionAction();
     int helpAction();
 
+    static App* instance_;
+
     std::string appName_;
     std::string appTitle_;
     std::string appVersion_;
+    FileSystem::path localStateDir_;
     std::optional<crispy::cli::Command> syntax_;
     std::optional<crispy::cli::FlagStore> flags_;
     std::map<std::string, std::function<int()>> handlers_;

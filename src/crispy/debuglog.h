@@ -221,6 +221,7 @@ class logging_sink {
 };
 
 auto const inline ErrorTag = crispy::debugtag::make("error", "Logs general errors.", true);
+auto const inline PerfMetricsTag = crispy::debugtag::make("perf.metrics", "Logs performance metrics.");
 
 }
 
