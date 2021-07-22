@@ -181,8 +181,8 @@ jobs:
         if-no-files-found: error
         retention-days: 30
 
-  osx:
-    name: "OS/X"
+  osx_qt5:
+    name: "OS/X (Qt5)"
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
@@ -200,6 +200,7 @@ jobs:
         set -ex
         #brew update
         ./scripts/install-deps.sh
+        brew install qt5
     - name: "Create build directory"
       run: mkdir build
     - name: "Generate build files"
@@ -233,6 +234,44 @@ jobs:
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
         if-no-files-found: error
         retention-days: 30
+
+  osx_qt6:
+    name: "OS/X (Qt6)"
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Install dependencies"
+      run: |
+        set -ex
+        #brew update
+        ./scripts/install-deps.sh
+        brew install qt6
+    - name: "Create build directory"
+      run: mkdir build
+    - name: "Generate build files"
+      run: |
+        cmake . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
+              -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
+              -DYAML_CPP_INSTALL=OFF \
+              -DCONTOUR_BUILD_WITH_QT6=ON \
+              -B build/
+    - name: "Build"
+      run: cmake --build build/
+    - name: "test: libcrispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
 
   windows:
     name: "Windows"
