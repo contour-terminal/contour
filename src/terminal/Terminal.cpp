@@ -676,10 +676,10 @@ void Terminal::flushInput()
     pendingInput_.clear();
 }
 
-void Terminal::writeToScreen(char const* data, size_t size)
+void Terminal::writeToScreen(string_view _data)
 {
     auto const _l = lock_guard{*this};
-    screen_.write(data, size);
+    screen_.write(_data);
 }
 
 // TODO: this family of functions seems we don't need anymore

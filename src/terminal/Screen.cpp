@@ -516,16 +516,16 @@ void Screen::fail(std::string const& _message) const
     abort();
 }
 
-void Screen::write(char const * _data, size_t _size)
+void Screen::write(std::string_view _data)
 {
-    if (!_size)
+    if (_data.empty())
         return;
 #if defined(LIBTERMINAL_LOG_RAW)
     if (crispy::debugtag::enabled(ScreenRawOutputTag))
-        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data, _data + _size));
+        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data));
 #endif
 
-    parser_.parseFragment(string_view(_data, _size));
+    parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
         return;
@@ -533,9 +533,9 @@ void Screen::write(char const * _data, size_t _size)
     eventListener_.screenUpdated();
 }
 
-void Screen::write(std::u32string_view const& _text)
+void Screen::write(std::u32string_view _data)
 {
-    parser_.parseFragment(_text);
+    parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
         return;

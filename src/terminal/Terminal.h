@@ -124,10 +124,7 @@ class Terminal : public ScreenEvents {
     }
 
     /// Writes a given VT-sequence to screen.
-    void writeToScreen(char const* data, size_t size);
-    void writeToScreen(std::string_view _text) { writeToScreen(_text.data(), _text.size()); }
-    void writeToScreen(std::string const& _text) { writeToScreen(_text.data(), _text.size()); }
-    // }}}
+    void writeToScreen(std::string_view _text);
 
     // viewport management
     Viewport& viewport() noexcept { return viewport_; }

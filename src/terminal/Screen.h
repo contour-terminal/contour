@@ -182,12 +182,8 @@ class Screen : public capabilities::StaticDatabase {
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
     /// Writes given data into the screen.
-    void write(char const* _data, size_t _size);
-
-    /// Writes given data into the screen.
-    void write(std::string_view const& _text) { write(_text.data(), _text.size()); }
-
-    void write(std::u32string_view const& _text);
+    void write(std::string_view _data);
+    void write(std::u32string_view _data);
 
     void writeText(char32_t _char);
     void writeText(std::string_view _chars);
