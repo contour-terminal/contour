@@ -57,6 +57,17 @@ namespace // {{{ helpers
         auto const b = _colorPalette.selectionBackground.value_or(fg);
         return tuple{a, b};
     }
+
+    void logRenderBufferSwap(bool _success, uint64_t _frameID)
+    {
+        if (!crispy::debugtag::enabled(crispy::PerfMetricsTag))
+            return;
+
+        if (_success)
+            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapped.", _frameID);
+        else
+            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapping failed.", _frameID);
+    }
 }
 // }}}
 
@@ -196,19 +207,6 @@ bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now, b
     return renderBuffer_.state == RenderBufferState::WaitingForRefresh;
 }
 
-#if defined(CONTOUR_PERF_STATS)
-static void logRenderBufferSwap(bool _success, uint64_t _frameCount)
-{
-    if (crispy::debugtag::enabled(crispy::PerfMetricsTag))
-    {
-        if (_success)
-            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapped.", _frameCount);
-        else
-            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapping failed.", _frameCount);
-    }
-}
-#endif
-
 bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked)
 {
     if (!renderBufferUpdateEnabled_)
@@ -245,7 +243,7 @@ bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
                 [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(_now);
 
                 #if defined(CONTOUR_PERF_STATS)
-                logRenderBufferSwap(success, frameCount_);
+                logRenderBufferSwap(success, lastFrameID_);
                 #endif
 
                 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -280,11 +278,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
     changes_.store(0);
 
+    ++lastFrameID_;
+    _output.frameID = lastFrameID_;
 #if defined(CONTOUR_PERF_STATS)
-    ++frameCount_;
-    _output.frameCount = frameCount_;
     if (crispy::debugtag::enabled(TerminalTag))
-        debuglog(TerminalTag).write("{}: Refreshing render buffer.\n", frameCount_.load());
+        debuglog(TerminalTag).write("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
     if (renderHyperlinks)

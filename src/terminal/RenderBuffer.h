@@ -35,7 +35,6 @@ struct RenderCell
 };
 
 struct RenderCursor
-// TODO: this could be already translated into a RenderCell
 {
     Coordinate position;
     CursorShape shape;
@@ -46,7 +45,7 @@ struct RenderBuffer
 {
     std::vector<RenderCell> screen{};
     std::optional<RenderCursor> cursor{};
-    uint64_t frameCount{};
+    uint64_t frameID{};
 
     void clear() { screen.clear(); cursor.reset(); }
 };

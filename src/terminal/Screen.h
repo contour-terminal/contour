@@ -61,20 +61,17 @@ class Modes {
   public:
     void set(AnsiMode _mode, bool _enabled)
     {
-        if (_enabled)
-            ansi_.insert(_mode);
-        else if (auto i = ansi_.find(_mode); i != ansi_.end())
-            ansi_.erase(i);
+        ansi_.set(static_cast<size_t>(_mode), _enabled);
     }
 
     void set(DECMode  _mode, bool _enabled)
     {
-        dec_.set(size_t(_mode), _enabled);
+        dec_.set(static_cast<size_t>(_mode), _enabled);
     }
 
-    bool enabled(AnsiMode _mode) const noexcept { return ansi_.find(_mode) != ansi_.end(); }
+    bool enabled(AnsiMode _mode) const noexcept { return ansi_.test(static_cast<size_t>(_mode)); }
 
-    bool enabled(DECMode _mode) const noexcept { return dec_.test(size_t(_mode)); }
+    bool enabled(DECMode _mode) const noexcept { return dec_.test(static_cast<size_t>(_mode)); }
 
     void save(std::vector<DECMode> const& _modes)
     {
@@ -97,8 +94,8 @@ class Modes {
 
   private:
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode enum values.
-    std::set<AnsiMode> ansi_;
-    std::bitset<2048> dec_;
+    std::bitset<32> ansi_; // AnsiMode
+    std::bitset<2048> dec_; // DECMode
     std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 };
 // }}}

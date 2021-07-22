@@ -294,14 +294,7 @@ class Terminal : public ScreenEvents {
 
     void markScreenDirty() { screenDirty_ = true; }
 
-    uint64_t frameCount() const noexcept
-    {
-#if defined(CONTOUR_PERF_STATS)
-        return frameCount_.load();
-#else
-        return 0;
-#endif
-    }
+    uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
 
   private:
     void flushInput();
@@ -398,9 +391,7 @@ class Terminal : public ScreenEvents {
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;
 
-#if defined(CONTOUR_PERF_STATS)
-    std::atomic<uint64_t> frameCount_ = 0;
-#endif
+    std::atomic<uint64_t> lastFrameID_ = 0;
 };
 
 }  // namespace terminal
