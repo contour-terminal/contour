@@ -1,6 +1,8 @@
 #include <terminal/pty/MockPty.h>
 
 using namespace std::chrono;
+using std::optional;
+using std::string_view;
 
 namespace terminal
 {
@@ -14,15 +16,12 @@ MockPty::~MockPty()
 {
 }
 
-int MockPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
+optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
 {
-    // Reading from stdout.
-    (void) _timeout;
-
-    auto const n = std::min(outputBuffer_.size(), _size);
-    std::copy(begin(outputBuffer_), next(begin(outputBuffer_), static_cast<int>(n)), _buf);
-    outputBuffer_.erase(0, n);
-    return static_cast<int>(n);
+    auto const n = std::min(outputBuffer_.size() - outputReadOffset_, _size);
+    auto const result = string_view{outputBuffer_.data() + outputReadOffset_, n};
+    outputReadOffset_ += n;
+    return result;
 }
 
 void MockPty::wakeupReader()

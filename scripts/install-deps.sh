@@ -49,7 +49,7 @@ main_linux()
 
 main_darwin()
 {
-    brew install freetype fontconfig qt5 harfbuzz boost pkg-config
+    brew install freetype fontconfig harfbuzz boost pkg-config
 }
 
 main()

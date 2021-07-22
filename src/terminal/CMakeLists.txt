@@ -37,6 +37,7 @@ set(terminal_HEADERS
     Process.h
     pty/Pty.h
     pty/MockPty.h
+    pty/MockViewPty.h
     pty/UnixPty.h
     pty/ConPty.h
     pty/PtyProcess.h
@@ -53,6 +54,7 @@ set(terminal_HEADERS
 
 set(terminal_SOURCES
     pty/MockPty.cpp
+    pty/MockViewPty.cpp
     pty/PtyProcess.cpp
     Charset.cpp
     Capabilities.cpp
@@ -137,7 +139,10 @@ if(LIBTERMINAL_TESTING)
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
-endif(LIBTERMINAL_TESTING)
+
+    add_executable(bench-headless bench-headless.cpp)
+    target_link_libraries(bench-headless fmt::fmt-header-only terminal termbench)
+endif()
 
 message(STATUS "[libterminal] Compile unit tests: ${LIBTERMINAL_TESTING}")
 message(STATUS "[libterminal] Enable raw VT sequence logging: ${LIBTERMINAL_LOG_RAW}")

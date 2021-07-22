@@ -26,7 +26,7 @@ class MockPty : public Pty
     explicit MockPty(PageSize windowSize);
     ~MockPty() override;
 
-    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize screenSize() const noexcept override;
@@ -37,14 +37,27 @@ class MockPty : public Pty
     void close() override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
-    std::string& stdoutBuffer() noexcept { return outputBuffer_; }
     bool isClosed() const noexcept { return closed_; }
+
+    void appendStdOutBuffer(std::string_view _that)
+    {
+        if (outputReadOffset_ == outputBuffer_.size())
+        {
+            outputReadOffset_ = 0;
+            outputBuffer_ = _that;
+        }
+        else
+        {
+            outputBuffer_ += _that;
+        }
+    }
 
   private:
     PageSize screenSize_;
     std::optional<ImageSize> pixelSize_;
     std::string inputBuffer_;
     std::string outputBuffer_;
+    std::size_t outputReadOffset_ = 0;
     bool closed_ = false;
 };
 

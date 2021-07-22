@@ -17,6 +17,7 @@
 
 #include <chrono>
 #include <optional>
+#include <string_view>
 
 namespace terminal {
 
@@ -42,11 +43,10 @@ class Pty {
 
     /// Reads from the terminal whatever has been written to from the other side of the terminal.
     ///
-    /// @param buf    Target buffer to store the received data to.
-    /// @param size   Capacity of parameter @p buf. At most @p size bytes will be stored into it.
+    /// @param _size   Capacity of parameter @p buf. At most @p size bytes will be stored into it.
     ///
-    /// @returns number of bytes stored in @p buf or -1 on error.
-    virtual int read(char* buf, size_t size, std::chrono::milliseconds _timeout) = 0;
+    /// @returns view to the consumed buffer.
+    virtual std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) = 0;
 
     /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
     ///

@@ -39,6 +39,9 @@ class ParserEvents {
      */
     virtual void print(char32_t _text) = 0;
 
+    /// Optimization that passes in ASCII chars between [0x20 .. 0x7F].
+    virtual void print(std::string_view _chars) = 0;
+
     /**
      * The C0 or C1 control function should be executed, which may have any one of a variety of
      * effects, including changing the cursor position, suspending or resuming communications or
@@ -145,6 +148,7 @@ class BasicParserEvents : public ParserEvents {
   public:
     void error(std::string_view const&) override {}
     void print(char32_t) override {}
+    void print(std::string_view) override {};
     void execute(char) override {}
     void clear() override {}
     void collect(char) override {}

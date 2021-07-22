@@ -1005,6 +1005,9 @@ Sequencer::Sequencer(Screen& _screen,
 
 void Sequencer::error(std::string_view const& _errorString)
 {
+    if (!crispy::debugtag::enabled(VTParserTag))
+        return;
+
     debuglog(VTParserTag).write("Parser error: {}", _errorString);
 }
 
@@ -1013,6 +1016,16 @@ void Sequencer::print(char32_t _char)
     precedingGraphicCharacter_ = _char;
     instructionCounter_++;
     screen_.writeText(_char);
+}
+
+void Sequencer::print(string_view _chars)
+{
+    if (_chars.empty())
+        return;
+
+    precedingGraphicCharacter_ = _chars.back();
+    instructionCounter_ += _chars.size();
+    screen_.writeText(_chars);
 }
 
 void Sequencer::execute(char _controlCode)
@@ -1317,7 +1330,8 @@ void Sequencer::executeControlFunction(char _c0)
             screen_.restoreCursor();
             break;
         default:
-            debuglog(VTParserTag).write("Unsupported C0 sequence: {}", crispy::escape(_c0));
+            if (crispy::debugtag::enabled(VTParserTag))
+                debuglog(VTParserTag).write("Unsupported C0 sequence: {}", crispy::escape(_c0));
             break;
     }
 }
@@ -1337,7 +1351,7 @@ void Sequencer::handleSequence()
         applyAndLog(*funcSpec, sequence_);
         screen_.verifyState();
     }
-    else
+    else if (crispy::debugtag::enabled(VTParserTag))
         debuglog(VTParserTag).write("Unknown VT sequence: {}", sequence_);
 }
 

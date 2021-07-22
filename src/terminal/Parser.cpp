@@ -25,13 +25,90 @@
 #include <cstdio>
 #include <map>
 #include <ostream>
+#include <string_view>
 
 #include <fmt/format.h>
+
+#include <range/v3/view/subrange.hpp>
+
+#if defined(__SSE2__)
+#include <immintrin.h>
+#endif
 
 namespace terminal::parser {
 
 using namespace std;
 
+inline int countTrailingZeroBits(unsigned int _value)
+{
+#if defined(_WIN32)
+    return _tzcnt_u32(_value);
+#else
+    return __builtin_ctz(_value);
+#endif
+}
+
+inline size_t countAsciiTextChars(uint8_t const* _begin, uint8_t const* _end) noexcept
+{
+    // TODO: Do move this functionality into libunicode?
+
+    auto input = _begin;
+
+#if 0 // TODO: defined(__AVX2__)
+    // AVX2 to be implemented directly in NASM file.
+
+#elif defined(__SSE2__)
+    __m128i const ControlCodeMax = _mm_set1_epi8(0x20);  // 0..0x1F
+    __m128i const Complex = _mm_set1_epi8(static_cast<char>(0x80));
+
+    while (input < _end - sizeof(__m128i))
+    {
+        __m128i batch = _mm_loadu_si128((__m128i *)input);
+        __m128i isControl = _mm_cmplt_epi8(batch, ControlCodeMax);
+        __m128i isComplex = _mm_and_si128(batch, Complex);
+        __m128i testPack = _mm_or_si128(isControl, isComplex);
+        if (int const check = _mm_movemask_epi8(testPack); check != 0)
+        {
+            int advance = countTrailingZeroBits(check);
+            input += advance;
+            break;
+        }
+        input += 16;
+    }
+
+    return static_cast<size_t>(std::distance(_begin, input));
+#else
+    return 0;
+#endif
+}
+
+void Parser::parseFragment(string_view _data)
+{
+    auto input = reinterpret_cast<uint8_t const*>(_data.data());
+    auto end = reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
+
+    if (state_ == State::Ground)
+    {
+        if (auto count = countAsciiTextChars(input, end); count > 0)
+        {
+            eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
+            input += count;
+        }
+    }
+
+    static constexpr char32_t ReplacementCharacter {0xFFFD};
+
+    for (auto const current: ranges::subrange(input, end))
+    {
+        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
+        if (std::holds_alternative<unicode::Success>(r))
+            processInput(std::get<unicode::Success>(r).value);
+        else if (std::holds_alternative<unicode::Invalid>(r))
+            processInput(ReplacementCharacter);
+    }
+}
+
+// {{{ dot
 using Transition = pair<State, State>;
 using Range = ParserTable::Range;
 using RangeSet = std::vector<Range>;
@@ -118,5 +195,6 @@ void dot(std::ostream& _os, ParserTable const& _table)
 
     _os << "}\n";
 }
+// }}}
 
 }  // namespace terminal

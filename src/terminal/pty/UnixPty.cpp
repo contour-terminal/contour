@@ -39,10 +39,14 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-using std::runtime_error;
+using std::min;
+using std::max;
+using std::nullopt;
 using std::numeric_limits;
 using std::optional;
-using std::max;
+using std::runtime_error;
+using std::string_view;
+
 using namespace std::string_literals;
 
 namespace terminal {
@@ -76,7 +80,8 @@ namespace
 }
 
 UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
-    size_{ _windowSize }
+    size_{ _windowSize },
+    buffer_(4 * 1024 * 1024, {})
 {
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
     assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -157,13 +162,13 @@ void UnixPty::wakeupReader()
     (void) rv;
 }
 
-int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
+optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _timeout)
 {
     if (master_ < 0)
     {
         debuglog(PtyTag).write("read() called with closed PTY master.");
         errno = ENODEV;
-        return -1;
+        return nullopt;
     }
 
     timeval tv{};
@@ -191,11 +196,11 @@ int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
         if (rv == 0)
         {
             errno = EAGAIN;
-            return -1;
+            return nullopt;
         }
 
         if (rv < 0)
-            return -1;
+            return nullopt;
 
         bool piped = false;
         if (FD_ISSET(pipe_[0], &rfd))
@@ -213,15 +218,18 @@ int UnixPty::read(char* _buf, size_t _size, std::chrono::milliseconds _timeout)
 
         if (FD_ISSET(master_, &rfd))
         {
-            auto const rv = static_cast<int>(::read(master_, _buf, _size));
-            // debuglog(PtyTag).write("read returned {}. {}", rv, rv < 0 ? strerror(errno) : "");
-            return rv;
+            auto const n = min(_size, buffer_.size());
+            auto const rv = static_cast<int>(::read(master_, buffer_.data(), n));
+            if (rv >= 0)
+                return string_view{buffer_.data(), static_cast<size_t>(rv)};
+            else
+                return string_view{};
         }
 
         if (piped)
         {
             errno = EINTR;
-            return -1;
+            return nullopt;
         }
     }
 }
