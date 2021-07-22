@@ -547,10 +547,20 @@ void Screen::write(std::u32string_view const& _text)
     eventListener_.screenUpdated();
 }
 
+void Screen::writeText(std::string_view _chars)
+{
+    // TODO: can be optimized.
+    // - This may require Grid/Line/Cell updates first before yielding any impact.
+    // - Also, we could use SIMD to batch-store the grid cell attributes.
+    for (char ch: _chars)
+        writeText(ch);
+}
+
 void Screen::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    debuglog(VTParserTraceTag).write("text: {}", unicode::convert_to<char>(_char));
+    if (debugtag::enabled(VTParserTraceTag))
+        debuglog(VTParserTraceTag).write("text: {}", unicode::convert_to<char>(_char));
 #endif
     bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
 

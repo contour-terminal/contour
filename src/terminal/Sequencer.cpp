@@ -1015,6 +1015,16 @@ void Sequencer::print(char32_t _char)
     screen_.writeText(_char);
 }
 
+void Sequencer::print(string_view _chars)
+{
+    if (_chars.empty())
+        return;
+
+    precedingGraphicCharacter_ = _chars.back();
+    instructionCounter_ += _chars.size();
+    screen_.writeText(_chars);
+}
+
 void Sequencer::execute(char _controlCode)
 {
     executeControlFunction(_controlCode);

@@ -137,6 +137,9 @@ if(LIBTERMINAL_TESTING)
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
+
+    add_executable(bench-headless bench-headless.cpp)
+    target_link_libraries(bench-headless fmt::fmt-header-only terminal)
 endif(LIBTERMINAL_TESTING)
 
 message(STATUS "[libterminal] Compile unit tests: ${LIBTERMINAL_TESTING}")

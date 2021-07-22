@@ -192,6 +192,7 @@ class Screen : public capabilities::StaticDatabase {
     void write(std::u32string_view const& _text);
 
     void writeText(char32_t _char);
+    void writeText(std::string_view _chars);
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>

@@ -762,37 +762,6 @@ class Parser {
     ParserEvents& eventListener_;
 };
 
-inline void Parser::parseFragment(iterator _begin, iterator _end)
-{
-    static constexpr char32_t ReplacementCharacter {0xFFFD};
-
-    for (auto const current : crispy::range(_begin, _end))
-    {
-#if 0
-        std::visit(
-            overloaded{
-                [&](unicode::Incomplete) {},
-                [&](unicode::Invalid) {
-                    eventListener_.error("Invalid UTF-8 byte sequence received.");
-                    processInput(ReplacementCharacter);
-                },
-                [&](unicode::Success const& success) {
-                    // std::cout << fmt::format("VTParser.parse: ch = {:04X}\n", static_cast<unsigned>(success.value));
-                    processInput(success.value);
-                },
-            },
-            unicode::from_utf8(utf8DecoderState_, current)
-        );
-#else
-        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
-        if (std::holds_alternative<unicode::Success>(r))
-            processInput(std::get<unicode::Success>(r).value);
-        else if (std::holds_alternative<unicode::Invalid>(r))
-            processInput(ReplacementCharacter);
-#endif
-    }
-}
-
 inline void Parser::processInput(char32_t _ch)
 {
     auto const s = static_cast<size_t>(state_);
