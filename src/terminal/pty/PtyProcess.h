@@ -36,7 +36,7 @@ class PtyProcess: public Pty
     void close() override;
     void prepareParentProcess() override;
     void prepareChildProcess() override;
-    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize screenSize() const noexcept override;

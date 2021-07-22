@@ -1,6 +1,6 @@
 /**
  * This file is part of the "libterminal" project
- *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *   Copyright (c) 2019-2021 Christian Parpart <christian@parpart.family>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,25 +11,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #pragma once
 
 #include <terminal/pty/Pty.h>
 
-#include <Windows.h>
-
-namespace terminal {
-
-/// ConPty implementation for newer Windows 10 versions.
-class ConPty : public Pty
+namespace terminal
 {
-  public:
-    explicit ConPty(PageSize const& windowSize);
-    ~ConPty() override;
 
-    void close() override;
+class MockViewPty: public Pty
+{
+public:
+    explicit MockViewPty(PageSize _windowSize):
+        screenSize_{_windowSize}
+    {}
 
-    void prepareParentProcess() override;
-    void prepareChildProcess() override;
+    ~MockViewPty() {}
+
+    void setReadData(std::string_view _data);
 
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
@@ -37,14 +36,20 @@ class ConPty : public Pty
     PageSize screenSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
-    HPCON master() const noexcept { return master_; }
+    void prepareChildProcess() override;
+    void prepareParentProcess() override;
+    void close() override;
 
-  private:
-    PageSize size_;
-    HPCON master_;
-    HANDLE input_;
-    HANDLE output_;
-    std::vector<char> buffer_;
+    std::string& stdinBuffer() noexcept { return inputBuffer_; }
+    std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
+    bool isClosed() const noexcept { return closed_; }
+
+private:
+    PageSize screenSize_;
+    std::optional<ImageSize> pixelSize_;
+    std::string inputBuffer_;
+    std::string_view outputBuffer_;
+    bool closed_ = false;
 };
 
-}  // namespace terminal
+}

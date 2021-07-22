@@ -465,10 +465,6 @@ void Screen::resize(PageSize _newSize)
 
     // update last-cursor position & iterators
     lastCursorPosition_ = clampCoordinate(lastCursorPosition_);
-    lastColumn_ = columnIteratorAt(
-        begin(*next(begin(grid().mainPage()), lastCursorPosition_.row - 1)), // last line
-        lastCursorPosition_.column
-    );
 
     // truncating tabs
     while (!tabs_.empty() && tabs_.back() > boxed_cast<ColumnPosition>(_newSize.columns))
@@ -506,7 +502,7 @@ void Screen::verifyState() const
 
     if (line != currentLine_)
         fail(fmt::format("Calculated current line does not match."));
-    else if (col != currentColumn_)
+    else if (col != currentColumn())
         fail(fmt::format("Calculated current column does not match."));
 
     if (wrapPending_ && (cursor_.position.column + wrapPending_ - 1) != unbox<int>(size_.columns) && cursor_.position.column != margin_.horizontal.to)
@@ -520,16 +516,16 @@ void Screen::fail(std::string const& _message) const
     abort();
 }
 
-void Screen::write(char const * _data, size_t _size)
+void Screen::write(std::string_view _data)
 {
-    if (!_size)
+    if (_data.empty())
         return;
 #if defined(LIBTERMINAL_LOG_RAW)
     if (crispy::debugtag::enabled(ScreenRawOutputTag))
-        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data, _data + _size));
+        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data));
 #endif
 
-    parser_.parseFragment(string_view(_data, _size));
+    parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
         return;
@@ -537,9 +533,9 @@ void Screen::write(char const * _data, size_t _size)
     eventListener_.screenUpdated();
 }
 
-void Screen::write(std::u32string_view const& _text)
+void Screen::write(std::u32string_view _data)
 {
-    parser_.parseFragment(_text);
+    parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
         return;
@@ -576,8 +572,8 @@ void Screen::writeText(char32_t _char)
                     : _char == 0x7F ? ' ' : _char;
 
     char32_t const lastChar =
-        consecutiveTextWrite && !lastColumn_->empty()
-            ? lastColumn_->codepoint(lastColumn_->codepointCount() - 1)
+        consecutiveTextWrite && !lastPosition().empty()
+            ? lastPosition().codepoints().back()
             : char32_t{0};
 
     bool const insertToPrev =
@@ -587,7 +583,7 @@ void Screen::writeText(char32_t _char)
         writeCharToCurrentAndAdvance(ch);
     else
     {
-        auto const extendedWidth = lastColumn_->appendCharacter(ch);
+        auto const extendedWidth = lastPosition().appendCharacter(ch);
 
         if (extendedWidth > 0)
             clearAndAdvance(extendedWidth);
@@ -598,14 +594,13 @@ void Screen::writeText(char32_t _char)
 
 void Screen::writeCharToCurrentAndAdvance(char32_t _character)
 {
-    Cell& cell = *currentColumn_;
+    Cell& cell = *currentColumn();
     cell.setCharacter(_character);
     cell.setAttributes(cursor_.graphicsRendition);
 #if defined(LIBTERMINAL_HYPERLINKS)
     cell.setHyperlink(currentHyperlink_);
 #endif
 
-    lastColumn_ = currentColumn_;
     lastCursorPosition_ = cursor_.position;
 
     bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
@@ -618,14 +613,16 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     if (n == cell.width())
     {
         assert(n > 0);
-        cursor_.position.column += n;
-        currentColumn_++;
+        cursor_.position.column++;
         for (int i = 1; i < n; ++i)
+        {
 #if defined(LIBTERMINAL_HYPERLINKS)
-            (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
+            currentColumn()->reset(cursor_.graphicsRendition, currentHyperlink_);
 #else
-            (currentColumn_++)->reset(cursor_.graphicsRendition);
+            currentColumn()->reset(cursor_.graphicsRendition;
 #endif
+            cursor_.position.column++;
+        }
     }
     else if (cursor_.autoWrap)
         wrapPending_ = 1;
@@ -646,14 +643,17 @@ void Screen::clearAndAdvance(int _offset)
 
     if (n == _offset)
     {
+        cursor_.position.column++;
         assert(n > 0);
-        cursor_.position.column += n;
         for (auto i = 0; i < n; ++i)
+        {
 #if defined(LIBTERMINAL_HYPERLINKS)
-            (currentColumn_++)->reset(cursor_.graphicsRendition, currentHyperlink_);
+            currentColumn()->reset(cursor_.graphicsRendition, currentHyperlink_);
 #else
-            (currentColumn_++)->reset(cursor_.graphicsRendition);
+            currentColumn()->reset(cursor_.graphicsRendition);
 #endif
+            cursor_.position.column++;
+        }
     }
     else if (cursor_.autoWrap)
     {
@@ -831,9 +831,10 @@ void Screen::resetHard()
 
     grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();
-    moveCursorTo(Coordinate{1, 1});
 
-    lastColumn_ = currentColumn_;
+    cursor_ = {};
+    updateCursorIterators();
+
     lastCursorPosition_ = cursor_.position;
 
     margin_ = Margin{
@@ -898,7 +899,6 @@ void Screen::linefeed(int _newColumn)
         cursor_.position.row++;
         cursor_.position.column = _newColumn;
         currentLine_++;
-        updateColumnIterator();
     }
 }
 
@@ -921,7 +921,6 @@ void Screen::setCurrentColumn(ColumnPosition _n)
         : _n;
     auto const clampedCol = min(col, boxed_cast<ColumnPosition>(size_.columns));
     cursor_.position.column = *clampedCol;
-    updateColumnIterator();
 }
 
 string Screen::renderText() const
@@ -1102,13 +1101,13 @@ void Screen::eraseCharacters(ColumnCount _n)
     size_t const n = min(
         unbox<int>(size_.columns) - realCursorPosition().column + 1,
         *_n == 0 ? 1 : unbox<int>(_n));
-    fill_n(currentColumn_, n, Cell{{}, cursor_.graphicsRendition});
+    fill_n(currentColumn(), n, Cell{{}, cursor_.graphicsRendition});
 }
 
 void Screen::clearToEndOfLine()
 {
     fill(
-        currentColumn_,
+        currentColumn(),
         end(*currentLine_),
         Cell{{}, cursor_.graphicsRendition}
     );
@@ -1118,7 +1117,7 @@ void Screen::clearToBeginOfLine()
 {
     fill(
         begin(*currentLine_),
-        next(currentColumn_),
+        next(currentColumn()),
         Cell{{}, cursor_.graphicsRendition}
     );
 }
@@ -1167,9 +1166,6 @@ void Screen::insertChars(int _lineNo, ColumnCount _n)
         column1,
         column2
     );
-
-    if (&line == &*currentLine_)
-        updateColumnIterator();
 
     fill_n(
         columnIteratorAt(begin(line), cursor_.position.column),
@@ -1417,7 +1413,6 @@ void Screen::moveCursorForward(ColumnCount _n)
 {
     auto const n = min(unbox<int>(_n), margin_.horizontal.length() - cursor_.position.column);
     cursor_.position.column += n;
-    updateColumnIterator();
 }
 
 void Screen::moveCursorBackward(ColumnCount _n)

@@ -108,7 +108,7 @@ namespace // {{{ helpers
 
         void writeToStdout(std::string_view _text)
         {
-            pty_.stdoutBuffer() += _text;
+            pty_.appendStdOutBuffer(_text);
             terminal_.processInputOnce();
         }
 

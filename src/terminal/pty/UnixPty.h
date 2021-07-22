@@ -17,6 +17,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <util.h>
@@ -32,7 +33,7 @@ class UnixPty : public Pty
     explicit UnixPty(PageSize const& windowSize, std::optional<ImageSize> _pixels = std::nullopt);
     ~UnixPty() override;
 
-    int read(char* buf, size_t size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize screenSize() const noexcept override;
@@ -47,6 +48,7 @@ class UnixPty : public Pty
     int master_;
     int slave_;
     std::array<int, 2> pipe_;
+    std::vector<char> buffer_;
 };
 
 }  // namespace terminal
