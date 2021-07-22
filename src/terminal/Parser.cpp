@@ -29,8 +29,6 @@
 
 #include <fmt/format.h>
 
-#include <range/v3/view/subrange.hpp>
-
 #if defined(__SSE2__)
 #include <immintrin.h>
 #endif
@@ -87,25 +85,32 @@ void Parser::parseFragment(string_view _data)
     auto input = reinterpret_cast<uint8_t const*>(_data.data());
     auto end = reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
 
-    if (state_ == State::Ground)
+    do
     {
-        if (auto count = countAsciiTextChars(input, end); count > 0)
+        if (state_ == State::Ground && !utf8DecoderState_.expectedLength)
         {
-            eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
-            input += count;
+            if (auto count = countAsciiTextChars(input, end); count > 0)
+            {
+                eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
+                input += count;
+            }
+        }
+
+        static constexpr char32_t ReplacementCharacter {0xFFFD};
+
+        while (input != end || utf8DecoderState_.expectedLength)
+        {
+            unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, *input);
+
+            if (std::holds_alternative<unicode::Success>(r))
+                processInput(std::get<unicode::Success>(r).value);
+            else if (std::holds_alternative<unicode::Invalid>(r))
+                processInput(ReplacementCharacter);
+
+            ++input;
         }
     }
-
-    static constexpr char32_t ReplacementCharacter {0xFFFD};
-
-    for (auto const current: ranges::make_subrange(input, end))
-    {
-        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
-        if (std::holds_alternative<unicode::Success>(r))
-            processInput(std::get<unicode::Success>(r).value);
-        else if (std::holds_alternative<unicode::Invalid>(r))
-            processInput(ReplacementCharacter);
-    }
+    while (input != end);
 }
 
 // {{{ dot
