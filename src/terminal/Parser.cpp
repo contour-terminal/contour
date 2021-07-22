@@ -29,6 +29,8 @@
 
 #include <fmt/format.h>
 
+#include <range/v3/view/subrange.hpp>
+
 #if defined(__SSE2__)
 #include <immintrin.h>
 #endif
@@ -80,20 +82,23 @@ inline size_t countAsciiTextChars(uint8_t const* _begin, uint8_t const* _end) no
 #endif
 }
 
-void Parser::parseFragment(iterator _begin, iterator _end)
+void Parser::parseFragment(string_view _data)
 {
+    auto input = reinterpret_cast<uint8_t const*>(_data.data());
+    auto end = reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
+
     if (state_ == State::Ground)
     {
-        if (auto count = countAsciiTextChars(_begin, _end); count > 0)
+        if (auto count = countAsciiTextChars(input, end); count > 0)
         {
-            eventListener_.print(string_view{reinterpret_cast<char const*>(_begin), count});
-            _begin += count;
+            eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
+            end += count;
         }
     }
 
     static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-    for (auto const current : crispy::range(_begin, _end))
+    for (auto const current: ranges::subrange(input, end))
     {
         unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
         if (std::holds_alternative<unicode::Success>(r))
