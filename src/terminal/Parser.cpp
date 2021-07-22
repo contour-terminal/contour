@@ -92,7 +92,7 @@ void Parser::parseFragment(string_view _data)
         if (auto count = countAsciiTextChars(input, end); count > 0)
         {
             eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
-            end += count;
+            input += count;
         }
     }
 
