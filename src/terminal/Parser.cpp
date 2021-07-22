@@ -98,7 +98,7 @@ void Parser::parseFragment(string_view _data)
 
     static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-    for (auto const current: ranges::subrange(input, end))
+    for (auto const current: ranges::make_subrange(input, end))
     {
         unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, current);
         if (std::holds_alternative<unicode::Success>(r))

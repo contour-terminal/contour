@@ -54,6 +54,15 @@ CPMAddPackage(
 )
 
 CPMAddPackage(
+  NAME GSL
+  VERSION "3.1.0"
+  URL https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip
+  URL_HASH SHA256=a1041e41e60f9cb3789036f1c84ea9b4298823cbe94d16b096971fdc3de485b7
+  EXCLUDE_FROM_ALL YES
+)
+
+
+CPMAddPackage(
   NAME termbenchpro
   VERSION ${3rdparty_termbenchpro_version}
   URL https://github.com/contour-terminal/termbench-pro/archive/${3rdparty_termbenchpro_version}.zip
