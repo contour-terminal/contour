@@ -693,7 +693,7 @@ void OpenGLRenderer::executeRenderTextures()
                      batch.buffer.size() * sizeof(GLfloat),
                      batch.buffer.data(),
                      GL_STREAM_DRAW);
-        glDrawArrays(GL_TRIANGLES, 0, batch.renderTextures.size() * 6);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(batch.renderTextures.size() * 6));
 
         batch.clear();
     }

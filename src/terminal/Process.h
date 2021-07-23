@@ -19,6 +19,7 @@
 
 #include <crispy/stdfs.h>
 
+#include <cstring>
 #include <map>
 #include <optional>
 #include <string>
@@ -135,7 +136,12 @@ namespace fmt
                 },
                 [&](terminal::Process::SignalExit _exit) {
                     char buf[256];
-                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, strerror_r(_exit.signum, buf, sizeof(buf)));
+                    #if defined(_WIN32)
+                    strerror_s(buf, sizeof(buf), errno);
+                    #else
+                    strerror_r(errno, buf, sizeof(buf));
+                    #endif
+                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, buf);
                 }
             }, _status);
         }

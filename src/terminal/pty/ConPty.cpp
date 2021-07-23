@@ -13,6 +13,8 @@
  */
 #include <terminal/pty/ConPty.h>
 
+#include <utility>
+
 #include <Windows.h>
 
 using namespace std;
@@ -123,7 +125,7 @@ optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _time
     // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
     (void) _timeout;
 
-    auto const n = static_cast<DWORD>(min(size, buffer_.size()));
+    auto const n = static_cast<DWORD>(min(_size, buffer_.size()));
 
     DWORD nread{};
     if (!ReadFile(input_, buffer_.data(), n, &nread, nullptr))
