@@ -42,7 +42,7 @@ inline std::string escape(uint8_t ch)
         case '"':
             return "\\\"";
         default:
-            if (std::isprint(static_cast<char>(ch)))
+            if (ch < 0x80 && std::isprint(static_cast<char>(ch)))
                 return fmt::format("{}", static_cast<char>(ch));
             else
                 return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);

@@ -15,6 +15,8 @@
 
 #include <terminal/pty/Pty.h>
 
+#include <vector>
+
 #include <Windows.h>
 
 namespace terminal {
