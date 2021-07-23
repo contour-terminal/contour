@@ -3,6 +3,7 @@ include(CPM)
 set(3rdparty_catch2_version "bf61a418cbc4d3b430e3d258c5287780944ad505" CACHE STRING "catch2: commit hash")
 set(3rdparty_fmt_version "561834650aa77ba37b15f7e5c9d5726be5127df9" CACHE STRING "fmt: commit hash")
 set(3rdparty_libunicode_version "a0f72919e4520ee1a02890ea77f19ff16c92d4f8" CACHE STRING "libunicode: commit hash")
+set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
 set(3rdparty_range_v3_version "0487cca29e352e8f16bbd91fda38e76e39a0ed28" CACHE STRING "range_v3: commit hash")
 set(3rdparty_yaml_cpp_version "79aa6d53e5718ca44bc01ef05fdda7a849d353e0" CACHE STRING "yaml-cpp: commit hash")
 set(3rdparty_termbenchpro_version "c2312fc2ebadf45adc724295951d078b1adb7ffe" CACHE STRING "termbench-pro: version")
@@ -78,3 +79,14 @@ CPMAddPackage(
   EXCLUDE_FROM_ALL YES
 )
 
+if(CONTOUR_BUILD_WITH_MIMALLOC)
+  set(MI_BUILD_SHARED OFF CACHE INTERNAL "")
+  set(MI_BUILD_TESTS OFF CACHE INTERNAL "")
+  CPMAddPackage(
+    NAME mimalloc
+    VERSION ${3rdparty_mimalloc_version}
+    URL https://github.com/microsoft/mimalloc/archive/${3rdparty_mimalloc_version}.zip
+    URL_HASH SHA256=6ccba822e251b8d10f8a63d5d7767bc0cbfae689756a4047cdf3d1e4a9fd33d0
+    EXCLUDE_FROM_ALL YES
+  )
+endif()
