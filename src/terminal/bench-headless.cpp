@@ -28,7 +28,7 @@
 
 using namespace std;
 
-class ParserOnly: public terminal::ParserEvents
+class NullParserEvents: public terminal::ParserEvents
 {
 public:
     void error(std::string_view const& _errorString) override {}
@@ -49,106 +49,83 @@ public:
     void unhook() override {}
 };
 
-class HeadlessBench: public terminal::Terminal::Events
+template <typename Writer>
+void baseBenchmark(Writer&& _writer, size_t _testSizeMB, string_view _title)
 {
-public:
-    HeadlessBench(terminal::PageSize _pageSize,
-                  int _ptyReadBufferSize,
-                  std::optional<terminal::LineCount> _maxHistoryLineCount);
-
-    terminal::MockViewPty& pty() noexcept { return *pty_; }
-    terminal::Terminal& terminal() noexcept { return vt_; }
-
-private:
-    std::unique_ptr<terminal::MockViewPty> pty_;
-    terminal::Terminal vt_;
-};
-
-HeadlessBench::HeadlessBench(terminal::PageSize _pageSize,
-                             int _ptyReadBufferSize,
-                             std::optional<terminal::LineCount> _maxHistoryLineCount):
-    pty_{std::make_unique<terminal::MockViewPty>(_pageSize)},
-    vt_{
-        *pty_,
-        _ptyReadBufferSize,
-        *this,
-        _maxHistoryLineCount
-    }
-{
-    vt_.screen().setMode(terminal::DECMode::AutoWrap, true);
-}
-
-void benchmarkParser()
-{
-    auto po = ParserOnly{};
-    auto parser = terminal::parser::Parser{po};
+    auto const titleText = fmt::format("Running benchmark: {}", _title);
+    std::cout << titleText << '\n'
+              << std::string(titleText.size(), '=') << '\n';
 
     auto tbp = contour::termbench::Benchmark{
+        std::forward<Writer>(_writer),
+        _testSizeMB,
+        80,
+        24,
+        [&](contour::termbench::Test const& _test)
+        {
+            cout << fmt::format("Running test {} ...\n", _test.name);
+        }
+    };
+
+    tbp.add(contour::termbench::tests::many_lines());
+    tbp.add(contour::termbench::tests::long_lines());
+    tbp.add(contour::termbench::tests::sgr_fg_lines());
+    tbp.add(contour::termbench::tests::sgr_fgbg_lines());
+    // tbp.add(contour::termbench::tests::binary());
+
+    tbp.runAll();
+
+    cout << '\n';
+    cout << "Results\n";
+    cout << "-------\n";
+    tbp.summarize(cout);
+    cout << '\n';
+}
+
+void benchmarkParserOnly()
+{
+    auto po = NullParserEvents{};
+    auto parser = terminal::parser::Parser{po};
+    baseBenchmark(
         [&](char const* a, size_t b)
         {
             parser.parseFragment(string_view(a, b));
         },
         1024, // MB
-        80,
-        24,
-        [&](contour::termbench::Test const& _test)
-        {
-            cout << fmt::format("Running test {} ...\n", _test.name);
-        }
-    };
-
-    tbp.add(contour::termbench::tests::many_lines());
-    tbp.add(contour::termbench::tests::long_lines());
-    tbp.add(contour::termbench::tests::sgr_fg_lines());
-    tbp.add(contour::termbench::tests::sgr_fgbg_lines());
-    //tbp.add(contour::termbench::tests::binary());
-
-    tbp.runAll();
-
-    cout << '\n';
-    cout << "Terminal benchmark (parser only)\n";
-    cout << "================================\n\n";
-    tbp.summarize(cout);
+        "Parser only"sv
+    );
 }
 
 void benchmarkTerminal()
 {
+    auto const testSizeMB = 32;
     auto pageSize = terminal::PageSize{terminal::LineCount(25), terminal::ColumnCount(80)};
     auto const ptyReadBufferSize = 8192;
-    auto maxHistoryLineCount = optional{terminal::LineCount(10000)};
-    auto hb = HeadlessBench{pageSize, ptyReadBufferSize, maxHistoryLineCount};
+    auto maxHistoryLineCount = terminal::LineCount(4096);
+    auto eh = terminal::Terminal::Events{};
+    auto pty = std::make_unique<terminal::MockViewPty>(pageSize);
+    auto vt = terminal::Terminal{
+        *pty,
+        ptyReadBufferSize,
+        eh,
+        maxHistoryLineCount
+    };
+    vt.screen().setMode(terminal::DECMode::AutoWrap, true);
 
-    auto tbp = contour::termbench::Benchmark{
+    baseBenchmark(
         [&](char const* a, size_t b)
         {
-            hb.pty().setReadData({a, b});
-            do hb.terminal().processInputOnce();
-            while (!hb.pty().stdoutBuffer().empty());
+            pty->setReadData({a, b});
+            do vt.processInputOnce();
+            while (!pty->stdoutBuffer().empty());
         },
-        16, // MB
-        80,
-        24,
-        [&](contour::termbench::Test const& _test)
-        {
-            cout << fmt::format("Running test {} ...\n", _test.name);
-        }
-    };
+        testSizeMB,
+        "terminal with screen buffer"
+    );
 
-    tbp.add(contour::termbench::tests::many_lines());
-    tbp.add(contour::termbench::tests::long_lines());
-    tbp.add(contour::termbench::tests::sgr_fg_lines());
-    tbp.add(contour::termbench::tests::sgr_fgbg_lines());
-    //tbp.add(contour::termbench::tests::binary());
-
-    tbp.runAll();
-
-    cout << '\n';
-    cout << "Terminal benchmark (parser + terminal buffer)\n";
-    cout << "=============================================\n\n";
-    tbp.summarize(cout);
-    cout << fmt::format("{:>12}: {}\n",
+    cout << fmt::format("{:>12}: {}\n\n",
                         "history size",
-                        hb.terminal().screen().maxHistoryLineCount().value_or(terminal::LineCount(0)));
+                        vt.screen().maxHistoryLineCount().value_or(terminal::LineCount(0)));
 }
 
 int main(int argc, char const* argv[])
@@ -156,7 +133,7 @@ int main(int argc, char const* argv[])
     crispy::debugtag::disable(terminal::VTParserTag);
 
     benchmarkTerminal();
-    benchmarkParser();
+    benchmarkParserOnly();
 
     return EXIT_SUCCESS;
 }
