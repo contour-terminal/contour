@@ -93,6 +93,17 @@ void Parser::parseFragment(string_view _data)
             {
                 eventListener_.print(string_view{reinterpret_cast<char const*>(input), count});
                 input += count;
+
+                // This optimization is for the `cat`-people.
+                // It further optimizes the throughput performance by bypassing
+                // the FSM for the `(TEXT LF+)+`-case.
+                //
+                // As of bench-headless, the performance incrrease is about 50x.
+                if (input != end && *input == '\n')
+                {
+                    eventListener_.execute(static_cast<char>(*input++));
+                    continue;
+                }
             }
         }
 
