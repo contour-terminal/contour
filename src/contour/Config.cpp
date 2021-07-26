@@ -994,7 +994,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     string strValue = FileSystem::current_path().generic_string();
     tryLoadChild(_usedKeys, _doc, basePath, "initial_working_directory", strValue);
-    if (profile.shell.workingDirectory.empty())
+    if (strValue.empty())
         profile.shell.workingDirectory = FileSystem::current_path();
     else if (strValue[0] == '~')
     {
