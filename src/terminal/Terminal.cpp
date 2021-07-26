@@ -24,6 +24,8 @@
 #include <chrono>
 #include <utility>
 
+#include <fmt/chrono.h>
+
 #include <iostream>
 
 #include <sys/types.h>
@@ -167,7 +169,9 @@ bool Terminal::processInputOnce()
     auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
     if (!bufOpt)
     {
-        debuglog(TerminalTag).write("PTY read failed. {}", strerror(errno));
+        debuglog(TerminalTag).write("PTY read failed (timeout: {}). {}",
+                                    timeout,
+                                    strerror(errno));
         return errno == EINTR || errno == EAGAIN;
     }
     auto const buf = *bufOpt;
