@@ -1092,14 +1092,14 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             errorlog().write("Unknown text shaping method: {}", strValue);
     }
 
-    bool onlyMonospace = true;
-    tryLoadChild(_usedKeys, _doc, basePath, "font.only_monospace", onlyMonospace);
+    bool strictSpacing = false;
+    tryLoadChild(_usedKeys, _doc, basePath, "font.strict_spacing", strictSpacing);
 
     auto const fontBasePath = fmt::format("profiles.{}.font", _name);
 
     profile.fonts.regular.familyName = "regular";
     profile.fonts.regular.spacing = text::font_spacing::mono;
-    profile.fonts.regular.force_spacing = onlyMonospace;
+    profile.fonts.regular.strict_spacing = strictSpacing;
     softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
 
     profile.fonts.bold = profile.fonts.regular;

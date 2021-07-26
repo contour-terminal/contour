@@ -389,7 +389,7 @@ namespace // {{{ helper
 
             int spacing = -1; // ignore font if we cannot retrieve spacing information
             FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-            if (_fd.force_spacing)
+            if (_fd.strict_spacing)
             {
                 if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL) ||
                     (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
@@ -788,7 +788,7 @@ void open_shaper::shape(font_key _font,
             continue;
 
         // Skip if main font is monospace but fallback font is not.
-        if (fontInfo.description.force_spacing &&
+        if (fontInfo.description.strict_spacing &&
             fontInfo.description.spacing != font_spacing::proportional)
         {
             FontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
