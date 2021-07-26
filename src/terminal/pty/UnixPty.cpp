@@ -199,6 +199,12 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             return nullopt;
         }
 
+        if (master_ < 0)
+        {
+            errno = ENODEV;
+            return nullopt;
+        }
+
         if (rv < 0)
             return nullopt;
 
