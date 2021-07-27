@@ -8,10 +8,10 @@ KEY_ID="5E39E916156361EA1021D2B5427FBA118140755D"
 EMAIL="christian@parpart.family"
 SETMARK="\033[>M"
 
-# bionic    : Ubuntu 18.04
-# focal     : Ubuntu 20.04
-# groovy    : Ubuntu 20.10
-DISTRIBUTIONS=(groovy focal bionic)
+# bionic    : Ubuntu 18.04 (LTS)
+# focal     : Ubuntu 20.04 (LTS)
+# hirsute   : Ubuntu 21.04
+DISTRIBUTIONS=(hirsute focal bionic)
 
 function einfo()
 {
@@ -52,7 +52,12 @@ function main()
 
     einfo "Fetching embedded 3rdparty dependencies." # by running cmake configure step.
     mkdir "${BINDIR}"
-    cmake -D3rdparty_DOWNLOAD_DIR="${DISTDIR}" -B "${BINDIR}" -S "${SRCDIR}"
+    export CPM_SOURCE_CACHE="${DISTDIR}"
+    cmake \
+        -D3rdparty_DOWNLOAD_DIR="${DISTDIR}" \
+        -B "${BINDIR}" \
+        -S "${SRCDIR}"
+
     cp -rvp "${DISTDIR}" "${SRCDIR}/_3rdparty"
 
     # Also preserve the expected version information, because

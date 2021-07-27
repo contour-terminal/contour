@@ -8,17 +8,14 @@ BUILDDIR = release
 configure: configure-stamp
 configure-stamp:
 	mkdir -p ${BUILDDIR}
-	cd "${BUILDDIR}" && cmake .. \
-		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	cd "${BUILDDIR}" && \
+	CPM_SOURCE_CACHE="$(shell pwd)/_3rdparty" cmake .. \
+		-DCMAKE_BUILD_TYPE="RelWithDebInfo" \
 		-DCMAKE_INSTALL_PREFIX="/usr" \
 		-DCMAKE_CXX_FLAGS="-DNDEBUG=1" \
 		\
 		-DCONTOUR_EXAMPLES=OFF \
 		-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
-		\
-		-D3rdparty_DOWNLOAD_DIR="$(shell pwd)/_3rdparty" \
-		-DFETCHCONTENT_QUIET=OFF \
-		-DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
 		\
 		-DCRISPY_TESTING=ON \
 		-DLIBTERMINAL_TESTING=ON \
