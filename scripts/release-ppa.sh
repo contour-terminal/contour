@@ -2,6 +2,8 @@
 
 set -ex
 
+#PPA_TARGET="contour-terminal/contour-dev" (TODO: set this up)
+PPA_TARGET="christianparpart/contour-dev"
 KEY_ID="5E39E916156361EA1021D2B5427FBA118140755D"
 EMAIL="christian@parpart.family"
 SETMARK="\033[>M"
@@ -89,7 +91,7 @@ function main()
         debsign --re-sign -k ${KEY_ID} ../contour_${debversion}-${versionsuffix}_source.changes
 
         einfo "- Upload the package to the PPA."
-        dput ppa:contour-terminal/contour-dev ../contour_${debversion}-${versionsuffix}_source.changes
+        dput ppa:${PPA_TARGET} ../contour_${debversion}-${versionsuffix}_source.changes
 
         git status
         git diff | cat
