@@ -296,7 +296,7 @@ jobs:
       with:
         vcpkgArguments: freetype fontconfig harfbuzz
         vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-        vcpkgGitCommitId: b063d0cee7389514a0841cf1e2e055d6466fe4b8
+        vcpkgGitCommitId: 7dbc05515b44bf54d2a42b4da9d1e1f910868b86
         vcpkgTriplet: x64-windows
     - name: "create build directory"
       shell: powershell
