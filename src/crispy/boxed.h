@@ -13,10 +13,11 @@
  */
 #pragma once
 
-#include <cstdint>
-#include <type_traits>
 #include <cassert>
+#include <cstdint>
 #include <limits>
+#include <ostream>
+#include <type_traits>
 
 #include <fmt/format.h>
 
@@ -111,6 +112,8 @@ template <typename T, typename U> constexpr boxed<T, U>& operator+=(boxed<T, U>&
 template <typename T, typename U> constexpr boxed<T, U>& operator-=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value -= b.value; return a; }
 template <typename T, typename U> constexpr boxed<T, U>& operator*=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value *= b.value; return a; }
 template <typename T, typename U> constexpr boxed<T, U>& operator/=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value /= b.value; return a; }
+
+template <typename T, typename U> std::ostream& operator<<(std::ostream& os, boxed<T, U> const& v) { return os << v.value; }
 
 namespace helper
 {
