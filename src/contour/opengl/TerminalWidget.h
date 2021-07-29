@@ -238,6 +238,7 @@ public:
 #endif
 
     PermissionCache rememberedPermissions_;
+    bool inFocus_ = true;
 
     // render state cache
     struct {

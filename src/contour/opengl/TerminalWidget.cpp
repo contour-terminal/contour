@@ -601,11 +601,13 @@ void TerminalWidget::onFrameSwapped()
 // {{{ Input handling
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
-   sendKeyEvent(_keyEvent, session_);
+    qDebug() << "inFocus:" << inFocus_ << "keyEvent:" << _keyEvent;
+    sendKeyEvent(_keyEvent, session_);
 }
 
 void TerminalWidget::wheelEvent(QWheelEvent* _event)
 {
+    qDebug() << "inFocus:" << inFocus_ << "wheelEvent:" << _event;
     sendWheelEvent(_event, session_);
 }
 
@@ -616,6 +618,7 @@ void TerminalWidget::mousePressEvent(QMouseEvent* _event)
 
 void TerminalWidget::mouseMoveEvent(QMouseEvent* _event)
 {
+    qDebug() << "inFocus:" << inFocus_ << "mouseEvent:" << _event;
     sendMouseMoveEvent(_event, session_);
 }
 
@@ -628,12 +631,14 @@ void TerminalWidget::focusInEvent(QFocusEvent* _event)
 {
     QOpenGLWidget::focusInEvent(_event);
     session_.sendFocusInEvent(); // TODO: paint with "normal" colors
+    inFocus_ = true;
 }
 
 void TerminalWidget::focusOutEvent(QFocusEvent* _event)
 {
     QOpenGLWidget::focusOutEvent(_event);
     session_.sendFocusOutEvent(); // TODO maybe paint with "faint" colors
+    inFocus_ = false;
 }
 
 void TerminalWidget::inputMethodEvent(QInputMethodEvent* _event)
