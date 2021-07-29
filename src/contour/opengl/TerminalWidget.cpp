@@ -253,13 +253,6 @@ namespace // {{{
     }
 } // }}}
 
-terminal::renderer::FontDescriptions TerminalWidget::sanitizeDPI(terminal::renderer::FontDescriptions _fonts)
-{
-    if (_fonts.dpi.x <= 0 || _fonts.dpi.y <= 0)
-        _fonts.dpi = screenDPI();
-    return _fonts;
-}
-
 TerminalWidget::TerminalWidget(
     config::TerminalProfile const& _profile,
     TerminalSession& _session,
@@ -273,7 +266,7 @@ TerminalWidget::TerminalWidget(
     enableBackgroundBlur_{ std::move(_enableBackgroundBlur) },
     renderer_{
         terminal().screenSize(),
-        sanitizeDPI(profile_.fonts),
+        sanitizeFontDescription(profile_.fonts, screenDPI()),
         terminal().screen().colorPalette(),
         profile_.backgroundOpacity,
         profile_.hyperlinkDecoration.normal,
