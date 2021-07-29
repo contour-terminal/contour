@@ -140,70 +140,84 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
     std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
     std::wstring familyName = wStringConverter.from_bytes(_description.familyName);
 
-    for (UINT32 i = 0, e = fontCollection->GetFontFamilyCount(); i < e; ++i)
+    UINT32 familyIndex;
+    BOOL familyExists = FALSE;
+    fontCollection->FindFamilyName(familyName.data(), &familyIndex, &familyExists);
+
+    if (!familyExists) {
+        // Fallback to Consolas
+        const wchar_t* consolas = L"Consolas";
+        fontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
+    }
+
+    Microsoft::WRL::ComPtr<IDWriteFontFamily> fontFamily;
+    fontCollection->GetFontFamily(familyIndex, &fontFamily);
+
+    Microsoft::WRL::ComPtr<IDWriteLocalizedStrings> familyNames;
+    fontFamily->GetFamilyNames(&familyNames);
+
+    BOOL localeExists = FALSE;
+    unsigned index{};
+    familyNames->FindLocaleName(d->userLocale.c_str(), &index, &localeExists);
+
+    if (!localeExists) {
+        // Fallback to en-US
+        const wchar_t* localeName = L"en-US";
+        familyNames->FindLocaleName(localeName, &index, &localeExists);
+    }
+
+    if (!localeExists) {
+        // Fallback to locale where index = 0;
+        return nullopt;
+    }
+
+    UINT32 length = 0;
+
+    // TODO: very long font name?
+    wchar_t name[64];
+    familyNames->GetString(index, name, _countof(name));
+
+    for (UINT32 k = 0, ke = fontFamily->GetFontCount(); k < ke; ++k)
     {
-        IDWriteFontFamily* family{};
-        fontCollection->GetFontFamily(i, &family);
+        ComPtr<IDWriteFont> font;
+        fontFamily->GetFont(k, font.GetAddressOf());
 
-        IDWriteLocalizedStrings* names;
-        family->GetFamilyNames(&names);
-
-        BOOL exists = FALSE;
-        unsigned index{};
-        names->FindLocaleName(d->userLocale.c_str(), &index, &exists);
-
-        wchar_t name[64];
-        if (exists)
-            names->GetString(index, name, _countof(name));
-        else
-            // TODO: there was a different way of fallback that I have a tab open on
-            // one of my smartphones. Please find me.
-            names->GetString(i, name, sizeof(name));
-
-        if (familyName != name)
+        font_weight weight = dwFontWeight(font->GetWeight());
+        if (weight != _description.weight)
             continue;
 
-        for (UINT32 k = 0, ke = family->GetFontCount(); k < ke; ++k)
-        {
-            ComPtr<IDWriteFont> font;
-            family->GetFont(k, font.GetAddressOf());
+        font_slant slant = dwFontSlant(font->GetStyle());
+        if (weight != _description.weight)
+            continue;
 
-            font_weight weight = dwFontWeight(font->GetWeight());
-            if (weight != _description.weight)
-                continue;
+        ComPtr<IDWriteFontFace> fontFace;
+        font->CreateFontFace(fontFace.GetAddressOf());
 
-            font_slant slant = dwFontSlant(font->GetStyle());
-            if (weight != _description.weight)
-                continue;
+        auto dwMetrics = DWRITE_FONT_METRICS{};
+        font->GetMetrics(&dwMetrics);
 
-            ComPtr<IDWriteFontFace> fontFace;
-            font->CreateFontFace(fontFace.GetAddressOf());
+        auto const dipScalar = _size.pt / dwMetrics.designUnitsPerEm;
+        auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
 
-            auto dwMetrics = DWRITE_FONT_METRICS{};
-            font->GetMetrics(&dwMetrics);
+        auto fontInfo = FontInfo{};
+        fontInfo.description = _description;
+        fontInfo.size = _size;
+        fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
+        fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
+        fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
+        fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
+        fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
+        fontInfo.metrics.advance = int(ceil(d->computeAverageAdvance(fontFace.Get()) * dipScalar));
 
-            auto const dipScalar = _size.pt / dwMetrics.designUnitsPerEm;
-            auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
+        font.As(&fontInfo.font);
+        fontFace.As(&fontInfo.fontFace);
 
-            auto fontInfo = FontInfo{};
-            fontInfo.description = _description;
-            fontInfo.size = _size;
-            fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
-            fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
-            fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
-            fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
-            fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
-            fontInfo.metrics.advance = int(ceil(d->computeAverageAdvance(fontFace.Get()) * dipScalar));
+        auto key = d->create_font_key();
+        d->fonts.emplace(pair{ key, move(fontInfo) });
 
-            font.As(&fontInfo.font);
-            fontFace.As(&fontInfo.fontFace);
-
-            auto key = d->create_font_key();
-            d->fonts.emplace(pair{key, move(fontInfo)});
-
-            return key;
-        }
+        return key;
     }
+
     debuglog(FontFallbackTag).write("Font not found.");
     return nullopt;
 
