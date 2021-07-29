@@ -109,7 +109,7 @@ void Parser::parseFragment(string_view _data)
 
         static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-        while (input != end || utf8DecoderState_.expectedLength)
+        while (input != end)
         {
             unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, *input);
 
