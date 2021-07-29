@@ -170,7 +170,9 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     // which makes the text look pixelated on HighDPI screens. We want to apply HighDPI
     // manually in QOpenGLWidget.
     //QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
+    #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
+    #endif
 
     QApplication app(argc, (char**) argv);
 
