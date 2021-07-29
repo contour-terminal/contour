@@ -348,6 +348,11 @@ namespace // {{{ helper
         {
             if (_fd.familyName != "monospace")
                 FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
+#ifdef _WIN32
+            // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
+            else
+                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Consolas");
+#endif
             FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
             FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
         }

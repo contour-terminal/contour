@@ -84,6 +84,8 @@ ConPty::ConPty(PageSize const& _windowSize) :
 
     if (hr != S_OK)
         throw runtime_error{ GetLastErrorAsString() };
+
+    buffer_.resize(10240);
 }
 
 ConPty::~ConPty()

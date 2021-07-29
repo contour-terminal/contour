@@ -550,7 +550,8 @@ void ComplexTextShaper::endSequence()
 text::shape_result const& ComplexTextShaper::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    if (auto const cached = cache_.find(TextCacheKey{codepoints, style_}); cached != cache_.end())
+    auto const cached = cache_.find(TextCacheKey{codepoints, style_});
+    if (cached != cache_.end())
         return cached->second;
 
     cacheKeyStorage_.emplace_back(u32string{codepoints});
