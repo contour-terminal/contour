@@ -179,8 +179,6 @@ public:
     /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
     std::atomic<State> state_ = State::CleanIdle;
 
-    terminal::renderer::FontDescriptions sanitizeDPI(terminal::renderer::FontDescriptions _fonts);
-
     /// Flags the screen as dirty.
     ///
     /// @returns boolean indicating whether the screen was clean before and made dirty (true), false otherwise.

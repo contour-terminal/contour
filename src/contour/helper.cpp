@@ -340,6 +340,15 @@ terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
     return {leftMargin, bottomMargin};
 }
 
+terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts, crispy::Point screenDPI)
+{
+    if (_fonts.dpi.x <= 0 || _fonts.dpi.y <= 0)
+        _fonts.dpi = screenDPI;
+    if (std::fabs(_fonts.size.pt) <= std::numeric_limits<double>::epsilon())
+        _fonts.size.pt = 12;
+    return _fonts;
+}
+
 bool applyFontDescription(terminal::ImageSize _cellSize,
                           terminal::PageSize _screenSize,
                           terminal::ImageSize _pixelSize,
@@ -352,10 +361,7 @@ bool applyFontDescription(terminal::ImageSize _cellSize,
 
     auto const windowMargin = computeMargin(_cellSize, _screenSize, _pixelSize);
 
-    if (_fontDescriptions.dpi == Zero<Point>)
-        _fontDescriptions.dpi = _screenDPI;
-
-    _renderer.setFonts(_fontDescriptions);
+    _renderer.setFonts(sanitizeFontDescription(_fontDescriptions, _screenDPI));
     _renderer.setMargin(windowMargin);
     _renderer.updateFontMetrics();
 
