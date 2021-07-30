@@ -149,7 +149,7 @@ profiles:
 
             # Indicates whether or not to include *only* monospace fonts in the font and
             # font-fallback list (Default: true).
-            only_monospace: true
+            strict_spacing: true
 
             # Font family to use for displaying text.
             #
