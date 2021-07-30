@@ -41,6 +41,10 @@
 #include <sys/ioctl.h>
 #endif
 
+#if defined(_WIN32)
+#include <Windows.h>
+#endif
+
 using std::bind;
 using std::cerr;
 using std::cout;
@@ -231,6 +235,18 @@ ContourApp::ContourApp() :
     signal(SIGSEGV, segvHandler);
 #endif
 
+#if defined(_WIN32)
+    // Enable VT output processing on Conhost.
+    HANDLE stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD savedModes{}; // NOTE: Is it required to restore that upon process exit?
+    if (GetConsoleMode(stdoutHandle, &savedModes) != FALSE)
+    {
+        DWORD modes = savedModes;
+        modes |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+        SetConsoleMode(stdoutHandle, modes);
+    }
+#endif
+
     link("contour.capture", bind(&ContourApp::captureAction, this));
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));
@@ -239,7 +255,7 @@ ContourApp::ContourApp() :
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
 }
-
+ 
 template <typename Callback>
 auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, Callback _callback)
 {
