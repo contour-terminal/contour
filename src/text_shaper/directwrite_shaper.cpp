@@ -127,6 +127,11 @@ struct directwrite_shaper::Private
 
         return int(maxAdvance);
     }
+
+    float pixelPerDip()
+    {
+        return dpi_.x / 96;
+    }
 };
 
 directwrite_shaper::directwrite_shaper(crispy::Point _dpi) :
@@ -201,7 +206,7 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
         auto dwMetrics = DWRITE_FONT_METRICS{};
         font->GetMetrics(&dwMetrics);
 
-        auto const dipScalar = _size.pt / dwMetrics.designUnitsPerEm;
+        auto const dipScalar = _size.pt / dwMetrics.designUnitsPerEm * (d->dpi_.x / 96);
         auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
 
         auto fontInfo = FontInfo{};
@@ -310,6 +315,7 @@ void directwrite_shaper::shape(font_key _font,
         &uiLengthRead,
         &_glyphIndices.at(glyphStart));
 
+
     BOOL _isEntireTextSimple = isTextSimple && uiLengthRead == textLength;
     if (_isEntireTextSimple)
     {
@@ -326,7 +332,7 @@ void directwrite_shaper::shape(font_key _font,
 
         for (size_t i = glyphStart; i < textLength; i++)
         {
-            const auto cellWidth = static_cast<double>((float)_glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt;
+            const auto cellWidth = static_cast<double>((float)_glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt * (96.0 / 72.0)  * d->pixelPerDip();
             glyph_position gpos{};
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{_glyphIndices.at(i)} };
             gpos.offset.x = static_cast<int>(cellWidth);
@@ -347,7 +353,6 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     FontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
     const float fontEmSize = _glyph.size.pt * (96.0 / 72.0);
-    const float pixelPerDip = 96.0 / d->dpi_.x;
 
     const UINT16 glyphIndex = static_cast<UINT16>(_glyph.index.value);
     const DWRITE_GLYPH_OFFSET glyphOffset{};
@@ -369,7 +374,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     DWRITE_RENDERING_MODE renderingMode;
     auto hr = fontFace->GetRecommendedRenderingMode(
         fontEmSize,
-        pixelPerDip,
+        d->pixelPerDip(),
         DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
         renderingParams.Get(),
         &renderingMode);
@@ -382,8 +387,8 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 
     d->factory->CreateGlyphRunAnalysis(
         &glyphRun,
-        pixelPerDip,
-        NULL,
+        d->pixelPerDip(),
+        nullptr,
         renderingMode,
         DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
         0.0f,
@@ -403,12 +408,27 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     output.bitmap.resize(*height * *width * 3);
     output.format = bitmap_format::rgb;
 
+    std::vector<uint8_t> tmp;
+    tmp.resize(*height * *width * 3);
+
     hr = glyphAnalysis->CreateAlphaTexture(
         DWRITE_TEXTURE_CLEARTYPE_3x1,
         &textureBounds,
-        output.bitmap.data(),
-        output.bitmap.size()
+        tmp.data(),
+        tmp.size()
     );
+
+    auto t = output.bitmap.begin();
+
+    for (auto i = 0; i < *height; i++)
+        for (auto j = 0; j < *width; j++)
+        {
+            const auto base = ((*height - 1 - i) * *width + j) * 3;
+
+            *t++ = tmp[base];
+            *t++ = tmp[base + 1];
+            *t++ = tmp[base + 2];
+        }
 
     if (FAILED(hr)) {
         return nullopt;
