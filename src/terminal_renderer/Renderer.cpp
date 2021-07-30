@@ -81,11 +81,11 @@ Renderer::Renderer(PageSize _screenSize,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover):
     textShaper_{
-        #if defined(_WIN32)
-        make_unique<text::directwrite_shaper>(_fontDescriptions.dpi)
-        #else
+        //#if defined(_WIN32)
+        //make_unique<text::directwrite_shaper>(_fontDescriptions.dpi)
+        //#else
         make_unique<text::open_shaper>(_fontDescriptions.dpi)
-        #endif
+        //#endif
     },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
