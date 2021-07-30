@@ -29,7 +29,7 @@
 - Adds config option `profile.*.terminal_id: STR` to set the terminal identification to one of VT100, VT220, VT340, etc.
 - Adds config option `profile.*.maximized: BOOL` to indicate maximized state during profile activation.
 - Adds config option `profile.*.fullscreen: BOOL` to indicate fullscreen state during profile activation.
-- Adds config option `profile.*.font.only_monospace: BOOL` to indicate that only monospace fonts may be used.
+- Adds config option `profile.*.font.strict_spacing: BOOL` to indicate that only monospace fonts may be used.
 - Adds config option `profile.*.font.TYPE.weight: WEIGHT` and `profile.*.fonts.TYPE.slant: SLANT` options (optional) along with `profile.*.fonts.TYPE.family: STRING`.
 - Adds config option `profile.*.font.TYPE.weight: WEIGHT` and `profile.*.fonts.TYPE.slant: SLANT` options (optional) along with `profile.*.fonts.TYPE.family: STRING`.
 - Adds config option `profile.*.font.dpi_scale: FLOAT` to apply some additional DPI scaling on fonts.
