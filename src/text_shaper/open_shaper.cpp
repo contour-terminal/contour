@@ -346,12 +346,17 @@ namespace // {{{ helper
 
         if (_fd.spacing != font_spacing::proportional)
         {
-            if (_fd.familyName != "monospace")
-                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
 #ifdef _WIN32
             // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
-            else
+            if (_fd.familyName == "monospace")
                 FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Consolas");
+#elif __APPLE__
+            // Same for macOS, we use "Menlo" for "monospace".
+            if (_fd.familyName == "monospace")
+                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Menlo");
+#else
+            if (_fd.familyName != "monospace")
+                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
 #endif
             FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
             FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
