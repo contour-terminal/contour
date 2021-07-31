@@ -126,6 +126,15 @@ profiles:
 
             # Text shaping related settings
             text_shaping:
+                # Selects which text shaping and font rendering engine to use.
+                # Supported values are:
+                # - native      : automatically choose the best available on the current platform.
+                # - DirectWrite : selects DirectWrite engine (Windows only)
+                # - CoreText    : selects CoreText engine (Mac OS/X only)
+                # - OpenShaper  : selects OpenShaper (harfbuzz/freetype/fontconfig, avilable on all
+                #                 platforms)
+                engine: native
+
                 # Determines what shaping method to use. Value options are:
                 # - complex : Full Unicode text shaping, supporting most Unicode features.
                 # - simple  : reduced text shaping features for improved
