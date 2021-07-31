@@ -11,12 +11,17 @@
 // }}}
 
 #include <wrl/client.h>
+#include <wrl/implements.h>
 #include <dwrite.h>
 #include <dwrite_3.h>
 
 #include <iostream> // DEBUGGING ONLY
 
 using Microsoft::WRL::ComPtr;
+using Microsoft::WRL::RuntimeClass;
+using Microsoft::WRL::RuntimeClassFlags;
+using Microsoft::WRL::ClassicCom;
+using Microsoft::WRL::InhibitFtmBase;
 
 using std::max;
 using std::make_unique;
@@ -106,6 +111,49 @@ struct directwrite_shaper::Private
         return result;
     }
 
+    text::font_key add_font(const std::wstring _familyName, font_description _description, font_size _size, ComPtr<IDWriteFont> _font)
+    {
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
+        std::string familyName = wStringConverter.to_bytes(_familyName);;
+        _description.familyName = familyName;
+        _description.wFamilyName = _familyName;
+
+        ComPtr<IDWriteFontFace> fontFace;
+        _font->CreateFontFace(fontFace.GetAddressOf());
+
+        for (const std::pair<font_key, FontInfo>& kv : fonts)
+        {
+            const auto fontInfo = kv.second;
+            if (_description == fontInfo.description && fontInfo.fontFace.Get()->Equals(fontFace.Get()))
+            {
+                return kv.first;
+            }
+        }
+
+        auto dwMetrics = DWRITE_FONT_METRICS{};
+        _font->GetMetrics(&dwMetrics);
+
+        auto const dipScalar = _size.pt * (96.0 / 72.0) / dwMetrics.designUnitsPerEm * pixelPerDip();
+        auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
+
+        auto fontInfo = FontInfo{};
+        fontInfo.description = _description;
+        fontInfo.size = _size;
+        fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
+        fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
+        fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
+        fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
+        fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
+        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace.Get()) * dipScalar));
+
+        _font.As(&fontInfo.font);
+        fontFace.As(&fontInfo.fontFace);
+
+        auto key = create_font_key();
+        fonts.emplace(pair{ key, move(fontInfo) });
+        return key;
+    }
+
     int computeAverageAdvance(IDWriteFontFace* _fontFace)
     {
         auto constexpr firstCharIndex = UINT16{32};
@@ -132,6 +180,115 @@ struct directwrite_shaper::Private
     {
         return dpi_.x / 96;
     }
+};
+
+class DWriteAnalysisWrapper : public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>, IDWriteTextAnalysisSource, IDWriteTextAnalysisSink>
+{
+public:
+    DWriteAnalysisWrapper(const std::wstring& _text) :
+        text(_text) {
+
+    }
+
+#pragma region IDWriteTextAnalysisSource
+    HRESULT GetTextAtPosition(
+        UINT32 textPosition,
+        _Outptr_result_buffer_(*textLength) WCHAR const** textString,
+        _Out_ UINT32* textLength)
+    {
+        *textString = nullptr;
+        *textLength = 0;
+
+        if (textPosition < text.size())
+        {
+            *textString = &text.at(textPosition);
+            *textLength = text.size() - textPosition;
+        }
+
+        return S_OK;
+    }
+
+    HRESULT GetTextBeforePosition(
+        UINT32 textPosition,
+        _Outptr_result_buffer_(*textLength) WCHAR const** textString,
+        _Out_ UINT32* textLength)
+    {
+        *textString = nullptr;
+        *textLength = 0;
+
+        if (textPosition > 0 && textPosition <= text.size())
+        {
+            *textString = text.data();
+            *textLength = textPosition;
+        }
+
+        return S_OK;
+    }
+
+    DWRITE_READING_DIRECTION GetParagraphReadingDirection()
+    {
+        // TODO: is this always correct?
+        return DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
+    }
+
+    HRESULT GetLocaleName(
+        UINT32 textPosition,
+        _Out_ UINT32* textLength,
+        _Outptr_result_z_ WCHAR const** localeName)
+    {
+        // TODO: real locale;
+        *localeName = L"en-US";
+        *textLength = text.size() - textPosition;
+
+        return S_OK;
+    }
+
+    HRESULT GetNumberSubstitution(UINT32 textPosition,
+        _Out_ UINT32* textLength,
+        _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution)
+    {
+
+        *numberSubstitution = nullptr;
+        *textLength = text.size() - textPosition;
+
+        return S_OK;
+    }
+#pragma endregion
+
+#pragma region IDWriteTextAnalysisSink
+    HRESULT SetScriptAnalysis(UINT32 textPosition, UINT32 textLength, _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis)
+    {
+        script = *scriptAnalysis;
+        return S_OK;
+    }
+
+    HRESULT SetLineBreakpoints(UINT32 textPosition,
+        UINT32 textLength,
+        _In_reads_(textLength) DWRITE_LINE_BREAKPOINT const* lineBreakpoints)
+    {
+        return S_OK;
+    }
+
+    HRESULT SetBidiLevel(UINT32 textPosition,
+        UINT32 textLength,
+        UINT8 /*explicitLevel*/,
+        UINT8 resolvedLevel)
+    {
+        return S_OK;
+    }
+
+    HRESULT SetNumberSubstitution(UINT32 textPosition,
+        UINT32 textLength,
+        _In_ IDWriteNumberSubstitution* numberSubstitution)
+    {
+        return S_OK;
+    }
+#pragma endregion
+
+    DWRITE_SCRIPT_ANALYSIS script;
+
+private:
+    const std::wstring& text;
 };
 
 directwrite_shaper::directwrite_shaper(crispy::Point _dpi) :
@@ -177,15 +334,23 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
     }
 
     if (!localeExists) {
-        // Fallback to locale where index = 0;
-        return nullopt;
+        // Fallback to locale where index = 0
+        index = 0;
+
+        std::wstring localeName{};
+        UINT32 length = 0;
+        familyNames->GetLocaleNameLength(index, &length);
+        localeName.resize(length);
+        familyNames->FindLocaleName(localeName.c_str(), &index, &localeExists);
     }
 
     UINT32 length = 0;
+    familyNames->GetStringLength(index, &length);
 
-    // TODO: very long font name?
-    wchar_t name[64];
-    familyNames->GetString(index, name, _countof(name));
+    std::wstring resolvedFamilyName;
+    resolvedFamilyName.resize(length);
+
+    familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
 
     for (UINT32 k = 0, ke = fontFamily->GetFontCount(); k < ke; ++k)
     {
@@ -200,81 +365,11 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
         if (weight != _description.weight)
             continue;
 
-        ComPtr<IDWriteFontFace> fontFace;
-        font->CreateFontFace(fontFace.GetAddressOf());
-
-        auto dwMetrics = DWRITE_FONT_METRICS{};
-        font->GetMetrics(&dwMetrics);
-
-        auto const dipScalar = _size.pt / dwMetrics.designUnitsPerEm * (d->dpi_.x / 96);
-        auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
-
-        auto fontInfo = FontInfo{};
-        fontInfo.description = _description;
-        fontInfo.size = _size;
-        fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
-        fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
-        fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
-        fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
-        fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
-        fontInfo.metrics.advance = int(ceil(d->computeAverageAdvance(fontFace.Get()) * dipScalar));
-
-        font.As(&fontInfo.font);
-        fontFace.As(&fontInfo.fontFace);
-
-        auto key = d->create_font_key();
-        d->fonts.emplace(pair{ key, move(fontInfo) });
-
-        return key;
+        return d->add_font(resolvedFamilyName, _description, _size, font);
     }
 
     debuglog(FontFallbackTag).write("Font not found.");
     return nullopt;
-
-#if 0
-    IDWriteFontFallbackBuilder* ffb{};
-    d->factory->CreateFontFallbackBuilder(&ffb);
-    IDWriteFontFallback* ff;
-    ffb->CreateFontFallback(&ff);
-
-    IDWriteTextAnalyzer* textAnalyzer{};
-    d->factory->CreateTextAnalyzer(&textAnalyzer);//?
-    textAnalyzer->Release();
-
-    IDWriteTextAnalysisSource *analysisSource;
-    UINT32 textPosition;
-    UINT32 textLength;
-    IDWriteFontCollection *baseFontCollection;
-    const wchar_t *baseFamilyName;
-    DWRITE_FONT_WEIGHT baseWeight;
-    DWRITE_FONT_STYLE baseStyle;
-    DWRITE_FONT_STRETCH baseStretch;
-
-    UINT32 mappedLength;
-    IDWriteFont *mappedFont;
-    FLOAT scale;
-    ff->MapCharacters(analysisSource, textPosition, textLength, baseFontCollection,
-                      baseFamilyName, baseWeight, baseStyle, baseStretch,
-                      &mappedLength, &mappedFont, &scale);
-
-    // DWRITE_FONT_FACE_TYPE fontFaceType = DWRITE_FONT_FACE_TYPE_UNKNOWN;
-    // UINT32 numberOfFiles = 1;
-    // IDWriteFontFile *const *fontFiles;
-    // UINT32 faceIndex = 0;
-    // DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags;
-    // IDWriteFontFace *fontFace{};
-    // d->factory->CreateFontFace();
-
-    // DWRITE_FONT_FACE_TYPE fontFaceType;
-    // UINT32 numberOfFiles;
-    // IDWriteFontFile *const *fontFiles;
-    // UINT32 faceIndex;
-    // DWRITE_FONT_SIMULATIONS fontFaceSimulationFlags;
-    // IDWriteFontFace **fontFace = nullptr;
-    // d->factory->CreateFontFace(fontFaceType, numberOfFiles, fontFiles, faceIndex, fontFaceSimulationFlags, fontFace);
-    printf("done\n");
-    return nullopt;
-#endif
 }
 
 font_metrics directwrite_shaper::metrics(font_key _key) const
@@ -299,13 +394,16 @@ void directwrite_shaper::shape(font_key _font,
     FontInfo const& fontInfo = d->fonts.at(_font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
 
-    std::vector<UINT16> _glyphIndices;
-    std::vector<INT32> _glyphDesignUnitAdvances;
+    std::vector<UINT16> glyphIndices;
+    std::vector<INT32> glyphDesignUnitAdvances;
+    std::vector<UINT16> glyphClusters;
 
     BOOL isTextSimple = FALSE;
     UINT32 uiLengthRead = 0;
     const UINT32 glyphStart = 0;
-    _glyphIndices.resize(textLength);
+
+    glyphIndices.resize(textLength);
+    glyphClusters.resize(textLength);
 
     d->textAnalyzer->GetTextComplexity(
         textString,
@@ -313,28 +411,31 @@ void directwrite_shaper::shape(font_key _font,
         fontFace,
         &isTextSimple,
         &uiLengthRead,
-        &_glyphIndices.at(glyphStart));
+        &glyphIndices.at(glyphStart));
 
 
-    BOOL _isEntireTextSimple = isTextSimple && uiLengthRead == textLength;
-    if (_isEntireTextSimple)
+    BOOL isEntireTextSimple = isTextSimple && uiLengthRead == textLength;
+    // Note that some fonts won't report isTextSimple even for ASCII only strings, due to the existence of "locl" table. 
+    if (isEntireTextSimple)
     {
+        // "Simple" shaping assumes every character has the exact same width which can be calculate from the metrics.
+        //  This saves us from the need of expensive shaping operation.
         DWRITE_FONT_METRICS1 metrics;
         fontFace->GetMetrics(&metrics);
 
-        _glyphDesignUnitAdvances.resize(textLength);
+        glyphDesignUnitAdvances.resize(textLength);
         USHORT designUnitsPerEm = metrics.designUnitsPerEm;
         fontFace->GetDesignGlyphAdvances(
             textLength,
-            & _glyphIndices.at(glyphStart),
-            & _glyphDesignUnitAdvances.at(glyphStart),
+            & glyphIndices.at(glyphStart),
+            & glyphDesignUnitAdvances.at(glyphStart),
             false);
 
         for (size_t i = glyphStart; i < textLength; i++)
         {
-            const auto cellWidth = static_cast<double>((float)_glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt * (96.0 / 72.0)  * d->pixelPerDip();
+            const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt * (96.0 / 72.0)  * d->pixelPerDip();
             glyph_position gpos{};
-            gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{_glyphIndices.at(i)} };
+            gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
             gpos.offset.x = static_cast<int>(cellWidth);
             //gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
@@ -344,7 +445,169 @@ void directwrite_shaper::shape(font_key _font,
         }
     }
     else {
-        // TODO
+        // Complex shaping
+        const UINT32 textStart = 0;
+        DWriteAnalysisWrapper analysisWrapper(wText);
+
+        // Fallback analysis
+        ComPtr<IDWriteTextFormat> format;
+        auto hr = d->factory->CreateTextFormat(
+            fontInfo.description.wFamilyName.c_str(),
+            nullptr,
+            fontInfo.font->GetWeight(),
+            fontInfo.font->GetStyle(),
+            fontInfo.font->GetStretch(),
+            fontInfo.size.pt,
+            d->userLocale.c_str(),
+            &format);
+
+        ComPtr<IDWriteTextFormat1> format1;
+
+        if (SUCCEEDED(hr) && SUCCEEDED(format->QueryInterface(IID_PPV_ARGS(&format1))))
+        {
+            ComPtr<IDWriteFontFallback> fallback;
+            format1->GetFontFallback(&fallback);
+
+            ComPtr<IDWriteFontCollection> collection;
+            format1->GetFontCollection(&collection);
+
+            std::wstring familyName;
+            familyName.resize(format1->GetFontFamilyNameLength() + 1);
+            format1->GetFontFamilyName(familyName.data(), familyName.size());
+
+            const auto weight = format1->GetFontWeight();
+            const auto style = format1->GetFontStyle();
+            const auto stretch = format1->GetFontStretch();
+
+            if (!fallback)
+            {
+                d->factory->GetSystemFontFallback(&fallback);
+            }
+
+            UINT32 mappedLength = 0;
+            ComPtr<IDWriteFont> mappedFont;
+            FLOAT scale = 0.0f;
+
+            fallback->MapCharacters(&analysisWrapper,
+                0,
+                textLength,
+                collection.Get(),
+                familyName.data(),
+                weight,
+                style,
+                stretch,
+                &mappedLength,
+                &mappedFont,
+                &scale);
+
+            if (mappedFont)
+            {
+                ComPtr<IDWriteFontFamily> fontFamily;
+                mappedFont->GetFontFamily(&fontFamily);
+
+                ComPtr<IDWriteLocalizedStrings> familyNames;
+                fontFamily->GetFamilyNames(&familyNames);
+
+                BOOL localeExists = FALSE;
+                unsigned index{};
+                familyNames->FindLocaleName(d->userLocale.c_str(), &index, &localeExists);
+
+                if (!localeExists) {
+                    // Fallback to en-US
+                    const wchar_t* localeName = L"en-US";
+                    familyNames->FindLocaleName(localeName, &index, &localeExists);
+                }
+
+                UINT32 length = 0;
+                familyNames->GetStringLength(index, &length);
+
+                std::wstring resolvedFamilyName;
+                resolvedFamilyName.resize(length);
+
+                familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
+
+                _font = d->add_font(resolvedFamilyName, fontInfo.description, fontInfo.size, mappedFont);
+            }
+        }
+
+        // Script analysis
+        d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
+
+        UINT32 actualGlyphCount = 0;
+        UINT32 maxGlyphCount = textLength;
+        std::vector<DWRITE_SHAPING_TEXT_PROPERTIES> textProps(textLength);
+        std::vector<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps(textLength);
+
+        uint8_t attempt = 0;
+
+        do {
+            auto hr = d->textAnalyzer->GetGlyphs(
+                &wText.at(textStart),
+                textLength,
+                fontFace,
+                0, // isSideways,
+                0, // isRightToLeft
+                &analysisWrapper.script,
+                d->userLocale.data(),
+                nullptr, // _numberSubstitution
+                nullptr, // features
+                nullptr, // featureLengths
+                0, // featureCount
+                maxGlyphCount, // maxGlyphCount
+                &glyphClusters.at(textStart),
+                &textProps.at(0),
+                &glyphIndices.at(glyphStart),
+                &glyphProps.at(0),
+                &actualGlyphCount);
+            if (hr == E_NOT_SUFFICIENT_BUFFER)
+            {
+                // Using a larger buffer.
+                maxGlyphCount *= 2;
+                const UINT32 totalGlyphsArrayCount = glyphStart + maxGlyphCount;
+
+                glyphProps.resize(maxGlyphCount);
+                glyphIndices.resize(totalGlyphsArrayCount);
+            }
+            else
+            {
+                break;
+            }
+        } while (attempt < 2);
+
+        std::vector<float> glyphAdvances(actualGlyphCount);
+        std::vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
+
+        hr = d->textAnalyzer->GetGlyphPlacements(
+            &wText.at(textStart),
+            &glyphClusters.at(textStart),
+            &textProps.at(0),
+            textLength,
+            &glyphIndices.at(glyphStart),
+            &glyphProps.at(0),
+            actualGlyphCount,
+            fontFace,
+            fontInfo.size.pt,
+            0, // isSideways,
+            0, // isRightToLeft
+            &analysisWrapper.script,
+            d->userLocale.data(),
+            nullptr, // features
+            nullptr, // featureLengths
+            0, // featureCount
+            &glyphAdvances.at(glyphStart),
+            &glyphOffsets.at(glyphStart));
+
+        for (size_t i = glyphStart; i < textLength; i++)
+        {
+            glyph_position gpos{};
+            gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
+            gpos.offset.x = static_cast<int>(glyphOffsets.at(i).advanceOffset);
+            //gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
+
+            gpos.advance.x = static_cast<int>(glyphAdvances.at(i));
+            //gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
+            _result.emplace_back(gpos);
+        }
     }
 }
 
