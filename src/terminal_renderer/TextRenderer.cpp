@@ -267,7 +267,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
     {
-        assert(colored && "RGBA should be only used on colored (i.e. emoji) fonts.");
         assert(numCells >= 2);
         auto const cellSize = gridMetrics_.cellSize;
 
@@ -396,35 +395,21 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                                  GlyphMetrics const& _glyphMetrics,
                                  text::glyph_position const& _glyphPos)
 {
-    auto const colored = textShaper_.has_color(_glyphPos.glyph.font);
+    auto const x = _pos.x
+                 + _glyphMetrics.bearing.x
+                 + _glyphPos.offset.x
+                 ;
 
-    if (colored)
-    {
-        auto const x = _pos.x
-                     + _glyphMetrics.bearing.x
-                     + _glyphPos.offset.x
-                     ;
+    auto const y = textShaper_.has_color(_glyphPos.glyph.font)
+                 ? _pos.y
+                 : _pos.y                                       // bottom left
+                    + _glyphPos.offset.y                        // -> harfbuzz adjustment
+                    + gridMetrics_.baseline                     // -> baseline
+                    + _glyphMetrics.bearing.y                   // -> bitmap top
+                    - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
+                    ;
 
-        auto const y = _pos.y;
-
-        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
-    }
-    else
-    {
-        auto const x = _pos.x
-                     + _glyphMetrics.bearing.x
-                     + _glyphPos.offset.x
-                     ;
-
-        auto const y = _pos.y                                     // bottom left
-                     + _glyphPos.offset.y                         // -> harfbuzz adjustment
-                     + gridMetrics_.baseline                      // -> baseline
-                     + _glyphMetrics.bearing.y                    // -> bitmap top
-                     - _glyphMetrics.bitmapSize.height.as<int>()  // -> bitmap height
-                     ;
-
-        renderTexture(crispy::Point{x, y}, _color, _textureInfo);
-    }
+    renderTexture(crispy::Point{x, y}, _color, _textureInfo);
 
 #if 0
     if (crispy::debugtag::enabled(TextRendererTag))
