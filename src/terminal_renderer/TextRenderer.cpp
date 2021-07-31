@@ -229,6 +229,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     if (!theGlyphOpt.has_value())
         return nullopt;
 
+    bool const colored = textShaper_.has_color(_id.font);
+
     text::rasterized_glyph& glyph = theGlyphOpt.value();
     auto const numCells = colored ? 2u : 1u; // is this the only case - with colored := Emoji presentation?
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.

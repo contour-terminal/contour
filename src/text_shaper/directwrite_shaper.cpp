@@ -66,6 +66,60 @@ namespace
         }
         return font_slant::normal;
     }
+
+    void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* _glyphAnalysis, RECT& _textureBounds, bitmap_format _targetFormat, std::vector<uint8_t>::iterator& _it)
+    {
+        const auto width = _textureBounds.right - _textureBounds.left;
+        const auto height = _textureBounds.bottom - _textureBounds.top;
+
+        std::vector<uint8_t> tmp;
+        tmp.resize(height *width * 3);
+
+        auto hr = _glyphAnalysis->CreateAlphaTexture(
+            DWRITE_TEXTURE_CLEARTYPE_3x1,
+            &_textureBounds,
+            tmp.data(),
+            tmp.size()
+        );
+
+        for (auto i = 0; i < height; i++)
+            for (auto j = 0; j < width; j++)
+            {
+                const auto base = ((height - 1 - i) *width + j) * 3;
+                const auto r = tmp[base];
+                const auto g = tmp[base + 1];
+                const auto b = tmp[base + 2];
+                if (r > 0)
+                {
+                    *_it++ = r;
+                }
+                else
+                {
+                    _it++;
+                }
+                if (g > 0)
+                {
+                    *_it++ = g;
+                }
+                else
+                {
+                    _it++;
+                }
+                if (b > 0)
+                {
+                    *_it++ = b;
+                }
+                else
+                {
+                    _it++;
+                }
+
+                if (_targetFormat == bitmap_format::rgba)
+                {
+                    *_it++ = 255;
+                }
+            }
+    }
 }
 
 struct FontInfo
@@ -86,6 +140,7 @@ struct directwrite_shaper::Private
     crispy::Point dpi_;
     std::wstring userLocale;
     std::unordered_map<font_key, FontInfo> fonts;
+    std::unordered_map<font_key, bool> fontsHasColor;
 
     font_key nextFontKey;
 
@@ -151,6 +206,7 @@ struct directwrite_shaper::Private
 
         auto key = create_font_key();
         fonts.emplace(pair{ key, move(fontInfo) });
+        fontsHasColor.emplace(pair{ key, false });
         return key;
     }
 
@@ -602,7 +658,7 @@ void directwrite_shaper::shape(font_key _font,
             &glyphAdvances.at(glyphStart),
             &glyphOffsets.at(glyphStart));
 
-        for (size_t i = glyphStart; i < textLength; i++)
+        for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
             glyph_position gpos{};
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
@@ -673,36 +729,71 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 
     auto const width = output.size.width;
     auto const height = output.size.height;
-    output.bitmap.resize(*height * *width * 3);
-    output.format = bitmap_format::rgb;
 
-    std::vector<uint8_t> tmp;
-    tmp.resize(*height * *width * 3);
+    IDWriteFactory2* factory2 = nullptr;
+    IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;
+    if (SUCCEEDED(d->factory->QueryInterface(IID_PPV_ARGS(&factory2))))
+    {
+        hr = factory2->TranslateColorGlyphRun(
+            0.0f,
+            0.0f,
+            &glyphRun,
+            nullptr,
+            DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+            nullptr,
+            0,
+            &glyphRunEnumerator);
 
-    hr = glyphAnalysis->CreateAlphaTexture(
-        DWRITE_TEXTURE_CLEARTYPE_3x1,
-        &textureBounds,
-        tmp.data(),
-        tmp.size()
-    );
-
-    auto t = output.bitmap.begin();
-
-    for (auto i = 0; i < *height; i++)
-        for (auto j = 0; j < *width; j++)
+        if (hr == DWRITE_E_NOCOLOR)
         {
-            const auto base = ((*height - 1 - i) * *width + j) * 3;
+            output.bitmap.resize(*height * *width * 3);
+            output.format = bitmap_format::rgb;
 
-            *t++ = tmp[base];
-            *t++ = tmp[base + 1];
-            *t++ = tmp[base + 2];
+            auto t = output.bitmap.begin();
+
+            renderGlyphRunToBitmap(glyphAnalysis.Get(), textureBounds, output.format, t);
+
+            return output;
         }
+        else
+        {
+            output.bitmap.resize(*height * *width * 4);
+            output.format = bitmap_format::rgba;
 
-    if (FAILED(hr)) {
-        return nullopt;
+            d->fontsHasColor.at(_glyph.font) = true;
+            while (true)
+            {
+                BOOL haveRun;
+                glyphRunEnumerator->MoveNext(&haveRun);
+                if (!haveRun)
+                    break;
+
+                DWRITE_COLOR_GLYPH_RUN  const* colorRun;
+                glyphRunEnumerator->GetCurrentRun(&colorRun);
+
+                ComPtr<IDWriteGlyphRunAnalysis> colorGlyphsAnalysis;
+
+                d->factory->CreateGlyphRunAnalysis(
+                    &colorRun->glyphRun,
+                    d->pixelPerDip(),
+                    nullptr,
+                    renderingMode,
+                    DWRITE_MEASURING_MODE::DWRITE_MEASURING_MODE_NATURAL,
+                    0.0f,
+                    0.0f,
+                    &colorGlyphsAnalysis);
+
+                auto t = output.bitmap.begin();
+                renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, output.format, t);
+            }
+
+            return output;
+        }
     }
 
-    return output;
+    return nullopt;
+
+
 }
 
 void directwrite_shaper::set_dpi(crispy::Point _dpi)
