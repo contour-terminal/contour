@@ -1092,6 +1092,32 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             errorlog().write("Unknown text shaping method: {}", strValue);
     }
 
+    auto constexpr NativeTextShapingEngine =
+#if defined(_WIN32)
+        terminal::renderer::TextShapingEngine::DWrite;
+#elif defined(__APPLE__)
+        terminal::renderer::TextShapingEngine::CoreText;
+#else
+        terminal::renderer::TextShapingEngine::OpenShaper;
+#endif
+
+    strValue = "";
+    if (tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.engine", strValue))
+    {
+        auto const lwrValue = toLower(strValue);
+        if (lwrValue == "dwrite" || lwrValue == "directwrite")
+            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::DWrite;
+        else if (lwrValue == "core" || lwrValue == "coretext")
+            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::CoreText;
+        else if (lwrValue == "open" || lwrValue == "openshaper")
+            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::OpenShaper;
+        else if (lwrValue == "native")
+            profile.fonts.textShapingEngine = NativeTextShapingEngine;
+        else
+            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.text_shaping.engine: {}",
+                    basePath, strValue);
+    }
+
     bool strictSpacing = false;
     tryLoadChild(_usedKeys, _doc, basePath, "font.strict_spacing", strictSpacing);
 

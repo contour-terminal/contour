@@ -13,6 +13,7 @@
  */
 #include <terminal_renderer/Renderer.h>
 #include <terminal_renderer/TextRenderer.h>
+#include <terminal_renderer/utils.h>
 
 #include <text_shaper/open_shaper.h>
 #include <text_shaper/directwrite_shaper.h>
@@ -74,19 +75,43 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     return output;
 }
 
+unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Point _dpi)
+{
+    switch (_engine)
+    {
+        case TextShapingEngine::DWrite:
+            #if defined(_WIN32)
+            debuglog(TextRendererTag).write("Using DirectWrite text shaping engine.");
+            return make_unique<text::directwrite_shaper>(_dpi);
+            #else
+            debuglog(TextRendererTag).write("DirectWrite not available on this platform.");
+            break;
+            #endif
+
+        case TextShapingEngine::CoreText:
+            #if defined(__APPLE__)
+            debuglog(TextRendererTag).write("CoreText not yet implemented.");
+            break;
+            #else
+            debuglog(TextRendererTag).write("CoreText not available on this platform.");
+            break;
+            #endif
+
+        case TextShapingEngine::OpenShaper:
+            break;
+    }
+
+    debuglog(TextRendererTag).write("Using OpenShaper text shaping engine.");
+    return make_unique<text::open_shaper>(_dpi);
+}
+
 Renderer::Renderer(PageSize _screenSize,
                    FontDescriptions const& _fontDescriptions,
                    terminal::ColorPalette const& _colorPalette,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover):
-    textShaper_{
-        #if defined(_WIN32)
-        make_unique<text::directwrite_shaper>(_fontDescriptions.dpi)
-        #else
-        make_unique<text::open_shaper>(_fontDescriptions.dpi)
-        #endif
-    },
+    textShaper_{ createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi) },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
@@ -141,8 +166,14 @@ void Renderer::clearCache()
 
 void Renderer::setFonts(FontDescriptions _fontDescriptions)
 {
-    textShaper_->clear_cache();
-    textShaper_->set_dpi(_fontDescriptions.dpi);
+    if (fontDescriptions_.textShapingEngine == _fontDescriptions.textShapingEngine)
+    {
+        textShaper_->clear_cache();
+        textShaper_->set_dpi(_fontDescriptions.dpi);
+    }
+    else
+        textShaper_ = createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi);
+
     fontDescriptions_ = move(_fontDescriptions);
     fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
     updateFontMetrics();

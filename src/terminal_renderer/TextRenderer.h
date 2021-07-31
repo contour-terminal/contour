@@ -144,6 +144,13 @@ enum class TextShapingMethod
     Simple,  //!< minimal text shaping for optimum performance butless features
 };
 
+enum class TextShapingEngine
+{
+    OpenShaper,     //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
+    DWrite,         //!< native platform support: Windows
+    CoreText,       //!< native platform support: OS/X
+};
+
 struct FontDescriptions
 {
     double dpiScale = 1.0;
@@ -156,6 +163,7 @@ struct FontDescriptions
     text::font_description emoji;
     text::render_mode renderMode;
     TextShapingMethod textShapingMethod;
+    TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     bool builtinBoxDrawing = true;
 };
 
