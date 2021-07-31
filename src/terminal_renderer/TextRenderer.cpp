@@ -392,26 +392,28 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                  + _glyphPos.offset.x
                  ;
 
-    auto const y = textShaper_.has_color(_glyphPos.glyph.font)
-                 ? _pos.y
-                 : _pos.y                                       // bottom left
-                    + _glyphPos.offset.y                        // -> harfbuzz adjustment
-                    + gridMetrics_.baseline                     // -> baseline
-                    + _glyphMetrics.bearing.y                   // -> bitmap top
-                    - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
-                    ;
+    auto const y =
+#if 1 // TODO: get rid of the has_color dependency
+            textShaper_.has_color(_glyphPos.glyph.font) ? _pos.y :
+#endif
+            _pos.y                                      // bottom left
+            + _glyphPos.offset.y                        // -> harfbuzz adjustment
+            + gridMetrics_.baseline                     // -> baseline
+            + _glyphMetrics.bearing.y                   // -> bitmap top
+            - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
+            ;
 
     renderTexture(crispy::Point{x, y}, _color, _textureInfo);
 
 #if 0
     if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write("xy={}:{} pos=({}:{}) tex={}x{}, gpos=({}:{}), baseline={}, descender={}",
-                                        x, y,
-                                        _pos.x(), _pos.y(),
-                                        _textureInfo.width, _textureInfo.height,
-                                        _glyphPos.offset.x, _glyphPos.offset.y,
-                                        textShaper_.metrics(_glyphPos.glyph.font).baseline(),
-                                        _glyph.descender);
+        debuglog(TextRendererTag).write(
+                "xy={}:{} pos=({}:{}) tex={}, gpos=({}:{}), baseline={}",
+                x, y,
+                _pos,
+                _textureInfo.bitmapSize,
+                _glyphPos.offset.x, _glyphPos.offset.y,
+                gridMetrics_.baseline);
 #endif
 }
 
@@ -567,6 +569,13 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
         std::get<unicode::Script>(_run.properties),
         gpos
     );
+
+    // TODO: See if we can tweak here something in order to not depend
+    //       on shaper::has_color() later on.
+    //
+    // if (isEmojiPresentation)
+    //     for (text::glyph_position& gp: gpos)
+    //         gp.offset.y = 0;
 
     if (crispy::debugtag::enabled(TextRendererTag) && !gpos.empty())
     {
