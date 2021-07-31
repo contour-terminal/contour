@@ -394,7 +394,7 @@ class TextRenderer : public Renderable {
     }
 
     BoxDrawingRenderer boxDrawingRenderer_;
-    bool lastWasBoxDrawing_ = false;
+    bool forceCellGroupSplit_ = false;
 
     // target surface rendering
     //

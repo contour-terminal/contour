@@ -132,9 +132,6 @@ void TextRenderer::updateFontMetrics()
     clearCache();
 }
 
-/// Should box drawing fall back to font based box drawing?
-// XXX #define BOXDRAWING_FONT_FALLBACK
-
 void TextRenderer::renderCell(RenderCell const& _cell)
 {
     auto const style = [](auto mask) constexpr -> TextStyle {
@@ -156,26 +153,21 @@ void TextRenderer::renderCell(RenderCell const& _cell)
 
     if (isBoxDrawingCharacter)
     {
-        [[maybe_unused]] bool const couldRender = boxDrawingRenderer_.render(
+        boxDrawingRenderer_.render(
             LinePosition::cast_from(_cell.position.row),
             ColumnPosition::cast_from(_cell.position.column),
             codepoints[0] % 0x2500,
             _cell.foregroundColor
         );
-#if defined(BOXDRAWING_FONT_FALLBACK)
-        if (couldRender)
-#endif
-        {
-            if (!lastWasBoxDrawing_)
-                textRenderingEngine_->endSequence();
-            lastWasBoxDrawing_ = true;
-            return;
-        }
+        if (!forceCellGroupSplit_)
+            textRenderingEngine_->endSequence();
+        forceCellGroupSplit_ = true;
+        return;
     }
 
-    if (lastWasBoxDrawing_ || (_cell.flags & CellFlags::CellSequenceStart))
+    if (forceCellGroupSplit_ || (_cell.flags & CellFlags::CellSequenceStart))
     {
-        lastWasBoxDrawing_ = false;
+        forceCellGroupSplit_ = false;
         textRenderingEngine_->setTextPosition(gridMetrics_.map(_cell.position));
     }
 
