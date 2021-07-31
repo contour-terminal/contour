@@ -437,7 +437,7 @@ void directwrite_shaper::shape(font_key _font,
             const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt * (96.0 / 72.0)  * d->pixelPerDip();
             glyph_position gpos{};
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
-            gpos.offset.x = static_cast<int>(cellWidth);
+            // gpos.offset.x = static_cast<int>(cellWidth);
             //gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
             gpos.advance.x = static_cast<int>(cellWidth);
