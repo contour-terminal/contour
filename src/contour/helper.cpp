@@ -361,7 +361,7 @@ bool applyFontDescription(terminal::ImageSize _cellSize,
 
     auto const windowMargin = computeMargin(_cellSize, _screenSize, _pixelSize);
 
-    _renderer.setFonts(sanitizeFontDescription(_fontDescriptions, _screenDPI));
+    _renderer.setFonts(sanitizeFontDescription(std::move(_fontDescriptions), _screenDPI));
     _renderer.setMargin(windowMargin);
     _renderer.updateFontMetrics();
 
