@@ -185,9 +185,10 @@ struct directwrite_shaper::Private
 class DWriteAnalysisWrapper : public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>, IDWriteTextAnalysisSource, IDWriteTextAnalysisSink>
 {
 public:
-    DWriteAnalysisWrapper(const std::wstring& _text) :
-        text(_text) {
-
+    DWriteAnalysisWrapper(const std::wstring& _text, const std::wstring& _userLocale) :
+        text(_text),
+        userLocale(_userLocale)
+    {
     }
 
 #pragma region IDWriteTextAnalysisSource
@@ -236,8 +237,7 @@ public:
         _Out_ UINT32* textLength,
         _Outptr_result_z_ WCHAR const** localeName)
     {
-        // TODO: real locale;
-        *localeName = L"en-US";
+        *localeName = userLocale.c_str();
         *textLength = text.size() - textPosition;
 
         return S_OK;
@@ -289,6 +289,7 @@ public:
 
 private:
     const std::wstring& text;
+    const std::wstring& userLocale;
 };
 
 directwrite_shaper::directwrite_shaper(crispy::Point _dpi) :
@@ -391,7 +392,7 @@ void directwrite_shaper::shape(font_key _font,
 
     WCHAR const* textString = wText.c_str();
     UINT32 textLength = wText.size();
-    FontInfo const& fontInfo = d->fonts.at(_font);
+    FontInfo fontInfo = d->fonts.at(_font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
 
     std::vector<UINT16> glyphIndices;
@@ -447,7 +448,7 @@ void directwrite_shaper::shape(font_key _font,
     else {
         // Complex shaping
         const UINT32 textStart = 0;
-        DWriteAnalysisWrapper analysisWrapper(wText);
+        DWriteAnalysisWrapper analysisWrapper(wText, d->userLocale);
 
         // Fallback analysis
         ComPtr<IDWriteTextFormat> format;
@@ -527,6 +528,8 @@ void directwrite_shaper::shape(font_key _font,
                 familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
 
                 _font = d->add_font(resolvedFamilyName, fontInfo.description, fontInfo.size, mappedFont);
+                fontInfo = d->fonts.at(_font);
+                fontFace = fontInfo.fontFace.Get();
             }
         }
 
