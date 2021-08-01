@@ -14,7 +14,10 @@
 #pragma once
 
 #include <unicode/ucd.h>
+#include <unicode/emoji_segmenter.h>
+
 #include <text_shaper/font.h>
+
 #include <crispy/point.h>
 #include <crispy/size.h>
 #include <crispy/ImageSize.h>
@@ -70,6 +73,8 @@ struct glyph_position
     glyph_key glyph;
     crispy::Point offset;
     crispy::Point advance;
+
+    unicode::PresentationStyle presentation;
 };
 
 using shape_result = std::vector<glyph_position>;
@@ -120,6 +125,7 @@ class shaper {
      * @param _text     the sequence of codepoints to shape (must be all of the same script).
      * @param _clusters codepoint clusters
      * @param _script   the script of the given text.
+     * @param _presentation the pre-determined presentation style that is being stored in each glyph position.
      * @param _result   vector at which the text shaping result will be stored.
      *
      * The call always returns a usable shape result, optionally using font fallback if the given
@@ -129,6 +135,7 @@ class shaper {
                        std::u32string_view _text,
                        crispy::span<unsigned> _clusters,
                        unicode::Script _script,
+                       unicode::PresentationStyle _presentation,
                        shape_result& _result) = 0;
 
     virtual std::optional<glyph_position> shape(font_key _font,

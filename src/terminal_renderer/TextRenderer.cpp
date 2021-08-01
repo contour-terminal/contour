@@ -196,7 +196,7 @@ void TextRenderer::renderRun(crispy::Point _pos,
 
     for (text::glyph_position const& gpos: _glyphPositions)
     {
-        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph); ti.has_value())
+        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph, gpos.presentation); ti.has_value())
         {
             renderTexture(pen,
                           _color,
@@ -215,35 +215,15 @@ void TextRenderer::renderRun(crispy::Point _pos,
     }
 }
 
-TextRenderer::TextureAtlas& TextRenderer::atlasForFont(text::font_key _font)
-{
-    if (textShaper_.has_color(_font))
-        return *colorAtlas_;
-
-    switch (fontDescriptions_.renderMode)
-    {
-        case text::render_mode::lcd:
-            // fallthrough; return lcdAtlas_;
-            return *lcdAtlas_;
-        case text::render_mode::color:
-            return *colorAtlas_;
-        case text::render_mode::light:
-        case text::render_mode::gray:
-        case text::render_mode::bitmap:
-            return *monochromeAtlas_;
-    }
-
-    return *monochromeAtlas_;
-}
-
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id)
+optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id,
+                                                             unicode::PresentationStyle _presentation)
 {
     if (auto i = glyphToTextureMapping_.find(_id); i != glyphToTextureMapping_.end())
         if (TextureAtlas* ta = atlasForBitmapFormat(i->second); ta != nullptr)
             if (optional<DataRef> const dataRef = ta->get(_id); dataRef.has_value())
                 return dataRef;
 
-    bool const colored = textShaper_.has_color(_id.font);
+    bool const colored = _presentation == unicode::PresentationStyle::Emoji;
 
     auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
     if (!theGlyphOpt.has_value())
@@ -392,16 +372,15 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
                  + _glyphPos.offset.x
                  ;
 
-    auto const y =
-#if 1 // TODO: get rid of the has_color dependency
-            textShaper_.has_color(_glyphPos.glyph.font) ? _pos.y :
-#endif
-            _pos.y                                      // bottom left
-            + _glyphPos.offset.y                        // -> harfbuzz adjustment
-            + gridMetrics_.baseline                     // -> baseline
-            + _glyphMetrics.bearing.y                   // -> bitmap top
-            - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
-            ;
+    // Emoji are simple square bitmap fonts that do not need special positioning.
+    auto const y = _glyphPos.presentation == unicode::PresentationStyle::Emoji
+                ? _pos.y
+                : _pos.y                                      // bottom left
+                  + _glyphPos.offset.y                        // -> harfbuzz adjustment
+                  + gridMetrics_.baseline                     // -> baseline
+                  + _glyphMetrics.bearing.y                   // -> bitmap top
+                  - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
+                  ;
 
     renderTexture(crispy::Point{x, y}, _color, _textureInfo);
 
@@ -567,15 +546,9 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
         codepoints,
         clusters,
         std::get<unicode::Script>(_run.properties),
+        std::get<unicode::PresentationStyle>(_run.properties),
         gpos
     );
-
-    // TODO: See if we can tweak here something in order to not depend
-    //       on shaper::has_color() later on.
-    //
-    // if (isEmojiPresentation)
-    //     for (text::glyph_position& gp: gpos)
-    //         gp.offset.y = 0;
 
     if (crispy::debugtag::enabled(TextRendererTag) && !gpos.empty())
     {

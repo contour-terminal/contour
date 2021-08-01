@@ -645,6 +645,7 @@ bool tryShape(font_key _font,
               hb_buffer_t* _hbBuf,
               hb_font_t* _hbFont,
               unicode::Script _script,
+              unicode::PresentationStyle _presentation,
               u32string_view _codepoints,
               crispy::span<unsigned> _clusters,
               shape_result& _result)
@@ -672,6 +673,7 @@ bool tryShape(font_key _font,
         gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
         gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0f);
         gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
+        gpos.presentation = _presentation;
         _result.emplace_back(gpos);
     }
     return crispy::none_of(_result, glyphMissing);
@@ -713,6 +715,7 @@ void open_shaper::shape(font_key _font,
                         u32string_view _codepoints,
                         crispy::span<unsigned> _clusters,
                         unicode::Script _script,
+                        unicode::PresentationStyle _presentation,
                         shape_result& _result)
 {
     FontInfo& fontInfo = d->fonts_.at(_font);
@@ -729,7 +732,7 @@ void open_shaper::shape(font_key _font,
         logMessage.write("Using font: key={}, path=\"{}\"\n", _font, identifierOf(fontInfo.primary));
     }
 
-    if (tryShape(_font, fontInfo, hbBuf, hbFont, _script, _codepoints, _clusters, _result))
+    if (tryShape(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result))
         return;
 
     for (font_source const& fallbackFont: fontInfo.fallbacks)
@@ -750,13 +753,13 @@ void open_shaper::shape(font_key _font,
 
         FontInfo& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
         debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
-        if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, hbBuf, fallbackFontInfo.hbFont.get(), _script, _codepoints, _clusters, _result))
+        if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, hbBuf, fallbackFontInfo.hbFont.get(), _script, _presentation, _codepoints, _clusters, _result))
             return;
     }
     debuglog(FontFallbackTag).write("Shaping failed.");
 
     // reshape with primary font
-    tryShape(_font, fontInfo, hbBuf, hbFont, _script, _codepoints, _clusters, _result);
+    tryShape(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result);
     replaceMissingGlyphs(fontInfo.ftFace.get(), _result);
 }
 
