@@ -472,6 +472,7 @@ void ComplexTextShaper::appendCell(gsl::span<char32_t const> _codepoints,
 
 void ComplexTextShaper::beginFrame()
 {
+    // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
     assert(codepoints_.empty());
     assert(clusters_.empty());
 
@@ -483,14 +484,15 @@ void ComplexTextShaper::beginFrame()
 void ComplexTextShaper::setTextPosition(crispy::Point _position)
 {
     textPosition_ = _position;
-    // std::cout << fmt::format("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
+    // fmt::print("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
 }
 
 void ComplexTextShaper::endSequence()
 {
-    // std::cout << fmt::format("ComplexTextShaper.equenceEnd({}): {}+{}\n",
-    //         textPosition_.x / gridMetrics_.cellSize.width,
-    //         textPosition_, cellCount_);
+    // fmt::print("ComplexTextShaper.sequenceEnd: textPos={}, cellCount={}, width={}, count={}\n",
+    //            textPosition_.x, cellCount_,
+    //            gridMetrics_.cellSize.width,
+    //            codepoints_.size());
 
     if (!codepoints_.empty())
     {

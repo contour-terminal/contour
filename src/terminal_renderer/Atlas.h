@@ -356,12 +356,17 @@ class MetadataTextureAtlas {
         if (!textureInfo)
             return std::nullopt;
 
-        allocations_.emplace(_id, textureInfo);
+        std::reference_wrapper<TextureInfo const> allocation = *allocations_.emplace(_id, textureInfo).first->second;
 
         if constexpr (!std::is_same_v<Metadata, void>)
-            metadata_.emplace(std::pair{_id, std::move(_metadata)});
-
-        return get(_id);
+        {
+            metadata_.emplace(_id, std::move(_metadata));
+            auto& metadata = metadata_.at(_id);
+            // std::reference_wrapper<Metadata const> metadata = *metadata_.emplace(_id, std::move(_metadata)).first->second;
+            return DataRef{allocation, metadata};
+        }
+        else
+            return DataRef{allocation, {}};
     }
 
     /// Retrieves TextureInfo and Metadata tuple if available, std::nullopt otherwise.
