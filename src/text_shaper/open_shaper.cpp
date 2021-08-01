@@ -481,7 +481,7 @@ namespace // {{{ helper
     }
 } // }}}
 
-struct FontInfo
+struct HbFontInfo
 {
     font_source primary;
     font_source_list fallbacks;
@@ -531,7 +531,7 @@ struct open_shaper::Private // {{{
         auto hbFontPtr = HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()),
                                    [](auto p) { hb_font_destroy(p); });
 
-        auto fontInfo = FontInfo{source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr)};
+        auto fontInfo = HbFontInfo{source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr)};
         auto identifier = identifierOf(fontInfo.primary);
 
         auto key = create_font_key();
@@ -616,7 +616,7 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
 
     sources.erase(sources.begin()); // remove primary font from list
 
-    FontInfo& fontInfo = d->fonts_.at(fontKeyOpt.value());
+    HbFontInfo& fontInfo = d->fonts_.at(fontKeyOpt.value());
     fontInfo.fallbacks = move(sources);
     fontInfo.description = _description;
 
@@ -645,7 +645,7 @@ void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span
 }
 
 bool tryShape(font_key _font,
-              FontInfo& _fontInfo,
+              HbFontInfo& _fontInfo,
               hb_buffer_t* _hbBuf,
               hb_font_t* _hbFont,
               unicode::Script _script,
@@ -688,7 +688,7 @@ bool tryShape(font_key _font,
 optional<glyph_position> open_shaper::shape(font_key _font,
                                             char32_t _codepoint)
 {
-    FontInfo& fontInfo = d->fonts_.at(_font);
+    HbFontInfo& fontInfo = d->fonts_.at(_font);
 
     glyph_index glyphIndex{ FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
     if (!glyphIndex.value)
@@ -698,7 +698,7 @@ optional<glyph_position> open_shaper::shape(font_key _font,
             optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
             if (!fallbackKeyOpt.has_value())
                 continue;
-            FontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
+            HbFontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
             glyphIndex = glyph_index{ FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), _codepoint) };
             if (glyphIndex.value)
                 break;
@@ -722,7 +722,7 @@ void open_shaper::shape(font_key _font,
                         unicode::PresentationStyle _presentation,
                         shape_result& _result)
 {
-    FontInfo& fontInfo = d->fonts_.at(_font);
+    HbFontInfo& fontInfo = d->fonts_.at(_font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = d->hb_buf_.get();
 
@@ -749,13 +749,13 @@ void open_shaper::shape(font_key _font,
         if (fontInfo.description.strict_spacing &&
             fontInfo.description.spacing != font_spacing::proportional)
         {
-            FontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
+            HbFontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
             bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
             if (!fontIsMonospace)
                 continue;
         }
 
-        FontInfo& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
+        HbFontInfo& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
         debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
         if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, hbBuf, fallbackFontInfo.hbFont.get(), _script, _presentation, _codepoints, _clusters, _result))
             return;

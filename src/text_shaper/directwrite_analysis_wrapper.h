@@ -13,15 +13,22 @@
  */
 #pragma once
 
+#include<string>
+
 #include <dwrite.h>
 #include <dwrite_3.h>
 #include <wrl/implements.h>
 
+using Microsoft::WRL::RuntimeClass;
+using Microsoft::WRL::RuntimeClassFlags;
+using Microsoft::WRL::ClassicCom;
+using Microsoft::WRL::InhibitFtmBase;
+
 namespace text {
-    class DWriteAnalysisWrapper : public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>, IDWriteTextAnalysisSource, IDWriteTextAnalysisSink>
+    class dwrite_analysis_wrapper : public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>, IDWriteTextAnalysisSource, IDWriteTextAnalysisSink>
     {
     public:
-        DWriteAnalysisWrapper(const std::wstring& _text, const std::wstring& _userLocale) :
+        dwrite_analysis_wrapper(const std::wstring& _text, const std::wstring& _userLocale) :
             text(_text),
             userLocale(_userLocale)
         {

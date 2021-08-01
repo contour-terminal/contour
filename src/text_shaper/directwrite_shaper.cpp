@@ -19,10 +19,6 @@
 #include <iostream> // DEBUGGING ONLY
 
 using Microsoft::WRL::ComPtr;
-using Microsoft::WRL::RuntimeClass;
-using Microsoft::WRL::RuntimeClassFlags;
-using Microsoft::WRL::ClassicCom;
-using Microsoft::WRL::InhibitFtmBase;
 
 using std::max;
 using std::make_unique;
@@ -97,14 +93,15 @@ namespace
     }
 }
 
-struct FontInfo
+struct DxFontInfo
 {
     font_description description;
     font_size size;
     font_metrics metrics;
     int fontUnitsPerEm;
 
-    ComPtr<IDWriteFontFace5> fontFace;
+    // Owning pointer
+    IDWriteFontFace5* fontFace;
 };
 
 struct directwrite_shaper::Private
@@ -115,7 +112,7 @@ struct directwrite_shaper::Private
 
     crispy::Point dpi_;
     std::wstring userLocale;
-    std::unordered_map<font_key, FontInfo> fonts;
+    std::unordered_map<font_key, DxFontInfo> fonts;
     std::unordered_map<font_key, bool> fontsHasColor;
 
     font_key nextFontKey;
@@ -143,7 +140,7 @@ struct directwrite_shaper::Private
         return result;
     }
 
-    optional<text::font_key> add_font(font_source const& _source, font_description _description, font_size _size)
+    optional<text::font_key> add_font(font_source const& _source, font_description const& _description, font_size _size)
     {
         if (!std::holds_alternative<font_path>(_source))
         {
@@ -166,12 +163,16 @@ struct directwrite_shaper::Private
         DWRITE_FONT_FILE_TYPE fileType;
         DWRITE_FONT_FACE_TYPE fontFaceType;
         UINT32 numFaces;
-        ComPtr<IDWriteFontFace> fontFace;
+        IDWriteFontFace* fontFace;
         fontFile->Analyze(&isSupported, &fileType, &fontFaceType, &numFaces);
-        factory->CreateFontFace(fontFaceType, 1, &fontFile, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontFace);
+        hr = factory->CreateFontFace(fontFaceType, 1, fontFile.GetAddressOf(), 0, DWRITE_FONT_SIMULATIONS_NONE, &fontFace);
+        if (FAILED(hr))
+        {
+            return nullopt;
+        }
 
-        ComPtr<IDWriteFontFace3> fontFace3;
-        fontFace.As(&fontFace3);
+        IDWriteFontFace3* fontFace3;
+        fontFace->QueryInterface(&fontFace3);
 
         ComPtr<IDWriteLocalizedStrings> familyNames;
         fontFace3->GetFamilyNames(&familyNames);
@@ -205,13 +206,10 @@ struct directwrite_shaper::Private
 
         familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
 
-        _description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
-        _description.wFamilyName = resolvedFamilyName;
-
-        for (const std::pair<font_key, FontInfo>& kv : fonts)
+        for (const std::pair<font_key, DxFontInfo>& kv : fonts)
         {
             const auto fontInfo = kv.second;
-            if (_description == fontInfo.description && fontInfo.fontFace.Get()->Equals(fontFace.Get()))
+            if (_description == fontInfo.description && fontInfo.fontFace->Equals(fontFace))
             {
                 return kv.first;
             }
@@ -223,17 +221,19 @@ struct directwrite_shaper::Private
         auto const dipScalar = ptToEm(_size.pt) / dwMetrics.designUnitsPerEm * pixelPerDip();
         auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
 
-        auto fontInfo = FontInfo{};
+        DxFontInfo fontInfo{};
         fontInfo.description = _description;
+        fontInfo.description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
+        fontInfo.description.wFamilyName = resolvedFamilyName;
         fontInfo.size = _size;
         fontInfo.metrics.line_height = int(ceil(lineHeight * dipScalar));
         fontInfo.metrics.ascender = int(ceil(dwMetrics.ascent * dipScalar));
         fontInfo.metrics.descender = int(ceil(dwMetrics.descent * dipScalar));
         fontInfo.metrics.underline_position = int(ceil(dwMetrics.underlinePosition * dipScalar));
         fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
-        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace.Get()) * dipScalar));
+        fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace) * dipScalar));
 
-        fontFace.As(&fontInfo.fontFace);
+        fontFace->QueryInterface(&fontInfo.fontFace);
 
         auto key = create_font_key();
         fonts.emplace(pair{ key, move(fontInfo) });
@@ -296,7 +296,7 @@ optional<font_key> directwrite_shaper::load_font(font_description const& _descri
 
 font_metrics directwrite_shaper::metrics(font_key _key) const
 {
-    FontInfo const& fontInfo = d->fonts.at(_key);
+    DxFontInfo const& fontInfo = d->fonts.at(_key);
     return fontInfo.metrics;
 }
 
@@ -314,8 +314,8 @@ void directwrite_shaper::shape(font_key _font,
 
     WCHAR const* textString = wText.c_str();
     UINT32 textLength = wText.size();
-    FontInfo fontInfo = d->fonts.at(_font);
-    IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
+    DxFontInfo fontInfo = d->fonts.at(_font);
+    IDWriteFontFace5* fontFace = fontInfo.fontFace;
 
     std::vector<UINT16> glyphIndices;
     std::vector<INT32> glyphDesignUnitAdvances;
@@ -371,10 +371,20 @@ void directwrite_shaper::shape(font_key _font,
     else {
         // Complex shaping
         const UINT32 textStart = 0;
-        DWriteAnalysisWrapper analysisWrapper(wText, d->userLocale);
+        dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
 
         // Fallback analysis
         font_source_list sources = d->locator_->resolve(gsl::span(_text.data(), _text.size()));
+        if (sources.size() > 0)
+        {
+            optional<font_key> fontKeyOpt = d->add_font(sources[0], fontInfo.description, fontInfo.size);
+            if (fontKeyOpt.has_value())
+            {
+                _font = fontKeyOpt.value();
+                fontInfo = d->fonts.at(fontKeyOpt.value());
+                fontFace = fontInfo.fontFace;
+            }
+        }
 
         // Script analysis
         d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
@@ -423,7 +433,7 @@ void directwrite_shaper::shape(font_key _font,
         std::vector<float> glyphAdvances(actualGlyphCount);
         std::vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
 
-        hr = d->textAnalyzer->GetGlyphPlacements(
+        auto hr = d->textAnalyzer->GetGlyphPlacements(
             &wText.at(textStart),
             &glyphClusters.at(textStart),
             &textProps.at(0),
@@ -459,8 +469,8 @@ void directwrite_shaper::shape(font_key _font,
 
 std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, render_mode _mode)
 {
-    FontInfo const& fontInfo = d->fonts.at(_glyph.font);
-    IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
+    DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
+    IDWriteFontFace5* fontFace = fontInfo.fontFace;
     const float fontEmSize = d->ptToEm(_glyph.size.pt);
 
     const UINT16 glyphIndex = static_cast<UINT16>(_glyph.index.value);
