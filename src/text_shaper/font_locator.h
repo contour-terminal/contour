@@ -71,7 +71,7 @@ public:
      * possible fonts that can be used for text shaping the given
      * codepoint sequence.
      */
-    virtual font_source_list resolve(gsl::span<char32_t> codepoints) = 0;
+    virtual font_source_list resolve(gsl::span<const char32_t> codepoints) = 0;
 };
 
 }

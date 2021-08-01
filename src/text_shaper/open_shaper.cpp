@@ -15,8 +15,6 @@
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
 
-#include <text_shaper/fontconfig_locator.h>
-
 #include <crispy/algorithm.h>
 #include <crispy/debuglog.h>
 #include <crispy/times.h>
