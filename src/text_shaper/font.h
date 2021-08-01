@@ -116,7 +116,7 @@ constexpr std::optional<font_spacing> make_font_spacing(std::string_view _text)
 struct font_description
 {
     std::string familyName;
-#if _WIN32
+#if defined(_WIN32)
     std::wstring wFamilyName;
 #endif
 

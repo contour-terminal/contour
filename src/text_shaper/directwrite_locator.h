@@ -17,22 +17,19 @@
 #include <text_shaper/font_locator.h>
 #include <text_shaper/font.h>
 
-class IDWriteFontFace;
+struct IDWriteFontFace;
 
 namespace text {
 
     /**
-     * Font locator API implementation using `fontconfig` library.
+     * Font locator API implementation using `DirectWrite` library.
      *
-     * This should be available on all platforms.
-     *
-     * @note on Windows, fontconfig still can NOT find user installed fonts.
+     * This is available only on Windows.
      */
     class directwrite_locator : public font_locator
     {
     public:
         directwrite_locator();
-        ~directwrite_locator() override;
 
         font_source_list locate(font_description const& description) override;
         font_source_list all() override;

@@ -89,7 +89,7 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
             #if defined(_WIN32)
             return make_unique<text::directwrite_locator>();
             #else
-            debuglog(TextRendererTag).write("Font locator CoreText not supported on this platform.");
+            debuglog(TextRendererTag).write("Font locator DirectWrite not supported on this platform.");
             #endif
             break;
         case FontLocatorEngine::CoreText:
@@ -117,7 +117,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Poi
             #if defined(_WIN32)
             debuglog(TextRendererTag).write("Using DirectWrite text shaping engine.");
             // TODO: do we want to use custom font locator here?
-            return make_unique<text::directwrite_shaper>(_dpi, std::move(_locator));
+            return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
             #else
             debuglog(TextRendererTag).write("DirectWrite not available on this platform.");
             break;

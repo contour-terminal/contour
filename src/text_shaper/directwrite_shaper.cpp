@@ -91,6 +91,11 @@ namespace
                 }
             }
     }
+
+    constexpr double ptToEm(double pt)
+    {
+        return pt * (96.0 / 72.0);
+    }
 }
 
 struct DxFontInfo
@@ -267,11 +272,6 @@ struct directwrite_shaper::Private
     {
         return dpi_.x / 96.0;
     }
-
-    double ptToEm(double pt)
-    {
-        return pt * (96.0 / 72.0);
-    }
 };
 
 
@@ -356,7 +356,7 @@ void directwrite_shaper::shape(font_key _font,
 
         for (size_t i = glyphStart; i < textLength; i++)
         {
-            const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * d->ptToEm(fontInfo.size.pt) * d->pixelPerDip();
+            const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * ptToEm(fontInfo.size.pt) * d->pixelPerDip();
             glyph_position gpos{};
             gpos.presentation = _presentation;
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
@@ -381,7 +381,7 @@ void directwrite_shaper::shape(font_key _font,
             if (fontKeyOpt.has_value())
             {
                 _font = fontKeyOpt.value();
-                fontInfo = d->fonts.at(fontKeyOpt.value());
+                fontInfo = d->fonts.at(_font);
                 fontFace = fontInfo.fontFace;
             }
         }
@@ -471,7 +471,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 {
     DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
-    const float fontEmSize = d->ptToEm(_glyph.size.pt);
+    const float fontEmSize = ptToEm(_glyph.size.pt);
 
     const UINT16 glyphIndex = static_cast<UINT16>(_glyph.index.value);
     const DWRITE_GLYPH_OFFSET glyphOffset{};
@@ -522,8 +522,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     output.position.x = textureBounds.left;
     output.position.y = -textureBounds.top;
 
-    auto const width = output.size.width;
-    auto const height = output.size.height;
+    auto const [width, height] = output.size;
 
     IDWriteFactory2* factory2;
     IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;
@@ -563,8 +562,11 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
                 if (!haveRun)
                     break;
 
-                DWRITE_COLOR_GLYPH_RUN  const* colorRun;
-                glyphRunEnumerator->GetCurrentRun(&colorRun);
+                DWRITE_COLOR_GLYPH_RUN const* colorRun;
+                hr = glyphRunEnumerator->GetCurrentRun(&colorRun);
+                if (FAILED(hr)) {
+                    break;
+                }
 
                 ComPtr<IDWriteGlyphRunAnalysis> colorGlyphsAnalysis;
 

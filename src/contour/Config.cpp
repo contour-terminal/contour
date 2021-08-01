@@ -1156,7 +1156,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     profile.fonts.boldItalic.slant = text::font_slant::italic;
     softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
 
-#if _WIN32
+#if defined(_WIN32)
     profile.fonts.emoji.familyName = "Segoe UI Emoji";
 #else
     profile.fonts.emoji.familyName = "emoji";

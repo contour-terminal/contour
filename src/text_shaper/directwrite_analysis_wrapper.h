@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include<string>
+#include <string>
 
 #include <dwrite.h>
 #include <dwrite_3.h>
@@ -38,7 +38,7 @@ namespace text {
         HRESULT GetTextAtPosition(
             UINT32 textPosition,
             _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-            _Out_ UINT32* textLength)
+            _Out_ UINT32* textLength) override
         {
             *textString = nullptr;
             *textLength = 0;
@@ -55,7 +55,7 @@ namespace text {
         HRESULT GetTextBeforePosition(
             UINT32 textPosition,
             _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-            _Out_ UINT32* textLength)
+            _Out_ UINT32* textLength) override
         {
             *textString = nullptr;
             *textLength = 0;
@@ -69,7 +69,7 @@ namespace text {
             return S_OK;
         }
 
-        DWRITE_READING_DIRECTION GetParagraphReadingDirection()
+        DWRITE_READING_DIRECTION GetParagraphReadingDirection() override
         {
             // TODO: is this always correct?
             return DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
@@ -78,7 +78,7 @@ namespace text {
         HRESULT GetLocaleName(
             UINT32 textPosition,
             _Out_ UINT32* textLength,
-            _Outptr_result_z_ WCHAR const** localeName)
+            _Outptr_result_z_ WCHAR const** localeName) override
         {
             *localeName = userLocale.c_str();
             *textLength = text.size() - textPosition;
@@ -88,7 +88,7 @@ namespace text {
 
         HRESULT GetNumberSubstitution(UINT32 textPosition,
             _Out_ UINT32* textLength,
-            _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution)
+            _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution) override
         {
 
             *numberSubstitution = nullptr;
@@ -99,7 +99,7 @@ namespace text {
 #pragma endregion
 
 #pragma region IDWriteTextAnalysisSink
-        HRESULT SetScriptAnalysis(UINT32 textPosition, UINT32 textLength, _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis)
+        HRESULT SetScriptAnalysis(UINT32 textPosition, UINT32 textLength, _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis) override
         {
             script = *scriptAnalysis;
             return S_OK;
@@ -107,7 +107,7 @@ namespace text {
 
         HRESULT SetLineBreakpoints(UINT32 textPosition,
             UINT32 textLength,
-            _In_reads_(textLength) DWRITE_LINE_BREAKPOINT const* lineBreakpoints)
+            _In_reads_(textLength) DWRITE_LINE_BREAKPOINT const* lineBreakpoints) override
         {
             return S_OK;
         }
@@ -115,14 +115,14 @@ namespace text {
         HRESULT SetBidiLevel(UINT32 textPosition,
             UINT32 textLength,
             UINT8 /*explicitLevel*/,
-            UINT8 resolvedLevel)
+            UINT8 resolvedLevel) override
         {
             return S_OK;
         }
 
         HRESULT SetNumberSubstitution(UINT32 textPosition,
             UINT32 textLength,
-            _In_ IDWriteNumberSubstitution* numberSubstitution)
+            _In_ IDWriteNumberSubstitution* numberSubstitution) override
         {
             return S_OK;
         }

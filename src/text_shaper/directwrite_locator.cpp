@@ -131,10 +131,6 @@ namespace text
     {
     }
 
-    directwrite_locator::~directwrite_locator()
-    {
-    }
-
     font_source_list directwrite_locator::locate(font_description const& _fd)
     {
         font_source_list output;
