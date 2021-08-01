@@ -20,15 +20,19 @@
 
 namespace text {
 
+class font_locator;
+
 /**
  * Text shaping and rendering engine using open source technologies,
  * fontconfig + harfbuzz + freetype.
  */
 class open_shaper : public shaper {
   public:
-    explicit open_shaper(crispy::Point _dpi);
+    explicit open_shaper(crispy::Point _dpi, std::unique_ptr<font_locator> _locator);
 
     void set_dpi(crispy::Point _dpi) override;
+
+    void set_locator(std::unique_ptr<font_locator> _locator) override;
 
     void clear_cache() override;
 

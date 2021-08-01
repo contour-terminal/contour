@@ -13,6 +13,9 @@
  */
 #include <text_shaper/open_shaper.h>
 #include <text_shaper/font.h>
+#include <text_shaper/font_locator.h>
+
+#include <text_shaper/fontconfig_locator.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/debuglog.h>
@@ -97,6 +100,15 @@ auto constexpr MissingGlyphId = 0xFFFDu;
 
 namespace // {{{ helper
 {
+    string identifierOf(font_source const& source)
+    {
+        if (std::holds_alternative<font_path>(source))
+            return std::get<font_path>(source).value;
+        if (std::holds_alternative<font_memory_ref>(source))
+            return std::get<font_memory_ref>(source).identifier;
+        throw std::invalid_argument("source");
+    }
+
     constexpr string_view fcSpacingStr(int _value) noexcept
     {
         using namespace std::string_view_literals;
@@ -223,106 +235,6 @@ namespace // {{{ helper
                 return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
         }
     }
-
-#if 0
-    char const* fcWeightStr(int _value)
-    {
-        switch (_value)
-        {
-            case FC_WEIGHT_THIN: return "Thin";
-            case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
-            case FC_WEIGHT_LIGHT: return "Light";
-#if defined(FC_WEIGHT_DEMILIGHT)
-            case FC_WEIGHT_DEMILIGHT: return "DemiLight";
-#endif
-            case FC_WEIGHT_BOOK: return "Book";
-            case FC_WEIGHT_REGULAR: return "Regular";
-            case FC_WEIGHT_MEDIUM: return "Medium";
-            case FC_WEIGHT_DEMIBOLD: return "DemiBold";
-            case FC_WEIGHT_BOLD: return "Bold";
-            case FC_WEIGHT_EXTRABOLD: return "ExtraBold";
-            case FC_WEIGHT_BLACK: return "Black";
-            case FC_WEIGHT_EXTRABLACK: return "ExtraBlack";
-            default: return "?";
-        }
-    }
-
-    char const* fcSlantStr(int _value)
-    {
-        switch (_value)
-        {
-            case FC_SLANT_ROMAN: return "Roman";
-            case FC_SLANT_ITALIC: return "Italic";
-            case FC_SLANT_OBLIQUE: return "Oblique";
-            default: return "?";
-        }
-    }
-
-    static optional<vector<string>> getAvailableFonts()
-    {
-        FcPattern* pat = FcPatternCreate();
-        FcObjectSet* os = FcObjectSetBuild(
-#if defined(FC_COLOR)
-            FC_COLOR,
-#endif
-            FC_FAMILY,
-            FC_FILE,
-            FC_FULLNAME,
-            FC_HINTING,
-            FC_HINT_STYLE,
-            FC_INDEX,
-            FC_OUTLINE,
-#if defined(FC_POSTSCRIPT_NAME)
-            FC_POSTSCRIPT_NAME,
-#endif
-            FC_SCALABLE,
-            FC_SLANT,
-            FC_SPACING,
-            FC_STYLE,
-            FC_WEIGHT,
-            FC_WIDTH,
-            NULL
-        );
-        FcFontSet* fs = FcFontList(nullptr, pat, os);
-
-        vector<string> output;
-
-        for (auto i = 0; i < fs->nfont; ++i)
-        {
-            FcPattern* font = fs->fonts[i];
-
-            FcChar8* filename = nullptr;
-            FcPatternGetString(font, FC_FILE, 0, &filename);
-
-            FcChar8* family = nullptr;
-            FcPatternGetString(font, FC_FAMILY, 0, &family);
-
-            int spacing = -1; // ignore font if we cannot retrieve spacing information
-            FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-
-            int weight = -1;
-            FcPatternGetInteger(font, FC_WEIGHT, 0, &weight);
-
-            int slant = -1;
-            FcPatternGetInteger(font, FC_SLANT, 0, &slant);
-
-            if (spacing >= FC_DUAL)
-            {
-                std::cerr << fmt::format("font({}, {}): {}\n",
-                    fcWeightStr(weight),
-                    fcSlantStr(slant),
-                    (char*) family);
-                output.emplace_back((char const*) filename);
-            }
-        }
-
-        FcObjectSetDestroy(os);
-        FcFontSetDestroy(fs);
-        FcPatternDestroy(pat);
-
-        return output;
-    }
-#endif
 
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
@@ -491,13 +403,38 @@ namespace // {{{ helper
         return best;
     }
 
-    optional<FtFacePtr> loadFace(string const& _path, font_size _fontSize, crispy::Point _dpi, FT_Library _ft)
+    optional<FtFacePtr> loadFace(font_source const& _source, font_size _fontSize, crispy::Point _dpi, FT_Library _ft)
     {
         FT_Face ftFace = nullptr;
-        auto ftErrorCode = FT_New_Face(_ft, _path.c_str(), 0, &ftFace);
-        if (!ftFace)
+
+        if (std::holds_alternative<font_path>(_source))
         {
-            debuglog(FontLoaderTag).write("Failed to load font from path {}. {}", _path, ftErrorStr(ftErrorCode));
+            auto const& sourcePath = std::get<font_path>(_source);
+            FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), 0, &ftFace);
+            if (!ftFace)
+            {
+                debuglog(FontLoaderTag).write("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
+                return nullopt;
+            }
+        }
+        else if (std::holds_alternative<font_memory_ref>(_source))
+        {
+            int faceIndex = 0;
+            auto const memory = std::get<font_memory_ref>(_source);
+            FT_Error ec = FT_New_Memory_Face(_ft,
+                                             memory.data.data(),
+                                             static_cast<FT_Long>(memory.data.size()),
+                                             faceIndex,
+                                             &ftFace);
+            if (!ftFace)
+            {
+                debuglog(FontLoaderTag).write("Failed to load font from memory. {}", ftErrorStr(ec));
+                return nullopt;
+            }
+        }
+        else
+        {
+            debuglog(FontLoaderTag).write("Unsupported font_source type.");
             return nullopt;
         }
 
@@ -510,7 +447,7 @@ namespace // {{{ helper
 
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
-                debuglog(FontLoaderTag).write("Failed to FT_Select_Size(index={}, file={}): {}", strikeIndex, _path, ftErrorStr(ec));
+                debuglog(FontLoaderTag).write("Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, _source, ftErrorStr(ec));
         }
         else
         {
@@ -520,7 +457,7 @@ namespace // {{{ helper
                                             static_cast<FT_UInt>(_dpi.x),
                                             static_cast<FT_UInt>(_dpi.y)); ec != FT_Err_Ok)
             {
-                debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi={}, file={}): {}\n", size, _dpi, _path, ftErrorStr(ec));
+                debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n", size, _dpi, _source, ftErrorStr(ec));
             }
         }
 
@@ -542,17 +479,18 @@ namespace // {{{ helper
 
 struct FontInfo
 {
-    string path;
+    font_source primary;
+    font_source_list fallbacks;
     font_size size;
     FtFacePtr ftFace;
     HbFontPtr hbFont;
     font_description description{};
-    vector<string> fallbackFonts{};
 };
 
 struct open_shaper::Private // {{{
 {
     FT_Library ft_;
+    std::unique_ptr<font_locator> locator_;
     crispy::Point dpi_;
     std::unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
     std::unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
@@ -571,12 +509,12 @@ struct open_shaper::Private // {{{
         return result;
     }
 
-    optional<font_key> get_font_key_for(string _path, font_size _fontSize)
+    optional<font_key> get_font_key_for(font_source const& source, font_size _fontSize)
     {
-        if (auto i = fontPathSizeToKeys.find(FontPathAndSize{_path, _fontSize}); i != fontPathSizeToKeys.end())
+        if (auto i = fontPathSizeToKeys.find(FontPathAndSize{identifierOf(source), _fontSize}); i != fontPathSizeToKeys.end())
             return i->second;
 
-        auto ftFacePtrOpt = loadFace(_path, _fontSize, dpi_, ft_);
+        auto ftFacePtrOpt = loadFace(source, _fontSize, dpi_, ft_);
         if (!ftFacePtrOpt.has_value())
             return nullopt;
 
@@ -584,12 +522,13 @@ struct open_shaper::Private // {{{
         auto hbFontPtr = HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()),
                                    [](auto p) { hb_font_destroy(p); });
 
-        auto fontInfo = FontInfo{_path, _fontSize, move(ftFacePtr), move(hbFontPtr)};
+        auto fontInfo = FontInfo{source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr)};
+        auto identifier = identifierOf(fontInfo.primary);
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        debuglog(FontLoaderTag).write("Loading font: key={}, path=\"{}\" size={} dpi={} {}", key, _path, _fontSize, dpi_, metrics(key));
-        fontPathSizeToKeys.emplace(pair{FontPathAndSize{move(_path), _fontSize}, key});
+        debuglog(FontLoaderTag).write("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, identifier, _fontSize, dpi_, metrics(key));
+        fontPathSizeToKeys.emplace(pair{FontPathAndSize{identifier, _fontSize}, key});
         return key;
     }
 
@@ -609,14 +548,14 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    explicit Private(crispy::Point _dpi) :
+    Private(crispy::Point _dpi,
+            unique_ptr<font_locator> _locator) :
         ft_{},
+        locator_{ move(_locator) },
         dpi_{ _dpi },
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey_{}
     {
-        FcInit();
-
         if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
             throw runtime_error{ "freetype: Failed to initialize. "s + ftErrorStr(ec)};
 
@@ -624,19 +563,16 @@ struct open_shaper::Private // {{{
         if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
             debuglog(GlyphRendstring).write("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 #endif
-
-        //getAvailableFonts();
     }
 
     ~Private()
     {
         FT_Done_FreeType(ft_);
-
-        FcFini();
     }
 }; // }}}
 
-open_shaper::open_shaper(crispy::Point _dpi) : d(new Private(_dpi), [](Private* p) { delete p; })
+open_shaper::open_shaper(crispy::Point _dpi, unique_ptr<font_locator> _locator):
+    d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
 {
 }
 
@@ -648,6 +584,11 @@ void open_shaper::set_dpi(crispy::Point _dpi)
     d->dpi_ = _dpi;
 }
 
+void open_shaper::set_locator(std::unique_ptr<font_locator> _locator)
+{
+    d->locator_ = std::move(_locator);
+}
+
 void open_shaper::clear_cache()
 {
     d->fonts_.clear();
@@ -656,18 +597,18 @@ void open_shaper::clear_cache()
 
 optional<font_key> open_shaper::load_font(font_description const& _description, font_size _size)
 {
-    auto fontPathsOpt = getFontFallbackPaths(_description);
-    if (!fontPathsOpt.has_value())
+    font_source_list sources = d->locator_->locate(_description);
+    if (sources.empty())
         return nullopt;
 
-    auto& [primaryFont, fallbackFonts] = fontPathsOpt.value();
-
-    optional<font_key> fontKeyOpt = d->get_font_key_for(move(primaryFont), _size);
+    optional<font_key> fontKeyOpt = d->get_font_key_for(sources[0], _size);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
+    sources.erase(sources.begin()); // remove primary font from list
+
     FontInfo& fontInfo = d->fonts_.at(fontKeyOpt.value());
-    fontInfo.fallbackFonts = fallbackFonts;
+    fontInfo.fallbacks = move(sources);
     fontInfo.description = _description;
 
     return fontKeyOpt;
@@ -746,7 +687,7 @@ optional<glyph_position> open_shaper::shape(font_key _font,
     glyph_index glyphIndex{ FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
     if (!glyphIndex.value)
     {
-        for (auto const& fallbackFont : fontInfo.fallbackFonts)
+        for (font_source const& fallbackFont : fontInfo.fallbacks)
         {
             optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
             if (!fallbackKeyOpt.has_value())
@@ -785,19 +726,19 @@ void open_shaper::shape(font_key _font,
         for (auto [i, codepoint] : crispy::indexed(_codepoints))
             logMessage.write(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
         logMessage.write("\n");
-        logMessage.write("Using font: key={}, path=\"{}\"\n", _font, fontInfo.path);
+        logMessage.write("Using font: key={}, path=\"{}\"\n", _font, identifierOf(fontInfo.primary));
     }
 
     if (tryShape(_font, fontInfo, hbBuf, hbFont, _script, _codepoints, _clusters, _result))
         return;
 
-    for (auto const& fallbackFont : fontInfo.fallbackFonts)
+    for (font_source const& fallbackFont: fontInfo.fallbacks)
     {
         optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
         if (!fallbackKeyOpt.has_value())
             continue;
 
-        // Skip if main font is monospace but fallback font is not.
+        // Skip if main font is monospace but fallbacks font is not.
         if (fontInfo.description.strict_spacing &&
             fontInfo.description.spacing != font_spacing::proportional)
         {
@@ -808,7 +749,7 @@ void open_shaper::shape(font_key _font,
         }
 
         FontInfo& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
-        debuglog(FontFallbackTag).write("Try fallback font: key={}, path=\"{}\"\n", fallbackKeyOpt.value(), fallbackFontInfo.path);
+        debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
         if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, hbBuf, fallbackFontInfo.hbFont.get(), _script, _codepoints, _clusters, _result))
             return;
     }

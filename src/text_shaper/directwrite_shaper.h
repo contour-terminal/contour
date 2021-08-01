@@ -29,6 +29,7 @@ class directwrite_shaper : public shaper {
     explicit directwrite_shaper(crispy::Point _dpi);
 
     void set_dpi(crispy::Point _dpi) override;
+    void set_locator(std::unique_ptr<font_locator> _locator) override;
     void clear_cache() override;
 
     std::optional<font_key> load_font(font_description const& _description, font_size _size) override;

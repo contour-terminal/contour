@@ -35,7 +35,6 @@
 namespace text {
 
 auto const inline FontLoaderTag = crispy::debugtag::make("font.loader", "Logs font loads and loading errors.");
-auto const inline FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
 auto const inline TextShapingTag = crispy::debugtag::make("font.textshaping", "Logs details about text shaping.");
 auto const inline GlyphRenderTag = crispy::debugtag::make("font.render", "Logs details about rendering glyphs.");
 
@@ -75,6 +74,8 @@ struct glyph_position
 
 using shape_result = std::vector<glyph_position>;
 
+class font_locator;
+
 /**
  * Platform-independent font loading, text shaping, and glyph rendering API.
  */
@@ -86,6 +87,11 @@ class shaper {
      * Sets or updates DPI to the given value.
      */
     virtual void set_dpi(crispy::Point _dpi) = 0;
+
+    /**
+     * Configures the font location API to be used.
+     */
+    virtual void set_locator(std::unique_ptr<font_locator> _locator) = 0;
 
     /**
      * Clears internal caches (if any).

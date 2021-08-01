@@ -124,6 +124,14 @@ profiles:
             # DPI scaling factor applied on top of the system configured on (default: 1.0).
             dpi_scale: 1.0
 
+            # Font Locator API
+            # Selects an engine to use for locating font files on the system.
+            # This is implicitly also responsible for font fallback
+            # Possible values are:
+            # - fontconfig      : uses fontconfig to select fonts
+            # - CoreText        : uses OS/X CoreText to select fonts (currently not implemented).
+            locator: fontconfig
+
             # Text shaping related settings
             text_shaping:
                 # Selects which text shaping and font rendering engine to use.

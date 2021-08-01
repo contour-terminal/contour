@@ -151,6 +151,13 @@ enum class TextShapingEngine
     CoreText,       //!< native platform support: OS/X
 };
 
+enum class FontLocatorEngine
+{
+    FontConfig,     //!< platform independant font locator API
+    CoreText,       //!< native font locator on OS/X
+    // TODO: GDI or DirectWrite (Windows)
+};
+
 struct FontDescriptions
 {
     double dpiScale = 1.0;
@@ -164,6 +171,7 @@ struct FontDescriptions
     text::render_mode renderMode;
     TextShapingMethod textShapingMethod;
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
+    FontLocatorEngine fontLocator = FontLocatorEngine::FontConfig;
     bool builtinBoxDrawing = true;
 };
 
