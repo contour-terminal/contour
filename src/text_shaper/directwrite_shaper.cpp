@@ -705,12 +705,6 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     return output;
 }
 
-bool directwrite_shaper::has_color(font_key _font) const
-{
-    // TODO: use internal hash map to font info
-    return false;
-}
-
 void directwrite_shaper::set_dpi(crispy::Point _dpi)
 {
     d->dpi_ = _dpi;

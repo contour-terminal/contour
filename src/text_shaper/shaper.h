@@ -148,8 +148,6 @@ class shaper {
      * @param _mode  render technique to use.
      */
     virtual std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) = 0;
-
-    virtual bool has_color(font_key _font) const = 0;
 };
 
 } // end namespace text

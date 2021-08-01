@@ -52,8 +52,6 @@ class open_shaper : public shaper {
 
     std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
 
-    bool has_color(font_key _font) const override;
-
   private:
     struct Private;
     std::unique_ptr<Private, void(*)(Private*)> d;
