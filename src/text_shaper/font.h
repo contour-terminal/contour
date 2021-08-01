@@ -15,6 +15,7 @@
 
 #include <crispy/FNV.h>
 #include <crispy/point.h>
+#include <crispy/debuglog.h>
 
 #include <fmt/format.h>
 
@@ -24,6 +25,8 @@
 #include <utility>
 
 namespace text {
+
+auto const inline FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
 
 namespace detail
 {

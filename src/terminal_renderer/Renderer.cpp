@@ -17,6 +17,7 @@
 
 #include <text_shaper/open_shaper.h>
 #include <text_shaper/directwrite_shaper.h>
+#include <text_shaper/fontconfig_locator.h>
 
 #include <crispy/debuglog.h>
 
@@ -75,13 +76,37 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     return output;
 }
 
-unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Point _dpi)
+unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
+{
+    switch (_engine)
+    {
+        // TODO: GDI / DirectWrite needs to be hooked in here
+
+        case FontLocatorEngine::CoreText:
+            #if defined(__APPLE__)
+            debuglog(TextRendererTag).write("Font locator CoreText not implemented yet.");
+            #else
+            debuglog(TextRendererTag).write("Font locator CoreText not supported on this platform.");
+            #endif
+            break;
+
+        case FontLocatorEngine::FontConfig:
+            break;
+    }
+
+    debuglog(TextRendererTag).write("Using font locator: fontconfig.");
+    return make_unique<text::fontconfig_locator>();
+}
+
+unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Point _dpi,
+                                          unique_ptr<text::font_locator> _locator)
 {
     switch (_engine)
     {
         case TextShapingEngine::DWrite:
             #if defined(_WIN32)
             debuglog(TextRendererTag).write("Using DirectWrite text shaping engine.");
+            // TODO: do we want to use custom font locator here?
             return make_unique<text::directwrite_shaper>(_dpi);
             #else
             debuglog(TextRendererTag).write("DirectWrite not available on this platform.");
@@ -102,7 +127,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Poi
     }
 
     debuglog(TextRendererTag).write("Using OpenShaper text shaping engine.");
-    return make_unique<text::open_shaper>(_dpi);
+    return make_unique<text::open_shaper>(_dpi, std::move(_locator));
 }
 
 Renderer::Renderer(PageSize _screenSize,
@@ -111,7 +136,13 @@ Renderer::Renderer(PageSize _screenSize,
                    terminal::Opacity _backgroundOpacity,
                    Decorator _hyperlinkNormal,
                    Decorator _hyperlinkHover):
-    textShaper_{ createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi) },
+    textShaper_{
+        createTextShaper(
+            _fontDescriptions.textShapingEngine,
+            _fontDescriptions.dpi,
+            createFontLocator(_fontDescriptions.fontLocator)
+        )
+    },
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
@@ -170,9 +201,15 @@ void Renderer::setFonts(FontDescriptions _fontDescriptions)
     {
         textShaper_->clear_cache();
         textShaper_->set_dpi(_fontDescriptions.dpi);
+        if (fontDescriptions_.fontLocator != _fontDescriptions.fontLocator)
+            textShaper_->set_locator(createFontLocator(_fontDescriptions.fontLocator));
     }
     else
-        textShaper_ = createTextShaper(_fontDescriptions.textShapingEngine, _fontDescriptions.dpi);
+        textShaper_ = createTextShaper(
+            _fontDescriptions.textShapingEngine,
+            _fontDescriptions.dpi,
+            createFontLocator(_fontDescriptions.fontLocator)
+        );
 
     fontDescriptions_ = move(_fontDescriptions);
     fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);

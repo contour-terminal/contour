@@ -1118,6 +1118,22 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
                     basePath, strValue);
     }
 
+    strValue = "";
+    if (tryLoadChild(_usedKeys, _doc, basePath, "font.locator", strValue))
+    {
+        auto const lwrValue = toLower(strValue);
+        if (lwrValue == "fontconfig")
+            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::FontConfig;
+        else if (lwrValue == "coretext")
+            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::CoreText;
+        else if (lwrValue == "directwrite" || lwrValue == "gdi") // TODO: Implement one of the two.
+            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {} (Not implemented).",
+                                      basePath, strValue);
+        else
+            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {}",
+                                      basePath, strValue);
+    }
+
     bool strictSpacing = false;
     tryLoadChild(_usedKeys, _doc, basePath, "font.strict_spacing", strictSpacing);
 

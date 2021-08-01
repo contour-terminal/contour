@@ -1,7 +1,9 @@
 set(text_shaper_SRC
-    shaper.cpp shaper.h
     font.cpp font.h
+    font_locator.h
+    fontconfig_locator.cpp fontconfig_locator.h
     open_shaper.cpp open_shaper.h
+    shaper.cpp shaper.h
 )
 
 if("${CMAKE_SYSTEM}" MATCHES "Windows")
@@ -14,6 +16,7 @@ add_library(text_shaper STATIC ${text_shaper_SRC})
 set(TEXT_SHAPER_LIBS unicode::core)
 list(APPEND TEXT_SHAPER_LIBS fmt::fmt-header-only)
 list(APPEND TEXT_SHAPER_LIBS range-v3)
+list(APPEND TEXT_SHAPER_LIBS GSL)
 
 if(APPLE)
     find_package(PkgConfig REQUIRED)

@@ -416,7 +416,7 @@ void directwrite_shaper::shape(font_key _font,
 
 
     BOOL isEntireTextSimple = isTextSimple && uiLengthRead == textLength;
-    // Note that some fonts won't report isTextSimple even for ASCII only strings, due to the existence of "locl" table. 
+    // Note that some fonts won't report isTextSimple even for ASCII only strings, due to the existence of "locl" table.
     if (isEntireTextSimple)
     {
         // "Simple" shaping assumes every character has the exact same width which can be calculate from the metrics.
@@ -713,6 +713,11 @@ void directwrite_shaper::set_dpi(crispy::Point _dpi)
 {
     d->dpi_ = _dpi;
     clear_cache();
+}
+
+void directwrite_shaper::set_locator(std::unique_ptr<font_locator> _locator)
+{
+    // TODO: use the given font locator for subsequent font location requests.
 }
 
 void directwrite_shaper::clear_cache()
