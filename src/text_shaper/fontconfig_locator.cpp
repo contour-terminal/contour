@@ -173,11 +173,11 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 
     if (_fd.spacing != font_spacing::proportional)
     {
-#ifdef _WIN32
+#if defined(_WIN32)
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
         if (_fd.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Consolas");
-#elif __APPLE__
+#elif defined(__APPLE__)
         // Same for macOS, we use "Menlo" for "monospace".
         if (_fd.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Menlo");

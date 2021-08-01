@@ -496,7 +496,7 @@ struct open_shaper::Private // {{{
     FT_Library ft_;
     unique_ptr<font_locator> locator_;
     crispy::Point dpi_;
-    unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
+    unordered_map<font_key, HbFontInfo> fonts_;  // from font_key to FontInfo struct
     unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
     // The key (for caching) should be composed out of:
