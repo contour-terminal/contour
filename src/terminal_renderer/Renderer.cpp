@@ -16,7 +16,11 @@
 #include <terminal_renderer/utils.h>
 
 #include <text_shaper/open_shaper.h>
+
+#if defined(_WIN32)
+#include <text_shaper/directwrite_locator.h>
 #include <text_shaper/directwrite_shaper.h>
+#endif
 #include <text_shaper/fontconfig_locator.h>
 
 #include <crispy/debuglog.h>
@@ -81,7 +85,13 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
     switch (_engine)
     {
         // TODO: GDI / DirectWrite needs to be hooked in here
-
+        case FontLocatorEngine::DWrite:
+            #if defined(_WIN32)
+            return make_unique<text::directwrite_locator>();
+            #else
+            debuglog(TextRendererTag).write("Font locator CoreText not supported on this platform.");
+            #endif
+            break;
         case FontLocatorEngine::CoreText:
             #if defined(__APPLE__)
             debuglog(TextRendererTag).write("Font locator CoreText not implemented yet.");
@@ -107,7 +117,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Poi
             #if defined(_WIN32)
             debuglog(TextRendererTag).write("Using DirectWrite text shaping engine.");
             // TODO: do we want to use custom font locator here?
-            return make_unique<text::directwrite_shaper>(_dpi);
+            return make_unique<text::directwrite_shaper>(_dpi, std::move(_locator));
             #else
             debuglog(TextRendererTag).write("DirectWrite not available on this platform.");
             break;

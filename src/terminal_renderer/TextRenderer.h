@@ -154,8 +154,8 @@ enum class TextShapingEngine
 enum class FontLocatorEngine
 {
     FontConfig,     //!< platform independant font locator API
+    DWrite,         //!< native platform support: Windows
     CoreText,       //!< native font locator on OS/X
-    // TODO: GDI or DirectWrite (Windows)
 };
 
 struct FontDescriptions

@@ -38,7 +38,6 @@ namespace text {
         font_source_list all() override;
         font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
-        std::wstring get_font_path(IDWriteFontFace* fontFace);
     private:
         struct Private;
         std::unique_ptr<Private, void(*)(Private*)> d;

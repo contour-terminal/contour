@@ -1126,9 +1126,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::FontConfig;
         else if (lwrValue == "coretext")
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::CoreText;
-        else if (lwrValue == "directwrite" || lwrValue == "gdi") // TODO: Implement one of the two.
-            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {} (Not implemented).",
-                                      basePath, strValue);
+        else if (lwrValue == "dwrite" || lwrValue == "directwrite")
+            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::DWrite;
         else
             debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {}",
                                       basePath, strValue);

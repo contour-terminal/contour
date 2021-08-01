@@ -77,6 +77,30 @@ namespace text
             }
             return font_slant::normal;
         }
+
+        std::wstring get_font_path(IDWriteFontFace* fontFace)
+        {
+            ComPtr<IDWriteFontFile> fontFile;
+            UINT32 numberOfFiles = 0;
+            fontFace->GetFiles(&numberOfFiles, nullptr);
+            fontFace->GetFiles(&numberOfFiles, &fontFile);
+
+            ComPtr<IDWriteFontFileLoader> loader;
+            fontFile->GetLoader(&loader);
+            const void* key;
+            UINT32 keySize;
+            fontFile->GetReferenceKey(&key, &keySize);
+            ComPtr<IDWriteLocalFontFileLoader> localLoader;
+            loader.As(&localLoader);
+
+            UINT32 pathLen;
+            localLoader->GetFilePathLengthFromKey(key, keySize, &pathLen);
+            std::wstring path;
+            path.resize(pathLen);
+            localLoader->GetFilePathFromKey(key, keySize, path.data(), pathLen + 1);
+
+            return path;
+        }
     } // }}}
 
     struct directwrite_locator::Private
@@ -153,12 +177,18 @@ namespace text
         return output;
     }
 
+    font_source_list directwrite_locator::all()
+    {
+        // TODO;
+        return {};
+    }
+
     font_source_list directwrite_locator::resolve(gsl::span<const char32_t> codepoints)
     {
         font_source_list output;
 
         std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv1;
-        std::string bytes = conv1.to_bytes(std::u32string{ codepoints.data() });
+        std::string bytes = conv1.to_bytes(std::u32string{ codepoints.data(), codepoints.size() });
         std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv2;
         std::wstring wText = conv2.from_bytes(bytes);
 
@@ -167,7 +197,7 @@ namespace text
         ComPtr<IDWriteFont> mappedFont;
         FLOAT scale = 0.0f;
 
-        DWriteAnalysisWrapper analysisWrapper(wText, d->userLocale);
+        dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
 
         d->systemFontFallback->MapCharacters(&analysisWrapper,
             0,
@@ -193,27 +223,5 @@ namespace text
         }
 
         return output;
-    }
-
-    std::wstring get_font_path(IDWriteFontFace* fontFace)
-    {
-        ComPtr<IDWriteFontFile> fontFile;
-        UINT32 numberOfFiles;
-        fontFace->GetFiles(&numberOfFiles, &fontFile);
-        ComPtr<IDWriteFontFileLoader> loader;
-        fontFile->GetLoader(&loader);
-        const void* key;
-        UINT32 keySize;
-        fontFile->GetReferenceKey(&key, &keySize);
-        ComPtr<IDWriteLocalFontFileLoader> localLoader;
-        loader.As(&localLoader);
-
-        UINT32 pathLen;
-        localLoader->GetFilePathLengthFromKey(key, keySize, &pathLen);
-        std::wstring path;
-        path.resize(pathLen);
-        localLoader->GetFilePathFromKey(key, keySize, path.data(), pathLen + 1);
-
-        return path;
     }
 }
