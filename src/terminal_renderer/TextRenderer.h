@@ -360,15 +360,14 @@ class TextRenderer : public Renderable {
     using TextureAtlas = atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
     using DataRef = TextureAtlas::DataRef;
 
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id);
+    std::optional<DataRef> getTextureInfo(GlyphId const& _id,
+                                          unicode::PresentationStyle _presentation);
 
     void renderTexture(crispy::Point const& _pos,
                        RGBAColor const& _color,
                        atlas::TextureInfo const& _textureInfo,
                        GlyphMetrics const& _glyphMetrics,
                        text::glyph_position const& _gpos);
-
-    TextureAtlas& atlasForFont(text::font_key _font);
 
     // general properties
     //

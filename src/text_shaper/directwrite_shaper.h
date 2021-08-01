@@ -40,6 +40,7 @@ class directwrite_shaper : public shaper {
                std::u32string_view _text,
                crispy::span<unsigned> _clusters,
                unicode::Script _script,
+               unicode::PresentationStyle _presentation,
                shape_result& _result) override;
 
     std::optional<glyph_position> shape(font_key _font,
