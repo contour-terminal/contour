@@ -41,21 +41,28 @@
 #include <unordered_map>
 #include <utility>
 
+using ranges::views::iota;
+using std::get;
+using std::holds_alternative;
+using std::invalid_argument;
 using std::max;
 using std::move;
 using std::nullopt;
+using std::numeric_limits;
 using std::optional;
 using std::pair;
 using std::runtime_error;
+using std::size_t;
 using std::string;
 using std::string_view;
 using std::tuple;
 using std::u32string_view;
 using std::unique_ptr;
+using std::unordered_map;
 using std::vector;
-using ranges::views::iota;
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 
 namespace
 {
@@ -82,7 +89,7 @@ namespace std
 {
     template<>
     struct hash<FontPathAndSize> {
-        std::size_t operator()(FontPathAndSize const& fd) const noexcept
+        size_t operator()(FontPathAndSize const& fd) const noexcept
         {
             auto fnv = crispy::FNV<char>();
             return size_t(fnv(fnv(fd.path), to_string(fd.size.pt))); // SSO should kick in.
@@ -92,9 +99,9 @@ namespace std
 
 namespace text {
 
-using HbBufferPtr = std::unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)>;
-using HbFontPtr = std::unique_ptr<hb_font_t, void(*)(hb_font_t*)>;
-using FtFacePtr = std::unique_ptr<FT_FaceRec_, void(*)(FT_FaceRec_*)>;
+using HbBufferPtr = unique_ptr<hb_buffer_t, void(*)(hb_buffer_t*)>;
+using HbFontPtr = unique_ptr<hb_font_t, void(*)(hb_font_t*)>;
+using FtFacePtr = unique_ptr<FT_FaceRec_, void(*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
@@ -102,16 +109,15 @@ namespace // {{{ helper
 {
     string identifierOf(font_source const& source)
     {
-        if (std::holds_alternative<font_path>(source))
-            return std::get<font_path>(source).value;
-        if (std::holds_alternative<font_memory_ref>(source))
-            return std::get<font_memory_ref>(source).identifier;
-        throw std::invalid_argument("source");
+        if (holds_alternative<font_path>(source))
+            return get<font_path>(source).value;
+        if (holds_alternative<font_memory_ref>(source))
+            return get<font_memory_ref>(source).identifier;
+        throw invalid_argument("source");
     }
 
     constexpr string_view fcSpacingStr(int _value) noexcept
     {
-        using namespace std::string_view_literals;
         switch (_value)
         {
             case FC_PROPORTIONAL: return "proportional"sv;
@@ -389,7 +395,7 @@ namespace // {{{ helper
     int ftBestStrikeIndex(FT_Face _face, int _fontWidth) noexcept
     {
         int best = 0;
-        int diff = std::numeric_limits<int>::max();
+        int diff = numeric_limits<int>::max();
         for (int i = 0; i < _face->num_fixed_sizes; ++i)
         {
             auto const currentWidth = _face->available_sizes[i].width;
@@ -407,9 +413,9 @@ namespace // {{{ helper
     {
         FT_Face ftFace = nullptr;
 
-        if (std::holds_alternative<font_path>(_source))
+        if (holds_alternative<font_path>(_source))
         {
-            auto const& sourcePath = std::get<font_path>(_source);
+            auto const& sourcePath = get<font_path>(_source);
             FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), 0, &ftFace);
             if (!ftFace)
             {
@@ -417,10 +423,10 @@ namespace // {{{ helper
                 return nullopt;
             }
         }
-        else if (std::holds_alternative<font_memory_ref>(_source))
+        else if (holds_alternative<font_memory_ref>(_source))
         {
             int faceIndex = 0;
-            auto const memory = std::get<font_memory_ref>(_source);
+            auto const& memory = get<font_memory_ref>(_source);
             FT_Error ec = FT_New_Memory_Face(_ft,
                                              memory.data.data(),
                                              static_cast<FT_Long>(memory.data.size()),
@@ -490,15 +496,15 @@ struct FontInfo
 struct open_shaper::Private // {{{
 {
     FT_Library ft_;
-    std::unique_ptr<font_locator> locator_;
+    unique_ptr<font_locator> locator_;
     crispy::Point dpi_;
-    std::unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
-    std::unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
+    unordered_map<font_key, FontInfo> fonts_;  // from font_key to FontInfo struct
+    unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
     // The key (for caching) should be composed out of:
     // (file_path, file_mtime, font_weight, font_slant, pixel_size)
 
-    std::unordered_map<glyph_key, rasterized_glyph> glyphs_;
+    unordered_map<glyph_key, rasterized_glyph> glyphs_;
     HbBufferPtr hb_buf_;
     font_key nextFontKey_;
 
@@ -589,9 +595,9 @@ void open_shaper::set_dpi(crispy::Point _dpi)
     d->dpi_ = _dpi;
 }
 
-void open_shaper::set_locator(std::unique_ptr<font_locator> _locator)
+void open_shaper::set_locator(unique_ptr<font_locator> _locator)
 {
-    d->locator_ = std::move(_locator);
+    d->locator_ = move(_locator);
 }
 
 void open_shaper::clear_cache()
@@ -825,12 +831,12 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             ftBitmap.num_grays = 256;
 
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(*height * *width); // 8-bit channel (with values 0 or 255)
+            output.bitmap.resize(height.as<size_t>() * width.as<size_t>()); // 8-bit channel (with values 0 or 255)
 
             auto const pitch = static_cast<unsigned>(ftBitmap.pitch);
             for (auto const i: iota(0u, ftBitmap.rows))
                 for (auto const j: iota(0u, ftBitmap.width))
-                    output.bitmap[i * *width + j] = ftBitmap.buffer[(*height - 1 - i) * pitch + j] * 255;
+                    output.bitmap[i * width.as<size_t>() + j] = ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j] * 255;
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
             break;
@@ -869,15 +875,15 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const height = output.size.height;
 
             output.format = bitmap_format::rgba;
-            output.bitmap.resize(*height * *width * 4);
+            output.bitmap.resize(height.as<size_t>() * width.as<size_t>() * 4);
             auto t = output.bitmap.begin();
 
             auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-            for (auto const i: iota(0u, *height))
+            for (auto const i: iota(0u, height.as<size_t>()))
             {
-                for (auto const j: iota(0u, *width))
+                for (auto const j: iota(0u, width.as<size_t>()))
                 {
-                    auto const s = &ftFace->glyph->bitmap.buffer[(*height - i - 1) * pitch + j * 4];
+                    auto const s = &ftFace->glyph->bitmap.buffer[(height.as<size_t>() - i - 1) * pitch + j * 4];
 
                     // BGRA -> RGBA
                     *t++ = s[2];
