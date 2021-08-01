@@ -509,6 +509,11 @@ struct open_shaper::Private // {{{
         return result;
     }
 
+    bool has_color(font_key _font) const noexcept
+    {
+        return FT_HAS_COLOR(fonts_.at(_font).ftFace.get());
+    }
+
     optional<font_key> get_font_key_for(font_source const& source, font_size _fontSize)
     {
         if (auto i = fontPathSizeToKeys.find(FontPathAndSize{identifierOf(source), _fontSize}); i != fontPathSizeToKeys.end())
@@ -617,11 +622,6 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
 font_metrics open_shaper::metrics(font_key _key) const
 {
     return d->metrics(_key);
-}
-
-bool open_shaper::has_color(font_key _font) const
-{
-    return FT_HAS_COLOR(d->fonts_.at(_font).ftFace.get());
 }
 
 namespace
@@ -768,7 +768,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     auto const font = _glyph.font;
     auto ftFace = d->fonts_.at(font).ftFace.get();
     auto const glyphIndex = _glyph.index;
-    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (has_color(font) ? FT_LOAD_COLOR : 0));
+    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (d->has_color(font) ? FT_LOAD_COLOR : 0));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
     if (ec != FT_Err_Ok)
