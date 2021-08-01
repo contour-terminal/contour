@@ -67,13 +67,18 @@ namespace
         return font_slant::normal;
     }
 
-    void renderGlyphRunToBitmap(IDWriteGlyphRunAnalysis* _glyphAnalysis, RECT& _textureBounds, bitmap_format _targetFormat, std::vector<uint8_t>::iterator& _it)
+    void renderGlyphRunToBitmap(
+        IDWriteGlyphRunAnalysis* _glyphAnalysis,
+        const RECT& _textureBounds,
+        const DWRITE_COLOR_F& runColor,
+        bitmap_format _targetFormat,
+        std::vector<uint8_t>::iterator& _it)
     {
         const auto width = _textureBounds.right - _textureBounds.left;
         const auto height = _textureBounds.bottom - _textureBounds.top;
 
         std::vector<uint8_t> tmp;
-        tmp.resize(height *width * 3);
+        tmp.resize(height * width * 3);
 
         auto hr = _glyphAnalysis->CreateAlphaTexture(
             DWRITE_TEXTURE_CLEARTYPE_3x1,
@@ -86,37 +91,39 @@ namespace
             for (auto j = 0; j < width; j++)
             {
                 const auto base = ((height - 1 - i) *width + j) * 3;
-                const auto r = tmp[base];
-                const auto g = tmp[base + 1];
-                const auto b = tmp[base + 2];
-                if (r > 0)
+                const auto srcR = tmp[base];
+                const auto srcG = tmp[base + 1];
+                const auto srcB = tmp[base + 2];
+
+                if (_targetFormat == bitmap_format::rgb)
                 {
-                    *_it++ = r;
-                }
-                else
-                {
-                    _it++;
-                }
-                if (g > 0)
-                {
-                    *_it++ = g;
-                }
-                else
-                {
-                    _it++;
-                }
-                if (b > 0)
-                {
-                    *_it++ = b;
-                }
-                else
-                {
-                    _it++;
+                    *_it++ = srcR;
+                    *_it++ = srcG;
+                    *_it++ = srcB;
                 }
 
                 if (_targetFormat == bitmap_format::rgba)
                 {
-                    *_it++ = 255;
+                    const auto r = runColor.r * 255;
+                    const auto g = runColor.g * 255;
+                    const auto b = runColor.b * 255;
+                    const auto a = runColor.a;
+
+                    float redAlpha = a * srcR / 255.0;
+                    float greenAlpha = a * srcG / 255.0;
+                    float blueAlpha = a * srcB / 255.0;
+                    float averageAlpha = (redAlpha + greenAlpha + blueAlpha) / 3.0;
+
+                    const auto currentR = *_it;
+                    const auto currentG = *(_it + 1);
+                    const auto currentB = *(_it + 2);
+                    const auto currentA = *(_it + 3);
+
+                    // Bitmap composition
+                    *_it++ = currentR * (1.0 - averageAlpha) + averageAlpha * r;
+                    *_it++ = currentG * (1.0 - averageAlpha) + averageAlpha * g;
+                    *_it++ = currentB * (1.0 - averageAlpha) + averageAlpha * b;
+                    *_it++ = currentA * (1.0 - averageAlpha) + averageAlpha * 255;
                 }
             }
     }
@@ -188,7 +195,7 @@ struct directwrite_shaper::Private
         auto dwMetrics = DWRITE_FONT_METRICS{};
         _font->GetMetrics(&dwMetrics);
 
-        auto const dipScalar = _size.pt * (96.0 / 72.0) / dwMetrics.designUnitsPerEm * pixelPerDip();
+        auto const dipScalar = ptToEm(_size.pt) / dwMetrics.designUnitsPerEm * pixelPerDip();
         auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
 
         auto fontInfo = FontInfo{};
@@ -234,7 +241,12 @@ struct directwrite_shaper::Private
 
     float pixelPerDip()
     {
-        return dpi_.x / 96;
+        return dpi_.x / 96.0;
+    }
+
+    double ptToEm(double pt)
+    {
+        return pt * (96.0 / 72.0);
     }
 };
 
@@ -491,7 +503,7 @@ void directwrite_shaper::shape(font_key _font,
 
         for (size_t i = glyphStart; i < textLength; i++)
         {
-            const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * fontInfo.size.pt * (96.0 / 72.0)  * d->pixelPerDip();
+            const auto cellWidth = static_cast<double>((float)glyphDesignUnitAdvances.at(i)) / designUnitsPerEm * d->ptToEm(fontInfo.size.pt) * d->pixelPerDip();
             glyph_position gpos{};
             gpos.presentation = _presentation;
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
@@ -676,7 +688,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 {
     FontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace.Get();
-    const float fontEmSize = _glyph.size.pt * (96.0 / 72.0);
+    const float fontEmSize = d->ptToEm(_glyph.size.pt);
 
     const UINT16 glyphIndex = static_cast<UINT16>(_glyph.index.value);
     const DWRITE_GLYPH_OFFSET glyphOffset{};
@@ -730,7 +742,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     auto const width = output.size.width;
     auto const height = output.size.height;
 
-    IDWriteFactory2* factory2 = nullptr;
+    IDWriteFactory2* factory2;
     IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;
     if (SUCCEEDED(d->factory->QueryInterface(IID_PPV_ARGS(&factory2))))
     {
@@ -751,7 +763,7 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 
             auto t = output.bitmap.begin();
 
-            renderGlyphRunToBitmap(glyphAnalysis.Get(), textureBounds, output.format, t);
+            renderGlyphRunToBitmap(glyphAnalysis.Get(), textureBounds, DWRITE_COLOR_F{}, output.format, t);
 
             return output;
         }
@@ -784,7 +796,14 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
                     &colorGlyphsAnalysis);
 
                 auto t = output.bitmap.begin();
-                renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, output.format, t);
+                if (colorRun->paletteIndex == 0xFFFF)
+                {
+                    renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, DWRITE_COLOR_F{}, output.format, t);
+                }
+                else
+                {
+                    renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, colorRun->runColor, output.format, t);
+                }
             }
 
             return output;
