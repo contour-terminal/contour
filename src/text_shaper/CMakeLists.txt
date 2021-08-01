@@ -7,6 +7,8 @@ set(text_shaper_SRC
 )
 
 if("${CMAKE_SYSTEM}" MATCHES "Windows")
+    list(APPEND text_shaper_SRC directwrite_analysis_wrapper.cpp directwrite_analysis_wrapper.h)
+    list(APPEND text_shaper_SRC directwrite_locator.cpp directwrite_locator.h)
     list(APPEND text_shaper_SRC directwrite_shaper.cpp directwrite_shaper.h)
 endif()
 

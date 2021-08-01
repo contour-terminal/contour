@@ -34,7 +34,7 @@ public:
 
     font_source_list locate(font_description const& description) override;
     font_source_list all() override;
-    font_source_list resolve(gsl::span<char32_t> codepoints) override;
+    font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
 private:
     struct Private;

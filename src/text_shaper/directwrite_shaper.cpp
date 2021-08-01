@@ -1,4 +1,6 @@
 #include <text_shaper/directwrite_shaper.h>
+#include <text_shaper/directwrite_analysis_wrapper.h>
+#include <text_shaper/font_locator.h>
 
 #include <crispy/debuglog.h>
 
@@ -11,7 +13,6 @@
 // }}}
 
 #include <wrl/client.h>
-#include <wrl/implements.h>
 #include <dwrite.h>
 #include <dwrite_3.h>
 
@@ -34,39 +35,6 @@ using std::wstring;
 namespace text {
 namespace
 {
-    font_weight dwFontWeight(int _weight)
-    {
-        switch (_weight)
-        {
-            case DWRITE_FONT_WEIGHT_THIN: return font_weight::thin;
-            case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return font_weight::extra_light;
-            case DWRITE_FONT_WEIGHT_LIGHT: return font_weight::light;
-            case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return font_weight::demilight;
-            case DWRITE_FONT_WEIGHT_REGULAR: return font_weight::normal;
-            // XXX What about font_weight::book (which does exist via fontconfig)?
-            case DWRITE_FONT_WEIGHT_MEDIUM: return font_weight::medium;
-            case DWRITE_FONT_WEIGHT_DEMI_BOLD: return font_weight::demibold;
-            case DWRITE_FONT_WEIGHT_BOLD: return font_weight::bold;
-            case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return font_weight::extra_bold;
-            case DWRITE_FONT_WEIGHT_BLACK: return font_weight::black;
-            case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return font_weight::extra_black;
-            default: // TODO: the others
-                break;
-        }
-        return font_weight::normal; // TODO: rename normal to regular
-    }
-
-    font_slant dwFontSlant(int _style)
-    {
-        switch (_style)
-        {
-            case DWRITE_FONT_STYLE_NORMAL: return font_slant::normal;
-            case DWRITE_FONT_STYLE_ITALIC: return font_slant::italic;
-            case DWRITE_FONT_STYLE_OBLIQUE: return font_slant::oblique;
-        }
-        return font_slant::normal;
-    }
-
     void renderGlyphRunToBitmap(
         IDWriteGlyphRunAnalysis* _glyphAnalysis,
         const RECT& _textureBounds,
@@ -136,7 +104,6 @@ struct FontInfo
     font_metrics metrics;
     int fontUnitsPerEm;
 
-    ComPtr<IDWriteFont3> font;
     ComPtr<IDWriteFontFace5> fontFace;
 };
 
@@ -144,6 +111,8 @@ struct directwrite_shaper::Private
 {
     ComPtr<IDWriteFactory7> factory;
     ComPtr<IDWriteTextAnalyzer1> textAnalyzer;
+    std::unique_ptr<font_locator> locator_;
+
     crispy::Point dpi_;
     std::wstring userLocale;
     std::unordered_map<font_key, FontInfo> fonts;
@@ -151,8 +120,9 @@ struct directwrite_shaper::Private
 
     font_key nextFontKey;
 
-    Private(crispy::Point _dpi) :
-        dpi_{ _dpi }
+    Private(crispy::Point _dpi, std::unique_ptr<font_locator> _locator) :
+        dpi_{ _dpi },
+        locator_ { move(_locator) }
     {
         auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                                       __uuidof(IDWriteFactory7),
@@ -173,15 +143,70 @@ struct directwrite_shaper::Private
         return result;
     }
 
-    text::font_key add_font(const std::wstring _familyName, font_description _description, font_size _size, ComPtr<IDWriteFont> _font)
+    optional<text::font_key> add_font(font_source const& _source, font_description _description, font_size _size)
     {
-        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
-        std::string familyName = wStringConverter.to_bytes(_familyName);;
-        _description.familyName = familyName;
-        _description.wFamilyName = _familyName;
+        if (!std::holds_alternative<font_path>(_source))
+        {
+            return nullopt;
+        }
 
+        auto const& sourcePath = std::get<font_path>(_source);
+
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
+        std::wstring wSourcePath = wStringConverter.from_bytes(sourcePath.value);
+
+        ComPtr<IDWriteFontFile> fontFile;
+        auto hr = factory->CreateFontFileReference(wSourcePath.c_str(), NULL, &fontFile);
+        if (FAILED(hr))
+        {
+            return nullopt;
+        }
+
+        BOOL isSupported;
+        DWRITE_FONT_FILE_TYPE fileType;
+        DWRITE_FONT_FACE_TYPE fontFaceType;
+        UINT32 numFaces;
         ComPtr<IDWriteFontFace> fontFace;
-        _font->CreateFontFace(fontFace.GetAddressOf());
+        fontFile->Analyze(&isSupported, &fileType, &fontFaceType, &numFaces);
+        factory->CreateFontFace(fontFaceType, 1, &fontFile, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontFace);
+
+        ComPtr<IDWriteFontFace3> fontFace3;
+        fontFace.As(&fontFace3);
+
+        ComPtr<IDWriteLocalizedStrings> familyNames;
+        fontFace3->GetFamilyNames(&familyNames);
+
+        BOOL localeExists = FALSE;
+        unsigned index{};
+        familyNames->FindLocaleName(userLocale.c_str(), &index, &localeExists);
+
+        if (!localeExists) {
+            // Fallback to en-US
+            const wchar_t* localeName = L"en-US";
+            familyNames->FindLocaleName(localeName, &index, &localeExists);
+        }
+
+        if (!localeExists) {
+            // Fallback to locale where index = 0
+            index = 0;
+
+            std::wstring localeName{};
+            UINT32 length = 0;
+            familyNames->GetLocaleNameLength(index, &length);
+            localeName.resize(length);
+            familyNames->FindLocaleName(localeName.c_str(), &index, &localeExists);
+        }
+
+        UINT32 length = 0;
+        familyNames->GetStringLength(index, &length);
+
+        std::wstring resolvedFamilyName;
+        resolvedFamilyName.resize(length);
+
+        familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
+
+        _description.familyName = wStringConverter.to_bytes(resolvedFamilyName);
+        _description.wFamilyName = resolvedFamilyName;
 
         for (const std::pair<font_key, FontInfo>& kv : fonts)
         {
@@ -193,7 +218,7 @@ struct directwrite_shaper::Private
         }
 
         auto dwMetrics = DWRITE_FONT_METRICS{};
-        _font->GetMetrics(&dwMetrics);
+        fontFace3->GetMetrics(&dwMetrics);
 
         auto const dipScalar = ptToEm(_size.pt) / dwMetrics.designUnitsPerEm * pixelPerDip();
         auto const lineHeight = dwMetrics.ascent + dwMetrics.descent + dwMetrics.lineGap;
@@ -208,7 +233,6 @@ struct directwrite_shaper::Private
         fontInfo.metrics.underline_thickness = int(ceil(dwMetrics.underlineThickness * dipScalar));
         fontInfo.metrics.advance = int(ceil(computeAverageAdvance(fontFace.Get()) * dipScalar));
 
-        _font.As(&fontInfo.font);
         fontFace.As(&fontInfo.fontFace);
 
         auto key = create_font_key();
@@ -250,195 +274,24 @@ struct directwrite_shaper::Private
     }
 };
 
-class DWriteAnalysisWrapper : public RuntimeClass<RuntimeClassFlags<ClassicCom | InhibitFtmBase>, IDWriteTextAnalysisSource, IDWriteTextAnalysisSink>
-{
-public:
-    DWriteAnalysisWrapper(const std::wstring& _text, const std::wstring& _userLocale) :
-        text(_text),
-        userLocale(_userLocale)
-    {
-    }
 
-#pragma region IDWriteTextAnalysisSource
-    HRESULT GetTextAtPosition(
-        UINT32 textPosition,
-        _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-        _Out_ UINT32* textLength)
-    {
-        *textString = nullptr;
-        *textLength = 0;
-
-        if (textPosition < text.size())
-        {
-            *textString = &text.at(textPosition);
-            *textLength = text.size() - textPosition;
-        }
-
-        return S_OK;
-    }
-
-    HRESULT GetTextBeforePosition(
-        UINT32 textPosition,
-        _Outptr_result_buffer_(*textLength) WCHAR const** textString,
-        _Out_ UINT32* textLength)
-    {
-        *textString = nullptr;
-        *textLength = 0;
-
-        if (textPosition > 0 && textPosition <= text.size())
-        {
-            *textString = text.data();
-            *textLength = textPosition;
-        }
-
-        return S_OK;
-    }
-
-    DWRITE_READING_DIRECTION GetParagraphReadingDirection()
-    {
-        // TODO: is this always correct?
-        return DWRITE_READING_DIRECTION::DWRITE_READING_DIRECTION_LEFT_TO_RIGHT;
-    }
-
-    HRESULT GetLocaleName(
-        UINT32 textPosition,
-        _Out_ UINT32* textLength,
-        _Outptr_result_z_ WCHAR const** localeName)
-    {
-        *localeName = userLocale.c_str();
-        *textLength = text.size() - textPosition;
-
-        return S_OK;
-    }
-
-    HRESULT GetNumberSubstitution(UINT32 textPosition,
-        _Out_ UINT32* textLength,
-        _COM_Outptr_ IDWriteNumberSubstitution** numberSubstitution)
-    {
-
-        *numberSubstitution = nullptr;
-        *textLength = text.size() - textPosition;
-
-        return S_OK;
-    }
-#pragma endregion
-
-#pragma region IDWriteTextAnalysisSink
-    HRESULT SetScriptAnalysis(UINT32 textPosition, UINT32 textLength, _In_ DWRITE_SCRIPT_ANALYSIS const* scriptAnalysis)
-    {
-        script = *scriptAnalysis;
-        return S_OK;
-    }
-
-    HRESULT SetLineBreakpoints(UINT32 textPosition,
-        UINT32 textLength,
-        _In_reads_(textLength) DWRITE_LINE_BREAKPOINT const* lineBreakpoints)
-    {
-        return S_OK;
-    }
-
-    HRESULT SetBidiLevel(UINT32 textPosition,
-        UINT32 textLength,
-        UINT8 /*explicitLevel*/,
-        UINT8 resolvedLevel)
-    {
-        return S_OK;
-    }
-
-    HRESULT SetNumberSubstitution(UINT32 textPosition,
-        UINT32 textLength,
-        _In_ IDWriteNumberSubstitution* numberSubstitution)
-    {
-        return S_OK;
-    }
-#pragma endregion
-
-    DWRITE_SCRIPT_ANALYSIS script;
-
-private:
-    const std::wstring& text;
-    const std::wstring& userLocale;
-};
-
-directwrite_shaper::directwrite_shaper(crispy::Point _dpi) :
-    d(new Private(_dpi), [](Private* p) { delete p; })
+directwrite_shaper::directwrite_shaper(crispy::Point _dpi, std::unique_ptr<font_locator> _locator) :
+    d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
 {
 }
 
 optional<font_key> directwrite_shaper::load_font(font_description const& _description, font_size _size)
 {
     debuglog(FontFallbackTag).write("Loading font chain for: {}", _description);
+    font_source_list sources = d->locator_->locate(_description);
+    if (sources.empty())
+        return nullopt;
 
-    IDWriteFontCollection* fontCollection{};
-    d->factory->GetSystemFontCollection(&fontCollection);
+    optional<font_key> fontKeyOpt = d->add_font(sources[0], _description, _size);
+    if (!fontKeyOpt.has_value())
+        return nullopt;
 
-    // TODO: use libunicode for that (TODO: create wchar_t/char16_t converters in libunicode)
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> wStringConverter;
-    std::wstring familyName = wStringConverter.from_bytes(_description.familyName);
-
-    UINT32 familyIndex;
-    BOOL familyExists = FALSE;
-    fontCollection->FindFamilyName(familyName.data(), &familyIndex, &familyExists);
-
-    if (!familyExists) {
-        // Fallback to Consolas
-        const wchar_t* consolas = L"Consolas";
-        fontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
-    }
-
-    ComPtr<IDWriteFontFamily> fontFamily;
-    fontCollection->GetFontFamily(familyIndex, &fontFamily);
-
-    ComPtr<IDWriteLocalizedStrings> familyNames;
-    fontFamily->GetFamilyNames(&familyNames);
-
-    BOOL localeExists = FALSE;
-    unsigned index{};
-    familyNames->FindLocaleName(d->userLocale.c_str(), &index, &localeExists);
-
-    if (!localeExists) {
-        // Fallback to en-US
-        const wchar_t* localeName = L"en-US";
-        familyNames->FindLocaleName(localeName, &index, &localeExists);
-    }
-
-    if (!localeExists) {
-        // Fallback to locale where index = 0
-        index = 0;
-
-        std::wstring localeName{};
-        UINT32 length = 0;
-        familyNames->GetLocaleNameLength(index, &length);
-        localeName.resize(length);
-        familyNames->FindLocaleName(localeName.c_str(), &index, &localeExists);
-    }
-
-    UINT32 length = 0;
-    familyNames->GetStringLength(index, &length);
-
-    std::wstring resolvedFamilyName;
-    resolvedFamilyName.resize(length);
-
-    familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
-
-    for (UINT32 k = 0, ke = fontFamily->GetFontCount(); k < ke; ++k)
-    {
-        ComPtr<IDWriteFont> font;
-        fontFamily->GetFont(k, font.GetAddressOf());
-
-        font_weight weight = dwFontWeight(font->GetWeight());
-        if (weight != _description.weight)
-            continue;
-
-        font_slant slant = dwFontSlant(font->GetStyle());
-        if (weight != _description.weight)
-            continue;
-
-        return d->add_font(resolvedFamilyName, _description, _size, font);
-    }
-
-    debuglog(FontFallbackTag).write("Font not found.");
-    return nullopt;
+    return fontKeyOpt;
 }
 
 font_metrics directwrite_shaper::metrics(font_key _key) const
@@ -521,87 +374,7 @@ void directwrite_shaper::shape(font_key _font,
         DWriteAnalysisWrapper analysisWrapper(wText, d->userLocale);
 
         // Fallback analysis
-        ComPtr<IDWriteTextFormat> format;
-        auto hr = d->factory->CreateTextFormat(
-            fontInfo.description.wFamilyName.c_str(),
-            nullptr,
-            fontInfo.font->GetWeight(),
-            fontInfo.font->GetStyle(),
-            fontInfo.font->GetStretch(),
-            fontInfo.size.pt,
-            d->userLocale.c_str(),
-            &format);
-
-        ComPtr<IDWriteTextFormat1> format1;
-
-        if (SUCCEEDED(hr) && SUCCEEDED(format->QueryInterface(IID_PPV_ARGS(&format1))))
-        {
-            ComPtr<IDWriteFontFallback> fallback;
-            format1->GetFontFallback(&fallback);
-
-            ComPtr<IDWriteFontCollection> collection;
-            format1->GetFontCollection(&collection);
-
-            std::wstring familyName;
-            familyName.resize(format1->GetFontFamilyNameLength() + 1);
-            format1->GetFontFamilyName(familyName.data(), familyName.size());
-
-            const auto weight = format1->GetFontWeight();
-            const auto style = format1->GetFontStyle();
-            const auto stretch = format1->GetFontStretch();
-
-            if (!fallback)
-            {
-                d->factory->GetSystemFontFallback(&fallback);
-            }
-
-            UINT32 mappedLength = 0;
-            ComPtr<IDWriteFont> mappedFont;
-            FLOAT scale = 0.0f;
-
-            fallback->MapCharacters(&analysisWrapper,
-                0,
-                textLength,
-                collection.Get(),
-                familyName.data(),
-                weight,
-                style,
-                stretch,
-                &mappedLength,
-                &mappedFont,
-                &scale);
-
-            if (mappedFont)
-            {
-                ComPtr<IDWriteFontFamily> fontFamily;
-                mappedFont->GetFontFamily(&fontFamily);
-
-                ComPtr<IDWriteLocalizedStrings> familyNames;
-                fontFamily->GetFamilyNames(&familyNames);
-
-                BOOL localeExists = FALSE;
-                unsigned index{};
-                familyNames->FindLocaleName(d->userLocale.c_str(), &index, &localeExists);
-
-                if (!localeExists) {
-                    // Fallback to en-US
-                    const wchar_t* localeName = L"en-US";
-                    familyNames->FindLocaleName(localeName, &index, &localeExists);
-                }
-
-                UINT32 length = 0;
-                familyNames->GetStringLength(index, &length);
-
-                std::wstring resolvedFamilyName;
-                resolvedFamilyName.resize(length);
-
-                familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
-
-                _font = d->add_font(resolvedFamilyName, fontInfo.description, fontInfo.size, mappedFont);
-                fontInfo = d->fonts.at(_font);
-                fontFace = fontInfo.fontFace.Get();
-            }
-        }
+        font_source_list sources = d->locator_->resolve(gsl::span(_text.data(), _text.size()));
 
         // Script analysis
         d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
