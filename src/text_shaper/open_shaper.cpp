@@ -631,7 +631,7 @@ font_metrics open_shaper::metrics(font_key _key) const
 namespace
 {
 
-void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, crispy::span<unsigned> _clusters, unicode::Script _script)
+void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, gsl::span<unsigned> _clusters, unicode::Script _script)
 {
     hb_buffer_clear_contents(_hbBuf);
     for (auto const i: iota(0u, _codepoints.size()))
@@ -651,7 +651,7 @@ bool tryShape(font_key _font,
               unicode::Script _script,
               unicode::PresentationStyle _presentation,
               u32string_view _codepoints,
-              crispy::span<unsigned> _clusters,
+              gsl::span<unsigned> _clusters,
               shape_result& _result)
 {
     assert(_hbFont != nullptr);
@@ -717,7 +717,7 @@ optional<glyph_position> open_shaper::shape(font_key _font,
 
 void open_shaper::shape(font_key _font,
                         u32string_view _codepoints,
-                        crispy::span<unsigned> _clusters,
+                        gsl::span<unsigned> _clusters,
                         unicode::Script _script,
                         unicode::PresentationStyle _presentation,
                         shape_result& _result)

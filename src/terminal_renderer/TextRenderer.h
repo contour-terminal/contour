@@ -27,9 +27,11 @@
 #include <crispy/FNV.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
-#include <crispy/span.h>
 
 #include <unicode/run_segmenter.h>
+
+#include <gsl/span>
+#include <gsl/span_ext>
 
 #include <functional>
 #include <list>
@@ -205,7 +207,7 @@ class TextShaper
 {
 public:
     using RenderGlyphs = std::function<void(crispy::Point,
-                                            crispy::span<text::glyph_position const>,
+                                            gsl::span<text::glyph_position const>,
                                             RGBColor)>;
 
     virtual ~TextShaper() = default;
@@ -219,7 +221,7 @@ public:
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
     ///
-    virtual void appendCell(crispy::span<char32_t const> _codepoints,
+    virtual void appendCell(gsl::span<char32_t const> _codepoints,
                             TextStyle _style,
                             RGBColor _color) = 0;
 
@@ -240,7 +242,7 @@ public:
 
     void beginFrame() override;
     void setTextPosition(crispy::Point _position) override;
-    void appendCell(crispy::span<char32_t const> _codepoints,
+    void appendCell(gsl::span<char32_t const> _codepoints,
                     TextStyle _style,
                     RGBColor _color) override;
     void endSequence() override;
@@ -290,10 +292,10 @@ public:
     void clearCache() override {}
     void beginFrame() override {}
     void setTextPosition(crispy::Point _position) override;
-    void appendCell(crispy::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color) override;
+    void appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color) override;
     void endSequence() override;
 
-    text::shape_result cachedGlyphPositions(crispy::span<char32_t const> _codepoints, TextStyle _style);
+    text::shape_result cachedGlyphPositions(gsl::span<char32_t const> _codepoints, TextStyle _style);
     void flush();
 
 private:
@@ -341,7 +343,7 @@ class TextRenderer : public Renderable {
     void setTextShapingMethod(TextShapingMethod _method);
 
     void renderRun(crispy::Point _startPos,
-                   crispy::span<text::glyph_position const> _glyphPositions,
+                   gsl::span<text::glyph_position const> _glyphPositions,
                    RGBColor _color);
 
     /// Renders an arbitrary texture.
