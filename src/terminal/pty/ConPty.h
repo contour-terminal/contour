@@ -15,6 +15,7 @@
 
 #include <terminal/pty/Pty.h>
 
+#include <mutex>
 #include <vector>
 
 #include <Windows.h>
@@ -42,6 +43,7 @@ class ConPty : public Pty
     HPCON master() const noexcept { return master_; }
 
   private:
+    std::mutex mutex_; // used to guard close()
     PageSize size_;
     HPCON master_;
     HANDLE input_;

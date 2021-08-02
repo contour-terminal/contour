@@ -95,6 +95,8 @@ ConPty::~ConPty()
 
 void ConPty::close()
 {
+    auto const _ = std::lock_guard{mutex_};
+
     if (master_ != INVALID_HANDLE_VALUE)
     {
         ClosePseudoConsole(master_);
