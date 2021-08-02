@@ -1156,13 +1156,15 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     profile.fonts.boldItalic.slant = text::font_slant::italic;
     softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
 
-#if defined(_WIN32)
-    profile.fonts.emoji.familyName = "Segoe UI Emoji";
-#else
     profile.fonts.emoji.familyName = "emoji";
-#endif
     profile.fonts.emoji.spacing = text::font_spacing::mono;
     softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
+
+#if defined(_WIN32)
+    // Windows does not understand font family "emoji", but fontconfig does. Rewrite user-input here.
+    if (profile.fonts.emoji.familyName == "emoji")
+        profile.fonts.emoji.familyName = "Segoe UI Emoji";
+#endif
 
     strValue = "gray";
     string renderModeStr;
