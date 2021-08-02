@@ -222,9 +222,10 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
     {
-        assert(numCells >= 2);
-        auto const cellSize = gridMetrics_.cellSize;
+        // FIXME !
+        // We currently assume that only Emoji can be RGBA, but there are also colored glyphs!
 
+        auto const cellSize = gridMetrics_.cellSize;
         if (numCells > 1 && // XXX for now, only if emoji glyph
                 (glyph.size.width > (cellSize.width * numCells)
               || glyph.size.height > cellSize.height))
