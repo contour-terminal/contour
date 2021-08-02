@@ -772,7 +772,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     auto const font = _glyph.font;
     auto ftFace = d->fonts_.at(font).ftFace.get();
     auto const glyphIndex = _glyph.index;
-    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (d->has_color(font) ? FT_LOAD_COLOR : 0));
+    auto const flags = static_cast<FT_Int32>(ftRenderFlag(_mode) | (FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : 0));
 
     FT_Error ec = FT_Load_Glyph(ftFace, glyphIndex.value, flags);
     if (ec != FT_Err_Ok)
@@ -806,8 +806,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     }
 
     rasterized_glyph output{};
-    output.size.width = crispy::Width(ftFace->glyph->bitmap.width);
-    output.size.height = crispy::Height(ftFace->glyph->bitmap.rows);
+    output.size.width = crispy::Width::cast_from(ftFace->glyph->bitmap.width);
+    output.size.height = crispy::Height::cast_from(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 
