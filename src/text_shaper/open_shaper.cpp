@@ -520,7 +520,8 @@ struct open_shaper::Private // {{{
 
     optional<font_key> get_font_key_for(font_source const& source, font_size _fontSize)
     {
-        if (auto i = fontPathSizeToKeys.find(FontPathAndSize{identifierOf(source), _fontSize}); i != fontPathSizeToKeys.end())
+        auto const sourceId = identifierOf(source);
+        if (auto i = fontPathSizeToKeys.find(FontPathAndSize{sourceId, _fontSize}); i != fontPathSizeToKeys.end())
             return i->second;
 
         auto ftFacePtrOpt = loadFace(source, _fontSize, dpi_, ft_);
@@ -532,12 +533,11 @@ struct open_shaper::Private // {{{
                                    [](auto p) { hb_font_destroy(p); });
 
         auto fontInfo = HbFontInfo{source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr)};
-        auto identifier = identifierOf(fontInfo.primary);
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        debuglog(FontLoaderTag).write("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, identifier, _fontSize, dpi_, metrics(key));
-        fontPathSizeToKeys.emplace(pair{FontPathAndSize{identifier, _fontSize}, key});
+        debuglog(FontLoaderTag).write("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, _fontSize, dpi_, metrics(key));
+        fontPathSizeToKeys.emplace(pair{FontPathAndSize{sourceId, _fontSize}, key});
         return key;
     }
 
