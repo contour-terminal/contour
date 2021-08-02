@@ -282,14 +282,14 @@ uint64_t Renderer::render(Terminal& _terminal,
     #endif // }}}
 
     optional<terminal::RenderCursor> cursorOpt;
-    textRenderer_.start();
+    textRenderer_.beginFrame();
     textRenderer_.setPressure(_pressure && _terminal.screen().isPrimaryScreen());
     {
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().screen);
     }
-    textRenderer_.finish();
+    textRenderer_.endFrame();
 
     if (cursorOpt && _terminal.cursorCurrentlyVisible())
     {

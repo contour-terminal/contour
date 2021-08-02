@@ -79,30 +79,6 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     textShaper_{ _textShaper },
     boxDrawingRenderer_{ _gridMetrics }
 {
-    setTextShapingMethod(fontDescriptions_.textShapingMethod);
-}
-
-void TextRenderer::setTextShapingMethod(TextShapingMethod _method)
-{
-    switch (_method)
-    {
-        case TextShapingMethod::Complex:
-            textRenderingEngine_ = make_unique<ComplexTextShaper>(
-                gridMetrics_,
-                textShaper_,
-                fonts_,
-                std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
-            );
-            return;
-        case TextShapingMethod::Simple:
-            textRenderingEngine_ = make_unique<SimpleTextShaper>(
-                gridMetrics_,
-                textShaper_,
-                fonts_,
-                std::bind(&TextRenderer::renderRun, this, _1, _2, _3)
-            );
-            return;
-    }
 }
 
 void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
@@ -118,14 +94,14 @@ void TextRenderer::clearCache()
     colorAtlas_ = make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
     lcdAtlas_ = make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
 
-    textRenderingEngine_->clearCache();
+    cacheKeyStorage_.clear();
+    cache_.clear();
+
     boxDrawingRenderer_.clearCache();
 }
 
 void TextRenderer::updateFontMetrics()
 {
-    setTextShapingMethod(fontDescriptions_.textShapingMethod);
-
     if (!renderTargetAvailable())
         return;
 
@@ -160,31 +136,38 @@ void TextRenderer::renderCell(RenderCell const& _cell)
             _cell.foregroundColor
         );
         if (!forceCellGroupSplit_)
-            textRenderingEngine_->endSequence();
+            endSequence();
         forceCellGroupSplit_ = true;
         return;
     }
 
     if (forceCellGroupSplit_ || (_cell.flags & CellFlags::CellSequenceStart))
     {
+        // fmt::print("TextRenderer.sequenceStart: {}\n", textPosition_);
         forceCellGroupSplit_ = false;
-        textRenderingEngine_->setTextPosition(gridMetrics_.map(_cell.position));
+        textPosition_ = gridMetrics_.map(_cell.position);
     }
 
-    textRenderingEngine_->appendCell(codepoints, style, _cell.foregroundColor);
+    appendCell(codepoints, style, _cell.foregroundColor);
 
     if (_cell.flags & CellFlags::CellSequenceEnd)
-        textRenderingEngine_->endSequence();
+        endSequence();
 }
 
-void TextRenderer::start()
+void TextRenderer::beginFrame()
 {
-    textRenderingEngine_->beginFrame();
+    // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
+    assert(codepoints_.empty());
+    assert(clusters_.empty());
+
+    auto constexpr DefaultColor = RGBColor{};
+    style_ = TextStyle::Invalid;
+    color_ = DefaultColor;
 }
 
-void TextRenderer::finish()
+void TextRenderer::endFrame()
 {
-    textRenderingEngine_->endSequence();
+    endSequence();
 }
 
 void TextRenderer::renderRun(crispy::Point _pos,
@@ -210,7 +193,7 @@ void TextRenderer::renderRun(crispy::Point _pos,
             // Only advance horizontally, as we're (guess what) a terminal. :-)
             // Only advance in fixed-width steps.
             // Only advance iff there harfbuzz told us to.
-            pen.x += advanceX;
+            pen.x += static_cast<decltype(pen.x)>(advanceX);
         }
     }
 }
@@ -425,25 +408,7 @@ void TextRenderer::debugCache(std::ostream& _textOutput) const
     }
 }
 
-// {{{ ComplexTextShaper
-ComplexTextShaper::ComplexTextShaper(GridMetrics const& _gridMetrics,
-                                     text::shaper& _textShaper,
-                                     FontKeys const& _fonts,
-                                     RenderGlyphs _renderGlyphs):
-    gridMetrics_{ _gridMetrics },
-    fonts_{ _fonts },
-    textShaper_{ _textShaper },
-    renderGlyphs_{ std::move(_renderGlyphs) }
-{
-}
-
-void ComplexTextShaper::clearCache()
-{
-    cacheKeyStorage_.clear();
-    cache_.clear();
-}
-
-void ComplexTextShaper::appendCell(gsl::span<char32_t const> _codepoints,
+void TextRenderer::appendCell(gsl::span<char32_t const> _codepoints,
                                    TextStyle _style,
                                    RGBColor _color)
 {
@@ -470,26 +435,9 @@ void ComplexTextShaper::appendCell(gsl::span<char32_t const> _codepoints,
     cellCount_++;
 }
 
-void ComplexTextShaper::beginFrame()
+void TextRenderer::endSequence()
 {
-    // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
-    assert(codepoints_.empty());
-    assert(clusters_.empty());
-
-    auto constexpr DefaultColor = RGBColor{};
-    style_ = TextStyle::Invalid;
-    color_ = DefaultColor;
-}
-
-void ComplexTextShaper::setTextPosition(crispy::Point _position)
-{
-    textPosition_ = _position;
-    // fmt::print("ComplexTextShaper.sequenceStart: {}\n", textPosition_);
-}
-
-void ComplexTextShaper::endSequence()
-{
-    // fmt::print("ComplexTextShaper.sequenceEnd: textPos={}, cellCount={}, width={}, count={}\n",
+    // fmt::print("TextRenderer.sequenceEnd: textPos={}, cellCount={}, width={}, count={}\n",
     //            textPosition_.x, cellCount_,
     //            gridMetrics_.cellSize.width,
     //            codepoints_.size());
@@ -497,7 +445,7 @@ void ComplexTextShaper::endSequence()
     if (!codepoints_.empty())
     {
         text::shape_result const& glyphPositions = cachedGlyphPositions();
-        renderGlyphs_(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
+        renderRun(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
     }
 
     codepoints_.clear();
@@ -507,7 +455,7 @@ void ComplexTextShaper::endSequence()
     textStartFound_ = false;
 }
 
-text::shape_result const& ComplexTextShaper::cachedGlyphPositions()
+text::shape_result const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
     auto const cached = cache_.find(TextCacheKey{codepoints, style_});
@@ -520,7 +468,7 @@ text::shape_result const& ComplexTextShaper::cachedGlyphPositions()
     return cache_[cacheKeyFromStorage] = requestGlyphPositions();
 }
 
-text::shape_result ComplexTextShaper::requestGlyphPositions()
+text::shape_result TextRenderer::requestGlyphPositions()
 {
     text::shape_result glyphPositions;
     unicode::run_segmenter::range run;
@@ -531,7 +479,7 @@ text::shape_result ComplexTextShaper::requestGlyphPositions()
     return glyphPositions;
 }
 
-text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range const& _run)
+text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
 {
     bool const isEmojiPresentation = std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
@@ -580,73 +528,6 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
     }
 
     return gpos;
-}
-// }}}
-
-// {{{ SimpleTextShaper
-SimpleTextShaper::SimpleTextShaper(GridMetrics const& _gridMetrics,
-                                   text::shaper& _textShaper,
-                                   FontKeys const& _fonts,
-                                   RenderGlyphs _renderGlyphs):
-    gridMetrics_{ _gridMetrics },
-    fonts_{ _fonts },
-    textShaper_{ _textShaper },
-    renderGlyphs_{ std::move(_renderGlyphs) }
-{
-}
-
-void SimpleTextShaper::setTextPosition(crispy::Point _position)
-{
-    textPosition_ = _position;
-}
-
-void SimpleTextShaper::appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)
-{
-    if (color_ != _color)
-    {
-        flush();
-        color_ = _color;
-    }
-
-    optional<text::glyph_position> glyphPositionOpt = textShaper_.shape(getFontForStyle(fonts_, _style), _codepoints[0]);
-    if (!glyphPositionOpt.has_value())
-        return;
-
-    glyphPositions_.emplace_back(glyphPositionOpt.value());
-    cellCount_++;
-}
-
-text::shape_result SimpleTextShaper::cachedGlyphPositions(gsl::span<char32_t const> _codepoints, TextStyle _style)
-{
-    auto const codepoints = u32string_view(&_codepoints[0], _codepoints.size());
-    if (auto const cached = cache_.find(TextCacheKey{codepoints, _style}); cached != cache_.end())
-        return cached->second;
-
-    auto glyphPositionOpt = textShaper_.shape(getFontForStyle(fonts_, _style), _codepoints[0]);
-    if (!glyphPositionOpt.has_value())
-        return {};
-
-    cacheKeyStorage_.emplace_back(u32string{codepoints});
-    auto const cacheKeyFromStorage = TextCacheKey{ cacheKeyStorage_.back(), _style };
-
-    return cache_[cacheKeyFromStorage] = {glyphPositionOpt.value()};
-}
-
-void SimpleTextShaper::endSequence()
-{
-    flush();
-}
-
-void SimpleTextShaper::flush()
-{
-    if (glyphPositions_.empty())
-        return;
-
-    text::shape_result const& glyphPositions = glyphPositions_;
-    renderGlyphs_(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
-    glyphPositions_.clear();
-    textPosition_.x += gridMetrics_.cellSize.width.as<int>() * cellCount_;
-    cellCount_ = 0;
 }
 // }}}
 

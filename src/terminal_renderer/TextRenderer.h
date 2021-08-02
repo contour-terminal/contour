@@ -140,12 +140,6 @@ namespace terminal::renderer {
 
 struct GridMetrics;
 
-enum class TextShapingMethod
-{
-    Complex, //!< fully featured text shaping
-    Simple,  //!< minimal text shaping for optimum performance butless features
-};
-
 enum class TextShapingEngine
 {
     OpenShaper,     //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
@@ -171,7 +165,6 @@ struct FontDescriptions
     text::font_description boldItalic;
     text::font_description emoji;
     text::render_mode renderMode;
-    TextShapingMethod textShapingMethod;
     TextShapingEngine textShapingEngine = TextShapingEngine::OpenShaper;
     FontLocatorEngine fontLocator = FontLocatorEngine::FontConfig;
     bool builtinBoxDrawing = true;
@@ -193,7 +186,8 @@ inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noe
     return !(a == b);
 }
 
-struct FontKeys {
+struct FontKeys
+{
     text::font_key regular;
     text::font_key bold;
     text::font_key italic;
@@ -201,146 +195,45 @@ struct FontKeys {
     text::font_key emoji;
 };
 
-// {{{ TextShaper
-/// API to perform text shaping and glyph rasterization on terminal screen.
-class TextShaper
-{
-public:
-    using RenderGlyphs = std::function<void(crispy::Point,
-                                            gsl::span<text::glyph_position const>,
-                                            RGBColor)>;
-
-    virtual ~TextShaper() = default;
-
-    virtual void clearCache() = 0;
-
-    virtual void beginFrame() = 0;
-
-    virtual void setTextPosition(crispy::Point _position) = 0;
-
-    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
-    /// at the end of the currently filled line.
-    ///
-    virtual void appendCell(gsl::span<char32_t const> _codepoints,
-                            TextStyle _style,
-                            RGBColor _color) = 0;
-
-    /// Marks the end of a consecutive sequence of text.
-    virtual void endSequence() = 0;
-};
-
-// Fully featured Text shaping pipeline.
-class ComplexTextShaper : public TextShaper
-{
-public:
-    ComplexTextShaper(GridMetrics const& _gridMetrics,
-                      text::shaper& _textShaper,
-                      FontKeys const& _fonts,
-                      RenderGlyphs _renderGlyphs);
-
-    void clearCache() override;
-
-    void beginFrame() override;
-    void setTextPosition(crispy::Point _position) override;
-    void appendCell(gsl::span<char32_t const> _codepoints,
-                    TextStyle _style,
-                    RGBColor _color) override;
-    void endSequence() override;
-
-private:
-    // helper functions
-    //
-    text::shape_result const& cachedGlyphPositions();
-    text::shape_result requestGlyphPositions();
-    text::shape_result shapeRun(unicode::run_segmenter::range const& _run);
-
-    // fonts, text shaper, and grid metrics
-    //
-    GridMetrics const& gridMetrics_;
-    FontKeys const& fonts_;
-    text::shaper& textShaper_;
-    RenderGlyphs renderGlyphs_;
-
-    // render states
-    //
-    crispy::Point textPosition_;
-    TextStyle style_ = TextStyle::Invalid;
-    RGBColor color_{};
-
-    std::vector<char32_t> codepoints_;
-    std::vector<unsigned> clusters_;
-    unsigned cellCount_ = 0;
-    bool textStartFound_ = false;
-
-    // text shaping cache
-    //
-    std::list<std::u32string> cacheKeyStorage_;
-    std::unordered_map<TextCacheKey, text::shape_result> cache_;
-
-    // output fields
-    //
-    std::vector<text::shape_result> shapedLines_;
-};
-
-// Text rendering pipeline optimized for performance with simple feature set.
-class SimpleTextShaper : public TextShaper {
-public:
-    SimpleTextShaper(GridMetrics const& _gridMetrics,
-                     text::shaper& _textShaper,
-                     FontKeys const& _fonts,
-                     RenderGlyphs _renderGlyphs);
-    void clearCache() override {}
-    void beginFrame() override {}
-    void setTextPosition(crispy::Point _position) override;
-    void appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color) override;
-    void endSequence() override;
-
-    text::shape_result cachedGlyphPositions(gsl::span<char32_t const> _codepoints, TextStyle _style);
-    void flush();
-
-private:
-    GridMetrics const& gridMetrics_;
-    FontKeys const& fonts_;
-    text::shaper& textShaper_;
-    RenderGlyphs renderGlyphs_;
-
-    // cache
-    std::list<std::u32string> cacheKeyStorage_;
-    std::unordered_map<TextCacheKey, text::shape_result> cache_;
-
-    // input state
-    crispy::Point textPosition_ = {0, 0};
-    RGBColor color_;
-
-    // intermediate states
-    int cellCount_ = 0;
-    std::vector<text::glyph_position> glyphPositions_;
-};
-// }}}
-
 /// Text Rendering Pipeline
-class TextRenderer : public Renderable {
-  public:
+class TextRenderer: public Renderable
+{
+public:
     TextRenderer(GridMetrics const& _gridMetrics,
                  text::shaper& _textShaper,
                  FontDescriptions& _fontDescriptions,
                  FontKeys const& _fontKeys);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
+
+    void debugCache(std::ostream& _textOutput) const;
     void clearCache() override;
 
     void updateFontMetrics();
 
     void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
 
-    void start();
-    void renderCell(RenderCell const& _cell);
-    void finish();
+    /// Must be invoked before a new terminal frame is rendered.
+    void beginFrame();
 
-    void debugCache(std::ostream& _textOutput) const;
+    /// Renders a given terminal's grid cell that has been
+    /// transformed into a RenderCell.
+    void renderCell(RenderCell const& _cell);
+
+
+    /// Must be invoked when rendering the terminal's text has finished for this frame.
+    void endFrame();
 
   private:
-    void setTextShapingMethod(TextShapingMethod _method);
+    /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
+    /// at the end of the currently filled line.
+    void appendCell(gsl::span<char32_t const> _codepoints,
+                    TextStyle _style,
+                    RGBColor _color);
+    text::shape_result const& cachedGlyphPositions();
+    text::shape_result requestGlyphPositions();
+    text::shape_result shapeRun(unicode::run_segmenter::range const& _run);
+    void endSequence();
 
     void renderRun(crispy::Point _startPos,
                    gsl::span<text::glyph_position const> _glyphPositions,
@@ -404,7 +297,24 @@ class TextRenderer : public Renderable {
     std::unique_ptr<TextureAtlas> colorAtlas_;
     std::unique_ptr<TextureAtlas> lcdAtlas_;
 
-    std::unique_ptr<TextShaper> textRenderingEngine_;
+    // render states
+    TextStyle style_ = TextStyle::Invalid;
+    RGBColor color_{};
+
+    crispy::Point textPosition_;
+    std::vector<char32_t> codepoints_;
+    std::vector<unsigned> clusters_;
+    unsigned cellCount_ = 0;
+    bool textStartFound_ = false;
+
+    // text shaping cache
+    //
+    std::list<std::u32string> cacheKeyStorage_;
+    std::unordered_map<TextCacheKey, text::shape_result> cache_;
+
+    // output fields
+    //
+    std::vector<text::shape_result> shapedLines_;
 };
 
 } // end namespace
