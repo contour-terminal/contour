@@ -373,19 +373,6 @@ void directwrite_shaper::shape(font_key _font,
         const UINT32 textStart = 0;
         dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
 
-        // Fallback analysis
-        font_source_list sources = d->locator_->resolve(gsl::span(_text.data(), _text.size()));
-        if (sources.size() > 0)
-        {
-            optional<font_key> fontKeyOpt = d->add_font(sources[0], fontInfo.description, fontInfo.size);
-            if (fontKeyOpt.has_value())
-            {
-                _font = fontKeyOpt.value();
-                fontInfo = d->fonts.at(_font);
-                fontFace = fontInfo.fontFace;
-            }
-        }
-
         // Script analysis
         d->textAnalyzer->AnalyzeScript(&analysisWrapper, 0, wText.size(), &analysisWrapper);
 
@@ -415,7 +402,26 @@ void directwrite_shaper::shape(font_key _font,
                 &glyphIndices.at(glyphStart),
                 &glyphProps.at(0),
                 &actualGlyphCount);
-            if (hr == E_NOT_SUFFICIENT_BUFFER)
+            attempt++;
+
+            if (SUCCEEDED(hr) && std::find(glyphIndices.begin(), glyphIndices.end(), 0) != glyphIndices.end())
+            {
+                // glyphIndices contains 0 means some glyphs are missing from the current font.
+                // Need to perform fallback analysis.
+                font_source_list sources = d->locator_->resolve(gsl::span(_text.data(), _text.size()));
+                if (sources.size() > 0)
+                {
+                    optional<font_key> fontKeyOpt = d->add_font(sources[0], fontInfo.description, fontInfo.size);
+                    if (fontKeyOpt.has_value())
+                    {
+                        _font = fontKeyOpt.value();
+                        fontInfo = d->fonts.at(_font);
+                        fontFace = fontInfo.fontFace;
+                    }
+                }
+                continue;
+            }
+            else if (hr == E_NOT_SUFFICIENT_BUFFER)
             {
                 // Using a larger buffer.
                 maxGlyphCount *= 2;
@@ -428,7 +434,7 @@ void directwrite_shaper::shape(font_key _font,
             {
                 break;
             }
-        } while (attempt < 2);
+        } while (attempt < 3);
 
         std::vector<float> glyphAdvances(actualGlyphCount);
         std::vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
