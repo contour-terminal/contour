@@ -69,6 +69,10 @@ namespace // {{{ helpers
     }
 } // }}}
 
+// TODO: What's a good value here? Or do we want to make that configurable,
+// or even computed based on memory resources available?
+constexpr size_t TextShapingCacheSize = 3000;
+
 TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
                            text::shaper& _textShaper,
                            FontDescriptions& _fontDescriptions,
@@ -77,7 +81,8 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     fontDescriptions_{ _fontDescriptions },
     fonts_{ _fonts },
     textShaper_{ _textShaper },
-    boxDrawingRenderer_{ _gridMetrics }
+    boxDrawingRenderer_{ _gridMetrics },
+    cache_{ TextShapingCacheSize }
 {
 }
 
@@ -459,14 +464,12 @@ void TextRenderer::endSequence()
 text::shape_result const& TextRenderer::cachedGlyphPositions()
 {
     auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    auto const cached = cache_.find(TextCacheKey{codepoints, style_});
-    if (cached != cache_.end())
-        return cached->second;
+    if (auto p = cache_.try_get(TextCacheKey{codepoints, style_}))
+        return *p;
 
     cacheKeyStorage_.emplace_back(u32string{codepoints});
     auto const cacheKeyFromStorage = TextCacheKey{ cacheKeyStorage_.back(), style_ };
-
-    return cache_[cacheKeyFromStorage] = requestGlyphPositions();
+    return cache_.emplace(cacheKeyFromStorage, requestGlyphPositions());
 }
 
 text::shape_result TextRenderer::requestGlyphPositions()
