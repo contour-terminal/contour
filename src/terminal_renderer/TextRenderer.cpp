@@ -144,7 +144,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
         return TextStyle::Regular;
     }(_cell.flags);
 
-    auto const codepoints = crispy::span(_cell.codepoints.data(), _cell.codepoints.size());
+    auto const codepoints = gsl::span(_cell.codepoints.data(), _cell.codepoints.size());
 
     bool const isBoxDrawingCharacter =
         fontDescriptions_.builtinBoxDrawing &&
@@ -188,7 +188,7 @@ void TextRenderer::finish()
 }
 
 void TextRenderer::renderRun(crispy::Point _pos,
-                             crispy::span<text::glyph_position const> _glyphPositions,
+                             gsl::span<text::glyph_position const> _glyphPositions,
                              RGBColor _color)
 {
     crispy::Point pen = _pos;
@@ -443,7 +443,7 @@ void ComplexTextShaper::clearCache()
     cache_.clear();
 }
 
-void ComplexTextShaper::appendCell(crispy::span<char32_t const> _codepoints,
+void ComplexTextShaper::appendCell(gsl::span<char32_t const> _codepoints,
                                    TextStyle _style,
                                    RGBColor _color)
 {
@@ -495,7 +495,7 @@ void ComplexTextShaper::endSequence()
     if (!codepoints_.empty())
     {
         text::shape_result const& glyphPositions = cachedGlyphPositions();
-        renderGlyphs_(textPosition_, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+        renderGlyphs_(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
     }
 
     codepoints_.clear();
@@ -538,7 +538,7 @@ text::shape_result ComplexTextShaper::shapeRun(unicode::run_segmenter::range con
     // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
     auto const count = static_cast<int>(_run.end - _run.start);
     auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
-    auto const clusters = crispy::span(clusters_.data() + _run.start, count);
+    auto const clusters = gsl::span(clusters_.data() + _run.start, count);
 
     text::shape_result gpos;
     textShaper_.shape(
@@ -598,7 +598,7 @@ void SimpleTextShaper::setTextPosition(crispy::Point _position)
     textPosition_ = _position;
 }
 
-void SimpleTextShaper::appendCell(crispy::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)
+void SimpleTextShaper::appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)
 {
     if (color_ != _color)
     {
@@ -614,7 +614,7 @@ void SimpleTextShaper::appendCell(crispy::span<char32_t const> _codepoints, Text
     cellCount_++;
 }
 
-text::shape_result SimpleTextShaper::cachedGlyphPositions(crispy::span<char32_t const> _codepoints, TextStyle _style)
+text::shape_result SimpleTextShaper::cachedGlyphPositions(gsl::span<char32_t const> _codepoints, TextStyle _style)
 {
     auto const codepoints = u32string_view(&_codepoints[0], _codepoints.size());
     if (auto const cached = cache_.find(TextCacheKey{codepoints, _style}); cached != cache_.end())
@@ -641,7 +641,7 @@ void SimpleTextShaper::flush()
         return;
 
     text::shape_result const& glyphPositions = glyphPositions_;
-    renderGlyphs_(textPosition_, crispy::span(glyphPositions.data(), glyphPositions.size()), color_);
+    renderGlyphs_(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
     glyphPositions_.clear();
     textPosition_.x += gridMetrics_.cellSize.width.as<int>() * cellCount_;
     cellCount_ = 0;
