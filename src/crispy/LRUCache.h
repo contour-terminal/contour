@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <cassert>
 #include <list>
 #include <stdexcept>
 #include <unordered_map>
@@ -44,7 +45,12 @@ public:
 
     [[nodiscard]] bool contains(Key _key) const noexcept
     {
-        return lookupMap_.find(_key) != lookupMap_.end();
+        return try_get(_key) != nullptr;
+    }
+
+    [[nodiscard]] Value* try_get(Key _key) const
+    {
+        return const_cast<LRUCache*>(this)->try_get(_key);
     }
 
     [[nodiscard]] Value* try_get(Key _key)
@@ -116,6 +122,12 @@ public:
     {
         if (Value* p = try_get(_key))
             return *p;
+        return emplace(_key, _constructValue());
+    }
+
+    [[nodiscard]] Value& emplace(Key _key, Value _value)
+    {
+        assert(!try_get(_key));
 
         if (items_.size() == capacity_)
         {
@@ -124,7 +136,7 @@ public:
             items_.pop_back();
         }
 
-        items_.emplace_front(Item{_key, _constructValue()});
+        items_.emplace_front(Item{_key, std::move(_value)});
         lookupMap_.emplace(_key, items_.begin());
         return items_.front().second;
     }
