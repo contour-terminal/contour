@@ -143,13 +143,6 @@ profiles:
                 #                 platforms)
                 engine: native
 
-                # Determines what shaping method to use. Value options are:
-                # - complex : Full Unicode text shaping, supporting most Unicode features.
-                # - simple  : reduced text shaping features for improved
-                #             performance but lesser Unicode features.
-                # Default: complex
-                method: complex
-
             # Uses builtin textures for pixel-perfect box drawing.
             # If disabled, the font's provided box drawing characters
             # will be used (Default: true).

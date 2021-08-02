@@ -1081,17 +1081,6 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChild(_usedKeys, _doc, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
     tryLoadChild(_usedKeys, _doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
 
-    strValue = "complex";
-    tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.method", strValue);
-    {
-        if (strValue == "simple")
-            profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Simple;
-        else if (strValue == "complex")
-            profile.fonts.textShapingMethod = terminal::renderer::TextShapingMethod::Complex;
-        else
-            errorlog().write("Unknown text shaping method: {}", strValue);
-    }
-
     auto constexpr NativeTextShapingEngine =
 #if defined(_WIN32)
         terminal::renderer::TextShapingEngine::DWrite;
