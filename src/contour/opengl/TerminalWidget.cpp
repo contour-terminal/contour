@@ -71,6 +71,7 @@ using terminal::Height;
 using terminal::PageSize;
 using terminal::LineCount;
 using terminal::ColumnCount;
+using terminal::RGBAColor;
 
 using namespace std::string_literals;
 using namespace std;
@@ -260,27 +261,22 @@ TerminalWidget::TerminalWidget(
     function<void(bool)> _enableBackgroundBlur
 ):
     QOpenGLWidget(),
-    profile_{ _profile },
     session_{ _session },
     adaptSize_{ std::move(_adaptSize) },
     enableBackgroundBlur_{ std::move(_enableBackgroundBlur) },
     renderer_{
         terminal().screenSize(),
-        sanitizeFontDescription(profile_.fonts, screenDPI()),
+        sanitizeFontDescription(profile().fonts, screenDPI()),
         terminal().screen().colorPalette(),
-        profile_.backgroundOpacity,
-        profile_.hyperlinkDecoration.normal,
-        profile_.hyperlinkDecoration.hover
+        profile().backgroundOpacity,
+        profile().hyperlinkDecoration.normal,
+        profile().hyperlinkDecoration.hover
         //TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
-    },
-    size_{
-        terminal::Width(*terminal().screenSize().columns * *gridMetrics().cellSize.width),
-        terminal::Height(*terminal().screenSize().lines * *gridMetrics().cellSize.height)
     }
 {
     debuglog(WidgetTag).write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
-                              profile_.terminalSize,
-                              profile_.fonts.size,
+                              profile().terminalSize,
+                              profile().fonts.size,
                               contentScale(),
                               geometry().top(),
                               geometry().left(),
@@ -320,11 +316,11 @@ double TerminalWidget::refreshRate() const
 {
     auto const screen = screenOf(this);
     if (!screen)
-        return profile_.refreshRate != 0.0 ? profile_.refreshRate : 30.0;
+        return profile().refreshRate != 0.0 ? profile().refreshRate : 30.0;
 
     auto const systemRefreshRate = static_cast<double>(screen->refreshRate());
-    if (1.0 < profile_.refreshRate && profile_.refreshRate < systemRefreshRate)
-        return profile_.refreshRate;
+    if (1.0 < profile().refreshRate && profile().refreshRate < systemRefreshRate)
+        return profile().refreshRate;
     else
         return systemRefreshRate;
 }
@@ -341,7 +337,10 @@ bool TerminalWidget::isFullScreen() const
 
 terminal::ImageSize TerminalWidget::pixelSize() const
 {
-    return size_;
+    return {
+        terminal::Width(*session_.terminal().screenSize().columns * *gridMetrics().cellSize.width),
+        terminal::Height(*session_.terminal().screenSize().lines * *gridMetrics().cellSize.height)
+    };
 }
 
 terminal::ImageSize TerminalWidget::cellSize() const
@@ -401,12 +400,12 @@ QSize TerminalWidget::sizeHint() const
 {
     auto const cellSize = renderer_.gridMetrics().cellSize;
     auto const viewSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
-        Height(*gridMetrics().cellSize.height * *profile_.terminalSize.lines)
+        Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
+        Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines)
     };
 
     debuglog(WidgetTag).write("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
-                              viewSize, cellSize, profile_.terminalSize,
+                              viewSize, cellSize, profile().terminalSize,
                               renderer_.fontDescriptions().dpi);
 
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
@@ -433,8 +432,8 @@ void TerminalWidget::initializeGL()
         debuglog(WidgetTag).write("[FYI] DPI             : {} physical; {} logical",
                          crispy::Size{physicalDpiX(), physicalDpiY()},
                          crispy::Size{logicalDpiX(), logicalDpiY()});
-        auto const fontSizeInPx = int(ceil(profile_.fonts.size.pt / 72.0 * 96.0 * contentScale()));
-        debuglog(WidgetTag).write("[FYI] Font size       : {} ({}px)", profile_.fonts.size, fontSizeInPx);
+        auto const fontSizeInPx = int(ceil(profile().fonts.size.pt / 72.0 * 96.0 * contentScale()));
+        debuglog(WidgetTag).write("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
         debuglog(WidgetTag).write("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         debuglog(WidgetTag).write("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         debuglog(WidgetTag).write("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
@@ -482,29 +481,9 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-    debuglog(WidgetTag).write("resizing to {}", ImageSize{Width(_width), Height(_height)});
     QOpenGLWidget::resizeGL(_width, _height);
+    applyResize(terminal::ImageSize{Width(_width), Height(_height)}, session_, renderer_);
 
-    if (_width == 0 || _height == 0)
-        return;
-
-    size_ = ImageSize{Width(_width), Height(_height)};
-    auto const newScreenSize = screenSize();
-
-    renderer_.setRenderSize(size_);
-    renderer_.setScreenSize(newScreenSize);
-    renderer_.setMargin(computeMargin(gridMetrics().cellSize, newScreenSize, size_));
-    //renderer_.clearCache();
-
-    if (newScreenSize != terminal().screenSize())
-    {
-        auto const viewSize = ImageSize{
-            Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
-            Height(*gridMetrics().cellSize.height * *profile_.terminalSize.lines)
-        };
-        terminal().resizeScreen(newScreenSize, viewSize);
-        terminal().clearSelection();
-    }
 }
 
 void TerminalWidget::paintGL()
@@ -533,25 +512,11 @@ void TerminalWidget::paintGL()
         bool const reverseVideo =
             terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
 
-        auto const bg =
+        renderTarget_->clear(
             reverseVideo
-                ? terminal::RGBAColor(profile_.colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
-                : terminal::RGBAColor(profile_.colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()));
-
-        if (bg != renderStateCache_.backgroundColor)
-        {
-            auto const clearColor = array<float, 4>{
-                float(bg.red()) / 255.0f,
-                float(bg.green()) / 255.0f,
-                float(bg.blue()) / 255.0f,
-                float(bg.alpha()) / 255.0f
-            };
-            glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
-            renderStateCache_.backgroundColor = bg;
-        }
-
-        glClear(GL_COLOR_BUFFER_BIT);
-
+                ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
+                : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()))
+        );
         renderer_.render(terminal(), steady_clock::now(), renderingPressure_);
     }
     catch (exception const& e)
@@ -573,7 +538,9 @@ void TerminalWidget::onFrameSwapped()
                 update();
                 return;
             case State::DirtyPainting:
+#if defined(CONTOUR_PERF_STATS)
                 stats_.consecutiveRenderCount++;
+#endif
                 update();
                 return;
             case State::CleanPainting:
@@ -582,7 +549,7 @@ void TerminalWidget::onFrameSwapped()
                 [[fallthrough]];
             case State::CleanIdle:
                 renderingPressure_ = false;
-                if (profile_.cursorDisplay == terminal::CursorDisplay::Blink
+                if (profile().cursorDisplay == terminal::CursorDisplay::Blink
                         && terminal().screen().cursor().visible)
                     updateTimer_.start(terminal().nextRender(steady_clock::now()));
                 return;
@@ -865,7 +832,7 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
     requestedScreenSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
 
     //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile_).terminalSize = requestedScreenSize;
+    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
     renderer_.setScreenSize(requestedScreenSize);
     auto const pixels = terminal::ImageSize{
         terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
@@ -891,7 +858,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
         requestedScreenSize.lines = _lines;
 
     //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile_).terminalSize = requestedScreenSize;
+    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
     renderer_.setScreenSize(requestedScreenSize);
     auto const pixels = terminal::ImageSize{
         terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
@@ -905,9 +872,10 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
 {
     if (applyFontDescription(gridMetrics().cellSize,
-                             screenSize(), size_, screenDPI(),
+                             screenSize(), pixelSize(), screenDPI(),
                              renderer_, _fontDescriptions))
-        resize(size_); // resize widget (same pixels, but adjusted terminal rows/columns and margin)
+        // resize widget (same pixels, but adjusted terminal rows/columns and margin)
+        applyResize(pixelSize(), session_, renderer_);
 }
 
 bool TerminalWidget::setFontSize(text::font_size _size)
@@ -916,7 +884,8 @@ bool TerminalWidget::setFontSize(text::font_size _size)
         return false;
 
     renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), pixelSize()));
-    resize(size_); // resize view (same pixels, but adjusted terminal rows/columns and margin)
+    // resize widget (same pixels, but adjusted terminal rows/columns and margin)
+    applyResize(pixelSize(), session_, renderer_);
     updateMinimumSize();
     return true;
 }
@@ -927,8 +896,8 @@ bool TerminalWidget::setScreenSize(PageSize _newScreenSize)
         return false;
 
     auto const viewSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
-        Height(*gridMetrics().cellSize.width * *profile_.terminalSize.columns)
+        Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
+        Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns)
     };
     renderer_.setScreenSize(_newScreenSize);
     terminal().resizeScreen(_newScreenSize, viewSize);
@@ -943,7 +912,7 @@ void TerminalWidget::setMouseCursorShape(MouseCursorShape _shape)
 
 void TerminalWidget::setTerminalProfile(config::TerminalProfile _profile)
 {
-    (void) _profile; // profile_ = std::move(_profile); // TODO
+    (void) _profile;
 }
 
 void TerminalWidget::setWindowTitle(string_view _title)
@@ -1105,28 +1074,6 @@ double TerminalWidget::contentScale() const
         return 1.0f;
 
     return window()->windowHandle()->screen()->devicePixelRatio();
-}
-
-void TerminalWidget::resize(ImageSize _size)
-{
-    size_ = _size;
-
-    auto const newScreenSize = screenSize();
-
-    renderer_.setRenderSize(_size);
-    renderer_.setScreenSize(newScreenSize);
-    renderer_.setMargin(computeMargin(gridMetrics().cellSize, newScreenSize, size_));
-    //renderer_.clearCache();
-
-    if (newScreenSize != terminal().screenSize())
-    {
-        auto const viewSize = ImageSize{
-            Width(*gridMetrics().cellSize.width * *profile_.terminalSize.columns),
-            Height(*gridMetrics().cellSize.width * *profile_.terminalSize.columns)
-        };
-        terminal().resizeScreen(newScreenSize, viewSize);
-        terminal().clearSelection();
-    }
 }
 
 void TerminalWidget::updateMinimumSize()

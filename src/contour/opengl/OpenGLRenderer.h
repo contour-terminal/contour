@@ -62,6 +62,7 @@ class OpenGLRenderer final :
     void renderRectangle(int _x, int _y, int _width, int _height,
                          float _r, float _g, float _b, float _a) override;
 
+    void clear(terminal::RGBAColor _fillColor) override;
     void execute() override;
 
     void clearCache() override;
@@ -127,6 +128,11 @@ class OpenGLRenderer final :
     GLuint rectVBO_;
 
     std::optional<ScreenshotCallback> pendingScreenshotCallback_;
+
+    // render state cache
+    struct {
+        terminal::RGBAColor backgroundColor{};
+    } renderStateCache_;
 };
 
 } // end namespace

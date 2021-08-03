@@ -22,9 +22,11 @@
 #include <range/v3/all.hpp>
 
 #include <algorithm>
+#include <array>
 #include <vector>
 #include <utility>
 
+using std::array;
 using std::min;
 using std::optional;
 using std::nullopt;
@@ -593,6 +595,23 @@ optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocato
 void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback _callback)
 {
     pendingScreenshotCallback_ = std::move(_callback);
+}
+
+void OpenGLRenderer::clear(terminal::RGBAColor _fillColor)
+{
+    if (_fillColor != renderStateCache_.backgroundColor)
+    {
+        auto const clearColor = array<float, 4>{
+            float(_fillColor.red()) / 255.0f,
+            float(_fillColor.green()) / 255.0f,
+            float(_fillColor.blue()) / 255.0f,
+            float(_fillColor.alpha()) / 255.0f
+        };
+        glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+        renderStateCache_.backgroundColor = _fillColor;
+    }
+
+    glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void OpenGLRenderer::execute()

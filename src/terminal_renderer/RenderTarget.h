@@ -66,16 +66,25 @@ class RenderTarget
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
+    /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int _x, int _y, int _width, int _height,
                                  float _r, float _g, float _b, float _a) = 0;
 
     using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
+
+    /// Takes a screenshot of the current schene and forwards it to the given callback function.
     virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
 
+    /// Clears the target surface with the given fill color.
+    virtual void clear(terminal::RGBAColor _fillColor) = 0;
+
+    /// Executes all previously scheduled render commands.
     virtual void execute() = 0;
 
+    /// Clears any existing caches.
     virtual void clearCache() = 0;
 
+    /// Reads out the given texture atlas.
     virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) = 0;
 };
 

@@ -175,6 +175,13 @@ terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
 
 terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts, crispy::Point _screenDPI);
 
+terminal::PageSize screenSizeForPixels(terminal::ImageSize _pixelSize,
+                                       terminal::renderer::GridMetrics const& _gridMetrics);
+
+void applyResize(terminal::ImageSize _newPixelSize,
+                 TerminalSession& _session,
+                 terminal::renderer::Renderer& _renderer);
+
 bool applyFontDescription(
     terminal::ImageSize _cellSize,
     terminal::PageSize _screenSize,
