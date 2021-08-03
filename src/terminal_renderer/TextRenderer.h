@@ -24,6 +24,7 @@
 #include <text_shaper/font.h>
 #include <text_shaper/shaper.h>
 
+#include <crispy/LRUCache.h>
 #include <crispy/FNV.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
@@ -248,7 +249,7 @@ public:
     //
     struct GlyphMetrics {
         ImageSize bitmapSize;    // glyph size in pixels
-        crispy::Point bearing;      // offset baseline and left to top and left of the glyph's bitmap
+        crispy::Point bearing;   // offset baseline and left to top and left of the glyph's bitmap
     };
     friend struct fmt::formatter<GlyphMetrics>;
 
@@ -310,7 +311,7 @@ public:
     // text shaping cache
     //
     std::list<std::u32string> cacheKeyStorage_;
-    std::unordered_map<TextCacheKey, text::shape_result> cache_;
+    crispy::LRUCache<TextCacheKey, text::shape_result> cache_;
 
     // output fields
     //
