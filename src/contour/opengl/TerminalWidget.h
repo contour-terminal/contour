@@ -148,36 +148,17 @@ public:
   private:
     // helper methods
     //
+    config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
-    terminal::PageSize screenSize() const {
-        auto tmp = size_ / gridMetrics().cellSize;
-        return terminal::PageSize{
-            boxed_cast<terminal::LineCount>(tmp.height),
-            boxed_cast<terminal::ColumnCount>(tmp.width)
-        };
-    }
+    terminal::PageSize screenSize() const { return screenSizeForPixels(pixelSize(), renderer_.gridMetrics()); }
     void assertInitialized();
     double contentScale() const;
     void blinkingCursorUpdate();
-    void resize(terminal::ImageSize _pixels);
     void updateMinimumSize();
 
     void statsSummary();
     void doResize(crispy::Size _size);
     terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
-
-    /// Defines the current screen-dirtiness-vs-rendering state.
-    ///
-    /// This is primarily updated by two independant threads, the rendering thread and the I/O
-    /// thread.
-    /// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
-    /// to render and, depending on whether new screen changes happened, in the frameSwapped()
-    /// callback either DirtyPainting and continues to rerender or CleanIdle if no changes came in
-    /// since last render.
-    ///
-    /// The I/O thread constantly marks the state dirty whenever new data has arrived,
-    /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
-    std::atomic<State> state_ = State::CleanIdle;
 
     /// Flags the screen as dirty.
     ///
@@ -185,7 +166,9 @@ public:
     bool setScreenDirty()
     {
         //(still needed?) terminalView_->terminal().forceRender();
+#if defined(CONTOUR_PERF_STATS)
         stats_.updatesSinceRendering++;
+#endif
         for (;;)
         {
             auto state = state_.load();
@@ -208,39 +191,42 @@ public:
 
     // private data fields
     //
-    config::TerminalProfile const& profile_; // TODO: a cref would be much better
     TerminalSession& session_;
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBackgroundBlur_;
     terminal::renderer::Renderer renderer_;
-    crispy::ImageSize size_;                     // view size in pixels
-    text::font_size fontSize_{};
+    std::atomic<bool> initialized_ = false;
+    bool renderingPressure_ = false;
+    std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
+    PermissionCache rememberedPermissions_{};
+    bool maximizedState_ = false;
+
+    // update() timer used to animate the blinking cursor.
+    QTimer updateTimer_;
+
+    /// Defines the current screen-dirtiness-vs-rendering state.
+    ///
+    /// This is primarily updated by two independant threads, the rendering thread and the I/O
+    /// thread.
+    /// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
+    /// to render and, depending on whether new screen changes happened, in the frameSwapped()
+    /// callback either DirtyPainting and continues to rerender or CleanIdle if no changes came in
+    /// since last render.
+    ///
+    /// The I/O thread constantly marks the state dirty whenever new data has arrived,
+    /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
+    std::atomic<State> state_ = State::CleanIdle;
 
     // ======================================================================
 
-    std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
-    QTimer updateTimer_;                            // update() timer used to animate the blinking cursor.
-    bool renderingPressure_ = false;
-    bool maximizedState_ = false;
+#if defined(CONTOUR_PERF_STATS)
     struct Stats {
         std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
-    std::atomic<bool> initialized_ = false;
     Stats stats_;
-#if defined(CONTOUR_PERF_STATS)
     std::atomic<uint64_t> renderCount_ = 0;
 #endif
-#if defined(CONTOUR_VT_METRICS)
-    terminal::Metrics terminalMetrics_{};
-#endif
-
-    PermissionCache rememberedPermissions_;
-
-    // render state cache
-    struct {
-        terminal::RGBAColor backgroundColor{};
-    } renderStateCache_;
 };
 
 } // namespace contour

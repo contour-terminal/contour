@@ -47,6 +47,11 @@ using crispy::Point;
 using crispy::Size;
 using crispy::Zero;
 
+using terminal::Width;
+using terminal::Height;
+using terminal::ImageSize;
+using terminal::PageSize;
+
 namespace contour {
 
 bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
@@ -325,9 +330,9 @@ terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer)
     };
 }
 
-terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
-                                             terminal::PageSize _charCells,
-                                             terminal::ImageSize _pixels) noexcept
+terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
+                                             PageSize _charCells,
+                                             ImageSize _pixels) noexcept
 {
     auto const usedHeight = static_cast<int>(*_charCells.lines * *_cellSize.height);
     auto const freeHeight = static_cast<int>(*_pixels.height - usedHeight);
@@ -349,9 +354,9 @@ terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer:
     return _fonts;
 }
 
-bool applyFontDescription(terminal::ImageSize _cellSize,
-                          terminal::PageSize _screenSize,
-                          terminal::ImageSize _pixelSize,
+bool applyFontDescription(ImageSize _cellSize,
+                          PageSize _screenSize,
+                          ImageSize _pixelSize,
                           Point _screenDPI,
                           terminal::renderer::Renderer& _renderer,
                           terminal::renderer::FontDescriptions _fontDescriptions)
@@ -366,6 +371,45 @@ bool applyFontDescription(terminal::ImageSize _cellSize,
     _renderer.updateFontMetrics();
 
     return true;
+}
+
+terminal::PageSize screenSizeForPixels(ImageSize _pixelSize,
+                                       terminal::renderer::GridMetrics const& _gridMetrics)
+{
+    auto tmp = _pixelSize / _gridMetrics.cellSize;
+    return terminal::PageSize{
+        boxed_cast<terminal::LineCount>(tmp.height),
+        boxed_cast<terminal::ColumnCount>(tmp.width)
+    };
+}
+
+void applyResize(terminal::ImageSize _newPixelSize,
+                 TerminalSession& _session,
+                 terminal::renderer::Renderer& _renderer)
+{
+    debuglog(WidgetTag).write("resizing to {}", _newPixelSize);
+    if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
+        return;
+
+    auto const newScreenSize = screenSizeForPixels(_newPixelSize, _renderer.gridMetrics());
+    terminal::Terminal& terminal = _session.terminal();
+    terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
+    terminal::PageSize terminalSize = _session.profile().terminalSize;
+
+    _renderer.setRenderSize(_newPixelSize);
+    _renderer.setScreenSize(newScreenSize);
+    _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newScreenSize, _newPixelSize));
+    //_renderer.clearCache();
+
+    if (newScreenSize == terminal.screenSize())
+        return;
+
+    auto const viewSize = terminal::ImageSize{
+        Width::cast_from(*cellSize.width * *terminalSize.columns),
+        Height::cast_from(*cellSize.height * *terminalSize.lines)
+    };
+    terminal.resizeScreen(newScreenSize, viewSize);
+    terminal.clearSelection();
 }
 
 } // end namespace
