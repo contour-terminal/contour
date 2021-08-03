@@ -95,6 +95,7 @@ if(WIN32)
         )
     endif()
 elseif(APPLE)
+    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
     set(contour_version "0.1.0_pre")
     set_target_properties(contour PROPERTIES
         MACOSX_BUNDLE ON
