@@ -404,14 +404,6 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
 
 void TextRenderer::debugCache(std::ostream& _textOutput) const
 {
-    std::map<u32string, CacheKey> orderedKeys;
-
-    _textOutput << fmt::format("TextRenderer: {} cache entries:\n", orderedKeys.size());
-    for (auto && [word, key] : orderedKeys)
-    {
-        auto const vword = u32string_view(word);
-        _textOutput << fmt::format("  {}\n", unicode::convert_to<char>(vword));
-    }
 }
 
 void TextRenderer::appendCell(gsl::span<char32_t const> _codepoints,

@@ -42,89 +42,57 @@
 
 namespace terminal::renderer
 {
-    using GlyphId = text::glyph_key;
 
-    struct CacheKey {
-        std::u32string_view text;
-        CellFlags styles;
+enum class TextStyle
+{
+    Invalid     = 0x00,
+    Regular     = 0x10,
+    Bold        = 0x11,
+    Italic      = 0x12,
+    BoldItalic  = 0x13,
+};
 
-        bool operator==(CacheKey const& _rhs) const noexcept
-        {
-            return text == _rhs.text && styles == _rhs.styles;
-        }
-
-        bool operator!=(CacheKey const& _rhs) const noexcept
-        {
-            return !(*this == _rhs);
-        }
-
-        bool operator<(CacheKey const& _rhs) const noexcept
-        {
-            if (text < _rhs.text)
-                return true;
-
-            if (static_cast<unsigned>(styles) < static_cast<unsigned>(_rhs.styles))
-                return true;
-
-            return false;
-        }
-    };
-
-    enum class TextStyle {
-        Invalid     = 0x00,
-        Regular     = 0x10,
-        Bold        = 0x11,
-        Italic      = 0x12,
-        BoldItalic  = 0x13,
-    };
-
-    constexpr TextStyle operator|(TextStyle a, TextStyle b) noexcept
-    {
-        return static_cast<TextStyle>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-    }
-
-    constexpr bool operator<(TextStyle a, TextStyle b) noexcept
-    {
-        return static_cast<unsigned>(a) < static_cast<unsigned>(b);
-    }
-
-    struct TextCacheKey {
-        std::u32string_view text;
-        TextStyle style; // TODO: use font_key instead, and kill TextStyle
-
-        constexpr bool operator<(TextCacheKey const& _rhs) const noexcept
-        {
-            if (text < _rhs.text)
-                return true;
-
-            return text < _rhs.text || style < _rhs.style;
-        }
-
-        constexpr bool operator==(TextCacheKey const& _rhs) const noexcept
-        {
-            return text == _rhs.text && style == _rhs.style;
-        }
-
-        constexpr bool operator!=(TextCacheKey const& _rhs) const noexcept
-        {
-            return !(*this == _rhs);
-        }
-    };
+constexpr TextStyle operator|(TextStyle a, TextStyle b) noexcept
+{
+    return static_cast<TextStyle>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
 }
+
+constexpr bool operator<(TextStyle a, TextStyle b) noexcept
+{
+    return static_cast<unsigned>(a) < static_cast<unsigned>(b);
+}
+
+struct TextCacheKey
+{
+    std::u32string_view text;
+    TextStyle style;
+
+    constexpr bool operator<(TextCacheKey const& _rhs) const noexcept
+    {
+        if (text < _rhs.text)
+            return true;
+
+        return text < _rhs.text || style < _rhs.style;
+    }
+
+    constexpr bool operator==(TextCacheKey const& _rhs) const noexcept
+    {
+        return text == _rhs.text && style == _rhs.style;
+    }
+
+    constexpr bool operator!=(TextCacheKey const& _rhs) const noexcept
+    {
+        return !(*this == _rhs);
+    }
+};
+
+} // end namespace terminal::renderer
 
 namespace std
 {
     template <>
-    struct hash<terminal::renderer::CacheKey> {
-        size_t operator()(terminal::renderer::CacheKey const& _key) const noexcept
-        {
-            auto fnv = crispy::FNV<char32_t>{};
-            return static_cast<size_t>(fnv(fnv(_key.text.data(), _key.text.size()), static_cast<char32_t>(_key.styles)));
-        }
-    };
-
-    template <>
-    struct hash<terminal::renderer::TextCacheKey> {
+    struct hash<terminal::renderer::TextCacheKey>
+    {
         size_t operator()(terminal::renderer::TextCacheKey const& _key) const noexcept
         {
             auto fnv = crispy::FNV<char32_t>{};
@@ -137,7 +105,8 @@ namespace std
     };
 }
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 struct GridMetrics;
 
@@ -247,16 +216,16 @@ public:
 
     // rendering
     //
-    struct GlyphMetrics {
+    struct GlyphMetrics
+    {
         ImageSize bitmapSize;    // glyph size in pixels
         crispy::Point bearing;   // offset baseline and left to top and left of the glyph's bitmap
     };
-    friend struct fmt::formatter<GlyphMetrics>;
 
     using TextureAtlas = atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
     using DataRef = TextureAtlas::DataRef;
 
-    std::optional<DataRef> getTextureInfo(GlyphId const& _id,
+    std::optional<DataRef> getTextureInfo(text::glyph_key const& _id,
                                           unicode::PresentationStyle _presentation);
 
     void renderTexture(crispy::Point const& _pos,
@@ -264,6 +233,17 @@ public:
                        atlas::TextureInfo const& _textureInfo,
                        GlyphMetrics const& _glyphMetrics,
                        text::glyph_position const& _gpos);
+
+    TextureAtlas* atlasForBitmapFormat(text::bitmap_format _format) noexcept
+    {
+        switch (_format)
+        {
+            case text::bitmap_format::alpha_mask: return monochromeAtlas_.get();
+            case text::bitmap_format::rgba: return colorAtlas_.get();
+            case text::bitmap_format::rgb: return lcdAtlas_.get();
+            default: return nullptr; // Should NEVER EVER happen.
+        }
+    }
 
     // general properties
     //
@@ -277,26 +257,16 @@ public:
 
     std::unordered_map<text::glyph_key, text::bitmap_format> glyphToTextureMapping_;
 
-    TextureAtlas* atlasForBitmapFormat(text::bitmap_format _format)
-    {
-        switch (_format)
-        {
-            case text::bitmap_format::alpha_mask: return monochromeAtlas_.get();
-            case text::bitmap_format::rgba: return colorAtlas_.get();
-            case text::bitmap_format::rgb: return lcdAtlas_.get();
-            default: return nullptr; // Should NEVER EVER happen.
-        }
-    }
-
-    BoxDrawingRenderer boxDrawingRenderer_;
-    bool forceCellGroupSplit_ = false;
-
     // target surface rendering
     //
     text::shaper& textShaper_;
     std::unique_ptr<TextureAtlas> monochromeAtlas_;
     std::unique_ptr<TextureAtlas> colorAtlas_;
     std::unique_ptr<TextureAtlas> lcdAtlas_;
+
+    // sub-renderer
+    //
+    BoxDrawingRenderer boxDrawingRenderer_;
 
     // render states
     TextStyle style_ = TextStyle::Invalid;
@@ -307,6 +277,7 @@ public:
     std::vector<unsigned> clusters_;
     unsigned cellCount_ = 0;
     bool textStartFound_ = false;
+    bool forceCellGroupSplit_ = false;
 
     // text shaping cache
     //
