@@ -20,13 +20,19 @@
 
 using Microsoft::WRL::ComPtr;
 
-using std::max;
+using std::codecvt_utf8;
+using std::codecvt_utf8_utf16;
 using std::make_unique;
+using std::max;
 using std::move;
 using std::nullopt;
 using std::optional;
 using std::pair;
+using std::string;
+using std::u32string;
+using std::vector;
 using std::wstring;
+using std::wstring_convert;
 
 namespace text {
 namespace
@@ -51,6 +57,7 @@ namespace
             tmp.size()
         );
 
+        // TODO: #ifdef (__SSE2__) SIMD me :-)
         for (auto i = 0; i < height; i++)
             for (auto j = 0; j < width; j++)
             {
@@ -68,20 +75,20 @@ namespace
 
                 if (_targetFormat == bitmap_format::rgba)
                 {
-                    const auto r = runColor.r * 255;
-                    const auto g = runColor.g * 255;
-                    const auto b = runColor.b * 255;
-                    const auto a = runColor.a;
+                    auto const r = runColor.r * 255;
+                    auto const g = runColor.g * 255;
+                    auto const b = runColor.b * 255;
+                    auto const a = runColor.a;
 
-                    float redAlpha = a * srcR / 255.0;
-                    float greenAlpha = a * srcG / 255.0;
-                    float blueAlpha = a * srcB / 255.0;
-                    float averageAlpha = (redAlpha + greenAlpha + blueAlpha) / 3.0;
+                    float const redAlpha = a * srcR / 255.0;
+                    float const greenAlpha = a * srcG / 255.0;
+                    float const blueAlpha = a * srcB / 255.0;
+                    float const averageAlpha = (redAlpha + greenAlpha + blueAlpha) / 3.0;
 
-                    const auto currentR = *_it;
-                    const auto currentG = *(_it + 1);
-                    const auto currentB = *(_it + 2);
-                    const auto currentA = *(_it + 3);
+                    auto const currentR = *_it;
+                    auto const currentG = *(_it + 1);
+                    auto const currentB = *(_it + 2);
+                    auto const currentA = *(_it + 3);
 
                     // Bitmap composition
                     *_it++ = currentR * (1.0 - averageAlpha) + averageAlpha * r;
@@ -164,11 +171,11 @@ struct directwrite_shaper::Private
             return nullopt;
         }
 
-        BOOL isSupported;
-        DWRITE_FONT_FILE_TYPE fileType;
-        DWRITE_FONT_FACE_TYPE fontFaceType;
-        UINT32 numFaces;
-        IDWriteFontFace* fontFace;
+        BOOL isSupported{};
+        DWRITE_FONT_FILE_TYPE fileType{};
+        DWRITE_FONT_FACE_TYPE fontFaceType{};
+        UINT32 numFaces{};
+        IDWriteFontFace* fontFace{};
         fontFile->Analyze(&isSupported, &fileType, &fontFaceType, &numFaces);
         hr = factory->CreateFontFace(fontFaceType, 1, fontFile.GetAddressOf(), 0, DWRITE_FONT_SIMULATIONS_NONE, &fontFace);
         if (FAILED(hr))
@@ -176,10 +183,10 @@ struct directwrite_shaper::Private
             return nullopt;
         }
 
-        IDWriteFontFace3* fontFace3;
+        IDWriteFontFace3* fontFace3{};
         fontFace->QueryInterface(&fontFace3);
 
-        ComPtr<IDWriteLocalizedStrings> familyNames;
+        ComPtr<IDWriteLocalizedStrings> familyNames{};
         fontFace3->GetFamilyNames(&familyNames);
 
         BOOL localeExists = FALSE;
@@ -206,19 +213,14 @@ struct directwrite_shaper::Private
         UINT32 length = 0;
         familyNames->GetStringLength(index, &length);
 
-        std::wstring resolvedFamilyName;
+        std::wstring resolvedFamilyName{};
         resolvedFamilyName.resize(length);
 
         familyNames->GetString(index, resolvedFamilyName.data(), length + 1);
 
-        for (const std::pair<font_key, DxFontInfo>& kv : fonts)
-        {
-            const auto fontInfo = kv.second;
+        for (auto && [fontKey, fontInfo]: fonts)
             if (_description == fontInfo.description && fontInfo.fontFace->Equals(fontFace))
-            {
-                return kv.first;
-            }
-        }
+                return fontKey;
 
         auto dwMetrics = DWRITE_FONT_METRICS{};
         fontFace3->GetMetrics(&dwMetrics);
@@ -307,19 +309,19 @@ void directwrite_shaper::shape(font_key _font,
                                unicode::PresentationStyle _presentation,
                                shape_result& _result)
 {
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv1;
-    std::string bytes = conv1.to_bytes(std::u32string{ _text });
-    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv2;
-    std::wstring wText = conv2.from_bytes(bytes);
+    wstring_convert<codecvt_utf8<char32_t>, char32_t> conv1;
+    string bytes = conv1.to_bytes(u32string{ _text });
+    wstring_convert<codecvt_utf8_utf16<wchar_t>> conv2;
+    wstring wText = conv2.from_bytes(bytes);
 
     WCHAR const* textString = wText.c_str();
     UINT32 textLength = wText.size();
     DxFontInfo fontInfo = d->fonts.at(_font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
 
-    std::vector<UINT16> glyphIndices;
-    std::vector<INT32> glyphDesignUnitAdvances;
-    std::vector<UINT16> glyphClusters;
+    vector<UINT16> glyphIndices;
+    vector<INT32> glyphDesignUnitAdvances;
+    vector<UINT16> glyphClusters;
 
     BOOL isTextSimple = FALSE;
     UINT32 uiLengthRead = 0;
@@ -343,7 +345,7 @@ void directwrite_shaper::shape(font_key _font,
     {
         // "Simple" shaping assumes every character has the exact same width which can be calculate from the metrics.
         //  This saves us from the need of expensive shaping operation.
-        DWRITE_FONT_METRICS1 metrics;
+        DWRITE_FONT_METRICS1 metrics{};
         fontFace->GetMetrics(&metrics);
 
         glyphDesignUnitAdvances.resize(textLength);
@@ -360,17 +362,13 @@ void directwrite_shaper::shape(font_key _font,
             glyph_position gpos{};
             gpos.presentation = _presentation;
             gpos.glyph = glyph_key{ _font, fontInfo.size, glyph_index{glyphIndices.at(i)} };
-            // gpos.offset.x = static_cast<int>(cellWidth);
-            //gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
-
             gpos.advance.x = static_cast<int>(cellWidth);
-            //gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
             _result.emplace_back(gpos);
         }
     }
     else {
         // Complex shaping
-        const UINT32 textStart = 0;
+        UINT32 const textStart = 0;
         dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
 
         // Script analysis
@@ -378,8 +376,8 @@ void directwrite_shaper::shape(font_key _font,
 
         UINT32 actualGlyphCount = 0;
         UINT32 maxGlyphCount = textLength;
-        std::vector<DWRITE_SHAPING_TEXT_PROPERTIES> textProps(textLength);
-        std::vector<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps(textLength);
+        vector<DWRITE_SHAPING_TEXT_PROPERTIES> textProps(textLength);
+        vector<DWRITE_SHAPING_GLYPH_PROPERTIES> glyphProps(textLength);
 
         uint8_t attempt = 0;
 
@@ -425,7 +423,7 @@ void directwrite_shaper::shape(font_key _font,
             {
                 // Using a larger buffer.
                 maxGlyphCount *= 2;
-                const UINT32 totalGlyphsArrayCount = glyphStart + maxGlyphCount;
+                UINT32 const totalGlyphsArrayCount = glyphStart + maxGlyphCount;
 
                 glyphProps.resize(maxGlyphCount);
                 glyphIndices.resize(totalGlyphsArrayCount);
@@ -436,8 +434,8 @@ void directwrite_shaper::shape(font_key _font,
             }
         } while (attempt < 3);
 
-        std::vector<float> glyphAdvances(actualGlyphCount);
-        std::vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
+        vector<float> glyphAdvances(actualGlyphCount);
+        vector<DWRITE_GLYPH_OFFSET> glyphOffsets(actualGlyphCount);
 
         auto hr = d->textAnalyzer->GetGlyphPlacements(
             &wText.at(textStart),
@@ -477,13 +475,13 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
 {
     DxFontInfo const& fontInfo = d->fonts.at(_glyph.font);
     IDWriteFontFace5* fontFace = fontInfo.fontFace;
-    const float fontEmSize = ptToEm(_glyph.size.pt);
+    float const fontEmSize = ptToEm(_glyph.size.pt);
 
-    const UINT16 glyphIndex = static_cast<UINT16>(_glyph.index.value);
-    const DWRITE_GLYPH_OFFSET glyphOffset{};
-    const float glyphAdvances = 0;
+    UINT16 const glyphIndex = static_cast<UINT16>(_glyph.index.value);
+    DWRITE_GLYPH_OFFSET const glyphOffset{};
+    float const glyphAdvances = 0;
 
-    DWRITE_GLYPH_RUN glyphRun;
+    DWRITE_GLYPH_RUN glyphRun{};
     glyphRun.fontEmSize = fontEmSize;
     glyphRun.fontFace = fontFace;
     glyphRun.glyphAdvances = &(glyphAdvances);
@@ -587,14 +585,8 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
                     &colorGlyphsAnalysis);
 
                 auto t = output.bitmap.begin();
-                if (colorRun->paletteIndex == 0xFFFF)
-                {
-                    renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, DWRITE_COLOR_F{}, output.format, t);
-                }
-                else
-                {
-                    renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, colorRun->runColor, output.format, t);
-                }
+                auto const color = colorRun->paletteIndex == 0xFFFF ? DWRITE_COLOR_F{} : colorRun->runColor;
+                renderGlyphRunToBitmap(colorGlyphsAnalysis.Get(), textureBounds, color, output.format, t);
             }
 
             return output;
@@ -602,8 +594,6 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     }
 
     return nullopt;
-
-
 }
 
 void directwrite_shaper::set_dpi(crispy::Point _dpi)
