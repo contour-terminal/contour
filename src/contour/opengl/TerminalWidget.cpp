@@ -882,9 +882,13 @@ bool TerminalWidget::setFontSize(text::font_size _size)
     if (!renderer_.setFontSize(_size))
         return false;
 
-    renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), pixelSize()));
+    auto currentWidgetPixelSize = ImageSize{
+        terminal::Width(width()),
+        terminal::Height(height())
+    };
+    renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), currentWidgetPixelSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    applyResize(pixelSize(), session_, renderer_);
+    applyResize(currentWidgetPixelSize, session_, renderer_);
     updateMinimumSize();
     return true;
 }
