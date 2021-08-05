@@ -127,14 +127,6 @@ public:
     void discardImage(terminal::Image const&) override;
     // }}}
 
-    /// Declares the screen-dirtiness-vs-rendering state.
-    enum class State {
-        CleanIdle,      //!< No screen updates and no rendering currently in progress.
-        DirtyIdle,      //!< Screen updates pending and no rendering currently in progress.
-        CleanPainting,  //!< No screen updates and rendering currently in progress.
-        DirtyPainting   //!< Screen updates pending and rendering currently in progress.
-    };
-
   public Q_SLOTS:
     void onFrameSwapped();
     void onScrollBarValueChanged(int _value);
@@ -165,28 +157,10 @@ public:
     /// @returns boolean indicating whether the screen was clean before and made dirty (true), false otherwise.
     bool setScreenDirty()
     {
-        //(still needed?) terminalView_->terminal().forceRender();
 #if defined(CONTOUR_PERF_STATS)
         stats_.updatesSinceRendering++;
 #endif
-        for (;;)
-        {
-            auto state = state_.load();
-            switch (state)
-            {
-                case State::CleanIdle:
-                    if (state_.compare_exchange_strong(state, State::DirtyIdle))
-                        return true;
-                    break;
-                case State::CleanPainting:
-                    if (state_.compare_exchange_strong(state, State::DirtyPainting))
-                        return false;
-                    break;
-                case State::DirtyIdle:
-                case State::DirtyPainting:
-                    return false;
-            }
-        }
+        return state_.touch();
     }
 
     // private data fields
@@ -204,18 +178,7 @@ public:
     // update() timer used to animate the blinking cursor.
     QTimer updateTimer_;
 
-    /// Defines the current screen-dirtiness-vs-rendering state.
-    ///
-    /// This is primarily updated by two independant threads, the rendering thread and the I/O
-    /// thread.
-    /// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
-    /// to render and, depending on whether new screen changes happened, in the frameSwapped()
-    /// callback either DirtyPainting and continues to rerender or CleanIdle if no changes came in
-    /// since last render.
-    ///
-    /// The I/O thread constantly marks the state dirty whenever new data has arrived,
-    /// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
-    std::atomic<State> state_ = State::CleanIdle;
+    RenderStateManager state_;
 
     // ======================================================================
 
@@ -230,31 +193,3 @@ public:
 };
 
 } // namespace contour
-
-namespace fmt {
-    template <>
-    struct formatter<contour::opengl::TerminalWidget::State> {
-        using State = contour::opengl::TerminalWidget::State;
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(State state, FormatContext& ctx)
-        {
-            switch (state)
-            {
-                case State::CleanIdle:
-                    return format_to(ctx.out(), "clean-idle");
-                case State::CleanPainting:
-                    return format_to(ctx.out(), "clean-painting");
-                case State::DirtyIdle:
-                    return format_to(ctx.out(), "dirty-idle");
-                case State::DirtyPainting:
-                    return format_to(ctx.out(), "dirty-painting");
-            }
-            return format_to(ctx.out(), "Invalid");
-        }
-    };
-}

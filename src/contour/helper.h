@@ -19,6 +19,8 @@
 #include <QtCore/Qt>
 #include <QtCore/QCoreApplication>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QScreen>
+#include <QtWidgets/QWidget>
 
 #include <cctype>
 #include <map>
@@ -30,19 +32,21 @@ namespace terminal::renderer
     class Renderer;
 }
 
-namespace contour {
+namespace contour
+{
 
-namespace detail {
+namespace detail
+{
     template <typename F>
     class FunctionCallEvent : public QEvent
     {
-      private:
-       using Fun = typename std::decay<F>::type;
-       Fun fun;
-      public:
-       FunctionCallEvent(Fun && fun) : QEvent(QEvent::None), fun(std::move(fun)) {}
-       FunctionCallEvent(Fun const& fun) : QEvent(QEvent::None), fun(fun) {}
-       ~FunctionCallEvent() { fun(); }
+    private:
+        using Fun = typename std::decay<F>::type;
+        Fun fun;
+    public:
+        FunctionCallEvent(Fun && fun) : QEvent(QEvent::None), fun(std::move(fun)) {}
+        FunctionCallEvent(Fun const& fun) : QEvent(QEvent::None), fun(fun) {}
+        ~FunctionCallEvent() { fun(); }
     };
 }
 
@@ -65,6 +69,8 @@ void postToObject(QObject* obj, F fun)
     QCoreApplication::postEvent(obj, new detail::FunctionCallEvent<F>(std::forward<F>(fun)));
 #endif
 }
+
+QScreen* screenOf(QWidget const* _widget);
 
 constexpr inline bool isModifier(Qt::Key _key)
 {
@@ -152,14 +158,6 @@ auto const inline KeyboardTag = crispy::debugtag::make("system.keyboard", "Logs 
 auto const inline WindowTag = crispy::debugtag::make("system.window", "Logs system window debug events.");
 auto const inline WidgetTag = crispy::debugtag::make("system.widget", "Logs system widget related debug information.");
 
-#define CHECKED_GL(code) \
-    do { \
-        (code); \
-        GLenum err{}; \
-        while ((err = glGetError()) != GL_NO_ERROR) \
-            debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
-    } while (0)
-
 using PermissionCache = std::map<std::string, bool>;
 
 bool requestPermission(PermissionCache& _cache,
@@ -208,4 +206,110 @@ constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
     return Qt::CursorShape::ArrowCursor;
 }
 
+/// Declares the screen-dirtiness-vs-rendering state.
+enum class RenderState
+{
+    CleanIdle,      //!< No screen updates and no rendering currently in progress.
+    DirtyIdle,      //!< Screen updates pending and no rendering currently in progress.
+    CleanPainting,  //!< No screen updates and rendering currently in progress.
+    DirtyPainting   //!< Screen updates pending and rendering currently in progress.
+};
+
+/// Defines the current screen-dirtiness-vs-rendering state.
+///
+/// This is primarily updated by two independant threads, the rendering thread and the I/O
+/// thread.
+/// The rendering thread constantly marks the rendering state CleanPainting whenever it is about
+/// to render and, depending on whether new screen changes happened, in the frameSwapped()
+/// callback either DirtyPainting and continues to rerender or CleanIdle if no changes came in
+/// since last render.
+///
+/// The I/O thread constantly marks the state dirty whenever new data has arrived,
+/// either DirtyIdle if no painting is currently in progress, DirtyPainting otherwise.
+struct RenderStateManager
+{
+    std::atomic<RenderState> state_ = RenderState::CleanIdle;
+    bool renderingPressure_ = false;
+
+    RenderState fetchAndClear()
+    {
+        return state_.exchange(RenderState::CleanPainting);
+    }
+
+    bool touch()
+    {
+        for (;;)
+        {
+            auto state = state_.load();
+            switch (state)
+            {
+                case RenderState::CleanIdle:
+                    if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
+                        return true;
+                    break;
+                case RenderState::CleanPainting:
+                    if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
+                        return false;
+                    break;
+                case RenderState::DirtyIdle:
+                case RenderState::DirtyPainting:
+                    return false;
+            }
+        }
+    }
+
+    /// @retval true finished rendering, nothing pending yet. So please start update timer.
+    /// @retval false more data pending. Rerun paint() immediately.
+    bool finish()
+    {
+        for (;;)
+        {
+            auto state = state_.load();
+            switch (state)
+            {
+                case RenderState::DirtyIdle:
+                    //assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                    //qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
+                    [[fallthrough]];
+                case RenderState::DirtyPainting:
+                    return false;
+                case RenderState::CleanPainting:
+                    if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
+                        break;
+                    [[fallthrough]];
+                case RenderState::CleanIdle:
+                    renderingPressure_ = false;
+                    return true;
+            }
+        }
+    }
+};
+
+}
+
+namespace fmt
+{
+    template <>
+    struct formatter<contour::RenderState>
+    {
+        using State = contour::RenderState;
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(State state, FormatContext& ctx)
+        {
+            switch (state)
+            {
+                case State::CleanIdle:
+                    return format_to(ctx.out(), "clean-idle");
+                case State::CleanPainting:
+                    return format_to(ctx.out(), "clean-painting");
+                case State::DirtyIdle:
+                    return format_to(ctx.out(), "dirty-idle");
+                case State::DirtyPainting:
+                    return format_to(ctx.out(), "dirty-painting");
+            }
+            return format_to(ctx.out(), "Invalid");
+        }
+    };
 }

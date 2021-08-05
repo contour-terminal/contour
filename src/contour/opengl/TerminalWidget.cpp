@@ -61,6 +61,14 @@
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
+#define CHECKED_GL(code) \
+    do { \
+        (code); \
+        GLenum err{}; \
+        while ((err = glGetError()) != GL_NO_ERROR) \
+            debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
+    } while (0)
+
 using crispy::Point;
 using crispy::Zero;
 
@@ -233,24 +241,6 @@ namespace // {{{
     {
         debuglog(WidgetTag).write("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
-    }
-
-    QScreen* screenOf(QWidget const* _widget)
-    {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        return _widget->screen();
-#elif QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        #warning "Using alternative implementation of screenOf() for Qt >= 5.10.0"
-        if (auto topLevel = _widget->window())
-        {
-            if (auto screenByPos = QGuiApplication::screenAt(topLevel->geometry().center()))
-                return screenByPos;
-        }
-        return QGuiApplication::primaryScreen();
-#else
-        #warning "Using alternative implementation of screenOf() for Qt < 5.10.0"
-        return QGuiApplication::primaryScreen();
-#endif
     }
 } // }}}
 
@@ -490,7 +480,7 @@ void TerminalWidget::paintGL()
 {
     try
     {
-        [[maybe_unused]] auto const lastState = state_.exchange(State::CleanPainting);
+        [[maybe_unused]] auto const lastState = state_.fetchAndClear();
 
 #if defined(CONTOUR_PERF_STATS)
         {
@@ -509,11 +499,8 @@ void TerminalWidget::paintGL()
         }
 #endif
 
-        bool const reverseVideo =
-            terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo);
-
         renderTarget_->clear(
-            reverseVideo
+            terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
                 ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
                 : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()))
         );
@@ -527,34 +514,14 @@ void TerminalWidget::paintGL()
 
 void TerminalWidget::onFrameSwapped()
 {
-    for (;;)
+    if (state_.finish())
     {
-        auto state = state_.load();
-        switch (state)
-        {
-            case State::DirtyIdle:
-                //assert(!"The impossible happened, painting but painting. Shakesbeer.");
-                //qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
-                update();
-                return;
-            case State::DirtyPainting:
-#if defined(CONTOUR_PERF_STATS)
-                stats_.consecutiveRenderCount++;
-#endif
-                update();
-                return;
-            case State::CleanPainting:
-                if (!state_.compare_exchange_strong(state, State::CleanIdle))
-                    break;
-                [[fallthrough]];
-            case State::CleanIdle:
-                renderingPressure_ = false;
-                if (profile().cursorDisplay == terminal::CursorDisplay::Blink
-                        && terminal().screen().cursor().visible)
-                    updateTimer_.start(terminal().nextRender(steady_clock::now()));
-                return;
-        }
+        if (profile().cursorDisplay == terminal::CursorDisplay::Blink
+                && terminal().screen().cursor().visible)
+            updateTimer_.start(terminal().nextRender(steady_clock::now()));
     }
+    else
+        update();
 }
 // }}}
 

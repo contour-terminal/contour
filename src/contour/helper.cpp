@@ -54,6 +54,24 @@ using terminal::PageSize;
 
 namespace contour {
 
+QScreen* screenOf(QWidget const* _widget)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    return _widget->screen();
+#elif QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+    #warning "Using alternative implementation of screenOf() for Qt >= 5.10.0"
+    if (auto topLevel = _widget->window())
+    {
+        if (auto screenByPos = QGuiApplication::screenAt(topLevel->geometry().center()))
+            return screenByPos;
+    }
+    return QGuiApplication::primaryScreen();
+#else
+    #warning "Using alternative implementation of screenOf() for Qt < 5.10.0"
+    return QGuiApplication::primaryScreen();
+#endif
+}
+
 bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 {
     using terminal::Key;
