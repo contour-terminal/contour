@@ -31,6 +31,7 @@
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
+#include <QtGui/QGuiApplication>
 #include <QtNetwork/QHostInfo>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
@@ -69,8 +70,12 @@
             debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
-using crispy::Point;
-using crispy::Zero;
+#if defined(_MSC_VER)
+#define __PRETTY_FUNCTION__ __FUNCDNAME__
+#endif
+
+namespace contour::opengl
+{
 
 using terminal::ImageSize;
 using terminal::Width;
@@ -82,25 +87,12 @@ using terminal::ColumnCount;
 using terminal::RGBAColor;
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 using namespace std;
+
 using std::chrono::steady_clock;
 
-using namespace std::string_view_literals;
-
-#if defined(_MSC_VER)
-#define __PRETTY_FUNCTION__ __FUNCDNAME__
-#endif
-
-namespace contour::opengl {
-
-using namespace std;
 using actions::Action;
-
-#define DUMP_COUNTER(text) \
-    do { \
-        static uint64_t i = 0; \
-        printf("%s/%lu\n", (text), ++i); \
-    } while (0)
 
 namespace // {{{
 {
@@ -244,6 +236,7 @@ namespace // {{{
     }
 } // }}}
 
+// {{{ Widget creation and QOpenGLWidget overides
 TerminalWidget::TerminalWidget(
     config::TerminalProfile const& _profile,
     TerminalSession& _session,
@@ -290,8 +283,6 @@ TerminalWidget::TerminalWidget(
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
-    // TODO
-    // configureTerminal(view(), config(), actionHandler_->profileName());
     QOpenGLWidget::updateGeometry();
 }
 
@@ -301,45 +292,6 @@ TerminalWidget::~TerminalWidget()
     makeCurrent(); // XXX must be called.
 }
 
-// {{{ attributes
-double TerminalWidget::refreshRate() const
-{
-    auto const screen = screenOf(this);
-    if (!screen)
-        return profile().refreshRate != 0.0 ? profile().refreshRate : 30.0;
-
-    auto const systemRefreshRate = static_cast<double>(screen->refreshRate());
-    if (1.0 < profile().refreshRate && profile().refreshRate < systemRefreshRate)
-        return profile().refreshRate;
-    else
-        return systemRefreshRate;
-}
-
-crispy::Point TerminalWidget::screenDPI() const
-{
-    return crispy::Point{ logicalDpiX(), logicalDpiY() };
-}
-
-bool TerminalWidget::isFullScreen() const
-{
-    return window()->isFullScreen();
-}
-
-terminal::ImageSize TerminalWidget::pixelSize() const
-{
-    return {
-        terminal::Width(*session_.terminal().screenSize().columns * *gridMetrics().cellSize.width),
-        terminal::Height(*session_.terminal().screenSize().lines * *gridMetrics().cellSize.height)
-    };
-}
-
-terminal::ImageSize TerminalWidget::cellSize() const
-{
-    return gridMetrics().cellSize;
-}
-// }}}
-
-// {{{ OpenGL render API
 QSurfaceFormat TerminalWidget::surfaceFormat()
 {
     QSurfaceFormat format;
@@ -525,7 +477,7 @@ void TerminalWidget::onFrameSwapped()
 }
 // }}}
 
-// {{{ Input handling
+// {{{ Qt Widget Input Event handling & forwarding
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
    sendKeyEvent(_keyEvent, session_);
@@ -636,7 +588,87 @@ bool TerminalWidget::event(QEvent* _event)
 }
 // }}}
 
-// {{{ (user requested) actions
+// {{{ helpers
+void TerminalWidget::assertInitialized()
+{
+    if (initialized_)
+        return;
+
+    throw std::runtime_error(
+        "Internal error. "
+        "TerminalWidget function invoked before initialization has finished."
+    );
+}
+
+void TerminalWidget::onScrollBarValueChanged(int _value)
+{
+    terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition::cast_from(_value));
+    scheduleRedraw();
+}
+
+void TerminalWidget::blinkingCursorUpdate()
+{
+    scheduleRedraw();
+}
+
+double TerminalWidget::contentScale() const
+{
+    if (!window()->windowHandle())
+        return 1.0f;
+
+    return window()->windowHandle()->screen()->devicePixelRatio();
+}
+
+void TerminalWidget::updateMinimumSize()
+{
+    auto const MinimumGridSize = PageSize{LineCount(2), ColumnCount(3)};
+    auto const minSize = ImageSize{
+        Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
+        Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns)
+    };
+    setMinimumSize(minSize.width.as<int>(), minSize.height.as<int>());
+}
+// }}}
+
+// {{{ TerminalDisplay: attributes
+double TerminalWidget::refreshRate() const
+{
+    auto const screen = screenOf(this);
+    if (!screen)
+        return profile().refreshRate != 0.0 ? profile().refreshRate : 30.0;
+
+    auto const systemRefreshRate = static_cast<double>(screen->refreshRate());
+    if (1.0 < profile().refreshRate && profile().refreshRate < systemRefreshRate)
+        return profile().refreshRate;
+    else
+        return systemRefreshRate;
+}
+
+crispy::Point TerminalWidget::screenDPI() const
+{
+    return crispy::Point{ logicalDpiX(), logicalDpiY() };
+}
+
+bool TerminalWidget::isFullScreen() const
+{
+    return window()->isFullScreen();
+}
+
+terminal::ImageSize TerminalWidget::pixelSize() const
+{
+    return {
+        terminal::Width(*session_.terminal().screenSize().columns * *gridMetrics().cellSize.width),
+        terminal::Height(*session_.terminal().screenSize().lines * *gridMetrics().cellSize.height)
+    };
+}
+
+terminal::ImageSize TerminalWidget::cellSize() const
+{
+    return gridMetrics().cellSize;
+}
+// }}}
+
+// {{{ TerminalDisplay: (user requested) actions
 void TerminalWidget::post(std::function<void()> _fn)
 {
     postToObject(this, std::move(_fn));
@@ -957,7 +989,7 @@ void TerminalWidget::setBackgroundOpacity(terminal::Opacity _opacity)
 }
 // }}}
 
-// {{{ terminal events
+// {{{ TerminalDisplay: terminal events
 void TerminalWidget::scheduleRedraw()
 {
     if (!initialized_.load())
@@ -1009,48 +1041,6 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
 void TerminalWidget::discardImage(terminal::Image const& _image)
 {
     renderer_.discardImage(_image);
-}
-// }}}
-
-// {{{ helpers
-void TerminalWidget::assertInitialized()
-{
-    if (initialized_)
-        return;
-
-    throw std::runtime_error(
-        "Internal error. "
-        "TerminalWidget function invoked before initialization has finished."
-    );
-}
-
-void TerminalWidget::onScrollBarValueChanged(int _value)
-{
-    terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition::cast_from(_value));
-    scheduleRedraw();
-}
-
-void TerminalWidget::blinkingCursorUpdate()
-{
-    scheduleRedraw();
-}
-
-double TerminalWidget::contentScale() const
-{
-    if (!window()->windowHandle())
-        return 1.0f;
-
-    return window()->windowHandle()->screen()->devicePixelRatio();
-}
-
-void TerminalWidget::updateMinimumSize()
-{
-    auto const MinimumGridSize = PageSize{LineCount(2), ColumnCount(3)};
-    auto const minSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
-        Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns)
-    };
-    setMinimumSize(minSize.width.as<int>(), minSize.height.as<int>());
 }
 // }}}
 

@@ -21,6 +21,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtCore/QProcess>
+#include <QtGui/QGuiApplication>
 #include <QtNetwork/QHostInfo>
 #include <QtWidgets/QMessageBox>
 
