@@ -146,8 +146,11 @@ struct GraphicsAttributes {
     Color underlineColor{DefaultColor()};
     CellFlags styles{};
 
-    RGBColor getUnderlineColor(ColorPalette const& _colorPalette) const noexcept
+    RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept
     {
+        if (isDefaultColor(underlineColor))
+            return _defaultColor;
+
         float const opacity = [this]() {
             if (styles & CellFlags::Faint)
                 return 0.5f;
