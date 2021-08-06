@@ -303,7 +303,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         RenderCell cell;
         cell.backgroundColor = bg;
         cell.foregroundColor = fg;
-        cell.decorationColor = _cell.attributes().getUnderlineColor(screen_.colorPalette());
+        cell.decorationColor = _cell.attributes().getUnderlineColor(screen_.colorPalette(), fg);
         cell.position = _pos;
         cell.flags = _cell.attributes().styles;
 
