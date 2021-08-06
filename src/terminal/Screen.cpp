@@ -548,8 +548,67 @@ void Screen::writeText(std::string_view _chars)
     // TODO: can be optimized.
     // - This may require Grid/Line/Cell updates first before yielding any impact.
     // - Also, we could use SIMD to batch-store the grid cell attributes.
+#if 0
     for (char ch: _chars)
         writeText(ch);
+#else
+    auto i = _chars.data();
+    auto e = _chars.data() + _chars.size();
+    size_t charsLeft = _chars.size();
+    char32_t lastChar = sequencer_.precedingGraphicCharacter();
+
+    while (i != e)
+    {
+        bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
+        auto const cellsAvailable = cursorInsideMargin
+        ? *(margin_.horizontal.to - cursor_.position.column) - 1
+        : *size_.columns - *cursor_.position.column - 1;
+        auto const n = min(size_t(cellsAvailable), charsLeft);
+        for (size_t k = 0; k < n && i != e; ++k)
+        {
+            char32_t const codepoint = cursor_.charsets.map(*i);
+            if (!lastChar || unicode::grapheme_segmenter::breakable(lastChar, codepoint))
+            {
+                // writeCharToCurrentAndAdvance(codepoint);
+                Cell& cell = currentCell();
+                cell.setCharacter(codepoint);
+                cell.setAttributes(cursor_.graphicsRendition);
+                #if defined(LIBTERMINAL_HYPERLINKS)
+                cell.setHyperlink(currentHyperlink_);
+                #endif
+                lastCursorPosition_ = cursor_.position;
+                cursor_.position.column += ColumnOffset::cast_from(cell.width());
+                for (int i = 1; i < cell.width(); ++i)
+                {
+#if defined(LIBTERMINAL_HYPERLINKS)
+                    currentCell().reset(cursor_.graphicsRendition, currentHyperlink_);
+#else
+                    currentCell().reset(cursor_.graphicsRendition);
+#endif
+                }
+            }
+            else
+            {
+                auto const extendedWidth = lastPosition().appendCharacter(codepoint);
+                if (extendedWidth > 0)
+                    clearAndAdvance(extendedWidth);
+            }
+            ++i;
+        }
+        linefeed(margin_.horizontal.from);
+    }
+
+    // TODO: Call this but with range range of point.
+    // XXX: But even if we keep it but enable the setReportDamage(bool),
+    //      then this should still be cheap as it's only invoked when something
+    //      is actually selected.
+    // eventListener_.markRegionDirty(
+    //     cursor_.position.row,
+    //     cursor_.position.column
+    // );
+
+    sequencer_.resetInstructionCounter();
+#endif
 }
 
 void Screen::writeText(char32_t _char)
@@ -627,6 +686,11 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
     else if (cursor_.autoWrap)
         wrapPending_ = 1;
 
+    // TODO: maybe move selector API up? So we can make this call conditional,
+    //       and only call it when something is selected?
+    //       Alternatively we could add a boolean to make this callback
+    //       conditional, something like: setReportDamage(bool);
+    //       The latter is probably the easiest.
     eventListener_.markRegionDirty(
         LinePosition::cast_from(cursor_.position.row),
         ColumnPosition::cast_from(cursor_.position.column)

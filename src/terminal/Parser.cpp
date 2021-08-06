@@ -102,15 +102,15 @@ void Parser::parseFragment(string_view _data)
                 if (input != end && *input == '\n')
                 {
                     eventListener_.execute(static_cast<char>(*input++));
-                    continue;
                 }
+                continue;
             }
         }
 
         static constexpr char32_t ReplacementCharacter {0xFFFD};
 
-        while (input != end)
-        {
+        // do
+        // {
             unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, *input);
 
             if (std::holds_alternative<unicode::Success>(r))
@@ -119,7 +119,8 @@ void Parser::parseFragment(string_view _data)
                 processInput(ReplacementCharacter);
 
             ++input;
-        }
+        // }
+        // while (input != end && utf8DecoderState_.expectedLength != 0);
     }
     while (input != end);
 }

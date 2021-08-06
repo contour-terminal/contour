@@ -93,6 +93,15 @@ TEST_CASE("Screen.isLineVisible", "[screen]")
     CHECK(viewport.isLineVisible(-2));
 }
 
+TEST_CASE("writeText.sequence", "[screen]")
+{
+    auto screen = MockScreen{PageSize{LineCount(2), ColumnCount(3)},
+                             LineCount(2)};
+    screen.writeText("12345689"sv);
+
+    logScreenTextAlways(screen);
+}
+
 TEST_CASE("AppendChar", "[screen]")
 {
     auto screen = MockScreen{PageSize{LineCount(1), ColumnCount(3)}};
