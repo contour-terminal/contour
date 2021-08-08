@@ -17,6 +17,7 @@ set(crispy_SOURCES
     indexed.h
     overloaded.h
     reference.h
+    ring.h
     span.h
     stdfs.h
     times.h
@@ -25,7 +26,7 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
-set(CRISPY_CORE_LIBS range-v3 fmt::fmt-header-only unicode::core)
+set(CRISPY_CORE_LIBS range-v3 fmt::fmt-header-only unicode::core GSL)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)
@@ -99,6 +100,7 @@ if(CRISPY_TESTING)
         indexed_test.cpp
         compose_test.cpp
         utils_test.cpp
+        ring_test.cpp
         sort_test.cpp
         test_main.cpp
     )
