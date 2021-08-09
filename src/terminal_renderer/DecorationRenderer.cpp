@@ -98,9 +98,9 @@ void DecorationRenderer::rebuild()
     auto const width = gridMetrics_.cellSize.width;
 
     { // {{{ underline
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
+        auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
+        auto const thickness = thickness_half * 2;
+        auto const y0 = max(0, underlinePosition() - thickness_half);
         auto const height = Height(y0 + thickness);
         auto image = atlas::Buffer(*width * *height, 0);
 
@@ -116,9 +116,9 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ double underline
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y1 = max(0, gridMetrics_.underline.position - thickness_half);
+        auto const thickness_half = max(1, int(ceil(underlineThickness() / 3.0)));
+        auto const thickness = max(1, thickness_half * 2);
+        auto const y1 = max(0, underlinePosition() - thickness_half);
         auto const y0 = max(0, y1 - 2 * thickness);
         auto const height = Height(y1 + thickness);
         auto image = atlas::Buffer(*width * *height, 0);
@@ -149,9 +149,9 @@ void DecorationRenderer::rebuild()
             auto const sin_x = normalizedX * 2.0 * M_PI;
             auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
-            auto const y = static_cast<int>(normalizedY * static_cast<float>(*height - gridMetrics_.underline.thickness));
+            auto const y = static_cast<int>(normalizedY * static_cast<float>(*height - underlineThickness()));
             assert(y < *height);
-            for (int yi = 0; yi < gridMetrics_.underline.thickness; ++yi)
+            for (int yi = 0; yi < underlineThickness(); ++yi)
                 image[(y + yi) * *width + x] = 0xFF;
         }
 
@@ -163,9 +163,9 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ dotted underline
-        auto const radius = int(ceil(gridMetrics_.underline.thickness / 2.0));
+        auto const radius = max(1, int(ceil(underlineThickness() / 2.0)));
         auto const diameter = radius * 2;
-        auto const y0 = max(radius, gridMetrics_.underline.position - radius); // offset to the bottom line of the grid-cell.
+        auto const y0 = max(radius, underlinePosition() - radius); // offset to the bottom line of the grid-cell.
         auto const height = Height(1 + y0 + radius);
         auto image = atlas::Buffer(*width * *height, 0);
 
@@ -182,8 +182,8 @@ void DecorationRenderer::rebuild()
                 {
                     if (pointVisibleInCircle(x, y, radius))
                     {
-                        auto const bitmapX = bitmapStartX + x;
-                        auto const bitmapY = (*height - 1 - y0 - (y));
+                        auto const bitmapX = min(width.as<int>() - 1, bitmapStartX + x);
+                        auto const bitmapY = min(*height - 1, (*height - 1 - y0 - (y)));
                         image.at(bitmapY * *width + bitmapX) = 0xFF;
                     }
                 }
@@ -200,9 +200,9 @@ void DecorationRenderer::rebuild()
     { // {{{ dashed underline
         // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
         // whereas the middle one is being skipped.
-        auto const thickness_half = int(ceil(gridMetrics_.underline.thickness / 2.0));
-        auto const thickness = min(1, thickness_half * 2);
-        auto const y0 = max(0, gridMetrics_.underline.position - thickness_half);
+        auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
+        auto const thickness = max(1, thickness_half * 2);
+        auto const y0 = max(0, underlinePosition() - thickness_half);
         auto const height = Height(y0 + thickness);
         auto image = atlas::Buffer(*width * *height, 0);
 
@@ -220,7 +220,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ framed
         auto const cellHeight = gridMetrics_.cellSize.height;
-        auto const thickness = max(1, gridMetrics_.underline.thickness / 2);
+        auto const thickness = max(1, underlineThickness() / 2);
         auto image = atlas::Buffer(*width * *cellHeight, 0u);
         auto const gap = 0; // thickness;
 
@@ -249,7 +249,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ overline
         auto const cellHeight = gridMetrics_.cellSize.height;
-        auto const thickness = gridMetrics_.underline.thickness;
+        auto const thickness = underlineThickness();
         auto image = atlas::Buffer(*width * *cellHeight, 0);
 
         for (int y = 0; y < thickness; ++y)
@@ -265,7 +265,7 @@ void DecorationRenderer::rebuild()
     } // }}}
     { // {{{ crossed-out
         auto const height = Height(*gridMetrics_.cellSize.height / 2);
-        auto const thickness = gridMetrics_.underline.thickness;
+        auto const thickness = underlineThickness();
         auto image = atlas::Buffer(*width * *height, 0u);
 
         for (int y = 1; y <= thickness; ++y)

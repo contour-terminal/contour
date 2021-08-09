@@ -83,6 +83,9 @@ class DecorationRenderer : public Renderable {
     constexpr Decorator hyperlinkNormal() const noexcept { return hyperlinkNormal_; }
     constexpr Decorator hyperlinkHover() const noexcept { return hyperlinkHover_; }
 
+    constexpr int underlineThickness() const noexcept { return gridMetrics_.underline.thickness; }
+    constexpr int underlinePosition() const noexcept { return gridMetrics_.underline.position; }
+
   private:
     using Atlas = atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
     using DataRef = Atlas::DataRef;
