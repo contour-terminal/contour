@@ -487,6 +487,7 @@ void TerminalSession::operator()(actions::DecreaseOpacity)
 
 void TerminalSession::operator()(actions::FollowHyperlink)
 {
+    #if defined(LIBTERMINAL_HYPERLINKS)
     auto const _l = scoped_lock{terminal()};
     auto const currentMousePosition = terminal().currentMousePosition();
     auto const currentMousePositionRel = terminal::Coordinate{
@@ -501,6 +502,7 @@ void TerminalSession::operator()(actions::FollowHyperlink)
             return;
         }
     }
+    #endif
 }
 
 void TerminalSession::operator()(actions::IncreaseFontSize)

@@ -619,7 +619,7 @@ void Screen::writeCharToCurrentAndAdvance(char32_t _character)
 #if defined(LIBTERMINAL_HYPERLINKS)
             currentColumn()->reset(cursor_.graphicsRendition, currentHyperlink_);
 #else
-            currentColumn()->reset(cursor_.graphicsRendition;
+            currentColumn()->reset(cursor_.graphicsRendition);
 #endif
             cursor_.position.column++;
         }
