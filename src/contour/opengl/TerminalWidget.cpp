@@ -305,15 +305,11 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
     );
 
     if (forceOpenGLES || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
-    {
-        format.setVersion(3, 0);
         format.setRenderableType(QSurfaceFormat::OpenGLES);
-    }
     else
-    {
-        format.setVersion(3, 0);
         format.setRenderableType(QSurfaceFormat::OpenGL);
-    }
+
+    format.setVersion(3, 0);
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setAlphaBufferSize(8);
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
