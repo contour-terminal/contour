@@ -20,7 +20,6 @@ exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
            -DCMAKE_CXX_FLAGS="-fdiagnostics-color=always" \
            -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" \
-           -DOpenGL_GL_PREFERENCE="GLVND" \
            -DYAML_CPP_BUILD_CONTRIB="OFF" \
            -DYAML_CPP_BUILD_TOOLS="OFF" \
            -DLIBTERMINAL_LOG_RAW="ON" \
