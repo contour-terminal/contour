@@ -274,7 +274,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         viewport_.absoluteScrollOffset().
         value_or(boxed_cast<StaticScrollbackPosition>(screen_.historyLineCount())).
         as<int>();
+
+    #if defined(LIBTERMINAL_HYPERLINKS)
     auto const renderHyperlinks = screen_.contains(currentMousePosition_);
+    #endif
+
     auto const currentMousePositionRel = Coordinate{
         currentMousePosition_.row - unbox<int>(viewport_.relativeScrollOffset()),
         currentMousePosition_.column
@@ -289,12 +293,14 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         debuglog(TerminalTag).write("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
+    #if defined(LIBTERMINAL_HYPERLINKS)
     if (renderHyperlinks)
     {
         auto& cellAtMouse = screen_.at(currentMousePositionRel);
         if (cellAtMouse.hyperlink())
             cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
     }
+    #endif
 
     // {{{ void appendCell(pos, cell, fg, bg)
     auto const appendCell = [&](Coordinate const& _pos, Cell const& _cell,
@@ -323,6 +329,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         }
 #endif
 
+        #if defined(LIBTERMINAL_HYPERLINKS)
         if (_cell.hyperlink())
         {
             auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
@@ -335,6 +342,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             cell.flags |= decoration; // toCellStyle(decoration);
             cell.decorationColor = color;
         }
+        #endif
 
         _output.screen.emplace_back(std::move(cell));
     }; // }}}
@@ -402,12 +410,14 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         viewport_.absoluteScrollOffset()
     );
 
+    #if defined(LIBTERMINAL_HYPERLINKS)
     if (renderHyperlinks)
     {
         auto& cellAtMouse = screen_.at(currentMousePositionRel);
         if (cellAtMouse.hyperlink())
             cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
     }
+    #endif
 
     _output.cursor = renderCursor();
 }
@@ -712,7 +722,11 @@ bool Terminal::updateCursorHoveringState()
         currentMousePosition_.column
     };
 
-    auto const newState = screen_.contains(currentMousePosition_) && screen_.at(relCursorPos).hyperlink();
+    auto const newState = screen_.contains(currentMousePosition_)
+#if defined(LIBTERMINAL_HYPERLINKS)
+                        && screen_.at(relCursorPos).hyperlink()
+#endif
+        ;
     auto const oldState = hoveringHyperlink_.exchange(newState);
     return newState != oldState;
 }
