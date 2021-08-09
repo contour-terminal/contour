@@ -142,6 +142,10 @@ class ParserEvents {
      * handler to finish neatly.
      */
     virtual void unhook() = 0;
+
+    virtual void startAPC() = 0;
+    virtual void putAPC(char32_t) = 0;
+    virtual void dispatchAPC() = 0;
 };
 
 class BasicParserEvents : public ParserEvents {
@@ -162,5 +166,8 @@ class BasicParserEvents : public ParserEvents {
     void hook(char) override {}
     void put(char32_t) override {}
     void unhook() override {}
+    void startAPC() override {}
+    void putAPC(char32_t) override {}
+    void dispatchAPC() override {}
 };
 } // end namespace terminal

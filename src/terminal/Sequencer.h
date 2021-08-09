@@ -492,6 +492,9 @@ class Sequencer : public ParserEvents {
     void hook(char _function) override;
     void put(char32_t _char) override;
     void unhook() override;
+    void startAPC() override {}
+    void putAPC(char32_t) override {}
+    void dispatchAPC() override {}
 
   private:
     void executeControlFunction(char _c0);

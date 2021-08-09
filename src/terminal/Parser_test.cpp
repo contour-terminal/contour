@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Parser.h>
+#include <unicode/convert.h>
 #include <catch2/catch_all.hpp>
 
 using namespace std;
@@ -19,10 +20,16 @@ using namespace terminal;
 
 class MockParserEvents : public terminal::BasicParserEvents {
   public:
-    std::vector<char32_t> text;
+    std::string text;
+    std::string apc;
 
     void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
-    void print(char32_t _ch) override { text.push_back(_ch); }
+    void print(char32_t _ch) override { text += unicode::convert_to<char>(_ch); }
+    void print(std::string_view s) override { text += s; }
+
+    void startAPC() override { apc += "{"; }
+    void putAPC(char32_t ch) override { apc += unicode::convert_to<char>(ch); }
+    void dispatchAPC() override { apc += "}"; }
 };
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
@@ -32,7 +39,17 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
 
     p.parseFragment("\xC3\xB6");  // ö
 
-    REQUIRE(textListener.text.size() == 1);
-    CHECK(0xF6 == static_cast<unsigned>(textListener.text.at(0)));
+    REQUIRE(textListener.text == "\xC3\xB6");
+}
+
+TEST_CASE("Parser.APC")
+{
+    MockParserEvents listener;
+    auto p = parser::Parser(listener);
+    REQUIRE(p.state() == parser::State::Ground);
+    p.parseFragment("ABC\033\\\033_Gi=1,a=q;\033\\DEF"sv);
+    REQUIRE(p.state() == parser::State::Ground);
+    REQUIRE(listener.apc == "{Gi=1,a=q;}");
+    REQUIRE(listener.text == "ABCDEF");
 }
 
