@@ -7,6 +7,7 @@ on:
     branches:
       - 'release*'
       - 'prerelease*'
+      - 'prerelease'
       - 'testing' # for public testing
       - 'gh-actions' # only for testing
 
