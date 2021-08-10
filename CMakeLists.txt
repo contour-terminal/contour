@@ -22,8 +22,8 @@ include(ClangTidy)
 include(CIncludeMe)
 
 if(DEFINED MSVC)
-    add_definitions(-DNOMINMAX)
     add_definitions(-D_USE_MATH_DEFINES)
+    add_definitions(-DNOMINMAX)
 endif()
 
 find_program(ADDR2LINE "addr2line")
