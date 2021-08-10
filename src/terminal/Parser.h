@@ -189,10 +189,16 @@ enum class State : uint8_t {
     OSC_String,
 
     /**
+     * Application Program Command.
+     * ESC _ ... ST
+     */
+    APC_String,
+
+    /**
      * The VT500 doesn’t define any function for these control strings, so this state ignores
      * all received characters until the control function ST is recognised.
      */
-    SOS_PM_APC_String,
+    IgnoreUntilST,
 };
 
 /// Actions can be invoked due to various reasons.
@@ -306,6 +312,10 @@ enum class Action : uint8_t {
      */
     Unhook,
 
+    APC_Start,
+    APC_Put,
+    APC_End,
+
     /**
      * When the control function OSC (Operating System Command) is recognised,
      * this action initializes an external parser (the “OSC Handler”)
@@ -331,9 +341,9 @@ enum class Action : uint8_t {
 
 constexpr State& operator++(State& s) noexcept
 {
-    // NB: We allow to increment one element beyond maximum element (SOS_PM_APC_String) as sentinel
+    // NB: We allow to increment one element beyond maximum element (IgnoreUntilST) as sentinel
     // in order to allow easy iteration.
-    if (s <= State::SOS_PM_APC_String)
+    if (s <= State::IgnoreUntilST)
         s = static_cast<State>(1 + static_cast<uint8_t>(s));
 
     return s;
@@ -371,7 +381,7 @@ constexpr std::string_view to_string(State state)
             return "DCS Ignore";
         case State::OSC_String:
             return "OSC String";
-        case State::SOS_PM_APC_String:
+        case State::IgnoreUntilST:
             return "SOS/PM/APC String";
     }
     return "?";
@@ -440,8 +450,8 @@ namespace std { // {{{
     struct numeric_limits<terminal::parser::State> {
         using State = terminal::parser::State;
         constexpr static State min() noexcept { return State::Ground; }  // skip Undefined
-        constexpr static State max() noexcept { return State::SOS_PM_APC_String; }
-        constexpr static size_t size() noexcept { return 15; }
+        constexpr static State max() noexcept { return State::IgnoreUntilST; }
+        constexpr static size_t size() noexcept { return 16; }
     };
 
     template <>
@@ -449,7 +459,7 @@ namespace std { // {{{
         using Action = terminal::parser::Action;
         constexpr static Action min() noexcept { return Action::Ignore; }  // skip Undefined
         constexpr static Action max() noexcept { return Action::OSC_End; }
-        constexpr static size_t size() noexcept { return 15; }
+        constexpr static size_t size() noexcept { return 16; }
     };
 } // }}}
 
@@ -589,9 +599,9 @@ constexpr ParserTable ParserTable::get() // {{{
     t.entry(State::Escape, Action::Clear);
     t.event(State::Escape, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
     t.event(State::Escape, Action::Ignore, 0x7F_b);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x58_b);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5E_b);
-    t.transition(State::Escape, State::SOS_PM_APC_String, 0x5F_b);
+    t.transition(State::Escape, State::IgnoreUntilST, 0x58_b); // SOS (start of string): ESC X
+    t.transition(State::Escape, State::IgnoreUntilST, 0x5E_b); // PM (private message): ESC ^
+    t.transition(State::Escape, State::APC_String, 0x5F_b);    // APC (application program command): ESC _
     t.transition(State::Escape, State::DCS_Entry, 0x50_b);
     t.transition(State::Escape, State::OSC_String, 0x5D_b);
     t.transition(State::Escape, State::CSI_Entry, 0x5B_b);
@@ -603,9 +613,9 @@ constexpr ParserTable ParserTable::get() // {{{
     t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x60_b, 0x7E_b});
     t.transition(State::Escape, State::EscapeIntermediate, Action::Collect, Range{0x20_b, 0x2F_b});
 
-    // SOS_PM_APC_String
-    t.event(State::SOS_PM_APC_String, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.transition(State::SOS_PM_APC_String, State::Ground, 0x9C_b);
+    // IgnoreUntilST
+    t.event(State::IgnoreUntilST, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
+    t.transition(State::IgnoreUntilST, State::Ground, 0x9C_b);
 
     // DCS_Entry
     t.entry(State::DCS_Entry, Action::Clear);
@@ -657,6 +667,16 @@ constexpr ParserTable ParserTable::get() // {{{
     t.transition(State::OSC_String, State::Ground, 0x9C_b);
     t.transition(State::OSC_String, State::Ground, 0x07_b);
 
+    // APC_String
+    // APC := ESC _ ... ST
+    t.entry(State::APC_String, Action::APC_Start);
+    t.event(State::APC_String, Action::APC_Put, Range{0x20_b, 0x7F_b});
+    t.event(State::APC_String, Action::APC_Put, Range{0xA0_b, 0xFF_b});
+    t.event(State::APC_String, Action::APC_Put, UnicodeCodepoint::Value);
+    t.exit(State::APC_String, Action::APC_End);
+    t.transition(State::APC_String, State::Ground, 0x9C_b); // ST
+    t.transition(State::APC_String, State::Ground, 0x07_b); // BEL
+
     // CSI_Entry
     t.entry(State::CSI_Entry, Action::Clear);
     t.event(State::CSI_Entry, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
@@ -703,9 +723,9 @@ constexpr ParserTable ParserTable::get() // {{{
 
         t.transition(anywhere, State::DCS_Entry, 0x90_b);
 
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x98_b);
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x9E_b);
-        t.transition(anywhere, State::SOS_PM_APC_String, 0x9F_b);
+        t.transition(anywhere, State::IgnoreUntilST, 0x98_b);
+        t.transition(anywhere, State::IgnoreUntilST, 0x9E_b);
+        t.transition(anywhere, State::IgnoreUntilST, 0x9F_b);
     }
 
     // TODO: verify the above is correct (programatically as much as possible)
@@ -740,6 +760,8 @@ class Parser {
         for (auto const codepoint : s)
             processInput(codepoint);
     }
+
+    State state() const noexcept { return state_; }
 
   private:
     void processInput(char32_t _ch);
@@ -827,6 +849,15 @@ inline void Parser::handle(ActionClass _actionClass, Action _action, char32_t _c
         case Action::Unhook:
             eventListener_.unhook();
             break;
+        case Action::APC_Start:
+            eventListener_.startAPC();
+            break;
+        case Action::APC_Put:
+            eventListener_.putAPC(_char);
+            break;
+        case Action::APC_End:
+            eventListener_.dispatchAPC();
+            break;
         case Action::Ignore:
         case Action::Undefined:
             break;
@@ -907,7 +938,7 @@ namespace fmt { // {{{
                 "DCS_PassThrough",
                 "DCS_Ignore",
                 "OSC_String",
-                "SOS_PM_APC_String",
+                "IgnoreUntilST",
             };
             return format_to(ctx.out(), "{}", mappings.at(static_cast<unsigned>(state)));
         }
