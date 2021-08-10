@@ -34,7 +34,7 @@ jobs:
         with:
           vcpkgArguments: freetype fontconfig harfbuzz angle
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: acd2f59e931172f46706ef8ac2fc9b21f71fba85
+          vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
