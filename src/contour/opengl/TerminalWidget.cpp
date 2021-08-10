@@ -309,7 +309,7 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
     else
         format.setRenderableType(QSurfaceFormat::OpenGL);
 
-    format.setVersion(3, 0);
+    format.setVersion(3, 3);
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setAlphaBufferSize(8);
     format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
