@@ -22,8 +22,8 @@ include(ClangTidy)
 include(CIncludeMe)
 
 if(DEFINED MSVC)
-    add_definitions(-DNOMINMAX)
     add_definitions(-D_USE_MATH_DEFINES)
+    add_definitions(-DNOMINMAX)
 endif()
 
 find_program(ADDR2LINE "addr2line")
@@ -39,6 +39,7 @@ option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
 option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
 option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
 option(CONTOUR_BUILD_WITH_MIMALLOC "Builds with mimalloc [default: OFF]" OFF)
+
 # ----------------------------------------------------------------------------
 # code coverage
 
