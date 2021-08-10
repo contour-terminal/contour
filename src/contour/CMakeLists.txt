@@ -193,7 +193,6 @@ if(WIN32)
     set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION}") # XXX: WIX does only allow x.x.x.x patterns.
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
     set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
-    set(CPACK_WIX_PRODUCT_GUID "DC04A0C6-AAC4-4E1C-835E-8D4223FC5092")
 
     include(DeployQt)
     windeployqt(contour)
