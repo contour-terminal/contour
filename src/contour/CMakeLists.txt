@@ -195,8 +195,8 @@ if(WIN32)
     set(CPACK_WIX_UPGRADE_GUID "0E736497-2B72-4117-95E9-54EC6DC2432A")
     set(CPACK_WIX_PRODUCT_GUID "DC04A0C6-AAC4-4E1C-835E-8D4223FC5092")
 
-    #include(DeployQt)
-    #windeployqt(contour)
+    include(DeployQt)
+    windeployqt(contour)
     install(TARGETS contour DESTINATION bin)
     install(
         DIRECTORY "$<TARGET_FILE_DIR:contour>/"

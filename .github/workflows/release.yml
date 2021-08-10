@@ -32,7 +32,7 @@ jobs:
         uses: lukka/run-vcpkg@v5
         id: runvcpkg
         with:
-          vcpkgArguments: freetype fontconfig harfbuzz
+          vcpkgArguments: freetype fontconfig harfbuzz angle
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
           vcpkgGitCommitId: acd2f59e931172f46706ef8ac2fc9b21f71fba85
           vcpkgTriplet: x64-windows
