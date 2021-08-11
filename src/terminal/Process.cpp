@@ -154,6 +154,17 @@ namespace {
 	#endif
 } // anonymous namespace
 
+
+char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
+{
+    char** argv = new char* [_args.size() + 2 - i];
+    argv[0] = const_cast<char*>(_arg0.c_str());
+    for (size_t i = 0; i < _args.size(); ++i)
+        argv[i + 1] = const_cast<char*>(_args[i].c_str());
+    argv[_args.size() + 1] = nullptr;
+    return argv;
+}
+
 Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
@@ -182,11 +193,7 @@ Process::Process(string const& _path,
                 exit(EXIT_FAILURE);
             }
 
-            char** argv = new char* [_args.size() + 2];
-            argv[0] = const_cast<char*>(_path.c_str());
-            for (size_t i = 0; i < _args.size(); ++i)
-                argv[i + 1] = const_cast<char*>(_args[i].c_str());
-			argv[_args.size() + 1] = nullptr;
+            char** argv = createArgv(_path, _args, 0);
 
             for (auto&& [name, value] : _env)
                 setenv(name.c_str(), value.c_str(), true);
@@ -204,9 +211,13 @@ Process::Process(string const& _path,
             // Fallback: Try login shell.
             fprintf(stdout, "\r\n\e[31;1mFailed to spawn %s. %s\e[m\r\n\n", argv[0], strerror(errno));
             fflush(stdout);
-            auto const theLoginShell = loginShell();
-            argv[0] = const_cast<char*>(theLoginShell.c_str());
-            ::execvp(argv[0], argv);
+            auto theLoginShell = loginShell();
+            if (!theLoginShell.empty())
+            {
+                delete[] argv;
+                argv = createArgv(_args[0], _args, 1);
+                ::execvp(argv[0], argv);
+            }
 
             // Bad luck.
             ::_exit(EXIT_FAILURE);
@@ -409,15 +420,25 @@ Process::ExitStatus Process::wait()
     return *checkStatus(true);
 }
 
-std::string Process::loginShell()
+vector<string> Process::loginShell()
 {
 #if defined(_WIN32)
-    return "powershell.exe"s;
+    return {"powershell.exe"s};
 #else
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return pw->pw_shell;
+    {
+        #if defined(__APPLE__)
+        return {
+            "/usr/bin/login",
+            "-fp",
+            pw->pw_name,
+        };
+        #else
+        return {pw->pw_shell};
+        #endif
+    }
     else
-        return "/bin/sh"s;
+        return {"/bin/sh"s};
 #endif
 }
 

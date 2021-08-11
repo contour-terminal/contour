@@ -982,7 +982,12 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     string const basePath = fmt::format("profiles.{}", _name);
     if (profile.shell.program.empty())
-        profile.shell.program = terminal::Process::loginShell();
+    {
+        auto loginShell = terminal::Process::loginShell();
+        profile.shell.program = loginShell.front();
+        loginShell.erase(loginShell.begin());
+        profile.shell.arguments = loginShell;
+    }
     tryLoadChild(_usedKeys, _doc, basePath, "shell", profile.shell.program);
     tryLoadChild(_usedKeys, _doc, basePath, "maximized", profile.maximized);
     tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);

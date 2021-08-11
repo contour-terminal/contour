@@ -64,7 +64,7 @@ class [[nodiscard]] Process {
     };
 
     //! Returns login shell of current user.
-    static std::string loginShell();
+    static std::vector<std::string> loginShell();
 
     static FileSystem::path homeDirectory();
 
