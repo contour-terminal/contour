@@ -206,7 +206,8 @@ jobs:
         run: |
           set -ex
           cd build
-          sudo cpack
+          sudo cpack -G "DragNDrop;ZIP"
+          ls -hl
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
           mv -vf "Contour-${{ steps.set_vars.outputs.version }}-Darwin.zip" "../${BASENAME}.zip"
           mv -vf "Contour-${{ steps.set_vars.outputs.version }}-Darwin.dmg" "../${BASENAME}.dmg"
