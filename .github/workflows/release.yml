@@ -265,11 +265,12 @@ jobs:
           docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
           docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
+          mv "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst" \
+              contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_${{ steps.tags.outputs.ARCH }}
       - name: "Uploading Archlinux .pkg.tar.zst package"
         uses: actions/upload-artifact@v2
         with:
-          name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_${{ steps.tags.outputs.ARCH }}
-          path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
+          path: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_${{ steps.tags.outputs.ARCH }}
           if-no-files-found: error
           retention-days: 30
 
