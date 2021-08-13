@@ -385,7 +385,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_x86_64
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64.pkg.tar.zst
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64
           asset_content_type: application/x-zstd-compressed-tar
 
       - name: Upload Archlinux package aarch64
@@ -396,7 +396,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64.pkg.tar.zst
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64
           asset_content_type: application/x-zstd-compressed-tar
 
       # -------------------------------------------------------------
