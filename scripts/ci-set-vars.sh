@@ -5,15 +5,22 @@ set -ex
 VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
 SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
 
-if [ $REPOSITORY = "master" ]; then
-   IS_PRE='false';
-   SUFFIX="";
-   VERSION_STRING="${VERSION}"
-else
-   IS_PRE='true';
-   SUFFIX="prerelease-${GITHUB_RUN_NUMBER}";
-   VERSION_STRING="${VERSION}-${SUFFIX}"
+if [[ "${GITHUB_RUN_NUMBER}" != "" ]]; then
+    VERSION="${VERSION}.${GITHUB_RUN_NUMBER}"
 fi
+
+case "${GITHUB_REF}" in
+    refs/heads/master|refs/heads/release)
+        IS_PRE='false';
+        SUFFIX="";
+        VERSION_STRING="${VERSION}"
+        ;;
+    *)
+        IS_PRE='true';
+        SUFFIX="prerelease";
+        VERSION_STRING="${VERSION}-${SUFFIX}"
+        ;;
+esac
 
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt

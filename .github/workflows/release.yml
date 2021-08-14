@@ -13,6 +13,10 @@ on:
 
 name: Create Release
 
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
 # TODO:
 # [ ] run tests on each build (as last check before creating release)
 # [ ] label package files with "prerelease" if they're not a release
@@ -59,19 +63,19 @@ jobs:
         run: Get-ChildItem -Recurse
       - name: "Rename packages"
         run: |
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-win64.msi"
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-win64.zip"
       - name: "Inspect again"
         run: Get-ChildItem
       - name: "Uploading MSI to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          path: contour-${{ steps.set_vars.outputs.version }}-win64.msi
           retention-days: 30
       - name: "Uploading ZIP to artifact store"
         uses: actions/upload-artifact@v2
         with:
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          path: contour-${{ steps.set_vars.outputs.version }}-win64.zip
           retention-days: 30
 
   build_ubuntu1804:
@@ -107,17 +111,17 @@ jobs:
           mv ../contour*.* target/
       - name: "Rename files"
         run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb"
+          mv -v "target/contour_${{ steps.set_vars.outputs.version }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          path: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
           retention-days: 30
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
           retention-days: 30
 
   build_ubuntu2004:
@@ -153,17 +157,17 @@ jobs:
           mv ../contour*.* target/
       - name: "Rename files"
         run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb"
+          mv -v "target/contour_${{ steps.set_vars.outputs.version }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          path: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+          path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
           retention-days: 30
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
           retention-days: 30
 
   build_osx:
@@ -208,18 +212,18 @@ jobs:
           cd build
           sudo cpack -G "DragNDrop;ZIP"
           ls -hl
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
+          BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
           mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
           mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
       - name: upload to artifact store (ZIP)
         uses: actions/upload-artifact@v2
         with:
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.zip
+          path: contour-${{ steps.set_vars.outputs.version }}-osx.zip
           retention-days: 30
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+          path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           retention-days: 30
   build_archlinux:
     strategy:
@@ -266,11 +270,11 @@ jobs:
           docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
           mv "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst" \
-              contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_${{ steps.tags.outputs.ARCH }}
+              contour_${{ steps.set_vars.outputs.version }}-archlinux_${{ steps.tags.outputs.ARCH }}
       - name: "Uploading Archlinux .pkg.tar.zst package"
         uses: actions/upload-artifact@v2
         with:
-          path: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_${{ steps.tags.outputs.ARCH }}
+          path: contour_${{ steps.set_vars.outputs.version }}-archlinux_${{ steps.tags.outputs.ARCH }}
           if-no-files-found: error
           retention-days: 30
 
@@ -284,14 +288,19 @@ jobs:
         id: set_vars
         run: |
           VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-          SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
-          if [ $REPOSITORY = "master" ]; then IS_PRE='false'; else IS_PRE='true'; fi
-          if [ $REPOSITORY = "master" ]; then SUFFIX=''     ; else SUFFIX='prerelease'; fi
-          if [ $REPOSITORY != "master" ]; then
-            TAG_SUFFIX="_prerelease_${GITHUB_RUN_NUMBER}"
-          else
-            TAG_SUFFIX=""
-          fi
+          # SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
+          case "${REPOSITORY}" in
+              master|release)
+                  IS_PRE="false"
+                  SUFFIX=
+                  TAG_SUFFIX=""
+                  ;;
+              *)
+                  IS_PRE="true"
+                  SUFFIX="prerelease"
+                  TAG_SUFFIX="_prerelease_${GITHUB_RUN_NUMBER}"
+                  ;;
+          esac
           RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
           RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
           RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
@@ -338,8 +347,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.deb
+          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 18.04 debug package (.ddeb)
@@ -349,8 +358,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
-          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_18_04_amd64.ddeb
+          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
 
       # -------------------------------------------------------------
@@ -361,8 +370,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.deb
+          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 20.04 debug package (.ddeb)
@@ -372,8 +381,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
-          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-ubuntu_20_04_amd64.ddeb
+          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
 
       # -------------------------------------------------------------
@@ -384,8 +393,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_x86_64
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_x86_64
+          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-archlinux_x86_64
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-archlinux_x86_64
           asset_content_type: application/x-zstd-compressed-tar
 
       - name: Upload Archlinux package aarch64
@@ -395,8 +404,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-archlinux_aarch64
+          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-archlinux_aarch64
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-archlinux_aarch64
           asset_content_type: application/x-zstd-compressed-tar
 
       # -------------------------------------------------------------
@@ -407,8 +416,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-          asset_name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          asset_path: ./contour-${{ steps.set_vars.outputs.version }}-win64.msi
+          asset_name: contour-${{ steps.set_vars.outputs.version }}-win64.msi
           asset_content_type: application/octet-stream
 
       # -------------------------------------------------------------
@@ -419,8 +428,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
-          asset_name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          asset_path: contour-${{ steps.set_vars.outputs.version }}-win64.zip
+          asset_name: contour-${{ steps.set_vars.outputs.version }}-win64.zip
           asset_content_type: application/zip
 
       # -------------------------------------------------------------
@@ -431,8 +440,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.zip
-          asset_name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.zip
+          asset_path: contour-${{ steps.set_vars.outputs.version }}-osx.zip
+          asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.zip
           asset_content_type: application/zip
 
       # -------------------------------------------------------------
@@ -443,7 +452,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-          asset_name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+          asset_path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
+          asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_content_type: application/x-apple-diskimage
 
