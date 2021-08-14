@@ -83,8 +83,8 @@ profiles:
 
         # Determines the initial terminal sice in characters.
         terminal_size:
-            columns: 130
-            lines: 30
+            columns: 80
+            lines: 25
 
         history:
             # Number of lines to preserve (-1 for infinite).
