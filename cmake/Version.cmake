@@ -28,7 +28,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         set(THE_SOURCE "${CMAKE_SOURCE_DIR}/version.txt")
     endif()
 
-    # 2.) /.git directory with the output of `git describe ...`)
+    # 2.) .git directory with the output of `git describe ...`)
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/.git"))
         execute_process(COMMAND git describe --all
             OUTPUT_VARIABLE git_branch
@@ -49,6 +49,12 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
         # extract and construct version triple
         set(THE_VERSION ${CMAKE_MATCH_1})
+
+        # maybe append CI run-ID.
+        if (NOT("$ENV{RUN_ID}" STREQUAL ""))
+            string(CONCAT THE_VERSION "${THE_VERSION}." $ENV{RUN_ID})
+        endif()
+
         # extract suffix, construct full version string
         string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
 
@@ -66,6 +72,12 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         # extract and construct version triple
         string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
         set(THE_VERSION ${CMAKE_MATCH_1})
+
+        # maybe append CI run-ID.
+        if (NOT("$ENV{RUN_ID}" STREQUAL ""))
+            string(CONCAT THE_VERSION "${THE_VERSION}." $ENV{RUN_ID})
+        endif()
+
         # extract suffix, construct full version string
         string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
         if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
