@@ -94,25 +94,21 @@ jobs:
           set -ex
           cat /etc/apt/sources.list
           sudo apt -q update
-          sudo apt install -y "g++-9" cmake \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev \
-                  debhelper dpkg-dev
+          sudo ./scripts/install-deps.sh
       - name: "create debian package"
         run: |
           set -ex
-          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" "${{ steps.set_vars.outputs.RUN_ID }}"
+          INCR=1
+          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" ${INCR}
           VERSION="${{ steps.set_vars.outputs.version }}"
-          INCR="${{ steps.set_vars.outputs.RUN_ID }}"
           sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
           dpkg-buildpackage -uc -us
           mkdir target
           mv ../contour*.* target/
       - name: "Rename files"
         run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-1_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-1_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
@@ -140,25 +136,21 @@ jobs:
           set -ex
           cat /etc/apt/sources.list
           sudo apt -q update
-          sudo apt install -y "g++-9" cmake \
-                  libfreetype6-dev \
-                  qtbase5-dev libqt5gui5 extra-cmake-modules libkf5windowsystem-dev \
-                  libfontconfig1-dev libharfbuzz-dev \
-                  debhelper dpkg-dev
+          sudo ./scripts/install-deps.sh
       - name: "create debian package"
         run: |
           set -ex
-          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" "${{ steps.set_vars.outputs.RUN_ID }}"
+          INCR=1
+          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" ${INCR}
           VERSION="${{ steps.set_vars.outputs.version }}"
-          INCR="${{ steps.set_vars.outputs.RUN_ID }}"
           sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
           dpkg-buildpackage -uc -us
           mkdir target
           mv ../contour*.* target/
       - name: "Rename files"
         run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb"
+          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-1_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
+          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-1_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
@@ -286,35 +278,9 @@ jobs:
       - uses: actions/checkout@v2
       - name: set variables
         id: set_vars
-        run: |
-          VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-          # SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()')
-          case "${REPOSITORY}" in
-              master|release)
-                  IS_PRE="false"
-                  SUFFIX=
-                  TAG_SUFFIX=""
-                  ;;
-              *)
-                  IS_PRE="true"
-                  SUFFIX="prerelease"
-                  TAG_SUFFIX="_prerelease_${GITHUB_RUN_NUMBER}"
-                  ;;
-          esac
-          RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
-          RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
-          RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
-          RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
-
-          echo "::set-output name=version::${VERSION}"
-          echo "::set-output name=tag_suffix::${TAG_SUFFIX}"
-          echo "::set-output name=RUN_ID::${GITHUB_RUN_NUMBER}"
-          echo "::set-output name=IS_PRERELEASE::${IS_PRE}"
-          echo "::set-output name=RELEASENAME_SUFFIX::${SUFFIX}"
-          echo "::set-output name=RELEASEBODY::${RELEASEBODY}"
+        run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-
       - name: fetch release artifacts
         uses: actions/download-artifact@v2
         with:

@@ -9,6 +9,8 @@ install_deps_ubuntu()
     local packages=(
         build-essential
         cmake
+        debhelper
+        dpkg-dev
         extra-cmake-modules
         g++
         libc6-dev
@@ -31,6 +33,7 @@ install_deps_ubuntu()
     fi
 
     apt install ${packages[*]}
+    sudo snap install --classic powershell
 }
 
 main_linux()

@@ -8,13 +8,7 @@ else
 fi
 
 BUILD_TYPE="${1:-Debug}"
-WORKDIR="build"
-if [[ "${BUILD_TYPE}" != "Debug" ]]; then
-    WORKDIR="release"
-fi
-
-mkdir -p "${ROOTDIR}/${WORKDIR}"
-cd "${ROOTDIR}/${WORKDIR}"
+WORKDIR="$(pwd)"
 
 exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \

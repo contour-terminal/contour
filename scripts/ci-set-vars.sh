@@ -2,11 +2,13 @@
 
 set -ex
 
-VERSION=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
+VERSION_TRIPLE=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
 SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
 
 if [[ "${GITHUB_RUN_NUMBER}" != "" ]]; then
-    VERSION="${VERSION}.${GITHUB_RUN_NUMBER}"
+    VERSION="${VERSION_TRIPLE}.${GITHUB_RUN_NUMBER}"
+else
+    VERSION="${VERSION_TRIPLE}"
 fi
 
 case "${GITHUB_REF}" in
@@ -25,7 +27,7 @@ esac
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt
 
-RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION'/ {print $0}' Changelog.md | tail -n+3)
+RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION_TRIPLE'/ {print $0}' Changelog.md | tail -n+3)
 RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
 RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
 RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
