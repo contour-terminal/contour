@@ -12,6 +12,7 @@
 - Fixes keyboard keys for `F1`..`F4` when pressed with and without modifiers.
 - Fixes OSC 8 hyperlink rendering when scrolled.
 - Fixes SGR 1 (bold) wrongly applied on indexed background colors.
+- Fixes text shaping sometimes showing missing glyphs instead of the actual glyphs (by changing the last-resort font fallback mechanism to chape each cluster individually with its own font fallback).
 - Preserve active profile when reloading config, and forces redraw after config reload.
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
 - Changes config entries `scrollbar.*` to `profile.*.scrollbar.*`.

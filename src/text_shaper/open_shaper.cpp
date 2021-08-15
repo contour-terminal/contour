@@ -103,6 +103,16 @@ using FtFacePtr = unique_ptr<FT_FaceRec_, void(*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
+struct HbFontInfo
+{
+    font_source primary;
+    font_source_list fallbacks;
+    font_size size;
+    FtFacePtr ftFace;
+    HbFontPtr hbFont;
+    font_description description{};
+};
+
 namespace // {{{ helper
 {
     string identifierOf(font_source const& source)
@@ -479,17 +489,56 @@ namespace // {{{ helper
             if (glyphMissing(gpos))
                 gpos.glyph.index = glyph_index{ missingGlyph };
     }
-} // }}}
 
-struct HbFontInfo
-{
-    font_source primary;
-    font_source_list fallbacks;
-    font_size size;
-    FtFacePtr ftFace;
-    HbFontPtr hbFont;
-    font_description description{};
-};
+    void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, gsl::span<unsigned> _clusters, unicode::Script _script)
+    {
+        hb_buffer_clear_contents(_hbBuf);
+        for (auto const i: iota(0u, _codepoints.size()))
+            hb_buffer_add(_hbBuf, _codepoints[i], _clusters[i]);
+
+        hb_buffer_set_direction(_hbBuf, HB_DIRECTION_LTR);
+        hb_buffer_set_script(_hbBuf, mapScriptToHarfbuzzScript(_script));
+        hb_buffer_set_language(_hbBuf, hb_language_get_default());
+        hb_buffer_set_content_type(_hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);
+        hb_buffer_guess_segment_properties(_hbBuf);
+    }
+
+    bool tryShape(font_key _font,
+                  HbFontInfo& _fontInfo,
+                  hb_buffer_t* _hbBuf,
+                  hb_font_t* _hbFont,
+                  unicode::Script _script,
+                  unicode::PresentationStyle _presentation,
+                  u32string_view _codepoints,
+                  gsl::span<unsigned> _clusters,
+                  shape_result& _result)
+    {
+        assert(_hbFont != nullptr);
+        assert(_hbBuf != nullptr);
+
+        prepareBuffer(_hbBuf, _codepoints, _clusters, _script);
+
+        hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
+        hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
+
+        auto const glyphCount = hb_buffer_get_length(_hbBuf);
+        hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(_hbBuf, nullptr);
+        hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(_hbBuf, nullptr);
+
+        for (auto const i: iota(0u, glyphCount))
+        {
+            glyph_position gpos{};
+            gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
+            gpos.offset.x = static_cast<int>(static_cast<double>(pos[i].x_offset) / 64.0); // gpos.offset.(x,y) ?
+            gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
+            gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0f);
+            gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
+            gpos.presentation = _presentation;
+            _result.emplace_back(gpos);
+        }
+        return crispy::none_of(_result, glyphMissing);
+    }
+} // }}}
 
 struct open_shaper::Private // {{{
 {
@@ -578,6 +627,48 @@ struct open_shaper::Private // {{{
     {
         FT_Done_FreeType(ft_);
     }
+
+    bool tryShapeWithFallback(font_key _font,
+                              HbFontInfo& _fontInfo,
+                              hb_buffer_t* _hbBuf,
+                              hb_font_t* _hbFont,
+                              unicode::Script _script,
+                              unicode::PresentationStyle _presentation,
+                              u32string_view _codepoints,
+                              gsl::span<unsigned> _clusters,
+                              shape_result& _result)
+    {
+        auto const initialResultOffset = _result.size();
+
+        if (tryShape(_font, _fontInfo, _hbBuf, _hbFont, _script, _presentation, _codepoints, _clusters, _result))
+            return true;
+
+        for (font_source const& fallbackFont: _fontInfo.fallbacks)
+        {
+            _result.resize(initialResultOffset); // rollback to initial size
+
+            optional<font_key> fallbackKeyOpt = get_font_key_for(fallbackFont, _fontInfo.size);
+            if (!fallbackKeyOpt.has_value())
+                continue;
+
+            // Skip if main font is monospace but fallbacks font is not.
+            if (_fontInfo.description.strict_spacing &&
+                _fontInfo.description.spacing != font_spacing::proportional)
+            {
+                HbFontInfo const& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
+                bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
+                if (!fontIsMonospace)
+                    continue;
+            }
+
+            HbFontInfo& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
+            debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
+            if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, _hbBuf, fallbackFontInfo.hbFont.get(), _script, _presentation, _codepoints, _clusters, _result))
+                return true;
+        }
+
+        return false;
+    }
 }; // }}}
 
 open_shaper::open_shaper(crispy::Point _dpi, unique_ptr<font_locator> _locator):
@@ -628,63 +719,6 @@ font_metrics open_shaper::metrics(font_key _key) const
     return d->metrics(_key);
 }
 
-namespace
-{
-
-void prepareBuffer(hb_buffer_t* _hbBuf, u32string_view _codepoints, gsl::span<unsigned> _clusters, unicode::Script _script)
-{
-    hb_buffer_clear_contents(_hbBuf);
-    for (auto const i: iota(0u, _codepoints.size()))
-        hb_buffer_add(_hbBuf, _codepoints[i], _clusters[i]);
-
-    hb_buffer_set_direction(_hbBuf, HB_DIRECTION_LTR);
-    hb_buffer_set_script(_hbBuf, mapScriptToHarfbuzzScript(_script));
-    hb_buffer_set_language(_hbBuf, hb_language_get_default());
-    hb_buffer_set_content_type(_hbBuf, HB_BUFFER_CONTENT_TYPE_UNICODE);
-    hb_buffer_guess_segment_properties(_hbBuf);
-}
-
-bool tryShape(font_key _font,
-              HbFontInfo& _fontInfo,
-              hb_buffer_t* _hbBuf,
-              hb_font_t* _hbFont,
-              unicode::Script _script,
-              unicode::PresentationStyle _presentation,
-              u32string_view _codepoints,
-              gsl::span<unsigned> _clusters,
-              shape_result& _result)
-{
-    assert(_hbFont != nullptr);
-    assert(_hbBuf != nullptr);
-
-    prepareBuffer(_hbBuf, _codepoints, _clusters, _script);
-
-    hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
-    hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
-
-    auto const glyphCount = hb_buffer_get_length(_hbBuf);
-    hb_glyph_info_t const* info = hb_buffer_get_glyph_infos(_hbBuf, nullptr);
-    hb_glyph_position_t const* pos = hb_buffer_get_glyph_positions(_hbBuf, nullptr);
-
-    _result.clear();
-    _result.reserve(glyphCount);
-
-    for (auto const i: iota(0u, glyphCount))
-    {
-        glyph_position gpos{};
-        gpos.glyph = glyph_key{_font, _fontInfo.size, glyph_index{info[i].codepoint}};
-        gpos.offset.x = static_cast<int>(static_cast<double>(pos[i].x_offset) / 64.0); // gpos.offset.(x,y) ?
-        gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
-        gpos.advance.x = static_cast<int>(static_cast<double>(pos[i].x_advance) / 64.0f);
-        gpos.advance.y = static_cast<int>(static_cast<double>(pos[i].y_advance) / 64.0f);
-        gpos.presentation = _presentation;
-        _result.emplace_back(gpos);
-    }
-    return crispy::none_of(_result, glyphMissing);
-}
-
-} // end anonymous namespace
-
 optional<glyph_position> open_shaper::shape(font_key _font,
                                             char32_t _codepoint)
 {
@@ -722,6 +756,8 @@ void open_shaper::shape(font_key _font,
                         unicode::PresentationStyle _presentation,
                         shape_result& _result)
 {
+    assert(_clusters.size() == _codepoints.size());
+
     HbFontInfo& fontInfo = d->fonts_.at(_font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = d->hb_buf_.get();
@@ -736,34 +772,39 @@ void open_shaper::shape(font_key _font,
         logMessage.write("Using font: key={}, path=\"{}\"\n", _font, identifierOf(fontInfo.primary));
     }
 
-    if (tryShape(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result))
+    if (d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result))
         return;
 
-    for (font_source const& fallbackFont: fontInfo.fallbacks)
-    {
-        optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
-        if (!fallbackKeyOpt.has_value())
-            continue;
-
-        // Skip if main font is monospace but fallbacks font is not.
-        if (fontInfo.description.strict_spacing &&
-            fontInfo.description.spacing != font_spacing::proportional)
-        {
-            HbFontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
-            bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
-            if (!fontIsMonospace)
-                continue;
-        }
-
-        HbFontInfo& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
-        debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
-        if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, hbBuf, fallbackFontInfo.hbFont.get(), _script, _presentation, _codepoints, _clusters, _result))
-            return;
-    }
     debuglog(FontFallbackTag).write("Shaping failed.");
 
-    // reshape with primary font
-    tryShape(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result);
+    // Reshape each cluster individually.
+    _result.clear();
+    int cluster = _clusters[0];
+    int start = 0;
+    for (int i = 1; i < _clusters.size(); ++i)
+    {
+        if (cluster != _clusters[i])
+        {
+            int const count = i - start;
+            d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont,
+                                    _script, _presentation,
+                                    _codepoints.substr(start, count),
+                                    _clusters.subspan(start, count),
+                                    _result);
+            start = i;
+            cluster = _clusters[i];
+        }
+    }
+
+    auto const end = _clusters.size();
+    if (d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont,
+                                _script, _presentation,
+                                _codepoints.substr(start, end - start),
+                                _clusters.subspan(start, end - start),
+                                _result))
+        return;
+
+    // last resort
     replaceMissingGlyphs(fontInfo.ftFace.get(), _result);
 }
 

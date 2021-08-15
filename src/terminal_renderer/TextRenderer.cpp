@@ -487,6 +487,7 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
     auto const clusters = gsl::span(clusters_.data() + _run.start, count);
 
     text::shape_result gpos;
+    gpos.reserve(clusters.size());
     textShaper_.shape(
         font,
         codepoints,
