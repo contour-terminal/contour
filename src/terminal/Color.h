@@ -219,7 +219,7 @@ struct ColorPalette
         colors[7] = 0xc0c0c0_rgb; // white
 
         // bright colors
-        colors[8] = 0x808080_rgb;  // bright black (dark gray)
+        colors[8] = 0x707070_rgb;  // bright black (dark gray)
         colors[9] = 0xff0000_rgb;  // bright red
         colors[10] = 0x00ff00_rgb; // bright green
         colors[11] = 0xffff00_rgb; // bright yellow
