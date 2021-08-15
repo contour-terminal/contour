@@ -381,8 +381,10 @@ constexpr std::string_view to_string(State state)
             return "DCS Ignore";
         case State::OSC_String:
             return "OSC String";
+        case State::APC_String:
+            return "APC String";
         case State::IgnoreUntilST:
-            return "SOS/PM/APC String";
+            return "Ignore Until ST (SOS/PM)";
     }
     return "?";
 }
@@ -439,6 +441,12 @@ constexpr std::string_view to_string(Action action)
             return "OSC Put";
         case Action::OSC_End:
             return "OSC End";
+        case Action::APC_Start:
+            return "APC Start";
+        case Action::APC_Put:
+            return "APC Put";
+        case Action::APC_End:
+            return "APC End";
     }
     return "?";
 }
