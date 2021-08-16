@@ -1,81 +1,66 @@
-# Current PR (box drawings)
-
-- [ ] `builtin_box_drawing: false` ignored? check!
-- [ ]  top-left and bottom-left arc show artifacts on very left side. why? most likely overflow in pixel painting.
-
 # RELEASE CHECKLIST
 
+- [ ] top-left and bottom-left arc show artifacts on very left side. why? most likely overflow in pixel painting.
 - [x] errors always shown on stderr (no need to explicitly enable via `debug error`)
-- [ ] print stack trace upon SEGV
-- [ ] opacity change via shortcut
-- [ ] profile change upon shortcut
-- [ ] Ubuntu PPAs working
+- [!] print stack trace upon SEGV
+- [x] opacity change via shortcut
+- [x] profile change upon shortcut
+- [x] Ubuntu PPAs working
 - [ ] verify why (maybe due to my config) clickable links are not working. MAKE IT UNIT-TESTABLE
 - [ ] code health (get compiler warnings branch merged, have it compile-time optional `CONTOUR_PEDANTIC=OFF/ON`
 - [x] Ubuntu 18.04 ppa (fontconfig)
 - [ ] improve unit tests (InputGenerator)
 
-# current PR checklist
+# Features
 
-- [ ] LIVE: create a neofetch-patch for contour support
-  - show font (OSC 50)
-  - version: (XTVERSION)
-  - test 2026 synchronized output support (DECRQM)
-  - show sixel
-  - distor (`lsb_release`)
+- [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).  This function is behind permission gate and triggers a popup dialog when set to "ask".
+
+# FIXMEs checklist
 
 - [x] CHECK: profile change upon shortcut
-- [ ] config: warn on unknown yaml keys
 - [x] TEST: RenderBuffer ops testable (esp. 2026)?
->>>>>>> 1482076... snip
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
 - [ ] BUG? hidden scrollbar in alt screen causes render artifacts sometimes?
 - [ ] BUG? eval need of `Terminal::shouldRender` and friends
-- [ ] CHECK: CopyLastMarkRange seems to not copy last 2 lines instead (due to zsh double line prompt?)
-  - try with zsh single line prompts
-  - ensure unit tests for that
+- [ ] CHECK: CopyLastMarkRange seems to not copy last 2 lines instead (due to zsh double line prompt?) (- try with zsh single line prompts | - ensure unit tests for that)
 - [ ] RENDER-BUG: "template..." is segmented as "template." and ".." but should be "template..." (or "template" and "...")
 - [ ] BUG? showNotification: not working (because not connected, not ported)
 - [ ] move scrollbar into profile
-- [ ] FIXME: `reset` resets screen size to 80x25, should remain actual one.
 - [ ] dotted underline could be prettier. Not as circles but as squares (because circles w/o AA look bad)
-
-# Milestone 0.2.0 checklist
-
+- [ ] FIXME: `reset` resets screen size to 80x25, should remain actual one.
 - [ ] BUG/SECURITY: DCS without ST is problematic (what are other TEs doing?)
 - [ ] resizing font to HUGE and then moving back instantly (Ctrl+0) may cause SEGV b/c of word-wrap
 - [ ] fix '🇯🇵' when surrounded with text (roflmao)
 - [ ] contour-cli deb package (without terminal GUI)
 - [ ] config option to disable reflow entirely
-
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
 - [ ] vim's wrap mode with multiline text seems to have rendering issues.
 - [ ] CI: build with parallel support (STL then requires tbb apparently)
 - [ ] debuglog: filter by logging tags (in a somewhat performant way), so the debuglog (when enabled) is not flooding.
-
-- [ ] Font: support DirectWrite backend
+- [x] Font: support DirectWrite backend
 - [ ] Font: fix framed underline
-- [ ] Font: hasColor should not determine whether a glyph is emoji or not
-- [ ] Font: check harfbuzz font api (can it replace freetype, at least on linux/unix?)
-- [ ] logger: on win32 the function name is too verbose.
+- [x] Font: hasColor should not determine whether a glyph is emoji or not
+- [x] logger: on win32 the function name is too verbose.
 - [ ] SGR underline not visible when inverse is set
 - [ ] Don't perform pressure-performance optimization when in alt-buffer
 - [ ] charset SCS/SS not well tested (i.e.: write unit tests)
-- [ ] U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
-  https://www.unicode.org/reports/tr11/tr11-36.html#Recommendations
-  Chapter 5 (Recommendations), last bullet point!
-  - provide VT sequence to get/set unicode (width) conformance level (pre unicode 9, and unicode 9+)
-  - see https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/9
 - [ ] walk through the source code and apply cleanups & coding style
 - [ ] cleanup config (and contour.yml) from dead options (logging?)
-- [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).
-  This function is behind permission gate and triggers a popup dialog when set to "ask".
 - [ ] debug log must include software git sha (and version)
 
 ```
 * and at start of debug-logging, dump initial state once.
 * log debug-logging start/end events to the debug log, too.
 ```
+
+### U+26A0
+
+U+26A0 width = 1, why 1 and not 2? cursor offsetting glitch between contour and rest of world
+https://www.unicode.org/reports/tr11/tr11-36.html#Recommendations
+Chapter 5 (Recommendations), last bullet point!
+
+- provide VT sequence to get/set unicode (width) conformance level (pre unicode 9, and unicode 9+)
+- see https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/9
 
 # TODO
 

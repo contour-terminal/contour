@@ -163,23 +163,34 @@ TEST_CASE("AppendChar.emoji_VS16_fixed_width", "[screen]")
     auto screen = MockScreen{PageSize{LineCount(1), ColumnCount(5)}};
 
     // print letter-like symbol `i` with forced emoji presentation style.
+    REQUIRE(screen.cursorPosition().column == 1);
     screen.write(U"\u2139");
+    REQUIRE(screen.cursorPosition().column == 2);
     screen.write(U"\uFE0F");
+    REQUIRE(screen.cursorPosition().column == 3);
     screen.write(U"X");
+    REQUIRE(screen.cursorPosition().column == 4);
+    logScreenText(screen);
+    REQUIRE(screen.cursorPosition().column == 4);
+    REQUIRE(screen.cursorPosition().row == 1);
 
     // double-width emoji with VS16
     auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == U"\u2139\uFE0F");
-    CHECK(c1.width() == 1); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
+    CHECK(c1.width() == 2); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
 
     // character after the emoji
     auto const& c2 = screen.at({1, 2});
-    CHECK(c2.codepoints() == U"X");
-    CHECK(c2.width() == 1);
+    CHECK(c2.codepointCount() == 0);
 
     // character after the emoji
     auto const& c3 = screen.at({1, 3});
-    CHECK(c3.codepointCount() == 0);
+    CHECK(c3.codepoints() == U"X");
+    CHECK(c3.width() == 1);
+
+    // character after X
+    auto const& c4 = screen.at({1, 4});
+    CHECK(c4.codepointCount() == 0);
 }
 
 #if 0

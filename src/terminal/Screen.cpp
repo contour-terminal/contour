@@ -645,7 +645,7 @@ void Screen::clearAndAdvance(int _offset)
     {
         cursor_.position.column++;
         assert(n > 0);
-        for (auto i = 0; i < n; ++i)
+        for (auto i = 1; i < n; ++i)
         {
 #if defined(LIBTERMINAL_HYPERLINKS)
             currentColumn()->reset(cursor_.graphicsRendition, currentHyperlink_);
