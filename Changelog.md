@@ -17,6 +17,7 @@
 - Changes config entry `profile.*.font_size` to `profile.*.font.size`.
 - Changes config entries `scrollbar.*` to `profile.*.scrollbar.*`.
 - Changes behavior of live configuration reload, which is not default anymore and must be explicitly enabled via CLI parameter `--live-config`.
+- Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too.
 - Changes the CLI command line interface syntax.
 - Removes `tab_width` configuration. Tab width cannot be configured anymore but remaints by default at 8.
 - Adds basic automatically created archive for Arch Linux to the CI build artifacts page and release page.
