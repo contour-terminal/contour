@@ -311,4 +311,46 @@ namespace fmt { // {{{
                 fd.renderMode);
         }
     };
+
+    template <>
+    struct formatter<terminal::renderer::FontLocatorEngine> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::renderer::FontLocatorEngine value, FormatContext& ctx)
+        {
+            using terminal::renderer::FontLocatorEngine;
+            switch (value)
+            {
+                case FontLocatorEngine::FontConfig:
+                    return format_to(ctx.out(), "FontConfig");
+                case FontLocatorEngine::DWrite:
+                    return format_to(ctx.out(), "DirectWrite");
+                case FontLocatorEngine::CoreText:
+                    return format_to(ctx.out(), "CoreText");
+            }
+            return format_to(ctx.out(), "UNKNOWN");
+        }
+    };
+
+    template <>
+    struct formatter<terminal::renderer::TextShapingEngine> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(terminal::renderer::TextShapingEngine value, FormatContext& ctx)
+        {
+            using terminal::renderer::TextShapingEngine;
+            switch (value)
+            {
+                case TextShapingEngine::OpenShaper:
+                    return format_to(ctx.out(), "OpenShaper");
+                case TextShapingEngine::DWrite:
+                    return format_to(ctx.out(), "DirectWrite");
+                case TextShapingEngine::CoreText:
+                    return format_to(ctx.out(), "CoreText");
+            }
+            return format_to(ctx.out(), "UNKNOWN");
+        }
+    };
 } // }}}

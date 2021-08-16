@@ -144,12 +144,10 @@ namespace // {{{ helper
         if (_offset == _keys.size())
         {
             _store = _root.as<T>();
-            debuglog(ConfigTag).write("Loading {} with {}", parentKey, crispy::escape(fmt::format("{}", _store)));
             return true;
         }
 
         auto const currentKey = string(_keys.at(_offset));
-        debuglog(ConfigTag).write("-> key {}", currentKey);
 
         auto const child = _root[currentKey];
         if (!child)
@@ -160,14 +158,13 @@ namespace // {{{ helper
                 parentKey += '.';
                 parentKey += _keys[i];
             }
-            errorlog().write(
+            debuglog(ConfigTag).write(
                 "Missing key {}. Using default: {}.",
                 parentKey, !defaultStr.empty() ? defaultStr : "\"\""s
             );
             return false;
         }
 
-        debuglog(ConfigTag).write("Emplacing {}", parentKey);
         _usedKeys.emplace(parentKey);
 
         return tryLoadValue(_usedKeys, child, _keys, _offset + 1, _store);
@@ -189,7 +186,6 @@ namespace // {{{ helper
                       string const& _path,
                       T& _store)
     {
-        debuglog(ConfigTag).write("Try load: {}\n", _path);
         auto const keys = crispy::split(_path, '.');
         _usedKeys.emplace(_path);
         return tryLoadValue(_usedKeys, _root, keys, 0, _store);
@@ -994,8 +990,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
 
     if (auto args = _doc["profiles"][_name]["arguments"]; args && args.IsSequence())
+    {
+        _usedKeys.emplace(fmt::format("{}.arguments", basePath));
         for (auto const& argNode : args)
             profile.shell.arguments.emplace_back(argNode.as<string>());
+    }
 
     string strValue = FileSystem::current_path().generic_string();
     tryLoadChild(_usedKeys, _doc, basePath, "initial_working_directory", strValue);
@@ -1095,7 +1094,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         terminal::renderer::TextShapingEngine::OpenShaper;
 #endif
 
-    strValue = "";
+    strValue = fmt::format("{}", profile.fonts.textShapingEngine);
     if (tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.engine", strValue))
     {
         auto const lwrValue = toLower(strValue);
@@ -1112,7 +1111,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
                     basePath, strValue);
     }
 
-    strValue = "";
+    strValue = fmt::format("{}", profile.fonts.fontLocator);
     if (tryLoadChild(_usedKeys, _doc, basePath, "font.locator", strValue))
     {
         auto const lwrValue = toLower(strValue);
@@ -1328,22 +1327,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     }
 
     checkForSuperfluousKeys(doc, usedKeys);
-
-    auto const logMappings = [](auto const& _mapping) {
-        for (auto const& m: _mapping)
-        {
-            debuglog(ConfigTag).write("{} {} {}", m.modes, m.modifier, m.input);
-            // for (auto const& a: m.second)
-            //     debuglog(ConfigTag).write("Parsed input mapping: {} {}", m.first, a);
-        }
-    };
-    debuglog(ConfigTag).write("Write parsed input mappings {} / {} / {}.",
-                              _config.inputMappings.keyMappings.size(),
-                              _config.inputMappings.charMappings.size(),
-                              _config.inputMappings.mouseMappings.size());
-    // logMappings(_config.inputMappings.keyMappings);
-    // logMappings(_config.inputMappings.charMappings);
-    // logMappings(_config.inputMappings.mouseMappings);
 }
 
 optional<std::string> readConfigFile(std::string const& _filename)
