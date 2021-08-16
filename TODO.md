@@ -1,22 +1,11 @@
 # RELEASE CHECKLIST
 
-- [ ] top-left and bottom-left arc show artifacts on very left side. why? most likely overflow in pixel painting.
-- [x] errors always shown on stderr (no need to explicitly enable via `debug error`)
-- [!] print stack trace upon SEGV
-- [x] opacity change via shortcut
-- [x] profile change upon shortcut
-- [x] Ubuntu PPAs working
-- [ ] verify why (maybe due to my config) clickable links are not working. MAKE IT UNIT-TESTABLE
+# FIXMEs / CODEHALTH checklist
+
+- [ ] double-click line select on empty line selects everything to the right - should maybe not select anything?
+- [ ] SEGV handler should probably only use `backtrace_symbols_fd()`
 - [ ] code health (get compiler warnings branch merged, have it compile-time optional `CONTOUR_PEDANTIC=OFF/ON`
-- [x] Ubuntu 18.04 ppa (fontconfig)
 - [ ] improve unit tests (InputGenerator)
-
-# Features
-
-- [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).  This function is behind permission gate and triggers a popup dialog when set to "ask".
-
-# FIXMEs checklist
-
 - [x] CHECK: profile change upon shortcut
 - [x] TEST: RenderBuffer ops testable (esp. 2026)?
 - [ ] BUG? wrt RenderBuffer: maybe problem with vte emoji asset test? (one emoji)
@@ -62,18 +51,15 @@ Chapter 5 (Recommendations), last bullet point!
 - provide VT sequence to get/set unicode (width) conformance level (pre unicode 9, and unicode 9+)
 - see https://gitlab.freedesktop.org/terminal-wg/specifications/-/issues/9
 
-# TODO
+# Features
 
-- [ ] QA: wrap row/col/width/height numbers into `boxed<int, Tag...>`?
+- [ ] trigger config reload via VT sequence (as SIGUSR1 won't work on windows).  This function is behind permission gate and triggers a popup dialog when set to "ask".
 - [ ] move to profile: `word_delimiters`
 - [ ] move to profile: `scrollbar.*`
 - [ ] move to profile: `images.*`
 - [ ] `input_mapping` becomes default, `profiles.NAME.overrides.input_mapping` is used for overrides/additions
 - [ ] make sure `input_mapping` overrides can also remove mappings
 - [ ] move to ranges-v3 (eliminating some crispy helpers)
-
-### Features to be added to 0.3.0 milestone
-
 - [ ] "The impossible happened" in TerminalWidget
 - [ ] contour: provide `--mono` (or alike) CLI flag to "just" provide a QOpenGLWindow for best performance,
       lacking UI features as compromise.
