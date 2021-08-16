@@ -224,7 +224,7 @@ void drawArc(atlas::Buffer& _buffer,
                                filter([](auto x) { return !get<1>(x).empty(); }))
     {
         sort(begin(gap), end(gap));
-        for (auto const xi: iota(gap.front(), gap.back() + 1))
+        for (auto const xi: iota(gap.front(), gap.back()))
             _buffer.at(y * _width + xi) = 0xFF;
     }
 }
