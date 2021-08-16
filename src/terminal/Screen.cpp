@@ -383,7 +383,7 @@ Screen::Screen(PageSize _size,
     sequencer_{
         *this,
         _maxImageSize,
-        RGBAColor{}, // TODO
+        colorPalette_.defaultBackground,
         imageColorPalette_
     },
     parser_{ ref(sequencer_) },
@@ -2557,7 +2557,7 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                 }
                 case Action::ResetToDefault:
                 {
-                    auto const value = 256; // TODO: read the configuration's default here
+                    auto const value = maxImageColorRegisters_;
                     imageColorPalette_->setSize(value);
                     reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
                     break;

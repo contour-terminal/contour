@@ -92,14 +92,14 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
         *pty_,
         config_.ptyReadBufferSize,
         *this,
-        LineCount{4000}, // _maxHistoryLineCount,
+        config_.profile(profileName_)->maxHistoryLineCount,
         {}, // TODO: that's actually dead param (_cursorBlinkInterval,)
         steady_clock::now(),
         config_.wordDelimiters, // TODO: move to profile!
         config_.bypassMouseProtocolModifier, // TODO: you too
-        ImageSize{Width(800), Height(600)},     // maxImageSize
-        256,            // maxImageColorRegisters
-        true,           // sixelCursorConformance
+        config_.maxImageSize,
+        config_.maxImageColorRegisters,
+        config_.sixelCursorConformance,
         profile_.colors,
         _display ? _display->refreshRate() : 50.0
     },
