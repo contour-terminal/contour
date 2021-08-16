@@ -381,7 +381,16 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
                                             _button,
                                             _modifier,
                                             matchModeFlags()))
+    {
         executeAllActions(*actions);
+        return;
+    }
+
+    if (_button != MouseButton::Left)
+        return;
+    if (!terminal_.handleMouseSelection(_modifier, _now))
+        return;
+    scheduleRedraw();
 }
 
 void TerminalSession::sendMouseMoveEvent(int _row, int _column, terminal::Modifier _modifier, Timestamp _now)

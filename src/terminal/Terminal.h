@@ -107,6 +107,8 @@ class Terminal : public ScreenEvents {
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
     void sendRaw(std::string_view _text);   // Sends raw string to the application.
 
+    bool handleMouseSelection(Modifier _modifier, Timestamp _now);
+
     bool applicationCursorKeys() const noexcept { return inputGenerator_.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
     // }}}

@@ -501,9 +501,11 @@ bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Time
         return true;
     }
 
-    if (_button != MouseButton::Left)
-        return false;
+    return false;
+}
 
+bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
+{
     double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
     lastClick_ = _now;
     speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;

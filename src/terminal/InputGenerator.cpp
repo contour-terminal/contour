@@ -697,6 +697,9 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
 {
     currentMousePosition_ = {_row, _column};
 
+    if (!mouseProtocol_.has_value())
+        return false;
+
     switch (mouseWheelMode())
     {
         case MouseWheelMode::NormalCursorKeys:
