@@ -439,3 +439,21 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
     }
 }
+
+TEST_CASE("Grid.shrink_lines_with_history")
+{
+    auto const gridMargin = Margin{{1, 2}, {1, 3}};
+    auto grid = Grid(PageSize{LineCount(2), ColumnCount(3)}, true, std::nullopt);
+    grid.scrollUp(LineCount{1}, GraphicsAttributes{}, gridMargin);
+    grid.lineAt(0).setText("ABC"); // history
+    grid.lineAt(1).setText("DEF"); // main page: line 1
+    grid.lineAt(2).setText("GHI"); // main page: line 2
+    logGridText(grid, "setup grid at 3x2x1");
+
+    // shrink by one line
+    auto const newPageSize = PageSize{LineCount(1), ColumnCount(3)};
+    auto const curCursorPos = Coordinate{2, 2};
+    Coordinate newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CHECK(newCursorPos.row == 1);
+    CHECK(newCursorPos.column == 2);
+}

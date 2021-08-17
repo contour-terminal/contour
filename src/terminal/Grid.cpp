@@ -373,7 +373,7 @@ Coordinate Grid::resize(PageSize _newSize, Coordinate _currentCursorPos, bool _w
             auto const shrinkedLinesCount = screenSize_.lines - LineCount(_newHeight);
             screenSize_.lines = _newHeight;
             clampHistory();
-            return Coordinate{unbox<int>(shrinkedLinesCount), 0};
+            return Coordinate{-unbox<int>(shrinkedLinesCount), 0};
         }
         else
         {
@@ -646,6 +646,9 @@ void Grid::clampHistory()
 
 void Grid::scrollUp(LineCount _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
 {
+    assert(_margin.horizontal.from >= 1 && _margin.horizontal.to <= *screenSize_.columns);
+    assert(_margin.vertical.from >= 1 && _margin.vertical.to <= *screenSize_.lines);
+
     if (_margin.horizontal != Margin::Range{1, unbox<int>(screenSize_.columns)})
     {
         // a full "inside" scroll-up
