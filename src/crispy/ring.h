@@ -37,10 +37,13 @@ template<
 class basic_ring
 {
 public:
-    using iterator = RingIterator<T, Vector>;
-    using const_iterator = RingIterator<T const, Vector>;
-    using reverse_iterator = RingReverseIterator<T, Vector>;
-    using const_reverse_iterator = RingReverseIterator<T const, Vector>;
+    using value_type = T;
+    using iterator = RingIterator<value_type, Vector>;
+    using const_iterator = RingIterator<value_type const, Vector>;
+    using reverse_iterator = RingReverseIterator<value_type, Vector>;
+    using const_reverse_iterator = RingReverseIterator<value_type const, Vector>;
+    using difference_type = long;
+    using offset_type = long;
 
     basic_ring() = default;
     basic_ring(basic_ring const&) = default;
@@ -51,11 +54,11 @@ public:
 
     explicit basic_ring(Vector storage): _storage(std::move(storage)) {}
 
-    T const& operator[](std::size_t i) const noexcept { return _storage[(_zero + i) % size()]; }
-    T& operator[](std::size_t i) noexcept { return _storage[(_zero + i) % size()]; }
+    value_type const& operator[](offset_type i) const noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
+    value_type& operator[](offset_type i) noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
 
-    T const& at(std::size_t i) const noexcept { return _storage[(_zero + i) % size()]; }
-    T& at(std::size_t i) noexcept { return _storage[(_zero + i) % size()]; }
+    value_type const& at(offset_type i) const noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
+    value_type& at(offset_type i) noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
 
     Vector& storage() noexcept { return _storage; }
     Vector const& storage() const noexcept { return _storage; }
@@ -66,31 +69,42 @@ public:
 
     std::size_t size() const noexcept { return _storage.size(); }
 
-    void rotate(int count) noexcept { _zero = (_zero + size() + count) % size(); }
+    // positvie count rotates right, negative count rotates left
+    void rotate(int count) noexcept { _zero = (_zero + size() - count) % size(); }
+
     void rotate_left(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
     void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
     void unrotate() { _zero = 0; }
 
-    iterator begin() noexcept { return iterator{this, _zero}; }
-    iterator end() noexcept { return iterator{this, _zero + size()}; }
+    value_type& front() noexcept { return at(0); }
+    value_type const& front() const noexcept { return at(0); }
 
-    const_iterator begin() const noexcept { return const_iterator{this, _zero}; }
-    const_iterator end() const noexcept { return const_iterator{this, _zero + size()}; }
+    value_type& back() noexcept { return at(size() - 1); }
+    value_type const& back() const noexcept { return at(size() - 1); }
 
-    const_iterator cbegin() const noexcept { return begin(); }
-    const_iterator cend() const noexcept { return begin(); }
+    iterator begin() noexcept { return iterator{this, 0}; }
+    iterator end() noexcept { return iterator{this, static_cast<difference_type>(size())}; }
+
+    const_iterator cbegin() const noexcept { return const_iterator{(basic_ring<value_type const, Vector>*)this, 0}; }
+    const_iterator cend() const noexcept { return const_iterator{(basic_ring<value_type const, Vector>*)this, static_cast<difference_type>(size())}; }
+
+    const_iterator begin() const noexcept { return cbegin(); }
+    const_iterator end() const noexcept { return cend(); }
 
     reverse_iterator rbegin() noexcept;
     reverse_iterator rend() noexcept;
 
-    gsl::span<T> span(size_t start, size_t count) noexcept
+    const_reverse_iterator rbegin() const noexcept;
+    const_reverse_iterator rend() const noexcept;
+
+    gsl::span<value_type> span(offset_type start, size_t count) noexcept
     {
         auto a = std::next(begin(), start);
         auto b = std::next(a, count);
         return gsl::make_span(a, b);
     }
 
-    gsl::span<T const> span(size_t start, size_t count) const noexcept
+    gsl::span<value_type const> span(offset_type start, size_t count) const noexcept
     {
         auto a = std::next(begin(), start);
         auto b = std::next(a, count);
@@ -121,8 +135,16 @@ public:
 
     void reserve(size_t capacity) { this->_storage.reserve(capacity); }
     void resize(size_t newSize) { this->_storage.resize(newSize); }
+    void clear() { this->_storage.clear(); this->_zero = 0; }
     void push_back(T const& _value) { this->_storage.push_back(_value); }
-    void emplace_back(T _value) { this->_storage.emplace_back(std::move(_value)); }
+
+    void push_back(T&& _value) { this->emplace_back(std::move(_value)); }
+
+    template <typename... Args>
+    void emplace_back(Args&& ... args)
+    {
+        this->_storage.emplace_back(std::forward<Args>(args)...);
+    }
 };
 
 /// Fixed-size basic_ring<T> implementation
@@ -140,7 +162,7 @@ struct RingIterator
     using reference = T&;
 
     basic_ring<T, Vector>* ring{};
-    std::size_t current{};
+    difference_type current{};
 
     RingIterator(RingIterator const&) = default;
     RingIterator& operator=(RingIterator const&) = default;
@@ -149,10 +171,22 @@ struct RingIterator
     RingIterator& operator=(RingIterator &&) noexcept = default;
 
     RingIterator& operator++() noexcept { ++current; return *this; }
-    RingIterator& operator++(int) noexcept { return ++(*this); }
+
+    RingIterator operator++(int) noexcept
+    {
+        auto old = *this;
+        ++(*this);
+        return old;
+    }
 
     RingIterator& operator--() noexcept { --current; return *this; }
-    RingIterator& operator--(int) noexcept { return --(*this); }
+
+    RingIterator operator--(int) noexcept
+    {
+        auto old = *this;
+        --(*this);
+        return old;
+    }
 
     RingIterator& operator+=(int n) noexcept { current += n; return *this; }
     RingIterator& operator-=(int n) noexcept { current -= n; return *this; }
@@ -169,8 +203,11 @@ struct RingIterator
     bool operator==(RingIterator const& rhs) const noexcept { return current == rhs.current; }
     bool operator!=(RingIterator const& rhs) const noexcept { return current != rhs.current; }
 
-    T& operator*() noexcept { return (*ring)[current % ring->size()]; }
-    T const& operator*() const noexcept { return (*ring)[current % ring->size()]; }
+    T& operator*() noexcept { return (*ring)[current]; }
+    T const& operator*() const noexcept { return (*ring)[current]; }
+
+    T* operator->() noexcept { return &(*ring)[current]; }
+    T* operator->() const noexcept { return &(*ring)[current]; }
 };
 // }}}
 
@@ -185,7 +222,7 @@ struct RingReverseIterator
     using reference = T&;
 
     basic_ring<T, Vector>* ring;
-    std::size_t current;
+    difference_type current;
 
     RingReverseIterator(RingReverseIterator const&) = default;
     RingReverseIterator& operator=(RingReverseIterator const&) = default;
@@ -216,6 +253,9 @@ struct RingReverseIterator
 
     T& operator*() noexcept { return (*ring)[ring->size() - current - 1]; }
     T const& operator*() const noexcept { return (*ring)[ring->size() - current - 1]; }
+
+    T* operator->() noexcept { return &(*ring)[ring->size() - current - 1]; }
+    T* operator->() const noexcept { return &(*ring)[ring->size() - current - 1]; }
 };
 // }}}
 
@@ -230,6 +270,18 @@ template <typename T, typename Vector>
 typename basic_ring<T, Vector>::reverse_iterator basic_ring<T, Vector>::rend() noexcept
 {
     return reverse_iterator{this, size()};
+}
+
+template <typename T, typename Vector>
+typename basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rbegin() const noexcept
+{
+    return const_reverse_iterator{(basic_ring<T const, Vector>*)this, 0};
+}
+
+template <typename T, typename Vector>
+typename basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::rend() const noexcept
+{
+    return const_reverse_iterator{(basic_ring<T const, Vector>*)this, static_cast<difference_type>(size())};
 }
 
 template <typename T, typename Vector>

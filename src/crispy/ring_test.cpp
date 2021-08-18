@@ -156,3 +156,18 @@ TEST_CASE("ring.fixed_size")
     REQUIRE(r[4] == 'e');
     REQUIRE(r[5] == 'f');
 }
+
+TEST_CASE("ring.offset_negative")
+{
+    ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    REQUIRE(r[-1] == 'c');
+    REQUIRE(r[-2] == 'b');
+    REQUIRE(r[-3] == 'a');
+}
