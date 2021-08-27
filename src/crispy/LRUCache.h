@@ -43,6 +43,11 @@ public:
         items_.clear();
     }
 
+    void touch(Key _key) noexcept
+    {
+        (void) try_get(_key);
+    }
+
     [[nodiscard]] bool contains(Key _key) const noexcept
     {
         return try_get(_key) != nullptr;
@@ -71,6 +76,14 @@ public:
     [[nodiscard]] Value& at(Key _key)
     {
         if (Value* p = try_get(_key))
+            return *p;
+
+        throw std::out_of_range("_key");
+    }
+
+    [[nodiscard]] Value const& at(Key _key) const
+    {
+        if (Value const* p = try_get(_key))
             return *p;
 
         throw std::out_of_range("_key");
@@ -158,6 +171,18 @@ public:
         for (Item const& item: items_)
             result[i++] = item.first;
         return result;
+    }
+
+    void erase(iterator _iter)
+    {
+        items_.erase(_iter);
+        itemByKeyMapping_.erase(_iter->first);
+    }
+
+    void erase(Key const& _key)
+    {
+        if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
+            erase(i->second);
     }
 
 private:
