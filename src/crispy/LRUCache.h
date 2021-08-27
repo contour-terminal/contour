@@ -39,7 +39,7 @@ public:
 
     void clear()
     {
-        lookupMap_.clear();
+        itemByKeyMapping_.clear();
         items_.clear();
     }
 
@@ -60,13 +60,13 @@ public:
 
     [[nodiscard]] Value* try_get(Key _key)
     {
-        if (auto i = lookupMap_.find(_key); i != lookupMap_.end())
+        if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
         {
             // value exists already, move it to the front, and return it
             Item item = std::move(*i->second);
             items_.emplace_front(std::move(item));
             items_.erase(i->second);
-            lookupMap_.insert_or_assign(_key, items_.begin());
+            itemByKeyMapping_.insert_or_assign(_key, items_.begin());
             return &items_.front().second;
         }
 
@@ -98,13 +98,13 @@ public:
 
         if (items_.size() == capacity_)
         {
-            auto i = lookupMap_.find(items_.back().first);
-            lookupMap_.erase(i);
+            auto i = itemByKeyMapping_.find(items_.back().first);
+            itemByKeyMapping_.erase(i);
             items_.pop_back();
         }
 
         items_.emplace_front(Item{_key, Value{}});
-        lookupMap_.emplace(_key, items_.begin());
+        itemByKeyMapping_.emplace(_key, items_.begin());
         return items_.front().second;
     }
 
@@ -120,13 +120,13 @@ public:
 
         if (items_.size() == capacity_)
         {
-            auto i = lookupMap_.find(items_.back().first);
-            lookupMap_.erase(i);
+            auto i = itemByKeyMapping_.find(items_.back().first);
+            itemByKeyMapping_.erase(i);
             items_.pop_back();
         }
 
         items_.emplace_front(Item{_key, _constructValue()});
-        lookupMap_.emplace(_key, items_.begin());
+        itemByKeyMapping_.emplace(_key, items_.begin());
         return true;
     }
 
@@ -138,19 +138,19 @@ public:
         return emplace(_key, _constructValue());
     }
 
-    [[nodiscard]] Value& emplace(Key _key, Value _value)
+    Value& emplace(Key _key, Value _value)
     {
         assert(!try_get(_key));
 
         if (items_.size() == capacity_)
         {
-            auto i = lookupMap_.find(items_.back().first);
-            lookupMap_.erase(i);
+            auto i = itemByKeyMapping_.find(items_.back().first);
+            itemByKeyMapping_.erase(i);
             items_.pop_back();
         }
 
         items_.emplace_front(Item{_key, std::move(_value)});
-        lookupMap_.emplace(_key, items_.begin());
+        itemByKeyMapping_.emplace(_key, items_.begin());
         return items_.front().second;
     }
 
@@ -187,7 +187,7 @@ public:
 
 private:
     std::list<Item> items_;
-    std::unordered_map<Key, typename std::list<Item>::iterator> lookupMap_;
+    std::unordered_map<Key, typename std::list<Item>::iterator> itemByKeyMapping_;
     std::size_t capacity_;
 };
 
