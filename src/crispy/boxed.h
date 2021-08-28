@@ -86,10 +86,10 @@ template <typename T, typename Tag> struct boxed
     }
 };
 
-template <typename T, typename U> constexpr T& operator++(boxed<T, U>& a) noexcept { ++a.value; return a; }
-template <typename T, typename U> constexpr T& operator++(boxed<T, U>& a, int) noexcept { a.value++; return a; }
-template <typename T, typename U> constexpr T& operator--(boxed<T, U>& a) noexcept { --a.value; return a; }
-template <typename T, typename U> constexpr T& operator--(boxed<T, U>& a, int) noexcept { a.value--; return a; }
+template <typename T, typename U> constexpr boxed<T, U>& operator++(boxed<T, U>& a) noexcept { ++a.value; return a; }
+template <typename T, typename U> constexpr boxed<T, U>& operator--(boxed<T, U>& a) noexcept { --a.value; return a; }
+template <typename T, typename U> constexpr boxed<T, U> operator++(boxed<T, U>& a, int) noexcept { auto old = a; a.value++; return old; }
+template <typename T, typename U> constexpr boxed<T, U> operator--(boxed<T, U>& a, int) noexcept { auto old = a; a.value--; return old; }
 template <typename T, typename U> constexpr T const& operator*(boxed<T, U> const& a) noexcept { return a.value; }
 template <typename T, typename U> constexpr bool operator<(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value < b.value; }
 template <typename T, typename U> constexpr bool operator>(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return a.value > b.value; }
@@ -102,6 +102,10 @@ template <typename T, typename U> constexpr boxed<T, U> operator+(boxed<T, U> co
 template <typename T, typename U> constexpr boxed<T, U> operator-(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value - b.value}; }
 template <typename T, typename U> constexpr boxed<T, U> operator*(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value * b.value}; }
 template <typename T, typename U> constexpr boxed<T, U> operator/(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value / b.value}; }
+template <typename T, typename U> constexpr boxed<T, U> operator%(boxed<T, U> const& a, boxed<T, U> const& b) noexcept { return boxed<T, U>{a.value % b.value}; }
+
+template <typename T, typename U> constexpr boxed<T, U> operator-(boxed<T, U> const& a) noexcept { return boxed<T, U>{-a.value}; }
+template <typename T, typename U> constexpr boxed<T, U> operator+(boxed<T, U> const& a) noexcept { return boxed<T, U>{+a.value}; }
 
 template <typename T, typename U> constexpr boxed<T, U> operator+(boxed<T, U> const& a, T b) noexcept { return boxed<T, U>{a.value + b}; }
 template <typename T, typename U> constexpr boxed<T, U> operator-(boxed<T, U> const& a, T b) noexcept { return boxed<T, U>{a.value - b}; }
@@ -112,6 +116,7 @@ template <typename T, typename U> constexpr boxed<T, U>& operator+=(boxed<T, U>&
 template <typename T, typename U> constexpr boxed<T, U>& operator-=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value -= b.value; return a; }
 template <typename T, typename U> constexpr boxed<T, U>& operator*=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value *= b.value; return a; }
 template <typename T, typename U> constexpr boxed<T, U>& operator/=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value /= b.value; return a; }
+template <typename T, typename U> constexpr boxed<T, U>& operator%=(boxed<T, U>& a, boxed<T, U> const& b) noexcept { a.value %= b.value; return a; }
 
 template <typename T, typename U> std::ostream& operator<<(std::ostream& os, boxed<T, U> const& v) { return os << v.value; }
 
@@ -164,6 +169,19 @@ namespace std {
         static Boxed denorm_min() noexcept { return Boxed{std::numeric_limits<A>::denorm_min()}; }
     };
 }
+
+namespace std // {{{
+{
+    template <typename T, typename U>
+    struct hash<crispy::boxed<T, U>>
+    {
+        constexpr size_t operator()(crispy::boxed<T, U> v) const noexcept
+        {
+            return std::hash<T>{}(v.value);
+        }
+    };
+}
+// }}}
 
 namespace fmt // {{{
 {
