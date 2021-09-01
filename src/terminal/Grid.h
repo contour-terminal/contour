@@ -383,11 +383,24 @@ class Cell {
             codepoints_[codepointCount_++] = _codepoint;
 #endif
 
-            if (_codepoint == 0xFE0F)
+            constexpr bool AllowWidthChange = false; // TODO: make configurable
+
+            auto const width = [&]() {
+                switch (_codepoint)
+                {
+                    case 0xFE0E:
+                        return 1;
+                    case 0xFE0F:
+                        return 2;
+                    default:
+                        return unicode::width(_codepoint);
+                }
+            }();
+
+            if (width != width_ && AllowWidthChange)
             {
-                uint8_t const newWidth = 2;
-                int const diff = newWidth - width_;
-                width_ = newWidth;
+                int const diff = width - width_;
+                width_ = static_cast<uint8_t>(width);
                 return diff;
             }
         }
