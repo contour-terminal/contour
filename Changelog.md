@@ -1,6 +1,7 @@
 ### 0.2.1 (unreleased)
 
 - Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."
+- Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
 
 ### 0.2.0 (2021-08-17)
 
