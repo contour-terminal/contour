@@ -167,25 +167,26 @@ TEST_CASE("AppendChar.emoji_VS16_fixed_width", "[screen]")
     screen.write(U"\u2139");
     REQUIRE(screen.cursorPosition().column == 2);
     screen.write(U"\uFE0F");
-    REQUIRE(screen.cursorPosition().column == 3);
+    REQUIRE(screen.cursorPosition().column == 2); // XXX actually, U+FE0F extends width to 2 instead of keeping current, but yeah
     screen.write(U"X");
-    REQUIRE(screen.cursorPosition().column == 4);
+    REQUIRE(screen.cursorPosition().column == 3);
     logScreenText(screen);
-    REQUIRE(screen.cursorPosition().column == 4);
+    REQUIRE(screen.cursorPosition().column == 3);
     REQUIRE(screen.cursorPosition().row == 1);
 
     // double-width emoji with VS16
     auto const& c1 = screen.at({1, 1});
     CHECK(c1.codepoints() == U"\u2139\uFE0F");
-    CHECK(c1.width() == 2); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
+    CHECK(c1.width() == 1); // XXX by default: do not change width (TODO: create test for optionally changing width by configuration)
 
     // character after the emoji
     auto const& c2 = screen.at({1, 2});
-    CHECK(c2.codepointCount() == 0);
+    CHECK(c2.codepoints() == U"X");
+    CHECK(c2.width() == 1);
 
     // character after the emoji
     auto const& c3 = screen.at({1, 3});
-    CHECK(c3.codepoints() == U"X");
+    CHECK(c3.codepoints() == U"");
     CHECK(c3.width() == 1);
 
     // character after X
