@@ -135,7 +135,7 @@ namespace
         // initialize color (set dynamic colors)
         String{ "Ic"_tcap, "initc"sv, "\033]4;%p1%d;rgb:%p2%{255}%*%{1000}%/%2.2X/%p3%{255}%*%{1000}%/%2.2X/%p4%{255}%*%{1000}%/%2.2X\033\\"sv },
         // Set all colors to original values
-        String{ "oc"_tcap, "oc"sv, "\033]104\007"sv },
+        String{ "oc"_tcap, "oc"sv, "\033]104\033\\"sv },
         // turn on blank mode (characters invisible)
         String{ "mk"_tcap, "invis"sv, "\033[8m"sv },     // turn on blank mode (characters invisible)
         String{ "kb"_tcap, "kbs"sv, "\177"sv }, // Backspace
@@ -171,7 +171,7 @@ namespace
         String{ "ct"_tcap, "tbc"sv, "\033[3g"sv },       // Clear all tab stops
         String{ "ts"_tcap, "tsl"sv, "\033]2;"sv },       // To status line (used to set window titles)
         String{ "fs"_tcap, "fsl"sv, "^G"sv },          // From status line (end window title string)
-        String{ "ds"_tcap, "dsl"sv,"" "\033]2;\007"sv },   // Disable status line (clear window title)
+        String{ "ds"_tcap, "dsl"sv,"" "\033]2;\033\\"sv },   // Disable status line (clear window title)
         String{ "cv"_tcap, "vpa"sv,"" "\033[%i%p1%dd"sv }, // Move to specified line
         String{ "ZH"_tcap, "sitm"sv, "\033[3m"sv },       // Enter italics mode
         String{ "ZR"_tcap, "ritm"sv,"" "\033[23m"sv },      // Leave italics mode
@@ -323,6 +323,27 @@ namespace
 	    String{ "kN"_tcap, "knp"sv, "\033[6~"sv },
 	    String{ "kP"_tcap, "kpp"sv, "\033[5~"sv },
 	    String{ "&8"_tcap, "kund"sv, ""sv },
+
+        // {{{ Extensions originally introduced by tmux.
+        //
+        String{ "Ss"_tcap, "Ss"sv, "\033[%p1%d q" },    // Set cursor style.
+        String{ "Se"_tcap, "Ss"sv, "\033[ q" },         // Reset cursor style.
+
+        // Set cursor color.
+        String{ "Cs"_tcap, "Cs"sv, "\033]12;%p1%s\033\\"sv },
+
+        // Reset cursor color.
+        // TODO String{ "Cr"_tcap, "Cr"sv, ""sv },
+
+        // Enable overline SGR attribute.
+        String{ Undefined, "Smol"sv, "\033[53m"sv  },
+
+        // Set styled underscore.
+        String{ Undefined, "Smulx"sv, "\E[4:%p1%dm"sv },
+
+        // Set underscore color.
+        String{ Undefined, "Setulc"sv, "\033[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
+        // }}}
 
         // RGB for the ncurses direct-color extension.
         // Only a terminfo name is provided, since termcap applica-
