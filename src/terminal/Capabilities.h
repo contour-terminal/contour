@@ -38,14 +38,14 @@ struct Code
         return fmt::format("{:02X}{:02X}", unsigned((code >> 8) & 0xFF), unsigned(code & 0xFF));
     }
 
-    constexpr Code() = default;
-    constexpr Code(Code const&) = default;
-    constexpr Code& operator=(Code const&) = default;
-    constexpr Code(Code &&) = default;
-    constexpr Code& operator=(Code &&) = default;
-    constexpr explicit Code(uint16_t _code) : code{_code} {}
+    constexpr Code() noexcept = default;
+    constexpr Code(Code const&) noexcept = default;
+    constexpr Code& operator=(Code const&) noexcept = default;
+    constexpr Code(Code &&) noexcept = default;
+    constexpr Code& operator=(Code &&) noexcept = default;
+    constexpr explicit Code(uint16_t _code) noexcept : code{_code} {}
 
-    constexpr explicit Code(std::string_view _code) : code{uint16_t(_code[0] << 8 | _code[1])}
+    constexpr explicit Code(std::string_view _code) noexcept : code{uint16_t(_code[0] << 8 | _code[1])}
     {
         code = uint16_t(_code[0] << 8 | _code[1]);
     }

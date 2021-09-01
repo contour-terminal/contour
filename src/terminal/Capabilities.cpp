@@ -135,7 +135,7 @@ namespace
         // initialize color (set dynamic colors)
         String{ "Ic"_tcap, "initc"sv, "\033]4;%p1%d;rgb:%p2%{255}%*%{1000}%/%2.2X/%p3%{255}%*%{1000}%/%2.2X/%p4%{255}%*%{1000}%/%2.2X\033\\"sv },
         // Set all colors to original values
-        String{ "oc"_tcap, "oc"sv, "\033]104\007"sv },
+        String{ "oc"_tcap, "oc"sv, "\033]104\033\\"sv },
         // turn on blank mode (characters invisible)
         String{ "mk"_tcap, "invis"sv, "\033[8m"sv },     // turn on blank mode (characters invisible)
         String{ "kb"_tcap, "kbs"sv, "\177"sv }, // Backspace
@@ -171,7 +171,7 @@ namespace
         String{ "ct"_tcap, "tbc"sv, "\033[3g"sv },       // Clear all tab stops
         String{ "ts"_tcap, "tsl"sv, "\033]2;"sv },       // To status line (used to set window titles)
         String{ "fs"_tcap, "fsl"sv, "^G"sv },          // From status line (end window title string)
-        String{ "ds"_tcap, "dsl"sv,"" "\033]2;\007"sv },   // Disable status line (clear window title)
+        String{ "ds"_tcap, "dsl"sv,"" "\033]2;\033\\"sv },   // Disable status line (clear window title)
         String{ "cv"_tcap, "vpa"sv,"" "\033[%i%p1%dd"sv }, // Move to specified line
         String{ "ZH"_tcap, "sitm"sv, "\033[3m"sv },       // Enter italics mode
         String{ "ZR"_tcap, "ritm"sv,"" "\033[23m"sv },      // Leave italics mode
