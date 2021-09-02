@@ -152,7 +152,7 @@ class BasicParserEvents : public ParserEvents {
   public:
     void error(std::string_view const&) override {}
     void print(char32_t) override {}
-    void print(std::string_view) override {};
+    void print(std::string_view) override {}
     void execute(char) override {}
     void clear() override {}
     void collect(char) override {}
