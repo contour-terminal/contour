@@ -55,10 +55,16 @@ public:
     explicit basic_ring(Vector storage): _storage(std::move(storage)) {}
 
     value_type const& operator[](offset_type i) const noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
-    value_type& operator[](offset_type i) noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
+    value_type& operator[](offset_type i) noexcept
+    {
+        return _storage[size_t(offset_type(_zero + size()) + i) % size()];
+    }
 
     value_type const& at(offset_type i) const noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
-    value_type& at(offset_type i) noexcept { return _storage[size_t(_zero + size() + i) % size()]; }
+    value_type& at(offset_type i) noexcept
+    {
+        return _storage[size_t(offset_type(_zero + size()) + i) % size()];
+    }
 
     Vector& storage() noexcept { return _storage; }
     Vector const& storage() const noexcept { return _storage; }
@@ -70,7 +76,10 @@ public:
     std::size_t size() const noexcept { return _storage.size(); }
 
     // positvie count rotates right, negative count rotates left
-    void rotate(int count) noexcept { _zero = (_zero + size() - count) % size(); }
+    void rotate(int count) noexcept
+    {
+        _zero = size_t(offset_type(_zero + size()) - count) % size();
+    }
 
     void rotate_left(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
     void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
@@ -134,7 +143,7 @@ public:
     explicit ring(size_t capacity): ring(capacity, T{}) {}
 
     void reserve(size_t capacity) { this->_storage.reserve(capacity); }
-    void resize(size_t newSize) { this->_storage.resize(newSize); }
+    void resize(size_t newSize) { this->rezero(); this->_storage.resize(newSize); }
     void clear() { this->_storage.clear(); this->_zero = 0; }
     void push_back(T const& _value) { this->_storage.push_back(_value); }
 
@@ -145,6 +154,8 @@ public:
     {
         this->_storage.emplace_back(std::forward<Args>(args)...);
     }
+
+    void pop_front() { this->_storage.erase(this->_storage.begin()); }
 };
 
 /// Fixed-size basic_ring<T> implementation
@@ -287,7 +298,7 @@ typename basic_ring<T, Vector>::const_reverse_iterator basic_ring<T, Vector>::re
 template <typename T, typename Vector>
 void basic_ring<T, Vector>::rezero()
 {
-    std::rotate(begin(), std::next(begin(), _zero), end()); // shift-left
+    std::rotate(begin(), std::next(begin(), static_cast<difference_type>(_zero)), end()); // shift-left
     _zero = 0;
 }
 
