@@ -339,7 +339,7 @@ namespace
         String{ Undefined, "Smol"sv, "\033[53m"sv  },
 
         // Set styled underscore.
-        String{ Undefined, "Smulx"sv, "\E[4:%p1%dm"sv },
+        String{ Undefined, "Smulx"sv, "\033[4:%p1%dm"sv },
 
         // Set underscore color.
         String{ Undefined, "Setulc"sv, "\033[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
