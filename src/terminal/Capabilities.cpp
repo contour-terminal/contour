@@ -178,6 +178,9 @@ namespace
         String{ "as"_tcap, "smacs"sv,"" "\033(0"sv }, // start alternate character set (P)
         String{ "ae"_tcap, "rmacs"sv,"" "\033(B"sv }, // end alternate character set (P)
 
+        // Synchronized Output
+        String{ Undefined, "Sync"sv, "\033[?2026%?%p1%{1}%-%tl%eh"sv },
+
         // non-standard: used by NeoVIM
         String{ Undefined, "setrgbf"sv, "\033[38:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbf: Set RGB foreground color
         String{ Undefined, "setrgbb"sv, "\033[48:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbb: Set RGB background color
