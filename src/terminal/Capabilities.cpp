@@ -345,7 +345,9 @@ namespace
         String{ Undefined, "Smulx"sv, "\033[4:%p1%dm"sv },
 
         // Set underscore color.
-        String{ Undefined, "Setulc"sv, "\033[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
+        String{ Undefined, "Setulc"sv, "\033[58:2::%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
+        // NB: the following would work, too.
+        // String{ Undefined, "Setulc"sv, "\033[58:2::%p1%d:%p2%d:%p3%dm"sv },
         // }}}
 
         // RGB for the ncurses direct-color extension.
