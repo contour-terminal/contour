@@ -4,6 +4,7 @@
 - Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).
 - Adds `Sync` capability entry to terminfo file.
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
+- Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.
 
 ### 0.2.0 (2021-08-17)
 

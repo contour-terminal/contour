@@ -223,7 +223,7 @@ namespace impl // {{{ some command generator helpers
         // We are at parameter index `i`.
         //
         // It may now follow:
-        // - ":2;r;g;b"         RGB color
+        // - ":2::r:g:b"        RGB color
         // - ":3:F:C:M:Y"       CMY color  (F is scaling factor, what is max? 100 or 255?)
         // - ":4:F:C:M:Y:K"     CMYK color (F is scaling factor, what is max? 100 or 255?)
         // - ":5:P"
@@ -233,12 +233,13 @@ namespace impl // {{{ some command generator helpers
         {
             switch (_seq.subparam(i, 0))
             {
-                case 2: // ":2:R:G:B"
-                    if (_seq.subParameterCount(i) == 4)
+                case 2: // ":2::R:G:B"
+                    if (_seq.subParameterCount(i) == 5)
                     {
-                        auto const r = _seq.subparam(i, 1);
-                        auto const g = _seq.subparam(i, 2);
-                        auto const b = _seq.subparam(i, 3);
+                        // NB: subparam(i, 1) ignored
+                        auto const r = _seq.subparam(i, 2);
+                        auto const g = _seq.subparam(i, 3);
+                        auto const b = _seq.subparam(i, 4);
                         if (r <= 255 && g <= 255 && b <= 255)
                         {
                             *pi = i + 1;
@@ -261,6 +262,7 @@ namespace impl // {{{ some command generator helpers
             }
         }
 
+        // Compatibility mode, colors using ';' instead of ':'.
 		if (i + 1 < _seq.parameterCount())
 		{
 			++i;

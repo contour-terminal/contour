@@ -182,8 +182,8 @@ namespace
         String{ Undefined, "Sync"sv, "\033[?2026%?%p1%{1}%-%tl%eh"sv },
 
         // non-standard: used by NeoVIM
-        String{ Undefined, "setrgbf"sv, "\033[38:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbf: Set RGB foreground color
-        String{ Undefined, "setrgbb"sv, "\033[48:2:%p1%d:%p2%d:%p3%dm"sv }, // setrgbb: Set RGB background color
+        String{ Undefined, "setrgbf"sv, "\033[38:2::%p1%d:%p2%d:%p3%dm"sv }, // setrgbf: Set RGB foreground color
+        String{ Undefined, "setrgbb"sv, "\033[48:2::%p1%d:%p2%d:%p3%dm"sv }, // setrgbb: Set RGB background color
 
         // Inputs (TODO: WIP!)
 	    String{ "*4"_tcap, "kDC"sv, "\033[3;2~"sv },
