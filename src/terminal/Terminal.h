@@ -270,6 +270,7 @@ class Terminal : public ScreenEvents {
 
     /// Tests whether some area has been selected.
     bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
+    bool isSelectionInProgress() const noexcept { return selector_ && selector_->state() != Selector::State::Complete; }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
     bool isSelectedAbsolute(Coordinate _coord) const noexcept

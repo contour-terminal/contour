@@ -403,7 +403,7 @@ void TerminalSession::sendMouseMoveEvent(int _row, int _column, terminal::Modifi
     else
         setDefaultCursor();
 
-    if (mouseHoveringHyperlink || handled || terminal().isSelectionAvailable()) // && only if selection has changed!
+    if (mouseHoveringHyperlink || handled || terminal().isSelectionInProgress()) // && only if selection has changed!
     {
         terminal().breakLoopAndRefreshRenderBuffer();
         scheduleRedraw();

@@ -572,7 +572,7 @@ bool Terminal::sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Tim
     speedClicks_ = 0;
 
     if (!positionChanged)
-        return true;
+        return false;
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
