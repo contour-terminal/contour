@@ -296,15 +296,9 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 {
     QSurfaceFormat format;
 
-    constexpr bool forceOpenGLES = (
-#if defined(__linux__)
-        true
-#else
-        false
-#endif
-    );
+    bool useOpenGLES = QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
 
-    if (forceOpenGLES || QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES)
+    if (useOpenGLES)
         format.setRenderableType(QSurfaceFormat::OpenGLES);
     else
         format.setRenderableType(QSurfaceFormat::OpenGL);
