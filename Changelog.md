@@ -6,6 +6,7 @@
 - Do not force OpenGL ES on Linux anymore.
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
 - Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.
+- Fixes SEGV with overflowing (Sixel) images (#409).
 
 ### 0.2.0 (2021-08-17)
 
