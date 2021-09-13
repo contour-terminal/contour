@@ -4,6 +4,7 @@
 - Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).
 - Adds `Sync` capability entry to terminfo file.
 - Do not force OpenGL ES on Linux anymore.
+- Fixes CPU load going up on mouse move inside terminal window (#407).
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
 - Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.
 - Fixes SEGV with overflowing (Sixel) images (#409).

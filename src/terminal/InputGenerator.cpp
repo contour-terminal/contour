@@ -751,13 +751,13 @@ bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifie
 
 bool InputGenerator::generateMouseMove(int _row, int _column, Modifier _modifier)
 {
-    if (!mouseProtocol_.has_value())
+    if (currentMousePosition_ == Coordinate{_row, _column})
         return false;
 
-    if (currentMousePosition_ == Coordinate{_row, _column})
-        return true;
-
     currentMousePosition_ = {_row, _column};
+
+    if (!mouseProtocol_.has_value())
+        return false;
 
     bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
 
