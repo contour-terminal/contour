@@ -2089,7 +2089,8 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
 #else
     auto const linesAvailable = LineCount(1 + *size_.lines - _topLeft.row);
     auto const linesToBeRendered = min(_gridSize.lines, linesAvailable);
-    auto const columnsToBeRendered = ColumnCount(min(*_gridSize.columns, *size_.columns - _topLeft.column - 1));
+    auto const columnsAvailable = *size_.columns - _topLeft.column + 1;
+    auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *_gridSize.columns));
     auto const gapColor = RGBAColor{}; // TODO: cursor_.graphicsRendition.backgroundColor;
 
     // TODO: make use of _imageOffset and _imageSize
