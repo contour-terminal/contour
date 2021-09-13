@@ -8,6 +8,7 @@
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
 - Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.
 - Fixes SEGV with overflowing (Sixel) images (#409).
+- Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).
 
 ### 0.2.0 (2021-08-17)
 

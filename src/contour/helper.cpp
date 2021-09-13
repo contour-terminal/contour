@@ -431,7 +431,6 @@ void applyResize(terminal::ImageSize _newPixelSize,
     auto const newScreenSize = screenSizeForPixels(_newPixelSize, _renderer.gridMetrics());
     terminal::Terminal& terminal = _session.terminal();
     terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
-    terminal::PageSize terminalSize = _session.profile().terminalSize;
 
     _renderer.setRenderSize(_newPixelSize);
     _renderer.setScreenSize(newScreenSize);
@@ -442,8 +441,8 @@ void applyResize(terminal::ImageSize _newPixelSize,
         return;
 
     auto const viewSize = terminal::ImageSize{
-        Width::cast_from(*cellSize.width * *terminalSize.columns),
-        Height::cast_from(*cellSize.height * *terminalSize.lines)
+        cellSize.width * newScreenSize.columns.as<Width>(),
+        cellSize.height * newScreenSize.lines.as<Height>()
     };
     terminal.resizeScreen(newScreenSize, viewSize);
     terminal.clearSelection();
