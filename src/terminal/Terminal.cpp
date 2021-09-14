@@ -549,8 +549,10 @@ void Terminal::clearSelection()
 
 bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Timestamp /*_now*/)
 {
-    auto const newPosition = Coordinate{_row, _column};
-    bool const positionChanged = newPosition != currentMousePosition_;
+    speedClicks_ = 0;
+
+    if (newPosition == currentMousePosition_)
+        return false;
 
     currentMousePosition_ = newPosition;
 
@@ -563,11 +565,6 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
         flushInput();
         return true;
     }
-
-    speedClicks_ = 0;
-
-    if (!positionChanged)
-        return false;
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
