@@ -560,22 +560,21 @@ namespace
 
 bool InputGenerator::generateMouse(MouseButton _button,
                                    Modifier _modifier,
-                                   int _row,
-                                   int _column,
+                                   Coordinate _pos,
                                    MouseEventType _eventType)
 {
     if (!mouseProtocol_.has_value())
         return false;
 
-    // std::cout << fmt::format("generateMouse({}/{}): button:{}, modifier:{}, at:{}:{}, type:{}\n",
+    // std::cout << fmt::format("generateMouse({}/{}): button:{}, modifier:{}, at:{}, type:{}\n",
     //                          mouseTransport_, *mouseProtocol_,
-    //                          _button, _modifier, _row, _column, _eventType);
+    //                          _button, _modifier, _pos, _eventType);
 
     switch (*mouseProtocol_)
     {
         case MouseProtocol::X10: // Old X10 mouse protocol
             if (_eventType == MouseEventType::Press)
-                mouseTransport(buttonX10(_button), modifierBits(_modifier), _row, _column, _eventType);
+                mouseTransport(buttonX10(_button), modifierBits(_modifier), _pos, _eventType);
             return true;
         case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and modifiers
             if (_eventType == MouseEventType::Press ||
@@ -584,7 +583,7 @@ bool InputGenerator::generateMouse(MouseButton _button,
                 auto const button = mouseTransport_ != MouseTransport::SGR
                                   ? buttonNormal(_button, _eventType)
                                   : buttonX10(_button);
-                mouseTransport(button, modifierBits(_modifier), _row, _column, _eventType);
+                mouseTransport(button, modifierBits(_modifier), _pos, _eventType);
             }
             return true;
         case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
@@ -601,7 +600,7 @@ bool InputGenerator::generateMouse(MouseButton _button,
                                               ? button + 0x20
                                               : button;
 
-                mouseTransport(draggableButton, modifierBits(_modifier), _row, _column, _eventType);
+                mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
                 return true;
             }
             return false;
@@ -616,7 +615,7 @@ bool InputGenerator::generateMouse(MouseButton _button,
                                               ? button + 0x20
                                               : button;
 
-                mouseTransport(draggableButton, modifierBits(_modifier), _row, _column, _eventType);
+                mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
             }
             return true;
         case MouseProtocol::HighlightTracking: // Highlight mouse tracking
@@ -626,35 +625,35 @@ bool InputGenerator::generateMouse(MouseButton _button,
     return false;
 }
 
-bool InputGenerator::mouseTransport(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _eventType)
+bool InputGenerator::mouseTransport(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
 {
     switch (mouseTransport_)
     {
         case MouseTransport::Default: // mode: 9
-            mouseTransportX10(_button, _modifier, _row, _column);
+            mouseTransportX10(_button, _modifier, _pos);
             return true;
         case MouseTransport::Extended: // mode: 1005
             // TODO (like Default but with UTF-8 encoded coords)
             return false;
         case MouseTransport::SGR:      // mode: 1006
-            return mouseTransportSGR(_button, _modifier, _row, _column, _eventType);
+            return mouseTransportSGR(_button, _modifier, _pos, _eventType);
         case MouseTransport::URXVT:    // mode: 1015
-            return mouseTransportURXVT(_button, _modifier, _row, _column, _eventType);
+            return mouseTransportURXVT(_button, _modifier, _pos, _eventType);
     }
 
     return false;
 }
 
-bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, int _row, int _column)
+bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos)
 {
     constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
     constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
 
-    if (_row <= MaxCoordValue && _column <= MaxCoordValue)
+    if (_pos.row <= MaxCoordValue && _pos.column <= MaxCoordValue)
     {
         uint8_t const button = SkipCount + static_cast<uint8_t>(_button | _modifier);
-        uint8_t const row = static_cast<uint8_t>(SkipCount + _row);
-        uint8_t const column = static_cast<uint8_t>(SkipCount + _column);
+        uint8_t const row = static_cast<uint8_t>(SkipCount + _pos.row);
+        uint8_t const column = static_cast<uint8_t>(SkipCount + _pos.column);
         append("\033[M");
         append(button);
         append(column);
@@ -665,37 +664,37 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, int _
         return false;
 }
 
-bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _eventType)
+bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
 {
     append("\033[<");
     append(static_cast<unsigned>(_button | _modifier));
     append(';');
-    append(static_cast<unsigned>(_column));
+    append(static_cast<unsigned>(_pos.column));
     append(';');
-    append(static_cast<unsigned>(_row));
+    append(static_cast<unsigned>(_pos.row));
     append(_eventType != MouseEventType::Release ? 'M' : 'm');
 
     return true;
 }
 
-bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _eventType)
+bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
 {
     if (_eventType == MouseEventType::Press)
     {
         append("\033[");
         append(static_cast<unsigned>(_button | _modifier));
         append(';');
-        append(static_cast<unsigned>(_column));
+        append(static_cast<unsigned>(_pos.column));
         append(';');
-        append(static_cast<unsigned>(_row));
+        append(static_cast<unsigned>(_pos.row));
         append('M');
     }
     return true;
 }
 
-bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, int _row, int _column)
+bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
-    currentMousePosition_ = {_row, _column};
+    currentMousePosition_ = _pos;
 
     if (!mouseProtocol_.has_value())
         return false;
@@ -736,25 +735,25 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
         if (!currentlyPressedMouseButtons_.count(_button))
             currentlyPressedMouseButtons_.insert(_button);
 
-    return generateMouse(_button, _modifier, _row, _column, MouseEventType::Press);
+    return generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Press);
 }
 
-bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifier, int _row, int _column)
+bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
-    currentMousePosition_ = {_row, _column};
+    currentMousePosition_ = _pos;
 
     if (auto i = currentlyPressedMouseButtons_.find(_button); i != currentlyPressedMouseButtons_.end())
         currentlyPressedMouseButtons_.erase(i);
 
-    return generateMouse(_button, _modifier, _row, _column, MouseEventType::Release);
+    return generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Release);
 }
 
-bool InputGenerator::generateMouseMove(int _row, int _column, Modifier _modifier)
+bool InputGenerator::generateMouseMove(Coordinate _pos, Modifier _modifier)
 {
-    if (currentMousePosition_ == Coordinate{_row, _column})
+    if (_pos == currentMousePosition_)
         return false;
 
-    currentMousePosition_ = {_row, _column};
+    currentMousePosition_ = _pos;
 
     if (!mouseProtocol_.has_value())
         return false;
@@ -768,8 +767,7 @@ bool InputGenerator::generateMouseMove(int _row, int _column, Modifier _modifier
         return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
                                             : MouseButton::Release,
                              _modifier,
-                             _row,
-                             _column,
+                             _pos,
                              MouseEventType::Drag);
 
     return false;

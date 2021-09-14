@@ -249,8 +249,9 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
     auto const cellSize = _session.display()->cellSize();
     auto const row = int{1 + (max(_event->pos().y(), 0) - MarginTop) /  cellSize.height.as<int>()};
     auto const col = int{1 + (max(_event->pos().x(), 0) - MarginLeft) / cellSize.width.as<int>()};
+    auto const pos = terminal::Coordinate{row, col};
 
-    _session.sendMouseMoveEvent(row, col,
+    _session.sendMouseMoveEvent(pos,
                                 makeModifier(_event->modifiers()),
                                 steady_clock::now());
 }

@@ -93,7 +93,7 @@ class TerminalSession: public terminal::Terminal::Events
     void sendKeyPressEvent(terminal::Key _key, terminal::Modifier _modifier, Timestamp _now);
     void sendCharPressEvent(char32_t _value, terminal::Modifier _modifier, Timestamp _now);
     void sendMousePressEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
-    void sendMouseMoveEvent(int _row, int _column, terminal::Modifier _modifier, Timestamp _now);
+    void sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Modifier _modifier, Timestamp _now);
     void sendMouseReleaseEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
     void sendFocusInEvent();
     void sendFocusOutEvent();
@@ -176,6 +176,7 @@ class TerminalSession: public terminal::Terminal::Events
     // state vars
     //
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
+    terminal::Coordinate currentMousePosition_ = terminal::Coordinate{};
     bool allowKeyMappings_ = true;
 };
 

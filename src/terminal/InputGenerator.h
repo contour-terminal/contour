@@ -270,9 +270,9 @@ class InputGenerator {
     bool generate(std::u32string const& _characterEvent, Modifier _modifier);
     bool generate(Key _key, Modifier _modifier);
     void generatePaste(std::string_view const& _text);
-    bool generateMousePress(MouseButton _button, Modifier _modifier, int _row, int _column);
-    bool generateMouseMove(int _row, int _column, Modifier _modifier);
-    bool generateMouseRelease(MouseButton _button, Modifier _modifier, int _row, int _column);
+    bool generateMousePress(MouseButton _button, Modifier _modifier, Coordinate _pos);
+    bool generateMouseMove(Coordinate _pos, Modifier _modifier);
+    bool generateMouseRelease(MouseButton _button, Modifier _modifier, Coordinate _pos);
 
     bool generateFocusInEvent();
     bool generateFocusOutEvent();
@@ -299,14 +299,13 @@ class InputGenerator {
   private:
     bool generateMouse(MouseButton _button,
                        Modifier _modifier,
-                       int _row,
-                       int _column,
+                       Coordinate _pos,
                        MouseEventType _eventType);
 
-    bool mouseTransport(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
-    bool mouseTransportX10(uint8_t _button, uint8_t _modifier, int _row, int _column);
-    bool mouseTransportSGR(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
-    bool mouseTransportURXVT(uint8_t _button, uint8_t _modifier, int _row, int _column, MouseEventType _type);
+    bool mouseTransport(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
+    bool mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos);
+    bool mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
+    bool mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
 
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);

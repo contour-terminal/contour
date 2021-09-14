@@ -100,7 +100,7 @@ class Terminal : public ScreenEvents {
     bool sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now);
     bool sendCharPressEvent(char32_t _char, Modifier _modifier, Timestamp _now);
     bool sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
-    bool sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Timestamp _now);
+    bool sendMouseMoveEvent(Coordinate _pos, Modifier _modifier, Timestamp _now);
     bool sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
