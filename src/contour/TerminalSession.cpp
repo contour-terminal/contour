@@ -395,7 +395,11 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
 
 void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Modifier _modifier, Timestamp _now)
 {
-    auto const handled = terminal().sendMouseMoveEvent(_row, _column, _modifier, _now);
+    if (_pos == currentMousePosition_)
+        return;
+
+    currentMousePosition_ = _pos;
+
     auto const handled = terminal().sendMouseMoveEvent(_pos, _modifier, _now);
 
     bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
@@ -692,7 +696,6 @@ void TerminalSession::operator()(actions::WriteScreen const& _event)
 void TerminalSession::setDefaultCursor()
 {
     using Type = terminal::ScreenType;
-    display_->setMouseCursorShape(MouseCursorShape::Hidden); // hide first so we force the change.
     switch (terminal().screen().bufferType())
     {
         case Type::Main:

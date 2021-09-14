@@ -176,6 +176,7 @@ class TerminalSession: public terminal::Terminal::Events
     // state vars
     //
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
+    terminal::Coordinate currentMousePosition_ = terminal::Coordinate{};
     bool allowKeyMappings_ = true;
 };
 
