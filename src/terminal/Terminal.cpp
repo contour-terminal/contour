@@ -490,9 +490,7 @@ bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Time
     respectMouseProtocol_ = mouseProtocolBypassModifier_ == Modifier::None
                          || !_modifier.contains(mouseProtocolBypassModifier_);
 
-    if (respectMouseProtocol_ && inputGenerator_.generateMousePress(
-                _button, _modifier,
-                currentMousePosition_.row, currentMousePosition_.column))
+    if (respectMouseProtocol_ && inputGenerator_.generateMousePress(_button, _modifier, currentMousePosition_))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
@@ -549,7 +547,7 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Timestamp /*_now*/)
+bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Timestamp /*_now*/)
 {
     auto const newPosition = Coordinate{_row, _column};
     bool const positionChanged = newPosition != currentMousePosition_;
@@ -559,12 +557,9 @@ bool Terminal::sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Tim
     bool changed = updateCursorHoveringState();
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (respectMouseProtocol_ && inputGenerator_.generateMouseMove(
-                                                    currentMousePosition_.row,
-                                                    currentMousePosition_.column,
-                                                    _modifier))
+    if (respectMouseProtocol_ && inputGenerator_.generateMouseMove(currentMousePosition_, _modifier))
     {
-        debuglog(InputTag).write("Sending mouse move at {}:{} {}.", _row, _column, _modifier);
+        debuglog(InputTag).write("Sending mouse move at {} {}.", newPosition, _modifier);
         flushInput();
         return true;
     }
@@ -600,11 +595,7 @@ bool Terminal::sendMouseMoveEvent(int _row, int _column, Modifier _modifier, Tim
 
 bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp /*_now*/)
 {
-    if (respectMouseProtocol_ && inputGenerator_.generateMouseRelease(
-                                                    _button,
-                                                    _modifier,
-                                                    currentMousePosition_.row,
-                                                    currentMousePosition_.column))
+    if (respectMouseProtocol_ && inputGenerator_.generateMouseRelease(_button, _modifier, currentMousePosition_))
     {
         debuglog(InputTag).write("Sending mouse release {} {} at {}.", _button, _modifier, currentMousePosition_);
         flushInput();

@@ -393,9 +393,10 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
     scheduleRedraw();
 }
 
-void TerminalSession::sendMouseMoveEvent(int _row, int _column, terminal::Modifier _modifier, Timestamp _now)
+void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Modifier _modifier, Timestamp _now)
 {
     auto const handled = terminal().sendMouseMoveEvent(_row, _column, _modifier, _now);
+    auto const handled = terminal().sendMouseMoveEvent(_pos, _modifier, _now);
 
     bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
     if (mouseHoveringHyperlink)
