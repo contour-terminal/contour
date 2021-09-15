@@ -1,12 +1,12 @@
 include(CPM)
 
-set(3rdparty_catch2_version "bf61a418cbc4d3b430e3d258c5287780944ad505" CACHE STRING "catch2: commit hash")
-set(3rdparty_fmt_version "561834650aa77ba37b15f7e5c9d5726be5127df9" CACHE STRING "fmt: commit hash")
-set(3rdparty_libunicode_version "a0f72919e4520ee1a02890ea77f19ff16c92d4f8" CACHE STRING "libunicode: commit hash")
+set(3rdparty_catch2_version "10fb93cce8cb878fdfe8faa118b531258db96a26" CACHE STRING "catch2: commit hash")
+set(3rdparty_fmt_version "d9fd695ac737f84f7de2d0a2aa346b25efb9afbf" CACHE STRING "fmt: commit hash")
+set(3rdparty_libunicode_version "ce74dda96e0f7b2a1648f770a36f802ca6141f22" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
-set(3rdparty_range_v3_version "0487cca29e352e8f16bbd91fda38e76e39a0ed28" CACHE STRING "range_v3: commit hash")
-set(3rdparty_yaml_cpp_version "79aa6d53e5718ca44bc01ef05fdda7a849d353e0" CACHE STRING "yaml-cpp: commit hash")
-set(3rdparty_termbenchpro_version "b028454119d28670784204a82fc32fa121199154" CACHE STRING "termbench-pro: version")
+set(3rdparty_range_v3_version "8f690283cc03146ad20514741cf69eafb325e974" CACHE STRING "range_v3: commit hash")
+set(3rdparty_yaml_cpp_version "6308112e54fe41a3bc1ceeb2b807f0d09f15a1e9" CACHE STRING "yaml-cpp: commit hash")
+set(3rdparty_termbenchpro_version "8f317315df288124f257ccc860d23b61703ddf47" CACHE STRING "termbench-pro: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
   set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")
@@ -20,7 +20,7 @@ if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
     NAME catch2
     VERSION ${3rdparty_catch2_version}
     URL https://github.com/catchorg/Catch2/archive/${3rdparty_catch2_version}.zip
-    URL_HASH SHA256=7521e7e7ee7f2d301a639bdfe4a95855fbe503417d73af0934f9d1933ca38407
+    URL_HASH SHA256=1545216747b1d0e4b9bd51843c61ac9a91b2d559977a3a93b9185ad8dbba6b82
     EXCLUDE_FROM_ALL YES
   )
 endif()
@@ -29,7 +29,7 @@ CPMAddPackage(
   NAME fmt
   VERSION ${3rdparty_fmt_version}
   URL https://github.com/fmtlib/fmt/archive/${3rdparty_fmt_version}.zip
-  URL_HASH SHA256=310ba642b8944ecfc798fea39bfe66b91fd3c649d29c4fdfc218b0b2bb6c23d7
+  URL_HASH SHA256=5c4e038b984161ddde7987472caf7e2ea864d49bede768038c6b93c9425ff218
   EXCLUDE_FROM_ALL YES
 )
 
@@ -37,7 +37,7 @@ CPMAddPackage(
   NAME range_v3
   VERSION ${3rdparty_range_v3_version}
   URL https://github.com/ericniebler/range-v3/archive/${3rdparty_range_v3_version}.zip
-  URL_HASH SHA256=e3992d30629d058e5918b9721d6fbdbc20f72b298cdf5cfb96e798fc4b5b54fe
+  URL_HASH SHA256=d866cb8f56aea491928af5cb1e7d2dbc4d46bd8a1a2a7b88194fb42b2c126e4b
   EXCLUDE_FROM_ALL YES
 )
 
@@ -50,7 +50,7 @@ CPMAddPackage(
   NAME yaml_cpp
   VERSION ${3rdparty_yaml_cpp_version}
   URL https://github.com/jbeder/yaml-cpp/archive/${3rdparty_yaml_cpp_version}.zip
-  URL_HASH SHA256=d1822ca08b55eb55aa3176ee83873b0ed40390c11068c5b98fe5268c54a6c85f
+  URL_HASH SHA256=a1d8401401de040fe78edd0e5499d37b72171864a58079f49cbcb7d5ca0b8a51
   EXCLUDE_FROM_ALL YES
 )
 
@@ -67,7 +67,7 @@ CPMAddPackage(
   NAME termbenchpro
   VERSION ${3rdparty_termbenchpro_version}
   URL https://github.com/contour-terminal/termbench-pro/archive/${3rdparty_termbenchpro_version}.zip
-  URL_HASH SHA256=6e3953cc0c7391f2497bb422c27f80b3a7bb72820ae8ab9a58bdf3c31c293c52
+  URL_HASH SHA256=3746308910343641c2ccb7327698fff65e5833fe9a760cb4eea92570c4854f25
   EXCLUDE_FROM_ALL YES
 )
 
@@ -75,7 +75,7 @@ CPMAddPackage(
   NAME libunicode
   VERSION ${3rdparty_libunicode_version}
   URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
-  URL_HASH SHA256=11c64919dbfb25b040b774e25ac8cfa7823216298bdd9131e21bd09556790dc1
+  URL_HASH SHA256=2253ef1aeaa4610068fd0c7eb2495cdc7f34617d4cbd0d8762f4d86d1bd76ac6
   EXCLUDE_FROM_ALL YES
 )
 
