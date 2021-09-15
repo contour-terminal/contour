@@ -28,7 +28,7 @@
 
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 
-set(CURRENT_CPM_VERSION 0.32.2)
+set(CURRENT_CPM_VERSION 0.33.0)
 
 if(CPM_DIRECTORY)
   if(NOT CPM_DIRECTORY STREQUAL CMAKE_CURRENT_LIST_DIR)
@@ -223,7 +223,7 @@ function(cpm_create_module_file Name)
   if(NOT CPM_DONT_UPDATE_MODULE_PATH)
     # erase any previous modules
     file(WRITE ${CPM_MODULE_PATH}/Find${Name}.cmake
-         "include(${CPM_FILE})\n${ARGN}\nset(${Name}_FOUND TRUE)"
+         "include(\"${CPM_FILE}\")\n${ARGN}\nset(${Name}_FOUND TRUE)"
     )
   endif()
 endfunction()
@@ -352,6 +352,68 @@ function(cpm_parse_add_package_single_arg arg outArgs)
       ${out}
       PARENT_SCOPE
   )
+endfunction()
+
+# Check that the working directory for a git repo is clean
+function(cpm_check_git_working_dir_is_clean repoPath gitTag isClean)
+
+  find_package(Git REQUIRED)
+
+  if(NOT GIT_EXECUTABLE)
+    # No git executable, assume directory is clean
+    set(${isClean}
+        TRUE
+        PARENT_SCOPE
+    )
+    return()
+  endif()
+
+  # check for uncommited changes
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} status --porcelain
+    RESULT_VARIABLE resultGitStatus
+    OUTPUT_VARIABLE repoStatus
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
+    WORKING_DIRECTORY ${repoPath}
+  )
+  if(resultGitStatus)
+    # not supposed to happen, assume clean anyway
+    message(WARNING "Calling git status on folder ${repoPath} failed")
+    set(${isClean}
+        TRUE
+        PARENT_SCOPE
+    )
+    return()
+  endif()
+
+  if(NOT "${repoStatus}" STREQUAL "")
+    set(${isClean}
+        FALSE
+        PARENT_SCOPE
+    )
+    return()
+  endif()
+
+  # check for commited changes
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} diff -s --exit-code ${gitTag}
+    RESULT_VARIABLE resultGitDiff
+    OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_QUIET
+    WORKING_DIRECTORY ${repoPath}
+  )
+
+  if(${resultGitDiff} EQUAL 0)
+    set(${isClean}
+        TRUE
+        PARENT_SCOPE
+    )
+  else()
+    set(${isClean}
+        FALSE
+        PARENT_SCOPE
+    )
+  endif()
+
 endfunction()
 
 # Download and add a package from source
@@ -544,6 +606,15 @@ function(CPMAddPackage)
       set(${CPM_ARGS_NAME}_BINARY_DIR ${CPM_FETCHCONTENT_BASE_DIR}/${lower_case_name}-build)
       set(${CPM_ARGS_NAME}_ADDED YES)
       set(${CPM_ARGS_NAME}_SOURCE_DIR ${download_directory})
+
+      if(DEFINED CPM_ARGS_GIT_TAG)
+        # warn if cache has been changed since checkout
+        cpm_check_git_working_dir_is_clean(${download_directory} ${CPM_ARGS_GIT_TAG} IS_CLEAN)
+        if(NOT ${IS_CLEAN})
+          message(WARNING "Cache for ${CPM_ARGS_NAME} (${download_directory}) is dirty")
+        endif()
+      endif()
+
       cpm_add_subdirectory(
         "${CPM_ARGS_NAME}" "${DOWNLOAD_ONLY}"
         "${${CPM_ARGS_NAME}_SOURCE_DIR}/${CPM_ARGS_SOURCE_SUBDIR}" "${${CPM_ARGS_NAME}_BINARY_DIR}"
@@ -587,12 +658,14 @@ function(CPMAddPackage)
     cpm_declare_fetch(
       "${CPM_ARGS_NAME}" "${CPM_ARGS_VERSION}" "${PACKAGE_INFO}" "${CPM_ARGS_UNPARSED_ARGUMENTS}"
     )
-    cpm_fetch_package("${CPM_ARGS_NAME}")
-    cpm_add_subdirectory(
-      "${CPM_ARGS_NAME}" "${DOWNLOAD_ONLY}"
-      "${${CPM_ARGS_NAME}_SOURCE_DIR}/${CPM_ARGS_SOURCE_SUBDIR}" "${${CPM_ARGS_NAME}_BINARY_DIR}"
-      "${CPM_ARGS_EXCLUDE_FROM_ALL}" "${CPM_ARGS_OPTIONS}"
-    )
+    cpm_fetch_package("${CPM_ARGS_NAME}" populated)
+    if(${populated})
+      cpm_add_subdirectory(
+        "${CPM_ARGS_NAME}" "${DOWNLOAD_ONLY}"
+        "${${CPM_ARGS_NAME}_SOURCE_DIR}/${CPM_ARGS_SOURCE_SUBDIR}" "${${CPM_ARGS_NAME}_BINARY_DIR}"
+        "${CPM_ARGS_EXCLUDE_FROM_ALL}" "${CPM_ARGS_OPTIONS}"
+      )
+    endif()
     cpm_get_fetch_properties("${CPM_ARGS_NAME}")
   endif()
 
@@ -750,7 +823,11 @@ endfunction()
 
 # downloads a previously declared package via FetchContent and exports the variables
 # `${PACKAGE}_SOURCE_DIR` and `${PACKAGE}_BINARY_DIR` to the parent scope
-function(cpm_fetch_package PACKAGE)
+function(cpm_fetch_package PACKAGE populated)
+  set(${populated}
+      FALSE
+      PARENT_SCOPE
+  )
   if(${CPM_DRY_RUN})
     message(STATUS "${CPM_INDENT} package ${PACKAGE} not fetched (dry run)")
     return()
@@ -758,11 +835,16 @@ function(cpm_fetch_package PACKAGE)
 
   FetchContent_GetProperties(${PACKAGE})
 
+  string(TOLOWER "${PACKAGE}" lower_case_name)
+
   if(NOT ${lower_case_name}_POPULATED)
     FetchContent_Populate(${PACKAGE})
+    set(${populated}
+        TRUE
+        PARENT_SCOPE
+    )
   endif()
 
-  string(TOLOWER "${PACKAGE}" lower_case_name)
   set(${PACKAGE}_SOURCE_DIR
       ${${lower_case_name}_SOURCE_DIR}
       PARENT_SCOPE
