@@ -133,7 +133,7 @@ namespace // {{{ helper
             << "  An internal error caused the terminal to crash ;-( 😭\r\n"
             << "-------------------------------------------------------\r\n"
             << "\r\n"
-            << "Please report this to https://github.com/contour-terminal/contour/isues/\r\n"
+            << "Please report this to https://github.com/contour-terminal/contour/issues/\r\n"
             << "\r\n"
             << crashLog
             << "========================================================================\r\n"
