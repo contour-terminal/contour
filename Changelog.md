@@ -3,6 +3,7 @@
 - Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."
 - Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).
 - Adds `Sync` capability entry to terminfo file.
+- Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Fixes CPU load going up on mouse move inside terminal window (#407).
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
