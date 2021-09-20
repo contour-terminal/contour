@@ -82,7 +82,10 @@ template <typename T, typename Tag> struct boxed
     template <typename Source>
     constexpr static boxed<T, Tag> cast_from(Source _value)
     {
-        return boxed<T, Tag>(static_cast<T>(_value));
+        if constexpr (is_boxed<Source>)
+            return boxed<T, Tag>{static_cast<T>(_value.value)};
+        else
+            return boxed<T, Tag>(static_cast<T>(_value));
     }
 };
 
