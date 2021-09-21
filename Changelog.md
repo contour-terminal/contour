@@ -4,6 +4,7 @@
 - Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).
 - Adds `Sync` capability entry to terminfo file.
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
+- Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).
 - Do not force OpenGL ES on Linux anymore.
 - Fixes CPU load going up on mouse move inside terminal window (#407).
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
