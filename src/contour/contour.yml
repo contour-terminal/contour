@@ -215,7 +215,7 @@ profiles:
 
         # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
         hyperlink_decoration:
-            default: dotted
+            normal: dotted
             hover: underline
 
 # Color Profiles
