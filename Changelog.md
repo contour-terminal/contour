@@ -11,6 +11,7 @@
 - Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.
 - Fixes SEGV with overflowing (Sixel) images (#409).
 - Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).
+- Fixes configuring a custom shell on OS/X (#425).
 
 ### 0.2.0 (2021-08-17)
 
