@@ -230,18 +230,17 @@ namespace // {{{ helper
             for (auto const& mapItem: _root)
             {
                 auto const name = mapItem.first.as<string>();
-                auto child = mapItem.second;
-                auto prefix = _prefix.empty() ? name : fmt::format("{}.{}", _prefix, name);
-                if (!_usedKeys.count(prefix))
-                {
-                    if (!crispy::startsWith(string_view(prefix), "x-"sv))
-                        errorlog().write(
-                            "Superfluous config key found: {}",
-                            escape(prefix)
-                        );
-                    continue;
-                }
+                auto const child = mapItem.second;
+                auto const prefix = _prefix.empty() ? name : fmt::format("{}.{}", _prefix, name);
                 checkForSuperfluousKeys(child, prefix, _usedKeys);
+                if (_usedKeys.count(prefix))
+                    continue;
+                if (crispy::startsWith(string_view(prefix), "x-"sv))
+                    continue;
+                errorlog().write(
+                    "Superfluous config key found: {}",
+                    escape(prefix)
+                );
             }
         }
         else if (_root.IsSequence())
