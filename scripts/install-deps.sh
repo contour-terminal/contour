@@ -41,7 +41,7 @@ main_linux()
     local ID=`lsb_release --id | awk '{print $NF}'`
 
     case "${ID}" in
-        Ubuntu)
+        Ubuntu|Neon)
             install_deps_ubuntu
             ;;
         *)
