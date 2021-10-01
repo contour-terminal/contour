@@ -12,6 +12,7 @@
 - Fixes SEGV with overflowing (Sixel) images (#409).
 - Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).
 - Fixes configuring a custom shell on OS/X (#425).
+- Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).
 
 ### 0.2.0 (2021-08-17)
 
