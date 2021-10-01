@@ -2047,8 +2047,8 @@ void Screen::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const columnCount = ColumnCount(unsigned(ceilf(float(*_pixelSize.width) / float(*cellPixelSize_.width))));
     auto const lineCount = LineCount(unsigned(ceilf(float(*_pixelSize.height) / float(*cellPixelSize_.height))));
     auto const extent = GridSize{lineCount, columnCount};
-    auto const sixelScrolling = isModeEnabled(DECMode::SixelScrolling);
-    auto const topLeft = sixelScrolling ? cursorPosition() : Coordinate{1, 1};
+    auto const autoScrollAtBottomMargin = isModeEnabled(DECMode::SixelScrolling); // If DECSDM is enabled, scrolling is meant to be disabled.
+    auto const topLeft = autoScrollAtBottomMargin ? cursorPosition() : Coordinate{1, 1};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
     auto const resizePolicy = ImageResize::NoResize;
@@ -2060,7 +2060,7 @@ void Screen::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
         renderImage(imageRef, topLeft, extent,
                     imageOffset, imageSize,
                     alignmentPolicy, resizePolicy,
-                    sixelScrolling);
+                    autoScrollAtBottomMargin);
 
     if (!sixelCursorConformance_)
         linefeed(topLeft.column);
@@ -2128,7 +2128,7 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
-    // AND iff sixel sixelScrolling  is enabled, then scroll as much as needed to render the remaining lines.
+    // AND iff sixel !sixelScrolling  is enabled, then scroll as much as needed to render the remaining lines.
     if (linesToBeRendered != _gridSize.lines && _autoScroll)
     {
         auto const remainingLineCount = _gridSize.lines - linesToBeRendered;
