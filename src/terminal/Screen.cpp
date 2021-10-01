@@ -2599,11 +2599,13 @@ void Screen::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, 
                     if (holds_alternative<ImageSize>(_value))
                     {
                         auto size = get<ImageSize>(_value);
-                        size.width = min(size.width, maxImageSize_.width);
-                        size.height = min(size.height, maxImageSize_.height);
+                        size.width = min(size.width, maxImageSizeLimit_.width);
+                        size.height = min(size.height, maxImageSizeLimit_.height);
                         maxImageSize_ = size;
-                        // No reply.
+                        reply("\033[?{};{};{};{}S", SixelItem, Success, size.width, size.height);
                     }
+                    else
+                        reply("\033[?{};{};{}S", SixelItem, Failure, 0);
                     break;
             }
             break;
