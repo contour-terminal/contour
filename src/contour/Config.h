@@ -204,7 +204,7 @@ struct Config {
 
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;
-    terminal::ImageSize maxImageSize = {terminal::Width(1280), terminal::Height(720)};
+    terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.
     int maxImageColorRegisters = 4096;
 
     std::set<std::string> experimentalFeatures;
