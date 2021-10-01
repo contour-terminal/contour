@@ -44,6 +44,9 @@ main_linux()
         Ubuntu)
             install_deps_ubuntu
             ;;
+        Neon)
+            install_deps_ubuntu
+            ;;
         *)
             echo "No automated installation of build dependencies available yet."
             ;;
