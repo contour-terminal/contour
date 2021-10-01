@@ -882,6 +882,11 @@ namespace impl // {{{ some command generator helpers
         if (!action.has_value())
             return ApplyResult::Invalid;
 
+        if (*item != XtSmGraphics::Item::NumberOfColorRegisters
+                && *action == XtSmGraphics::Action::SetToValue
+                && (!Pv || !Pu))
+            return ApplyResult::Invalid;
+
         auto const value = [&]() -> XtSmGraphics::Value {
             using Action = XtSmGraphics::Action;
             switch (*action) {
