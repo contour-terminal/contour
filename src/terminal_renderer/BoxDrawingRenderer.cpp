@@ -720,7 +720,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
             {
                 auto const x = int(double(y) * aInv);
                 for (auto const xi: iota(-_lineThickness / 2, _lineThickness / 2))
-                    image[y * *width + max(0, min(x + xi, unbox<int>(width)))] = 0xFF;
+                    image[y * *width + max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
             }
         }
         if (unsigned(box.diagonal_) & unsigned(Diagonal::Backward))
@@ -729,7 +729,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::build(uint8_t _id, ImageSize _size,
             {
                 auto const x = int(double(*height - y - 1) * aInv);
                 for (auto const xi: iota(-_lineThickness / 2, _lineThickness / 2))
-                    image[y * *width + max(0, min(x + xi, unbox<int>(width)))] = 0xFF;
+                    image[y * *width + max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
             }
         }
     }
