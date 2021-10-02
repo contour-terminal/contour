@@ -42,6 +42,8 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+#else
+#include <unistd.h>
 #endif
 
 auto constexpr MinimumFontSize = text::font_size{ 8.0 };
@@ -76,6 +78,44 @@ using actions::Action;
 
 namespace // {{{ helper
 {
+    vector<FileSystem::path> getTermInfoDirs()
+    {
+        auto locations = vector<FileSystem::path>{
+            getenv("HOME") + "/.terminfo"s,
+            "/usr/share/terminfo"s
+        };
+
+        if (auto const value = getenv("TERMINFO_DIRS"); value && *value)
+            for (auto const dir: crispy::split(string_view(value), ':'))
+                locations.push_back(FileSystem::path(string(dir)));
+
+        return locations;
+    }
+
+    string getDefaultTERM()
+    {
+#if defined(_WIN32)
+        return "contour";
+#else
+        auto locations = getTermInfoDirs();
+        auto const terms = vector<string>{
+            "contour",
+            "contour-latest",
+            "xterm-256color",
+            "xterm",
+            "vt340",
+            "vt220",
+        };
+
+        for (auto const& prefix: locations)
+            for (auto const& term: terms)
+                if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
+                    return term;
+
+        return "vt100";
+#endif
+    }
+
     template <typename String>
     inline std::string toLower(String const& _value)
     {
@@ -1030,7 +1070,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     // force some default env
     if (profile.shell.env.find("TERM") == profile.shell.env.end())
-        profile.shell.env["TERM"] = "xterm-256color";
+    {
+        profile.shell.env["TERM"] = getDefaultTERM();
+        debuglog(ConfigTag).write("Defaulting TERM to {}.", profile.shell.env["TERM"]);
+    }
+
     if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
         profile.shell.env["COLORTERM"] = "truecolor";
 

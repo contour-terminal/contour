@@ -433,7 +433,7 @@ string StaticDatabase::terminfo() const
 
     std::stringstream output;
 
-    output << "contour-latest|xterm-contour|ContourTTY,\n";
+    output << "contour|contour-latest|Contour Terminal Emulator,\n";
 
     for (auto const& cap: move(booleans) | actions::sort)
         if (!cap.name.empty() && cap.value)
