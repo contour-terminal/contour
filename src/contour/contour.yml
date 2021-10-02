@@ -28,10 +28,10 @@ images:
     # If enabled, the ANSI text cursor is placed at the position of the sixel graphics cursor after
     # image rendering, otherwise (if disabled) the cursor is placed underneath the image.
     sixel_cursor_conformance: true
-    # maximum width in pixels of an image to be accepted
-    max_width: 1280
-    # maximum height in pixels of an image to be accepted
-    max_height: 720
+    # maximum width in pixels of an image to be accepted (0 defaults to system screen pixel width)
+    max_width: 0
+    # maximum height in pixels of an image to be accepted (0 defaults to system screen pixel height)
+    max_height: 0
 
 # Terminal Profiles
 # -----------------

@@ -6,6 +6,7 @@
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).
 - Do not force OpenGL ES on Linux anymore.
+- Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
 - Fixes CPU load going up on mouse move inside terminal window (#407).
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
 - Fixes RGB color parsing via ':2::Pr:Pg:Pb' syntax and also adapt setrgbf & setrgbb accordingly.

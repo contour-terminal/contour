@@ -49,6 +49,10 @@
 using namespace std;
 using namespace std::placeholders;
 
+using terminal::Width;
+using terminal::Height;
+using terminal::ImageSize;
+
 #if defined(_MSC_VER)
 #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
@@ -217,6 +221,26 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
+
+    // {{{ fill config's maxImageSize if not yet set.
+    auto const defaultMaxImageSize = [&]() -> ImageSize {
+        QScreen const* screen = QGuiApplication::primaryScreen();
+        auto constexpr fallbackDefaultMaxImageSize = ImageSize{ Width(800), Height(600) };
+        if (!screen)
+            return fallbackDefaultMaxImageSize;
+        QSize const size = screen->size();
+        if (size.isEmpty())
+            return fallbackDefaultMaxImageSize;
+        return ImageSize{
+            Width::cast_from(size.width()),
+            Height::cast_from(size.height())
+        };
+    }();
+    if (config_.maxImageSize.width <= Width(0))
+        config_.maxImageSize.width = defaultMaxImageSize.width;
+    if (config_.maxImageSize.height <= Height(0))
+        config_.maxImageSize.height = defaultMaxImageSize.height;
+    // }}}
 
     terminalSession_ = make_unique<TerminalSession>(
         make_unique<terminal::PtyProcess>(
