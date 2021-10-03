@@ -1,13 +1,13 @@
 include(CPM)
 
-set(3rdparty_catch2_version "10fb93cce8cb878fdfe8faa118b531258db96a26" CACHE STRING "catch2: commit hash")
-set(3rdparty_fmt_version "d9fd695ac737f84f7de2d0a2aa346b25efb9afbf" CACHE STRING "fmt: commit hash")
-set(3rdparty_freetype_version "529158983ddde23ac422fc28939b0eb2bbaa04a1" CACHE STRING "freetype: commit hash")
-set(3rdparty_harfbuzz_version "6db4b56e05a6fd993b4f3b5f1d21acc12236361e" CACHE STRING "harfbuzz: commit hash")
-set(3rdparty_libunicode_version "ce74dda96e0f7b2a1648f770a36f802ca6141f22" CACHE STRING "libunicode: commit hash")
+set(3rdparty_catch2_version "3e9c6fec222a5b307a712ba47dc4e930b37ad4e5" CACHE STRING "catch2: commit hash")
+set(3rdparty_fmt_version "0a985fd4c6115eae8a455b110a747b265d1af2d1" CACHE STRING "fmt: commit hash")
+set(3rdparty_freetype_version "3a65f1a2152b4222ec1e97f6a3229d8fd04c76aa" CACHE STRING "freetype: commit hash")
+set(3rdparty_harfbuzz_version "794b00db4b63e8314aee96c23a20ecb878452eef" CACHE STRING "harfbuzz: commit hash")
+set(3rdparty_libunicode_version "40e520d17febaca90e49d4d0db1252a1d345a91d" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
 set(3rdparty_range_v3_version "8f690283cc03146ad20514741cf69eafb325e974" CACHE STRING "range_v3: commit hash")
-set(3rdparty_yaml_cpp_version "6308112e54fe41a3bc1ceeb2b807f0d09f15a1e9" CACHE STRING "yaml-cpp: commit hash")
+set(3rdparty_yaml_cpp_version "0d9dbcfe8c0df699aed8ae050dddaca614178fb1" CACHE STRING "yaml-cpp: commit hash")
 set(3rdparty_termbenchpro_version "8f317315df288124f257ccc860d23b61703ddf47" CACHE STRING "termbench-pro: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
@@ -22,7 +22,7 @@ if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
     NAME catch2
     VERSION ${3rdparty_catch2_version}
     URL https://github.com/catchorg/Catch2/archive/${3rdparty_catch2_version}.zip
-    URL_HASH SHA256=1545216747b1d0e4b9bd51843c61ac9a91b2d559977a3a93b9185ad8dbba6b82
+    URL_HASH SHA256=d39352486878820a39cbe6f3500f7df8e75eb37e606e733dde234b4ac6e0823c
     EXCLUDE_FROM_ALL YES
   )
 endif()
@@ -31,7 +31,7 @@ CPMAddPackage(
   NAME fmt
   VERSION ${3rdparty_fmt_version}
   URL https://github.com/fmtlib/fmt/archive/${3rdparty_fmt_version}.zip
-  URL_HASH SHA256=5c4e038b984161ddde7987472caf7e2ea864d49bede768038c6b93c9425ff218
+  URL_HASH SHA256=e082c3af5cadc8afc544a5853c75e285270ee46406d7cacf22fe80fd404ea66a
   EXCLUDE_FROM_ALL YES
 )
 
@@ -52,7 +52,7 @@ CPMAddPackage(
   NAME yaml_cpp
   VERSION ${3rdparty_yaml_cpp_version}
   URL https://github.com/jbeder/yaml-cpp/archive/${3rdparty_yaml_cpp_version}.zip
-  URL_HASH SHA256=a1d8401401de040fe78edd0e5499d37b72171864a58079f49cbcb7d5ca0b8a51
+  URL_HASH SHA256=7c13c96ffcce90dd734b945db7f1c13d0af15add912ce14cc5943bd68626b6cf
   EXCLUDE_FROM_ALL YES
 )
 
@@ -77,7 +77,7 @@ CPMAddPackage(
   NAME libunicode
   VERSION ${3rdparty_libunicode_version}
   URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
-  URL_HASH SHA256=2253ef1aeaa4610068fd0c7eb2495cdc7f34617d4cbd0d8762f4d86d1bd76ac6
+  URL_HASH SHA256=d660e5d701917aa105323cb55015c2d5076c66e004e97e522d44345916acd6bb
   EXCLUDE_FROM_ALL YES
 )
 
@@ -98,13 +98,13 @@ if(CONTOUR_BUILD_WITH_EMBEDDED_FT_HB)
     NAME harfbuzz
     VERSION ${3rdparty_harfbuzz_version}
     URL https://github.com/harfbuzz/harfbuzz/archive/${3rdparty_harfbuzz_version}.zip
-    URL_HASH SHA256=30e641704ae260f6a4a20b6604f9e8711f28d7c9d13ccdc7dd918d3575926221
+    URL_HASH SHA256=4491cd826fb4ad0f43ceb9fcc8ac769d508048ff7b25be1ae1bc0da938dd522e
   )
 
   CPMAddPackage(
     NAME freetype
     VERSION ${3rdparty_freetype_version}
     URL https://github.com/freetype/freetype/archive/${3rdparty_freetype_version}.zip
-    URL_HASH SHA256=eaf8dce6b67ff22edcfa1de47b34bbdca4bb9d3b3c3020d3d836bfa74500cad0
+    URL_HASH SHA256=cbdc961aae4fef1f6ca4274e32e016b27098807d3058485cb2466bda1b6e7b8b
   )
 endif()
