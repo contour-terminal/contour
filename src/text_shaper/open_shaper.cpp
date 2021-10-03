@@ -472,6 +472,10 @@ namespace // {{{ helper
                                             static_cast<FT_UInt>(_dpi.y)); ec != FT_Err_Ok)
             {
                 debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n", size, _dpi, _source, ftErrorStr(ec));
+                // If we cannot set the char-size, this font is most likely unusable for us.
+                // Specifically PCF files fail here and I do not know how to deal with them in that
+                // case, so do not use this font file at all.
+                return nullopt;
             }
         }
 
