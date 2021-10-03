@@ -35,17 +35,20 @@ class BoxDrawingRenderer : public Renderable {
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
 
+    bool renderable(char32_t codepoint) const noexcept;
+
     /// Renders boxdrawing character.
     ///
-    /// @param _char the boxdrawing character's codepoint modulo 0x2500 (a value between 0x00 and 0x7F).
-    bool render(LinePosition _line, ColumnPosition _column, uint8_t _id, RGBColor _color);
+    /// @param _char the boxdrawing character's codepoint.
+    bool render(LinePosition _line, ColumnPosition _column, char32_t codepoint, RGBColor _color);
 
   private:
-    using TextureAtlas = atlas::MetadataTextureAtlas<uint8_t, int>;
+    using TextureAtlas = atlas::MetadataTextureAtlas<char32_t, int>;
     using DataRef = TextureAtlas::DataRef;
 
-    std::optional<DataRef> getDataRef(uint8_t _id);
-    std::optional<atlas::Buffer> build(uint8_t _id, ImageSize _size, int _lineThickness);
+    std::optional<DataRef> getDataRef(char32_t codepoint);
+    std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint, ImageSize _size, int _lineThickness);
+    std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 
     // private fields
     //

@@ -130,20 +130,23 @@ void TextRenderer::renderCell(RenderCell const& _cell)
     bool const isBoxDrawingCharacter =
         fontDescriptions_.builtinBoxDrawing &&
         _cell.codepoints.size() == 1 &&
-        crispy::ascending(char32_t{0x2500}, codepoints[0], char32_t{0x257F});
+        boxDrawingRenderer_.renderable(codepoints[0]);
 
     if (isBoxDrawingCharacter)
     {
-        boxDrawingRenderer_.render(
+        auto const success = boxDrawingRenderer_.render(
             LinePosition::cast_from(_cell.position.row),
             ColumnPosition::cast_from(_cell.position.column),
-            codepoints[0] % 0x2500,
+            codepoints[0],
             _cell.foregroundColor
         );
-        if (!forceCellGroupSplit_)
-            endSequence();
-        forceCellGroupSplit_ = true;
-        return;
+        if (success)
+        {
+            if (!forceCellGroupSplit_)
+                endSequence();
+            forceCellGroupSplit_ = true;
+            return;
+        }
     }
 
     if (forceCellGroupSplit_ || (_cell.flags & CellFlags::CellSequenceStart))
