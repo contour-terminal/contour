@@ -779,7 +779,7 @@ void open_shaper::shape(font_key _font,
 
     // Reshape each cluster individually.
     _result.clear();
-    int cluster = _clusters[0];
+    auto cluster = _clusters[0];
     int start = 0;
     for (int i = 1; i < _clusters.size(); ++i)
     {
