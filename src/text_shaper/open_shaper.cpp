@@ -796,13 +796,13 @@ void open_shaper::shape(font_key _font,
         }
     }
 
+    // shape last cluster
     auto const end = _clusters.size();
-    if (d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont,
+    d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont,
                                 _script, _presentation,
                                 _codepoints.substr(start, end - start),
                                 _clusters.subspan(start, end - start),
-                                _result))
-        return;
+                                _result);
 
     // last resort
     replaceMissingGlyphs(fontInfo.ftFace.get(), _result);
