@@ -2,8 +2,8 @@ include(CPM)
 
 set(3rdparty_catch2_version "3e9c6fec222a5b307a712ba47dc4e930b37ad4e5" CACHE STRING "catch2: commit hash")
 set(3rdparty_fmt_version "0a985fd4c6115eae8a455b110a747b265d1af2d1" CACHE STRING "fmt: commit hash")
-set(3rdparty_freetype_version "3a65f1a2152b4222ec1e97f6a3229d8fd04c76aa" CACHE STRING "freetype: commit hash")
-set(3rdparty_harfbuzz_version "794b00db4b63e8314aee96c23a20ecb878452eef" CACHE STRING "harfbuzz: commit hash")
+set(3rdparty_freetype_version "bbab0a675ef29b0eaa96054a69ada63fc3051c51" CACHE STRING "freetype: commit hash")
+set(3rdparty_harfbuzz_version "d58f1685cee7fef904f4149561a2dcf5ec519ac3" CACHE STRING "harfbuzz: commit hash")
 set(3rdparty_libunicode_version "40e520d17febaca90e49d4d0db1252a1d345a91d" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
 set(3rdparty_range_v3_version "8f690283cc03146ad20514741cf69eafb325e974" CACHE STRING "range_v3: commit hash")
@@ -98,13 +98,13 @@ if(CONTOUR_BUILD_WITH_EMBEDDED_FT_HB)
     NAME harfbuzz
     VERSION ${3rdparty_harfbuzz_version}
     URL https://github.com/harfbuzz/harfbuzz/archive/${3rdparty_harfbuzz_version}.zip
-    URL_HASH SHA256=4491cd826fb4ad0f43ceb9fcc8ac769d508048ff7b25be1ae1bc0da938dd522e
+    URL_HASH SHA256=cfff8c1703536f61b0c90f82ae1ca3e62e43bdf99c07504a3d107fd8ec808cbc
   )
 
   CPMAddPackage(
     NAME freetype
     VERSION ${3rdparty_freetype_version}
     URL https://github.com/freetype/freetype/archive/${3rdparty_freetype_version}.zip
-    URL_HASH SHA256=cbdc961aae4fef1f6ca4274e32e016b27098807d3058485cb2466bda1b6e7b8b
+    URL_HASH SHA256=d3f4d2ed447d09263eaf0fb1dccedee67fb75664b28b4b70c72c50b6c5d2223e
   )
 endif()
