@@ -1033,6 +1033,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);
     tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
 
+    tryLoadChild(_usedKeys, _doc, basePath, "wm_class", profile.wmClass);
+
     if (auto args = _doc["profiles"][_name]["arguments"]; args && args.IsSequence())
     {
         _usedKeys.emplace(fmt::format("{}.arguments", basePath));
