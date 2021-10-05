@@ -124,6 +124,8 @@ struct TerminalProfile {
     bool fullscreen = false;
     double refreshRate = 0.0; // 0=auto
 
+    std::string wmClass;
+
     terminal::PageSize terminalSize = {terminal::LineCount(10), terminal::ColumnCount(40)};
     terminal::VTType terminalId = terminal::VTType::VT525;
 

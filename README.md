@@ -41,7 +41,7 @@ for power users with a modern feature mindset.
   Usage:
 
     contour [terminal] [config STRING] [profile STRING] [debug STRING] [live-config]
-                       [working-directory STRING] [PROGRAM ARGS...]
+                       [working-directory STRING] [class STRING] [PROGRAM ARGS...]
     contour help
     contour version
     contour parser-table
@@ -61,6 +61,7 @@ for power users with a modern feature mindset.
             [debug STRING]              Enables debug logging, using a comma seperated list of tags.
             [live-config]               Enables live config reloading. [default: false]
             [working-directory STRING]  Sets initial working directory. [default: .]
+            [class STRING]              Sets the WM_CLASS property of the window. [default: contour]
             [PROGRAM ARGS...]           Executes given program instead of the configuration provided one.
 
 ```

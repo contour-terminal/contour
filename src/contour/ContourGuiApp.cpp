@@ -67,6 +67,7 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma (,) seperated list of tags.", "TAGS"},
                 CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
                 CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config).", "DIRECTORY"},
+                CLI::Option{"class", CLI::Value{""s}, "Sets the class part of the WM_CLASS property for the window (overriding config).", "WM_CLASS"},
             },
             CLI::CommandList{},
             CLI::CommandSelect::Implicit,
@@ -162,7 +163,12 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
              shell.arguments.push_back(string(_flags.verbatim.at(i)));
     }
 
-    QCoreApplication::setApplicationName("contour");
+
+    if (auto const wmClass = _flags.get<string>("contour.terminal.class"); !wmClass.empty())
+        config.profile(profileName)->wmClass = wmClass;
+
+    auto appName = QString::fromStdString(config.profile(profileName)->wmClass);
+    QCoreApplication::setApplicationName(appName);
     QCoreApplication::setOrganizationName("contour");
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
 
