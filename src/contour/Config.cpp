@@ -934,22 +934,24 @@ void softLoadFont(UsedKeys& _usedKeys,
     }
     else if (node.IsMap())
     {
+        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
+
         if (node["family"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "family"));
+            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "family"));
             _store.familyName = node["family"].as<string>();
         }
 
         if (node["slant"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
+            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "slant"));
             if (auto const p = text::make_font_slant(node["slant"].as<string>()))
                 _store.slant = p.value();
         }
 
         if (node["weight"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
+            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "weight"));
             if (auto const p = text::make_font_weight(node["weight"].as<string>()))
                 _store.weight = p.value();
         }
