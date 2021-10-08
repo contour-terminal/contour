@@ -24,6 +24,14 @@
 
 namespace terminal::renderer {
 
+// TODO(pr) I think I should cincerely rename this class to
+// something more suitable. it's not about box-drawing alone anymore,
+// but about manually rendering anything that needs to properly fit
+// into the grid cell.
+// - box drawing symbols
+// - symbols for legacy computing
+// - mathematical symbols
+
 /// Takes care of rendering the text cursor.
 class BoxDrawingRenderer : public Renderable {
   public:

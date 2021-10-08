@@ -3,9 +3,9 @@
 - Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."
 - Adds some more tmux-extension entries to the terminfo database that are supported by contour (`Ss`, `Se`, `Cs`, `Smol`, `Smulx`, `Setulc`).
 - Adds `Sync` capability entry to terminfo file.
-- Adds more pixel-perfect graphical codepoints: U+23A1..U+23A6, U+2580..U+2590, U+2594..U+259F, U+1FB00..U+1FB3B, U+1FB70..U+1FB8B.
-- Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
+- Adds many more pixel-perfect graphical characters: `23A1`..`23A6`, `2580`..`2590`, `2594`..`259F`, `1FB00`..`1FB3B`, `1FB3C`..`1FBAF`.
 - Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).
+- Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
 - Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.

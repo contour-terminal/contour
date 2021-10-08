@@ -23,11 +23,29 @@ constexpr bool operator<(ImageSize a, ImageSize b) noexcept
     return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
+inline ImageSize operator+(ImageSize a, ImageSize b) noexcept
+{
+    return ImageSize{a.width + b.width, a.height + b.height};
+}
+
+inline ImageSize operator-(ImageSize a, ImageSize b) noexcept
+{
+    return ImageSize{a.width - b.width, a.height - b.height};
+}
+
 inline ImageSize operator*(ImageSize _a, double _scalar) noexcept
 {
     return ImageSize{
         Width::cast_from(ceil(double(*_a.width) * _scalar)),
         Height::cast_from(ceil(double(*_a.height) * _scalar))
+    };
+}
+
+inline ImageSize operator/(ImageSize _a, double _scalar) noexcept
+{
+    return ImageSize{
+        Width::cast_from(ceil(double(*_a.width) / _scalar)),
+        Height::cast_from(ceil(double(*_a.height) / _scalar))
     };
 }
 
