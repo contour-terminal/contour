@@ -157,6 +157,23 @@ class shaper {
 
 namespace fmt { // {{{
     template <>
+    struct formatter<text::bitmap_format> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(text::bitmap_format value, FormatContext& ctx)
+        {
+            switch (value)
+            {
+                case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
+                case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
+                case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
+                default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+            }
+        }
+    };
+
+    template <>
     struct formatter<text::glyph_position> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
