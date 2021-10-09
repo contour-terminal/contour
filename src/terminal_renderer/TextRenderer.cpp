@@ -214,18 +214,17 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
             if (optional<DataRef> const dataRef = ta->get(_id); dataRef.has_value())
                 return dataRef;
 
-    bool const colored = _presentation == unicode::PresentationStyle::Emoji;
-
     auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
     if (!theGlyphOpt.has_value())
         return nullopt;
 
     text::rasterized_glyph& glyph = theGlyphOpt.value();
-    auto const numCells = colored ? 2u : 1u; // is this the only case - with colored := Emoji presentation?
+    auto const numCells = _presentation == unicode::PresentationStyle::Emoji ? 2u : 1u; // is this the only case - with colored := Emoji presentation?
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    debuglog(TextRendererTag).write("Glyph metrics: {}", glyph);
+    if (crispy::debugtag::enabled(TextRendererTag))
+        debuglog(TextRendererTag).write("Rasterized glyph: {} ({})", glyph, fontDescriptions_.renderMode);
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
@@ -280,36 +279,36 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     auto const yMax = gridMetrics_.baseline + glyph.position.y;
     auto const yMin = yMax - glyph.size.height.as<int>();
 
-    auto const ratio = !colored
+    auto const ratio =  _presentation != unicode::PresentationStyle::Emoji
                      ? 1.0f
                      : max(float(gridMetrics_.cellSize.width.as<int>() * numCells) / float(glyph.size.width.as<int>()),
                            float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
 
     auto const yOverflow = gridMetrics_.cellSize.height.as<int>() - yMax;
     if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write("insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+        debuglog(TextRendererTag).write("insert glyph {} id {} {} ratio:{} yOverflow({}, {})",
+                                        glyph,
                                         _id.index,
-                                        colored ? "emoji" : "text",
+                                        _presentation,
                                         ratio,
                                         yOverflow < 0 ? yOverflow : 0,
-                                        yMin < 0 ? yMin : 0,
-                                        glyph);
+                                        yMin < 0 ? yMin : 0);
 
-    auto && [userFormat, targetAtlas] = [this](bool _colorFont, text::bitmap_format _glyphFormat) -> pair<int, TextureAtlas&> { // {{{
-        // this format ID is used by the fragment shader to select the right texture atlas
-        if (_colorFont)
-            return {1, *colorAtlas_};
-        switch (_glyphFormat)
+    auto && [userFormat, targetAtlas] =
+        [this, glyphFormat = glyph.format]
+        () -> pair<int, TextureAtlas&>
         {
-            case text::bitmap_format::rgba:
-                return {1, *colorAtlas_};
-            case text::bitmap_format::rgb:
-                return {2, *lcdAtlas_};
-            case text::bitmap_format::alpha_mask:
-                return {0, *monochromeAtlas_};
-        }
-        return {0, *monochromeAtlas_};
-    }(colored, glyph.format); // }}}
+            switch (glyphFormat)
+            {
+                case text::bitmap_format::rgba:
+                    return {1, *colorAtlas_};
+                case text::bitmap_format::rgb:
+                    return {2, *lcdAtlas_};
+                case text::bitmap_format::alpha_mask:
+                    return {0, *monochromeAtlas_};
+            }
+            return {0, *monochromeAtlas_};
+        }();
 
     glyphToTextureMapping_[_id] = glyph.format;
 
@@ -339,7 +338,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
                                         targetAtlas.allocator().name(),
                                         _id.index,
-                                        colored ? "emoji" : "text",
+                                        _presentation,
                                         ratio,
                                         yOverflow < 0 ? yOverflow : 0,
                                         yMin < 0 ? yMin : 0,
