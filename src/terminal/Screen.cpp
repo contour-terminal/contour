@@ -1725,7 +1725,11 @@ void Screen::setGraphicsRendition(GraphicsRendition _rendition)
             cursor_.graphicsRendition.styles &= ~CellFlags::Italic;
             break;
         case GraphicsRendition::NoUnderline:
-            cursor_.graphicsRendition.styles &= ~CellFlags::Underline;
+            cursor_.graphicsRendition.styles &= ~(CellFlags::Underline |
+                                                  CellFlags::DoublyUnderlined |
+                                                  CellFlags::CurlyUnderlined |
+                                                  CellFlags::DottedUnderline |
+                                                  CellFlags::DashedUnderline);
             break;
         case GraphicsRendition::NoBlinking:
             cursor_.graphicsRendition.styles &= ~CellFlags::Blinking;

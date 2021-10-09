@@ -9,6 +9,7 @@
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
 - Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.
+- Fixes SGR 24 to remove any kind of underline (#451).
 - Fixes font fallback for `open_shaper` where in rare cases the text was not rendered at all.
 - Fixes CPU load going up on mouse move inside terminal window (#407).
 - Fixes terminfo entries accidentally double-escaping `\E` to `\\E` (#399).
