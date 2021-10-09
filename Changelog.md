@@ -19,6 +19,7 @@
 - Fixes internal pixel width/height tracking in VT screen, which did affect sizes of rendered Sixel images (#408).
 - Fixes configuring a custom shell on OS/X (#425).
 - Fixes off-by-one bug in builtin box drawing (#424).
+- Fixes assertion in text renderer with regards to colored glyphs.
 - Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).
 
 ### 0.2.0 (2021-08-17)
