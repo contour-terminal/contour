@@ -501,6 +501,7 @@ struct Pixmap
     ImageSize _downsampledSize;
     std::function<int(int, int)> _filler = [](int, int) { return 0xFF; };
     int _lineThickness = 1;
+    int _baseLine = 0;  // baseline position relative to cell bottom.
 
     Pixmap& fill()
     {
@@ -533,16 +534,14 @@ struct Pixmap
         //  7     5
         //   --6--
 
-        auto const thickness = int(1/10_th * unbox<float>(_size.width));
+        auto const Z = 2 * _lineThickness;
 
-        auto const Z = 2 * thickness;
-
-        auto const L = Z;
+        auto const L = 2 * Z;
         auto const R = unbox<int>(_size.width) - Z;
 
         auto const T = Z;
-        auto const M = unbox<int>(_size.height) / 2 - Z / 2;
-        auto const B = unbox<int>(_size.height) - Z;
+        auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
+        auto const M = T + (B - T) / 2;
 
         switch (which)
         {
@@ -1125,6 +1124,13 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         b.lineThickness(gridMetrics_.underline.thickness);
         return b;
     };
+    auto const segmentArt = [=]() {
+        auto constexpr AntiAliasingSamplingFactor = 1;
+        auto b = blockElement<AntiAliasingSamplingFactor>(size);
+        b.lineThickness(gridMetrics_.underline.thickness);
+        b._baseLine = gridMetrics_.baseline * AntiAliasingSamplingFactor;
+        return b;
+    };
 
     // TODO: just check notcurses-info to get an idea what may be missing
     switch (codepoint)
@@ -1426,16 +1432,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBAF: return lineArt().line({0, 1/2_th}, {1, 1/2_th}).
                                        line({1/2_th, 3/8_th}, {1/2_th, 5/8_th}).
                                        take();
-        case 0x1FBF0: return blockElement<1>(size).segment_bar(1, 2, 4, 5, 6, 7);
-        case 0x1FBF1: return blockElement<1>(size).segment_bar(2, 5);
-        case 0x1FBF2: return blockElement<1>(size).segment_bar(1, 2, 3, 6, 7);
-        case 0x1FBF3: return blockElement<1>(size).segment_bar(1, 2, 3, 5, 6);
-        case 0x1FBF4: return blockElement<1>(size).segment_bar(2, 3, 4, 5);
-        case 0x1FBF5: return blockElement<1>(size).segment_bar(1, 3, 4, 5, 6);
-        case 0x1FBF6: return blockElement<1>(size).segment_bar(1, 3, 4, 5, 6, 7);
-        case 0x1FBF7: return blockElement<1>(size).segment_bar(1, 2, 5);
-        case 0x1FBF8: return blockElement<1>(size).segment_bar(1, 2, 3, 4, 5, 6, 7);
-        case 0x1FBF9: return blockElement<1>(size).segment_bar(1, 2, 3, 4, 5, 6);
+        case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
+        case 0x1FBF1: return segmentArt().segment_bar(2, 5);
+        case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
+        case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
+        case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
+        case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
+        case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
+        case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
+        case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
+        case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
         // }}}
     }
 
