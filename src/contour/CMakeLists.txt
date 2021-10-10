@@ -241,8 +241,8 @@ elseif(APPLE)
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
-    install(FILES "shell-integration.zsh" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
-    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
+    install(DIRECTORY "${terminfo_basedir}" DESTINATION "${INSTALL_CMAKE_DIR}")
+    install(FILES "shell-integration.zsh" DESTINATION "${INSTALL_CMAKE_DIR}")
 
     #add_custom_target(Docs SOURCES README.md LICENSE.txt)
     #TODO: install(TARGETS Docs ...)
