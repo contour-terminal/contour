@@ -517,6 +517,71 @@ struct Pixmap
         return *this;
     }
 
+    struct From { int value; };
+    struct To { int value; };
+    struct BaseOffset { int value; };
+    enum class Orientation { Horizontal, Vertical };
+    Pixmap& segment_line(Orientation orientation, BaseOffset base, From from, To to)
+    {
+        switch (orientation)
+        {
+            case Orientation::Horizontal:
+                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
+                    for (auto const x: ranges::views::iota(from.value, to.value))
+                        paint(x, y);
+                break;
+            case Orientation::Vertical:
+                for (auto const y: ranges::views::iota(from.value, to.value))
+                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
+                        paint(x, y);
+                break;
+        }
+        return *this;
+    }
+
+    Pixmap& segment_bar(int which)
+    {
+        assert(1 <= which && which <= 7);
+
+        //   --1--
+        //  4     2
+        //   --3--
+        //  7     5
+        //   --6--
+
+        auto const thickness = int(1/10_th * unbox<float>(_size.width));
+
+        auto const Z = 2 * thickness;
+
+        auto const L = Z;
+        auto const R = unbox<int>(_size.width) - Z;
+
+        auto const T = Z;
+        auto const M = unbox<int>(_size.height) / 2 - Z / 2;
+        auto const B = unbox<int>(_size.height) - Z;
+
+        switch (which)
+        {
+            case 1: return segment_line(Orientation::Horizontal, BaseOffset{T}, From{L},   To{R});
+            case 2: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{T+Z}, To{M-Z});
+            case 3: return segment_line(Orientation::Horizontal, BaseOffset{M}, From{L},   To{R});
+            case 4: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{T+Z}, To{M-Z});
+            case 5: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{M+Z}, To{B-Z});
+            case 6: return segment_line(Orientation::Horizontal, BaseOffset{B}, From{L},   To{R});
+            case 7: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{M+Z}, To{B-Z});
+        }
+
+        assert(false);
+        return *this;
+    }
+
+    template <typename... More>
+    Pixmap& segment_bar(int which, More... more)
+    {
+        segment_bar(which);
+        return segment_bar(more...);
+    }
+
     Pixmap& line(Ratio _from, Ratio _to)
     {
         if (_from.y > _to.y)
@@ -541,13 +606,15 @@ struct Pixmap
         return *this;
     }
 
-    void paint(int x, int y)
+    void paint(int x, int y, uint8_t _value = 0xFF)
     {
         auto const w = unbox<int>(_size.width);
         auto const h = unbox<int>(_size.height) - 1;
         if (!(0 <= y && y <= h))
             return;
-        _buffer[(h - y) * w + x] = 0xFF;
+        if (!(0 <= x && x < w))
+            return;
+        _buffer.at((h - y) * w + x) = _value;
     }
 
     atlas::Buffer take()
@@ -1026,6 +1093,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         || ascending(0x2500, 0x2590)    // box drawing, block elements
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
         || ascending(0x1FB00, 0x1FBAF)  // more block sextants
+        || ascending(0x1FBF0, 0x1FBF9)  // digits
         ;
 }
 
@@ -1343,6 +1411,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBAF: return lineArt().line({0, 1/2_th}, {1, 1/2_th}).
                                        line({1/2_th, 3/8_th}, {1/2_th, 5/8_th}).
                                        take();
+        case 0x1FBF0: return blockElement<1>(size).segment_bar(1, 2, 4, 5, 6, 7).take();
+        case 0x1FBF1: return blockElement<1>(size).segment_bar(2, 5).take();
+        case 0x1FBF2: return blockElement<1>(size).segment_bar(1, 2, 3, 6, 7).take();
+        case 0x1FBF3: return blockElement<1>(size).segment_bar(1, 2, 3, 5, 6).take();
+        case 0x1FBF4: return blockElement<1>(size).segment_bar(2, 3, 4, 5).take();
+        case 0x1FBF5: return blockElement<1>(size).segment_bar(1, 3, 4, 5, 6).take();
+        case 0x1FBF6: return blockElement<1>(size).segment_bar(1, 3, 4, 5, 6, 7).take();
+        case 0x1FBF7: return blockElement<1>(size).segment_bar(1, 2, 5).take();
+        case 0x1FBF8: return blockElement<1>(size).segment_bar(1, 2, 3, 4, 5, 6, 7).take();
+        case 0x1FBF9: return blockElement<1>(size).segment_bar(1, 2, 3, 4, 5, 6).take();
         // }}}
     }
 
