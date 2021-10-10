@@ -1022,12 +1022,10 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x23A1, 0x23A6)    // square brackets
-        || ascending(0x2500, 0x257F)    // box drawing
-        || ascending(0x2580, 0x2590)    // block elements
+    return ascending(0x23A1, 0x23A6)    // mathematical square brackets
+        || ascending(0x2500, 0x2590)    // box drawing, block elements
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
-        || ascending(0x1FB00, 0x1FB3B)  // block sextants
-        || ascending(0x1FB3C, 0x1FBAF)  // more block elements
+        || ascending(0x1FB00, 0x1FBAF)  // more block sextants
         ;
 }
 
