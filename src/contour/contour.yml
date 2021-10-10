@@ -133,7 +133,8 @@ profiles:
             # Possible values are:
             # - fontconfig      : uses fontconfig to select fonts
             # - CoreText        : uses OS/X CoreText to select fonts (currently not implemented).
-            locator: fontconfig
+            # - DirectWrite     : selects DirectWrite engine (Windows only)
+            locator: native
 
             # Text shaping related settings
             text_shaping:
