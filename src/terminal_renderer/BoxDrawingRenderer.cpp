@@ -461,7 +461,7 @@ constexpr void fillBlock(Container& image,
                          ImageSize size,
                          Ratio from,
                          Ratio to,
-                         F filler)
+                         F const& filler)
 {
     auto const h = unbox<int>(size.height) - 1;
 
@@ -501,13 +501,20 @@ struct Pixmap
     ImageSize _downsampledSize;
     std::function<int(int, int)> _filler = [](int, int) { return 0xFF; };
     int _lineThickness = 1;
+    int _baseLine = 0;  // baseline position relative to cell bottom.
 
     Pixmap& fill()
+    {
+        return fill(_filler);
+    }
+
+    template <typename F>
+    Pixmap& fill(F const& filler)
     {
         auto const h = unbox<int>(_size.height) - 1;
         for (auto const y: ranges::views::iota(0, unbox<int>(_size.height)))
             for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
-                _buffer[(h - y) * *_size.width + x] = _filler(x, y);
+                _buffer[(h - y) * *_size.width + x] = filler(x, y);
         return *this;
     }
 
@@ -515,6 +522,47 @@ struct Pixmap
     {
         _lineThickness = n;
         return *this;
+    }
+
+    Pixmap& segment_bar(int which)
+    {
+        assert(1 <= which && which <= 7);
+
+        //   --1--
+        //  4     2
+        //   --3--
+        //  7     5
+        //   --6--
+
+        auto const Z = 2 * _lineThickness;
+
+        auto const L = 2 * Z;
+        auto const R = unbox<int>(_size.width) - Z;
+
+        auto const T = Z;
+        auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
+        auto const M = T + (B - T) / 2;
+
+        switch (which)
+        {
+            case 1: return segment_line(Orientation::Horizontal, BaseOffset{T}, From{L},   To{R});
+            case 2: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{T+Z}, To{M-Z});
+            case 3: return segment_line(Orientation::Horizontal, BaseOffset{M}, From{L},   To{R});
+            case 4: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{T+Z}, To{M-Z});
+            case 5: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{M+Z}, To{B-Z});
+            case 6: return segment_line(Orientation::Horizontal, BaseOffset{B}, From{L},   To{R});
+            case 7: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{M+Z}, To{B-Z});
+        }
+
+        assert(false);
+        return *this;
+    }
+
+    template <typename... More>
+    Pixmap& segment_bar(int which, More... more)
+    {
+        segment_bar(which);
+        return segment_bar(more...);
     }
 
     Pixmap& line(Ratio _from, Ratio _to)
@@ -541,13 +589,20 @@ struct Pixmap
         return *this;
     }
 
-    void paint(int x, int y)
+    void paint(int x, int y, uint8_t _value = 0xFF)
     {
         auto const w = unbox<int>(_size.width);
         auto const h = unbox<int>(_size.height) - 1;
         if (!(0 <= y && y <= h))
             return;
-        _buffer[(h - y) * w + x] = 0xFF;
+        if (!(0 <= x && x < w))
+            return;
+        _buffer.at((h - y) * w + x) = _value;
+    }
+
+    operator atlas::Buffer ()
+    {
+        return take();
     }
 
     atlas::Buffer take()
@@ -557,6 +612,32 @@ struct Pixmap
         else
             return std::move(_buffer);
     }
+
+    // {{{ helpers
+private:
+    struct From { int value; };
+    struct To { int value; };
+    struct BaseOffset { int value; };
+    enum class Orientation { Horizontal, Vertical };
+
+    Pixmap& segment_line(Orientation orientation, BaseOffset base, From from, To to)
+    {
+        switch (orientation)
+        {
+            case Orientation::Horizontal:
+                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
+                    for (auto const x: ranges::views::iota(from.value, to.value))
+                        paint(x, y);
+                break;
+            case Orientation::Vertical:
+                for (auto const y: ranges::views::iota(from.value, to.value))
+                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
+                        paint(x, y);
+                break;
+        }
+        return *this;
+    }
+    // }}}
 };
 
 template <std::size_t SupersamplingFactor = 1>
@@ -1022,12 +1103,11 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         return a <= codepoint && codepoint <= b;
     };
 
-    return ascending(0x23A1, 0x23A6)    // square brackets
-        || ascending(0x2500, 0x257F)    // box drawing
-        || ascending(0x2580, 0x2590)    // block elements
+    return ascending(0x23A1, 0x23A6)    // mathematical square brackets
+        || ascending(0x2500, 0x2590)    // box drawing, block elements
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
-        || ascending(0x1FB00, 0x1FB3B)  // block sextants
-        || ascending(0x1FB3C, 0x1FBAF)  // more block elements
+        || ascending(0x1FB00, 0x1FBAF)  // more block sextants
+        || ascending(0x1FBF0, 0x1FBF9)  // digits
         ;
 }
 
@@ -1042,6 +1122,13 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     auto const lineArt = [=]() {
         auto b = blockElement<2>(size);
         b.lineThickness(gridMetrics_.underline.thickness);
+        return b;
+    };
+    auto const segmentArt = [=]() {
+        auto constexpr AntiAliasingSamplingFactor = 1;
+        auto b = blockElement<AntiAliasingSamplingFactor>(size);
+        b.lineThickness(gridMetrics_.underline.thickness);
+        b._baseLine = gridMetrics_.baseline * AntiAliasingSamplingFactor;
         return b;
     };
 
@@ -1285,38 +1372,38 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FB8D: return blockElement<1>(size, checker<4, Inverted::No>(size)) | right(1/2_th);
         case 0x1FB8E: return blockElement<1>(size, checker<4, Inverted::No>(size)) | upper(1/2_th);
         case 0x1FB8F: return blockElement<1>(size, checker<4, Inverted::No>(size)) | lower(1/2_th);
-        case 0x1FB90: return blockElement<1>(size, checker<4, Inverted::No>(size)).fill().take();
-        case 0x1FB91: return blockElement<1>(size, [size](int x, int y) { return y <= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); }).fill().take();
-        case 0x1FB92: return blockElement<1>(size, [size](int x, int y) { return y >= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); }).fill().take();
+        case 0x1FB90: return blockElement<1>(size, checker<4, Inverted::No>(size)).fill();
+        case 0x1FB91: return blockElement<1>(size).fill([size](int x, int y) { return y <= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); });
+        case 0x1FB92: return blockElement<1>(size).fill([size](int x, int y) { return y >= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); });
         case 0x1FB93: break; // not assigned
-        case 0x1FB94: return blockElement<1>(size, [size](int x, int y) { return x >= *size.width / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); }).fill().take();
-        case 0x1FB95: return blockElement<1>(size, checker<8, Inverted::No>(size)).fill().take();
-        case 0x1FB96: return blockElement<1>(size, checker<8, Inverted::Yes>(size)).fill().take();
-        case 0x1FB97: return blockElement<1>(size, hbar<4>(size)).fill().take();
-        case 0x1FB98: return blockElement<2>(size, dbar<8, +1>(size * 4)).fill().take();
-        case 0x1FB99: return blockElement<2>(size, dbar<8, -1>(size * 4)).fill().take();
-        case 0x1FB9A: return blockElement<1>(size, dchecker<Inverted::Yes>(size)).fill().take();
-        case 0x1FB9B: return blockElement<1>(size, dchecker<Inverted::No>(size)).fill().take();
-        case 0x1FB9C: return blockElement<1>(size, triChecker<1>(size)).fill().take();
-        case 0x1FB9D: return blockElement<1>(size, triChecker<2>(size)).fill().take();
-        case 0x1FB9E: return blockElement<1>(size, triChecker<3>(size)).fill().take();
-        case 0x1FB9F: return blockElement<1>(size, triChecker<4>(size)).fill().take();
-        case 0x1FBA0: return lineArt().line({0, 1/2_th}, {1/2_th, 0}).take();
-        case 0x1FBA1: return lineArt().line({1/2_th, 0}, {1, 1/2_th}).take();
-        case 0x1FBA2: return lineArt().line({0, 1/2_th}, {1/2_th, 1}).take();
-        case 0x1FBA3: return lineArt().line({1/2_th, 1}, {1, 1/2_th}).take();
+        case 0x1FB94: return blockElement<1>(size).fill([size](int x, int y) { return x >= *size.width / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y); });
+        case 0x1FB95: return blockElement<1>(size).fill(checker<8, Inverted::No>(size));
+        case 0x1FB96: return blockElement<1>(size).fill(checker<8, Inverted::Yes>(size));
+        case 0x1FB97: return blockElement<1>(size).fill(hbar<4>(size));
+        case 0x1FB98: return blockElement<2>(size).fill(dbar<8, +1>(size * 4));
+        case 0x1FB99: return blockElement<2>(size).fill(dbar<8, -1>(size * 4));
+        case 0x1FB9A: return blockElement<1>(size).fill(dchecker<Inverted::Yes>(size));
+        case 0x1FB9B: return blockElement<1>(size).fill(dchecker<Inverted::No>(size));
+        case 0x1FB9C: return blockElement<1>(size).fill(triChecker<1>(size));
+        case 0x1FB9D: return blockElement<1>(size).fill(triChecker<2>(size));
+        case 0x1FB9E: return blockElement<1>(size).fill(triChecker<3>(size));
+        case 0x1FB9F: return blockElement<1>(size).fill(triChecker<4>(size));
+        case 0x1FBA0: return lineArt().line({0, 1/2_th}, {1/2_th, 0});
+        case 0x1FBA1: return lineArt().line({1/2_th, 0}, {1, 1/2_th});
+        case 0x1FBA2: return lineArt().line({0, 1/2_th}, {1/2_th, 1});
+        case 0x1FBA3: return lineArt().line({1/2_th, 1}, {1, 1/2_th});
         case 0x1FBA4: return lineArt().line({0, 1/2_th}, {1/2_th, 0}).
-                                       line({0, 1/2_th}, {1/2_th, 1}).take();
+                                       line({0, 1/2_th}, {1/2_th, 1});
         case 0x1FBA5: return lineArt().line({1/2_th, 0}, {1, 1/2_th}).
-                                       line({1/2_th, 1}, {1, 1/2_th}).take();
+                                       line({1/2_th, 1}, {1, 1/2_th});
         case 0x1FBA6: return lineArt().line({0, 1/2_th}, {1/2_th, 1}).
-                                       line({1/2_th, 1}, {1, 1/2_th}).take();
+                                       line({1/2_th, 1}, {1, 1/2_th});
         case 0x1FBA7: return lineArt().line({0, 1/2_th}, {1/2_th, 0}).
-                                       line({1/2_th, 0}, {1, 1/2_th}).take();
+                                       line({1/2_th, 0}, {1, 1/2_th});
         case 0x1FBA8: return lineArt().line({0, 1/2_th}, {1/2_th, 0}).
-                                       line({1/2_th, 1}, {1, 1/2_th}).take();
+                                       line({1/2_th, 1}, {1, 1/2_th});
         case 0x1FBA9: return lineArt().line({1/2_th, 0}, {1, 1/2_th}).
-                                       line({0, 1/2_th}, {1/2_th, 1}).take();
+                                       line({0, 1/2_th}, {1/2_th, 1});
         case 0x1FBAA: return lineArt().//line({0, 1/2_th}, {1/2_th, 0}).
                                        line({1/2_th, 0}, {1, 1/2_th}).
                                        line({0, 1/2_th}, {1/2_th, 1}).
@@ -1345,6 +1432,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBAF: return lineArt().line({0, 1/2_th}, {1, 1/2_th}).
                                        line({1/2_th, 3/8_th}, {1/2_th, 5/8_th}).
                                        take();
+        case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
+        case 0x1FBF1: return segmentArt().segment_bar(2, 5);
+        case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
+        case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
+        case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
+        case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
+        case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
+        case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
+        case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
+        case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
         // }}}
     }
 
@@ -1366,7 +1463,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     auto const lightThickness = _lineThickness;
     auto const heavyThickness = _lineThickness * 2;
 
-    auto image = atlas::Buffer(*width * *height, 0x00);
+    auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
 
     // catch all non-solid single-lines before the quad-render below
 
@@ -1382,7 +1479,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
 
         auto x0 = round(p / 2.0);
-        for (int const i: iota(0u, dashCount))
+        for (auto const i: iota(0u, dashCount))
         {
             auto const x0_ = static_cast<int>(round(x0));
             for (auto const y: iota(y0, y0 + w))
@@ -1406,7 +1503,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const p = unbox<double>(height) / static_cast<double>(dashCount * 2.0);
 
         auto y0 = round(p / 2.0);
-        for (int const i: iota(0u, dashCount))
+        for (auto const i: iota(0u, dashCount))
         {
             auto const y0_ = static_cast<int>(round(y0));
             for (auto const y: iota(y0_, y0_ + static_cast<int>(p)))
