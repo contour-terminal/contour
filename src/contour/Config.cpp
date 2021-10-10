@@ -1144,6 +1144,15 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         terminal::renderer::TextShapingEngine::OpenShaper;
 #endif
 
+    auto constexpr NativeFontLocator =
+#if defined(_WIN32)
+        terminal::renderer::FontLocatorEngine::DWrite;
+#elif defined(__APPLE__)
+        terminal::renderer::FontLocatorEngine::CoreText;
+#else
+        terminal::renderer::FontLocatorEngine::FontConfig;
+#endif
+
     strValue = fmt::format("{}", profile.fonts.textShapingEngine);
     if (tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.engine", strValue))
     {
@@ -1161,6 +1170,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
                     basePath, strValue);
     }
 
+    profile.fonts.fontLocator = NativeFontLocator;
     strValue = fmt::format("{}", profile.fonts.fontLocator);
     if (tryLoadChild(_usedKeys, _doc, basePath, "font.locator", strValue))
     {
@@ -1171,6 +1181,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::CoreText;
         else if (lwrValue == "dwrite" || lwrValue == "directwrite")
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::DWrite;
+        else if (lwrValue == "native")
+            profile.fonts.fontLocator = NativeFontLocator;
         else
             debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {}",
                                       basePath, strValue);

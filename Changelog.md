@@ -8,6 +8,7 @@
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
+- Changes font locator engine default on Windows to DirectWrite (#452).
 - Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.
 - Fixes SGR 24 to remove any kind of underline (#451).
 - Fixes font fallback for `open_shaper` where in rare cases the text was not rendered at all.
