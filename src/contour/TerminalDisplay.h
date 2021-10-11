@@ -43,6 +43,9 @@ public:
     /// Ensures @p _fn is being executed within the thread context of the display.
     virtual void post(std::function<void()> _fn) = 0;
 
+    // Close the display (regardless of whether the PTY is closed or not).
+    virtual void closeDisplay() = 0;
+
     // Attributes
     virtual double refreshRate() const = 0;
     virtual crispy::Point screenDPI() const = 0;
@@ -76,7 +79,6 @@ public:
     // terminal events
     virtual void bufferChanged(terminal::ScreenType) = 0; // primary/alt buffer has flipped
     virtual void discardImage(terminal::Image const&) = 0; // the given image is not in use anymore
-    virtual void onClosed() = 0; // PTY closed
     virtual void onSelectionCompleted() = 0; // a visual selection has completed
     virtual void renderBufferUpdated() = 0; // notify on RenderBuffer updates
     virtual void scheduleRedraw() = 0; //!< forced redraw of the screen

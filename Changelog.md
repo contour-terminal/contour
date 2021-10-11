@@ -5,6 +5,7 @@
 - Adds `Sync` capability entry to terminfo file.
 - Adds many more pixel-perfect graphical characters: `23A1`..`23A6`, `2580`..`2590`, `2594`..`259F`, `1FB00`..`1FB3B`, `1FB3C`..`1FBAF`, `1FBF0`..`1FBF9`.
 - Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).
+- Adds a shell early-exit-guard to not instantly close the terminal window but print a message instead and wait for any key press in order to close.
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).

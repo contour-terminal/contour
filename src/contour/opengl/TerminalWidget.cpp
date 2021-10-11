@@ -1002,7 +1002,7 @@ void TerminalWidget::renderBufferUpdated()
     scheduleRedraw();
 }
 
-void TerminalWidget::onClosed()
+void TerminalWidget::closeDisplay()
 {
     post([this]() { close(); });
 }

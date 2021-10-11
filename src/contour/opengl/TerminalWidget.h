@@ -85,6 +85,7 @@ public:
     // }}}
 
     // {{{ TerminalDisplay API
+    void closeDisplay() override;
     void post(std::function<void()> _fn) override;
 
     // Attributes
@@ -121,7 +122,6 @@ public:
     // terminal events
     void scheduleRedraw() override;
     void renderBufferUpdated() override;
-    void onClosed() override;
     void onSelectionCompleted() override;
     void bufferChanged(terminal::ScreenType) override;
     void discardImage(terminal::Image const&) override;

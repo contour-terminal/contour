@@ -161,6 +161,7 @@ class TerminalSession: public terminal::Terminal::Events
 
     // private data
     //
+    std::chrono::steady_clock::time_point startTime_;
     config::Config config_;
     std::string profileName_;
     config::TerminalProfile profile_;
@@ -169,6 +170,7 @@ class TerminalSession: public terminal::Terminal::Events
 
     std::unique_ptr<terminal::Pty> pty_;
     terminal::Terminal terminal_;
+    bool terminatedAndWaitingForKeyPress_ = false;
     std::unique_ptr<TerminalDisplay> display_;
 
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
