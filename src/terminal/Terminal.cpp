@@ -851,8 +851,6 @@ void Terminal::scrollbackBufferCleared()
 
 void Terminal::screenUpdated()
 {
-    //pty_.wakeupReader();
-
     if (!renderBufferUpdateEnabled_)
         return;
 
