@@ -42,6 +42,8 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #else
 #include <unistd.h>
 #endif
@@ -78,26 +80,30 @@ using actions::Action;
 
 namespace // {{{ helper
 {
-    vector<FileSystem::path> getTermInfoDirs()
+    vector<FileSystem::path> getTermInfoDirs(optional<FileSystem::path> const& _appTerminfoDir)
     {
-        auto locations = vector<FileSystem::path>{
-            getenv("HOME") + "/.terminfo"s,
-            "/usr/share/terminfo"s
-        };
+        auto locations = vector<FileSystem::path>();
+
+        if (_appTerminfoDir.has_value())
+            locations.emplace_back(_appTerminfoDir.value().string());
+
+        locations.emplace_back(getenv("HOME") + "/.terminfo"s);
 
         if (auto const value = getenv("TERMINFO_DIRS"); value && *value)
             for (auto const dir: crispy::split(string_view(value), ':'))
                 locations.push_back(FileSystem::path(string(dir)));
 
+        locations.emplace_back("/usr/share/terminfo");
+
         return locations;
     }
 
-    string getDefaultTERM()
+    string getDefaultTERM(optional<FileSystem::path> const& _appTerminfoDir)
     {
 #if defined(_WIN32)
         return "contour";
 #else
-        auto locations = getTermInfoDirs();
+        auto locations = getTermInfoDirs(_appTerminfoDir);
         auto const terms = vector<string>{
             "contour",
             "contour-latest",
@@ -109,8 +115,17 @@ namespace // {{{ helper
 
         for (auto const& prefix: locations)
             for (auto const& term: terms)
+            {
                 if (access((prefix / term.substr(0, 1) / term).string().c_str(), R_OK) == 0)
                     return term;
+
+                #if defined(__APPLE__)
+                // I realized that on Apple the `tic` command sometimes installs
+                // the terminfo files into weird paths.
+                if (access((prefix / fmt::format("{:02X}", term.at(0)) / term).string().c_str(), R_OK) == 0)
+                    return term;
+                #endif
+            }
 
         return "vt100";
 #endif
@@ -1059,6 +1074,23 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     profile.shell.env["TERMINAL_VERSION_TRIPLE"] = fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
     profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
+    std::optional<FileSystem::path> appTerminfoDir;
+    #if defined(__APPLE__)
+    {
+        char buf[1024];
+        uint32_t len = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &len) == 0)
+        {
+            auto p = FileSystem::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
+            if (FileSystem::is_directory(p))
+            {
+                appTerminfoDir = p;
+                profile.shell.env["TERMINFO_DIRS"] = p.string();
+            }
+        }
+    }
+    #endif
+
     if (auto env = _doc["profiles"][_name]["environment"]; env)
     {
         auto const envpath = basePath + ".environment";
@@ -1075,7 +1107,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     // force some default env
     if (profile.shell.env.find("TERM") == profile.shell.env.end())
     {
-        profile.shell.env["TERM"] = getDefaultTERM();
+        profile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
         debuglog(ConfigTag).write("Defaulting TERM to {}.", profile.shell.env["TERM"]);
     }
 
