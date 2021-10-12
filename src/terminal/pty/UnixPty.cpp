@@ -181,7 +181,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         FD_ZERO(&rfd);
         FD_ZERO(&wfd);
         FD_ZERO(&efd);
-        FD_SET(master_, &rfd);
+        if (master_ != -1)
+            FD_SET(master_, &rfd);
         FD_SET(pipe_[0], &rfd);
         auto const nfds = 1 + max(master_, pipe_[0]);
 
@@ -253,6 +254,9 @@ PageSize UnixPty::screenSize() const noexcept
 
 void UnixPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
+    if (master_ < 0)
+        return;
+
     auto w = winsize{};
     w.ws_col = unbox<unsigned short>(_cells.columns);
     w.ws_row = unbox<unsigned short>(_cells.lines);

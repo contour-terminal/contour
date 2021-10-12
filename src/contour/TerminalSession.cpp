@@ -82,6 +82,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  string _programPath,
                                  unique_ptr<TerminalDisplay> _display,
                                  std::function<void()> _displayInitialized):
+    startTime_{ steady_clock::now() },
     config_{ move(_config) },
     profileName_{ move(_profileName) },
     profile_{ *config_.profile(profileName_) },
@@ -274,10 +275,29 @@ void TerminalSession::notify(string_view _title, string_view _content)
 
 void TerminalSession::onClosed()
 {
+    auto const now = steady_clock::now();
+    auto const diff = now - startTime_;
+
+    if (diff < std::chrono::seconds(5))
+    {
+        //auto const w = terminal_.screenSize().columns.as<int>();
+        auto constexpr SGR = "\e[1;44;39m"sv;
+        auto constexpr EL = "\e[K"sv;
+        auto constexpr TextLines = array<string_view, 2>{
+            "Shell terminated too quickly.",
+            "The window will not be closed automatically."
+        };
+        for (auto const text: TextLines)
+            terminal_.writeToScreen(fmt::format("\r\n{}{}{}", SGR, EL, text));
+        terminal_.writeToScreen("\r\n");
+        terminatedAndWaitingForKeyPress_ = true;
+        return;
+    }
+
     if (!display_)
         return;
 
-    display_->onClosed(); // TODO: call this only from within the GUI thread!
+    display_->closeDisplay();
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -340,6 +360,12 @@ void TerminalSession::sendKeyPressEvent(Key _key,
 {
     debuglog(KeyboardTag).write("{} {}", _modifier, _key);
 
+    if (terminatedAndWaitingForKeyPress_)
+    {
+        display_->closeDisplay();
+        return;
+    }
+
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (auto const* actions = config::apply(config_.inputMappings.keyMappings,
@@ -354,6 +380,13 @@ void TerminalSession::sendKeyPressEvent(Key _key,
 void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
     debuglog(KeyboardTag).write("{} {}", _modifier, _value);
+    assert(display_ != nullptr);
+
+    if (terminatedAndWaitingForKeyPress_)
+    {
+        display_->closeDisplay();
+        return;
+    }
 
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
