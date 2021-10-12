@@ -169,9 +169,10 @@ bool Terminal::processInputOnce()
     auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
     if (!bufOpt)
     {
-        debuglog(TerminalTag).write("PTY read failed (timeout: {}). {}",
-                                    timeout,
-                                    strerror(errno));
+        if (errno != EINTR && errno != EAGAIN)
+            debuglog(TerminalTag).write("PTY read failed (timeout: {}). {}",
+                                        timeout,
+                                        strerror(errno));
         return errno == EINTR || errno == EAGAIN;
     }
     auto const buf = *bufOpt;
