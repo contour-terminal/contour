@@ -18,10 +18,10 @@
 
 #include <text_shaper/font.h>
 
+#include <crispy/logstore.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
 #include <crispy/ImageSize.h>
-#include <crispy/debuglog.h>
 
 #include <gsl/span>
 #include <gsl/span_ext>
@@ -39,9 +39,8 @@
 
 namespace text {
 
-auto const inline FontLoaderTag = crispy::debugtag::make("font.loader", "Logs font loads and loading errors.");
-auto const inline TextShapingTag = crispy::debugtag::make("font.textshaping", "Logs details about text shaping.");
-auto const inline GlyphRenderTag = crispy::debugtag::make("font.render", "Logs details about rendering glyphs.");
+auto const inline RasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
+auto const inline TextShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
 
 enum class bitmap_format { alpha_mask, rgb, rgba };
 

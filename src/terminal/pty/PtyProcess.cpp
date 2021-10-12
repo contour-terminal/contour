@@ -1,5 +1,4 @@
 #include <terminal/pty/PtyProcess.h>
-#include <crispy/debuglog.h>
 
 #if defined(_MSC_VER)
 #include <terminal/pty/ConPty.h>
@@ -10,8 +9,6 @@
 using namespace std;
 
 namespace terminal {
-
-auto const inline ProcessTag = crispy::debugtag::make("system.process", "Logs OS process informations.");
 
 PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels):
     pty_{
@@ -25,11 +22,7 @@ PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<Im
     processExitWatcher_{
         [this]() {
             (void) process_->wait();
-            auto const status = process_->checkStatus();
-            if (status.has_value())
-                debuglog(ProcessTag).write("Process terminated. ({})", status.value());
-            else
-                debuglog(ProcessTag).write("Process terminated. (Unknown status)");
+            // debuglog(ProcessTag).write("Process terminated. ({})", exitStatus.value());
             pty_->close();
         }
     }

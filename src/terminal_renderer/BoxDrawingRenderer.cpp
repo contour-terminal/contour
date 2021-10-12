@@ -14,7 +14,7 @@
 #include <terminal_renderer/BoxDrawingRenderer.h>
 #include <terminal_renderer/utils.h>
 
-#include <crispy/debuglog.h>
+#include <crispy/logstore.h>
 
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/iota.hpp>
@@ -34,7 +34,9 @@ namespace terminal::renderer {
 
 namespace
 {
-    auto const inline BoxDrawingTag = crispy::debugtag::make("renderer.boxdrawing", "Logs box drawing debugging.");
+    auto const inline BoxDrawingLog = logstore::Category("renderer.boxdrawing", "Logs box drawing debugging.",
+            logstore::Category::State::Disabled,
+            logstore::Category::Visibility::Hidden);
 }
 
 namespace detail {
@@ -1630,7 +1632,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
                 case detail::Light:
                 {
                     auto const y0 = offset - lightThickness / 2;
-                    debuglog(BoxDrawingTag).write(
+                    LOGSTORE(BoxDrawingLog)(
                         "{}: line:{}, x:{}..{}, y:{}..{}",
                         isFirst ? "left" : "right",
                         to_stringview(lm),
@@ -1762,7 +1764,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     if (box.arc_ != detail::NoArc)
         drawArc(image, *width, *height, lightThickness, box.arc_);
 
-    debuglog(BoxDrawingTag).write("BoxDrawing: build U+{:04X} ({})", _codepoint, _size);
+    LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", _codepoint, _size);
 
     return image;
 }

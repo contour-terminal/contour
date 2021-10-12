@@ -15,8 +15,6 @@
 #include <text_shaper/directwrite_analysis_wrapper.h>
 #include <text_shaper/font.h>
 
-#include <crispy/debuglog.h>
-
 #include <range/v3/view/iota.hpp>
 
 #include <string_view>

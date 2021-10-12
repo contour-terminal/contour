@@ -12,7 +12,8 @@
  * limitations under the License.
  */
 #include <terminal/pty/UnixPty.h>
-#include <crispy/debuglog.h>
+#include <crispy/logstore.h>
+#include <crispy/escape.h>
 
 #include <cassert>
 #include <cstddef>
@@ -51,7 +52,9 @@ using namespace std::string_literals;
 
 namespace terminal {
 
-auto const inline PtyTag = crispy::debugtag::make("system.pty", "Logs PTY informations.");
+auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
+auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
+auto const inline PtyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
 
 namespace
 {
@@ -119,13 +122,13 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
             break;
     }
 #endif
-    debuglog(PtyTag).write("PTY opened. master={}, slave={}, pipe=({}, {})",
-                            master_, slave_, pipe_.at(0), pipe_.at(1));
+    LOGSTORE(PtyLog)("PTY opened. master={}, slave={}, pipe=({}, {})",
+                     master_, slave_, pipe_.at(0), pipe_.at(1));
 }
 
 UnixPty::~UnixPty()
 {
-    debuglog(PtyTag).write("Destructing.");
+    LOGSTORE(PtyLog)("Destructing.");
 
     for (auto* fd: {&pipe_.at(0), &pipe_.at(1), &master_, &slave_})
     {
@@ -139,8 +142,8 @@ UnixPty::~UnixPty()
 
 void UnixPty::close()
 {
-    debuglog(PtyTag).write("PTY closing. master={}, slave={}, pipe=({}, {})",
-                            master_, slave_, pipe_.at(0), pipe_.at(1));
+    LOGSTORE(PtyLog)("PTY closing. master={}, slave={}, pipe=({}, {})",
+                     master_, slave_, pipe_.at(0), pipe_.at(1));
 
     for (auto* fd: {&master_, &slave_})
     {
@@ -156,7 +159,7 @@ void UnixPty::close()
 
 void UnixPty::wakeupReader()
 {
-    //debuglog(PtyTag).write("waking up via pipe {}", pipe_[1]);
+    LOGSTORE(PtyLog)("waking up via pipe {}", pipe_[1]);
     char dummy{};
     auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
     (void) rv;
@@ -166,7 +169,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 {
     if (master_ < 0)
     {
-        debuglog(PtyTag).write("read() called with closed PTY master.");
+        LOGSTORE(PtyInLog)("read() called with closed PTY master.");
         errno = ENODEV;
         return nullopt;
     }
@@ -186,11 +189,11 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         FD_SET(pipe_[0], &rfd);
         auto const nfds = 1 + max(master_, pipe_[0]);
 
-        // debuglog(PtyTag).write(
-        //     "read: select({}, {}) for {}.{:04}s.",
-        //     master_, pipe_[0],
-        //     tv.tv_sec, tv.tv_usec / 1000
-        // );
+        LOGSTORE(PtyLog)(
+            "read: select({}, {}) for {}.{:04}s.",
+            master_, pipe_[0],
+            tv.tv_sec, tv.tv_usec / 1000
+        );
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
 
@@ -228,7 +231,10 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             auto const n = min(_size, buffer_.size());
             auto const rv = static_cast<int>(::read(master_, buffer_.data(), n));
             if (rv >= 0)
+            {
+                LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
                 return string_view{buffer_.data(), static_cast<size_t>(rv)};
+            }
             else
                 return string_view{};
         }
@@ -243,6 +249,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 
 int UnixPty::write(char const* buf, size_t size)
 {
+    LOGSTORE(PtyInLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + size));
     ssize_t rv = ::write(master_, buf, size);
     return static_cast<int>(rv);
 }

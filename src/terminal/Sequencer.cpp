@@ -11,8 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "terminal/primitives.h"
 #include <terminal/Sequencer.h>
+#include <terminal/primitives.h>
+#include <terminal/logging.h>
 
 #include <terminal/Functions.h>
 #include <terminal/SixelParser.h>
@@ -22,7 +23,6 @@
 #include <crispy/algorithm.h>
 #include <crispy/base64.h>
 #include <crispy/escape.h>
-#include <crispy/debuglog.h>
 #include <crispy/utils.h>
 
 #include <unicode/utf8.h>
@@ -921,10 +921,10 @@ Sequencer::Sequencer(Screen& _screen,
 
 void Sequencer::error(std::string_view const& _errorString)
 {
-    if (!crispy::debugtag::enabled(VTParserTag))
+    if (!VTParserLog)
         return;
 
-    debuglog(VTParserTag).write("Parser error: {}", _errorString);
+    LOGSTORE(VTParserLog)("Parser error: {}", _errorString);
 }
 
 void Sequencer::print(char32_t _char)
@@ -1038,8 +1038,8 @@ void Sequencer::hook(char _finalChar)
     sequence_.setFinalChar(_finalChar);
 
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (crispy::debugtag::enabled(VTParserTraceTag))
-        debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
+    if (VTParserTraceLog)
+        LOGSTORE(VTParserTraceLog)("Handle VT sequence: {}", sequence_);
 #endif
 
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
@@ -1246,8 +1246,8 @@ void Sequencer::executeControlFunction(char _c0)
             screen_.restoreCursor();
             break;
         default:
-            if (crispy::debugtag::enabled(VTParserTag))
-                debuglog(VTParserTag).write("Unsupported C0 sequence: {}", crispy::escape(_c0));
+            if (VTParserLog)
+                LOGSTORE(VTParserLog)("Unsupported C0 sequence: {}", crispy::escape(_c0));
             break;
     }
 }
@@ -1255,8 +1255,8 @@ void Sequencer::executeControlFunction(char _c0)
 void Sequencer::handleSequence()
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (crispy::debugtag::enabled(VTParserTraceTag))
-        debuglog(VTParserTraceTag).write("Handle VT sequence: {}", sequence_);
+    if (VTParserTraceLog)
+        LOGSTORE(VTParserTraceLog)("Handle VT sequence: {}", sequence_);
 #endif
     // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,
     //         sequence_.functionDefinition() ? sequence_.functionDefinition()->comment : ""sv);
@@ -1267,8 +1267,8 @@ void Sequencer::handleSequence()
         applyAndLog(*funcSpec, sequence_);
         screen_.verifyState();
     }
-    else if (crispy::debugtag::enabled(VTParserTag))
-        debuglog(VTParserTag).write("Unknown VT sequence: {}", sequence_);
+    else if (VTParserLog)
+        LOGSTORE(VTParserLog)("Unknown VT sequence: {}", sequence_);
 }
 
 void Sequencer::flushBatchedSequences()
@@ -1298,10 +1298,10 @@ void Sequencer::applyAndLog(FunctionDefinition const& _function, Sequence const&
     switch (result)
     {
         case ApplyResult::Invalid:
-            debuglog(VTParserTag).write("Invalid VT sequence: {}", _seq);
+            LOGSTORE(VTParserLog)("Invalid VT sequence: {}", _seq);
             break;
         case ApplyResult::Unsupported:
-            debuglog(VTParserTag).write("Unsupported VT sequence: {}", _seq);
+            LOGSTORE(VTParserLog)("Unsupported VT sequence: {}", _seq);
             break;
         case ApplyResult::Ok:
             break;

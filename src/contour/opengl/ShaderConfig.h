@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <crispy/debuglog.h>
-
 #include <fmt/format.h>
 #include <QtCore/QtGlobal>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -27,9 +25,7 @@
 #include <string>
 #include <stdexcept>
 
-namespace terminal::renderer::opengl {
-
-auto const inline OpenGLRendererTag = crispy::debugtag::make("renderer.opengl", "Logs OpenGL render target specific debugging information.");
+namespace contour::opengl {
 
 enum class ShaderClass {
     Background,

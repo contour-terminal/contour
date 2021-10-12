@@ -29,8 +29,6 @@
 #include <terminal/pty/UnixPty.h>
 #endif
 
-#include <crispy/debuglog.h>
-
 #include <QtCore/QDebug>
 #include <QtGui/QScreen>
 #include <QtGui/QGuiApplication>
@@ -137,8 +135,8 @@ void ScrollableDisplay::updateValues()
 void ScrollableDisplay::updatePosition()
 {
     //terminalWidget_->setGeometry(calculateWidgetGeometry());
-    debuglog(WindowTag).write("called with {}x{} in {}", width(), height(),
-            session_.currentScreenType());
+    LOGSTORE(DisplayLog)("called with {}x{} in {}", width(), height(),
+                         session_.currentScreenType());
 
     auto const resizeMainAndScrollArea = [&]() {
         QSize ms = mainWidget_->sizeHint();
@@ -155,7 +153,7 @@ void ScrollableDisplay::updatePosition()
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
-        debuglog(WindowTag).write("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
+        LOGSTORE(DisplayLog)("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
         switch (session_.profile().scrollbarPosition)
         {
             case config::ScrollBarPosition::Right:
@@ -179,21 +177,23 @@ void ScrollableDisplay::updatePosition()
                 break;
             }
         }
-        debuglog(WindowTag).write("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
-                mainWidget_->pos().x(),
-                mainWidget_->pos().y(),
-                mainWidget_->width(),
-                mainWidget_->height(),
-                scrollBar_->isVisible() ? "visible" : "invisible",
-                scrollBar_->pos().x(),
-                scrollBar_->pos().y(),
-                scrollBar_->width(),
-                scrollBar_->height(),
-                scrollBar_->value(), scrollBar_->maximum());
+        LOGSTORE(DisplayLog)(
+            "TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
+            mainWidget_->pos().x(),
+            mainWidget_->pos().y(),
+            mainWidget_->width(),
+            mainWidget_->height(),
+            scrollBar_->isVisible() ? "visible" : "invisible",
+            scrollBar_->pos().x(),
+            scrollBar_->pos().y(),
+            scrollBar_->width(),
+            scrollBar_->height(),
+            scrollBar_->value(), scrollBar_->maximum()
+        );
     }
     else
     {
-        debuglog(WindowTag).write("resize terminal widget over full contents");
+        LOGSTORE(DisplayLog)("Resize terminal widget over full contents.");
         scrollBar_->hide();
     }
 }
@@ -291,7 +291,7 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 
 void TerminalWindow::onTerminalClosed()
 {
-    debuglog(WindowTag).write("title {}", terminalSession_->terminal().screen().windowTitle());
+    LOGSTORE(DisplayLog)("title {}", terminalSession_->terminal().screen().windowTitle());
     close();
 }
 
@@ -315,7 +315,7 @@ void TerminalWindow::profileChanged()
 void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 {
 #if defined(CONTOUR_SCROLLBAR)
-    debuglog(WindowTag).write("Screen buffer type has changed to {}.", _type);
+    LOGSTORE(DisplayLog)("Screen buffer type has changed to {}.", _type);
     scrollableDisplay_->showScrollBar(
         _type == terminal::ScreenType::Main || !profile()->hideScrollbarInAltScreen
     );
@@ -327,7 +327,7 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
 {
-    debuglog(WindowTag).write("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
+    LOGSTORE(DisplayLog)("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
         width(), height(),
         _event->size().width(),
         _event->size().height()

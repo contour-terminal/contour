@@ -292,10 +292,10 @@ bool requestPermission(PermissionCache& _cache,
     switch (_allowedByConfig)
     {
         case config::Permission::Allow:
-            debuglog(WidgetTag).write("Permission for {} allowed by configuration.", _topicText);
+            LOGSTORE(SessionLog)("Permission for {} allowed by configuration.", _topicText);
             return true;
         case config::Permission::Deny:
-            debuglog(WidgetTag).write("Permission for {} denied by configuration.", _topicText);
+            LOGSTORE(SessionLog)("Permission for {} denied by configuration.", _topicText);
             return false;
         case config::Permission::Ask:
             break;
@@ -305,7 +305,7 @@ bool requestPermission(PermissionCache& _cache,
     if (auto const i = _cache.find(string(_topicText)); i != _cache.end())
         return i->second;
 
-    debuglog(WidgetTag).write("Permission for {} requires asking user.", _topicText);
+    LOGSTORE(SessionLog)("Permission for {} requires asking user.", _topicText);
 
     auto const reply = QMessageBox::question(_parent,
         fmt::format("{} requested", _topicText).c_str(),
@@ -425,7 +425,7 @@ void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
                  terminal::renderer::Renderer& _renderer)
 {
-    debuglog(WidgetTag).write("resizing to {}", _newPixelSize);
+    LOGSTORE(SessionLog)("resizing to {}", _newPixelSize);
     if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
         return;
 

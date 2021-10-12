@@ -316,13 +316,13 @@ void InputGenerator::reset()
 
 void InputGenerator::setCursorKeysMode(KeyMode _mode)
 {
-    debuglog(InputTag).write("set cursor keys mode: {}", _mode);
+    LOGSTORE(InputLog)("set cursor keys mode: {}", _mode);
     cursorKeysMode_ = _mode;
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode _mode)
 {
-    debuglog(InputTag).write("set numpad keys mode: {}", _mode);
+    LOGSTORE(InputLog)("set numpad keys mode: {}", _mode);
     numpadKeysMode_ = _mode;
 }
 
@@ -333,7 +333,7 @@ void InputGenerator::setApplicationKeypadMode(bool _enable)
     else
         numpadKeysMode_ = KeyMode::Normal; // aka. Numeric
 
-    debuglog(InputTag).write("set application keypad mode: {} -> {}", _enable, numpadKeysMode_);
+    LOGSTORE(InputLog)("set application keypad mode: {} -> {}", _enable, numpadKeysMode_);
 }
 
 bool InputGenerator::generate(u32string const& _characterEvent, Modifier _modifier)
@@ -386,33 +386,44 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
         append(static_cast<char>(_characterEvent));
     else
         append(unicode::convert_to<char>(_characterEvent));
+
+    LOGSTORE(InputLog)("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(_characterEvent)), _modifier);
     return true;
 }
 
 bool InputGenerator::generate(Key _key, Modifier _modifier)
 {
+    auto const logged = [_key, _modifier](bool success) -> bool
+    {
+        if (success)
+            LOGSTORE(InputLog)("Sending {} {}.", _key, _modifier);
+        return success;
+    };
+
     if (_modifier)
     {
         if (auto mapping = tryMap(mappings::functionKeysWithModifiers, _key); mapping)
-            return append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier)));
+            return logged(append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier))));
     }
 
     if (applicationCursorKeys())
         if (auto mapping = tryMap(mappings::applicationCursorKeys, _key); mapping)
-            return append(*mapping);
+            return logged(append(*mapping));
 
     if (applicationKeypad())
         if (auto mapping = tryMap(mappings::applicationKeypad, _key); mapping)
-            return append(*mapping);
+            return logged(append(*mapping));
 
     if (auto mapping = tryMap(mappings::standard, _key); mapping)
-        return append(*mapping);
+        return logged(append(*mapping));
 
     return false;
 }
 
 void InputGenerator::generatePaste(std::string_view const& _text)
 {
+    LOGSTORE(InputLog)("Sending paste of {} bytes.", _text.size());
+
     if (bracketedPaste_)
         append("\033[200~"sv);
 
@@ -457,6 +468,7 @@ bool InputGenerator::generateFocusInEvent()
     if (generateFocusEvents())
     {
         append("\033[I");
+        LOGSTORE(InputLog)("Sending focus-in event.");
         return true;
     }
     return false;
@@ -467,6 +479,7 @@ bool InputGenerator::generateFocusOutEvent()
     if (generateFocusEvents())
     {
         append("\033[O");
+        LOGSTORE(InputLog)("Sending focus-out event.");
         return true;
     }
     return true;
@@ -694,6 +707,13 @@ bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coo
 
 bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
+    auto const logged = [=](bool success) -> bool
+    {
+        if (success)
+            LOGSTORE(InputLog)("Sending mouse press {} {} at {}.", _button, _modifier, _pos);
+        return success;
+    };
+
     currentMousePosition_ = _pos;
 
     if (!mouseProtocol_.has_value())
@@ -705,11 +725,9 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
             switch (_button)
             {
                 case MouseButton::WheelUp:
-                    append("\033[A");
-                    return true;
+                    return logged(append("\033[A"));
                 case MouseButton::WheelDown:
-                    append("\033[B");
-                    return true;
+                    return logged(append("\033[B"));
                 default:
                     break;
             }
@@ -718,11 +736,9 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
             switch (_button)
             {
                 case MouseButton::WheelUp:
-                    append("\033OA");
-                    return true;
+                    return logged(append("\033OA"));
                 case MouseButton::WheelDown:
-                    append("\033OB");
-                    return true;
+                    return logged(append("\033OB"));
                 default:
                     break;
             }
@@ -735,21 +751,35 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
         if (!currentlyPressedMouseButtons_.count(_button))
             currentlyPressedMouseButtons_.insert(_button);
 
-    return generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Press);
+    return logged(generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Press));
 }
 
 bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
+    auto const logged = [=](bool success) -> bool
+    {
+        if (success)
+            LOGSTORE(InputLog)("Sending mouse release {} {} at {}.", _button, _modifier, _pos);
+        return success;
+    };
+
     currentMousePosition_ = _pos;
 
     if (auto i = currentlyPressedMouseButtons_.find(_button); i != currentlyPressedMouseButtons_.end())
         currentlyPressedMouseButtons_.erase(i);
 
-    return generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Release);
+    return logged(generateMouse(_button, _modifier, currentMousePosition_, MouseEventType::Release));
 }
 
 bool InputGenerator::generateMouseMove(Coordinate _pos, Modifier _modifier)
 {
+    auto const logged = [=](bool success) -> bool
+    {
+        if (success)
+            LOGSTORE(InputLog)("Sending mouse move at {} {}.", _pos, _modifier);
+        return success;
+    };
+
     if (_pos == currentMousePosition_)
         return false;
 
@@ -764,11 +794,11 @@ bool InputGenerator::generateMouseMove(Coordinate _pos, Modifier _modifier)
                       || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
 
     if (report)
-        return generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
-                                            : MouseButton::Release,
-                             _modifier,
-                             _pos,
-                             MouseEventType::Drag);
+        return logged(generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
+                                                   : MouseButton::Release,
+                                    _modifier,
+                                    _pos,
+                                    MouseEventType::Drag));
 
     return false;
 }

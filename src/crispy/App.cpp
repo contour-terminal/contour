@@ -12,8 +12,9 @@
  * limitations under the License.
  */
 #include <crispy/App.h>
-#include <crispy/debuglog.h>
+#include <crispy/logstore.h>
 #include <crispy/utils.h>
+#include <crispy/indexed.h>
 
 #include <algorithm>
 #include <array>
@@ -84,23 +85,29 @@ namespace // {{{ helper
             2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
             150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
         };
-        crispy::logging_sink::for_debug().set_transform([](crispy::log_message const& _msg) -> std::string
+        logstore::set_formatter([](logstore::MessageBuilder const& _msg) -> std::string
         {
             auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
             {
                 if (!colorized)
                     return {"", "", ""};
                 auto const tagStart = "\033[1m";
-                auto const colorIndex = colors.at((_msg.tag().value) % colors.size());
+                auto const colorIndex = colors.at(std::hash<string_view>{}(_msg.category().name()) % colors.size());
                 auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
                 auto const resetSGR = fmt::format("\033[m");
                 return {tagStart, msgStart, resetSGR};
             }();
 
+#if 1
+            auto const fileName = FileSystem::path(_msg.location().file_name()).filename().string();
+#else
+            // fileName with path to file relative to project root
             auto const srcIndex = string_view(_msg.location().file_name()).find("src");
-            auto const fileName = string(srcIndex != string_view::npos
-                ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
-                : string(_msg.location().file_name()));
+            auto const fileName =
+                string(srcIndex != string_view::npos
+                    ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                    : string(_msg.location().file_name()));
+#endif
 
             auto result = string{};
 
@@ -111,18 +118,10 @@ namespace // {{{ helper
                 else
                 {
                     result += sgrTag;
-                    if (_msg.tag().value == crispy::ErrorTag.value)
-                    {
-                        result += fmt::format("[{}] ", "error");
-                    }
-                    else
-                    {
-                        result += fmt::format("[{}:{}:{}] ",
-                                              crispy::debugtag::get(_msg.tag()).name,
-                                              fileName,
-                                              _msg.location().line()
-                                );
-                    }
+                    result += fmt::format("[{}:{}:{}] ",
+                                          _msg.category().name(),
+                                          fileName,
+                                          _msg.location().line());
                     result += sgrReset;
                 }
 
@@ -134,6 +133,41 @@ namespace // {{{ helper
 
             return result;
         });
+
+        logstore::ErrorLog.set_formatter(
+            [](logstore::MessageBuilder const& _msg) -> std::string
+            {
+                auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
+                {
+                    if (!colorized)
+                        return {"", "", ""};
+                    auto const tagStart = "\033[1;31m";
+                    auto const msgStart = "\033[31m";
+                    auto const resetSGR = "\033[m";
+                    return {tagStart, msgStart, resetSGR};
+                }();
+
+                auto result = string{};
+
+                for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
+                {
+                    if (i != 0)
+                        result += "        ";
+                    else
+                    {
+                        result += sgrTag;
+                        result += fmt::format("[{}] ", "error");
+                        result += sgrReset;
+                    }
+
+                    result += sgrMessage;
+                    result += line;
+                    result += sgrReset;
+                    result += '\n';
+                }
+                return result;
+            }
+        );
     }
 
     FileSystem::path xdgStateHome()
@@ -181,26 +215,34 @@ void App::link(std::string _command, std::function<int()> _handler)
 
 void App::listDebugTags()
 {
-    auto tags = crispy::debugtag::store();
+    auto categories = logstore::get();
     sort(
-        begin(tags),
-        end(tags),
-        [](crispy::debugtag::tag_info const& a, crispy::debugtag::tag_info const& b) {
-           return a.name < b.name;
+        begin(categories),
+        end(categories),
+        [](auto const& a, auto const& b) {
+            return a.get().name() < b.get().name();
         }
     );
+
     auto const maxNameLength = std::accumulate(
-        begin(tags),
-        end(tags),
+        begin(categories),
+        end(categories),
         size_t{0},
-        [&](auto _acc, auto const& _tag) { return max(_acc, _tag.name.size()); }
+        [&](auto acc, auto const& cat) {
+            return !cat.get().visible() ? acc : max(acc, cat.get().name().size());
+        }
     );
-    auto const column1Length = maxNameLength + 2u;
-    for (auto const& tag: tags)
+    auto const column1Length = maxNameLength + 2;
+
+    for (auto const& category: categories)
     {
+        if (!category.get().visible())
+            continue;
+
+        // TODO(pr) maybe have color assigned per category AND have that colored here then too?
         std::cout
-            << left << setw(int(column1Length)) << tag.name
-            << "; " << tag.description << '\n';
+            << left << setw(int(column1Length)) << category.get().name()
+            << "; " << category.get().description() << '\n';
     }
 }
 

@@ -16,7 +16,6 @@
 #include <text_shaper/font_locator.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/indexed.h>
 
@@ -252,7 +251,7 @@ namespace // {{{ helper
 
     static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
     {
-        debuglog(FontLoaderTag).write("Loading font chain for: {}", _fd);
+        LOGSTORE(LocatorLog)("Loading font chain for: {}", _fd);
         auto pat = unique_ptr<FcPattern, void(*)(FcPattern*)>(
             FcPatternCreate(),
             [](auto p) { FcPatternDestroy(p); });
@@ -318,7 +317,7 @@ namespace // {{{ helper
             // FcPatternGetInteger(font, FC_COLOR, 0, &color);
             // if (color && !_color)
             // {
-            //     debuglog(FontFallbackTag).write("Skipping font (contains color). {}", (char const*) file);
+            //     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
             //     continue;
             // }
             #endif
@@ -330,14 +329,14 @@ namespace // {{{ helper
                 if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL) ||
                     (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
                 {
-                    debuglog(FontFallbackTag).write("Skipping font: {} ({} < {}).",
+                    LOGSTORE(LocatorLog)("Skipping font: {} ({} < {}).",
                         (char const*)(file), fcSpacingStr(spacing), fcSpacingStr(FC_DUAL));
                     continue;
                 }
             }
 
             fallbackFonts.emplace_back((char const*)(file));
-            // debuglog(FontFallbackTag).write("Found font: {}", fallbackFonts.back());
+            // LOGSTORE(LocatorLog)("Found font: {}", fallbackFonts.back());
         }
 
         #if defined(_WIN32)
@@ -427,7 +426,7 @@ namespace // {{{ helper
             FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), 0, &ftFace);
             if (!ftFace)
             {
-                debuglog(FontLoaderTag).write("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
+                errorlog()("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
                 return nullopt;
             }
         }
@@ -442,18 +441,18 @@ namespace // {{{ helper
                                              &ftFace);
             if (!ftFace)
             {
-                debuglog(FontLoaderTag).write("Failed to load font from memory. {}", ftErrorStr(ec));
+                errorlog()("Failed to load font from memory. {}", ftErrorStr(ec));
                 return nullopt;
             }
         }
         else
         {
-            debuglog(FontLoaderTag).write("Unsupported font_source type.");
+            errorlog()("Unsupported font_source type.");
             return nullopt;
         }
 
         if (FT_Error const ec = FT_Select_Charmap(ftFace, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
-            debuglog(FontLoaderTag).write("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
+            errorlog()("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
 
         if (FT_HAS_COLOR(ftFace))
         {
@@ -461,7 +460,7 @@ namespace // {{{ helper
 
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
-                debuglog(FontLoaderTag).write("Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, _source, ftErrorStr(ec));
+                errorlog()("Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, _source, ftErrorStr(ec));
         }
         else
         {
@@ -471,7 +470,7 @@ namespace // {{{ helper
                                             static_cast<FT_UInt>(_dpi.x),
                                             static_cast<FT_UInt>(_dpi.y)); ec != FT_Err_Ok)
             {
-                debuglog(FontLoaderTag).write("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n", size, _dpi, _source, ftErrorStr(ec));
+                errorlog()("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n", size, _dpi, _source, ftErrorStr(ec));
                 // If we cannot set the char-size, this font is most likely unusable for us.
                 // Specifically PCF files fail here and I do not know how to deal with them in that
                 // case, so do not use this font file at all.
@@ -589,7 +588,7 @@ struct open_shaper::Private // {{{
 
         auto key = create_font_key();
         fonts_.emplace(pair{key, move(fontInfo)});
-        debuglog(FontLoaderTag).write("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, _fontSize, dpi_, metrics(key));
+        LOGSTORE(LocatorLog)("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, _fontSize, dpi_, metrics(key));
         fontPathSizeToKeys.emplace(pair{FontPathAndSize{sourceId, _fontSize}, key});
         return key;
     }
@@ -623,7 +622,7 @@ struct open_shaper::Private // {{{
 
 #if defined(FT_LCD_FILTER_DEFAULT)
         if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
-            debuglog(GlyphRendstring).write("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
+            errorlog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 #endif
     }
 
@@ -666,7 +665,7 @@ struct open_shaper::Private // {{{
             }
 
             HbFontInfo& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
-            debuglog(FontFallbackTag).write("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
+            LOGSTORE(TextShapingLog)("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
             if (tryShape(fallbackKeyOpt.value(), fallbackFontInfo, _hbBuf, fallbackFontInfo.hbFont.get(), _script, _presentation, _codepoints, _clusters, _result))
                 return true;
         }
@@ -766,20 +765,20 @@ void open_shaper::shape(font_key _font,
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = d->hb_buf_.get();
 
-    if (crispy::debugtag::enabled(TextShapingTag))
+    if (TextShapingLog)
     {
-        auto logMessage = debuglog(TextShapingTag);
-        logMessage.write("Shaping codepoints:");
+        auto logMessage = LOGSTORE(TextShapingLog);
+        logMessage.append("Shaping codepoints:");
         for (auto [i, codepoint] : crispy::indexed(_codepoints))
-            logMessage.write(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
-        logMessage.write("\n");
-        logMessage.write("Using font: key={}, path=\"{}\"\n", _font, identifierOf(fontInfo.primary));
+            logMessage.append(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
+        logMessage.append("\n");
+        logMessage.append("Using font: key={}, path=\"{}\"\n", _font, identifierOf(fontInfo.primary));
     }
 
     if (d->tryShapeWithFallback(_font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result))
         return;
 
-    debuglog(FontFallbackTag).write("Shaping failed.");
+    LOGSTORE(TextShapingLog)("Shaping failed.");
 
     // Reshape each cluster individually.
     _result.clear();
@@ -829,9 +828,9 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
         if (ec != FT_Err_Ok)
         {
-            if (crispy::debugtag::enabled(TextShapingTag))
+            if (LocatorLog)
             {
-                debuglog(FontFallbackTag).write(
+                LOGSTORE(LocatorLog)(
                     "Error loading glyph index {} for font {} {}. {}",
                     glyphIndex.value,
                     ftFace->family_name,
@@ -938,7 +937,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             break;
         }
         default:
-            debuglog(GlyphRenderTag).write("Glyph requested that has an unsupported pixel_mode:{}", ftFace->glyph->bitmap.pixel_mode);
+            LOGSTORE(RasterizerLog)("Glyph requested that has an unsupported pixel_mode:{}", ftFace->glyph->bitmap.pixel_mode);
             return nullopt;
     }
 

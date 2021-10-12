@@ -20,7 +20,6 @@
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
-#include <crispy/debuglog.h>
 #include <crispy/size.h>
 #include <crispy/times.h>
 #include <crispy/utils.h>
@@ -521,8 +520,8 @@ void Screen::write(std::string_view _data)
     if (_data.empty())
         return;
 #if defined(LIBTERMINAL_LOG_RAW)
-    if (crispy::debugtag::enabled(ScreenRawOutputTag))
-        debuglog(ScreenRawOutputTag).write("raw: \"{}\"", escape(_data));
+    if (ScreenRawOutputLog)
+        LOGSTORE(ScreenRawOutputLog)("Received bytes:\"{}\"", escape(_data));
 #endif
 
     parser_.parseFragment(_data);
@@ -555,8 +554,8 @@ void Screen::writeText(std::string_view _chars)
 void Screen::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (debugtag::enabled(VTParserTraceTag))
-        debuglog(VTParserTraceTag).write("text: {}", unicode::convert_to<char>(_char));
+    if (ScreenRawOutputLog)
+        LOGSTORE(ScreenRawOutputLog)("Received character: {}", unicode::convert_to<char>(_char));
 #endif
     bool const consecutiveTextWrite = sequencer_.instructionCounter() == 1;
 
@@ -1837,8 +1836,8 @@ void Screen::setMode(DECMode _mode, bool _enable)
         case DECMode::DebugLogging:
             // Since this mode (Xterm extension) does not support finer graind control,
             // we'll be just globally enable/disable all debug logging.
-            for (auto& tag: crispy::debugtag::store())
-                tag.enabled = _enable;
+            for (auto& category: logstore::get())
+                category.get().enable(_enable);
             break;
         case DECMode::UseAlternateScreen:
             if (_enable)
@@ -2313,7 +2312,7 @@ void Screen::requestStatusString(RequestStatusString _value)
                 if (*size_.lines >= 24)
                     return fmt::format("{}t", size_.lines);
 #if defined(LIBTERMINAL_LOG_RAW)
-                debuglog(ScreenRawOutputTag).write("Requesting device status for {} not with line count < 24 is undefined.");
+                LOGSTORE(ScreenRawOutputLog)("Requesting device status for {} not with line count < 24 is undefined.");
 #endif
                 return nullopt;
             case RequestStatusString::DECSTBM:
@@ -2329,7 +2328,7 @@ void Screen::requestStatusString(RequestStatusString _value)
                 return fmt::format("0;{}m", vtSequenceParameterString(cursor_.graphicsRendition));
             case RequestStatusString::DECSCA: // TODO
 #if defined(LIBTERMINAL_LOG_RAW)
-                debuglog(ScreenRawOutputTag).write("Requesting device status for {} not implemented yet.", _value);
+                LOGSTORE(ScreenRawOutputLog)("Requesting device status for {} not implemented yet.", _value);
 #endif
                 break;
         }
@@ -2385,7 +2384,7 @@ void Screen::requestCapability(std::string_view _name)
     if (!respondToTCapQuery_)
     {
 #if defined(LIBTERMINAL_LOG_RAW)
-        debuglog(ScreenRawOutputTag).write("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
+        LOGSTORE(ScreenRawOutputLog)("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
 #endif
         return;
     }
@@ -2410,13 +2409,15 @@ void Screen::requestCapability(capabilities::Code _code)
     if (!respondToTCapQuery_)
     {
 #if defined(LIBTERMINAL_LOG_RAW)
-        debuglog(ScreenRawOutputTag).write("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
+        if (ScreenRawOutputLog)
+            LOGSTORE(ScreenRawOutputLog)("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
 #endif
         return;
     }
 
 #if defined(LIBTERMINAL_LOG_RAW)
-    debuglog(ScreenRawOutputTag).write("Requesting terminal capability: {}", _code);
+    if (ScreenRawOutputLog)
+        LOGSTORE(ScreenRawOutputLog)("Requesting terminal capability: {}", _code);
 #endif
     if (booleanCapability(_code))
         reply("\033P1+r{}\033\\", _code.hex());

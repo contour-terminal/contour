@@ -14,8 +14,8 @@
 #pragma once
 
 #include <crispy/FNV.h>
+#include <crispy/logstore.h>
 #include <crispy/point.h>
-#include <crispy/debuglog.h>
 
 #include <fmt/format.h>
 
@@ -26,7 +26,7 @@
 
 namespace text {
 
-auto const inline FontFallbackTag = crispy::debugtag::make("font.fallback", "Logs details about font fallback");
+auto const inline LocatorLog = logstore::Category("font.locator", "Logs about font loads.");
 
 namespace detail
 {

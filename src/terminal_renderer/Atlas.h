@@ -14,7 +14,6 @@
 #pragma once
 
 #include <crispy/size.h>
-#include <crispy/debuglog.h>
 #include <terminal/primitives.h>
 
 #include <fmt/format.h>
@@ -31,8 +30,6 @@
 #include <vector>
 
 namespace terminal::renderer::atlas {
-
-auto const inline AtlasTag = crispy::debugtag::make("renderer.atlas", "Logs details about texture atlas.");
 
 using Buffer = std::vector<uint8_t>;
 enum class Format { Red, RGB, RGBA };

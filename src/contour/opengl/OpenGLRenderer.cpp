@@ -13,6 +13,7 @@
  */
 #include <contour/opengl/OpenGLRenderer.h>
 #include <contour/opengl/ShaderConfig.h>
+#include <contour/helper.h>
 
 #include <terminal_renderer/Atlas.h>
 
@@ -34,7 +35,13 @@ using std::pair;
 using std::string;
 using std::vector;
 
-namespace terminal::renderer::opengl {
+using terminal::ImageSize;
+using terminal::Width;
+using terminal::Height;
+
+namespace contour::opengl {
+
+namespace atlas = terminal::renderer::atlas;
 
 #if !defined(NDEBUG)
 #define CHECKED_GL(code) \
@@ -42,7 +49,7 @@ namespace terminal::renderer::opengl {
         (code); \
         GLenum err{}; \
         while ((err = glGetError()) != GL_NO_ERROR) \
-            debuglog(OpenGLRendererTag).write("OpenGL error {} for call: {}", err, #code); \
+            LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 #else
 #define CHECKED_GL(code) do { (code); } while (0)
@@ -487,7 +494,7 @@ void OpenGLRenderer::uploadTexture(atlas::UploadTexture const& _param)
     auto const y0 = texture.offset.y;
     //auto const z0 = texture.z;
 
-    //debuglog(OpenGLRendererTag).write("({}): {}", textureId, _param);
+    //LOGSTORE(DisplayLog)("({}): {}", textureId, _param);
 
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
@@ -566,14 +573,14 @@ void OpenGLRenderer::renderRectangle(int _x, int _y, int _width, int _height,
     crispy::copy(vertices, back_inserter(rectBuffer_));
 }
 
-optional<AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceID)
+optional<terminal::renderer::AtlasTextureInfo> OpenGLRenderer::readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceID)
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
 
     auto const textureId = textureAtlasID(_instanceID);
 
-    AtlasTextureInfo output{};
+    terminal::renderer::AtlasTextureInfo output{};
     output.atlasName = _allocator.name();
     output.atlasInstanceId = _instanceID.value;
     output.size = _allocator.size();
@@ -653,7 +660,7 @@ void OpenGLRenderer::execute()
         vector<uint8_t> buffer;
         buffer.resize(*bufferSize.width * *bufferSize.height * 4);
 
-        debuglog(OpenGLRendererTag).write("Capture screenshot ({}/{}).", bufferSize, size_);
+        LOGSTORE(DisplayLog)("Capture screenshot ({}/{}).", bufferSize, size_);
 
         CHECKED_GL( glReadPixels(0, 0, *bufferSize.width, *bufferSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
 
@@ -679,7 +686,7 @@ void OpenGLRenderer::executeRenderTextures()
 {
     currentTextureId_ = std::numeric_limits<int>::max();
 
-    // debuglog(OpenGLRendererTag).write(
+    // LOGSTORE(DisplayLog)(
     //     "OpenGLRenderer::executeRenderTextures() upload={} render={}",
     //     textureScheduler_->uploadTextures.size(),
     //     textureScheduler_->renderTextures.size()

@@ -14,11 +14,11 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
-#include <crispy/debuglog.h>
+#include <crispy/logstore.h>
 
 namespace terminal::renderer {
 
-auto const inline TextRendererTag = crispy::debugtag::make("renderer.text", "Logs details about text rendering.");
+auto const inline RasterizerLog = logstore::Category("vt.renderer", "Logs details about text rendering.");
 
 std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& _bitmap,
                                     ImageSize _size,
