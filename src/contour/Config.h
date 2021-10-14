@@ -158,8 +158,8 @@ struct TerminalProfile {
     } hyperlinkDecoration;
 };
 
-using terminal::renderer::opengl::ShaderConfig;
-using terminal::renderer::opengl::ShaderClass;
+using opengl::ShaderConfig;
+using opengl::ShaderClass;
 
 // NB: All strings in here must be UTF8-encoded.
 struct Config {
@@ -201,8 +201,8 @@ struct Config {
 
     static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
 
-    ShaderConfig backgroundShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Background);
-    ShaderConfig textShader = terminal::renderer::opengl::defaultShaderConfig(ShaderClass::Text);
+    ShaderConfig backgroundShader = opengl::defaultShaderConfig(ShaderClass::Background);
+    ShaderConfig textShader = opengl::defaultShaderConfig(ShaderClass::Text);
 
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;

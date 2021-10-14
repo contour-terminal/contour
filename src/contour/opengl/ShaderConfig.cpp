@@ -12,8 +12,7 @@
  * limitations under the License.
  */
 #include <contour/opengl/ShaderConfig.h>
-
-#include <crispy/debuglog.h>
+#include <contour/helper.h>
 
 #include <iostream>
 #include <string>
@@ -23,7 +22,7 @@
 #include <contour/opengl/text_vert.h>
 #include <contour/opengl/text_frag.h>
 
-namespace terminal::renderer::opengl {
+namespace contour::opengl {
 
 namespace {
     template <size_t N>
@@ -54,30 +53,32 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
 
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
     {
-        debuglog(OpenGLRendererTag).write("Compiling vertex shader {} failed. {}", _shaderConfig.vertexShaderFileName,
-                                                                  shader->log().toStdString());
+        errorlog()("Compiling vertex shader {} failed. {}",
+                   _shaderConfig.vertexShaderFileName,
+                   shader->log().toStdString());
         qDebug() << shader->log();
         return {};
     }
 
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
     {
-        debuglog(OpenGLRendererTag).write("Compiling fragment shader {} failed. {}", _shaderConfig.fragmentShaderFileName,
-                                                                    shader->log().toStdString());
+        errorlog()("Compiling fragment shader {} failed. {}",
+                   _shaderConfig.fragmentShaderFileName,
+                   shader->log().toStdString());
         return {};
     }
 
     if (!shader->link())
     {
-        debuglog(OpenGLRendererTag).write("Linking shaders {} & {} failed. {}",
-                                          _shaderConfig.vertexShaderFileName,
-                                          _shaderConfig.fragmentShaderFileName,
-                                          shader->log().toStdString());
+        errorlog()("Linking shaders {} & {} failed. {}",
+                 _shaderConfig.vertexShaderFileName,
+                 _shaderConfig.fragmentShaderFileName,
+                 shader->log().toStdString());
         return {};
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        debuglog(OpenGLRendererTag).write(logString);
+        errorlog()(logString);
 
     return shader;
 }

@@ -14,8 +14,6 @@
 #include <text_shaper/fontconfig_locator.h>
 #include <text_shaper/font.h>
 
-#include <crispy/debuglog.h>
-
 #include <range/v3/view/iota.hpp>
 
 #include <fontconfig/fontconfig.h>
@@ -153,7 +151,7 @@ fontconfig_locator::~fontconfig_locator()
 
 font_source_list fontconfig_locator::locate(font_description const& _fd)
 {
-    debuglog(FontFallbackTag).write("Locating font chain for: {}", _fd);
+    LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
     auto pat = unique_ptr<FcPattern, void(*)(FcPattern*)>(
         FcPatternCreate(),
         [](auto p) { FcPatternDestroy(p); });
@@ -225,7 +223,7 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
         // FcPatternGetInteger(font, FC_COLOR, 0, &color);
         // if (color && !_color)
         // {
-        //     debuglog(FontFallbackTag).write("Skipping font (contains color). {}", (char const*) file);
+        //     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
         //     continue;
         // }
         #endif
@@ -237,14 +235,14 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
             if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL) ||
                 (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
             {
-                debuglog(FontFallbackTag).write("Skipping font: {} ({} < {}).",
+                LOGSTORE(LocatorLog)("Skipping font: {} ({} < {}).",
                     (char const*)(file), fcSpacingStr(spacing), fcSpacingStr(FC_DUAL));
                 continue;
             }
         }
 
         output.emplace_back(font_path{string{(char const*)(file)}});
-        // debuglog(FontFallbackTag).write("Found font: {}", (char const*) file);
+        // LOGSTORE(LocatorLog)("Found font: {}", (char const*) file);
     }
 
     #if defined(_WIN32)
@@ -327,10 +325,10 @@ font_source_list fontconfig_locator::all()
         if (spacing < FC_DUAL)
             continue;
 
-        debuglog(FontFallbackTag).write("font({}, {}, {})",
-                                        fcWeightStr(weight),
-                                        fcSlantStr(slant),
-                                        (char*) family);
+        LOGSTORE(LocatorLog)("font({}, {}, {})",
+                             fcWeightStr(weight),
+                             fcSlantStr(slant),
+                             (char*) family);
         output.emplace_back(font_path{(char const*) filename});
     }
 

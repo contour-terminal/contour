@@ -12,9 +12,9 @@ set(crispy_SOURCES
     algorithm.h
     base64.h
     compose.h
-    debuglog.h
     escape.h
     indexed.h
+    logstore.h
     overloaded.h
     reference.h
     ring.h
@@ -69,7 +69,10 @@ if(UNIX)
 
     # The following options are all important to get stacktrace dumping working
     target_link_libraries(crispy-core PUBLIC dl)
-    target_link_options(crispy-core PUBLIC -rdynamic -no-pie -fno-pie)
+    target_link_options(crispy-core PUBLIC -rdynamic -fno-pie)
+    if(NOT(APPLE))
+        target_link_options(crispy-core PUBLIC -no-pie)
+    endif()
     target_compile_definitions(crispy-core PUBLIC BOOST_STACKTRACE_USE_ADDR2LINE=1)
     if(CONTOUR_STACKTRACE_ADDR2LINE)
         target_compile_definitions(crispy-core PUBLIC CONTOUR_STACKTRACE_ADDR2LINE=1)

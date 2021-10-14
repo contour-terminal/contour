@@ -22,8 +22,8 @@
 #include <terminal/pty/Pty.h>
 
 #include <crispy/App.h>
-#include <crispy/debuglog.h>
 #include <crispy/stdfs.h>
+#include <crispy/logstore.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -67,7 +67,7 @@
         (code); \
         GLenum err{}; \
         while ((err = glGetError()) != GL_NO_ERROR) \
-            debuglog(WidgetTag).write("OpenGL error {} for call: {}", err, #code); \
+            LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
 #if defined(_MSC_VER)
@@ -217,7 +217,7 @@ namespace // {{{
             }
         }(_type);
 
-        debuglog(WidgetTag).write(
+        LOGSTORE(DisplayLog)(
             "[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
             tag, typeName, sourceName, debugSeverity, _message
         );
@@ -231,7 +231,7 @@ namespace // {{{
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
-        debuglog(WidgetTag).write("{}", unhandledExceptionMessage(where, e));
+        LOGSTORE(DisplayLog)("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
 } // }}}
@@ -257,14 +257,14 @@ TerminalWidget::TerminalWidget(
         //TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
     }
 {
-    debuglog(WidgetTag).write("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
-                              profile().terminalSize,
-                              profile().fonts.size,
-                              contentScale(),
-                              geometry().top(),
-                              geometry().left(),
-                              geometry().bottom(),
-                              geometry().right());
+    LOGSTORE(DisplayLog)("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
+                         profile().terminalSize,
+                         profile().fonts.size,
+                         contentScale(),
+                         geometry().top(),
+                         geometry().left(),
+                         geometry().bottom(),
+                         geometry().right());
 
     setMouseTracking(true);
     setFormat(surfaceFormat());
@@ -288,7 +288,7 @@ TerminalWidget::TerminalWidget(
 
 TerminalWidget::~TerminalWidget()
 {
-    debuglog(WidgetTag).write("TerminalWidget.dtor!");
+    LOGSTORE(DisplayLog)("TerminalWidget.dtor!");
     makeCurrent(); // XXX must be called.
 }
 
@@ -336,9 +336,9 @@ QSize TerminalWidget::sizeHint() const
         Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines)
     };
 
-    debuglog(WidgetTag).write("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
-                              viewSize, cellSize, profile().terminalSize,
-                              renderer_.fontDescriptions().dpi);
+    LOGSTORE(DisplayLog)("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
+                         viewSize, cellSize, profile().terminalSize,
+                         renderer_.fontDescriptions().dpi);
 
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
@@ -347,7 +347,7 @@ void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
-    renderTarget_ = make_unique<terminal::renderer::opengl::OpenGLRenderer>(
+    renderTarget_ = make_unique<OpenGLRenderer>(
         *config::Config::loadShaderConfig(config::ShaderClass::Text),
         *config::Config::loadShaderConfig(config::ShaderClass::Background),
         ImageSize{Width(width()), Height(height())},
@@ -361,20 +361,20 @@ void TerminalWidget::initializeGL()
     if (!infoPrinted)
     {
         infoPrinted = true;
-        debuglog(WidgetTag).write("[FYI] DPI             : {} physical; {} logical",
-                         crispy::Size{physicalDpiX(), physicalDpiY()},
-                         crispy::Size{logicalDpiX(), logicalDpiY()});
+        LOGSTORE(DisplayLog)("[FYI] DPI             : {} physical; {} logical",
+                             crispy::Size{physicalDpiX(), physicalDpiY()},
+                             crispy::Size{logicalDpiX(), logicalDpiY()});
         auto const fontSizeInPx = int(ceil(profile().fonts.size.pt / 72.0 * 96.0 * contentScale()));
-        debuglog(WidgetTag).write("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
-        debuglog(WidgetTag).write("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
-        debuglog(WidgetTag).write("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
-        debuglog(WidgetTag).write("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
+        LOGSTORE(DisplayLog)("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
+        LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+        LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
+        LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
 
         GLint versionMajor{};
         GLint versionMinor{};
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-        debuglog(WidgetTag).write("[FYI] OpenGL version  : {}.{}", versionMajor, versionMinor);
+        LOGSTORE(DisplayLog)("[FYI] OpenGL version  : {}.{}", versionMajor, versionMinor);
 
         auto glslVersionMsg = fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
@@ -398,7 +398,7 @@ void TerminalWidget::initializeGL()
             glslVersionMsg += ')';
         }
 #endif
-        debuglog(WidgetTag).write(glslVersionMsg);
+        LOGSTORE(DisplayLog)(glslVersionMsg);
     }
     // }}}
 
@@ -429,8 +429,8 @@ void TerminalWidget::paintGL()
             ++renderCount_;
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);
             auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
-            if (crispy::debugtag::enabled(WidgetTag))
-                debuglog(WidgetTag).write(
+            if (DisplayLog)
+                LOGSTORE(DisplayLog)(
                     "paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
                     renderCount_.load(),
                     renderCount,
@@ -699,7 +699,7 @@ void TerminalWidget::dumpState()
 
     FileSystem::create_directories(targetDir);
 
-    debuglog(WidgetTag).write("Dumping state into directory: {}", targetDir.generic_string());
+    LOGSTORE(DisplayLog)("Dumping state into directory: {}", targetDir.generic_string());
 
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
@@ -808,7 +808,7 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
 {
     if (isFullScreen())
     {
-        debuglog(WidgetTag).write("Application request to resize window in full screen mode denied.");
+        LOGSTORE(DisplayLog)("Application request to resize window in full screen mode denied.");
         return;
     }
 
@@ -836,7 +836,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 {
     if (isFullScreen())
     {
-        debuglog(WidgetTag).write("Application request to resize window in full screen mode denied.");
+        LOGSTORE(DisplayLog)("Application request to resize window in full screen mode denied.");
         return;
     }
 

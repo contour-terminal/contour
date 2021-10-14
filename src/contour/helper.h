@@ -15,6 +15,7 @@
 
 #include <contour/Config.h>
 #include <terminal/InputGenerator.h>
+#include <crispy/logstore.h>
 
 #include <QtCore/Qt>
 #include <QtCore/QCoreApplication>
@@ -34,6 +35,10 @@ namespace terminal::renderer
 
 namespace contour
 {
+
+auto inline const DisplayLog = logstore::Category("gui.display", "Logs display driver details (e.g. OpenGL).");
+auto inline const InputLog = logstore::Category("gui.input", "Logs input driver details (e.g. GUI input events).");
+auto inline const SessionLog = logstore::Category("gui.session", "VT terminal session logs");
 
 namespace detail
 {
@@ -153,10 +158,6 @@ void spawnNewTerminal(std::string const& _programPath,
                       std::string const& _configPath,
                       std::string const& _profileName,
                       std::string const& _cwdUrl);
-
-auto const inline KeyboardTag = crispy::debugtag::make("system.keyboard", "Logs OS keyboard related debug information.");
-auto const inline WindowTag = crispy::debugtag::make("system.window", "Logs system window debug events.");
-auto const inline WidgetTag = crispy::debugtag::make("system.widget", "Logs system widget related debug information.");
 
 using PermissionCache = std::map<std::string, bool>;
 

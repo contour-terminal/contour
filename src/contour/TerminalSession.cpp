@@ -108,8 +108,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 {
     if (_liveConfig)
     {
-        debuglog(WidgetTag).write("Enable live configuration reloading of file {}.",
-                                  config_.backingFilePath.generic_string());
+        LOGSTORE(SessionLog)("Enable live configuration reloading of file {}.",
+                             config_.backingFilePath.generic_string());
         configFileChangeWatcher_.emplace(config_.backingFilePath,
                                          [this](FileChangeWatcher::Event event) { onConfigReload(event); });
     }
@@ -126,7 +126,7 @@ TerminalSession::~TerminalSession()
 
 void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
 {
-    debuglog(WidgetTag).write("Assigning display.");
+    LOGSTORE(SessionLog)("Assigning display.");
     display_ = move(_display);
 
     // XXX find better way (dpi)
@@ -157,7 +157,7 @@ void TerminalSession::start()
 // {{{ Events implementations
 void TerminalSession::bell()
 {
-    debuglog(WidgetTag).write("TODO: Beep!");
+    LOGSTORE(SessionLog)("TODO: Beep!");
     QApplication::beep();
     // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
     // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
@@ -314,7 +314,7 @@ void TerminalSession::resizeWindow(LineCount _lines, ColumnCount _columns)
     if (!display_)
         return;
 
-    debuglog(WidgetTag).write("Application request to resize window: {}x{} px", _columns, _lines);
+    LOGSTORE(SessionLog)("Application request to resize window: {}x{} px", _columns, _lines);
     display_->post([this, _lines, _columns]() { display_->resizeWindow(_lines, _columns); });
 }
 
@@ -323,7 +323,7 @@ void TerminalSession::resizeWindow(Width _width, Height _height)
     if (!display_)
         return;
 
-    debuglog(WidgetTag).write("Application request to resize window: {}x{} px", _width, _height);
+    LOGSTORE(SessionLog)("Application request to resize window: {}x{} px", _width, _height);
     display_->post([this, _width, _height]() { display_->resizeWindow(_width, _height); });
 }
 
@@ -358,7 +358,7 @@ void TerminalSession::sendKeyPressEvent(Key _key,
                                         Modifier _modifier,
                                         Timestamp _now)
 {
-    debuglog(KeyboardTag).write("{} {}", _modifier, _key);
+    LOGSTORE(InputLog)("{} {}", _modifier, _key);
 
     if (terminatedAndWaitingForKeyPress_)
     {
@@ -379,7 +379,7 @@ void TerminalSession::sendKeyPressEvent(Key _key,
 
 void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
-    debuglog(KeyboardTag).write("{} {}", _modifier, _value);
+    LOGSTORE(InputLog)("{} {}", _modifier, _value);
     assert(display_ != nullptr);
 
     if (terminatedAndWaitingForKeyPress_)
@@ -480,7 +480,7 @@ void TerminalSession::sendFocusOutEvent()
 // {{{ Actions
 void TerminalSession::operator()(actions::ChangeProfile const& _action)
 {
-    debuglog(WidgetTag).write("Changing profile to: {}", _action.name);
+    LOGSTORE(SessionLog)("Changing profile to: {}", _action.name);
     if (_action.name == profileName_)
         return;
 
@@ -489,7 +489,7 @@ void TerminalSession::operator()(actions::ChangeProfile const& _action)
 
 void TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
-    debuglog(WidgetTag).write("Clearing history and perform terminal hard reset");
+    LOGSTORE(SessionLog)("Clearing history and perform terminal hard reset");
 
     auto const screenSize = terminal_.screenSize();
     auto const pixelSize = display_->pixelSize();
@@ -707,7 +707,7 @@ void TerminalSession::operator()(actions::SendChars const& _event)
 void TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     allowKeyMappings_ = !allowKeyMappings_;
-    debuglog(KeyboardTag).write(
+    LOGSTORE(InputLog)(
         "{} key mappings.",
         allowKeyMappings_ ? "Enabling" : "Disabling"
     );
@@ -753,9 +753,9 @@ void TerminalSession::sanitizeConfig(config::Config& _config)
 
 bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _profileName)
 {
-    debuglog(WidgetTag).write("Reloading configuration from {} with profile {}",
-                              _newConfig.backingFilePath.string(),
-                              _profileName);
+    LOGSTORE(SessionLog)("Reloading configuration from {} with profile {}",
+                         _newConfig.backingFilePath.string(),
+                         _profileName);
 
     sanitizeConfig(_newConfig);
 
@@ -793,12 +793,12 @@ void TerminalSession::executeAllActions(std::vector<actions::Action> const& _act
         return;
     }
 
-    debuglog(KeyboardTag).write("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
+    LOGSTORE(InputLog)("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
 }
 
 void TerminalSession::executeAction(actions::Action const& _action)
 {
-    debuglog(WidgetTag).write("executeAction: {}", _action);
+    LOGSTORE(SessionLog)("executeAction: {}", _action);
     visit(*this, _action);
 }
 
@@ -820,11 +820,11 @@ void TerminalSession::activateProfile(string const& _newProfileName)
     auto newProfile = config_.profile(_newProfileName);
     if (!newProfile)
     {
-        debuglog(WidgetTag).write("Cannot change profile. No such profile: '{}'.", _newProfileName);
+        LOGSTORE(SessionLog)("Cannot change profile. No such profile: '{}'.", _newProfileName);
         return;
     }
 
-    debuglog(WidgetTag).write("Changing profile to {}.", _newProfileName);
+    LOGSTORE(SessionLog)("Changing profile to {}.", _newProfileName);
     profileName_ = _newProfileName;
     profile_ = *newProfile;
     configureTerminal();
@@ -834,19 +834,19 @@ void TerminalSession::activateProfile(string const& _newProfileName)
 void TerminalSession::configureTerminal()
 {
     auto const _l = scoped_lock{terminal_};
-    debuglog(WidgetTag).write("Configuring terminal.");
+    LOGSTORE(SessionLog)("Configuring terminal.");
     terminal::Screen& screen = terminal_.screen();
 
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
 
-    debuglog(WidgetTag).write("Setting terminal ID to {}.", profile_.terminalId);
+    LOGSTORE(SessionLog)("Setting terminal ID to {}.", profile_.terminalId);
     screen.setTerminalId(profile_.terminalId);
     screen.setRespondToTCapQuery(config_.experimentalFeatures.count("tcap"));
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setMaxImageSize(config_.maxImageSize);
-    debuglog(WidgetTag).write("maxImageSize={}, sixelScrolling={}",
+    LOGSTORE(SessionLog)("maxImageSize={}, sixelScrolling={}",
             config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
     screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
 
@@ -867,7 +867,7 @@ void TerminalSession::configureDisplay()
     if (!display_)
         return;
 
-    debuglog(WidgetTag).write("Configuring display.");
+    LOGSTORE(SessionLog)("Configuring display.");
     display_->setBackgroundBlur(profile_.backgroundBlur);
 
     if (profile_.maximized)
@@ -969,7 +969,7 @@ bool TerminalSession::resetConfig()
     }
     catch (exception const& e)
     {
-        debuglog(WidgetTag).write("Failed to load default config: {}", e.what());
+        LOGSTORE(SessionLog)("Failed to load default config: {}", e.what());
     }
 
     return reloadConfig(defaultConfig, defaultConfig.defaultProfileName);

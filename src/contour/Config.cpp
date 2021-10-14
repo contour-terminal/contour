@@ -18,9 +18,9 @@
 #include <terminal/Process.h>
 #include <terminal/ControlCode.h>
 
+#include <crispy/logstore.h>
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
-#include <crispy/debuglog.h>
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
@@ -66,7 +66,7 @@ using terminal::ColumnCount;
 namespace contour::config {
 
 namespace {
-    auto const ConfigTag = crispy::debugtag::make("config", "Logs configuration file loading.");
+    auto const ConfigLog = logstore::Category("config", "Logs configuration file loading.");
 }
 
 using actions::Action;
@@ -213,7 +213,7 @@ namespace // {{{ helper
                 parentKey += '.';
                 parentKey += _keys[i];
             }
-            debuglog(ConfigTag).write(
+            LOGSTORE(ConfigLog)(
                 "Missing key {}. Using default: {}.",
                 parentKey, !defaultStr.empty() ? defaultStr : "\"\""s
             );
@@ -292,7 +292,7 @@ namespace // {{{ helper
                     continue;
                 if (crispy::startsWith(string_view(prefix), "x-"sv))
                     continue;
-                errorlog().write(
+                errorlog()(
                     "Superfluous config key found: {}",
                     escape(prefix)
                 );
@@ -557,7 +557,7 @@ optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
             flag = MatchModes::Select;
         else
         {
-            errorlog().write("Unknown input_mapping mode: {}", arg);
+            errorlog()("Unknown input_mapping mode: {}", arg);
             continue;
         }
 
@@ -789,7 +789,7 @@ void parseInputMapping(UsedKeys& _usedKeys, string const& _prefix,
         else
         {
             // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
-            debuglog(ConfigTag).write("Could not add some input mapping.");
+            LOGSTORE(ConfigLog)("Could not add some input mapping.");
         }
     }
 }
@@ -1027,17 +1027,17 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             profile.colors = i->second;
         }
         else
-            errorlog().write("scheme '{}' not found.", colors.as<string>());
+            errorlog()("scheme '{}' not found.", colors.as<string>());
     }
     else
-        errorlog().write("No colors section in profile {} found.", _name);
+        errorlog()("No colors section in profile {} found.", _name);
 
     string const basePath = fmt::format("profiles.{}", _name);
     tryLoadChild(_usedKeys, _doc, basePath, "shell", profile.shell.program);
     if (profile.shell.program.empty())
     {
         if (!profile.shell.arguments.empty())
-            errorlog().write("No shell defined but arguments. Ignoring arguments.");
+            errorlog()("No shell defined but arguments. Ignoring arguments.");
 
         auto loginShell = terminal::Process::loginShell();
         profile.shell.program = loginShell.front();
@@ -1108,7 +1108,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (profile.shell.env.find("TERM") == profile.shell.env.end())
     {
         profile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
-        debuglog(ConfigTag).write("Defaulting TERM to {}.", profile.shell.env["TERM"]);
+        LOGSTORE(ConfigLog)("Defaulting TERM to {}.", profile.shell.env["TERM"]);
     }
 
     if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
@@ -1119,7 +1119,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (auto const idOpt = stringToVTType(strValue))
         profile.terminalId = idOpt.value();
     else
-        errorlog().write("Invalid Terminal ID \"{}\", specified", strValue);
+        errorlog()("Invalid Terminal ID \"{}\", specified", strValue);
 
     tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.columns", profile.terminalSize.columns);
     tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.lines", profile.terminalSize.lines);
@@ -1128,13 +1128,13 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         auto constexpr MaximumTerminalSize = PageSize{LineCount(200), ColumnCount(300)};
 
         if (!sanitizeRange(ref(profile.terminalSize.columns.value), *MinimalTerminalSize.columns, *MaximumTerminalSize.columns))
-            errorlog().write(
+            errorlog()(
                 "Terminal width {} out of bounds. Should be between {} and {}.",
                 profile.terminalSize.columns, MinimalTerminalSize.columns, MaximumTerminalSize.columns
             );
 
         if (!sanitizeRange(ref(profile.terminalSize.lines), MinimalTerminalSize.lines, MaximumTerminalSize.lines))
-            errorlog().write(
+            errorlog()(
                 "Terminal height {} out of bounds. Should be between {} and {}.",
                 profile.terminalSize.lines, MinimalTerminalSize.lines, MaximumTerminalSize.lines
             );
@@ -1158,8 +1158,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     {
         if (profile.fonts.size < MinimumFontSize)
         {
-            errorlog().write("Invalid font size {} set in config file. Minimum value is {}.",
-                             profile.fonts.size, MinimumFontSize);
+            errorlog()("Invalid font size {} set in config file. Minimum value is {}.",
+                       profile.fonts.size, MinimumFontSize);
             profile.fonts.size = MinimumFontSize;
         }
     }
@@ -1198,7 +1198,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else if (lwrValue == "native")
             profile.fonts.textShapingEngine = NativeTextShapingEngine;
         else
-            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.text_shaping.engine: {}",
+            LOGSTORE(ConfigLog)("Invalid value for configuration key {}.font.text_shaping.engine: {}",
                     basePath, strValue);
     }
 
@@ -1216,8 +1216,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else if (lwrValue == "native")
             profile.fonts.fontLocator = NativeFontLocator;
         else
-            debuglog(ConfigTag).write("Invalid value for configuration key {}.font.locator: {}",
-                                      basePath, strValue);
+            LOGSTORE(ConfigLog)("Invalid value for configuration key {}.font.locator: {}",
+                                basePath, strValue);
     }
 
     bool strictSpacing = false;
@@ -1268,7 +1268,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (i != renderModeMap.end())
         profile.fonts.renderMode = i->second;
     else
-        errorlog().write("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        errorlog()("Invalid render_mode \"{}\" in configuration.", renderModeStr);
 
     auto intValue = profile.maxHistoryLineCount.value_or(std::numeric_limits<LineCount>::max());
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
@@ -1288,9 +1288,9 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else if (literal == "hidden")
             profile.scrollbarPosition = ScrollBarPosition::Hidden;
         else
-            errorlog().write("Invalid value for config entry {}: {}",
-                             "scrollbar.position",
-                             strValue);
+            errorlog()("Invalid value for config entry {}: {}",
+                       "scrollbar.position",
+                       strValue);
     }
     tryLoadChild(_usedKeys, _doc, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
 
@@ -1357,7 +1357,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             auto const key = x.first.as<string>();
             if (crispy::count(KnownExperimentalFeatures, key) == 0)
             {
-                errorlog().write("Unknown experimental feature tag: {}.", key);
+                errorlog()("Unknown experimental feature tag: {}.", key);
                 continue;
             }
 
@@ -1365,7 +1365,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             if (!x.second.as<bool>())
                 continue;
 
-            errorlog().write("Enabling experimental feature {}.", key);
+            errorlog()("Enabling experimental feature {}.", key);
             _config.experimentalFeatures.insert(key);
         }
     }
@@ -1405,8 +1405,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName);
     if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
     {
-        errorlog().write("default_profile \"{}\" not found in profiles list.",
-                         escape(_config.defaultProfileName));
+        errorlog()("default_profile \"{}\" not found in profiles list.",
+                   escape(_config.defaultProfileName));
     }
 
 	if (auto mapping = doc["input_mapping"]; mapping)
@@ -1446,7 +1446,7 @@ optional<std::string> readConfigFile(std::string const& _filename)
 
 std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
 {
-    auto const& defaultConfig = terminal::renderer::opengl::defaultShaderConfig(_shaderClass);
+    auto const& defaultConfig = opengl::defaultShaderConfig(_shaderClass);
     auto const basename = to_string(_shaderClass);
 
     auto const vertText = [&]() -> pair<string, string> {

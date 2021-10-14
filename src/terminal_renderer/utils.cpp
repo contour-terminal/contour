@@ -1,3 +1,16 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <terminal_renderer/utils.h>
 
 #include <range/v3/view/iota.hpp>
@@ -26,8 +39,8 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap,
     std::vector<uint8_t> dest;
     dest.resize(*_newSize.height * *_newSize.width * 4);
 
-    // debuglog(FontScaleTag).write("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-    //                              _size, _newSize, ratioX, ratioY, ratio, factor);
+    // LOGSTORE(RasterizerLog)("scaling from {} to {}, ratio {}x{} ({}), factor {}",
+    //                         _size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota
@@ -77,8 +90,8 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
 
     std::vector<uint8_t> dest(*_newSize.width * *_newSize.height * _numComponents, 0);
 
-    debuglog(TextRendererTag).write("downsample from {} to {}, ratio {}x{} ({}), factor {}",
-                                    _size, _newSize, ratioX, ratioY, ratio, factor);
+    LOGSTORE(RasterizerLog)("downsample from {} to {}, ratio {}x{} ({}), factor {}",
+                            _size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota

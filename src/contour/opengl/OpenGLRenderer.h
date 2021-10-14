@@ -16,8 +16,6 @@
 #include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/Atlas.h>
 
-#include <crispy/debuglog.h>
-
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -29,12 +27,12 @@
 #include <memory>
 #include <optional>
 
-namespace terminal::renderer::opengl {
+namespace contour::opengl {
 
 struct ShaderConfig;
 
 class OpenGLRenderer final :
-    public RenderTarget,
+    public terminal::renderer::RenderTarget,
     public QOpenGLExtraFunctions
 {
   private:
@@ -51,11 +49,11 @@ class OpenGLRenderer final :
     void setRenderSize(crispy::ImageSize _size) override;
     void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
 
-    atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
-    atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
-    atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
+    terminal::renderer::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
+    terminal::renderer::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
+    terminal::renderer::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
 
-    atlas::AtlasBackend& textureScheduler() override;
+    terminal::renderer::atlas::AtlasBackend& textureScheduler() override;
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
 
@@ -67,7 +65,7 @@ class OpenGLRenderer final :
 
     void clearCache() override;
 
-    std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) override;
+    std::optional<terminal::renderer::AtlasTextureInfo> readAtlas(terminal::renderer::atlas::TextureAtlasAllocator const& _allocator, terminal::renderer::atlas::AtlasID _instanceId) override;
 
   private:
     // private helper methods
@@ -84,16 +82,16 @@ class OpenGLRenderer final :
     crispy::ImageSize monochromeTextureSizeHint();
 
     void executeRenderTextures();
-    void createAtlas(atlas::CreateAtlas const& _param);
-    void uploadTexture(atlas::UploadTexture const& _param);
-    void renderTexture(atlas::RenderTexture const& _param);
-    void destroyAtlas(atlas::AtlasID _atlasID);
+    void createAtlas(terminal::renderer::atlas::CreateAtlas const& _param);
+    void uploadTexture(terminal::renderer::atlas::UploadTexture const& _param);
+    void renderTexture(terminal::renderer::atlas::RenderTexture const& _param);
+    void destroyAtlas(terminal::renderer::atlas::AtlasID _atlasID);
 
     void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
     void bindTexture(GLuint _textureId);
-    GLuint textureAtlasID(atlas::AtlasID _atlasID) const noexcept;
-    void clearTextureAtlas(GLuint _textureId, int _width, int _height, atlas::Format _format);
+    GLuint textureAtlasID(terminal::renderer::atlas::AtlasID _atlasID) const noexcept;
+    void clearTextureAtlas(GLuint _textureId, int _width, int _height, terminal::renderer::atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -112,12 +110,12 @@ class OpenGLRenderer final :
     GLuint vao_{};              // Vertex Array Object, covering all buffer objects
     GLuint vbo_{};              // Buffer containing the vertex coordinates
     //TODO: GLuint ebo_{};
-    std::unordered_map<atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
+    std::unordered_map<terminal::renderer::atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
-    atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
-    atlas::TextureAtlasAllocator coloredAtlasAllocator_;
-    atlas::TextureAtlasAllocator lcdAtlasAllocator_;
+    terminal::renderer::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
+    terminal::renderer::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
+    terminal::renderer::atlas::TextureAtlasAllocator lcdAtlasAllocator_;
 
     // private data members for rendering filled rectangles
     //

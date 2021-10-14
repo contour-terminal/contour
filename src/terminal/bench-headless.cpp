@@ -16,8 +16,6 @@
 #include <terminal/logging.h>
 #include <terminal/pty/MockViewPty.h>
 
-#include <crispy/debuglog.h>
-
 #include <libtermbench/termbench.h>
 
 #include <iostream>
@@ -133,8 +131,6 @@ void benchmarkTerminal()
 
 int main(int argc, char const* argv[])
 {
-    crispy::debugtag::disable(terminal::VTParserTag);
-
     benchmarkTerminal();
     benchmarkParserOnly();
 

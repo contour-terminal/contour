@@ -23,8 +23,6 @@
 #endif
 #include <text_shaper/fontconfig_locator.h>
 
-#include <crispy/debuglog.h>
-
 #include <array>
 #include <functional>
 #include <memory>
@@ -52,6 +50,8 @@ void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shape
     _gm.baseline = m.line_height - m.ascender;
     _gm.underline.position = _gm.baseline + m.underline_position;
     _gm.underline.thickness = m.underline_thickness;
+
+    LOGSTORE(RasterizerLog)("Loading grid metrics {}", _gm);
 }
 
 GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
@@ -89,14 +89,14 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
             #if defined(_WIN32)
             return make_unique<text::directwrite_locator>();
             #else
-            debuglog(TextRendererTag).write("Font locator DirectWrite not supported on this platform.");
+            LOGSTORE(RasterizerLog)("Font locator DirectWrite not supported on this platform.");
             #endif
             break;
         case FontLocatorEngine::CoreText:
             #if defined(__APPLE__)
-            debuglog(TextRendererTag).write("Font locator CoreText not implemented yet.");
+            LOGSTORE(RasterizerLog)("Font locator CoreText not implemented yet.");
             #else
-            debuglog(TextRendererTag).write("Font locator CoreText not supported on this platform.");
+            LOGSTORE(RasterizerLog)("Font locator CoreText not supported on this platform.");
             #endif
             break;
 
@@ -104,7 +104,7 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
             break;
     }
 
-    debuglog(TextRendererTag).write("Using font locator: fontconfig.");
+    LOGSTORE(RasterizerLog)("Using font locator: fontconfig.");
     return make_unique<text::fontconfig_locator>();
 }
 
@@ -115,20 +115,20 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Poi
     {
         case TextShapingEngine::DWrite:
             #if defined(_WIN32)
-            debuglog(TextRendererTag).write("Using DirectWrite text shaping engine.");
+            LOGSTORE(RasterizerLog)("Using DirectWrite text shaping engine.");
             // TODO: do we want to use custom font locator here?
             return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
             #else
-            debuglog(TextRendererTag).write("DirectWrite not available on this platform.");
+            LOGSTORE(RasterizerLog)("DirectWrite not available on this platform.");
             break;
             #endif
 
         case TextShapingEngine::CoreText:
             #if defined(__APPLE__)
-            debuglog(TextRendererTag).write("CoreText not yet implemented.");
+            LOGSTORE(RasterizerLog)("CoreText not yet implemented.");
             break;
             #else
-            debuglog(TextRendererTag).write("CoreText not available on this platform.");
+            LOGSTORE(RasterizerLog)("CoreText not available on this platform.");
             break;
             #endif
 
@@ -136,7 +136,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine, crispy::Poi
             break;
     }
 
-    debuglog(TextRendererTag).write("Using OpenShaper text shaping engine.");
+    LOGSTORE(RasterizerLog)("Using OpenShaper text shaping engine.");
     return make_unique<text::open_shaper>(_dpi, std::move(_locator));
 }
 

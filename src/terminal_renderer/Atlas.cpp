@@ -13,7 +13,7 @@
  */
 #include <terminal_renderer/Atlas.h>
 
-#include <crispy/debuglog.h>
+#include <crispy/logstore.h>
 
 #include <algorithm>
 #include <array>
@@ -148,7 +148,7 @@ TextureInfo const* TextureAtlasAllocator::insert(ImageSize _bitmapSize,
         _format
     });
 
-    //debuglog(AtlasTag).write("Insert texture into atlas. {}", info);
+    //LOGSTORE(AtlasLog)("Insert texture into atlas. {}", info);
     return &info;
 }
 

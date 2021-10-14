@@ -13,6 +13,8 @@
  */
 #include <contour/ContourGuiApp.h>
 
+#include <crispy/logstore.h>
+
 #if defined(CONTOUR_FRONTEND_GUI)
 #include <contour/Config.h>
 #include <contour/Controller.h>
@@ -91,23 +93,24 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     {
         if (filterString == "all")
         {
-            for (auto& tag: crispy::debugtag::store())
-                tag.enabled = true;
+            for (auto& category: logstore::get())
+                category.get().enable();
         }
         else
         {
             auto const filters = crispy::split(filterString, ',');
-            for (auto& tag: crispy::debugtag::store())
+            for (auto& category: logstore::get())
             {
-                tag.enabled = crispy::any_of(filters, [&](string_view const& filterPattern) -> bool {
+                category.get().enable(crispy::any_of(filters, [&](string_view filterPattern) -> bool {
                     if (filterPattern.back() != '*')
-                        return tag.name == filterPattern;
+                        return category.get().name() == filterPattern;
+                    // TODO(pr): '*' excludes hidden categories
                     return std::equal(
                         begin(filterPattern),
                         prev(end(filterPattern)),
-                        begin(tag.name)
+                        begin(category.get().name())
                     );
-                });
+                }));
             }
         }
     }

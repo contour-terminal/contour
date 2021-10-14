@@ -16,9 +16,9 @@
 #include <terminal_renderer/BoxDrawingRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/utils.h>
+#include <terminal/logging.h>
 
 #include <crispy/algorithm.h>
-#include <crispy/debuglog.h>
 #include <crispy/times.h>
 #include <crispy/range.h>
 
@@ -223,8 +223,8 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write("Rasterized glyph: {} ({})", glyph, fontDescriptions_.renderMode);
+    if (RasterizerLog)
+        LOGSTORE(RasterizerLog)("Rasterized glyph: {} ({})", glyph, fontDescriptions_.renderMode);
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
@@ -271,7 +271,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
             //     return rightEdge;
             // }();
             // if (rightEdge != std::numeric_limits<int>::max())
-            //     debuglog(TextRendererTag).write("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
+            //     LOGSTORE(RasterizerLog)("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
         }
     }
     // }}}
@@ -285,14 +285,14 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                            float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
 
     auto const yOverflow = gridMetrics_.cellSize.height.as<int>() - yMax;
-    if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write("insert glyph {} id {} {} ratio:{} yOverflow({}, {})",
-                                        glyph,
-                                        _id.index,
-                                        _presentation,
-                                        ratio,
-                                        yOverflow < 0 ? yOverflow : 0,
-                                        yMin < 0 ? yMin : 0);
+    if (RasterizerLog)
+        LOGSTORE(RasterizerLog)("insert glyph {} id {} {} ratio:{} yOverflow({}, {})",
+                                glyph,
+                                _id.index,
+                                _presentation,
+                                ratio,
+                                yOverflow < 0 ? yOverflow : 0,
+                                yMin < 0 ? yMin : 0);
 
     auto && [userFormat, targetAtlas] =
         [this, glyphFormat = glyph.format]
@@ -314,7 +314,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
 
     if (yOverflow < 0)
     {
-        debuglog(TextRendererTag).write("Cropping {} overflowing bitmap rows.", -yOverflow);
+        LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", -yOverflow);
         glyph.size.height += Height(yOverflow);
         glyph.position.y += yOverflow;
     }
@@ -323,7 +323,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     {
         auto const rowCount = -yMin;
         auto const pixelCount = rowCount * glyph.size.width.as<int>() * text::pixel_size(glyph.format);
-        debuglog(TextRendererTag).write("Cropping {} underflowing bitmap rows.", rowCount);
+        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
         assert(pixelCount >= 0);
@@ -334,15 +334,16 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     metrics.bitmapSize = glyph.size;
     metrics.bearing = glyph.position;
 
-    if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
-                                        targetAtlas.allocator().name(),
-                                        _id.index,
-                                        _presentation,
-                                        ratio,
-                                        yOverflow < 0 ? yOverflow : 0,
-                                        yMin < 0 ? yMin : 0,
-                                        glyph);
+    if (RenderBufferLog.is_enabled())
+        LOGSTORE(RenderBufferLog)
+            ("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
+            targetAtlas.allocator().name(),
+            _id.index,
+            _presentation,
+            ratio,
+            yOverflow < 0 ? yOverflow : 0,
+            yMin < 0 ? yMin : 0,
+            glyph);
 
     return targetAtlas.insert(_id,
                               glyph.size,
@@ -376,8 +377,8 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
     renderTexture(crispy::Point{x, y}, _color, _textureInfo);
 
 #if 0
-    if (crispy::debugtag::enabled(TextRendererTag))
-        debuglog(TextRendererTag).write(
+    if (RasterizerLog)
+        LOGSTORE(RasterizerLog)(
                 "xy={}:{} pos=({}:{}) tex={}, gpos=({}:{}), baseline={}",
                 x, y,
                 _pos,
@@ -499,31 +500,31 @@ text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _
         gpos
     );
 
-    if (crispy::debugtag::enabled(TextRendererTag) && !gpos.empty())
+    if (RasterizerLog && !gpos.empty())
     {
-        auto msg = debuglog(TextRendererTag);
-        msg.write("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
-        msg.write("  (presentation: {}/{})",
+        auto msg = LOGSTORE(RasterizerLog);
+        msg.append("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
+        msg.append("  (presentation: {}/{})",
                 isEmojiPresentation ? "emoji" : "text",
                 get<unicode::PresentationStyle>(_run.properties));
 
-        msg.write(" (");
+        msg.append(" (");
         for (auto const [i, codepoint] : crispy::indexed(codepoints))
         {
             if (i)
-                msg.write(" ");
-            msg.write("U+{:04X}", unsigned(codepoint));
+                msg.append(" ");
+            msg.append("U+{:04X}", unsigned(codepoint));
         }
-        msg.write(")\n");
+        msg.append(")\n");
 
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
         // auto const& font = gpos.front().glyph.font;
         // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(), font.filePath());
 
-        msg.write("with metrics:");
+        msg.append("with metrics:");
         for (text::glyph_position const& gp : gpos)
-            msg.write(" {}", gp);
+            msg.append(" {}", gp);
     }
 
     return gpos;

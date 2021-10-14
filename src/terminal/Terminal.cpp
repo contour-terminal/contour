@@ -19,7 +19,6 @@
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
-#include <crispy/debuglog.h>
 
 #include <chrono>
 #include <utility>
@@ -62,13 +61,13 @@ namespace // {{{ helpers
 
     void logRenderBufferSwap(bool _success, uint64_t _frameID)
     {
-        if (!crispy::debugtag::enabled(crispy::PerfMetricsTag))
+        if (!RenderBufferLog)
             return;
 
         if (_success)
-            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapped.", _frameID);
+            LOGSTORE(RenderBufferLog)("Render buffer {} swapped.", _frameID);
         else
-            debuglog(crispy::PerfMetricsTag).write("Render buffer {} swapping failed.", _frameID);
+            LOGSTORE(RenderBufferLog)("Render buffer {} swapping failed.", _frameID);
     }
 }
 // }}}
@@ -140,7 +139,7 @@ void Terminal::mainLoop()
 {
     mainLoopThreadID_ = this_thread::get_id();
 
-    debuglog(TerminalTag).write(
+    LOGSTORE(TerminalLog)(
         "Starting main loop with thread id {}",
         [&]() {
             stringstream sstr;
@@ -169,16 +168,17 @@ bool Terminal::processInputOnce()
     auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
     if (!bufOpt)
     {
-        debuglog(TerminalTag).write("PTY read failed (timeout: {}). {}",
-                                    timeout,
-                                    strerror(errno));
+        if (errno != EINTR && errno != EAGAIN)
+            LOGSTORE(TerminalLog)("PTY read failed (timeout: {}). {}",
+                                  timeout,
+                                  strerror(errno));
         return errno == EINTR || errno == EAGAIN;
     }
     auto const buf = *bufOpt;
 
     if (buf.empty())
     {
-        debuglog(TerminalTag).write("PTY read returned with zero bytes.");
+        LOGSTORE(TerminalLog)("PTY read returned with zero bytes.");
         return true;
     }
 
@@ -289,8 +289,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     ++lastFrameID_;
     _output.frameID = lastFrameID_;
 #if defined(CONTOUR_PERF_STATS)
-    if (crispy::debugtag::enabled(TerminalTag))
-        debuglog(TerminalTag).write("{}: Refreshing render buffer.\n", lastFrameID_.load());
+    if (TerminalLog)
+        LOGSTORE(TerminalLog)("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
     #if defined(LIBTERMINAL_HYPERLINKS)
@@ -454,9 +454,6 @@ bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 
     viewport_.scrollToBottom();
     bool const success = inputGenerator_.generate(_key, _modifier);
-    if (success)
-        debuglog(InputTag).write("Sending {} {}.", _key, _modifier);
-
     flushInput();
     viewport_.scrollToBottom();
     return success;
@@ -472,8 +469,6 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
         return true;
 
     auto const success = inputGenerator_.generate(_value, _modifier);
-    if (success)
-        debuglog(InputTag).write("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(_value)), _modifier);
 
     flushInput();
     viewport_.scrollToBottom();
@@ -489,7 +484,6 @@ bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Time
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
-        debuglog(InputTag).write("Sending mouse press {} {} at {}.", _button, _modifier, currentMousePosition_);
         flushInput();
         return true;
     }
@@ -556,7 +550,6 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
     // Do not handle mouse-move events in sub-cell dimensions.
     if (respectMouseProtocol_ && inputGenerator_.generateMouseMove(currentMousePosition_, _modifier))
     {
-        debuglog(InputTag).write("Sending mouse move at {} {}.", newPosition, _modifier);
         flushInput();
         return true;
     }
@@ -589,7 +582,6 @@ bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Ti
 {
     if (respectMouseProtocol_ && inputGenerator_.generateMouseRelease(_button, _modifier, currentMousePosition_))
     {
-        debuglog(InputTag).write("Sending mouse release {} {} at {}.", _button, _modifier, currentMousePosition_);
         flushInput();
         return true;
     }
@@ -625,7 +617,6 @@ bool Terminal::sendFocusInEvent()
 
     if (inputGenerator_.generateFocusInEvent())
     {
-        debuglog(InputTag).write("Sending focus-in event.");
         flushInput();
         return true;
     }
@@ -640,7 +631,6 @@ bool Terminal::sendFocusOutEvent()
 
     if (inputGenerator_.generateFocusOutEvent())
     {
-        debuglog(InputTag).write("Sending focus-out event.");
         flushInput();
         return true;
     }
@@ -650,7 +640,6 @@ bool Terminal::sendFocusOutEvent()
 
 void Terminal::sendPaste(string_view _text)
 {
-    debuglog(InputTag).write("Sending paste of {} bytes.", _text.size());
     inputGenerator_.generatePaste(_text);
     flushInput();
 }
@@ -668,7 +657,6 @@ void Terminal::flushInput()
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    debuglog(InputTag).write("Flushing input: \"{}\"", crispy::escape(begin(pendingInput_), end(pendingInput_)));
     pty_.write(pendingInput_.data(), pendingInput_.size());
     pendingInput_.clear();
 }
