@@ -322,12 +322,6 @@ class Cell {
     void setImage(ImageFragment _imageFragment)
     {
         imageFragment_.emplace(std::move(_imageFragment));
-        width_ = 1;
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        codepoints_.clear();
-#else
-        codepointCount_ = 0;
-#endif
     }
 
 #if defined(LIBTERMINAL_HYPERLINKS)

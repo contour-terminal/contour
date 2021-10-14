@@ -1107,7 +1107,7 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
     }(Pa);
 
     auto const aspectHorizontal = 1;
-    auto const transparentBackground = Pb != 1;
+    auto const transparentBackground = Pb == 1;
 
     sixelImageBuilder_ = make_unique<SixelImageBuilder>(
         maxImageSize_,

@@ -314,16 +314,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         cell.flags = _cell.attributes().styles;
 
         if (!_cell.codepoints().empty())
-        {
-#if defined(LIBTERMINAL_IMAGES)
-            assert(!_cell.imageFragment().has_value());
-#endif
             cell.codepoints = _cell.codepoints();
-        }
+
 #if defined(LIBTERMINAL_IMAGES)
-        else if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
+        if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
         {
-            assert(_cell.codepoints().empty());
             cell.flags |= CellFlags::Image; // TODO: this should already be there.
             cell.image = _cell.imageFragment();
         }

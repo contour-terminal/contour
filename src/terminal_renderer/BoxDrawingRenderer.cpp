@@ -1173,7 +1173,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         // TODO: case 0x23B2: // ⎲ SUMMATION TOP
         // TODO: case 0x23B3: // ⎳ SUMMATION BOTTOM
 
-        // {{{ 2580..2590 block elements
+        // {{{ 2580..259F block elements
         case 0x2580: return blockElement(size) | upper(1/2_th); // ▀ UPPER HALF BLOCK
         case 0x2581: return blockElement(size) | lower(1/8_th); // ▁ LOWER ONE EIGHTH BLOCK
         case 0x2582: return blockElement(size) | lower(1/4_th); // ▂ LOWER ONE QUARTER BLOCK
@@ -1191,8 +1191,9 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x258E: return blockElement(size) | left(1/4_th);  // ▎ LEFT ONE QUARTER BLOCK
         case 0x258F: return blockElement(size) | left(1/8_th);  // ▏ LEFT ONE EIGHTH BLOCK
         case 0x2590: return blockElement(size) | right(1/2_th); // ▐ RIGHT HALF BLOCK
-        // }}}
-        // {{{ 2594..259F block elements
+        // ░ TODO case 0x2591:
+        // ▒ TODO case 0x2592:
+        // ▓ TODO case 0x2593:
         case 0x2594: return blockElement(size) | upper(1/8_th); // ▔  UPPER ONE EIGHTH BLOCK
         case 0x2595: return blockElement(size) | right(1/8_th); // ▕  RIGHT ONE EIGHTH BLOCK
         case 0x2596: // ▖  QUADRANT LOWER LEFT
@@ -1221,6 +1222,102 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x259F: // ▟  QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
             return blockElement(size) | upper(1/2_th) * right(1/2_th)
                                       + lower(1/2_th);
+        // TODO: ■  U+25A0  BLACK SQUARE
+        // TODO: □  U+25A1  WHITE SQUARE
+        // TODO: ▢  U+25A2  WHITE SQUARE WITH ROUNDED CORNERS
+        // TODO: ▣  U+25A3  WHITE SQUARE CONTAINING BLACK SMALL SQUARE
+        // TODO: ▤  U+25A4  SQUARE WITH HORIZONTAL FILL
+        // TODO: ▥  U+25A5  SQUARE WITH VERTICAL FILL
+        // TODO: ▦  U+25A6  SQUARE WITH ORTHOGONAL CROSSHATCH FILL
+        // TODO: ▧  U+25A7  SQUARE WITH UPPER LEFT TO LOWER RIGHT FILL
+        // TODO: ▨  U+25A8  SQUARE WITH UPPER RIGHT TO LOWER LEFT FILL
+        // TODO: ▩  U+25A9  SQUARE WITH DIAGONAL CROSSHATCH FILL
+        // TODO: ▪  U+25AA  BLACK SMALL SQUARE
+        // TODO: ▫  U+25AB  WHITE SMALL SQUARE
+        // TODO: ▬  U+25AC  BLACK RECTANGLE
+        // TODO: ▭  U+25AD  WHITE RECTANGLE
+        // TODO: ▮  U+25AE  BLACK VERTICAL RECTANGLE
+        // TODO: ▯  U+25AF  WHITE VERTICAL RECTANGLE
+        // TODO: ▰  U+25B0  BLACK PARALLELOGRAM
+        // TODO: ▱  U+25B1  WHITE PARALLELOGRAM
+        // TODO: ▲  U+25B2  BLACK UP-POINTING TRIANGLE
+        // TODO: △  U+25B3  WHITE UP-POINTING TRIANGLE
+        // TODO: ▴  U+25B4  BLACK UP-POINTING SMALL TRIANGLE
+        // TODO: ▵  U+25B5  WHITE UP-POINTING SMALL TRIANGLE
+        // TODO: ▶  U+25B6  BLACK RIGHT-POINTING TRIANGLE
+        // TODO: ▷  U+25B7  WHITE RIGHT-POINTING TRIANGLE
+        // TODO: ▸  U+25B8  BLACK RIGHT-POINTING SMALL TRIANGLE
+        // TODO: ▹  U+25B9  WHITE RIGHT-POINTING SMALL TRIANGLE
+        // TODO: ►  U+25BA  BLACK RIGHT-POINTING POINTER
+        // TODO: ▻  U+25BB  WHITE RIGHT-POINTING POINTER
+        // TODO: ▼  U+25BC  BLACK DOWN-POINTING TRIANGLE
+        // TODO: ▽  U+25BD  WHITE DOWN-POINTING TRIANGLE
+        // TODO: ▾  U+25BE  BLACK DOWN-POINTING SMALL TRIANGLE
+        // TODO: ▿  U+25BF  WHITE DOWN-POINTING SMALL TRIANGLE
+        // TODO: ◀  U+25C0  BLACK LEFT-POINTING TRIANGLE
+        // TODO: ◁  U+25C1  WHITE LEFT-POINTING TRIANGLE
+        // TODO: ◂  U+25C2  BLACK LEFT-POINTING SMALL TRIANGLE
+        // TODO: ◃  U+25C3  WHITE LEFT-POINTING SMALL TRIANGLE
+        // TODO: ◄  U+25C4  BLACK LEFT-POINTING POINTER
+        // TODO: ◅  U+25C5  WHITE LEFT-POINTING POINTER
+        // TODO: ◆  U+25C6  BLACK DIAMOND
+        // TODO: ◇  U+25C7  WHITE DIAMOND
+        // TODO: ◈  U+25C8  WHITE DIAMOND CONTAINING BLACK SMALL DIAMOND
+        // TODO: ◉  U+25C9  FISHEYE
+        // TODO: ◊  U+25CA  LOZENGE
+        // TODO: ○  U+25CB  WHITE CIRCLE
+        // TODO: ◌  U+25CC  DOTTED CIRCLE
+        // TODO: ◍  U+25CD  CIRCLE WITH VERTICAL FILL
+        // TODO: ◎  U+25CE  BULLSEYE
+        // TODO: ●  U+25CF  BLACK CIRCLE
+        // TODO: ◐  U+25D0  CIRCLE WITH LEFT HALF BLACK
+        // TODO: ◑  U+25D1  CIRCLE WITH RIGHT HALF BLACK
+        // TODO: ◒  U+25D2  CIRCLE WITH LOWER HALF BLACK
+        // TODO: ◓  U+25D3  CIRCLE WITH UPPER HALF BLACK
+        // TODO: ◔  U+25D4  CIRCLE WITH UPPER RIGHT QUADRANT BLACK
+        // TODO: ◕  U+25D5  CIRCLE WITH ALL BUT UPPER LEFT QUADRANT BLACK
+        // TODO: ◖  U+25D6  LEFT HALF BLACK CIRCLE
+        // TODO: ◗  U+25D7  RIGHT HALF BLACK CIRCLE
+        // TODO: ◘  U+25D8  INVERSE BULLET
+        // TODO: ◙  U+25D9  INVERSE WHITE CIRCLE
+        // TODO: ◚  U+25DA  UPPER HALF INVERSE WHITE CIRCLE
+        // TODO: ◛  U+25DB  LOWER HALF INVERSE WHITE CIRCLE
+        // TODO: ◜  U+25DC  UPPER LEFT QUADRANT CIRCULAR ARC
+        // TODO: ◝  U+25DD  UPPER RIGHT QUADRANT CIRCULAR ARC
+        // TODO: ◞  U+25DE  LOWER RIGHT QUADRANT CIRCULAR ARC
+        // TODO: ◟  U+25DF  LOWER LEFT QUADRANT CIRCULAR ARC
+        // TODO: ◠  U+25E0  UPPER HALF CIRCLE
+        // TODO: ◡  U+25E1  LOWER HALF CIRCLE
+        // TODO: ◢  U+25E2  BLACK LOWER RIGHT TRIANGLE
+        // TODO: ◣  U+25E3  BLACK LOWER LEFT TRIANGLE
+        // TODO: ◤  U+25E4  BLACK UPPER LEFT TRIANGLE
+        // TODO: ◥  U+25E5  BLACK UPPER RIGHT TRIANGLE
+        // TODO: ◦  U+25E6  WHITE BULLET
+        // TODO: ◧  U+25E7  SQUARE WITH LEFT HALF BLACK
+        // TODO: ◨  U+25E8  SQUARE WITH RIGHT HALF BLACK
+        // TODO: ◩  U+25E9  SQUARE WITH UPPER LEFT DIAGONAL HALF BLACK
+        // TODO: ◪  U+25EA  SQUARE WITH LOWER RIGHT DIAGONAL HALF BLACK
+        // TODO: ◫  U+25EB  WHITE SQUARE WITH VERTICAL BISECTING LINE
+        // TODO: ◬  U+25EC  WHITE UP-POINTING TRIANGLE WITH DOT
+        // TODO: ◭  U+25ED  UP-POINTING TRIANGLE WITH LEFT HALF BLACK
+        // TODO: ◮  U+25EE  UP-POINTING TRIANGLE WITH RIGHT HALF BLACK
+        // TODO: ◯  U+25EF  LARGE CIRCLE
+        // TODO: ◰  U+25F0  WHITE SQUARE WITH UPPER LEFT QUADRANT
+        // TODO: ◱  U+25F1  WHITE SQUARE WITH LOWER LEFT QUADRANT
+        // TODO: ◲  U+25F2  WHITE SQUARE WITH LOWER RIGHT QUADRANT
+        // TODO: ◳  U+25F3  WHITE SQUARE WITH UPPER RIGHT QUADRANT
+        // TODO: ◴  U+25F4  WHITE CIRCLE WITH UPPER LEFT QUADRANT
+        // TODO: ◵  U+25F5  WHITE CIRCLE WITH LOWER LEFT QUADRANT
+        // TODO: ◶  U+25F6  WHITE CIRCLE WITH LOWER RIGHT QUADRANT
+        // TODO: ◷  U+25F7  WHITE CIRCLE WITH UPPER RIGHT QUADRANT
+        // TODO: ◸  U+25F8  UPPER LEFT TRIANGLE
+        // TODO: ◹  U+25F9  UPPER RIGHT TRIANGLE
+        // TODO: ◺  U+25FA  LOWER LEFT TRIANGLE
+        // TODO: ◻  U+25FB  WHITE MEDIUM SQUARE
+        // TODO: ◼  U+25FC  BLACK MEDIUM SQUARE
+        // TODO: ◽ U+25FD  WHITE MEDIUM SMALL SQUARE
+        // TODO: ◾ U+25FE  BLACK MEDIUM SMALL SQUARE
+        // TODO: ◿  U+25FF  LOWER RIGHT TRIANGLE
         // }}}
         // {{{ 1FB00..1FB3B sextant blocks
         case 0x1FB00: return blockSextant(size, 1);             // 🬀  BLOCK SEXTANT-1
