@@ -282,7 +282,7 @@ directwrite_shaper::directwrite_shaper(crispy::Point _dpi, std::unique_ptr<font_
 
 optional<font_key> directwrite_shaper::load_font(font_description const& _description, font_size _size)
 {
-    debuglog(FontFallbackTag).write("Loading font chain for: {}", _description);
+    LOGSTORE(LocatorLog)("Loading font chain for: {}", _description);
     font_source_list sources = d->locator_->locate(_description);
     if (sources.empty())
         return nullopt;

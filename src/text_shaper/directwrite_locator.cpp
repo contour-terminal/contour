@@ -131,7 +131,7 @@ namespace text
 
     font_source_list directwrite_locator::locate(font_description const& _fd)
     {
-        debuglog(FontFallbackTag).write("Locating font chain for: {}", _fd);
+        LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
 
         font_source_list output;
 
@@ -168,7 +168,7 @@ namespace text
             ComPtr<IDWriteFontFace> fontFace;
             font->CreateFontFace(&fontFace);
             output.emplace_back(font_path{ wStringConverter.to_bytes(get_font_path(fontFace.Get())) });
-            debuglog(FontFallbackTag).write("Adding font file: {}", output.back());
+            LOGSTORE(LocatorLog)("Adding font file: {}", output.back());
         }
 
         return output;
