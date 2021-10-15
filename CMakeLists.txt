@@ -26,7 +26,7 @@ if(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
 endif()
 
-find_program(ADDR2LINE "addr2line")
+find_program(ADDR2LINE NAMES addr2line llvm-addr2line)
 set(ADDR2LINE_DEFAULT OFF)
 if(NOT("${ADDR2LINE}" STREQUAL ""))
     set(ADDR2LINE_DEFAULT ON)
