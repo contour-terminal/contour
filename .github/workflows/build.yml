@@ -86,6 +86,16 @@ jobs:
     - name: "test: libterminal"
       run: ./build/src/terminal/terminal_test
 
+  check_PR_TODOs:
+    name: "Check PR TODO's"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: "Checking for open PR-related TODO's"
+      run: |
+        set -ex
+        ./scripts/check-pr-todos.sh
+
   ubuntu_2004:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04

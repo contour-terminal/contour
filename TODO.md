@@ -1,4 +1,11 @@
-# RELEASE CHECKLIST
+# TODO(pr) requirements before merge
+
+- [ ] ring: add negative and overflowing (r)iterator tests (should wrap around & succeed)
+- [ ] frontend: scrolling up/down works as expected (currently overflowing and inverted)
+- [ ] Terminal: Writing text, leading to page-scroll properly updates scrollbar.
+- [ ] Terminal: Writing text, leading to page-scroll properly updates active selection.
+- [ ] grid: revive logical line iterators, try to make them zero-copy
+- [ ] notify on dirty screen regions should become an area-test: `is (x,y) within ((x0,y0), (x1,y1))`
 
 # FIXMEs / CODEHALTH checklist
 
@@ -24,7 +31,6 @@
 - [ ] config option to disable reflow entirely
 - [ ] `ls -l --color=yes /` with wrapping on a bg-colored file (vmlinuz...) will cause the rest of the line to be bg-colored, too. that's wrong. SGR should be empty.This problem only exists when not having resized yet.
 - [ ] vim's wrap mode with multiline text seems to have rendering issues.
-- [ ] CI: build with parallel support (STL then requires tbb apparently)
 - [ ] debuglog: filter by logging tags (in a somewhat performant way), so the debuglog (when enabled) is not flooding.
 - [x] Font: support DirectWrite backend
 - [ ] Font: fix framed underline
@@ -100,7 +106,6 @@ Chapter 5 (Recommendations), last bullet point!
 
 ### Quality of code improvements:
 
-- QA: Reevaluate making more use of QtGui (and Qt fonts) in `terminal_view`.
 - See if we can gracefully handle `GL_OUT_OF_MEMORY`
 - QA/TEST: Ensure os/x rendering is working (wrt. @AYNSTAYN)
 - QA/TEST: make decoration parameter configurable in contour.yml (incl. hot reload)
@@ -120,6 +125,8 @@ Chapter 5 (Recommendations), last bullet point!
 
 ### Features
 
+- Configuration: ability to disable ligatures globally (or enable selectively by unicode range?)
+- respect aspect ratio of colored (emoji) glyph (y-offset / bearing)?
 - normal-mode cursor (that can be used for selection, basic vim movements)
 - [Tab/Decoration styling](https://gitlab.gnome.org/GNOME/gnome-terminal/-/issues/142)
 - OSC 6: [Set/unset current working document WTF?](https://gitlab.freedesktop.org/terminal-wg/specifications/-/merge_requests/7)
@@ -138,9 +145,3 @@ Chapter 5 (Recommendations), last bullet point!
 - Rethink an easily adaptable keyboard input protocol (CSI based)
   - should support any key with modifier information (ctrl,alt,meta,SHIFT)
 - Evaluate Shell Integration proposals from: http://per.bothner.com/blog/2019/shell-integration-proposal/
-
-### Taken over from ticket "final cleanup"
-- FEATURE: Configuration: ability to disable ligatures globally (or enable selectively by unicode range?)
-- FEATURE: respect aspect ratio of colored (emoji) glyph (y-offset / bearing)?
-- FEATURE: mouse shift-clicks for selecting text even if terminal app has enabled mouse tracking
-- FEATURE: proper windows font loading; either get fontconfig to work on windows, or use Windows APIs for that - https://docs.microsoft.com/en-us/windows/win32/directwrite/custom-font-sets-win10
