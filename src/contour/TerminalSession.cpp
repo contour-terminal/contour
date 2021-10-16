@@ -281,7 +281,7 @@ void TerminalSession::onClosed()
     if (diff < std::chrono::seconds(5))
     {
         //auto const w = terminal_.screenSize().columns.as<int>();
-        auto constexpr SGR = "\e[1;44;39m"sv;
+        auto constexpr SGR = "\e[1;38:2::255:255:255m\e[48:2::255:0:0m"sv;
         auto constexpr EL = "\e[K"sv;
         auto constexpr TextLines = array<string_view, 2>{
             "Shell terminated too quickly.",

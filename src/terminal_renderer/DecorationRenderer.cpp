@@ -139,19 +139,19 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = Height(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
+        auto const height = Height::cast_from(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
         auto image = atlas::Buffer(*width * *height, 0);
 
         for (int x = 0; x < *width; ++x)
         {
             auto const normalizedX = static_cast<double>(x) / unbox<double>(width);
             auto const sin_x = normalizedX * 2.0 * M_PI;
-            auto const normalizedY = (cosf(sin_x) + 1.0f) / 2.0f;
+            auto const normalizedY = (cos(sin_x) + 1.0) / 2.0;
             assert(0.0f <= normalizedY && normalizedY <= 1.0f);
             auto const y = static_cast<int>(normalizedY * static_cast<float>(*height - underlineThickness()));
-            assert(y < *height);
-            for (int yi = 0; yi < underlineThickness(); ++yi)
-                image[(y + yi) * *width + x] = 0xFF;
+            auto const yLim = std::min(unbox<int>(height), y + underlineThickness()) - 1;
+            for (int yi = y; yi < yLim; ++yi)
+                image[y * *width + x] = 0xFF;
         }
 
         atlas_->insert(

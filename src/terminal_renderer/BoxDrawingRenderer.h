@@ -24,7 +24,7 @@
 
 namespace terminal::renderer {
 
-// TODO(pr) I think I should cincerely rename this class to
+// TODO: I think I should cincerely rename this class to
 // something more suitable. it's not about box-drawing alone anymore,
 // but about manually rendering anything that needs to properly fit
 // into the grid cell.

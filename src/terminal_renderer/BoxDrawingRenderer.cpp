@@ -536,12 +536,12 @@ struct Pixmap
         //  7     5
         //   --6--
 
-        auto const Z = 2 * _lineThickness;
+        auto const Z = _lineThickness;
 
         auto const L = 2 * Z;
         auto const R = unbox<int>(_size.width) - Z;
 
-        auto const T = Z;
+        auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1/8_th)); // Z;
         auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
         auto const M = T + (B - T) / 2;
 
@@ -624,6 +624,10 @@ private:
 
     Pixmap& segment_line(Orientation orientation, BaseOffset base, From from, To to)
     {
+        // If the font size is very very small, line length calculation might cause negative values.
+        // Be sensible here then to not cause an infinite loop.
+        to.value = max(from.value, to.value);
+
         switch (orientation)
         {
             case Orientation::Horizontal:
@@ -1137,12 +1141,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     // TODO: just check notcurses-info to get an idea what may be missing
     switch (codepoint)
     {
-        // TODO(pr): case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
-        // TODO(pr): case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
-        // TODO(pr): case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
-        // TODO(pr): case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
-        // TODO(pr): case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
-        // TODO(pr): case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
+        // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
+        // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
 
         case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
             return blockElement(size) | left(1/8_th)

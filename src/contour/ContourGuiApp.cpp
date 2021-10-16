@@ -104,7 +104,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
                 category.get().enable(crispy::any_of(filters, [&](string_view filterPattern) -> bool {
                     if (filterPattern.back() != '*')
                         return category.get().name() == filterPattern;
-                    // TODO(pr): '*' excludes hidden categories
+                    // TODO: '*' excludes hidden categories
                     return std::equal(
                         begin(filterPattern),
                         prev(end(filterPattern)),
