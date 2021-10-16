@@ -536,12 +536,12 @@ struct Pixmap
         //  7     5
         //   --6--
 
-        auto const Z = 2 * _lineThickness;
+        auto const Z = _lineThickness;
 
         auto const L = 2 * Z;
         auto const R = unbox<int>(_size.width) - Z;
 
-        auto const T = Z;
+        auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1/8_th)); // Z;
         auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
         auto const M = T + (B - T) / 2;
 
