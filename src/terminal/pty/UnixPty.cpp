@@ -159,7 +159,8 @@ void UnixPty::close()
 
 void UnixPty::wakeupReader()
 {
-    LOGSTORE(PtyLog)("waking up via pipe {}", pipe_[1]);
+    if (PtyLog)
+        LOGSTORE(PtyLog)("waking up via pipe {}", pipe_[1]);
     char dummy{};
     auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
     (void) rv;
@@ -169,7 +170,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 {
     if (master_ < 0)
     {
-        LOGSTORE(PtyInLog)("read() called with closed PTY master.");
+        if (PtyInLog)
+            LOGSTORE(PtyInLog)("read() called with closed PTY master.");
         errno = ENODEV;
         return nullopt;
     }
@@ -189,11 +191,12 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         FD_SET(pipe_[0], &rfd);
         auto const nfds = 1 + max(master_, pipe_[0]);
 
-        LOGSTORE(PtyLog)(
-            "read: select({}, {}) for {}.{:04}s.",
-            master_, pipe_[0],
-            tv.tv_sec, tv.tv_usec / 1000
-        );
+        if (PtyInLog)
+            LOGSTORE(PtyInLog)(
+                "read: select({}, {}) for {}.{:04}s.",
+                master_, pipe_[0],
+                tv.tv_sec, tv.tv_usec / 1000
+            );
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
 
@@ -232,7 +235,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             auto const rv = static_cast<int>(::read(master_, buffer_.data(), n));
             if (rv >= 0)
             {
-                LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
+                if (PtyInLog)
+                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
                 return string_view{buffer_.data(), static_cast<size_t>(rv)};
             }
             else
@@ -249,7 +253,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 
 int UnixPty::write(char const* buf, size_t size)
 {
-    LOGSTORE(PtyInLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + size));
+    if (PtyOutLog)
+        LOGSTORE(PtyOutLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + size));
     ssize_t rv = ::write(master_, buf, size);
     return static_cast<int>(rv);
 }
