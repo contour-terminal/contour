@@ -1,8 +1,10 @@
 #! /bin/bash
-
-if ! git grep "TODO(pr)" | grep -v "scripts/check-pr-todos.sh" | cat; then
+FOUND=$(git grep "TODO(pr)" | grep -v "scripts/check-pr-todos.sh")
+if [[ "${FOUND}" == "" ]]; then
     exit 0
 fi
 
-echo 1>&2 "This PR still contains PR-related TODO itmes that must be resolved."
+echo "This PR still contains PR-related TODO itmes that must be resolved."
+echo
+echo "${FOUND}"
 exit 1
