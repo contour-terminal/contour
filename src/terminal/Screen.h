@@ -285,9 +285,9 @@ class Screen : public capabilities::StaticDatabase {
 
     void captureBuffer(int _numLines, bool _logicalLines);
 
-    void setForegroundColor(Color const& _color);
-    void setBackgroundColor(Color const& _color);
-    void setUnderlineColor(Color const& _color);
+    void setForegroundColor(Color _color);
+    void setBackgroundColor(Color _color);
+    void setUnderlineColor(Color _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
     void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
@@ -303,7 +303,7 @@ class Screen : public capabilities::StaticDatabase {
     void requestStatusString(RequestStatusString _value);
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
-    void setDynamicColor(DynamicColorName _name, RGBColor const& _color);
+    void setDynamicColor(DynamicColorName _name, RGBColor _color);
     void dumpState();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}

@@ -262,7 +262,7 @@ namespace // {{{ helper
             sgr_add(static_cast<unsigned>(m));
         }
 
-        void setForegroundColor(Color const& _color)
+        void setForegroundColor(Color _color)
         {
             // if (_color == currentForegroundColor_)
             //     return;
@@ -297,7 +297,7 @@ namespace // {{{ helper
             }
         }
 
-        void setBackgroundColor(Color const& _color)
+        void setBackgroundColor(Color _color)
         {
             // if (_color == currentBackgroundColor_)
             //     return;
@@ -1641,17 +1641,17 @@ void Screen::forwardIndex()
         moveCursorTo({cursorPosition().row, cursorPosition().column + 1});
 }
 
-void Screen::setForegroundColor(Color const& _color)
+void Screen::setForegroundColor(Color _color)
 {
     cursor_.graphicsRendition.foregroundColor = _color;
 }
 
-void Screen::setBackgroundColor(Color const& _color)
+void Screen::setBackgroundColor(Color _color)
 {
     cursor_.graphicsRendition.backgroundColor = _color;
 }
 
-void Screen::setUnderlineColor(Color const& _color)
+void Screen::setUnderlineColor(Color _color)
 {
     cursor_.graphicsRendition.underlineColor = _color;
 }
@@ -2462,7 +2462,7 @@ void Screen::resetDynamicColor(DynamicColorName _name)
     }
 }
 
-void Screen::setDynamicColor(DynamicColorName _name, RGBColor const& _value)
+void Screen::setDynamicColor(DynamicColorName _name, RGBColor _value)
 {
     switch (_name)
     {
