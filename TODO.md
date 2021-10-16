@@ -1,4 +1,4 @@
-# TODO(pr) requirements before merge
+# TODO requirements before merge
 
 - [ ] ring: add negative and overflowing (r)iterator tests (should wrap around & succeed)
 - [ ] frontend: scrolling up/down works as expected (currently overflowing and inverted)

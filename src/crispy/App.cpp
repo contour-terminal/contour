@@ -239,7 +239,7 @@ void App::listDebugTags()
         if (!category.get().visible())
             continue;
 
-        // TODO(pr) maybe have color assigned per category AND have that colored here then too?
+        // TODO: maybe have color assigned per category AND have that colored here then too?
         std::cout
             << left << setw(int(column1Length)) << category.get().name()
             << "; " << category.get().description() << '\n';

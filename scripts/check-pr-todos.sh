@@ -1,6 +1,6 @@
 #! /bin/bash
 
-if ! git grep "TODO(pr)" | cat; then
+if ! git grep "TODO(pr)" | grep -v "scripts/check-pr-todos.sh" | cat; then
     exit 0
 fi
 

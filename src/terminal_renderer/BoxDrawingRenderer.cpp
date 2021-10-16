@@ -1137,12 +1137,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     // TODO: just check notcurses-info to get an idea what may be missing
     switch (codepoint)
     {
-        // TODO(pr): case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
-        // TODO(pr): case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
-        // TODO(pr): case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
-        // TODO(pr): case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
-        // TODO(pr): case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
-        // TODO(pr): case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
+        // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
+        // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
 
         case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
             return blockElement(size) | left(1/8_th)
