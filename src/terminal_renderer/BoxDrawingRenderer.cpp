@@ -624,6 +624,10 @@ private:
 
     Pixmap& segment_line(Orientation orientation, BaseOffset base, From from, To to)
     {
+        // If the font size is very very small, line length calculation might cause negative values.
+        // Be sensible here then to not cause an infinite loop.
+        to.value = max(from.value, to.value);
+
         switch (orientation)
         {
             case Orientation::Horizontal:
