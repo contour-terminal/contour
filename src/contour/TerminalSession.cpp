@@ -379,7 +379,7 @@ void TerminalSession::sendKeyPressEvent(Key _key,
 
 void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
-    LOGSTORE(InputLog)("{} {}", _modifier, _value);
+    LOGSTORE(InputLog)("{} {}", _modifier, static_cast<uint32_t>(_value));
     assert(display_ != nullptr);
 
     if (terminatedAndWaitingForKeyPress_)

@@ -1,13 +1,13 @@
 include(CPM)
 
 set(3rdparty_catch2_version "3e9c6fec222a5b307a712ba47dc4e930b37ad4e5" CACHE STRING "catch2: commit hash")
-set(3rdparty_fmt_version "0a985fd4c6115eae8a455b110a747b265d1af2d1" CACHE STRING "fmt: commit hash")
+set(3rdparty_fmt_version "1266c2b6003e6391046bbab57dcf20293e25dedd" CACHE STRING "fmt: commit hash")
 set(3rdparty_freetype_version "bbab0a675ef29b0eaa96054a69ada63fc3051c51" CACHE STRING "freetype: commit hash")
 set(3rdparty_harfbuzz_version "d58f1685cee7fef904f4149561a2dcf5ec519ac3" CACHE STRING "harfbuzz: commit hash")
-set(3rdparty_libunicode_version "40e520d17febaca90e49d4d0db1252a1d345a91d" CACHE STRING "libunicode: commit hash")
+set(3rdparty_libunicode_version "ac1f708de81f16bf3eaa06c3f6c6e78188bf1eda" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
 set(3rdparty_range_v3_version "8f690283cc03146ad20514741cf69eafb325e974" CACHE STRING "range_v3: commit hash")
-set(3rdparty_yaml_cpp_version "0d9dbcfe8c0df699aed8ae050dddaca614178fb1" CACHE STRING "yaml-cpp: commit hash")
+set(3rdparty_yaml_cpp_version "1713859b054b0a7fd867a59905dfbb0d3f774d54" CACHE STRING "yaml-cpp: commit hash")
 set(3rdparty_termbenchpro_version "513cc8a7eb15b3b1a7940816944056d168d2c22a" CACHE STRING "termbench-pro: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
@@ -31,7 +31,7 @@ CPMAddPackage(
   NAME fmt
   VERSION ${3rdparty_fmt_version}
   URL https://github.com/fmtlib/fmt/archive/${3rdparty_fmt_version}.zip
-  URL_HASH SHA256=e082c3af5cadc8afc544a5853c75e285270ee46406d7cacf22fe80fd404ea66a
+  URL_HASH SHA256=42a78ffaf705abe5914b44a9c596e92e99a143987f0e36f43220ad0e2b7f33bd
   EXCLUDE_FROM_ALL YES
 )
 
@@ -52,7 +52,7 @@ CPMAddPackage(
   NAME yaml_cpp
   VERSION ${3rdparty_yaml_cpp_version}
   URL https://github.com/jbeder/yaml-cpp/archive/${3rdparty_yaml_cpp_version}.zip
-  URL_HASH SHA256=7c13c96ffcce90dd734b945db7f1c13d0af15add912ce14cc5943bd68626b6cf
+  URL_HASH SHA256=086e25ffc95eb54deb949f3e3343daff1722007375947da3d36b7ebd89e9ea97
   EXCLUDE_FROM_ALL YES
 )
 
@@ -76,7 +76,7 @@ CPMAddPackage(
   NAME libunicode
   VERSION ${3rdparty_libunicode_version}
   URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
-  URL_HASH SHA256=d660e5d701917aa105323cb55015c2d5076c66e004e97e522d44345916acd6bb
+  URL_HASH SHA256=a06c0da1b2175cdee69d832baeb29d8b07c5efd01532d45e7838c256a45cda6d
   EXCLUDE_FROM_ALL YES
 )
 
