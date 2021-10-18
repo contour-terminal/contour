@@ -1768,7 +1768,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     if (box.arc_ != detail::NoArc)
         drawArc(image, *width, *height, lightThickness, box.arc_);
 
-    LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", _codepoint, _size);
+    LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
 
     return image;
 }
