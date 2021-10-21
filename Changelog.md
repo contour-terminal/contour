@@ -12,6 +12,7 @@
 - Changes font locator engine default on Windows to DirectWrite (#452).
 - Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.
 - Fixes terminfo installation path on OS/X and tries to auto-set `TERMINFO_DIRS` to it on startup (#443).
+- Fixes terminfo entry `pairs`.
 - Fixes SGR 24 to remove any kind of underline (#451).
 - Fixes font fallback for `open_shaper` where in rare cases the text was not rendered at all.
 - Fixes CPU load going up on mouse move inside terminal window (#407).

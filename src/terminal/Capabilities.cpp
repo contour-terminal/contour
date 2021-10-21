@@ -77,7 +77,7 @@ namespace
         Numeric{ "co"_tcap, "cols"sv, 80 },   // number of columns in a line
         Numeric{ "it"_tcap, "it"sv, 8 },    // tabs initially every # spaces
         Numeric{ "Co"_tcap, "colors"sv, 256 },  // maximum number of colors on screen
-        Numeric{ "pa"_tcap, "pairs"sv, 65536 }// maximum number of color-pairs on the screen
+        Numeric{ "pa"_tcap, "pairs"sv, 32767 }  // maximum number of color-pairs on the screen
     );
 
     constexpr auto inline Undefined = Code{};
