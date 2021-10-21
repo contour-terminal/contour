@@ -1,5 +1,9 @@
 # See https://docs.github.com/en/enterprise-server@2.21/github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-code-owners#example-of-a-codeowners-file
 
-*       christian@parpart.family
-/.github/ @data-man
-cmake/ @data-man
+*                                   @christianparpart
+/.github/                           @data-man
+/.github/CODEOWNERS                 @christianparpart
+/.github/codechecker/               @whisperity
+/.github/workflows/*codechecker*    @whisperity
+cmake/                              @data-man
+
