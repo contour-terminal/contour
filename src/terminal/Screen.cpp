@@ -784,7 +784,9 @@ void Screen::restoreCursor(Cursor const& _savedCursor)
 {
     wrapPending_ = 0;
     cursor_ = _savedCursor;
+    cursor_.position = clampCoordinate(_savedCursor.position);
     updateCursorIterators();
+    verifyState();
 }
 
 void Screen::resetSoft()
