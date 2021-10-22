@@ -20,6 +20,7 @@
 #include <crispy/indexed.h>
 
 #include <range/v3/view/iota.hpp>
+#include <range/v3/algorithm/any_of.hpp>
 
 #include <ft2build.h>
 #include FT_BITMAP_H
@@ -551,6 +552,9 @@ struct open_shaper::Private // {{{
     unordered_map<font_key, HbFontInfo> fonts_;  // from font_key to FontInfo struct
     unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
+    // Blacklisted font files as we tried them already and failed.
+    std::vector<std::string> blacklistedSources;
+
     // The key (for caching) should be composed out of:
     // (file_path, file_mtime, font_weight, font_slant, pixel_size)
 
@@ -576,9 +580,15 @@ struct open_shaper::Private // {{{
         if (auto i = fontPathSizeToKeys.find(FontPathAndSize{sourceId, _fontSize}); i != fontPathSizeToKeys.end())
             return i->second;
 
+        if (ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
+            return nullopt;
+
         auto ftFacePtrOpt = loadFace(source, _fontSize, dpi_, ft_);
         if (!ftFacePtrOpt.has_value())
+        {
+            blacklistedSources.emplace_back(sourceId);
             return nullopt;
+        }
 
         auto ftFacePtr = move(ftFacePtrOpt.value());
         auto hbFontPtr = HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()),
