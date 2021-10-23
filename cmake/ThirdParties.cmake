@@ -1,10 +1,10 @@
 include(CPM)
 
-set(3rdparty_catch2_version "3e9c6fec222a5b307a712ba47dc4e930b37ad4e5" CACHE STRING "catch2: commit hash")
-set(3rdparty_fmt_version "1266c2b6003e6391046bbab57dcf20293e25dedd" CACHE STRING "fmt: commit hash")
+set(3rdparty_catch2_version "22750cde0e0d2c02ab447e2500422f2711356053" CACHE STRING "catch2: commit hash")
+set(3rdparty_fmt_version "3b6e409cd8573f63e4acad7717d9082bd898ec87" CACHE STRING "fmt: commit hash")
 set(3rdparty_freetype_version "bbab0a675ef29b0eaa96054a69ada63fc3051c51" CACHE STRING "freetype: commit hash")
 set(3rdparty_harfbuzz_version "d58f1685cee7fef904f4149561a2dcf5ec519ac3" CACHE STRING "harfbuzz: commit hash")
-set(3rdparty_libunicode_version "ac1f708de81f16bf3eaa06c3f6c6e78188bf1eda" CACHE STRING "libunicode: commit hash")
+set(3rdparty_libunicode_version "3c59a3a0eb0c57c3081d48ea77c22809ac7c2d6e" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version "v2.0.2" CACHE STRING "mimalloc: release tag")
 set(3rdparty_range_v3_version "8f690283cc03146ad20514741cf69eafb325e974" CACHE STRING "range_v3: commit hash")
 set(3rdparty_yaml_cpp_version "1713859b054b0a7fd867a59905dfbb0d3f774d54" CACHE STRING "yaml-cpp: commit hash")
@@ -22,7 +22,7 @@ if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
     NAME catch2
     VERSION ${3rdparty_catch2_version}
     URL https://github.com/catchorg/Catch2/archive/${3rdparty_catch2_version}.zip
-    URL_HASH SHA256=d39352486878820a39cbe6f3500f7df8e75eb37e606e733dde234b4ac6e0823c
+    URL_HASH SHA256=ab21f8c8804f3c9987d21a731440611d8dfecf8a80efcd2e46bf67a3d9bdf967
     EXCLUDE_FROM_ALL YES
   )
 endif()
@@ -31,7 +31,7 @@ CPMAddPackage(
   NAME fmt
   VERSION ${3rdparty_fmt_version}
   URL https://github.com/fmtlib/fmt/archive/${3rdparty_fmt_version}.zip
-  URL_HASH SHA256=42a78ffaf705abe5914b44a9c596e92e99a143987f0e36f43220ad0e2b7f33bd
+  URL_HASH SHA256=d5a6f6e3431fec6332021dc69a14dd11b85b0103b6317d33b2e5e5a91fd08add
   EXCLUDE_FROM_ALL YES
 )
 
@@ -76,7 +76,7 @@ CPMAddPackage(
   NAME libunicode
   VERSION ${3rdparty_libunicode_version}
   URL https://github.com/contour-terminal/libunicode/archive/${3rdparty_libunicode_version}.zip
-  URL_HASH SHA256=a06c0da1b2175cdee69d832baeb29d8b07c5efd01532d45e7838c256a45cda6d
+  URL_HASH SHA256=1884993f33147121660cdc0df50d2d7b5fc8c699a01ea83a3ff7b16409893989
   EXCLUDE_FROM_ALL YES
 )
 
