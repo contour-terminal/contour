@@ -1,4 +1,6 @@
 include(CPM)
+set(CPM_INCLUDE_ALL_IN_PACKAGE_LOCK ON)
+set(CPM_USE_NAMED_CACHE_DIRECTORIES ON)
 
 set(3rdparty_catch2_version "22750cde0e0d2c02ab447e2500422f2711356053" CACHE STRING "catch2: commit hash")
 set(3rdparty_fmt_version "3b6e409cd8573f63e4acad7717d9082bd898ec87" CACHE STRING "fmt: commit hash")
