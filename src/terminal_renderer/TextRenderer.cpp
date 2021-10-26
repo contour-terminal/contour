@@ -274,7 +274,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // }}}
 
     auto const yMax = gridMetrics_.baseline + glyph.position.y;
-    auto const yMin = yMax - glyph.size.height.as<int>();
+    auto const yMin = gridMetrics_.cellSize.height.as<int>() - yMax;
 
     auto const ratio =  _presentation != unicode::PresentationStyle::Emoji
                      ? 1.0f
