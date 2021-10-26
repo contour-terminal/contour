@@ -324,9 +324,11 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         auto const rowCount = -yMin;
         auto const pixelCount = rowCount * glyph.size.width.as<int>() * text::pixel_size(glyph.format);
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
         assert(pixelCount >= 0);
+        assert(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height));
+        assert(pixelCount < data.size());
+        glyph.size.height += Height(yMin);
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
     }
 
