@@ -223,9 +223,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
 
-    if (RasterizerLog)
-        LOGSTORE(RasterizerLog)("Rasterized glyph: {} ({})", glyph, fontDescriptions_.renderMode);
-
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)
     {
@@ -286,8 +283,9 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
 
     auto const yOverflow = gridMetrics_.cellSize.height.as<int>() - yMax;
     if (RasterizerLog)
-        LOGSTORE(RasterizerLog)("insert glyph {} id {} {} ratio:{} yOverflow({}, {})",
+        LOGSTORE(RasterizerLog)("Rasterize glyph {} ({}) id {} {} ratio:{} yOverflow({}, {})",
                                 glyph,
+                                fontDescriptions_.renderMode,
                                 _id.index,
                                 _presentation,
                                 ratio,
@@ -335,17 +333,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     GlyphMetrics metrics{};
     metrics.bitmapSize = glyph.size;
     metrics.bearing = glyph.position;
-
-    if (RenderBufferLog.is_enabled())
-        LOGSTORE(RenderBufferLog)
-            ("textureAtlas ({}) insert glyph {}: {}; ratio:{}; yOverflow({}, {}); {}",
-            targetAtlas.allocator().name(),
-            _id.index,
-            _presentation,
-            ratio,
-            yOverflow < 0 ? yOverflow : 0,
-            yMin < 0 ? yMin : 0,
-            glyph);
 
     return targetAtlas.insert(_id,
                               glyph.size,
