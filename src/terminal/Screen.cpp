@@ -1379,6 +1379,7 @@ void Screen::hyperlink(string const& _id, string const& _uri)
 
 void Screen::moveCursorUp(LineCount _n)
 {
+    wrapPending_ = 0;
     auto const n = min(
         unbox<int>(_n),
         cursorPosition().row > margin_.vertical.from
@@ -1393,6 +1394,7 @@ void Screen::moveCursorUp(LineCount _n)
 
 void Screen::moveCursorDown(LineCount _n)
 {
+    wrapPending_ = 0;
     auto const currentLineNumber = cursorPosition().row;
     auto const n = min(
         unbox<int>(_n),
@@ -1412,6 +1414,7 @@ void Screen::moveCursorDown(LineCount _n)
 
 void Screen::moveCursorForward(ColumnCount _n)
 {
+    wrapPending_ = 0;
     auto const n = min(unbox<int>(_n), margin_.horizontal.length() - cursor_.position.column);
     cursor_.position.column += n;
 }
