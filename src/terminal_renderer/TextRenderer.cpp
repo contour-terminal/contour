@@ -18,6 +18,7 @@
 #include <terminal_renderer/utils.h>
 #include <terminal/logging.h>
 
+#include <crispy/assert.h>
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 #include <crispy/range.h>
@@ -165,8 +166,8 @@ void TextRenderer::renderCell(RenderCell const& _cell)
 void TextRenderer::beginFrame()
 {
     // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
-    assert(codepoints_.empty());
-    assert(clusters_.empty());
+    Expects(codepoints_.empty());
+    Expects(clusters_.empty());
 
     auto constexpr DefaultColor = RGBColor{};
     style_ = TextStyle::Invalid;
@@ -274,23 +275,13 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // }}}
 
     auto const yMax = gridMetrics_.baseline + glyph.position.y;
-    auto const yMin = gridMetrics_.cellSize.height.as<int>() - yMax;
+    auto const yMin = yMax - glyph.size.height.as<int>();
+    auto const yOverflow = max(0, yMax - gridMetrics_.cellSize.height.as<int>());
 
     auto const ratio =  _presentation != unicode::PresentationStyle::Emoji
                      ? 1.0f
                      : max(float(gridMetrics_.cellSize.width.as<int>() * numCells) / float(glyph.size.width.as<int>()),
                            float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
-
-    auto const yOverflow = gridMetrics_.cellSize.height.as<int>() - yMax;
-    if (RasterizerLog)
-        LOGSTORE(RasterizerLog)("Rasterize glyph {} ({}) id {} {} ratio:{} yOverflow({}, {})",
-                                glyph,
-                                fontDescriptions_.renderMode,
-                                _id.index,
-                                _presentation,
-                                ratio,
-                                yOverflow < 0 ? yOverflow : 0,
-                                yMin < 0 ? yMin : 0);
 
     auto && [userFormat, targetAtlas] =
         [this, glyphFormat = glyph.format]
@@ -310,29 +301,41 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
 
     glyphToTextureMapping_[_id] = glyph.format;
 
-    if (yOverflow < 0)
+    if (yOverflow)
     {
-        LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", -yOverflow);
-        glyph.size.height += Height(yOverflow);
-        glyph.position.y += yOverflow;
+        LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", yOverflow);
+        glyph.size.height -= Height(yOverflow);
+        glyph.position.y -= yOverflow;
     }
 
     if (yMin < 0)
     {
         auto const rowCount = -yMin;
         auto const pixelCount = rowCount * glyph.size.width.as<int>() * text::pixel_size(glyph.format);
-        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         auto& data = glyph.bitmap;
-        assert(pixelCount >= 0);
-        assert(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height));
-        assert(pixelCount < data.size());
+        Ensure(pixelCount >= 0);
+        Expects(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height));
+        Expects(pixelCount < data.size());
+        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
+        fmt::print("Cropping {} underflowing bitmap rows. {} {}\n", rowCount, _id, glyph);
         glyph.size.height += Height(yMin);
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
+        Ensure(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height) * text::pixel_size(glyph.format));
     }
 
     GlyphMetrics metrics{};
     metrics.bitmapSize = glyph.size;
     metrics.bearing = glyph.position;
+
+    if (RasterizerLog)
+        LOGSTORE(RasterizerLog)("Inserting {} id {} render mode {} {} ratio {} yOverflow {} yMin {}.",
+                                glyph,
+                                _id.index,
+                                fontDescriptions_.renderMode,
+                                _presentation,
+                                ratio,
+                                yOverflow,
+                                yMin);
 
     return targetAtlas.insert(_id,
                               glyph.size,
