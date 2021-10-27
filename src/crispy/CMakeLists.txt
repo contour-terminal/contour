@@ -10,6 +10,7 @@ set(crispy_SOURCES
     LRUCache.h
     StackTrace.cpp StackTrace.h
     algorithm.h
+    assert.h
     base64.h
     compose.h
     escape.h
