@@ -326,6 +326,9 @@ jobs:
       with:
         path: "**/cpm_modules"
         key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: Avoid conflict with Chocolatey's CPack
+      if: runner.os == 'Windows'
+      run: Rename-Item -Force -Path ${Env:ChocolateyInstall}/bin/cpack.exe  -NewName ${Env:ChocolateyInstall}/bin/cpack-choco.exe
     - name: setup environment
       shell: powershell
       id: set_vars
