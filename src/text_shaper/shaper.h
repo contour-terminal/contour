@@ -65,6 +65,13 @@ struct rasterized_glyph
     crispy::Point position; // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
+
+    bool valid() const
+    {
+        return bitmap.size() == text::pixel_size(format) *
+                                unbox<size_t>(size.width) *
+                                unbox<size_t>(size.height);
+    }
 };
 
 std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::ImageSize _newSize);
