@@ -320,7 +320,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     if (yOverflow)
     {
         LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", yOverflow);
-        fmt::print("Cropping {} overflowing bitmap rows.\n", yOverflow);
         glyph.size.height -= Height(yOverflow);
         // Might have it done also, but better be save: glyph.position.y -= yOverflow;
         glyph.bitmap.resize(text::pixel_size(glyph.format) *
@@ -337,7 +336,6 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         auto const pixelCount = rowCount * unbox<int>(glyph.size.width) * text::pixel_size(glyph.format);
         Expects(0 < pixelCount && pixelCount < glyph.bitmap.size());
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
-        fmt::print("Cropping {} underflowing bitmap rows. {} {}\n", rowCount, _id, glyph);
         glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
