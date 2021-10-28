@@ -448,8 +448,8 @@ constexpr float operator/(int a, Ratio1 b) noexcept { return static_cast<float>(
 struct Ratio { float x; float y; };
 
 struct RatioBlock { Ratio from{}; Ratio to{}; };
-constexpr RatioBlock lower(float r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
-constexpr RatioBlock upper(float r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
+constexpr RatioBlock lower(float r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
+constexpr RatioBlock upper(float r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
 constexpr RatioBlock left(float r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
 constexpr RatioBlock right(float r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
 
@@ -947,7 +947,7 @@ inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
 // 1 <= n <= r*n
 constexpr inline RatioBlock horiz_nth(float r, int n) noexcept
 {
-    return RatioBlock{{0, 1 - r * float(n)}, {1, 1 - r * float(n - 1)}};
+    return RatioBlock{{0, r * float(n - 1)}, {1, r * float(n)}};
 }
 
 constexpr inline RatioBlock vert_nth(float r, int n) noexcept
