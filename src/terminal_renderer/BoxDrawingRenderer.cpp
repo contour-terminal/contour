@@ -968,10 +968,17 @@ constexpr inline void blockSextant(Container& image, ImageSize size, T position)
 {
     auto const x0 = (position - 1) % 2;
     auto const y0 = [position]() {
-        switch (position) {
-            case 1: case 2: return 2;
-            case 3: case 4: return 1;
-            case 5: case 6: return 0;
+        switch (position / 32) {
+            case 0: switch (position % 6) {
+                case 1: case 2: return 0;
+                case 3: case 4: return 1;
+                case 5: case 0: return 2;
+            }
+            case 1: switch (position % 6) {
+                case 1: case 2: return 2;
+                case 3: case 4: return 1;
+                case 5: case 0: return 0;
+            }
         }
         return 0;
     }();
