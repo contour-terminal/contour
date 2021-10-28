@@ -15,6 +15,7 @@
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
 
+#include <crispy/assert.h>
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
 #include <crispy/indexed.h>
@@ -896,7 +897,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         case FT_PIXEL_MODE_GRAY:
         {
             output.format = bitmap_format::alpha_mask;
-            output.bitmap.resize(*output.size.height * *output.size.width);
+            output.bitmap.resize(unbox<size_t>(output.size.height) * unbox<size_t>(output.size.width));
 
             auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
             auto const s = ftFace->glyph->bitmap.buffer;
@@ -907,15 +908,15 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         }
         case FT_PIXEL_MODE_LCD:
         {
-            auto const width = ftFace->glyph->bitmap.width;
-            auto const height = ftFace->glyph->bitmap.rows;
+            auto const width = static_cast<size_t>(ftFace->glyph->bitmap.width);
+            auto const height = static_cast<size_t>(ftFace->glyph->bitmap.rows);
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(width * height);
             output.size.width /= crispy::Width(3);
 
             auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-            auto s = ftFace->glyph->bitmap.buffer;
+            auto const s = ftFace->glyph->bitmap.buffer;
             for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
                 for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
                     output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
@@ -935,7 +936,10 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             {
                 for (auto const j: iota(0u, width.as<size_t>()))
                 {
-                    auto const s = &ftFace->glyph->bitmap.buffer[(height.as<size_t>() - i - 1) * pitch + j * 4];
+                    auto const s = &ftFace->glyph->bitmap.buffer[
+                        static_cast<size_t>(height.as<size_t>() - i - 1u) * pitch +
+                        static_cast<size_t>(j) * 4u
+                    ];
 
                     // BGRA -> RGBA
                     *t++ = s[2];
@@ -950,6 +954,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             LOGSTORE(RasterizerLog)("Glyph requested that has an unsupported pixel_mode:{}", ftFace->glyph->bitmap.pixel_mode);
             return nullopt;
     }
+
+    Ensure(output.valid());
 
     return output;
 }
