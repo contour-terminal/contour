@@ -220,6 +220,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         return nullopt;
 
     text::rasterized_glyph& glyph = theGlyphOpt.value();
+    Expects(glyph.bitmap.size() == text::pixel_size(glyph.format) * unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height));
     auto const numCells = _presentation == unicode::PresentationStyle::Emoji ? 2u : 1u; // is this the only case - with colored := Emoji presentation?
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emojis being colored fonts, and those take up 2 cell with units.
@@ -274,15 +275,27 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     }
     // }}}
 
+    // y-position relative to cell-bottom of glyphs top.
     auto const yMax = gridMetrics_.baseline + glyph.position.y;
+
+    // y-position relative to cell-bottom of the glyphs bottom.
     auto const yMin = yMax - glyph.size.height.as<int>();
+
+    // Number of pixel lines this rasterized glyph is overflowing above cell-top,
+    // or 0 if not overflowing.
     auto const yOverflow = max(0, yMax - gridMetrics_.cellSize.height.as<int>());
 
+    // Rasterized glyph's aspect ratio. This value
+    // is needed for proper down-scaling of a pixmap (used for emoji specifically).
     auto const ratio =  _presentation != unicode::PresentationStyle::Emoji
                      ? 1.0f
                      : max(float(gridMetrics_.cellSize.width.as<int>() * numCells) / float(glyph.size.width.as<int>()),
                            float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
 
+    // userFormat is the identifier that can be used inside the shaders
+    // to distinguish between the various supported formats and chose
+    // the right texture atlas.
+    // targetAtlas the the atlas this texture will be uploaded to.
     auto && [userFormat, targetAtlas] =
         [this, glyphFormat = glyph.format]
         () -> pair<int, TextureAtlas&>
@@ -299,28 +312,36 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
             return {0, *monochromeAtlas_};
         }();
 
+    // Mapping from glyph ID to it's texture format.
     glyphToTextureMapping_[_id] = glyph.format;
 
+    // If the rasterized glyph is overflowing above the grid cell metrics,
+    // then cut off at the top.
     if (yOverflow)
     {
         LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", yOverflow);
+        fmt::print("Cropping {} overflowing bitmap rows.\n", yOverflow);
         glyph.size.height -= Height(yOverflow);
-        glyph.position.y -= yOverflow;
+        // Might have it done also, but better be save: glyph.position.y -= yOverflow;
+        glyph.bitmap.resize(text::pixel_size(glyph.format) *
+                            unbox<size_t>(glyph.size.width) *
+                            unbox<size_t>(glyph.size.height));
     }
 
+    // If the rasterized glyph is underflowing below the grid cell's minimum (0),
+    // then cut off at grid cell's bottom.
     if (yMin < 0)
     {
+        Expects(glyph.valid());
         auto const rowCount = -yMin;
-        auto const pixelCount = rowCount * glyph.size.width.as<int>() * text::pixel_size(glyph.format);
-        auto& data = glyph.bitmap;
-        Ensure(pixelCount >= 0);
-        Expects(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height));
-        Expects(pixelCount < data.size());
+        auto const pixelCount = rowCount * unbox<int>(glyph.size.width) * text::pixel_size(glyph.format);
+        Expects(0 < pixelCount && pixelCount < glyph.bitmap.size());
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         fmt::print("Cropping {} underflowing bitmap rows. {} {}\n", rowCount, _id, glyph);
         glyph.size.height += Height(yMin);
+        auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
-        Ensure(data.size() == unbox<size_t>(glyph.size.width) * unbox<size_t>(glyph.size.height) * text::pixel_size(glyph.format));
+        Ensure(glyph.valid());
     }
 
     GlyphMetrics metrics{};
