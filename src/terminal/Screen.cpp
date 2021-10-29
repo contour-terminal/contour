@@ -342,12 +342,10 @@ namespace // {{{ helper
         Color currentBackgroundColor_ = DefaultColor();
     };
 
-    constexpr bool GridTextReflowEnabled = true;
-
-    array<Grid, 2> emptyGrids(PageSize _size, optional<LineCount> _maxHistoryLineCount)
+    array<Grid, 2> emptyGrids(PageSize _size, bool _reflowOnResize, optional<LineCount> _maxHistoryLineCount)
     {
         return array<Grid, 2>{
-            Grid(_size, GridTextReflowEnabled, _maxHistoryLineCount),
+            Grid(_size, _reflowOnResize, _maxHistoryLineCount),
             Grid(_size, false, LineCount(0))
         };
     }
@@ -362,7 +360,8 @@ Screen::Screen(PageSize _size,
                ImageSize _maxImageSize,
                int _maxImageColorRegisters,
                bool _sixelCursorConformance,
-               ColorPalette _colorPalette
+               ColorPalette _colorPalette,
+               bool _allowReflowOnResize
 ) :
     eventListener_{ _eventListener },
     logRaw_{ _logRaw },
@@ -388,7 +387,8 @@ Screen::Screen(PageSize _size,
     parser_{ ref(sequencer_) },
     size_{ _size },
     sixelCursorConformance_{ _sixelCursorConformance },
-    grids_{ emptyGrids(size(), _maxHistoryLineCount) },
+    allowReflowOnResize_{ _allowReflowOnResize },
+    grids_{ emptyGrids(size(), _allowReflowOnResize, _maxHistoryLineCount) },
     activeGrid_{ &primaryGrid() }
 {
     resetHard();
@@ -793,7 +793,7 @@ void Screen::resetSoft()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
-    setMode(DECMode::TextReflow, GridTextReflowEnabled);
+    setMode(DECMode::TextReflow, allowReflowOnResize_);
     setGraphicsRendition(GraphicsRendition::Reset); // SGR
     savedCursor_.position = Coordinate{1, 1}; // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true); // DECTCEM (Text cursor enable)
@@ -826,11 +826,11 @@ void Screen::resetHard()
 
     modes_ = Modes{};
     setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::TextReflow, true);
+    setMode(DECMode::TextReflow, allowReflowOnResize_);
 
     clearAllTabs();
 
-    grids_ = emptyGrids(size(), primaryGrid().maxHistoryLineCount());
+    grids_ = emptyGrids(size(), allowReflowOnResize_, primaryGrid().maxHistoryLineCount());
     activeGrid_ = &primaryGrid();
 
     cursor_ = {};
@@ -1814,7 +1814,7 @@ void Screen::setMode(DECMode _mode, bool _enable)
                 eventListener_.synchronizedOutput(_enable);
             break;
         case DECMode::TextReflow:
-            if (isPrimaryScreen())
+            if (allowReflowOnResize_ && isPrimaryScreen())
             {
                 if (_enable)
                 {

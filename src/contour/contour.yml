@@ -3,7 +3,17 @@
 # Word delimiters when selecting word-wise.
 word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 
+# Default PTY read buffer size.
+#
+# This is an advance option. Use with care!
+# Default: 16384
+read_buffer_size: 16384
+
 default_profile: main
+
+# Whether or not to reflow the lines on terminal resize events.
+# Default: true
+reflow_on_resize: true
 
 # Section of experimental features.
 # All experimental features are disabled by default and must be explicitely enabled here.

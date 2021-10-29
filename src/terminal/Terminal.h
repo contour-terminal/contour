@@ -77,7 +77,8 @@ class Terminal : public ScreenEvents {
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true,
              ColorPalette _colorPalette = {},
-             double _refreshRate = 30.0);
+             double _refreshRate = 30.0,
+             bool _allowReflowOnResize = true);
     ~Terminal();
 
     void start();

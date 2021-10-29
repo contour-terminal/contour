@@ -145,7 +145,8 @@ class Screen : public capabilities::StaticDatabase {
            ImageSize _maxImageSize = ImageSize{Width(800), Height(600)},
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true,
-           ColorPalette _colorPalette = {}
+           ColorPalette _colorPalette = {},
+           bool _reflowOnResize = true
     );
 
     using StaticDatabase::numericCapability;
@@ -675,6 +676,7 @@ class Screen : public capabilities::StaticDatabase {
     // Lines* activeBuffer_;
     // Lines savedLines_{};
 
+    bool allowReflowOnResize_;
     std::array<Grid, 2> grids_;
     Grid* activeGrid_;
 
