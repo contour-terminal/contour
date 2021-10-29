@@ -1389,6 +1389,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
 
+    tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);
+
     if (auto profiles = doc["profiles"]; profiles)
     {
         usedKeys.emplace("profiles");

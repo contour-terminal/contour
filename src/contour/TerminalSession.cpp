@@ -102,7 +102,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
         config_.maxImageColorRegisters,
         config_.sixelCursorConformance,
         profile_.colors,
-        _display ? _display->refreshRate() : 50.0
+        _display ? _display->refreshRate() : 50.0,
+        config_.reflowOnResize
     },
     display_{move(_display)}
 {

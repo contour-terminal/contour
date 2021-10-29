@@ -171,6 +171,8 @@ struct Config {
     // Changing this value may result in better or worse throughput performance.
     int ptyReadBufferSize = 16384;
 
+    bool reflowOnResize = true;
+
     std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;

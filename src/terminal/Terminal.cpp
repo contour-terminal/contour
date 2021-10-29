@@ -84,7 +84,8 @@ Terminal::Terminal(Pty& _pty,
                    int _maxImageColorRegisters,
                    bool _sixelCursorConformance,
                    ColorPalette _colorPalette,
-                   double _refreshRate
+                   double _refreshRate,
+                   bool _allowReflowOnResize
 ) :
     changes_{ 0 },
     ptyReadBufferSize_{ _ptyReadBufferSize },
@@ -110,7 +111,8 @@ Terminal::Terminal(Pty& _pty,
         _maxImageSize,
         _maxImageColorRegisters,
         _sixelCursorConformance,
-        _colorPalette
+        _colorPalette,
+        _allowReflowOnResize
     },
     screenUpdateThread_{},
     viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } }

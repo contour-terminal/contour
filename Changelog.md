@@ -7,6 +7,7 @@
 - Adds support for building with embedded FreeType and HarfBuzz (experimental, disabled by default).
 - Adds a shell early-exit-guard to not instantly close the terminal window but print a message instead and wait for any key press in order to close.
 - Adds missing config option `read_buffer_size` to default `contour.yml`.
+- Adds new config option `reflow_on_resize` to mandate whether or not text reflow is enabled on primary screen. If this option is false, it cannot be enabled programmatically either.
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
