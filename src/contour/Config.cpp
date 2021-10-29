@@ -324,6 +324,22 @@ namespace // {{{ helper
     {
         checkForSuperfluousKeys(_root, "", _usedKeys);
     }
+
+    optional<std::string> readFile(FileSystem::path const& _path)
+    {
+        if (!FileSystem::exists(_path))
+            return nullopt;
+
+        auto ifs = ifstream(_path.string());
+        if (!ifs.good())
+            return nullopt;
+
+        auto const size = FileSystem::file_size(_path);
+        auto text = string{};
+        text.resize(size);
+        ifs.read(text.data(), static_cast<std::streamsize>(size));
+        return {text};
+    }
 }
 // }}}
 
@@ -1026,6 +1042,26 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             _usedKeys.emplace(path);
             profile.colors = i->second;
         }
+        else if (colors.IsScalar())
+        {
+            bool found = false;
+            for (FileSystem::path const& prefix: configHomes("contour"))
+            {
+                auto const filePath = prefix / "colorschemes" / (colors.as<string>() + ".yml");
+                auto fileContents = readFile(filePath);
+                if (!fileContents)
+                    continue;
+                YAML::Node subDocument = YAML::Load(fileContents.value());
+                UsedKeys usedColorKeys;
+                profile.colors = loadColorScheme(usedColorKeys, "", subDocument);
+                // TODO: Check usedColorKeys for validity.
+                LOGSTORE(ConfigLog)("Loaded colors from {}.", filePath.string());
+                found = true;
+                break;
+            }
+            if (!found)
+                errorlog()("Could not open colorscheme file for \"{}\".", colors.as<string>());
+        }
         else
             errorlog()("scheme '{}' not found.", colors.as<string>());
     }
@@ -1427,22 +1463,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
 optional<std::string> readConfigFile(std::string const& _filename)
 {
-    for (FileSystem::path const& prefix : configHomes("contour"))
-    {
-        FileSystem::path path = prefix / _filename;
-        if (!FileSystem::exists(path))
-            continue;
+    for (FileSystem::path const& prefix: configHomes("contour"))
+        if (auto text = readFile(prefix / _filename); text.has_value())
+            return text;
 
-        auto ifs = ifstream(path.string());
-        if (!ifs.good())
-            continue;
-
-        auto const size = FileSystem::file_size(path);
-        auto text = string{};
-        text.resize(size);
-        ifs.read(text.data(), size);
-        return {text};
-    }
     return nullopt;
 }
 
