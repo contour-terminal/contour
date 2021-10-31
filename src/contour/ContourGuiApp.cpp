@@ -27,12 +27,14 @@
 #endif
 
 #include <iostream>
+#include <vector>
 
 using std::bind;
 using std::cerr;
 using std::prev;
 using std::string;
 using std::string_view;
+using std::vector;
 
 using namespace std::string_literals;
 
@@ -70,6 +72,11 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
                 CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config).", "DIRECTORY"},
                 CLI::Option{"class", CLI::Value{""s}, "Sets the class part of the WM_CLASS property for the window (overriding config).", "WM_CLASS"},
+                CLI::Option{"platform", CLI::Value{""s}, "Sets the QPA platform.", "PLATFORM[:OPTIONS]"},
+                CLI::Option{"session", CLI::Value{""s}, "Sets the sessioni ID used for resuming a prior session.", "SESSION_ID"},
+                #if defined(__linux__)
+                CLI::Option{"display", CLI::Value{""s}, "Sets the X11 display to connect to.", "DISPLAY_ID"},
+                #endif
             },
             CLI::CommandList{},
             CLI::CommandSelect::Implicit,
@@ -166,7 +173,6 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
              shell.arguments.push_back(string(_flags.verbatim.at(i)));
     }
 
-
     if (auto const wmClass = _flags.get<string>("contour.terminal.class"); !wmClass.empty())
         config.profile(profileName)->wmClass = wmClass;
 
@@ -183,11 +189,31 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
     #endif
 
-    QApplication app(argc, (char**) argv);
+    vector<char const*> qtArgsPtr;
+    qtArgsPtr.push_back(argv[0]);
+
+    auto const addQtArgIfSet = [&](string const& key, char const* arg)
+    {
+        if (string const& s = _flags.get<string>(key); !s.empty())
+        {
+            qtArgsPtr.push_back(arg);
+            qtArgsPtr.push_back(s.c_str());
+        }
+    };
+
+    addQtArgIfSet("contour.terminal.session", "-session");
+    addQtArgIfSet("contour.terminal.platform", "-platform");
+
+    #if defined(__linux__)
+    addQtArgIfSet("contour.terminal.display", "-display");
+    #endif
+
+    auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
+    QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
 
     QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
 
-    contour::Controller controller(argv[0], config, liveConfig, profileName);
+    contour::Controller controller(qtArgsPtr[0], config, liveConfig, profileName);
     controller.start();
 
     // auto const HTS = "\033H";
