@@ -13,6 +13,7 @@
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
 - Changes font locator engine default on Windows to DirectWrite (#452).
+- Changes tcap-query feature from experimental to always enabled (not configurable anymore).
 - Automatically detect if `contour` or `contour-latest` terminfo entries are present use that as default.
 - Fixes VT sequences that cause a cursor restore to sometimes crash.
 - Fixes terminfo installation path on OS/X and tries to auto-set `TERMINFO_DIRS` to it on startup (#443).

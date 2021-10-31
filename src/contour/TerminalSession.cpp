@@ -843,7 +843,6 @@ void TerminalSession::configureTerminal()
 
     LOGSTORE(SessionLog)("Setting terminal ID to {}.", profile_.terminalId);
     screen.setTerminalId(profile_.terminalId);
-    screen.setRespondToTCapQuery(config_.experimentalFeatures.count("tcap"));
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setMaxImageSize(config_.maxImageSize);
