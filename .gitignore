@@ -5,6 +5,7 @@ build
 build/**
 release
 release/**
+target
 
 # Visual Studio
 .vs

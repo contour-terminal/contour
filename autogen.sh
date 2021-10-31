@@ -8,19 +8,27 @@ else
 fi
 
 BUILD_TYPE="${1:-Debug}"
-WORKDIR="$(pwd)"
+BUILD_DIR="${ROOTDIR}/target/${BUILD_TYPE}"
+
+EXTRA_CMAKE_FLAGS=""
+case "$OSTYPE" in
+    linux-gnu*)
+        EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCONTOUR_BLUR_PLATFORM_KWIN=ON"
+        ;;
+    darwin*)
+        EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt5_DIR=$(brew --prefix qt5)/lib/cmake/Qt5"
+        ;;
+    *)
+        ;;
+esac
+
+if [[ "${BUILD_TYPE}" != "Debug" ]]; then
+    EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=~/usr/opt/contour"
+fi
 
 exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-           -DCMAKE_CXX_FLAGS="-fdiagnostics-color=always" \
-           -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" \
-           -DYAML_CPP_BUILD_CONTRIB="OFF" \
-           -DYAML_CPP_BUILD_TOOLS="OFF" \
-           -DLIBTERMINAL_LOG_RAW="ON" \
-           -DLIBTERMINAL_LOG_TRACE="ON" \
-           -DLIBTERMINAL_EXECUTION_PAR="OFF" \
-           -DCONTOUR_COVERAGE="OFF" \
-           -DCONTOUR_PERF_STATS="ON" \
-           -DCONTOUR_BLUR_PLATFORM_KWIN="ON" \
+           ${EXTRA_CMAKE_FLAGS} \
+           -B "${BUILD_DIR}" \
            -GNinja
 
