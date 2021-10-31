@@ -702,7 +702,7 @@ class Screen : public capabilities::StaticDatabase {
 
     // experimental features
     //
-    bool respondToTCapQuery_ = false;
+    bool respondToTCapQuery_ = true;
 };
 
 }  // namespace terminal

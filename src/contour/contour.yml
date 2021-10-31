@@ -17,9 +17,10 @@ reflow_on_resize: true
 
 # Section of experimental features.
 # All experimental features are disabled by default and must be explicitely enabled here.
-experimental:
-    # Enables experimental support for termcap/terminfo queries
-    tcap: false
+# NOTE: Contour currently has no experimental features behind this configuration wall.
+# experimental:
+#     # Enables experimental support for feature X/Y/Z
+#     feature_xyz: true
 
 # This keyboard modifier can be used to bypass the terminal's mouse protocol,
 # which can be used to select screen content even if the an application

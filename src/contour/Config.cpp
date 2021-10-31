@@ -1381,8 +1381,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                 doc["bypass_mouse_protocol_modifier"]); opt.has_value())
         _config.bypassMouseProtocolModifier = opt.value();
 
-    auto constexpr KnownExperimentalFeatures = array{
-        "tcap"sv
+    auto constexpr KnownExperimentalFeatures = array<string_view, 0>{
+        // "tcap"sv
     };
 
     if (auto experimental = doc["experimental"]; experimental.IsMap())
