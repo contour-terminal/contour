@@ -97,11 +97,7 @@ public:
             return *p;
 
         if (items_.size() == capacity_)
-        {
-            auto i = itemByKeyMapping_.find(items_.back().first);
-            itemByKeyMapping_.erase(i);
-            items_.pop_back();
-        }
+            evict_one();
 
         items_.emplace_front(Item{_key, Value{}});
         itemByKeyMapping_.emplace(_key, items_.begin());
@@ -119,15 +115,18 @@ public:
             return false;
 
         if (items_.size() == capacity_)
-        {
-            auto i = itemByKeyMapping_.find(items_.back().first);
-            itemByKeyMapping_.erase(i);
-            items_.pop_back();
-        }
+            evict_one();
 
         items_.emplace_front(Item{_key, _constructValue()});
         itemByKeyMapping_.emplace(_key, items_.begin());
         return true;
+    }
+
+    void evict_one()
+    {
+        auto i = itemByKeyMapping_.find(items_.back().first);
+        itemByKeyMapping_.erase(i);
+        items_.pop_back();
     }
 
     template <typename ValueConstructFn>
@@ -143,11 +142,7 @@ public:
         assert(!try_get(_key));
 
         if (items_.size() == capacity_)
-        {
-            auto i = itemByKeyMapping_.find(items_.back().first);
-            itemByKeyMapping_.erase(i);
-            items_.pop_back();
-        }
+            evict_one();
 
         items_.emplace_front(Item{_key, std::move(_value)});
         itemByKeyMapping_.emplace(_key, items_.begin());
