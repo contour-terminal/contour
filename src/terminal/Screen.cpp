@@ -1507,16 +1507,17 @@ void Screen::captureBuffer(int _lineCount, bool _logicalLines)
     auto writer = VTWriter([&](auto buf, auto len) { capturedBuffer += string_view(buf, len); });
 
     // TODO: when capturing _lineCount < screenSize.lines, start at the lowest non-empty line.
-    auto const relativeStartLine = _logicalLines ? grid().computeRelativeLineNumberFromBottom(_lineCount)
-                                                 : unbox<int>(size_.lines) - _lineCount + 1;
+    auto const relativeStartLine = _logicalLines
+        ? grid().computeRelativeLineNumberFromBottom(_lineCount)
+        : unbox<int>(size_.lines) - _lineCount + 1;
     auto const startLine = clamp(
-        1 - unbox<int>(historyLineCount()),
         relativeStartLine,
+        1 - unbox<int>(historyLineCount()),
         unbox<int>(size_.lines));
 
     // dumpState();
 
-    auto const lineCount = unbox<int>(size_.lines) - startLine + 1;
+    auto const lineCount = !_lineCount ? 0 : unbox<int>(size_.lines) - startLine + 1;
 
     auto const trimSpaceRight = [](string& value)
     {
