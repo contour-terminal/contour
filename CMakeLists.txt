@@ -32,6 +32,11 @@ if(DEFINED MSVC)
     add_definitions(-DNOMINMAX)
 endif()
 
+# Enables STL container checker if not building a release.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_definitions(-D_GLIBCXX_ASSERTIONS)
+endif()
+
 find_program(ADDR2LINE NAMES addr2line llvm-addr2line)
 set(ADDR2LINE_DEFAULT OFF)
 if(NOT("${ADDR2LINE}" STREQUAL ""))
