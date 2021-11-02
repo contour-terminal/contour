@@ -62,11 +62,8 @@ public:
     {
         if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
         {
-            // value exists already, move it to the front, and return it
-            Item item = std::move(*i->second);
-            items_.emplace_front(std::move(item));
-            items_.erase(i->second);
-            itemByKeyMapping_.insert_or_assign(_key, items_.begin());
+            // move it to the front, and return it
+            items_.splice(items_.begin(), items_, i->second);
             return &items_.front().second;
         }
 
