@@ -20,6 +20,9 @@ endfunction()
 
 option(PEDANTIC_COMPILER "Compile the project with almost all warnings turned on." OFF)
 
+# Always show diagnostics in colored output.
+try_add_compile_options(-fdiagnostics-color=always)
+
 if(${PEDANTIC_COMPILER})
     if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang"))
         message(STATUS "Enabling pedantic compiler options: yes")
@@ -36,12 +39,11 @@ if(${PEDANTIC_COMPILER})
         try_add_compile_options(-Wno-unknown-attributes)
         try_add_compile_options(-Wno-unknown-pragmas)
         try_add_compile_options(-Wnull-dereference)
-        try_add_compile_options(-Wsign-conversion)
+        #TODO(enable): try_add_compile_options(-Wsign-conversion)
         try_add_compile_options(-Wsuggest-destructor-override)
         try_add_compile_options(-pedantic)
-        try_add_compile_options(-Wconversion)
-        try_add_compile_options(-fdiagnostics-color=always)
-        #try_add_compile_options(-Werror) # XXX Not yet, but hopefully soon.
+        #TODO(enable): try_add_compile_options(-Wconversion)
+        #TODO(enable): try_add_compile_options(-Werror) # XXX Not yet, but hopefully soon.
         try_add_compile_options(-Wextra-semi)
         try_add_compile_options(-Wpessimizing-move)
         try_add_compile_options(-Wredundant-move)
