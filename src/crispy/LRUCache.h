@@ -132,7 +132,7 @@ public:
 
     Value& emplace(Key _key, Value _value)
     {
-        assert(!try_get(_key));
+        assert(!contains(_key));
 
         if (items_.size() == capacity_)
             return evict_one_and_push_front(_key)->second = std::move(_value);
