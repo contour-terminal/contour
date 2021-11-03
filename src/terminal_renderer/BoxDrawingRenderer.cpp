@@ -1052,7 +1052,7 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
 {
     if (codepoint < 0x2500 || codepoint > 0x257F)
         return false;
-    auto const& box = detail::boxDrawingDefinitions[codepoint];
+    auto const& box = detail::boxDrawingDefinitions[codepoint - 0x2500];
     return box.diagonal_ != detail::NoDiagonal
         || box.arc_ != detail::NoArc;
 }
