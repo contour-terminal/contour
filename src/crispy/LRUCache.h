@@ -22,6 +22,7 @@
 namespace crispy
 {
 
+/// Implements LRU (Least recently used) cache.
 template <typename Key, typename Value>
 class LRUCache
 {
@@ -94,7 +95,7 @@ public:
             return *p;
 
         if (items_.size() == capacity_)
-            evict_one();
+            return evict_one_and_push_front(_key)->second;
 
         items_.emplace_front(Item{_key, Value{}});
         itemByKeyMapping_.emplace(_key, items_.begin());
@@ -112,18 +113,13 @@ public:
             return false;
 
         if (items_.size() == capacity_)
-            evict_one();
-
-        items_.emplace_front(Item{_key, _constructValue()});
-        itemByKeyMapping_.emplace(_key, items_.begin());
+            evict_one_and_push_front(_key)->second = _constructValue();
+        else
+        {
+            items_.emplace_front(Item{_key, _constructValue()});
+            itemByKeyMapping_.emplace(_key, items_.begin());
+        }
         return true;
-    }
-
-    void evict_one()
-    {
-        auto i = itemByKeyMapping_.find(items_.back().first);
-        itemByKeyMapping_.erase(i);
-        items_.pop_back();
     }
 
     template <typename ValueConstructFn>
@@ -139,7 +135,7 @@ public:
         assert(!try_get(_key));
 
         if (items_.size() == capacity_)
-            evict_one();
+            return evict_one_and_push_front(_key)->second = std::move(_value);
 
         items_.emplace_front(Item{_key, std::move(_value)});
         itemByKeyMapping_.emplace(_key, items_.begin());
@@ -178,8 +174,26 @@ public:
     }
 
 private:
+    /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
+    [[nodiscard]] iterator evict_one_and_push_front(Key _newKey)
+    {
+        auto const oldKey = items_.back().first;
+        auto i = itemByKeyMapping_.find(oldKey);
+        auto& itemPtr = i->second;
+
+        itemByKeyMapping_.erase(oldKey);
+        itemByKeyMapping_.emplace(_newKey, itemPtr);
+
+        items_.splice(items_.begin(), items_, itemPtr);
+        itemPtr->first = _newKey;
+
+        return itemPtr;
+    }
+
+    // private data
+    //
     std::list<Item> items_;
-    std::unordered_map<Key, typename std::list<Item>::iterator> itemByKeyMapping_;
+    std::unordered_map<Key, iterator> itemByKeyMapping_;
     std::size_t capacity_;
 };
 
