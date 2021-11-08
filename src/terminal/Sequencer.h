@@ -505,8 +505,6 @@ class Sequencer : public ParserEvents {
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& /*_seq*/);
 
-    void flushBatchedSequences();
-
     void applyAndLog(FunctionDefinition const& _function, Sequence const& _context);
     ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
@@ -516,8 +514,6 @@ class Sequencer : public ParserEvents {
     Screen& screen_;
     char32_t precedingGraphicCharacter_ = {};
     int64_t instructionCounter_ = 0;
-    using Batchable = std::variant<char32_t, Sequence, SixelImage>;
-    std::vector<Batchable> batchedSequences_;
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;

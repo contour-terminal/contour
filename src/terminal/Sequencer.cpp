@@ -1271,27 +1271,6 @@ void Sequencer::handleSequence()
         LOGSTORE(VTParserLog)("Unknown VT sequence: {}", sequence_);
 }
 
-void Sequencer::flushBatchedSequences()
-{
-    for (auto const& batchable : batchedSequences_)
-    {
-        if (holds_alternative<char32_t>(batchable))
-            print(get<char32_t>(batchable));
-        else if (holds_alternative<Sequence>(batchable))
-        {
-            auto const& seq = get<Sequence>(batchable);
-            if (FunctionDefinition const* spec = seq.functionDefinition(); spec != nullptr)
-                applyAndLog(*spec, seq);
-        }
-        else if (holds_alternative<SixelImage>(batchable))
-        {
-            auto const& si = get<SixelImage>(batchable);
-            screen_.sixelImage(si.size, Image::Data(si.rgba));
-        }
-    }
-    batchedSequences_.clear();
-}
-
 void Sequencer::applyAndLog(FunctionDefinition const& _function, Sequence const& _seq)
 {
     auto const result = apply(_function, _seq);
