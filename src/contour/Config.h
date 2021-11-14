@@ -54,6 +54,13 @@ enum class Permission
     Ask
 };
 
+enum class SelectionAction
+{
+    Nothing,
+    CopyToSelectionClipboard,
+    CopyToClipboard,
+};
+
 using ActionList = std::vector<actions::Action>;
 using KeyInputMapping = terminal::InputBinding<terminal::Key, ActionList>;
 using CharInputMapping = terminal::InputBinding<char32_t, ActionList>;
@@ -197,6 +204,7 @@ struct Config {
     // selection
     std::string wordDelimiters;
     terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
+    SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
 
     // input mapping
     InputMappings inputMappings;
@@ -247,4 +255,30 @@ namespace fmt // {{{
             return format_to(ctx.out(), "({})", unsigned(_perm));
         }
     };
+
+    template <>
+    struct formatter<contour::config::SelectionAction>
+    {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+        using SelectionAction = contour::config::SelectionAction;
+        template <typename FormatContext>
+        auto format(SelectionAction _value, FormatContext& ctx)
+        {
+            switch (_value)
+            {
+                case SelectionAction::CopyToClipboard:
+                    return format_to(ctx.out(), "CopyToClipboard");
+                case SelectionAction::CopyToSelectionClipboard:
+                    return format_to(ctx.out(), "CopyToSelectionClipboard");
+                case SelectionAction::Nothing:
+                    return format_to(ctx.out(), "Waiting");
+            }
+            return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+        }
+    };
+
 } // }}}

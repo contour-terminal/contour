@@ -1381,6 +1381,27 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                 doc["bypass_mouse_protocol_modifier"]); opt.has_value())
         _config.bypassMouseProtocolModifier = opt.value();
 
+    if (doc["on_mouse_select"].IsDefined())
+    {
+        auto const value = toUpper(doc["on_mouse_select"].as<string>());
+        auto constexpr mappings = array{
+            pair{"COPYTOCLIPBOARD", SelectionAction::CopyToClipboard},
+            pair{"COPYTOSELECTIONCLIPBOARD", SelectionAction::CopyToSelectionClipboard},
+            pair{"NOTHING", SelectionAction::Nothing},
+        };
+        bool found = false;
+        for (auto const& mapping: mappings)
+            if (mapping.first == value)
+            {
+                _config.onMouseSelection = mapping.second;
+                usedKeys.emplace("on_mouse_select");
+                found = true;
+                break;
+            }
+        if (!found)
+            errorlog()("Invalid action specified for on_mouse_select: {}.", value);
+    }
+
     auto constexpr KnownExperimentalFeatures = array<string_view, 0>{
         // "tcap"sv
     };

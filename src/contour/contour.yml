@@ -29,6 +29,18 @@ reflow_on_resize: true
 # The same modifier values apply as with input modifiers (see below).
 bypass_mouse_protocol_modifier: Shift
 
+# Selects an action to perform when a text selection has been made.
+#
+# Possible values are:
+#
+# - None                        Does nothing
+# - CopyToClipboard             Copies the selection to the primary clipboard.
+# - CopyToSelectionClipboard    Copies the selection to the selection clipboard.
+#                               This is not supported on all platforms.
+#
+# Default: CopyToSelectionClipboard
+on_mouse_select: SelectClipboard
+
 # Inline image related default configuration and limits
 # -----------------------------------------------------
 images:
