@@ -33,9 +33,6 @@ jobs:
         run: .\scripts\ci-set-vars.ps1
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: Avoid conflict with Chocolatey's CPack
-        if: runner.os == 'Windows'
-        run: Rename-Item -Force -Path ${Env:ChocolateyInstall}/bin/cpack.exe  -NewName ${Env:ChocolateyInstall}/bin/cpack-choco.exe
       - name: "vcpkg: Install dependencies"
         uses: lukka/run-vcpkg@v5
         id: runvcpkg
