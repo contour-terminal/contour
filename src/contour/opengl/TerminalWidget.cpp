@@ -470,7 +470,7 @@ void TerminalWidget::onFrameSwapped()
 // {{{ Qt Widget Input Event handling & forwarding
 void TerminalWidget::keyPressEvent(QKeyEvent* _keyEvent)
 {
-   sendKeyEvent(_keyEvent, session_);
+    sendKeyEvent(_keyEvent, session_);
 }
 
 void TerminalWidget::wheelEvent(QWheelEvent* _event)
