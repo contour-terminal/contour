@@ -147,33 +147,31 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         return true;
     }
 
-    if (modifiers.contains(Modifier::Control))
-    {
-        if (key >= 0x20 && key < 0x7F)
-        {
-            _session.sendCharPressEvent(static_cast<char32_t>(key),
-                                        modifiers,
-                                        now);
-            return true;
-        }
-        switch (key)
-        {
-            case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now);
-                return true;
-            case Qt::Key_Equal:
-                _session.sendCharPressEvent(L'=', modifiers, now);
-                return true;
-            case Qt::Key_BraceRight:
-                _session.sendCharPressEvent(L']', modifiers, now);
-                return true;
-        }
-    }
-
     if (!_event->text().isEmpty())
     {
         for (auto const ch: _event->text().toUcs4())
             _session.sendCharPressEvent(ch, modifiers, now);
         return true;
+    }
+
+    if (key >= 0x20 && key < 0x80)
+    {
+        _session.sendCharPressEvent(static_cast<char32_t>(key),
+                                    modifiers,
+                                    now);
+        return true;
+    }
+
+    switch (key)
+    {
+        case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now);
+            return true;
+        case Qt::Key_Equal:
+            _session.sendCharPressEvent(L'=', modifiers, now);
+            return true;
+        case Qt::Key_BraceRight:
+            _session.sendCharPressEvent(L']', modifiers, now);
+            return true;
     }
 
     return false;

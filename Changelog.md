@@ -32,6 +32,7 @@
 - Fixes assertion in text renderer with regards to colored glyphs.
 - Fixes Sixel background select to support transparency (#450).
 - Fixes session resuming on KDE desktop envionment which is respawing all Contour instances upon re-login but failed due to invalid command line parameters (#461).
+- Fixes Meta+Key keyboard inputs being ignored.
 - Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).
 - Adds context menu support for KDE.
 
