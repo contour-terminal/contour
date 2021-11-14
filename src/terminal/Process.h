@@ -30,6 +30,8 @@
 #if defined(_MSC_VER)
 #include <Windows.h>
 #elif defined(__APPLE__)
+#include <libproc.h>
+#include <terminal/pty/UnixPty.h>
 #include <util.h>
 #else
 #include <pty.h>
@@ -97,7 +99,7 @@ class [[nodiscard]] Process {
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
 	[[nodiscard]] ExitStatus wait();
 
-	[[nodiscard]] std::string workingDirectory() const;
+    [[nodiscard]] std::string workingDirectory(Pty const* _pty = nullptr) const;
 
     enum class TerminationHint {
         Normal,

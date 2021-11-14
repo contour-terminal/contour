@@ -19,6 +19,10 @@
 #include <terminal/Terminal.h>
 #include <terminal/pty/Pty.h>
 
+#if defined(__APPLE__)
+#include <terminal/pty/PtyProcess.h>
+#endif
+
 #include <crispy/StackTrace.h>
 
 #include <range/v3/all.hpp>
@@ -828,8 +832,15 @@ void TerminalSession::executeAction(actions::Action const& _action)
 void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
     auto const wd = [this]() -> string {
-            auto const _l = scoped_lock{terminal_};
-            return terminal_.screen().currentWorkingDirectory();
+#if defined(__APPLE__)
+        if (auto const* ptyProcess = dynamic_cast<PtyProcess const*>(pty_.get())) {
+            return ptyProcess->process().workingDirectory(&ptyProcess->pty());
+        }
+#else
+        auto const _l = scoped_lock{terminal_};
+        return terminal_.screen().currentWorkingDirectory();
+#endif
+        return "."s;
         }();
 
     if (config_.spawnNewProcess) {

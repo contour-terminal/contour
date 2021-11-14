@@ -52,7 +52,7 @@ void Controller::newWindow(contour::config::Config const& _config)
         _config,
         liveConfig_,
         profileName_,
-        programPath_,
+        _config.profile(profileName_)->shell.workingDirectory.string(),
         *this
     };
 

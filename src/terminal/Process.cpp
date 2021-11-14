@@ -186,8 +186,8 @@ Process::Process(string const& _path,
 
             setsid();
 
-            auto const cwd = _cwd.generic_string();
-            if (!_cwd.empty() && chdir(cwd.c_str()) < 0)
+            auto const& cwd = _cwd.generic_string();
+            if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
             {
                 printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
                 exit(EXIT_FAILURE);
@@ -427,15 +427,17 @@ vector<string> Process::loginShell()
 #else
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
     {
-        #if defined(__APPLE__)
+#if defined(__APPLE__)
+        auto shell = string(pw->pw_shell);
+        auto index = shell.rfind('/');
         return {
-            "/usr/bin/login",
-            "-fp",
-            pw->pw_name,
+            "/bin/bash",
+            "-c",
+            fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell)
         };
-        #else
+#else
         return {pw->pw_shell};
-        #endif
+#endif
     }
     else
         return {"/bin/sh"s};
@@ -457,8 +459,7 @@ FileSystem::path Process::homeDirectory()
         return FileSystem::path("/");
 #endif
 }
-
-string Process::workingDirectory() const
+string Process::workingDirectory(Pty const* _pty) const
 {
 #if defined(__linux__)
 	try
@@ -472,8 +473,21 @@ string Process::workingDirectory() const
 		// ignore failure, and use default instead.
 		return "."s;
 	}
+#elif defined(__APPLE__)
+    try {
+        auto vpi = proc_vnodepathinfo{};
+        auto const pid = tcgetpgrp(static_cast<UnixPty const*>(_pty)->masterFd());
+
+        if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0) {
+            return "."s;
+        }
+
+        return string(vpi.pvi_cdir.vip_path);
+    } catch (...) {
+        return "."s;
+    }
 #else
-	// TODO: Apple, Windows
+	// TODO: Windows
 	return "."s;
 #endif
 }
