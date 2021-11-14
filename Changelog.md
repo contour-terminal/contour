@@ -1,4 +1,4 @@
-### 0.2.1 (unreleased)
+### 0.2.1 (2021-11-14)
 
 - Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."
 - Adds support for loading terminal color schemes from an exernal file, such as `~/.config/contour/colorschemes/onedark.yml` for the scheme `onedark` (file file format is simply a sub-tree of how colors can be specified inline).
