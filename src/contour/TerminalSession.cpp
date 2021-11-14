@@ -303,10 +303,24 @@ void TerminalSession::onClosed()
 
 void TerminalSession::onSelectionCompleted()
 {
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+    switch (config_.onMouseSelection)
     {
-        string const text = terminal().extractSelectionText();
-        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
+        case config::SelectionAction::CopyToSelectionClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr && clipboard->supportsSelection())
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
+            }
+            break;
+        case config::SelectionAction::CopyToClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Clipboard);
+            }
+            break;
+        case config::SelectionAction::Nothing:
+            break;
     }
 }
 

@@ -9,6 +9,7 @@
 - Adds a shell early-exit-guard to not instantly close the terminal window but print a message instead and wait for any key press in order to close.
 - Adds missing config option `read_buffer_size` to default `contour.yml`.
 - Adds new config option `reflow_on_resize` to mandate whether or not text reflow is enabled on primary screen. If this option is false, it cannot be enabled programmatically either.
+- Adds new config option `on_mouse_select` to decide what action to pick when text has been selected (copy to clipboard or copy to selection-clipboard, or do nothing)
 - Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).
 - Do not force OpenGL ES on Linux anymore.
 - Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).
@@ -31,6 +32,7 @@
 - Fixes assertion in text renderer with regards to colored glyphs.
 - Fixes Sixel background select to support transparency (#450).
 - Fixes session resuming on KDE desktop envionment which is respawing all Contour instances upon re-login but failed due to invalid command line parameters (#461).
+- Fixes Meta+Key keyboard inputs being ignored.
 - Changes DECSDM such that it works like a real VT340; also xterm, as of version 369, changed that recently (#287).
 - Adds context menu support for KDE.
 
