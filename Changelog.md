@@ -1,3 +1,7 @@
+### 0.3.0 (unreleased)
+
+- Adds new config option `spawn_new_process` to define new terminal window behavior.
+
 ### 0.2.1 (2021-11-14)
 
 - Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."

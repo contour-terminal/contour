@@ -39,6 +39,7 @@ class Controller : public QThread {
     std::list<TerminalWindow*> const& terminalWindows() const noexcept { return terminalWindows_; }
 
   public slots:
+    void newWindow(contour::config::Config const& _config);
     void newWindow();
     void showNotification(QString const& _title, QString const& _content);
 

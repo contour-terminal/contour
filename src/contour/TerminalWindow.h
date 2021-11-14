@@ -15,6 +15,7 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
+#include <contour/Controller.h>
 #include <contour/FileChangeWatcher.h>
 #include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
@@ -82,7 +83,7 @@ class TerminalWindow :
     Q_OBJECT
 
   public:
-    TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath);
+    TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath, Controller& _controller);
 
     bool event(QEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
@@ -104,6 +105,7 @@ class TerminalWindow :
     const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
+    Controller& controller_;
 
 #if defined(CONTOUR_SCROLLBAR)
     ScrollableDisplay* scrollableDisplay_ = nullptr;

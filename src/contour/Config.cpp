@@ -1427,6 +1427,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
+    tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess);
+
     tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
     tryLoadValue(usedKeys, doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
     tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);

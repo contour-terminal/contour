@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <algorithm>
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
@@ -80,6 +81,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  bool _liveConfig,
                                  string _profileName,
                                  string _programPath,
+                                 Controller &_controller,
                                  unique_ptr<TerminalDisplay> _display,
                                  std::function<void()> _displayInitialized):
     startTime_{ steady_clock::now() },
@@ -88,6 +90,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     profile_{ *config_.profile(profileName_) },
     programPath_{ move(_programPath ) },
     displayInitialized_{ move(_displayInitialized) },
+    controller_ { _controller },
     pty_{ move(_pty) },
     terminal_{
         *pty_,
@@ -819,15 +822,23 @@ void TerminalSession::executeAction(actions::Action const& _action)
 
 void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
-    ::contour::spawnNewTerminal(
-        programPath_,
-        config_.backingFilePath.generic_string(),
-        _profileName,
-        [this]() -> string {
+    auto const wd = [this]() -> string {
             auto const _l = scoped_lock{terminal_};
             return terminal_.screen().currentWorkingDirectory();
-        }()
-    );
+        }();
+
+    if (config_.spawnNewProcess) {
+        ::contour::spawnNewTerminal(
+            programPath_,
+            config_.backingFilePath.generic_string(),
+            _profileName,
+            wd
+        );
+    } else {
+        auto config = config_;
+        config.profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
+        controller_.newWindow(config);
+    }
 }
 
 void TerminalSession::activateProfile(string const& _newProfileName)

@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <contour/Controller.h>
 #include <contour/Config.h>
 #include <contour/TerminalDisplay.h>
 #include <contour/FileChangeWatcher.h>
@@ -49,6 +50,7 @@ class TerminalSession: public terminal::Terminal::Events
                     bool _liveconfig,
                     std::string _profileName,
                     std::string _programPath,
+                    Controller& _controller,
                     std::unique_ptr<TerminalDisplay> _display,
                     std::function<void()> _displayInitialized);
     ~TerminalSession();
@@ -166,6 +168,7 @@ class TerminalSession: public terminal::Terminal::Events
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
+    Controller& controller_;
     std::function<void()> displayInitialized_;
 
     std::unique_ptr<terminal::Pty> pty_;

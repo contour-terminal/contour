@@ -46,14 +46,16 @@ Controller::~Controller()
 {
 }
 
-void Controller::newWindow()
+void Controller::newWindow(contour::config::Config const& _config)
 {
     auto mainWindow = new TerminalWindow{
-        config_,
+        _config,
         liveConfig_,
         profileName_,
-        programPath_
+        programPath_,
+        *this
     };
+
     mainWindow->show();
 
     terminalWindows_.push_back(mainWindow);
@@ -61,6 +63,21 @@ void Controller::newWindow()
 
     // QObject::connect(mainWindow, &TerminalWindow::showNotification,
     //                  this, &Controller::showNotification);
+}
+
+void Controller::newWindow()
+{
+    auto mainWindow = new TerminalWindow{
+        config_,
+        liveConfig_,
+        profileName_,
+        programPath_,
+        *this
+    };
+
+    mainWindow->show();
+
+    terminalWindows_.push_back(mainWindow);
 }
 
 void Controller::showNotification(QString const& _title, QString const& _content)
