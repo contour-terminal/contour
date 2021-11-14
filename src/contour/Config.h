@@ -214,6 +214,8 @@ struct Config {
     ShaderConfig backgroundShader = opengl::defaultShaderConfig(ShaderClass::Background);
     ShaderConfig textShader = opengl::defaultShaderConfig(ShaderClass::Text);
 
+    bool spawnNewProcess = false;
+
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;
     terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.

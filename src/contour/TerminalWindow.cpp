@@ -205,11 +205,12 @@ void ScrollableDisplay::onValueChanged()
 }
 #endif // }}}
 
-TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath) :
+TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath, Controller& _controller) :
     config_{ std::move(_config) },
     liveConfig_{ _liveConfig },
     profileName_{ std::move(_profileName) },
-    programPath_{ std::move(_programPath) }
+    programPath_{ std::move(_programPath) },
+    controller_{ _controller }
 {
     // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 
@@ -251,6 +252,7 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
         liveConfig_,
         profileName_,
         programPath_,
+        controller_,
         unique_ptr<TerminalDisplay>{},
         [this]() {
             // NB: This is invoked whenever the newly assigned display

@@ -11,6 +11,10 @@ read_buffer_size: 16384
 
 default_profile: main
 
+# Flag to determine whether to spawn new process or not when creating new terminal
+# Default: false
+spawn_new_process: false
+
 # Whether or not to reflow the lines on terminal resize events.
 # Default: true
 reflow_on_resize: true
