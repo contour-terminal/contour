@@ -3,6 +3,8 @@
 - Fixes input mapping containing `Control` modifier.
 - Changes `DECCOLM` to only switch back to 80 when it was 132 before.
 - Adds new config option `spawn_new_process` to define new terminal window behavior.
+- Adds action `CancelSelection` to allow actively canceling selection via input mappings.
+- Adds key bindings to default configuration to allow simply pressing Ctrl+C/Ctrl+V (without Shift modifier) when an active selection is present.
 
 ### 0.2.1 (2021-11-14)
 

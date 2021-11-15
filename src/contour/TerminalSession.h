@@ -101,6 +101,7 @@ class TerminalSession: public terminal::Terminal::Events
     void sendFocusOutEvent();
 
     // Actions
+    void operator()(actions::CancelSelection);
     void operator()(actions::ChangeProfile const&);
     void operator()(actions::ClearHistoryAndReset);
     void operator()(actions::CopyPreviousMarkRange);

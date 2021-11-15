@@ -496,6 +496,11 @@ void TerminalSession::sendFocusOutEvent()
 
 // }}}
 // {{{ Actions
+void TerminalSession::operator()(actions::CancelSelection)
+{
+    terminal_.clearSelection();
+}
+
 void TerminalSession::operator()(actions::ChangeProfile const& _action)
 {
     LOGSTORE(SessionLog)("Changing profile to: {}", _action.name);
