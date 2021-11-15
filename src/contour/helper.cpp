@@ -147,18 +147,19 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         return true;
     }
 
-    if (!_event->text().isEmpty())
-    {
-        for (auto const ch: _event->text().toUcs4())
-            _session.sendCharPressEvent(ch, modifiers, now);
-        return true;
-    }
-
-    if (key >= 0x20 && key < 0x80)
+    if (modifiers.control() && key >= 0x20 && key < 0x80)
     {
         _session.sendCharPressEvent(static_cast<char32_t>(key),
                                     modifiers,
                                     now);
+        return true;
+    }
+
+    if (!_event->text().isEmpty())
+    {
+        for (auto const ch: _event->text().toUcs4())
+            _session.sendCharPressEvent(ch, modifiers, now);
+
         return true;
     }
 
