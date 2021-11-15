@@ -147,7 +147,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         return true;
     }
 
-    if (modifiers.control() && key >= 0x20 && key < 0x80)
+    if (modifiers.any() && key >= 0x20 && key < 0x80)
     {
         _session.sendCharPressEvent(static_cast<char32_t>(key),
                                     modifiers,
@@ -165,7 +165,8 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     switch (key)
     {
-        case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now);
+        case Qt::Key_BraceLeft:
+            _session.sendCharPressEvent(L'[', modifiers, now);
             return true;
         case Qt::Key_Equal:
             _session.sendCharPressEvent(L'=', modifiers, now);
