@@ -1799,7 +1799,9 @@ void Screen::setMode(DECMode _mode, bool _enable)
             cursor_.originMode = _enable;
             break;
         case DECMode::Columns132:
-            if (!_enable || isModeEnabled(DECMode::AllowColumns80to132))
+            if (!isModeEnabled(DECMode::AllowColumns80to132))
+                break;
+            if (_enable != isModeEnabled(DECMode::Columns132))
             {
                 auto const clear = _enable != isModeEnabled(_mode);
 

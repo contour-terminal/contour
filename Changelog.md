@@ -1,5 +1,6 @@
 ### 0.3.0 (unreleased)
 
+- Changes `DECCOLM` to only switch back to 80 when it was 132 before.
 - Adds new config option `spawn_new_process` to define new terminal window behavior.
 
 ### 0.2.1 (2021-11-14)
