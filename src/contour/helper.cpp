@@ -114,6 +114,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
     }; // }}}
 
     static auto constexpr charMappings = array{ // {{{
+        pair{Qt::Key_Return, '\n'},
         pair{Qt::Key_AsciiCircum, '^'},
         pair{Qt::Key_AsciiTilde, '~'},
         pair{Qt::Key_Backslash, '\\'},
