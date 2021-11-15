@@ -1,5 +1,6 @@
 ### 0.3.0 (unreleased)
 
+- Fixes input mapping containing `Control` modifier.
 - Changes `DECCOLM` to only switch back to 80 when it was 132 before.
 - Adds new config option `spawn_new_process` to define new terminal window behavior.
 
