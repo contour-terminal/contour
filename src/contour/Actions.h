@@ -21,6 +21,7 @@
 
 namespace contour::actions {
 
+struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
 struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
@@ -60,6 +61,7 @@ struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 // OpenTab
 
 using Action = std::variant<
+    CancelSelection,
     ChangeProfile,
     ClearHistoryAndReset,
     CopyPreviousMarkRange,
@@ -115,6 +117,7 @@ std::optional<Action> fromString(std::string const& _name);
     }
 
 // {{{ declare
+DECLARE_ACTION_FMT(CancelSelection)
 DECLARE_ACTION_FMT(ChangeProfile)
 DECLARE_ACTION_FMT(CopyPreviousMarkRange)
 DECLARE_ACTION_FMT(CopySelection)
@@ -166,6 +169,7 @@ namespace fmt {
         auto format(contour::actions::Action const& _action, FormatContext& ctx)
         {
             // {{{ handle
+            HANDLE_ACTION(CancelSelection);
             HANDLE_ACTION(ChangeProfile);
             HANDLE_ACTION(CopyPreviousMarkRange);
             HANDLE_ACTION(CopySelection);

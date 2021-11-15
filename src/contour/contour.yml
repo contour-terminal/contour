@@ -344,6 +344,7 @@ color_schemes:
 #   Left, Middle, Right, WheelUp, WheelDown
 #
 # Actions:
+# - CancelSelection   Cancels currently active selection, if any.
 # - ChangeProfile     Changes the profile to the given profile `name`.
 # - ClearHistoryAndReset    Clears the history, performs a terminal hard reset and attempts to force a redraw of the currently running application.
 # - CopyPreviousMarkRange   Copies the most recent range that is delimited by vertical line marks into clipboard.
@@ -388,12 +389,16 @@ input_mapping:
     - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
     - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
     - { mods: [Control, Shift], key: Plus,          action: IncreaseFontSize }
-    - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control],        key: '0',           action: ResetFontSize }
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
     - { mods: [Control, Shift], key: '_',           action: DecreaseFontSize }
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
+    - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard }
+    - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select' }
+    - { mods: [Control],        key: V,             action: PasteClipboard, mode: 'Select' }
+    - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select' }
+    - { mods: [],               key: Escape,        action: CancelSelection, mode: 'Select' }
     - { mods: [Control, Shift], key: Comma,         action: OpenConfiguration }
     - { mods: [Control, Shift], key: Q,             action: Quit }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }

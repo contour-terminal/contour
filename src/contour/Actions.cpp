@@ -49,6 +49,7 @@ namespace {
 optional<Action> fromString(string const& _name)
 {
     auto static const mappings = array{
+        mapAction<actions::CancelSelection>("CancelSelection"),
         mapAction<actions::ChangeProfile>("ChangeProfile"),
         mapAction<actions::ClearHistoryAndReset>("ClearHistoryAndReset"),
         mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
