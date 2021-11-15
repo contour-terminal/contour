@@ -5,7 +5,7 @@
 [Desktop Entry]
 Type=Application
 TryExec=contour
-Exec=/usr/bin/contour
+Exec=contour
 Icon=contour
 Terminal=false
 Categories=Qt;System;TerminalEmulator;
@@ -193,5 +193,3 @@ Name[uk]=Відкрити нове вікно
 Name[x-test]=xxOpen a New Windowxx
 Name[zh_CN]=打开新窗口
 Name[zh_TW]=開啟新視窗
-Icon=window-new
-Exec=konsole
