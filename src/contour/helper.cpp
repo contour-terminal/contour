@@ -148,7 +148,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         return true;
     }
 
-    if (modifiers.any() && key >= 0x20 && key < 0x80)
+    if (modifiers.control() && key >= 0x20 && key < 0x80)
     {
         _session.sendCharPressEvent(static_cast<char32_t>(key),
                                     modifiers,
@@ -158,8 +158,13 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     if (!_event->text().isEmpty())
     {
-        for (auto const ch: _event->text().toUcs4())
+#if defined(__APPLE__)
+        for (char32_t const ch: _event->text().toUcs4())
+            _session.sendCharPressEvent(ch, modifiers.without(Modifier::Alt), now);
+#else
+        for (char32_t const ch: _event->text().toUcs4())
             _session.sendCharPressEvent(ch, modifiers, now);
+#endif
 
         return true;
     }
