@@ -937,6 +937,9 @@ uint8_t TerminalSession::matchModeFlags() const
     if (terminal_.applicationKeypad())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AppKeypad);
 
+    if (terminal_.selectionAvailable())
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
+
     return flags;
 }
 
