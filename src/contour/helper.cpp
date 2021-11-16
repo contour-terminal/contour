@@ -269,6 +269,10 @@ void spawnNewTerminal(string const& _programPath,
 {
     auto const wd = [&]() -> QString {
         auto const url = QUrl(QString::fromUtf8(_cwdUrl.c_str()));
+
+        if (url.host().isEmpty())
+            return url.path();
+
         if (url.host() == QHostInfo::localHostName())
             return url.path();
         else
