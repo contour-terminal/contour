@@ -159,6 +159,8 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
     if (!_event->text().isEmpty())
     {
 #if defined(__APPLE__)
+        // On OS/X the Alt-modifier does not seem to be passed to the terminal apps
+        // but rather remapped to whatever OS/X is mapping them to.
         for (char32_t const ch: _event->text().toUcs4())
             _session.sendCharPressEvent(ch, modifiers.without(Modifier::Alt), now);
 #else
