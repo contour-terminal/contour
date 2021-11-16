@@ -485,7 +485,7 @@ optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
         return static_cast<char32_t>(toupper(text[0]));
 
     auto constexpr namedChars = array{
-        pair{"ENTER"sv, (char) C0::LF},
+        pair{"ENTER"sv, (char) C0::CR},
         pair{"BACKSPACE"sv, (char) C0::BS },
         pair{"TAB"sv, (char) C0::HT },
         pair{"ESCAPE"sv, (char) C0::ESC },
