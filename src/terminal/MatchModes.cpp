@@ -3,20 +3,6 @@
 
 namespace terminal {
 
-MatchModes constructMatchModes(Terminal const& _terminal)
-{
-    auto mm = MatchModes{};
-    if (_terminal.screen().isAlternateScreen())
-        mm.enable(MatchModes::AlternateScreen);
-    if (_terminal.applicationCursorKeys())
-        mm.enable(MatchModes::AppCursor);
-    if (_terminal.applicationKeypad())
-        mm.enable(MatchModes::AppKeypad);
-    if (_terminal.selectionAvailable())
-        mm.enable(MatchModes::Select);
-    return mm;
-}
-
 bool testMatch(Terminal const& _terminal, MatchModes _mode)
 {
     switch (_mode.status(MatchModes::AlternateScreen))

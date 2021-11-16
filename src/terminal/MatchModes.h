@@ -109,7 +109,6 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 
 class Terminal;
 
-MatchModes constructMatchModes(Terminal const& _terminal);
 bool testMatch(Terminal const& _terminal, MatchModes _mode);
 
 }
