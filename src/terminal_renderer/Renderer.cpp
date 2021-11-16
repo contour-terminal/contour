@@ -20,7 +20,10 @@
 #if defined(_WIN32)
 #include <text_shaper/directwrite_locator.h>
 #include <text_shaper/directwrite_shaper.h>
+#elif defined(__APPLE__)
+#include <text_shaper/coretext_locator.h>
 #endif
+
 #include <text_shaper/fontconfig_locator.h>
 
 #include <array>
@@ -94,7 +97,7 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
             break;
         case FontLocatorEngine::CoreText:
             #if defined(__APPLE__)
-            LOGSTORE(RasterizerLog)("Font locator CoreText not implemented yet.");
+            return make_unique<text::coretext_locator>();
             #else
             LOGSTORE(RasterizerLog)("Font locator CoreText not supported on this platform.");
             #endif

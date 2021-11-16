@@ -1,0 +1,134 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2021 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include <text_shaper/coretext_locator.h>
+#include <text_shaper/font.h>
+#include <text_shaper/font_locator.h>
+
+#import <AppKit/AppKit.h>
+#import <CoreText/CoreText.h>
+#import <Foundation/Foundation.h>
+
+namespace text
+{
+    namespace
+    {
+        font_path ctFontPath(NSString* _name)
+        {
+            auto fontRef = CTFontDescriptorCreateWithNameAndSize((CFStringRef)_name, 16.0);
+
+            CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(fontRef, kCTFontURLAttribute);
+            NSString* fontPath = [NSString stringWithString: [(NSURL *)CFBridgingRelease(url) path]];
+
+            return font_path{[fontPath cStringUsingEncoding: [NSString defaultCStringEncoding]]};
+        }
+
+        constexpr font_weight ctFontWeight(int _weight) noexcept
+        {
+            switch (_weight)
+            {
+            case 2: return font_weight::thin;
+            case 3: return font_weight::extra_light;
+            case 4: return font_weight::light;
+            case 5: return font_weight::normal;
+            case 6: return font_weight::medium;
+            case 8: return font_weight::demibold;
+            case 9: return font_weight::bold;
+            case 10: return font_weight::extra_bold;
+            case 11: return font_weight::black;
+            default: return font_weight::normal;
+            }
+        }
+
+        constexpr font_slant ctFontSlant(int _slant) noexcept
+        {
+            if (_slant & NSItalicFontMask)
+                return font_slant::italic;
+
+            if (_slant & (NSUnitalicFontMask | NSUnboldFontMask))
+                return font_slant::normal;
+
+            // Figure out how to get Oblique font, even though according to some docs.
+            // Oblique font is actually a fancy way to say Italic.
+
+            return font_slant::normal;
+        }
+    }
+
+    struct coretext_locator::Private
+    {
+        NSFontManager* fm = [NSFontManager sharedFontManager];
+
+        ~Private()
+        {
+            [fm release];
+        }
+    };
+
+
+    coretext_locator::coretext_locator() :
+        d{ new Private(), [](Private* p) { delete p; } }
+    {
+    }
+
+    font_source_list coretext_locator::locate(font_description const& _fd)
+    {
+        LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
+
+        font_source_list output;
+
+        NSArray<NSArray *>* fonts = [d->fm
+            availableMembersOfFontFamily: [NSString
+                stringWithCString: _fd.familyName.c_str()
+                encoding: [NSString defaultCStringEncoding]
+            ]
+        ];
+
+        if (fonts == nil)
+            fonts = [d->fm availableMembersOfFontFamily:@"Menlo"];
+
+        for (NSArray* object in fonts) {
+            auto weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
+
+            if (weight != _fd.weight)
+                continue;
+
+            auto slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
+
+            if (slant != _fd.slant)
+                continue;
+
+            output.emplace_back(ctFontPath([object objectAtIndex: 0]));
+        }
+
+        return output;
+    }
+
+    font_source_list coretext_locator::all()
+    {
+        font_source_list output;
+
+        NSArray<NSString *>* fonts = [d->fm availableFonts];
+
+        for (NSString* fontName in fonts) {
+            output.emplace_back(ctFontPath(fontName));
+        }
+
+        return output;
+    }
+
+    font_source_list coretext_locator::resolve(gsl::span<const char32_t> codepoints)
+    {
+        return {};
+    }
+}
