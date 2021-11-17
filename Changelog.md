@@ -3,6 +3,7 @@
 - Fixes input mapping containing `Control` modifier.
 - Fixes input mapping mode `Select` being ignored.
 - Fixes Modifier+Enter input mapping not being catched.
+- Fixes slant detection for DirectWrite.
 - Changes `DECCOLM` to only switch back to 80 when it was 132 before.
 - Adds new config option `spawn_new_process` to define new terminal window behavior.
 - Adds action `CancelSelection` to allow actively canceling selection via input mappings.

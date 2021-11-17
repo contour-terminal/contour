@@ -162,7 +162,7 @@ namespace text
                 continue;
 
             font_slant slant = dwFontSlant(font->GetStyle());
-            if (weight != _fd.weight)
+            if (slant != _fd.slant)
                 continue;
 
             ComPtr<IDWriteFontFace> fontFace;
