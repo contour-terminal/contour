@@ -28,12 +28,17 @@
 #include <unistd.h>
 #endif
 
+using namespace std::string_view_literals;
+
 using std::bind;
-using std::max;
+using std::cout;
+using std::endl;
 using std::exception;
 using std::left;
+using std::max;
 using std::nullopt;
 using std::optional;
+using std::setfill;
 using std::setw;
 using std::string;
 using std::string_view;
@@ -42,6 +47,14 @@ namespace CLI = crispy::cli;
 
 namespace // {{{ helper
 {
+    std::string operator*(std::string_view a, size_t n)
+    {
+        std::string s;
+        for (size_t i = 0; i < n; ++i)
+            s += a;
+        return s;
+    }
+
     CLI::HelpStyle helpStyle()
     {
         auto style = CLI::HelpStyle{};
@@ -191,16 +204,18 @@ namespace crispy {
 
 App* App::instance_ = nullptr;
 
-App::App(std::string _appName, std::string _appTitle, std::string _appVersion) :
+App::App(std::string _appName, std::string _appTitle, std::string _appVersion, std::string _appLicense) :
     appName_{ std::move(_appName) },
     appTitle_{ std::move(_appTitle) },
     appVersion_{ std::move(_appVersion) },
+    appLicense_{ std::move(_appLicense) },
     localStateDir_{xdgStateHome() / appName_}
 {
     instance_ = this;
 
     link(appName_ + ".help", bind(&App::helpAction, this));
     link(appName_ + ".version", bind(&App::versionAction, this));
+    link(appName_ + ".license", bind(&App::licenseAction, this));
 }
 
 App::~App()
@@ -249,6 +264,43 @@ void App::listDebugTags()
 int App::helpAction()
 {
     std::cout << CLI::helpText(syntax_.value(), helpStyle(), screenWidth());
+    return EXIT_SUCCESS;
+}
+
+int App::licenseAction()
+{
+    auto const& store = crispy::cli::about::store();
+    auto const titleWidth = std::accumulate(store.begin(), store.end(),
+            0, [](int a, auto const& b) { return std::max(a, (int) b.title.size()); });
+    auto const licenseWidth = std::accumulate(store.begin(), store.end(),
+            0, [](int a, auto const& b) { return std::max(a, (int) b.license.size()); });
+    auto const urlWidth = std::accumulate(store.begin(), store.end(),
+            0, [](int a, auto const& b) { return std::max(a, (int) b.url.size()); });
+
+    auto const Horiz = "\u2550"sv;
+    auto const Vert  = "\u2502"sv;
+    auto const Cross = "\u256A"sv;
+
+    cout << endl
+         << appTitle_ << ' ' << appVersion_ << endl
+         << "License: " << appLicense_ << endl
+         << "\u2550"sv * (appTitle_.size() + appVersion_.size() + 1) << endl
+         << endl;
+
+    cout << setw(titleWidth) << "Project" << ' ' << Vert << ' '
+         << setw(licenseWidth) << "License" << ' ' << Vert << ' '
+         << "Project URL" << endl;
+
+    cout << Horiz * titleWidth << Horiz << Cross << Horiz
+         << Horiz * licenseWidth << Horiz << Cross << Horiz
+         << Horiz * urlWidth
+         << endl;
+
+    for (auto const& project: crispy::cli::about::store())
+        cout << setw(titleWidth) << project.title << ' ' << Vert << ' '
+             << setw(licenseWidth) << project.license << ' ' << Vert << ' '
+             << project.url << endl;
+
     return EXIT_SUCCESS;
 }
 

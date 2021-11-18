@@ -9,6 +9,7 @@
 - Adds action `CancelSelection` to allow actively canceling selection via input mappings.
 - Adds key bindings to default configuration to allow simply pressing Ctrl+C/Ctrl+V (without Shift modifier) when an active selection is present.
 - Adds process current working directory on macOS.
+- Adds `contour license` CLI command to show project license but also an overview of all dependencies.
 
 ### 0.2.1 (2021-11-14)
 

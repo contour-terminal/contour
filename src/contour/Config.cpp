@@ -53,6 +53,8 @@ auto constexpr MinimumFontSize = text::font_size{ 8.0 };
 using namespace std;
 using crispy::escape;
 using crispy::unescape;
+using crispy::toLower;
+using crispy::toUpper;
 
 using terminal::ImageSize;
 using terminal::Width;
@@ -129,34 +131,6 @@ namespace // {{{ helper
 
         return "vt100";
 #endif
-    }
-
-    template <typename String>
-    inline std::string toLower(String const& _value)
-    {
-        std::string result;
-        result.reserve(_value.size());
-        std::transform(
-            begin(_value),
-            end(_value),
-            back_inserter(result),
-            [](auto ch) { return std::tolower(ch); }
-        );
-        return result;
-    }
-
-    template <typename String>
-    inline std::string toUpper(String const& _value)
-    {
-        std::string result;
-        result.reserve(_value.size());
-        std::transform(
-            begin(_value),
-            end(_value),
-            back_inserter(result),
-            [](auto ch) { return std::toupper(ch); }
-        );
-        return result;
     }
 
     optional<Permission> toPermission(string const& _value)

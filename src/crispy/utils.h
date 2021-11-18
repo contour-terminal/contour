@@ -259,4 +259,44 @@ std::basic_string<T> toHexString(std::basic_string_view<T> _input)
     return output;
 }
 
+template <typename T>
+inline std::basic_string<T> toLower(std::basic_string_view<T> _value)
+{
+    std::basic_string<T> result;
+    result.reserve(_value.size());
+    transform(
+        begin(_value),
+        end(_value),
+        back_inserter(result),
+        [](auto ch) { return tolower(ch); }
+    );
+    return result;
+}
+
+template <typename T>
+inline std::basic_string<T> toLower(std::basic_string<T> const& _value)
+{
+    return toLower<T>(std::basic_string_view<T>(_value));
+}
+
+template <typename T>
+inline std::basic_string<T> toUpper(std::basic_string_view<T> _value)
+{
+    std::basic_string<T> result;
+    result.reserve(_value.size());
+    std::transform(
+        begin(_value),
+        end(_value),
+        back_inserter(result),
+        [](auto ch) { return std::toupper(ch); }
+    );
+    return result;
+}
+
+template <typename T>
+inline std::basic_string<T> toUpper(std::basic_string<T> const& _value)
+{
+    return toUpper<T>(std::basic_string_view<T>(_value));
+}
+
 } // end namespace

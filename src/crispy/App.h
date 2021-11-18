@@ -27,7 +27,7 @@ namespace crispy {
 class App
 {
   public:
-    App(std::string _appName, std::string _appTitle, std::string _appVersion);
+    App(std::string _appName, std::string _appTitle, std::string _appVersion, std::string _appLicense);
     virtual ~App();
 
     static App* instance() noexcept { return instance_; }
@@ -48,6 +48,7 @@ class App
 
   private:
     int versionAction();
+    int licenseAction();
     int helpAction();
 
     static App* instance_;
@@ -55,6 +56,7 @@ class App
     std::string appName_;
     std::string appTitle_;
     std::string appVersion_;
+    std::string appLicense_;
     FileSystem::path localStateDir_;
     std::optional<crispy::cli::Command> syntax_;
     std::optional<crispy::cli::FlagStore> flags_;
