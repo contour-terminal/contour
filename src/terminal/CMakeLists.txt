@@ -143,6 +143,13 @@ if(LIBTERMINAL_TESTING)
     add_test(terminal_test ./terminal_test)
 
     add_executable(bench-headless bench-headless.cpp)
+    target_compile_definitions(bench-headless PRIVATE
+        CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+        CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+        CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+        CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    )
     target_link_libraries(bench-headless fmt::fmt-header-only terminal termbench)
 endif()
 
