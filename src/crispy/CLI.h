@@ -13,14 +13,16 @@
  */
 #pragma once
 
+#include <crispy/utils.h>
+
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -169,6 +171,37 @@ std::string helpText(Command const& _command, HelpStyle const& _style, unsigned 
 
 // Throw if Command is not well defined.
 void validate(Command const& _command);
+
+namespace about
+{
+    struct Project
+    {
+        std::string_view title;
+        std::string_view license;
+        std::string_view url;
+    };
+
+    inline std::vector<Project>& store()
+    {
+        static std::vector<Project> instance;
+        return instance;
+    }
+
+    inline void registerProjects(Project _project)
+    {
+        store().emplace_back(_project);
+        using crispy::toLower;
+        std::sort(store().begin(), store().end(),
+            [](auto const& a, auto const& b) { return toLower(a.title) < toLower(b.title); });
+    }
+
+    template <typename... Args>
+    void registerProjects(Project && _project0, Args&&... _more)
+    {
+        store().emplace_back(_project0);
+        registerProjects(std::forward<Args>(_more)...);
+    }
+}
 
 } // end namespace crispy::cli
 

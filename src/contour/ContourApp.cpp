@@ -160,8 +160,24 @@ namespace // {{{ helper
 } // }}}
 
 ContourApp::ContourApp() :
-    App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING)
+    App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
+    using Project = crispy::cli::about::Project;
+    crispy::cli::about::registerProjects(
+        #if defined(CONTOUR_BUILD_WITH_MIMALLOC)
+        Project{"mimalloc", "", ""},
+        #endif
+        Project{"Qt", "GPL", "https://www.qt.io/"},
+        Project{"FreeType", "GPL, FreeType License", "https://freetype.org/"},
+        Project{"HarfBuzz", "Old MIT", "https://harfbuzz.org/"},
+        //Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
+        Project{"libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode"},
+        Project{"range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3"},
+        Project{"yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp"},
+        Project{"termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro"},
+        Project{"fmt", "MIT", "https://github.com/fmtlib/fmt"}
+    );
+
 #if defined(__linux__)
     auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
     FileSystem::create_directories(crashLogDirPath);
@@ -281,7 +297,8 @@ crispy::cli::Command ContourApp::parameterDefinition() const
         CLI::OptionList{},
         CLI::CommandList{
             CLI::Command{"help", "Shows this help and exits."},
-            CLI::Command{"version", "Shows The version and exits."},
+            CLI::Command{"version", "Shows the version and exits."},
+            CLI::Command{"license", "Shows the license, and project URL of the used projects and Contour."},
             CLI::Command{"parser-table", "Dumps parser table"},
             CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
             CLI::Command{

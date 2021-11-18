@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include "Actions.h"
+#include <crispy/utils.h>
 
 #include <algorithm>
 #include <array>
@@ -22,23 +23,12 @@
 
 using namespace std;
 
+using crispy::toLower;
+
 namespace contour::actions {
 
-namespace {
-    template <typename String>
-    inline string toLower(String const& _value)
-    {
-        string result;
-        result.reserve(_value.size());
-        transform(
-            begin(_value),
-            end(_value),
-            back_inserter(result),
-            [](auto ch) { return tolower(ch); }
-        );
-        return result;
-    }
-
+namespace
+{
     template <typename T>
     inline auto mapAction(string_view _name)
     {
