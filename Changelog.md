@@ -1,4 +1,4 @@
-### 0.3.0 (unreleased)
+### 0.2.2 (2021-11-19)
 
 - Fixes input mapping containing `Control` modifier.
 - Fixes input mapping mode `Select` being ignored.
