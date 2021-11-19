@@ -1,10 +1,21 @@
 #! /bin/bash
 set -ex
 
+# Minor helper to avoid repeating myself,
+# This shortcut allows you to simply invoke ../../autogen.sh when being
+# in directories like:
+#     ./target/{Debug,RelWithDebInfo,Release}
+if [[ -e ../../autogen.sh ]] && [[ "$1" == "" ]] &&
+   [[ -x "$(command -v realpath)" ]] &&
+   [[ "$(basename $(realpath ${PWD}/..))" = "target" ]]
+then
+    exec ../../autogen.sh $(basename $(realpath ${PWD}))
+fi
+
 if [[ -x "$(command -v realpath)" ]]; then
-  ROOTDIR="$(realpath $(dirname $0))"
+    ROOTDIR="$(realpath $(dirname $0))"
 else
-  ROOTDIR="$(dirname $0)"
+    ROOTDIR="$(dirname $0)"
 fi
 
 BUILD_TYPE="${1:-Debug}"
