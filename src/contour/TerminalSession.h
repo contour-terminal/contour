@@ -107,40 +107,40 @@ class TerminalSession: public terminal::Terminal::Events
     void sendFocusOutEvent();
 
     // Actions
-    void operator()(actions::CancelSelection);
-    void operator()(actions::ChangeProfile const&);
-    void operator()(actions::ClearHistoryAndReset);
-    void operator()(actions::CopyPreviousMarkRange);
-    void operator()(actions::CopySelection);
-    void operator()(actions::DecreaseFontSize);
-    void operator()(actions::DecreaseOpacity);
-    void operator()(actions::FollowHyperlink);
-    void operator()(actions::IncreaseFontSize);
-    void operator()(actions::IncreaseOpacity);
-    void operator()(actions::NewTerminal const&);
-    void operator()(actions::OpenConfiguration);
-    void operator()(actions::OpenFileManager);
-    void operator()(actions::PasteClipboard);
-    void operator()(actions::PasteSelection);
-    void operator()(actions::Quit);
-    void operator()(actions::ReloadConfig const&);
-    void operator()(actions::ResetConfig);
-    void operator()(actions::ResetFontSize);
-    void operator()(actions::ScreenshotVT);
-    void operator()(actions::ScrollDown);
-    void operator()(actions::ScrollMarkDown);
-    void operator()(actions::ScrollMarkUp);
-    void operator()(actions::ScrollOneDown);
-    void operator()(actions::ScrollOneUp);
-    void operator()(actions::ScrollPageDown);
-    void operator()(actions::ScrollPageUp);
-    void operator()(actions::ScrollToBottom);
-    void operator()(actions::ScrollToTop);
-    void operator()(actions::ScrollUp);
-    void operator()(actions::SendChars const& _event);
-    void operator()(actions::ToggleAllKeyMaps);
-    void operator()(actions::ToggleFullscreen);
-    void operator()(actions::WriteScreen const& _event);
+    bool operator()(actions::CancelSelection);
+    bool operator()(actions::ChangeProfile const&);
+    bool operator()(actions::ClearHistoryAndReset);
+    bool operator()(actions::CopyPreviousMarkRange);
+    bool operator()(actions::CopySelection);
+    bool operator()(actions::DecreaseFontSize);
+    bool operator()(actions::DecreaseOpacity);
+    bool operator()(actions::FollowHyperlink);
+    bool operator()(actions::IncreaseFontSize);
+    bool operator()(actions::IncreaseOpacity);
+    bool operator()(actions::NewTerminal const&);
+    bool operator()(actions::OpenConfiguration);
+    bool operator()(actions::OpenFileManager);
+    bool operator()(actions::PasteClipboard);
+    bool operator()(actions::PasteSelection);
+    bool operator()(actions::Quit);
+    bool operator()(actions::ReloadConfig const&);
+    bool operator()(actions::ResetConfig);
+    bool operator()(actions::ResetFontSize);
+    bool operator()(actions::ScreenshotVT);
+    bool operator()(actions::ScrollDown);
+    bool operator()(actions::ScrollMarkDown);
+    bool operator()(actions::ScrollMarkUp);
+    bool operator()(actions::ScrollOneDown);
+    bool operator()(actions::ScrollOneUp);
+    bool operator()(actions::ScrollPageDown);
+    bool operator()(actions::ScrollPageUp);
+    bool operator()(actions::ScrollToBottom);
+    bool operator()(actions::ScrollToTop);
+    bool operator()(actions::ScrollUp);
+    bool operator()(actions::SendChars const& _event);
+    bool operator()(actions::ToggleAllKeyMaps);
+    bool operator()(actions::ToggleFullscreen);
+    bool operator()(actions::WriteScreen const& _event);
 
     void scheduleRedraw()
     {
@@ -155,8 +155,8 @@ class TerminalSession: public terminal::Terminal::Events
     // helpers
     void sanitizeConfig(config::Config& _config);
     bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
-    void executeAllActions(std::vector<actions::Action> const& _actions);
-    void executeAction(actions::Action const& _action);
+    int executeAllActions(std::vector<actions::Action> const& _actions);
+    bool executeAction(actions::Action const& _action);
     void spawnNewTerminal(std::string const& _profileName);
     void activateProfile(std::string const& _newProfileName);
     bool reloadConfigWithProfile(std::string const& _profileName);

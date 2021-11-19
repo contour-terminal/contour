@@ -10,7 +10,7 @@ set(3rdparty_libunicode_version   "3c59a3a0eb0c57c3081d48ea77c22809ac7c2d6e" CAC
 set(3rdparty_mimalloc_version     "0be71a2cac17062bd8913cbd272c472a44331b7f" CACHE STRING "mimalloc: commit hash")
 set(3rdparty_range_v3_version     "83783f578e0e6666d68a3bf17b0038a80e62530e" CACHE STRING "range_v3: commit hash")
 set(3rdparty_yaml_cpp_version     "1713859b054b0a7fd867a59905dfbb0d3f774d54" CACHE STRING "yaml-cpp: commit hash")
-set(3rdparty_termbenchpro_version "513cc8a7eb15b3b1a7940816944056d168d2c22a" CACHE STRING "termbench-pro: commit hash")
+set(3rdparty_termbenchpro_version "5a79261fbf5d26c9bf9d9a0d31f22ef4556cdd3b" CACHE STRING "termbench-pro: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
   set(CATCH_BUILD_EXAMPLES OFF CACHE INTERNAL "")

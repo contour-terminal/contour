@@ -31,6 +31,7 @@
 
 using std::array;
 using std::chrono::steady_clock;
+using std::clamp;
 using std::get;
 using std::holds_alternative;
 using std::max;
@@ -254,9 +255,11 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
     //     the display should provide the translation?
     auto constexpr MarginTop = 0;
     auto constexpr MarginLeft = 0;
+    auto const pageSize = _session.terminal().screen().pageSize();
     auto const cellSize = _session.display()->cellSize();
-    auto const row = int{1 + (max(_event->pos().y(), 0) - MarginTop) /  cellSize.height.as<int>()};
-    auto const col = int{1 + (max(_event->pos().x(), 0) - MarginLeft) / cellSize.width.as<int>()};
+    auto const viewSize = cellSize * pageSize;
+    auto const row = terminal::LineOffset(clamp((_event->pos().y() - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
+    auto const col = terminal::ColumnOffset(clamp((_event->pos().x() - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
     auto const pos = terminal::Coordinate{row, col};
 
     _session.sendMouseMoveEvent(pos,

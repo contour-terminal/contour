@@ -33,6 +33,21 @@ reflow_on_resize: true
 # The same modifier values apply as with input modifiers (see below).
 bypass_mouse_protocol_modifier: Shift
 
+# Modifier to be pressed in order to initiate block-selection
+# using the left mouse button.
+#
+# This is usually the Control modifier, but on OS/X that is not possible,
+# so Alt or Meta would be recommended instead.
+#
+# Supported modifiers:
+# - Alt
+# - Control
+# - Shift
+# - Meta
+#
+# Default: Control
+mouse_block_selection_modifier: Control
+
 # Selects an action to perform when a text selection has been made.
 #
 # Possible values are:
@@ -72,6 +87,13 @@ profiles:
         # shell: "ssh ubuntu-vm"
         # shell: "/bin/bash"
         # arguments: ["some", "optional", "arguments", "for", "the", "shell"]
+
+        # Advanced value that is useful when CopyPreviousMarkRange is used
+        # with multiline-prompts. This offset value is being added to the
+        # current cursor's line number minus 1 (i.e. the line above the current cursor).
+        #
+        # Default value is 0.
+        copy_last_mark_range_offset: 0
 
         # Sets initial working directory when spawning a new terminal.
         # A leading ~ is expanded to the user's home directory.

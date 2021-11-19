@@ -15,7 +15,6 @@
 
 #include <crispy/point.h>
 #include <crispy/size.h>
-#include <terminal/Coordinate.h>
 #include <terminal/primitives.h>
 
 #include <fmt/format.h>
@@ -55,20 +54,20 @@ struct GridMetrics
     /// Maps screen coordinates to target surface coordinates.
     ///
     /// @param col screen coordinate's column (between 1 and number of screen columns)
-    /// @param row screen coordinate's line (between 1 and number of screen lines)
+    /// @param line screen coordinate's line (between 1 and number of screen lines)
     ///
     /// @return 2D point into drawing coordinate system
-    constexpr crispy::Point map(int col, int row) const noexcept
+    constexpr crispy::Point map(LineOffset _line, ColumnOffset _column) const noexcept
     {
-        return map(Coordinate{row, col});
-    }
-
-    constexpr crispy::Point map(Coordinate const& _pos) const noexcept
-    {
-        auto const x = pageMargin.left + (_pos.column - 1) * cellSize.width.as<int>();
-        auto const y = pageMargin.bottom + (pageSize.lines.as<int>() - _pos.row) * cellSize.height.as<int>();
+        auto const x = pageMargin.left + *_column * cellSize.width.as<int>();
+        auto const y = pageMargin.bottom + (*pageSize.lines - *_line - 1) * cellSize.height.as<int>();
 
         return {x, y};
+    }
+
+    constexpr crispy::Point map(Coordinate _pos) const noexcept
+    {
+        return map(_pos.line, _pos.column);
     }
 };
 

@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Parser.h>
+#include <terminal/ParserEvents.h>
 #include <unicode/convert.h>
 #include <catch2/catch_all.hpp>
 
@@ -25,11 +26,11 @@ class MockParserEvents : public terminal::BasicParserEvents {
     std::string pm;
 
     void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
-    void print(char32_t _ch) override { text += unicode::convert_to<char>(_ch); }
+    void print(char ch) override { text += ch; }
     void print(std::string_view s) override { text += s; }
 
     void startAPC() override { apc += "{"; }
-    void putAPC(char32_t ch) override { apc += unicode::convert_to<char>(ch); }
+    void putAPC(char ch) override { apc += ch; }
     void dispatchAPC() override { apc += "}"; }
 
     void startPM() override { pm += "{"; }

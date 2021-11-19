@@ -192,7 +192,7 @@ void Renderer::executeImageDiscards()
 {
     auto _l = scoped_lock{imageDiscardLock_};
 
-    for (auto const& imageId : discardImageQueue_)
+    for (auto const imageId: discardImageQueue_)
         imageRenderer_.discardImage(imageId);
 
     discardImageQueue_.clear();
@@ -319,7 +319,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 
 tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
 {
-    auto const [fg, bg] = _cell.attributes().makeColors(_colorPalette, _reverseVideo);
+    auto const [fg, bg] = _cell.makeColors(_colorPalette, _reverseVideo);
     if (!_selected)
         return tuple{fg, bg};
 
@@ -362,7 +362,7 @@ optional<RenderCursor> Renderer::renderCursor(Terminal const& _terminal)
     bool const shouldDisplayCursor = _terminal.screen().cursor().visible
         && (_terminal.cursorDisplay() == CursorDisplay::Steady || _terminal.cursorBlinkActive());
 
-    if (!shouldDisplayCursor || !_terminal.viewport().isLineVisible(_terminal.screen().cursor().position.row))
+    if (!shouldDisplayCursor || !_terminal.viewport().isLineVisible(_terminal.screen().cursor().position.line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -374,8 +374,9 @@ optional<RenderCursor> Renderer::renderCursor(Terminal const& _terminal)
 
     return RenderCursor{
         gridMetrics_.map(
-            _terminal.screen().cursor().position.column,
-            _terminal.screen().cursor().position.row + _terminal.viewport().relativeScrollOffset().as<int>()
+            _terminal.screen().cursor().position.line
+                + _terminal.viewport().scrollOffset().as<LineOffset>(),
+            _terminal.screen().cursor().position.column
         ),
         cursorShape,
         cursorCell.width()

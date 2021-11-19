@@ -68,7 +68,6 @@ public:
     virtual void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) = 0;
     virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover) = 0;
     virtual void setMouseCursorShape(MouseCursorShape _shape) = 0;
-    virtual void setTerminalProfile(config::TerminalProfile _profile) = 0;
     virtual void setWindowFullScreen() = 0;
     virtual void setWindowMaximized() = 0;
     virtual void setWindowNormal() = 0;

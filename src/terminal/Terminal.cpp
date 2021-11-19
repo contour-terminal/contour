@@ -63,7 +63,7 @@ namespace // {{{ helpers
                                          bool _selected,
                                          bool _isCursor)
     {
-        auto const [fg, bg] = _cell.attributes().makeColors(_colorPalette, _reverseVideo);
+        auto const [fg, bg] = _cell.makeColors(_colorPalette, _reverseVideo);
         if (!_selected && !_isCursor)
             return tuple{fg, bg};
 
@@ -101,7 +101,8 @@ namespace // {{{ helpers
 Terminal::Terminal(Pty& _pty,
                    int _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
-                   optional<LineCount> _maxHistoryLineCount,
+                   LineCount _maxHistoryLineCount,
+                   LineOffset _copyLastMarkRangeOffset,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
                    string const& _wordDelimiters,
@@ -129,6 +130,7 @@ Terminal::Terminal(Pty& _pty,
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
     mouseProtocolBypassModifier_{ _mouseProtocolBypassModifier },
     inputGenerator_{},
+    copyLastMarkRangeOffset_{ _copyLastMarkRangeOffset },
     screen_{
         pty_.screenSize(),
         *this,
@@ -141,8 +143,8 @@ Terminal::Terminal(Pty& _pty,
         _colorPalette,
         _allowReflowOnResize
     },
-    screenUpdateThread_{},
-    viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } }
+    viewport_{ screen_, [this]() { breakLoopAndRefreshRenderBuffer(); } },
+    selectionHelper_{this}
 {
 }
 
@@ -159,9 +161,19 @@ void Terminal::start()
     screenUpdateThread_ = make_unique<std::thread>(bind(&Terminal::mainLoop, this));
 }
 
+void Terminal::resetHard()
+{
+    screen_.resetHard();
+}
+
 void Terminal::setRefreshRate(double _refreshRate)
 {
     refreshInterval_ = std::chrono::milliseconds(static_cast<long long>(1000.0 / _refreshRate));
+}
+
+void Terminal::setLastMarkRangeOffset(LineOffset _value) noexcept
+{
+    copyLastMarkRangeOffset_ = _value;
 }
 
 void Terminal::mainLoop()
@@ -192,7 +204,8 @@ bool Terminal::processInputOnce()
     auto const timeout =
         renderBuffer_.state == RenderBufferState::WaitingForRefresh && !screenDirty_
             ? std::chrono::seconds(4)
-            : refreshInterval_ // std::chrono::seconds(0)
+            //: refreshInterval_ : std::chrono::seconds(0)
+            : std::chrono::seconds(30)
             ;
 
     auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
@@ -294,22 +307,89 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
     refreshRenderBufferInternal(_output);
 }
 
+RenderCell makeRenderCell(ColorPalette const& _colorPalette,
+                          HyperlinkStorage const& _hyperlinks,
+                          ImageFragmentCache const& _imageFragments,
+                          Cell const& _cell,
+                          RGBColor fg, RGBColor bg,
+                          LineOffset _line, ColumnOffset _column)
+{
+    RenderCell cell;
+    cell.backgroundColor = bg;
+    cell.foregroundColor = fg;
+    cell.decorationColor = _cell.getUnderlineColor(_colorPalette, fg);
+    cell.position.line = _line;
+    cell.position.column = _column;
+    cell.flags = _cell.styles();
+
+    if (_cell.codepointCount() != 0)
+    {
+        for (size_t i = 0; i < _cell.codepointCount(); ++i)
+            cell.codepoints.push_back(_cell.codepoint(i));
+    }
+
+    if (ImageFragment const* fragment = _imageFragments.try_get(_cell.imageFragment()))
+        cell.image = *fragment;
+
+    if (auto href = _hyperlinks.hyperlinkById(_cell.hyperlink()))
+    {
+        auto const& color = href->state == HyperlinkState::Hover
+                            ? _colorPalette.hyperlinkDecoration.hover
+                            : _colorPalette.hyperlinkDecoration.normal;
+        // TODO(decoration): Move property into Terminal.
+        auto const decoration = href->state == HyperlinkState::Hover
+                                ? CellFlags::Underline          // TODO: decorationRenderer_.hyperlinkHover()
+                                : CellFlags::DottedUnderline;   // TODO: decorationRenderer_.hyperlinkNormal();
+        cell.flags |= decoration; // toCellStyle(decoration);
+        cell.decorationColor = color;
+    }
+
+    return cell;
+}
+
+PageSize Terminal::SelectionHelper::pageSize() const noexcept
+{
+    return terminal->screenSize();
+}
+
+bool Terminal::SelectionHelper::wordDelimited(Coordinate _pos) const noexcept
+{
+    // Word selection may be off by one
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+
+    Cell const& cell = terminal->screen().at(_pos);
+    return cell.empty() || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+}
+
+bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
+{
+    return terminal->screen().isLineWrapped(_line);
+}
+
+bool Terminal::SelectionHelper::cellEmpty(Coordinate _pos) const noexcept
+{
+    // Word selection may be off by one
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+
+    return terminal->screen().at(_pos).empty();
+}
+
+int Terminal::SelectionHelper::cellWidth(Coordinate _pos) const noexcept
+{
+    // Word selection may be off by one
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+
+    return terminal->screen().at(_pos).width();
+}
+
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
-    auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
-    auto const baseLine =
-        viewport_.absoluteScrollOffset().
-        value_or(boxed_cast<StaticScrollbackPosition>(screen_.historyLineCount())).
-        as<int>();
+    verifyState();
 
-    #if defined(LIBTERMINAL_HYPERLINKS)
     auto const renderHyperlinks = screen_.contains(currentMousePosition_);
-    #endif
 
-    auto const currentMousePositionRel = Coordinate{
-        currentMousePosition_.row - unbox<int>(viewport_.relativeScrollOffset()),
-        currentMousePosition_.column
-    };
+    auto const currentMousePositionRel =
+        viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
     changes_.store(0);
     screenDirty_ = false;
@@ -326,63 +406,22 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         LOGSTORE(TerminalLog)("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
-    #if defined(LIBTERMINAL_HYPERLINKS)
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = screen_.at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
-    }
-    #endif
-
-    // {{{ void appendCell(pos, cell, fg, bg)
-    auto const appendCell = [&](Coordinate const& _pos, Cell const& _cell,
-                                RGBColor fg, RGBColor bg)
-    {
-        RenderCell cell;
-        cell.backgroundColor = bg;
-        cell.foregroundColor = fg;
-        cell.decorationColor = _cell.attributes().getUnderlineColor(screen_.colorPalette(), fg);
-        cell.position = _pos;
-        cell.flags = _cell.attributes().styles;
-
-        if (!_cell.codepoints().empty())
-            cell.codepoints = _cell.codepoints();
-
-#if defined(LIBTERMINAL_IMAGES)
-        if (optional<ImageFragment> const& fragment = _cell.imageFragment(); fragment.has_value())
-        {
-            cell.flags |= CellFlags::Image; // TODO: this should already be there.
-            cell.image = _cell.imageFragment();
-        }
-#endif
-
-        #if defined(LIBTERMINAL_HYPERLINKS)
-        if (_cell.hyperlink())
-        {
-            auto const& color = _cell.hyperlink()->state == HyperlinkState::Hover
-                                ? screen_.colorPalette().hyperlinkDecoration.hover
-                                : screen_.colorPalette().hyperlinkDecoration.normal;
-            // TODO(decoration): Move property into Terminal.
-            auto const decoration = _cell.hyperlink()->state == HyperlinkState::Hover
-                                    ? CellFlags::Underline          // TODO: decorationRenderer_.hyperlinkHover()
-                                    : CellFlags::DottedUnderline;   // TODO: decorationRenderer_.hyperlinkNormal();
-            cell.flags |= decoration; // toCellStyle(decoration);
-            cell.decorationColor = color;
-        }
-        #endif
-
-        _output.screen.emplace_back(std::move(cell));
-    }; // }}}
+    shared_ptr<HyperlinkInfo> href = renderHyperlinks
+                                   ? screen_.hyperlinkAt(currentMousePositionRel)
+                                   : shared_ptr<HyperlinkInfo>{};
+    if (href)
+        href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
 
     _output.cursor = renderCursor();
-    int lineNr = 1;
+    auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
     screen_.render(
-        [&](Coordinate _pos, Cell const& _cell)
+        [this, reverseVideo, &_output, state = State::Gap, lineNr = LineOffset(0)]
+        (Cell const& _cell, LineOffset _line, ColumnOffset _column)
+        mutable
         {
-            auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
-            auto const selected = isSelectedAbsolute(absolutePos);
-            auto const hasCursor = viewport_.translateScreenToGridCoordinate(_pos) == screen_.realCursorPosition();
+            auto const selected = isSelected(Coordinate{_line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column});
+            auto const pos = Coordinate{_line, _column};
+            auto const hasCursor = viewport_.translateScreenToGridCoordinate(pos) == screen_.realCursorPosition();
             bool const paintCursor = hasCursor
                                   && _output.cursor.has_value()
                                   && _output.cursor->shape == CursorShape::Block;
@@ -392,15 +431,15 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
             auto const cellEmpty = _cell.empty();
             auto const customBackground = bg != screen_.colorPalette().defaultBackground
-                                       || !!_cell.attributes().styles;
+                                       || !!_cell.styles();
 
             bool isNewLine = false;
-            if (lineNr != _pos.row)
+            if (lineNr != _line)
             {
                 isNewLine = true;
-                lineNr = _pos.row;
+                lineNr = _line;
                 if (!_output.screen.empty())
-                    _output.screen.back().flags |= CellFlags::CellSequenceEnd;
+                    _output.screen.back().groupEnd = true;
             }
 
             switch (state)
@@ -409,42 +448,44 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                     if (!cellEmpty || customBackground)
                     {
                         state = State::Sequence;
-                        appendCell(_pos, _cell, fg, bg);
-                        _output.screen.back().flags |= CellFlags::CellSequenceStart;
+                        _output.screen.emplace_back(
+                            makeRenderCell(screen_.colorPalette(),
+                                           screen_.hyperlinks(),
+                                           screen_.imageFragments(),
+                                           _cell, fg, bg, _line, _column));
+                        _output.screen.back().groupStart = true;
                     }
                     break;
                 case State::Sequence:
                     if (cellEmpty && !customBackground)
                     {
-                        _output.screen.back().flags |= CellFlags::CellSequenceEnd;
+                        _output.screen.back().groupEnd = true;
                         state = State::Gap;
                     }
                     else
                     {
-                        appendCell(_pos, _cell, fg, bg);
+                        _output.screen.emplace_back(
+                            makeRenderCell(screen_.colorPalette(),
+                                           screen_.hyperlinks(),
+                                           screen_.imageFragments(),
+                                           _cell, fg, bg, _line, _column));
 
                         if (isNewLine)
-                            _output.screen.back().flags |= CellFlags::CellSequenceStart;
+                            _output.screen.back().groupStart = true;
                     }
                     break;
             }
         },
-        viewport_.absoluteScrollOffset()
+        viewport_.scrollOffset()
     );
 
-    #if defined(LIBTERMINAL_HYPERLINKS)
-    if (renderHyperlinks)
-    {
-        auto& cellAtMouse = screen_.at(currentMousePositionRel);
-        if (cellAtMouse.hyperlink())
-            cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
-    }
-    #endif
+    if (href)
+        href->state = HyperlinkState::Inactive;
 }
 
 optional<RenderCursor> Terminal::renderCursor()
 {
-    if (!cursorCurrentlyVisible() || !viewport().isLineVisible(screen_.cursor().position.row))
+    if (!cursorCurrentlyVisible() || !viewport().isLineVisible(screen_.cursor().position.line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -455,10 +496,10 @@ optional<RenderCursor> Terminal::renderCursor()
                                          : CursorShape::Rectangle;
 
     return RenderCursor{
-        Coordinate(
-            screen_.cursor().position.row + viewport_.relativeScrollOffset().as<int>(),
+        Coordinate{
+            screen_.cursor().position.line + viewport_.scrollOffset().as<LineOffset>(),
             screen_.cursor().position.column
-        ),
+        },
         shape,
         cursorCell.width()
     };
@@ -499,6 +540,8 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
 
 bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
 {
+    verifyState();
+
     respectMouseProtocol_ = mouseProtocolBypassModifier_ == Modifier::None
                          || !_modifier.contains(mouseProtocolBypassModifier_);
 
@@ -515,38 +558,38 @@ bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Time
 
 bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 {
+    verifyState();
+
     double const diff_ms = chrono::duration<double, milli>(_now - lastClick_).count();
     lastClick_ = _now;
     speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
     leftMouseButtonPressed_ = true;
 
-    Selector::Mode const selectionMode = [](unsigned _speedClicks, Modifier _modifier) {
-        if (_speedClicks == 3)
-            return Selector::Mode::FullLine;
-        else if (_modifier.contains(Modifier::Control))
-            return Selector::Mode::Rectangular;
-        else if (_speedClicks == 2)
-            return Selector::Mode::LinearWordWise;
-        else
-            return Selector::Mode::Linear;
-    }(speedClicks_, _modifier);
+    auto const startPos = Coordinate{
+        currentMousePosition_.line - boxed_cast<LineOffset>(viewport_.scrollOffset()),
+        currentMousePosition_.column,
+    };
 
-    if (!selectionAvailable()
-        || selector()->state() == Selector::State::Waiting
-        || speedClicks_ >= 2)
+    switch (speedClicks_)
     {
-        setSelector(make_unique<Selector>(
-            selectionMode,
-            wordDelimiters_,
-            screen_,
-            absoluteCoordinate(currentMousePosition_)
-        ));
-
-        if (selectionMode != Selector::Mode::Linear)
-            selector()->extend(absoluteCoordinate(currentMousePosition_));
+        case 1:
+            if (_modifier == mouseBlockSelectionModifier_)
+                selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
+            else
+                selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
+            break;
+        case 2:
+            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        case 3:
+            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        default:
+            clearSelection();
+            break;
     }
-    else if (selector()->state() == Selector::State::Complete)
-        clearSelection();
 
     breakLoopAndRefreshRenderBuffer();
     return true;
@@ -554,7 +597,8 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 
 void Terminal::clearSelection()
 {
-    selector_.reset();
+    selection_.reset();
+    speedClicks_ = 0;
     breakLoopAndRefreshRenderBuffer();
 }
 
@@ -562,10 +606,16 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
 {
     speedClicks_ = 0;
 
+    if (leftMouseButtonPressed_ && isSelectionComplete())
+        clearSelection();
+
     if (newPosition == currentMousePosition_)
         return false;
 
     currentMousePosition_ = newPosition;
+
+    auto const relativePos =
+        viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
     bool changed = updateCursorHoveringState();
 
@@ -579,18 +629,13 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
         changed = true;
-        setSelector(make_unique<Selector>(
-            Selector::Mode::Linear,
-            wordDelimiters_,
-            screen_,
-            absoluteCoordinate(currentMousePosition_)
-        ));
+        setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos));
     }
 
-    if (selectionAvailable() && selector()->state() != Selector::State::Complete)
+    if (selectionAvailable() && selector()->state() != Selection::State::Complete)
     {
         changed = true;
-        selector()->extend(absoluteCoordinate(newPosition));
+        selector()->extend(relativePos);
         breakLoopAndRefreshRenderBuffer();
         return true;
     }
@@ -602,6 +647,8 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
 
 bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp /*_now*/)
 {
+    verifyState();
+
     if (respectMouseProtocol_ && inputGenerator_.generateMouseRelease(_button, _modifier, currentMousePosition_))
     {
         flushInput();
@@ -616,14 +663,14 @@ bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Ti
         {
             switch (selector()->state())
             {
-                case Selector::State::Waiting:
-                    clearSelection();
-                    break;
-                case Selector::State::InProgress:
-                    selector()->stop();
+                case Selection::State::InProgress:
+                    selector()->complete();
                     eventListener_.onSelectionCompleted();
                     break;
-                case Selector::State::Complete:
+                case Selection::State::Waiting:
+                    selection_.reset();
+                    break;
+                case Selection::State::Complete:
                     break;
             }
         }
@@ -704,19 +751,17 @@ void Terminal::updateCursorVisibilityState() const
 
 bool Terminal::updateCursorHoveringState()
 {
+    verifyState();
+
     if (!screen_.contains(currentMousePosition_))
         return false;
 
-    auto const relCursorPos = terminal::Coordinate{
-        currentMousePosition_.row - viewport_.relativeScrollOffset().as<int>(),
-        currentMousePosition_.column
-    };
+    auto const relCursorPos =
+        viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
     auto const newState = screen_.contains(currentMousePosition_)
-#if defined(LIBTERMINAL_HYPERLINKS)
-                        && screen_.at(relCursorPos).hyperlink()
-#endif
-        ;
+                          && !!screen_.at(relCursorPos).hyperlink();
+
     auto const oldState = hoveringHyperlink_.exchange(newState);
     return newState != oldState;
 }
@@ -748,7 +793,18 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
         screen_.setCellPixelSize(ImageSize{width, height});
     }
 
+    currentMousePosition_.column = min(currentMousePosition_.column, boxed_cast<ColumnOffset>(_cells.columns - 1));
+    currentMousePosition_.line = min(currentMousePosition_.line, boxed_cast<LineOffset>(_cells.lines - 1));
+
     pty_.resizeScreen(_cells, _pixels);
+
+    verifyState();
+}
+
+void Terminal::verifyState()
+{
+    Expects(*currentMousePosition_.column < *screenSize().columns);
+    Expects(*currentMousePosition_.line < *screenSize().lines);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
@@ -769,16 +825,16 @@ void Terminal::setWordDelimiters(string const& _wordDelimiters)
 string Terminal::extractSelectionText() const
 {
     using namespace terminal;
-    int lastColumn = 0;
+    ColumnOffset lastColumn = {};
     string text;
     string currentLine;
 
     renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
         auto const _lock = scoped_lock{ *this };
         auto const isNewLine = _pos.column <= lastColumn;
-        auto const isLineWrapped = lineWrapped(_pos.row);
-        bool const touchesRightPage = _pos.row > 0
-            && isSelectedAbsolute({_pos.row - 1, screen_.size().columns.as<int>()});
+        auto const isLineWrapped = screen().isLineWrapped(_pos.line);
+        bool const touchesRightPage = _pos.line.value > 0
+            && isSelected({_pos.line - 1, screen_.pageSize().columns.as<ColumnOffset>() - 1});
         if (isNewLine && (!isLineWrapped || !touchesRightPage))
         {
             // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
@@ -799,31 +855,27 @@ string Terminal::extractSelectionText() const
 
 string Terminal::extractLastMarkRange() const
 {
-    using terminal::Coordinate;
-    using terminal::Cell;
-
     auto const _l = std::lock_guard{*this};
 
-    auto const colCount = *screen_.size().columns;
-    auto const bottomLine = *screen_.historyLineCount() + screen_.cursor().position.row - 1;
+    // -1 because we always want to start extracting one line above the cursor by default.
+    auto const bottomLine = screen_.cursor().position.line + LineOffset(-1) + copyLastMarkRangeOffset_;
 
     auto const marker1 = optional{bottomLine};
 
-    auto const marker0 = screen_.findMarkerBackward(marker1.value());
+    auto const marker0 = screen_.findMarkerUpwards(marker1.value());
     if (!marker0.has_value())
         return {};
 
     // +1 each for offset change from 0 to 1 and because we only want to start at the line *after* the mark.
-    auto const firstLine = *marker0 - screen_.historyLineCount().as<int>() + 2;
-    auto const lastLine = *marker1 - screen_.historyLineCount().as<int>();
+    auto const firstLine = *marker0 + 1;
+    auto const lastLine = *marker1;
 
     string text;
 
     for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
     {
-        for (auto colNum = 1; colNum < colCount; ++colNum)
-            text += screen_.at({lineNum, colNum}).toUtf8();
-        trimSpaceRight(text);
+        auto const lineText = screen_.grid().lineAt(lineNum).toUtf8Trimmed();
+        text += screen_.grid().lineAt(lineNum).toUtf8Trimmed();
         text += '\n';
     }
 
@@ -843,14 +895,14 @@ void Terminal::bell()
 
 void Terminal::bufferChanged(ScreenType _type)
 {
-    selector_.reset();
+    selection_.reset();
     viewport_.forceScrollToBottom();
     eventListener_.bufferChanged(_type);
 }
 
 void Terminal::scrollbackBufferCleared()
 {
-    selector_.reset();
+    selection_.reset();
     viewport_.scrollToBottom();
     breakLoopAndRefreshRenderBuffer();
 }
@@ -982,14 +1034,21 @@ void Terminal::discardImage(Image const& _image)
     eventListener_.discardImage(_image);
 }
 
-void Terminal::markRegionDirty(LinePosition _line, ColumnPosition _column)
+void Terminal::markCellDirty(Coordinate _position) noexcept
 {
-    if (!selector_)
+    if (!selection_)
         return;
 
-    auto const y = screen_.toAbsoluteLine(*_line);
-    auto const coord = Coordinate{y, *_column};
-    if (selector_->contains(coord))
+    if (selection_->contains(_position))
+        clearSelection();
+}
+
+void Terminal::markRegionDirty(Rect _area) noexcept
+{
+    if (!selection_)
+        return;
+
+    if (selection_->intersects(_area))
         clearSelection();
 }
 
@@ -1008,6 +1067,18 @@ void Terminal::synchronizedOutput(bool _enabled)
 
     refreshRenderBuffer(true);
     eventListener_.screenUpdated();
+}
+
+void Terminal::onBufferScrolled(LineCount _n) noexcept
+{
+    if (!selection_)
+        return;
+
+    auto const top = -boxed_cast<LineOffset>(screen_.historyLineCount());
+    if (selection_->from().line > top && selection_->to().line > top)
+        selection_->applyScroll(boxed_cast<LineOffset>(_n), screen_.historyLineCount());
+    else
+        selection_.reset();
 }
 // }}}
 

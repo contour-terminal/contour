@@ -22,12 +22,12 @@ namespace terminal {
 string to_string(Color _color)
 {
     using Type = ColorType;
-    switch (_color.type)
+    switch (_color.type())
     {
         case Type::Indexed:
-            return fmt::format("{}", _color.index);
+            return fmt::format("{}", _color.index());
         case Type::Bright:
-            switch (_color.index)
+            switch (_color.index())
             {
                 case 0: return "bright-black";
                 case 1: return "bright-red";
@@ -41,7 +41,7 @@ string to_string(Color _color)
             }
             return "?";
         case Type::Default:
-            switch (_color.index)
+            switch (_color.index())
             {
                 case 0: return "black";
                 case 1: return "red";
@@ -57,7 +57,7 @@ string to_string(Color _color)
         case Type::RGB:
         {
             char buf[8];
-            auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", _color.rgb.red, _color.rgb.green, _color.rgb.blue);
+            auto n = snprintf(buf, sizeof(buf), "#%02X%02X%02X", _color.rgb().red, _color.rgb().green, _color.rgb().blue);
             return string(buf, n);
         }
         case Type::Undefined:
@@ -168,13 +168,13 @@ string to_string(RGBAColor c)
 
 RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept
 {
-    switch (_color.type)
+    switch (_color.type())
     {
         case ColorType::RGB:
-            return _color.rgb;
+            return _color.rgb();
         case ColorType::Indexed:
             {
-                auto const index = static_cast<size_t>(_color.index);
+                auto const index = static_cast<size_t>(_color.index());
                 if (_bright && index < 8)
                     return _profile.brightColor(index);
                 else
@@ -182,7 +182,7 @@ RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, 
                 break;
             }
         case ColorType::Bright:
-            return _profile.brightColor(static_cast<size_t>(_color.index));
+            return _profile.brightColor(static_cast<size_t>(_color.index()));
         case ColorType::Undefined:
         case ColorType::Default:
             break;

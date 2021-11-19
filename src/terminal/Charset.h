@@ -39,11 +39,23 @@ class CharsetMapping {
         }
     {}
 
-    char32_t map(char _code) noexcept
+    char32_t map(char32_t _code) noexcept
     {
-        auto result = map(shift_, _code);
-        shift_ = selected_;
-        return result;
+        // TODO: could surely be implemented branchless with a jump-table and computed goto.
+        if (_code < 127)
+        {
+            auto result = map(shift_, static_cast<char>(_code));
+            shift_ = selected_;
+            return result;
+        }
+        else if (_code != 127)
+        {
+            return static_cast<char32_t>(_code);
+        }
+        else
+        {
+            return L' ';
+        }
     }
 
     char32_t map(CharsetTable _table, char _code) const noexcept

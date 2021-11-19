@@ -20,6 +20,27 @@ using namespace std;
 using namespace std::placeholders;
 using namespace terminal;
 
+namespace
+{
+
+template <typename T>
+struct TestSelectionHelper: public terminal::SelectionHelper
+{
+    Screen<T>* screen;
+    explicit TestSelectionHelper(Screen<T>& self): screen{&self} {}
+
+    PageSize pageSize() const noexcept { return screen->pageSize(); }
+    bool wordDelimited(Coordinate _pos) const noexcept { return true; } // TODO
+    bool wrappedLine(LineOffset _line) const noexcept { return screen->isLineWrapped(_line); }
+    bool cellEmpty(Coordinate _pos) const noexcept { return screen->at(_pos).empty(); }
+    int cellWidth(Coordinate _pos) const noexcept { return screen->at(_pos).width(); }
+};
+
+template <typename T>
+TestSelectionHelper(Screen<T>&) -> TestSelectionHelper<T>;
+
+}
+
 // Different cases to test
 // - single cell
 // - inside single line
@@ -30,165 +51,199 @@ using namespace terminal;
 
 namespace
 {
-    struct TextSelection {
-        string text;
+    template <typename T>
+    [[maybe_unused]]
+    void logScreenTextAlways(Screen<T> const& screen, string const& headline = "")
+    {
+        fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
+                headline.empty() ? "screen dump"s : headline,
+                screen.grid().zero_index(),
+                screen.realCursorPosition(),
+                screen.margin().horizontal.from,
+                screen.margin().horizontal.to
+        );
+        fmt::print("{}\n", dumpGrid(screen.grid()));
+    }
 
-        void operator()(Coordinate const& _pos, Cell const& _cell)
+    template <typename T>
+    struct TextSelection
+    {
+        Screen<T> const* screen;
+        string text;
+        ColumnOffset lastColumn_ = ColumnOffset(0);
+
+        explicit TextSelection(Screen<T> const& s): screen{&s} {}
+
+        void operator()(Coordinate const& _pos)
         {
+            auto const& cell = screen->at(_pos);
             text += _pos.column < lastColumn_ ? "\n" : "";
-            text += _cell.toUtf8();
+            text += cell.toUtf8();
             lastColumn_ = _pos.column;
         }
-
-      private:
-        int lastColumn_ = 0;
     };
+    template <typename T>
+    TextSelection(Screen<T> const&) -> TextSelection<T>;
 }
 
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents{};
-    auto screen = Screen{PageSize{LineCount(3), ColumnCount(11)}, screenEvents};
+    auto term = MockTerm(PageSize{LineCount(3), ColumnCount(11)}, LineCount(5));
+    auto& screen = term.screen;
+    auto selectionHelper = TestSelectionHelper(screen);
     screen.write(
-        //       123456789AB
+        //       0123456789A
         /* 0 */ "12345,67890"s +
         /* 1 */ "ab,cdefg,hi"s +
         /* 2 */ "12345,67890"s
     );
 
-    SECTION("single-cell") { // "b"
-        auto const pos = screen.toAbsolute({2, 2});
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, pos};
-        selector.extend(pos);
-        selector.stop();
+    logScreenTextAlways(screen, "init");
+    REQUIRE(screen.grid().lineText(LineOffset(0)) == "12345,67890");
+    REQUIRE(screen.grid().lineText(LineOffset(1)) == "ab,cdefg,hi");
+    REQUIRE(screen.grid().lineText(LineOffset(2)) == "12345,67890");
 
-        vector<Selector::Range> const selection = selector.selection();
+    SECTION("single-cell") { // "b"
+        auto const pos = Coordinate{LineOffset(1), ColumnOffset(1)};
+        auto selector = LinearSelection(selectionHelper, pos);
+        selector.extend(pos);
+        selector.complete();
+
+        vector<Selection::Range> const selection = selector.ranges();
         REQUIRE(selection.size() == 1);
-        Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == pos.row);
+        Selection::Range const& r1 = selection[0];
+        CHECK(r1.line == pos.line);
         CHECK(r1.fromColumn == pos.column);
         CHECK(r1.toColumn == pos.column);
-        CHECK(r1.length() == 1);
+        CHECK(r1.length() == ColumnCount(1));
 
-        auto selectedText = TextSelection{};
-        selector.render(selectedText);
+        auto selectedText = TextSelection{screen};
+        renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b");
     }
 
     SECTION("forward single-line") { // "b,c"
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 2}};
-        selector.extend(Coordinate{1, 4});
-        selector.stop();
+        auto const pos = Coordinate{LineOffset(1), ColumnOffset(1)};
+        auto selector = LinearSelection(selectionHelper, pos);
+        selector.extend(Coordinate{LineOffset(1), ColumnOffset(3)});
+        selector.complete();
 
-        vector<Selector::Range> const selection = selector.selection();
+        vector<Selection::Range> const selection = selector.ranges();
         REQUIRE(selection.size() == 1);
-        Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 1);
-        CHECK(r1.fromColumn == 2);
-        CHECK(r1.toColumn == 4);
-        CHECK(r1.length() == 3);
+        Selection::Range const& r1 = selection[0];
+        CHECK(r1.line == LineOffset(1));
+        CHECK(r1.fromColumn == ColumnOffset(1));
+        CHECK(r1.toColumn == ColumnOffset(3));
+        CHECK(r1.length() == ColumnCount(3));
 
-        auto selectedText = TextSelection{};
-        selector.render(selectedText);
+        auto selectedText = TextSelection{screen};
+        renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b,c");
     }
 
     SECTION("forward multi-line") { // "b,cdefg,hi\n1234"
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 2}};
-        selector.extend(Coordinate{2, 4});
-        selector.stop();
+        auto const pos = Coordinate{LineOffset(1), ColumnOffset(1)};
+        auto selector = LinearSelection(selectionHelper, pos);
+        selector.extend(Coordinate{LineOffset(2), ColumnOffset(3)});
+        selector.complete();
 
-        vector<Selector::Range> const selection = selector.selection();
+        vector<Selection::Range> const selection = selector.ranges();
         REQUIRE(selection.size() == 2);
 
-        Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 1);
-        CHECK(r1.fromColumn == 2);
-        CHECK(r1.toColumn == 11);
-        CHECK(r1.length() == 10);
+        Selection::Range const& r1 = selection[0];
+        CHECK(r1.line == LineOffset(1));
+        CHECK(r1.fromColumn == ColumnOffset(1));
+        CHECK(r1.toColumn == ColumnOffset(10));
+        CHECK(r1.length() == ColumnCount(10));
 
-        Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 2);
-        CHECK(r2.fromColumn == 1);
-        CHECK(r2.toColumn == 4);
-        CHECK(r2.length() == 4);
+        Selection::Range const& r2 = selection[1];
+        CHECK(r2.line == LineOffset(2));
+        CHECK(r2.fromColumn == ColumnOffset(0));
+        CHECK(r2.toColumn == ColumnOffset(3));
+        CHECK(r2.length() == ColumnCount(4));
 
-        auto selectedText = TextSelection{};
-        selector.render(selectedText);
+        auto selectedText = TextSelection{screen};
+        renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b,cdefg,hi\n1234");
     }
 
     SECTION("multiple lines fully in history") {
-        screen.write("foo\nbar\n"); // move first two lines into history.
+        screen.write("foo\r\nbar\r\n"); // move first two lines into history.
         /*
-        "12345,67890"
-        "ab,cdefg,hi"
-        "12345,67890"
-        "foo"
-        "bar"
+         * |  0123456789A
+        -2 | "12345,67890"
+        -1 | "ab,cdefg,hi"       [fg,hi]
+         0 | "12345,67890"       [123]
+         1 | "foo"
+         2 | "bar"
         */
 
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 7}};
-        selector.extend(Coordinate{2, 3});
-        selector.stop();
+        logScreenTextAlways(screen);
+        auto selector = LinearSelection(selectionHelper, Coordinate{LineOffset(-2), ColumnOffset(6)});
+        selector.extend(Coordinate{LineOffset(-1), ColumnOffset(2)});
+        selector.complete();
 
-        vector<Selector::Range> const selection = selector.selection();
+        vector<Selection::Range> const selection = selector.ranges();
         REQUIRE(selection.size() == 2);
 
-        Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 1);
-        CHECK(r1.fromColumn == 7);
-        CHECK(r1.toColumn == 11);
-        CHECK(r1.length() == 5);
+        Selection::Range const& r1 = selection[0];
+        CHECK(r1.line == LineOffset(-2));
+        CHECK(r1.fromColumn == ColumnOffset(6));
+        CHECK(r1.toColumn == ColumnOffset(10));
+        CHECK(r1.length() == ColumnCount(5));
 
-        Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 2);
-        CHECK(r2.fromColumn == 1);
-        CHECK(r2.toColumn == 3);
-        CHECK(r2.length() == 3);
+        Selection::Range const& r2 = selection[1];
+        CHECK(r2.line == LineOffset(-1));
+        CHECK(r2.fromColumn == ColumnOffset(0));
+        CHECK(r2.toColumn == ColumnOffset(2));
+        CHECK(r2.length() == ColumnCount(3));
 
-        auto selectedText = TextSelection{};
-        selector.render(selectedText);
+        auto selectedText = TextSelection{screen};
+        renderSelection(selector, selectedText);
         CHECK(selectedText.text == "fg,hi\n123");
     }
 
     SECTION("multiple lines from history into main buffer") {
-        screen.write("foo\nbar\n"); // move first two lines into history.
+        logScreenTextAlways(screen, "just before next test-write");
+        screen.write("foo\r\nbar\r\n"); // move first two lines into history.
+        logScreenTextAlways(screen, "just after next test-write");
         /*
-        "12345,67890"
-        "ab,cdefg,hi"         (--
-        "12345,67890" -----------
-        "foo"         --)
-        "bar"
+        -3 | "12345,67890"
+        -2 | "ab,cdefg,hi"         (--
+        -1 | "12345,67890" -----------
+         0 | "foo"         --)
+         1 | "bar"
+         2 | ""
         */
 
-        auto selector = Selector{Selector::Mode::Linear, U",", screen, Coordinate{1, 9}};
-        selector.extend(Coordinate{3, 2});
-        selector.stop();
+        auto selector = LinearSelection(selectionHelper, Coordinate{LineOffset(-2), ColumnOffset(8)});
+        selector.extend(Coordinate{LineOffset(0), ColumnOffset(1)});
+        selector.complete();
 
-        vector<Selector::Range> const selection = selector.selection();
+        vector<Selection::Range> const selection = selector.ranges();
         REQUIRE(selection.size() == 3);
 
-        Selector::Range const& r1 = selection[0];
-        CHECK(r1.line == 1);
-        CHECK(r1.fromColumn == 9);
-        CHECK(r1.toColumn == 11);
-        CHECK(r1.length() == 3);
+        Selection::Range const& r1 = selection[0];
+        CHECK(r1.line == LineOffset(-2));
+        CHECK(r1.fromColumn == ColumnOffset(8));
+        CHECK(r1.toColumn == ColumnOffset(10));
+        CHECK(r1.length() == ColumnCount(3));
 
-        Selector::Range const& r2 = selection[1];
-        CHECK(r2.line == 2);
-        CHECK(r2.fromColumn == 1);
-        CHECK(r2.toColumn == 11);
-        CHECK(r2.length() == 11);
+        Selection::Range const& r2 = selection[1];
+        CHECK(r2.line == LineOffset(-1));
+        CHECK(r2.fromColumn == ColumnOffset(0));
+        CHECK(r2.toColumn == ColumnOffset(10));
+        CHECK(r2.length() == ColumnCount(11));
 
-        Selector::Range const& r3 = selection[2];
-        CHECK(r3.line == 3);
-        CHECK(r3.fromColumn == 1);
-        CHECK(r3.toColumn == 2);
-        CHECK(r3.length() == 2);
+        Selection::Range const& r3 = selection[2];
+        CHECK(r3.line == LineOffset(0));
+        CHECK(r3.fromColumn == ColumnOffset(0));
+        CHECK(r3.toColumn == ColumnOffset(1));
+        CHECK(r3.length() == ColumnCount(2));
 
-        auto selectedText = TextSelection{};
-        selector.render(selectedText);
+        auto selectedText = TextSelection{screen};
+        renderSelection(selector, selectedText);
         CHECK(selectedText.text == ",hi\n12345,67890\nfo");
     }
 }

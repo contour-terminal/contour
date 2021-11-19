@@ -46,6 +46,7 @@ if(CONTOUR_FRONTEND_GUI)
         ContourGuiApp.cpp ContourGuiApp.h
         Controller.cpp Controller.h
         FileChangeWatcher.cpp FileChangeWatcher.h
+        ScrollableDisplay.cpp ScrollableDisplay.h
         TerminalSession.cpp TerminalSession.h
         TerminalWindow.cpp TerminalWindow.h
         helper.cpp helper.h

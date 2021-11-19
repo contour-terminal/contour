@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal/SixelParser.h>
-#include <terminal/Coordinate.h>
 
 #include <algorithm>
 
@@ -26,22 +25,22 @@ namespace terminal {
 
 namespace
 {
-    constexpr bool isDigit(char32_t _value) noexcept
+    constexpr bool isDigit(char _value) noexcept
     {
         return _value >= '0' && _value <= '9';
     }
 
-    constexpr int toDigit(char32_t _value) noexcept
+    constexpr int toDigit(char _value) noexcept
     {
         return static_cast<int>(_value) - '0';
     }
 
-    constexpr bool isSixel(char32_t _value) noexcept
+    constexpr bool isSixel(char _value) noexcept
     {
         return _value >= 63 && _value <= 126;
     }
 
-    constexpr int8_t toSixel(char32_t _value) noexcept
+    constexpr int8_t toSixel(char _value) noexcept
     {
         return static_cast<int8_t>(static_cast<int>(_value) - 63);
     }
@@ -123,7 +122,7 @@ SixelParser::SixelParser(Events& _events, OnFinalize _finalizer) :
 {
 }
 
-void SixelParser::parse(char32_t _value)
+void SixelParser::parse(char _value)
 {
     switch (state_)
     {
@@ -176,7 +175,7 @@ void SixelParser::parse(char32_t _value)
     }
 }
 
-void SixelParser::fallback(char32_t _value)
+void SixelParser::fallback(char _value)
 {
     if (_value == '#')
         transitionTo(State::ColorIntroducer);
@@ -297,7 +296,7 @@ void SixelParser::start()
     // no-op (for now)
 }
 
-void SixelParser::pass(char32_t _char)
+void SixelParser::pass(char _char)
 {
     parse(_char);
 }
@@ -318,7 +317,7 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
     colors_{ std::move(_colorPalette) },
     size_{ _maxSize },
     buffer_(*size_.width * *size_.height * 4),
-    sixelCursor_{ 0, 0 },
+    sixelCursor_{},
     currentColor_{0},
     aspectRatio_{ _aspectVertical, _aspectHorizontal }
 {
@@ -327,7 +326,7 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
 
 void SixelImageBuilder::clear(RGBAColor _fillColor)
 {
-    sixelCursor_ = {0, 0};
+    sixelCursor_ = {};
 
     auto p = &buffer_[0];
     for (int i = 0; i < *size_.width * *size_.height; ++i)
@@ -341,18 +340,18 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
 
 RGBAColor SixelImageBuilder::at(Coordinate _coord) const noexcept
 {
-    auto const row = _coord.row % *size_.height;
-    auto const col = _coord.column % *size_.width;
-    auto const base = row * *size_.width * 4 + col * 4;
+    auto const line = *_coord.line % *size_.height;
+    auto const col = *_coord.column % *size_.width;
+    auto const base = line * *size_.width * 4 + col * 4;
     auto const color = &buffer_[base];
     return RGBAColor{color[0], color[1], color[2], color[3]};
 }
 
 void SixelImageBuilder::write(Coordinate const& _coord, RGBColor const& _value) noexcept
 {
-    if (_coord.row >= 0 && _coord.row < *size_.height && _coord.column >= 0 && _coord.column < *size_.width)
+    if (*_coord.line >= 0 && *_coord.line < *size_.height && *_coord.column >= 0 && *_coord.column < *size_.width)
     {
-        auto const base = _coord.row * *size_.width * 4 + _coord.column * 4;
+        auto const base = *_coord.line * *size_.width * 4 + *_coord.column * 4;
         buffer_[base + 0] = _value.red;
         buffer_[base + 1] = _value.green;
         buffer_[base + 2] = _value.blue;
@@ -372,15 +371,15 @@ void SixelImageBuilder::useColor(int _index)
 
 void SixelImageBuilder::rewind()
 {
-    sixelCursor_.column = 0;
+    sixelCursor_.column = {};
 }
 
 void SixelImageBuilder::newline()
 {
-    sixelCursor_.column = 0;
+    sixelCursor_.column = {};
 
-    if (sixelCursor_.row + 6 < *size_.height)
-        sixelCursor_.row += 6;
+    if (*sixelCursor_.line + 6 < *size_.height)
+        sixelCursor_.line.value += 6;
 }
 
 void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
@@ -397,11 +396,11 @@ void SixelImageBuilder::render(int8_t _sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = sixelCursor_.column;
-    if (x < *size_.width)
+    if (*x < *size_.width)
     {
         for (int i = 0; i < 6; ++i)
         {
-            auto const y = sixelCursor_.row + i;
+            auto const y = sixelCursor_.line + i;
             auto const pos = Coordinate{y, x};
             auto const pin = 1 << i;
             auto const pinned = (_sixel & pin) != 0;

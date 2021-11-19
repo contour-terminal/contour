@@ -28,6 +28,7 @@
 using namespace std;
 using terminal::PageSize;
 using terminal::LineCount;
+using terminal::LineOffset;
 using terminal::ColumnCount;
 
 namespace // {{{ helpers
@@ -38,16 +39,16 @@ namespace // {{{ helpers
         terminal::RenderBufferRef renderBuffer = _terminal.renderBuffer();
 
         vector<string> lines;
-        lines.resize(unbox<size_t>(_terminal.screenSize().lines));
+        lines.resize(_terminal.screenSize().lines.as<size_t>());
 
         terminal::Coordinate lastPos = {};
         size_t lastCount = 0;
         for (terminal::RenderCell const& cell: renderBuffer.buffer.screen)
         {
             auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
-            auto& currentLine = lines.at(cell.position.row - 1);
-            if (gap > 0) // Did we jump?
-                currentLine.insert(currentLine.end(), gap - 1, ' ');
+            auto& currentLine = lines.at(*cell.position.line);
+            if (*gap > 0) // Did we jump?
+                currentLine.insert(currentLine.end(), *gap - 1, ' ');
 
             currentLine += unicode::convert_to<char>(u32string_view(cell.codepoints));
             lastPos = cell.position;
@@ -91,6 +92,7 @@ namespace // {{{ helpers
                 1024,
                 *this,
                 LineCount(1024), // max history line count
+                LineOffset(0),
                 chrono::milliseconds(500), // cursor blink interval
                 chrono::steady_clock::time_point(), // initial time point
             }
@@ -119,8 +121,8 @@ namespace // {{{ helpers
             else
                 UNSCOPED_INFO(headline + ":");
 
-            for (int row = 1; row <= unbox<int>(terminal().screen().size().lines); ++row)
-                UNSCOPED_INFO(fmt::format("[{}] \"{}\"", row, terminal().screen().renderTextLine(row)));
+            for (int line = 1; line <= unbox<int>(terminal().screen().pageSize().lines); ++line)
+                UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, terminal().screen().grid().lineText(terminal::LineOffset(line))));
         }
 
     private:
@@ -145,6 +147,9 @@ namespace // {{{ helpers
 // - [ ] extractLastMarkRange
 // - [ ] scroll mark up
 // - [ ] scroll mark down
+
+// TODO: Writing text, leading to page-scroll properly updates viewport.
+// TODO: Writing text, leading to page-scroll properly updates active selection.
 
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {

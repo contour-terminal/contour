@@ -10,12 +10,13 @@
 
 # TODO requirements before merge
 
+- [ ] line reflow seems to be broken on shrink "sometimes"?
 - [ ] ring: add negative and overflowing (r)iterator tests (should wrap around & succeed)
-- [ ] frontend: scrolling up/down works as expected (currently overflowing and inverted)
-- [ ] Terminal: Writing text, leading to page-scroll properly updates scrollbar.
-- [ ] Terminal: Writing text, leading to page-scroll properly updates active selection.
-- [ ] grid: revive logical line iterators, try to make them zero-copy
 - [ ] notify on dirty screen regions should become an area-test: `is (x,y) within ((x0,y0), (x1,y1))`
+- [x] frontend: scrolling up/down works as expected (currently overflowing and inverted)
+- [x] Terminal: Writing text, leading to page-scroll properly updates active selection.
+- [x] grid: revive logical line iterators, try to make them zero-copy
+- [x] Terminal: Writing text, leading to page-scroll properly updates scrollbar.
 
 # FIXMEs / CODEHALTH checklist
 

@@ -16,6 +16,10 @@
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
 
+#if defined(CONTOUR_SCROLLBAR)
+#include <contour/ScrollableDisplay.h>
+#endif
+
 #include <contour/opengl/TerminalWidget.h>
 
 #include <qnamespace.h>
@@ -60,150 +64,6 @@ using terminal::ImageSize;
 namespace contour {
 
 using actions::Action;
-
-#if defined(CONTOUR_SCROLLBAR) // {{{
-ScrollableDisplay::ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main):
-    QWidget(_parent),
-    session_{ _session },
-    mainWidget_{ _main },
-    scrollBar_{ nullptr }
-{
-    mainWidget_->setParent(this);
-
-    scrollBar_ = new QScrollBar(this);
-    scrollBar_->setMinimum(0);
-    scrollBar_->setMaximum(0);
-    scrollBar_->setValue(0);
-    scrollBar_->setCursor(Qt::ArrowCursor);
-
-    connect(scrollBar_, &QScrollBar::valueChanged,
-            this, QOverload<>::of(&ScrollableDisplay::onValueChanged));
-
-    QSize ms = mainWidget_->sizeHint();
-    QSize ss = scrollBar_->sizeHint();
-    ms.setWidth(width() - ss.width());
-    ss.setHeight(height());
-    scrollBar_->resize(ss);
-    mainWidget_->resize(ms);
-
-    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-
-    updateGeometry();
-}
-
-QSize ScrollableDisplay::sizeHint() const
-{
-    QSize s = mainWidget_->sizeHint();
-    s.setWidth(s.width() + scrollBar_->sizeHint().width());
-    return s;
-}
-
-void ScrollableDisplay::resizeEvent(QResizeEvent* _event)
-{
-    QWidget::resizeEvent(_event);
-
-    auto const sbWidth = scrollBar_->width();
-    auto const mainWidth = width() - sbWidth;
-    mainWidget_->resize(mainWidth, height());
-    scrollBar_->resize(sbWidth, height());
-    // mainWidget_->move(0, 0);
-    // scrollBar_->move(mainWidth, 0);
-    updatePosition();
-    updateGeometry();
-}
-
-void ScrollableDisplay::showScrollBar(bool _show)
-{
-    if (_show)
-        scrollBar_->show();
-    else
-        scrollBar_->hide();
-}
-
-void ScrollableDisplay::updateValues()
-{
-    if (!scrollBar_->isVisible())
-        return;
-
-    scrollBar_->setMaximum(session_.terminal().screen().historyLineCount().as<int>());
-    if (auto const s = session_.terminal().viewport().absoluteScrollOffset(); s.has_value())
-        scrollBar_->setValue(s.value().as<int>());
-    else
-        scrollBar_->setValue(scrollBar_->maximum());
-}
-
-void ScrollableDisplay::updatePosition()
-{
-    //terminalWidget_->setGeometry(calculateWidgetGeometry());
-    LOGSTORE(DisplayLog)("called with {}x{} in {}", width(), height(),
-                         session_.currentScreenType());
-
-    auto const resizeMainAndScrollArea = [&]() {
-        QSize ms = mainWidget_->sizeHint();
-        QSize ss = scrollBar_->sizeHint();
-        ms.setWidth(width() - ss.width());
-        ms.setHeight(height());
-        ss.setHeight(height());
-        scrollBar_->resize(ss);
-        mainWidget_->resize(ms);
-    };
-
-    if (session_.currentScreenType() != terminal::ScreenType::Alternate
-        || !session_.profile().hideScrollbarInAltScreen)
-    {
-        auto const sbWidth = scrollBar_->width();
-        auto const mainWidth = width() - sbWidth;
-        LOGSTORE(DisplayLog)("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
-        switch (session_.profile().scrollbarPosition)
-        {
-            case config::ScrollBarPosition::Right:
-                resizeMainAndScrollArea();
-                scrollBar_->show();
-                mainWidget_->move(0, 0);
-                scrollBar_->move(mainWidth, 0);
-                break;
-            case config::ScrollBarPosition::Left:
-                resizeMainAndScrollArea();
-                scrollBar_->show();
-                mainWidget_->move(sbWidth, 0);
-                scrollBar_->move(0, 0);
-                break;
-            case config::ScrollBarPosition::Hidden:
-            {
-                scrollBar_->hide();
-                auto const cr = contentsRect();
-                mainWidget_->resize(cr.right(), cr.bottom());
-                mainWidget_->move(0, 0);
-                break;
-            }
-        }
-        LOGSTORE(DisplayLog)(
-            "TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
-            mainWidget_->pos().x(),
-            mainWidget_->pos().y(),
-            mainWidget_->width(),
-            mainWidget_->height(),
-            scrollBar_->isVisible() ? "visible" : "invisible",
-            scrollBar_->pos().x(),
-            scrollBar_->pos().y(),
-            scrollBar_->width(),
-            scrollBar_->height(),
-            scrollBar_->value(), scrollBar_->maximum()
-        );
-    }
-    else
-    {
-        LOGSTORE(DisplayLog)("Resize terminal widget over full contents.");
-        scrollBar_->hide();
-    }
-}
-
-void ScrollableDisplay::onValueChanged()
-{
-    session_.terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition(scrollBar_->value()));
-    session_.scheduleRedraw();
-}
-#endif // }}}
 
 TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
                                config::Config _config,

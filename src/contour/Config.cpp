@@ -1108,6 +1108,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChild(_usedKeys, _doc, basePath, "maximized", profile.maximized);
     tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);
     tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
+    tryLoadChild(_usedKeys, _doc, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
 
     tryLoadChild(_usedKeys, _doc, basePath, "wm_class", profile.wmClass);
 
@@ -1331,10 +1332,10 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     else
         errorlog()("Invalid render_mode \"{}\" in configuration.", renderModeStr);
 
-    auto intValue = profile.maxHistoryLineCount.value_or(std::numeric_limits<LineCount>::max());
+    auto intValue = profile.maxHistoryLineCount;
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
-    if (unbox<int>(intValue) < 0 || intValue == std::numeric_limits<LineCount>::max())
-        profile.maxHistoryLineCount = nullopt;
+    if (unbox<int>(intValue) < 0)
+        profile.maxHistoryLineCount = LineCount(0);
     else
         profile.maxHistoryLineCount = intValue;
 
@@ -1406,6 +1407,11 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                 doc["bypass_mouse_protocol_modifier"]); opt.has_value())
         _config.bypassMouseProtocolModifier = opt.value();
 
+    if (auto opt = parseModifier(usedKeys,
+                "mouse_block_selection_modifier",
+                doc["mouse_block_selection_modifier"]); opt.has_value())
+        _config.mouseBlockSelectionModifier = opt.value();
+
     if (doc["on_mouse_select"].IsDefined())
     {
         auto const value = toUpper(doc["on_mouse_select"].as<string>());
@@ -1472,6 +1478,11 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     }
 
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
+    if ((_config.ptyReadBufferSize % 16) != 0)
+    {
+        // For improved performance ...
+        LOGSTORE(ConfigLog)("read_buffer_size must be a multiple of 16.");
+    }
 
     tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);
 

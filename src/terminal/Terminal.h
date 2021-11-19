@@ -16,7 +16,6 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/pty/Pty.h>
 #include <terminal/ScreenEvents.h>
-#include <terminal/Screen.h>
 #include <terminal/Selector.h>
 #include <terminal/Viewport.h>
 #include <terminal/RenderBuffer.h>
@@ -34,14 +33,17 @@
 
 namespace terminal {
 
+template <typename EventListener> class Screen;
+
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
 /// With a terminal being attached to a Process, the terminal's screen
 /// gets updated according to the process' outputted text,
 /// whereas input to the process can be send high-level via the various
 /// send(...) member functions.
-class Terminal : public ScreenEvents {
-  public:
+class Terminal
+{
+public:
     class Events {
       public:
         virtual ~Events() = default;
@@ -68,7 +70,8 @@ class Terminal : public ScreenEvents {
     Terminal(Pty& _pty,
              int _ptyReadBufferSize,
              Events& _eventListener,
-             std::optional<LineCount> _maxHistoryLineCount = std::nullopt,
+             LineCount _maxHistoryLineCount = LineCount(0),
+             LineOffset _copyLastMarkRangeOffset = LineOffset(0),
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              std::string const& _wordDelimiters = "",
@@ -83,7 +86,10 @@ class Terminal : public ScreenEvents {
 
     void start();
 
+    void resetHard();
+
     void setRefreshRate(double _refreshRate);
+    void setLastMarkRangeOffset(LineOffset _value) noexcept;
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
@@ -96,6 +102,7 @@ class Terminal : public ScreenEvents {
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
+    void setMouseBlockSelectionModifier(Modifier _value) { mouseBlockSelectionModifier_ = _value; }
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
@@ -115,24 +122,12 @@ class Terminal : public ScreenEvents {
     bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
     // }}}
 
-    // {{{ screen proxy
-    /// @returns absolute coordinate of @p _pos with scroll offset and applied.
-    Coordinate absoluteCoordinate(Coordinate const& _pos) const noexcept
-    {
-        // TODO: unit test case me BEFORE merge, yo !
-        auto const row = viewport_.absoluteScrollOffset().value_or(
-            boxed_cast<StaticScrollbackPosition>(screen_.historyLineCount())) +
-            StaticScrollbackPosition::cast_from(_pos.row - 1);
-        auto const col = _pos.column;
-        return Coordinate{unbox<int>(row), col};
-    }
-
     /// Writes a given VT-sequence to screen.
     void writeToScreen(std::string_view _text);
 
     // viewport management
-    Viewport& viewport() noexcept { return viewport_; }
-    Viewport const& viewport() const noexcept { return viewport_; }
+    Viewport<Terminal>& viewport() noexcept { return viewport_; }
+    Viewport<Terminal> const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -202,12 +197,12 @@ class Terminal : public ScreenEvents {
     void unlock() const { outerLock_.unlock(); innerLock_.unlock(); }
 
     /// Only access this when having the terminal object locked.
-    Screen const& screen() const noexcept { return screen_; }
+    Screen<Terminal> const& screen() const noexcept { return screen_; }
 
     /// Only access this when having the terminal object locked.
-    Screen& screen() noexcept { return screen_; }
+    Screen<Terminal>& screen() noexcept { return screen_; }
 
-    bool lineWrapped(int _lineNumber) const { return screen_.lineWrapped(_lineNumber); }
+    bool isLineWrapped(LineOffset _lineNumber) const noexcept { return screen_.isLineWrapped(_lineNumber); }
 
     Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
 
@@ -247,35 +242,36 @@ class Terminal : public ScreenEvents {
     void setWordDelimiters(std::string const& _wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
 
-    Selector const* selector() const noexcept { return selector_.get(); }
-    Selector* selector() noexcept { return selector_.get(); }
+    Selection const* selector() const noexcept { return selection_.get(); }
+    Selection* selector() noexcept { return selection_.get(); }
 
     template <typename RenderTarget>
     void renderSelection(RenderTarget _renderTarget) const
     {
-        if (selector_)
-            selector_->render(std::forward<RenderTarget>(_renderTarget));
+        if (selection_)
+            terminal::renderSelection(*selection_, [&](Coordinate _pos) { _renderTarget(_pos, screen_.at(_pos)); });
     }
 
     void clearSelection();
 
     /// Tests whether some area has been selected.
-    bool isSelectionAvailable() const noexcept { return selector_ && selector_->state() != Selector::State::Waiting; }
-    bool isSelectionInProgress() const noexcept { return selector_ && selector_->state() != Selector::State::Complete; }
+    bool isSelectionAvailable() const noexcept { return selection_ && selection_->state() != Selection::State::Waiting; }
+    bool isSelectionInProgress() const noexcept { return selection_ && selection_->state() != Selection::State::Complete; }
+    bool isSelectionComplete() const noexcept { return selection_ && selection_->state() == Selection::State::Complete; }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelectedAbsolute(Coordinate _coord) const noexcept
+    bool isSelected(Coordinate _coord) const noexcept
     {
-        return selector_
-            && selector_->state() != Selector::State::Waiting
-            && selector_->contains(_coord);
+        return selection_
+            && selection_->state() != Selection::State::Waiting
+            && selection_->contains(_coord);
     }
 
     /// Sets or resets to a new selection.
-    void setSelector(std::unique_ptr<Selector> _selector) { selector_ = std::move(_selector); }
+    void setSelector(std::unique_ptr<Selection> _selector) { selection_ = std::move(selection_); }
 
     /// Tests whether or not some grid cells are selected.
-    bool selectionAvailable() const noexcept { return !!selector_; }
+    bool selectionAvailable() const noexcept { return !!selection_; }
     // }}}
 
     std::string extractSelectionText() const;
@@ -291,6 +287,41 @@ class Terminal : public ScreenEvents {
 
     uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
 
+    // Screen's EventListener implementation
+    //
+    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount);
+    void bell();
+    void bufferChanged(ScreenType);
+    void scrollbackBufferCleared();
+    void screenUpdated();
+    FontDef getFontDef();
+    void setFontDef(FontDef const& _fontDef);
+    void copyToClipboard(std::string_view _data);
+    void dumpState();
+    void notify(std::string_view _title, std::string_view _body);
+    void reply(std::string_view _response);
+    void resizeWindow(PageSize);
+    void resizeWindow(ImageSize);
+    void setApplicationkeypadMode(bool _enabled);
+    void setBracketedPaste(bool _enabled);
+    void setCursorStyle(CursorDisplay _display, CursorShape _shape);
+    void setCursorVisibility(bool _visible);
+    void setGenerateFocusEvents(bool _enabled);
+    void setMouseProtocol(MouseProtocol _protocol, bool _enabled);
+    void setMouseTransport(MouseTransport _transport);
+    void setMouseWheelMode(InputGenerator::MouseWheelMode _mode);
+    void setWindowTitle(std::string_view _title);
+    void setTerminalProfile(std::string const& _configProfileName);
+    void useApplicationCursorKeys(bool _enabled);
+    void hardReset();
+    void discardImage(Image const&);
+    void markCellDirty(Coordinate _position) noexcept;
+    void markRegionDirty(Rect _area) noexcept;
+    void synchronizedOutput(bool _enabled);
+    void onBufferScrolled(LineCount _n) noexcept;
+
+    void verifyState();
+
   private:
     void flushInput();
     void mainLoop();
@@ -301,44 +332,13 @@ class Terminal : public ScreenEvents {
     bool updateCursorHoveringState();
 
     template <typename Renderer, typename... RemainingPasses>
-    void renderPass(Renderer const& pass, RemainingPasses... remainingPasses) const
+    void renderPass(Renderer && pass, RemainingPasses... remainingPasses) const
     {
-        screen_.render(pass, viewport_.absoluteScrollOffset());
+        screen_.render(std::forward<Renderer>(pass), viewport_.scrollOffset());
 
         if constexpr (sizeof...(RemainingPasses) != 0)
             renderPass(std::forward<RemainingPasses>(remainingPasses)...);
     }
-
-    // overrides
-    //
-    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
-    void bell() override;
-    void bufferChanged(ScreenType) override;
-    void scrollbackBufferCleared() override;
-    void screenUpdated() override;
-    FontDef getFontDef() override;
-    void setFontDef(FontDef const& _fontDef) override;
-    void copyToClipboard(std::string_view _data) override;
-    void dumpState() override;
-    void notify(std::string_view _title, std::string_view _body) override;
-    void reply(std::string_view _response) override;
-    void resizeWindow(PageSize) override;
-    void resizeWindow(ImageSize) override;
-    void setApplicationkeypadMode(bool _enabled) override;
-    void setBracketedPaste(bool _enabled) override;
-    void setCursorStyle(CursorDisplay _display, CursorShape _shape) override;
-    void setCursorVisibility(bool _visible) override;
-    void setGenerateFocusEvents(bool _enabled) override;
-    void setMouseProtocol(MouseProtocol _protocol, bool _enabled) override;
-    void setMouseTransport(MouseTransport _transport) override;
-    void setMouseWheelMode(InputGenerator::MouseWheelMode _mode) override;
-    void setWindowTitle(std::string_view _title) override;
-    void setTerminalProfile(std::string const& _configProfileName) override;
-    void useApplicationCursorKeys(bool _enabled) override;
-    void hardReset() override;
-    void discardImage(Image const&) override;
-    void markRegionDirty(LinePosition _line, ColumnPosition _column) override;
-    void synchronizedOutput(bool _enabled) override;
 
     // private data
     //
@@ -371,23 +371,37 @@ class Terminal : public ScreenEvents {
     std::chrono::steady_clock::time_point lastClick_{};
     unsigned int speedClicks_ = 0;
 
-    terminal::Coordinate currentMousePosition_{0, 0}; // current mouse position
+    terminal::Coordinate currentMousePosition_{}; // current mouse position
     Modifier mouseProtocolBypassModifier_ = Modifier::Shift;
+    Modifier mouseBlockSelectionModifier_ = Modifier::Control;
     bool respectMouseProtocol_ = true; // shift-click can disable that, button release sets it back to true
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
     InputGenerator inputGenerator_;
     InputGenerator::Sequence pendingInput_;
-    Screen screen_;
+    LineOffset copyLastMarkRangeOffset_;
+    Screen<Terminal> screen_;
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
     std::unique_ptr<std::thread> screenUpdateThread_;
-    Viewport viewport_;
-    std::unique_ptr<Selector> selector_;
+    Viewport<Terminal> viewport_;
+    std::unique_ptr<Selection> selection_;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;
 
     std::atomic<uint64_t> lastFrameID_ = 0;
+
+    struct SelectionHelper: public terminal::SelectionHelper
+    {
+        Terminal* terminal;
+        explicit SelectionHelper(Terminal* self): terminal{self} {}
+        PageSize pageSize() const noexcept override;
+        bool wordDelimited(Coordinate _pos) const noexcept override;
+        bool wrappedLine(LineOffset _line) const noexcept override;
+        bool cellEmpty(Coordinate _pos) const noexcept override;
+        int cellWidth(Coordinate _pos) const noexcept override;
+    };
+    SelectionHelper selectionHelper_;
 };
 
 }  // namespace terminal

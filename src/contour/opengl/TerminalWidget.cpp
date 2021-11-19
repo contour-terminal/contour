@@ -238,7 +238,7 @@ namespace // {{{
 
 // {{{ Widget creation and QOpenGLWidget overides
 TerminalWidget::TerminalWidget(
-    config::TerminalProfile const& _profile,
+    config::TerminalProfile const& _profile, // TODO(PR): OH I am unused!
     TerminalSession& _session,
     function<void()> _adaptSize,
     function<void(bool)> _enableBackgroundBlur
@@ -521,7 +521,7 @@ void TerminalWidget::inputMethodEvent(QInputMethodEvent* _event)
 
 QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
 {
-    const QPoint cursorPos = QPoint(); // TODO: cursorPosition();
+    const QPoint cursorPos = QPoint(); // TODO: realCursorPosition();
     switch (_query) {
     // TODO?: case Qt::ImCursorRectangle:
     // case Qt::ImMicroFocus:
@@ -588,7 +588,7 @@ void TerminalWidget::assertInitialized()
 
 void TerminalWidget::onScrollBarValueChanged(int _value)
 {
-    terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition::cast_from(_value));
+    terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(_value));
     scheduleRedraw();
 }
 
@@ -637,10 +637,7 @@ bool TerminalWidget::isFullScreen() const
 
 terminal::ImageSize TerminalWidget::pixelSize() const
 {
-    return {
-        terminal::Width(*session_.terminal().screenSize().columns * *gridMetrics().cellSize.width),
-        terminal::Height(*session_.terminal().screenSize().lines * *gridMetrics().cellSize.height)
-    };
+    return gridMetrics().cellSize * session_.terminal().screen().pageSize();
 }
 
 terminal::ImageSize TerminalWidget::cellSize() const
@@ -920,11 +917,6 @@ void TerminalWidget::setMouseCursorShape(MouseCursorShape _shape)
 {
     if (auto const newShape = toQtMouseShape(_shape); newShape != cursor().shape())
         setCursor(newShape);
-}
-
-void TerminalWidget::setTerminalProfile(config::TerminalProfile _profile)
-{
-    (void) _profile;
 }
 
 void TerminalWidget::setWindowTitle(string_view _title)

@@ -29,31 +29,31 @@
 
 using namespace std;
 
-class NullParserEvents: public terminal::ParserEvents
+class NullParserEvents
 {
 public:
-    void error(std::string_view const& _errorString) override {}
-    void print(char32_t _text) override {}
-    void print(std::string_view _chars) override {}
-    void execute(char _controlCode) override {}
-    void clear() override {}
-    void collect(char _char) override {}
-    void collectLeader(char _leader) override {}
-    void param(char _char) override {}
-    void dispatchESC(char _function) override {}
-    void dispatchCSI(char _function) override {}
-    void startOSC() override {}
-    void putOSC(char32_t _char) override {}
-    void dispatchOSC() override {}
-    void hook(char _function) override {}
-    void put(char32_t _char) override {}
-    void unhook() override {}
-    void startAPC() override {}
-    void putAPC(char32_t) override {}
-    void dispatchAPC() override {}
-    void startPM() override {}
-    void putPM(char32_t) override {}
-    void dispatchPM() override {}
+    void error(std::string_view const& _errorString) {}
+    void print(char _text) {}
+    void print(std::string_view _chars) {}
+    void execute(char _controlCode) {}
+    void clear() {}
+    void collect(char _char) {}
+    void collectLeader(char _leader) {}
+    void param(char _char) {}
+    void dispatchESC(char _function) {}
+    void dispatchCSI(char _function) {}
+    void startOSC() {}
+    void putOSC(char _char) {}
+    void dispatchOSC() {}
+    void hook(char _function) {}
+    void put(char _char) {}
+    void unhook() {}
+    void startAPC() {}
+    void putAPC(char) {}
+    void dispatchAPC() {}
+    void startPM() {}
+    void putPM(char) {}
+    void dispatchPM() {}
 };
 
 struct BenchOptions
@@ -172,7 +172,7 @@ public:
     {
         // Show any interesting meta information.
         fmt::print("Cell      : {} bytes\n", sizeof(terminal::Cell));
-        //fmt::print("CellExtra : {} bytes\n", sizeof(terminal::CellExtra));
+        fmt::print("CellExtra : {} bytes\n", sizeof(terminal::CellExtra));
         fmt::print("CellFlags : {} bytes\n", sizeof(terminal::CellFlags));
         fmt::print("Color     : {} bytes\n", sizeof(terminal::Color));
         return EXIT_SUCCESS;
