@@ -1,3 +1,7 @@
+### 0.3.0 (unreleased)
+
+- Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.
+
 ### 0.2.2 (2021-11-19)
 
 - Fixes input mapping containing `Control` modifier.

@@ -2146,12 +2146,11 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
         for (auto const lineOffset : crispy::times(*remainingLineCount))
         {
             linefeed();
-            moveCursorForward(ColumnCount(_topLeft.column));
             crispy::for_each(
                 LIBTERMINAL_EXECUTION_COMMA(par)
                 crispy::times(unbox<int>(columnsToBeRendered)),
                 [&](int columnOffset) {
-                    Cell& cell = at(Coordinate{unbox<int>(size_.lines), columnOffset + 1});
+                    Cell& cell = at(Coordinate{unbox<int>(size_.lines), _topLeft.column + columnOffset});
                     cell.setImage(ImageFragment{
                         rasterizedImage,
                         Coordinate{unbox<int>(linesToBeRendered) + int(lineOffset), columnOffset}
@@ -2163,7 +2162,6 @@ void Screen::renderImage(std::shared_ptr<Image const> const& _imageRef,
             );
         }
     }
-
     // move ansi text cursor to position of the sixel cursor
     moveCursorToColumn(ColumnPosition(_topLeft.column + unbox<int>(_gridSize.columns)));
 #endif
