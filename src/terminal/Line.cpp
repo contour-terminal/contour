@@ -1,11 +1,18 @@
 #include <terminal/Line.h>
 #include <terminal/Cell.h>
 
+#include <unicode/grapheme_segmenter.h>
+#include <unicode/utf8.h>
+
+using std::get;
+using std::holds_alternative;
+using std::min;
+
 namespace terminal
 {
 
 template <typename Cell, bool Optimize>
-typename Line<Cell, Optimize>::Buffer Line<Cell, Optimize>::reflow(ColumnCount _newColumnCount)
+typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;
     switch (crispy::strongCompare(_newColumnCount, columnsUsed()))
@@ -36,7 +43,7 @@ typename Line<Cell, Optimize>::Buffer Line<Cell, Optimize>::reflow(ColumnCount _
                     return std::tuple{reflowStart, reflowEnd};
                 }();
 
-                auto removedColumns = Buffer(reflowStart, reflowEnd);
+                auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
                 buffer_.erase(reflowStart, buffer_.end());
                 assert(columnsUsed() == _newColumnCount);
 #if 0
@@ -103,6 +110,55 @@ std::string Line<Cell, Optimize>::toUtf8Trimmed() const
     while (!output.empty() && isspace(output.back()))
         output.pop_back();
     return output;
+}
+
+template <typename Cell>
+InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input)
+{
+    static constexpr char32_t ReplacementCharacter {0xFFFD};
+
+    auto columns = InflatedLineBuffer<Cell>{};
+    columns.reserve(unbox<size_t>(input.width));
+
+    auto lastChar = char32_t{0};
+    auto utf8DecoderState = unicode::utf8_decoder_state{};
+
+    for (size_t i = 0; i < input.text.size(); ++i)
+    {
+        char ch = input.text[i];
+        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, ch);
+        if (holds_alternative<unicode::Incomplete>(r))
+            continue;
+
+        auto const nextChar = holds_alternative<unicode::Success>(r)
+                            ? get<unicode::Success>(r).value
+                            : ReplacementCharacter;
+        auto const isAsciiBreakable = lastChar < 128 && nextChar < 128; // NB: This is an optimization for US-ASCII text versus grapheme cluster segmentation.
+
+        if (!lastChar || isAsciiBreakable || unicode::grapheme_segmenter::breakable(lastChar, nextChar))
+        {
+            columns.emplace_back(Cell{});
+            columns.back().write(input.attributes, nextChar,
+                                 static_cast<uint8_t>(unicode::width(nextChar)));
+        }
+        else
+        {
+            Cell& prevCell = columns.back();
+            auto const extendedWidth = prevCell.appendCharacter(nextChar);
+            if (extendedWidth > 0)
+            {
+                auto const cellsAvailable = *input.width - static_cast<int>(columns.size()) + 1;
+                auto const n = min(extendedWidth, cellsAvailable);
+                for (int i = 1; i < n; ++i)
+                    columns.emplace_back(Cell{input.attributes});
+            }
+        }
+    }
+
+    while (columns.size() < unbox<size_t>(input.width))
+        columns.emplace_back(Cell{input.attributes});
+
+    return columns;
 }
 
 template class Line<Cell, true>;

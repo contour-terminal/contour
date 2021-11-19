@@ -88,12 +88,12 @@ namespace detail { // {{{
     LineCount addNewWrappedLines(
         Lines<Cell>& _targetLines,
         ColumnCount _newColumnCount,
-        typename Line<Cell>::Buffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
+        typename Line<Cell>::InflatedBuffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
         LineFlags _baseFlags,
         bool _initialNoWrap // TODO: pass `LineFlags _defaultLineFlags` instead?
     )
     {
-        using LineBuffer = typename Line<Cell>::Buffer;
+        using LineBuffer = typename Line<Cell>::InflatedBuffer;
         auto const wrappedFlag = _initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
 
         // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
@@ -577,7 +577,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
     // Shrinking in line count with the cursor at the bottom margin will move
     // the top lines into the scrollback area.
 
-    using LineBuffer = typename Line<Cell>::Buffer;
+    using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
     // {{{ helper methods
     auto const growLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate
@@ -671,7 +671,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
 
     auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> Coordinate
     {
-        using LineBuffer = typename Line<Cell>::Buffer;
+        using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
         {
@@ -775,7 +775,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
 
     auto const shrinkColumns = [this](ColumnCount _newColumnCount, LineCount _newLineCount, Coordinate _cursor) -> Coordinate
     {
-        using LineBuffer = typename Line<Cell>::Buffer;
+        using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
         {

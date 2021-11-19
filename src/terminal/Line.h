@@ -44,6 +44,22 @@ template <typename, bool> struct OptionalProperty;
 template <typename T> struct OptionalProperty<T, false> {};
 template <typename T> struct OptionalProperty<T, true> { T value; };
 
+struct SimpleLineBuffer
+{
+    GraphicsAttributes attributes;
+    std::string text; // TODO: Try std::string_view later to avoid scattered copies.
+    ColumnCount width; // page display width
+};
+
+template <typename Cell>
+using InflatedLineBuffer = std::vector<Cell>;
+
+template <typename Cell>
+InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input);
+
+template <typename Cell>
+using LineStorage = std::variant<SimpleLineBuffer, InflatedLineBuffer<Cell>>;
+
 /**
  * Line<Cell> API.
  *
@@ -60,24 +76,25 @@ public:
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
 
-    using Buffer = std::vector<Cell>;
+    using InflatedBuffer = InflatedLineBuffer<Cell>;
+    using Storage = LineStorage<Cell>;
     using value_type = Cell;
-    using iterator = typename Buffer::iterator;
-    using const_iterator = typename Buffer::const_iterator;
+    using iterator = typename InflatedBuffer::iterator;
+    using const_iterator = typename InflatedBuffer::const_iterator;
 
     Line(ColumnCount _width, LineFlags _flags, Cell _template = {}):
         buffer_(_width.as<size_t>(), _template /*, _allocator*/),
         flags_{static_cast<unsigned>(_flags)}
     {}
 
-    Line(ColumnCount _width, Buffer _buffer, LineFlags _flags):
+    Line(ColumnCount _width, InflatedBuffer _buffer, LineFlags _flags):
         buffer_{std::move(_buffer)},
         flags_{static_cast<unsigned>(_flags)}
     {
         buffer_.resize(unbox<size_t>(_width));
     }
 
-    Line(Buffer _buffer, LineFlags _flags):
+    Line(InflatedBuffer _buffer, LineFlags _flags):
         buffer_{std::move(_buffer)},
         flags_{static_cast<unsigned>(_flags)}
     {}
@@ -252,7 +269,7 @@ public:
         return (flags_ & static_cast<unsigned>(_flag)) != 0;
     }
 
-    Buffer reflow(ColumnCount _newColumnCount);
+    InflatedBuffer reflow(ColumnCount _newColumnCount);
     std::string toUtf8() const;
     std::string toUtf8Trimmed() const;
 
@@ -260,10 +277,11 @@ public:
     //
     // If this line has been stored in an optimized state, then
     // the line will be first unpacked into a vector of grid cells.
-    Buffer& editable();
+    InflatedBuffer& editable();
 
 private:
-    Buffer buffer_;
+    InflatedBuffer buffer_;
+    Storage storage_;
     unsigned flags_ = 0;
     // OptionalProperty<ColumnCount, ColumnOptimized> usedColumns_;
 };
@@ -284,13 +302,19 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 }
 
 template <typename Cell, bool Optimize>
-inline typename Line<Cell, Optimize>::Buffer& Line<Cell, Optimize>::editable()
+inline typename Line<Cell, Optimize>::InflatedBuffer& Line<Cell, Optimize>::editable()
 {
     // TODO: when we impement the line text buffer optimization,
     // then this is the place where we want to *promote* a possibly
     // optimized text buffer to a full grid line buffer.
+#if 0
+    if (std::holds_alternative<SimpleLineBuffer>(storage_))
+        storage_ = inflate<Cell>(std::get<SimpleLineBuffer>(storage_));
 
+    return std::get<InflatedBuffer>(storage_);
+#else
     return buffer_;
+#endif
 }
 
 }
