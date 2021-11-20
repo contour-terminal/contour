@@ -1,6 +1,7 @@
 ### 0.3.0 (unreleased)
 
 - Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.
+- Adds support for CoreText for matching font descriptions and font fallback (#479).
 
 ### 0.2.2 (2021-11-19)
 
