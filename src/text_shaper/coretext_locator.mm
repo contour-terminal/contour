@@ -23,12 +23,12 @@ namespace text
 {
     namespace
     {
-        font_path ctFontPath(NSString* _name)
+        font_path ctFontPath(NSString const* _name)
         {
-            auto fontRef = CTFontDescriptorCreateWithNameAndSize((CFStringRef)_name, 16.0);
+            auto const fontRef = CTFontDescriptorCreateWithNameAndSize((CFStringRef)_name, 16.0);
 
-            CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(fontRef, kCTFontURLAttribute);
-            NSString* fontPath = [NSString stringWithString: [(NSURL *)CFBridgingRelease(url) path]];
+            CFURLRef const url = (CFURLRef)CTFontDescriptorCopyAttribute(fontRef, kCTFontURLAttribute);
+            NSString const* fontPath = [NSString stringWithString: [(NSURL const*)CFBridgingRelease(url) path]];
 
             return font_path{[fontPath cStringUsingEncoding: [NSString defaultCStringEncoding]]};
         }
@@ -97,13 +97,14 @@ namespace text
         if (fonts == nil)
             fonts = [d->fm availableMembersOfFontFamily:@"Menlo"];
 
-        for (NSArray* object in fonts) {
-            auto weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
+        for (NSArray* object in fonts)
+        {
+            auto const weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
 
             if (weight != _fd.weight)
                 continue;
 
-            auto slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
+            auto const slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
 
             if (slant != _fd.slant)
                 continue;
@@ -118,9 +119,9 @@ namespace text
     {
         font_source_list output;
 
-        NSArray<NSString *>* fonts = [d->fm availableFonts];
+        NSArray<NSString *> const* fonts = [d->fm availableFonts];
 
-        for (NSString* fontName in fonts) {
+        for (NSString const* fontName in fonts) {
             output.emplace_back(ctFontPath(fontName));
         }
 

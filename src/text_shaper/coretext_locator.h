@@ -18,7 +18,6 @@
 
 namespace text
 {
-
     class coretext_locator : public font_locator
     {
     public:
