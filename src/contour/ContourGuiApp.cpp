@@ -31,10 +31,14 @@
 
 using std::bind;
 using std::cerr;
+using std::get;
+using std::holds_alternative;
 using std::prev;
 using std::string;
 using std::string_view;
 using std::vector;
+
+using terminal::Process;
 
 using namespace std::string_literals;
 
@@ -70,6 +74,7 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load (overriding config).", "NAME"},
                 CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma (,) seperated list of tags.", "TAGS"},
                 CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
+                CLI::Option{"early-exit-threshold", CLI::Value{6u}, "If the spawned process exits earlier than the given threshold seconds, an error message will be printed and the window not closed immediately."},
                 CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config).", "DIRECTORY"},
                 CLI::Option{"class", CLI::Value{""s}, "Sets the class part of the WM_CLASS property for the window (overriding config).", "WM_CLASS"},
                 CLI::Option{"platform", CLI::Value{""s}, "Sets the QPA platform.", "PLATFORM[:OPTIONS]"},
@@ -163,6 +168,8 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     bool const liveConfig = _flags.get<bool>("contour.terminal.live-config");
 
+    std::chrono::seconds earlyExitThreshold(_flags.get<unsigned>("contour.terminal.early-exit-threshold"));
+
     // Possibly override shell to be executed
     if (!_flags.verbatim.empty())
     {
@@ -213,17 +220,25 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
 
-    contour::Controller controller(qtArgsPtr[0], config, liveConfig, profileName);
+    contour::Controller controller(qtArgsPtr[0], earlyExitThreshold, config, liveConfig, profileName);
     controller.start();
 
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
-    auto const rv = app.exec();
+    auto rv = app.exec();
 
     controller.exit();
     controller.wait();
+
+    if (auto const ec = controller.exitStatus(); ec.has_value())
+    {
+        if (holds_alternative<Process::NormalExit>(*ec))
+            rv = get<Process::NormalExit>(ec.value()).exitCode;
+        else if (holds_alternative<Process::SignalExit>(*ec))
+            rv = EXIT_FAILURE;
+    }
 
     // printf("\r%s", TBC);
     return rv;

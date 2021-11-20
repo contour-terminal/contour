@@ -46,13 +46,15 @@ class TerminalSession: public terminal::Terminal::Events
      * @param _display fronend display to render the terminal.
      */
     TerminalSession(std::unique_ptr<terminal::Pty> _pty,
+                    std::chrono::seconds _earlyExitThreshold,
                     config::Config _config,
                     bool _liveconfig,
                     std::string _profileName,
                     std::string _programPath,
                     Controller& _controller,
                     std::unique_ptr<TerminalDisplay> _display,
-                    std::function<void()> _displayInitialized);
+                    std::function<void()> _displayInitialized,
+                    std::function<void()> _onExit);
     ~TerminalSession();
 
     void start();
@@ -165,12 +167,14 @@ class TerminalSession: public terminal::Terminal::Events
     // private data
     //
     std::chrono::steady_clock::time_point startTime_;
+    std::chrono::seconds earlyExitThreshold_;
     config::Config config_;
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
     Controller& controller_;
     std::function<void()> displayInitialized_;
+    std::function<void()> onExit_;
 
     std::unique_ptr<terminal::Pty> pty_;
     terminal::Terminal terminal_;

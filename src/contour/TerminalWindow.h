@@ -83,7 +83,12 @@ class TerminalWindow :
     Q_OBJECT
 
   public:
-    TerminalWindow(config::Config _config, bool _liveConfig, std::string _profileName, std::string _programPath, Controller& _controller);
+    TerminalWindow(std::chrono::seconds _earlyExitThreshold,
+                   config::Config _config,
+                   bool _liveConfig,
+                   std::string _profileName,
+                   std::string _programPath,
+                   Controller& _controller);
 
     bool event(QEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
