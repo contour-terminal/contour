@@ -71,12 +71,12 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: contour-${{ steps.set_vars.outputs.version }}-win64.msi
-          retention-days: 30
+          retention-days: 7
       - name: "Uploading ZIP to artifact store"
         uses: actions/upload-artifact@v2
         with:
           path: contour-${{ steps.set_vars.outputs.version }}-win64.zip
-          retention-days: 30
+          retention-days: 7
 
   build_ubuntu1804:
     name: Build on Ubuntu 18.04
@@ -113,12 +113,12 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
-          retention-days: 30
+          retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
           path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
-          retention-days: 30
+          retention-days: 7
 
   build_ubuntu2004:
     name: Build on Ubuntu 20.04
@@ -155,12 +155,12 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
-          retention-days: 30
+          retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
           path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
-          retention-days: 30
+          retention-days: 7
 
   build_osx:
     name: Build on OS/X
@@ -211,12 +211,12 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: contour-${{ steps.set_vars.outputs.version }}-osx.zip
-          retention-days: 30
+          retention-days: 7
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:
           path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
-          retention-days: 30
+          retention-days: 7
   build_archlinux:
     strategy:
       matrix:
@@ -268,7 +268,7 @@ jobs:
         with:
           path: contour_${{ steps.set_vars.outputs.version }}-archlinux_${{ steps.tags.outputs.ARCH }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 7
 
   do_release:
     name: Create Github release

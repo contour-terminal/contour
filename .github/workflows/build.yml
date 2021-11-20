@@ -149,14 +149,14 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
     - name: "Uploading artifact ZIP package"
       uses: actions/upload-artifact@v2
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   ubuntu1804:
     name: "Ubuntu Linux 18.04"
@@ -216,14 +216,14 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
     - name: "Uploading artifact ZIP package"
       uses: actions/upload-artifact@v2
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   osx_qt5:
     name: "OS/X (Qt5)"
@@ -274,7 +274,7 @@ jobs:
         name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   osx_qt6:
     name: "OS/X (Qt6)"
@@ -374,7 +374,7 @@ jobs:
         name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   archlinux:
     strategy:
@@ -425,5 +425,5 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-archlinux_${{ steps.tags.outputs.ARCH }}"
         path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
