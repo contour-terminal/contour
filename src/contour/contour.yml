@@ -92,9 +92,9 @@ profiles:
         wm_class: "contour"
 
         # Environment variables to be passed to the shell.
-        environment:
-            TERM: xterm-256color
-            COLORTERM: truecolor
+        # environment:
+        #     TERM: contour
+        #     COLORTERM: truecolor
 
         # Determines the terminal type that is being advertised.
         # Possible values are:
