@@ -35,13 +35,15 @@ class Controller : public QThread {
                std::chrono::seconds _earlyExitThreshold,
                contour::config::Config _config,
                bool _liveConfig,
-               std::string _profileName);
+               std::string _profileName,
+               bool _dumpStateAtExit);
 
     ~Controller();
 
     std::list<TerminalWindow*> const& terminalWindows() const noexcept { return terminalWindows_; }
 
     std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return exitStatus_; }
+    bool dumpStateAtExit() const noexcept { return dumpStateAtExit_; }
 
     void onExit(TerminalSession& _session);
 
@@ -61,6 +63,7 @@ class Controller : public QThread {
     contour::config::Config config_;
     bool const liveConfig_;
     std::string profileName_;
+    bool dumpStateAtExit_;
 
     std::list<TerminalWindow*> terminalWindows_;
 

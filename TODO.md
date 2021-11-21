@@ -1,3 +1,8 @@
+
+- [x] get screenshot before exit working
+- [ ] CI: notcureses test for each scene
+- [ ] rolling local state dump dir? (configurable to last N=10 dumps)
+
 # TODO requirements before merge
 
 - [ ] ring: add negative and overflowing (r)iterator tests (should wrap around & succeed)

@@ -163,6 +163,14 @@ void TerminalSession::start()
     terminal().start();
 }
 
+void TerminalSession::terminate()
+{
+    if (!display_)
+        return;
+
+    display_->closeDisplay();
+}
+
 // {{{ Events implementations
 void TerminalSession::bell()
 {
@@ -267,10 +275,12 @@ void TerminalSession::copyToClipboard(std::string_view _data)
 
 void TerminalSession::dumpState()
 {
-    if (!display_)
-        return;
+    if (display_)
+        display_->dumpState();
 
-    display_->post([this]() { display_->dumpState(); });
+    // Deferred termination? Then close display now.
+    if (terminal_.device().isClosed() && !controller_.dumpStateAtExit())
+        display_->closeDisplay();
 }
 
 
@@ -317,10 +327,10 @@ void TerminalSession::onClosed()
         return;
     }
 
-    if (!display_)
-        return;
-
-    display_->closeDisplay();
+    if (controller_.dumpStateAtExit())
+        dumpState();
+    else if (display_)
+        display_->closeDisplay();
 }
 
 void TerminalSession::onSelectionCompleted()

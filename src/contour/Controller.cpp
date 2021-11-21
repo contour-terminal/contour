@@ -29,12 +29,14 @@ Controller::Controller(std::string _programPath,
                        std::chrono::seconds _earlyExitThreshold,
                        config::Config _config,
                        bool _liveConfig,
-                       std::string _profileName) :
+                       std::string _profileName,
+                       bool _dumpStateAtExit):
     programPath_{ move(_programPath) },
     earlyExitThreshold_{ _earlyExitThreshold },
     config_{ move(_config) },
     liveConfig_{ _liveConfig },
-    profileName_{ move(_profileName) }
+    profileName_{ move(_profileName) },
+    dumpStateAtExit_{ _dumpStateAtExit }
 {
     // systrayIcon_ = new QSystemTrayIcon(nullptr);
     // systrayIcon_->show();

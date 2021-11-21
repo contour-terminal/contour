@@ -57,7 +57,11 @@ class TerminalSession: public terminal::Terminal::Events
                     std::function<void()> _onExit);
     ~TerminalSession();
 
+    /// Starts the VT background thread.
     void start();
+
+    /// Initiates termination of this session, regardless of the underlying terminal state.
+    void terminate();
 
     config::Config const& config() const noexcept { return config_; }
     config::TerminalProfile const& profile() const noexcept { return profile_; }
@@ -144,6 +148,8 @@ class TerminalSession: public terminal::Terminal::Events
         if (display_)
             display_->scheduleRedraw();
     }
+
+    Controller& controller() noexcept { return controller_; }
 
   private:
     // helpers

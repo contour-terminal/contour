@@ -74,6 +74,7 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load (overriding config).", "NAME"},
                 CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma (,) seperated list of tags.", "TAGS"},
                 CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
+                CLI::Option{"dump-state-at-exit", CLI::Value{false}, "Dumps internal state at exit. This is for debugging contour."},
                 CLI::Option{"early-exit-threshold", CLI::Value{6u}, "If the spawned process exits earlier than the given threshold seconds, an error message will be printed and the window not closed immediately."},
                 CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config).", "DIRECTORY"},
                 CLI::Option{"class", CLI::Value{""s}, "Sets the class part of the WM_CLASS property for the window (overriding config).", "WM_CLASS"},
@@ -167,6 +168,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
         return EXIT_FAILURE;
 
     bool const liveConfig = _flags.get<bool>("contour.terminal.live-config");
+    bool const dumpStateAtExit = _flags.get<bool>("contour.terminal.dump-state-at-exit");
 
     std::chrono::seconds earlyExitThreshold(_flags.get<unsigned>("contour.terminal.early-exit-threshold"));
 
@@ -220,7 +222,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
 
-    contour::Controller controller(qtArgsPtr[0], earlyExitThreshold, config, liveConfig, profileName);
+    contour::Controller controller(qtArgsPtr[0], earlyExitThreshold, config, liveConfig, profileName, dumpStateAtExit);
     controller.start();
 
     // auto const HTS = "\033H";
