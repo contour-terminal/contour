@@ -42,6 +42,7 @@ class UnixPty : public Pty
     void prepareParentProcess() override;
     void prepareChildProcess() override;
     void close() override;
+    bool isClosed() const override;
     [[nodiscard]] constexpr int masterFd() const noexcept { return master_; };
 
   private:

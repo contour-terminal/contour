@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/primitives.h>
+#include <crispy/logstore.h>
 
 #include <chrono>
 #include <optional>
@@ -29,6 +30,9 @@ class Pty {
     ///
     /// This is automatically invoked when the destructor is called.
     virtual void close() = 0;
+
+    /// Returns true if the underlying PTY is closed, otherwise false.
+    virtual bool isClosed() const = 0;
 
     /// Prepares PTY for use with a child process, therefore, closing the master end and
     /// doing some more prep work.
@@ -70,5 +74,9 @@ class Pty {
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;
 };
+
+auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
+auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
+auto const inline PtyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
 
 }  // namespace terminal

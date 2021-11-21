@@ -35,9 +35,9 @@ class MockPty : public Pty
     void prepareChildProcess() override;
     void prepareParentProcess() override;
     void close() override;
+    bool isClosed() const override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
-    bool isClosed() const noexcept { return closed_; }
 
     void appendStdOutBuffer(std::string_view _that)
     {

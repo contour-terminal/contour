@@ -30,6 +30,7 @@ class ConPty : public Pty
     ~ConPty() override;
 
     void close() override;
+    bool isClosed() const override;
 
     void prepareParentProcess() override;
     void prepareChildProcess() override;

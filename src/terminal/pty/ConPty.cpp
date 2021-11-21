@@ -93,6 +93,11 @@ ConPty::~ConPty()
     close();
 }
 
+bool ConPty::isClosed() const
+{
+    return master_ == INVALID_HANDLE_VALUE;
+}
+
 void ConPty::close()
 {
     auto const _ = std::lock_guard{mutex_};

@@ -21,8 +21,8 @@ PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<Im
     process_{ std::make_unique<Process>(_exe, *pty_) },
     processExitWatcher_{
         [this]() {
-            (void) process_->wait();
-            // debuglog(ProcessTag).write("Process terminated. ({})", exitStatus.value());
+            auto const exitStatus = process_->wait();
+            LOGSTORE(PtyLog)("Process terminated with exit code {}.", exitStatus);
             pty_->close();
         }
     }
@@ -44,6 +44,11 @@ void PtyProcess::close()
 {
     pty_->close();
     //process_->terminate(Process::TerminationHint::Hangup);
+}
+
+bool PtyProcess::isClosed() const
+{
+    return pty_->isClosed();
 }
 
 void PtyProcess::prepareParentProcess()

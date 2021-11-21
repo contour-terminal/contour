@@ -34,6 +34,7 @@ class PtyProcess: public Pty
     // Pty interface
     //
     void close() override;
+    bool isClosed() const override;
     void prepareParentProcess() override;
     void prepareChildProcess() override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;

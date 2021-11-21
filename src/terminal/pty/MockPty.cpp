@@ -60,4 +60,9 @@ void MockPty::close()
     closed_ = true;
 }
 
+bool MockPty::isClosed() const
+{
+    return closed_;
+}
+
 }
