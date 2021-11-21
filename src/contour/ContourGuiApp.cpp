@@ -198,6 +198,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
     #endif
 
+    vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;
     qtArgsPtr.push_back(argv[0]);
 
@@ -206,7 +207,8 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
         if (string const& s = _flags.get<string>(key); !s.empty())
         {
             qtArgsPtr.push_back(arg);
-            qtArgsPtr.push_back(s.c_str());
+            qtArgsStore.push_back(s);
+            qtArgsPtr.push_back(qtArgsStore.back().c_str());
         }
     };
 
