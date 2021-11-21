@@ -174,33 +174,39 @@ namespace // {{{ helper
         }
 
         // FLOAT
-        try {
-            auto result = Value{stod(string(_text))}; // TODO: avoid malloc
+        try
+        {
             if (holds_alternative<double>(_context.currentOption->value))
-                return result;
+            {
+                return Value{stod(string(_text))}; // TODO: avoid malloc
+            }
+        }
+        catch (...)
+        {
             throw ParserError("Floating point value expected but something else specified.");
         }
-        catch (...) {}
 
         // UINT
-        try {
-            auto const result = stoul(string(_text));
+        try
+        {
             if (holds_alternative<unsigned>(_context.currentOption->value))
-                return Value{unsigned(result)};
-            if (holds_alternative<int>(_context.currentOption->value))
-                return Value{int(result)};
+                return Value{unsigned(stoul(string(_text)))};
+        }
+        catch (...)
+        {
             throw ParserError("Unsigned integer value expected but something else specified.");
         }
-        catch (...) {}
 
         // INT
-        try {
-            auto const result = stoi(string(_text));
+        try
+        {
             if (holds_alternative<int>(_context.currentOption->value))
-                return Value{int(result)};
+                return Value{stoi(string(_text))};
+        }
+        catch (...)
+        {
             throw ParserError("Integer value expected but something else specified.");
         }
-        catch (...) {}
 
         // STR
         return Value{string(_text)};
