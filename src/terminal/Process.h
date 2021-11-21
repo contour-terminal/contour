@@ -111,7 +111,7 @@ private:
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
 	mutable NativeHandle pid_{};
 	bool detached_ = false;
-    std::mutex lock_;
+    mutable std::mutex lock_;
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};

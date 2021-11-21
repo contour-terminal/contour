@@ -362,6 +362,8 @@ optional<Process::ExitStatus> Process::checkStatus() const
 
 optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
 {
+    auto const _ = lock_guard{lock_};
+
     if (exitStatus_.has_value())
         return exitStatus_;
 
@@ -385,6 +387,7 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
         else if (WIFSTOPPED(status))
             return exitStatus_ = ExitStatus{ SignalExit{ SIGSTOP } };
         else
+            // TODO: handle the other WIF....(status) cases.
             throw runtime_error{ "Unknown waitpid() return value." };
     }
 #else
