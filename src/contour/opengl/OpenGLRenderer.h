@@ -56,6 +56,7 @@ class OpenGLRenderer final :
     terminal::renderer::atlas::AtlasBackend& textureScheduler() override;
 
     void scheduleScreenshot(ScreenshotCallback _callback) override;
+    std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
 
     void renderRectangle(int _x, int _y, int _width, int _height,
                          float _r, float _g, float _b, float _a) override;
