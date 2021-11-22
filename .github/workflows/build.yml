@@ -566,14 +566,15 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
-        .github/workflows/Xvfb-contour-run.sh  \
+        .github/workflows/Xvfb-contour-run.sh \
+              "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
     - name: "Save dump"
       uses: actions/upload-artifact@v2
       with:
         name: notcurses-contour-dump
-        path: ~/.local/state/contour
+        path: notcurses-demo-dumps
         if-no-files-found: ignore
         retention-days: 3
     - name: "Check result success"

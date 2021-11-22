@@ -697,10 +697,13 @@ void TerminalWidget::doDumpState()
 {
     makeCurrent();
 
-    auto const targetDir = crispy::App::instance()->localStateDir()
-                         / "dump"
-                         / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
-                                       std::chrono::system_clock::now());
+    auto const targetDir =
+        session_.controller().dumpStateAtExit().value_or(
+            crispy::App::instance()->localStateDir()
+            / "dump"
+            / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
+                          std::chrono::system_clock::now())
+        );
 
     FileSystem::create_directories(targetDir);
 
@@ -810,7 +813,7 @@ void TerminalWidget::doDumpState()
             // If this dump-state was triggered due to the PTY being closed
             // and a dump was requested at the end, then terminate this session here now.
             if (session_.terminal().device().isClosed() &&
-                session_.controller().dumpStateAtExit())
+                session_.controller().dumpStateAtExit().has_value())
             {
                 session_.terminate();
             }

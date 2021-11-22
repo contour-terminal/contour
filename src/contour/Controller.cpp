@@ -30,7 +30,7 @@ Controller::Controller(std::string _programPath,
                        config::Config _config,
                        bool _liveConfig,
                        std::string _profileName,
-                       bool _dumpStateAtExit):
+                       std::optional<FileSystem::path> _dumpStateAtExit):
     programPath_{ move(_programPath) },
     earlyExitThreshold_{ _earlyExitThreshold },
     config_{ move(_config) },

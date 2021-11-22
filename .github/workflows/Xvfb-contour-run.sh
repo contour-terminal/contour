@@ -16,11 +16,14 @@ XVFB_PID=$!
 
 sleep 3
 
+DUMP_DIR="${1}"
+shift
+
 contour terminal \
         debug pty,gui.session,gui.display \
         display ${DISPLAY} \
         early-exit-threshold 0 \
-        dump-state-at-exit \
+        dump-state-at-exit "${DUMP_DIR}" \
         ${@}
 
 # ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses

@@ -15,12 +15,14 @@
 
 #include <contour/Config.h>
 #include <terminal/Process.h>
+#include <crispy/stdfs.h>
 
 #include <QtCore/QThread>
 #include <QtWidgets/QSystemTrayIcon>
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -36,14 +38,14 @@ class Controller : public QThread {
                contour::config::Config _config,
                bool _liveConfig,
                std::string _profileName,
-               bool _dumpStateAtExit);
+               std::optional<FileSystem::path> _dumpStateAtExit);
 
     ~Controller();
 
     std::list<TerminalWindow*> const& terminalWindows() const noexcept { return terminalWindows_; }
 
     std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return exitStatus_; }
-    bool dumpStateAtExit() const noexcept { return dumpStateAtExit_; }
+    std::optional<FileSystem::path> const& dumpStateAtExit() const noexcept { return dumpStateAtExit_; }
 
     void onExit(TerminalSession& _session);
 
@@ -63,7 +65,7 @@ class Controller : public QThread {
     contour::config::Config config_;
     bool const liveConfig_;
     std::string profileName_;
-    bool dumpStateAtExit_;
+    std::optional<FileSystem::path> dumpStateAtExit_;
 
     std::list<TerminalWindow*> terminalWindows_;
 

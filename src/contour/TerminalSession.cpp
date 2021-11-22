@@ -279,7 +279,7 @@ void TerminalSession::dumpState()
         display_->dumpState();
 
     // Deferred termination? Then close display now.
-    if (terminal_.device().isClosed() && !controller_.dumpStateAtExit())
+    if (terminal_.device().isClosed() && !controller_.dumpStateAtExit().has_value())
         display_->closeDisplay();
 }
 
@@ -327,7 +327,7 @@ void TerminalSession::onClosed()
         return;
     }
 
-    if (controller_.dumpStateAtExit())
+    if (controller_.dumpStateAtExit().has_value())
         dumpState();
     else if (display_)
         display_->closeDisplay();
