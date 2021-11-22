@@ -591,7 +591,7 @@ namespace // {{{ helpers
 
         // Cut string at right margin, then shift left until we've hit a whitespace character.
         auto const rightMargin = _margin - _cursor + 1;
-        auto i = rightMargin;
+        auto i = rightMargin - 1;
         while (i > 0 && (_text[i] != ' ' && _text[i] != '\n'))
             --i;
 
