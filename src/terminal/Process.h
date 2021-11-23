@@ -111,7 +111,7 @@ private:
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
 	mutable NativeHandle pid_{};
 	bool detached_ = false;
-    std::mutex lock_;
+    mutable std::mutex lock_;
 
 #if defined(_MSC_VER)
 	PROCESS_INFORMATION processInfo_{};
@@ -134,7 +134,7 @@ namespace fmt
         {
             return std::visit(overloaded{
                 [&](terminal::Process::NormalExit _exit) {
-                    return format_to(_ctx.out(), "NormalExit:{}", _exit.exitCode);
+                    return format_to(_ctx.out(), "{} (normal exit)", _exit.exitCode);
                 },
                 [&](terminal::Process::SignalExit _exit) {
                     char buf[256];
@@ -143,7 +143,7 @@ namespace fmt
                     #else
                     strerror_r(errno, buf, sizeof(buf));
                     #endif
-                    return format_to(_ctx.out(), "SignalExit:{} ({})", _exit.signum, buf);
+                    return format_to(_ctx.out(), "{} (signal number {})", buf, _exit.signum);
                 }
             }, _status);
         }

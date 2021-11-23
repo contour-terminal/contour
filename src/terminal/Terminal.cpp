@@ -156,6 +156,7 @@ void Terminal::mainLoop()
             break;
     }
 
+    LOGSTORE(TerminalLog)("Event loop terminating (PTY {}).", pty_.isClosed() ? "closed" : "open");
     eventListener_.onClosed();
 }
 
@@ -171,16 +172,20 @@ bool Terminal::processInputOnce()
     if (!bufOpt)
     {
         if (errno != EINTR && errno != EAGAIN)
+        {
             LOGSTORE(TerminalLog)("PTY read failed (timeout: {}). {}",
                                   timeout,
                                   strerror(errno));
+            pty_.close();
+        }
         return errno == EINTR || errno == EAGAIN;
     }
     auto const buf = *bufOpt;
 
     if (buf.empty())
     {
-        LOGSTORE(TerminalLog)("PTY read returned with zero bytes.");
+        LOGSTORE(TerminalLog)("PTY read returned with zero bytes. Closing PTY.");
+        pty_.close();
         return true;
     }
 

@@ -604,6 +604,20 @@ void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback _callback)
     pendingScreenshotCallback_ = std::move(_callback);
 }
 
+pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
+{
+    ImageSize const imageSize = renderBufferSize();
+
+    vector<uint8_t> buffer;
+    buffer.resize(*imageSize.width * *imageSize.height * 4);
+
+    LOGSTORE(DisplayLog)("Capture screenshot ({}/{}).", imageSize, size_);
+
+    CHECKED_GL( glReadPixels(0, 0, *imageSize.width, *imageSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
+
+    return {imageSize, buffer};
+}
+
 void OpenGLRenderer::clear(terminal::RGBAColor _fillColor)
 {
     if (_fillColor != renderStateCache_.backgroundColor)
@@ -656,15 +670,8 @@ void OpenGLRenderer::execute()
 
     if (pendingScreenshotCallback_)
     {
-        ImageSize bufferSize = renderBufferSize();
-        vector<uint8_t> buffer;
-        buffer.resize(*bufferSize.width * *bufferSize.height * 4);
-
-        LOGSTORE(DisplayLog)("Capture screenshot ({}/{}).", bufferSize, size_);
-
-        CHECKED_GL( glReadPixels(0, 0, *bufferSize.width, *bufferSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()) );
-
-        pendingScreenshotCallback_.value()(buffer, bufferSize);
+        auto result = takeScreenshot();
+        pendingScreenshotCallback_.value()(result.second, result.first);
         pendingScreenshotCallback_.reset();
     }
 }

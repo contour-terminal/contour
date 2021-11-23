@@ -11,9 +11,6 @@ on:
     - '*.sh'
     branches:
     - master
-    - feature/**
-    - fix/**
-    - improvement/**
   pull_request:
     branches:
     - master
@@ -149,14 +146,14 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
     - name: "Uploading artifact ZIP package"
       uses: actions/upload-artifact@v2
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   ubuntu1804:
     name: "Ubuntu Linux 18.04"
@@ -216,14 +213,14 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
     - name: "Uploading artifact ZIP package"
       uses: actions/upload-artifact@v2
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   osx_qt5:
     name: "OS/X (Qt5)"
@@ -274,7 +271,7 @@ jobs:
         name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   osx_qt6:
     name: "OS/X (Qt6)"
@@ -374,7 +371,7 @@ jobs:
         name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
 
   archlinux:
     strategy:
@@ -425,5 +422,174 @@ jobs:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-archlinux_${{ steps.tags.outputs.ARCH }}"
         path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
+
+  # {{{ external test: notcurses
+
+  build_notcurses:
+    name: "Build notcurses"
+    runs-on: ubuntu-20.04
+    steps:
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo apt install -y \
+                    build-essential \
+                    cmake \
+                    doctest-dev \
+                    ffmpeg \
+                    libavcodec-dev \
+                    libavformat-dev \
+                    libavutil-dev \
+                    libdeflate-dev \
+                    libncurses-dev \
+                    libqrcodegen-dev \
+                    libswscale-dev \
+                    libunistring-dev \
+                    xvfb
+    - name: "git clone"
+      run: git clone https://github.com/dankamongmen/notcurses.git
+    - name: "configure cmake"
+      run: |
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
+              -DUSE_CPP=OFF \
+              -DUSE_DEFLATE=OFF \
+              -DUSE_MULTIMEDIA=ffmpeg \
+              -DUSE_PANDOC=OFF \
+              -DUSE_STATIC=ON \
+              -S notcurses \
+              -B notcurses/build
+    - name: "Build notcurses"
+      run: cmake --build notcurses/build/ -- -j3
+    - name: "Install notcurses"
+      run: cmake --build notcurses/build --config Release --target install/strip
+    - name: "Uploading artifact"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "notcurses-install"
+        path: ~/opt/notcurses
+        if-no-files-found: error
+        retention-days: 1
+
+  test_notcurses:
+    name: "external: notcurses-demo ${{ matrix.name }}"
+    runs-on: ubuntu-20.04
+    needs: [ubuntu_2004, build_notcurses]
+    strategy:
+      fail-fast: false
+      matrix:
+        # ixetunchmdbkywjgarvlsfqzo
+        include:
+          - name: 'aanimate'
+            id: 'a'
+          - name: 'box'
+            id: 'b'
+          - name: 'chunli'
+            id: 'c'
+          - name: 'dragon'
+            id: 'd'
+          - name: 'eagle'
+            id: 'e'
+          - name: 'fission'
+            id: 'f'
+          - name: 'grid'
+            id: 'g'
+          - name: 'highcon'
+            id: 'h'
+          - name: 'intro'
+            id: 'i'
+          - name: 'jungle'
+            id: 'j'
+          - name: 'keller'
+            id: 'k'
+          - name: 'luigi'
+            id: 'l'
+          - name: 'mojibake'
+            id: 'm'
+          - name: 'normal'
+            id: 'n'
+          - name: 'outro'
+            id: 'o'
+          - name: 'qrcode'
+            id: 'q'
+          - name: 'reel'
+            id: 'r'
+          - name: 'sliders'
+            id: 's'
+          - name: 'trans'
+            id: 't'
+          - name: 'uniblock'
+            id: 'u'
+          - name: 'view'
+            id: 'v'
+          - name: 'whiteout'
+            id: 'w'
+          - name: 'xray'
+            id: 'x'
+          - name: 'yield'
+            id: 'y'
+          - name: 'zoo'
+            id: 'z'
+    env:
+      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib
+    steps:
+    - uses: actions/checkout@v2
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - uses: actions/download-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+    - uses: actions/download-artifact@v2
+      with:
+        name: "notcurses-install"
+        path: ~/opt/notcurses
+    - name: "notcurses-install: fix executable bits"
+      run: chmod 0755 ~/opt/notcurses/bin/*
+    - name: "install dependencies"
+      run: .github/workflows/notcurses-install-deps.sh
+    - name: "Run notcurses-demo -h"
+      timeout-minutes: 1
+      run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
+    - name: "install contour"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+    - name: "contour executable test"
+      run: |
+        contour version
+        contour help
+        ls -hl ~/opt/notcurses/
+    - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
+      timeout-minutes: 5
+      id: Xvfb-contour-notcurses
+      run: |
+        .github/workflows/Xvfb-contour-run.sh \
+              "notcurses-demo-dumps/${{ matrix.name }}" \
+              ~/opt/notcurses/bin/notcurses-demo \
+                  -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
+    - name: "Save dump"
+      uses: actions/upload-artifact@v2
+      with:
+        name: notcurses-contour-dump
+        path: notcurses-demo-dumps
+        if-no-files-found: ignore
+        retention-days: 3
+    - name: "Check result success"
+      run: |
+        exit ${{ steps.Xvfb-contour-notcurses.outputs.exitCode }}
+
+  check_notcurses_test_matrix:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: external tests (matrix)
+    needs: test_notcurses
+    steps:
+    - name: Check build matrix status
+      if: ${{ needs.test_notcurses.result != 'success' }}
+      run: exit 1
+
+  # }}}
 

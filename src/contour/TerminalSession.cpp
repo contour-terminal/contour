@@ -18,10 +18,7 @@
 #include <terminal/MatchModes.h>
 #include <terminal/Terminal.h>
 #include <terminal/pty/Pty.h>
-
-#if defined(__APPLE__)
 #include <terminal/pty/PtyProcess.h>
-#endif
 
 #include <crispy/StackTrace.h>
 
@@ -81,19 +78,23 @@ namespace // {{{ helper
 } //  }}}
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
+                                 std::chrono::seconds _earlyExitThreshold,
                                  config::Config _config,
                                  bool _liveConfig,
                                  string _profileName,
                                  string _programPath,
                                  Controller &_controller,
                                  unique_ptr<TerminalDisplay> _display,
-                                 std::function<void()> _displayInitialized):
+                                 std::function<void()> _displayInitialized,
+                                 std::function<void()> _onExit):
     startTime_{ steady_clock::now() },
+    earlyExitThreshold_{ _earlyExitThreshold },
     config_{ move(_config) },
     profileName_{ move(_profileName) },
     profile_{ *config_.profile(profileName_) },
     programPath_{ move(_programPath ) },
     displayInitialized_{ move(_displayInitialized) },
+    onExit_{ move(_onExit) },
     controller_ { _controller },
     pty_{ move(_pty) },
     terminal_{
@@ -160,6 +161,14 @@ void TerminalSession::displayInitialized()
 void TerminalSession::start()
 {
     terminal().start();
+}
+
+void TerminalSession::terminate()
+{
+    if (!display_)
+        return;
+
+    display_->closeDisplay();
 }
 
 // {{{ Events implementations
@@ -266,10 +275,12 @@ void TerminalSession::copyToClipboard(std::string_view _data)
 
 void TerminalSession::dumpState()
 {
-    if (!display_)
-        return;
+    if (display_)
+        display_->dumpState();
 
-    display_->post([this]() { display_->dumpState(); });
+    // Deferred termination? Then close display now.
+    if (terminal_.device().isClosed() && !controller_.dumpStateAtExit().has_value())
+        display_->closeDisplay();
 }
 
 
@@ -284,9 +295,23 @@ void TerminalSession::notify(string_view _title, string_view _content)
 void TerminalSession::onClosed()
 {
     auto const now = steady_clock::now();
-    auto const diff = now - startTime_;
+    auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - startTime_);
 
-    if (diff < std::chrono::seconds(5))
+    if (auto const* pty = dynamic_cast<terminal::PtyProcess const*>(&terminal_.device()))
+    {
+        auto const exitStatus = pty->process().checkStatus();
+        if (exitStatus)
+            LOGSTORE(SessionLog)("Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
+        else
+            LOGSTORE(SessionLog)("Process terminated after {} seconds.", diff.count());
+    }
+    else
+        LOGSTORE(SessionLog)("Process terminated after {} seconds.", diff.count());
+
+    if (onExit_)
+        onExit_();
+
+    if (diff < earlyExitThreshold_)
     {
         //auto const w = terminal_.screenSize().columns.as<int>();
         auto constexpr SGR = "\e[1;38:2::255:255:255m\e[48:2::255:0:0m"sv;
@@ -302,10 +327,10 @@ void TerminalSession::onClosed()
         return;
     }
 
-    if (!display_)
-        return;
-
-    display_->closeDisplay();
+    if (controller_.dumpStateAtExit().has_value())
+        dumpState();
+    else if (display_)
+        display_->closeDisplay();
 }
 
 void TerminalSession::onSelectionCompleted()

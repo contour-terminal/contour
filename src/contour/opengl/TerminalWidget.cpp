@@ -690,12 +690,20 @@ void TerminalWidget::copyToClipboard(std::string_view _data)
 
 void TerminalWidget::dumpState()
 {
+    post([this]() { doDumpState(); });
+}
+
+void TerminalWidget::doDumpState()
+{
     makeCurrent();
 
-    auto const targetDir = crispy::App::instance()->localStateDir()
-                         / "dump"
-                         / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
-                                       std::chrono::system_clock::now());
+    auto const targetDir =
+        session_.controller().dumpStateAtExit().value_or(
+            crispy::App::instance()->localStateDir()
+            / "dump"
+            / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
+                          std::chrono::system_clock::now())
+        );
 
     FileSystem::create_directories(targetDir);
 
@@ -748,6 +756,7 @@ void TerminalWidget::dumpState()
                 }
             );
             image->save(QString::fromStdString(_filename.generic_string()));
+            LOGSTORE(DisplayLog)("Saving image: {}", _filename.generic_string());
         };
     };
 
@@ -796,7 +805,23 @@ void TerminalWidget::dumpState()
         }
     }
 
-    renderTarget.scheduleScreenshot(screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA));
+    renderTarget.scheduleScreenshot(
+        [this, targetDir, screenshotSaver](auto a, auto b)
+        {
+            screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA)(a, b);
+
+            // If this dump-state was triggered due to the PTY being closed
+            // and a dump was requested at the end, then terminate this session here now.
+            if (session_.terminal().device().isClosed() &&
+                session_.controller().dumpStateAtExit().has_value())
+            {
+                session_.terminate();
+            }
+        }
+    );
+
+    // force an update to actually render the screenshot
+    update();
 }
 
 void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_body*/)

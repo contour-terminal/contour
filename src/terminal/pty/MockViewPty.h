@@ -39,10 +39,10 @@ public:
     void prepareChildProcess() override;
     void prepareParentProcess() override;
     void close() override;
+    bool isClosed() const override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
     std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
-    bool isClosed() const noexcept { return closed_; }
 
 private:
     PageSize screenSize_;

@@ -14,6 +14,8 @@
 #include <contour/Controller.h>
 #include <contour/TerminalWindow.h>
 
+#include <terminal/pty/PtyProcess.h>
+
 #include <QtCore/QProcess>
 #include <QtGui/QGuiApplication>
 
@@ -24,13 +26,17 @@ namespace contour {
 Controller* Controller::self_ = nullptr;
 
 Controller::Controller(std::string _programPath,
+                       std::chrono::seconds _earlyExitThreshold,
                        config::Config _config,
                        bool _liveConfig,
-                       std::string _profileName) :
+                       std::string _profileName,
+                       std::optional<FileSystem::path> _dumpStateAtExit):
     programPath_{ move(_programPath) },
+    earlyExitThreshold_{ _earlyExitThreshold },
     config_{ move(_config) },
     liveConfig_{ _liveConfig },
-    profileName_{ move(_profileName) }
+    profileName_{ move(_profileName) },
+    dumpStateAtExit_{ _dumpStateAtExit }
 {
     // systrayIcon_ = new QSystemTrayIcon(nullptr);
     // systrayIcon_->show();
@@ -46,9 +52,19 @@ Controller::~Controller()
 {
 }
 
+void Controller::onExit(TerminalSession& _session)
+{
+    auto const* pty = dynamic_cast<terminal::PtyProcess const*>(&_session.terminal().device());
+    if (!pty)
+        return;
+
+    exitStatus_ = pty->process().checkStatus();
+}
+
 void Controller::newWindow(contour::config::Config const& _config)
 {
     auto mainWindow = new TerminalWindow{
+        earlyExitThreshold_,
         _config,
         liveConfig_,
         profileName_,
@@ -68,6 +84,7 @@ void Controller::newWindow(contour::config::Config const& _config)
 void Controller::newWindow()
 {
     auto mainWindow = new TerminalWindow{
+        earlyExitThreshold_,
         config_,
         liveConfig_,
         profileName_,

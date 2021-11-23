@@ -205,7 +205,12 @@ void ScrollableDisplay::onValueChanged()
 }
 #endif // }}}
 
-TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string _profileName, string _programPath, Controller& _controller) :
+TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
+                               config::Config _config,
+                               bool _liveConfig,
+                               string _profileName,
+                               string _programPath,
+                               Controller& _controller):
     config_{ std::move(_config) },
     liveConfig_{ _liveConfig },
     profileName_{ std::move(_profileName) },
@@ -248,6 +253,7 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
             profile()->shell,
             profile()->terminalSize
         ),
+        _earlyExitThreshold,
         config_,
         liveConfig_,
         profileName_,
@@ -262,6 +268,9 @@ TerminalWindow::TerminalWindow(config::Config _config, bool _liveConfig, string 
 #else
             (void) this;
 #endif
+        },
+        [this]() {
+            controller_.onExit(*terminalSession_);
         }
     );
 

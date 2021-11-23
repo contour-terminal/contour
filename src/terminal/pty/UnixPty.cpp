@@ -52,10 +52,6 @@ using namespace std::string_literals;
 
 namespace terminal {
 
-auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
-auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
-auto const inline PtyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
-
 namespace
 {
     static termios getTerminalSettings(int fd)
@@ -138,6 +134,11 @@ UnixPty::~UnixPty()
         ::close(*fd);
         *fd = -1;
     }
+}
+
+bool UnixPty::isClosed() const
+{
+    return master_ < 0;
 }
 
 void UnixPty::close()
@@ -240,7 +241,10 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
                 return string_view{buffer_.data(), static_cast<size_t>(rv)};
             }
             else
+            {
+                LOGSTORE(PtyLog)("PTY read: endpoint closed.");
                 return string_view{};
+            }
         }
 
         if (piped)

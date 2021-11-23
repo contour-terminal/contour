@@ -27,6 +27,8 @@
 
 #include <array>
 #include <memory>
+#include <optional>
+#include <vector>
 
 namespace terminal::renderer {
 
@@ -72,7 +74,7 @@ class RenderTarget
 
     using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
 
-    /// Takes a screenshot of the current schene and forwards it to the given callback function.
+    /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
     virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
 
     /// Clears the target surface with the given fill color.

@@ -70,4 +70,9 @@ void MockViewPty::close()
     closed_ = true;
 }
 
+bool MockViewPty::isClosed() const
+{
+    return closed_;
+}
+
 }
