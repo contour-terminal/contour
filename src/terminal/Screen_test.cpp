@@ -2690,6 +2690,20 @@ TEST_CASE("XTGETTCAP")
     // TODO: CHECK(...)
 }
 
+TEST_CASE("setMaxHistoryLineCount", "[screen]")
+{
+    // from zero to something
+    auto term = MockTerm{PageSize{LineCount(2), ColumnCount(2)}, LineCount(0)};
+    auto& screen = term.screen;
+    screen.write("ABCD");
+    REQUIRE("AB\nCD\n" == screen.renderMainPageText());
+    REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(1), ColumnOffset(1)});
+    logScreenTextAlways(screen, "after write");
+
+    screen.setMaxHistoryLineCount(LineCount(1));
+    logScreenTextAlways(screen, "after set history size");
+}
+
 // TODO: resize test (should be in Grid_test.cpp?)
 TEST_CASE("resize", "[screen]")
 {

@@ -134,10 +134,32 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistory
 template <typename Cell>
 void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 {
+#if 0
     verifyState();
+    if (_maxHistoryLineCount < maxHistoryLineCount_)
+    {
+        maxHistoryLineCount_ = _maxHistoryLineCount;
+        verifyState();
+        return;
+    }
+
+    auto t = detail::createLines<Cell>(pageSize_, _maxHistoryLineCount, reflowOnResize_, GraphicsAttributes{});
+    t.rotate_left(lines_.zero_index());
+    for (int i = -static_cast<int>(lines_.zero_index()); i < *pageSize_.lines; ++i)
+        t[i] = std::move(lines_[i]);
+
+    // recreate lines
+    // - copy existing ones
+    // - add empty to fill
+
+    verifyState();
+#else
+    verifyState();
+    rezeroBuffers();
     maxHistoryLineCount_ = _maxHistoryLineCount;
     lines_.reserve(unbox<size_t>(_maxHistoryLineCount));
     verifyState();
+#endif
 }
 
 template <typename Cell>
