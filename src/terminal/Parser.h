@@ -733,7 +733,7 @@ constexpr ParserTable ParserTable::get() // {{{
         // t.transition(anywhere, State::DCS_Entry, 0x90_b);     // C1: DCS
         // t.transition(anywhere, State::IgnoreUntilST, 0x98_b); // C1: SOS
         // t.transition(anywhere, State::IgnoreUntilST, 0x9E_b); // C1: PM
-        // t.transition(anywhere, State::IgnoreUntilST, 0x9F_b); // C1: APC
+        // t.transition(anywhere, State::APC_String, 0x9F_b);    // C1: APC
     }
 
     // TODO: verify the above is correct (programatically as much as possible)
