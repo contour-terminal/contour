@@ -29,6 +29,11 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004_no_kwin
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -58,6 +63,11 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -98,6 +108,11 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -155,12 +170,17 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
-  ubuntu1804:
+  ubuntu_1804:
     name: "Ubuntu Linux 18.04"
     runs-on: ubuntu-18.04
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_1804
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -227,6 +247,11 @@ jobs:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-osx_qt5
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -278,6 +303,11 @@ jobs:
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-osx_qt6
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"

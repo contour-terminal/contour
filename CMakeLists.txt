@@ -5,7 +5,6 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Version)
 GetVersionInformation(CONTOUR_VERSION CONTOUR_VERSION_STRING)
 file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${CONTOUR_VERSION_STRING}")
-
 project(contour VERSION "${CONTOUR_VERSION}" LANGUAGES CXX)
 
 # setting defaults
@@ -14,6 +13,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(EnableCcache)
+include(ClangTidy)
+include(CIncludeMe)
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE
     STRING "Choose the build mode." FORCE)
@@ -21,11 +24,6 @@ endif()
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Debug Release MinSizeRel RelWithDebInfo)
 
 find_package(Threads)
-option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
-
-include(EnableCcache)
-include(ClangTidy)
-include(CIncludeMe)
 
 if(DEFINED MSVC)
     add_definitions(-D_USE_MATH_DEFINES)

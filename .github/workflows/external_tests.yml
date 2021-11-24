@@ -31,6 +31,11 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004-external-tests
+        max-size: 256M
     - uses: actions/cache@v2
       with:
         path: "**/cpm_modules"
@@ -48,12 +53,9 @@ jobs:
     - name: "create build directory"
       run: mkdir build
     - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="RelWithDebInfo" \
-          CXX="g++-9" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
-          ./scripts/ci-prepare-contour.sh
+      env:
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=ON"
+      run: ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
     - name: "test: crispy"
@@ -108,10 +110,16 @@ jobs:
                     xvfb
     - name: "git clone"
       run: git clone https://github.com/dankamongmen/notcurses.git
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004-notcurses
+        max-size: 256M
     - name: "configure cmake"
       run: |
         cmake -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
               -DUSE_CPP=OFF \
               -DUSE_DEFLATE=OFF \
               -DUSE_MULTIMEDIA=ffmpeg \
@@ -209,7 +217,7 @@ jobs:
     - name: "notcurses-install: fix executable bits"
       run: chmod 0755 ~/opt/notcurses/bin/*
     - name: "install dependencies"
-      run: .github/workflows/notcurses-install-deps.sh
+      run: ./scripts/ci/notcurses-install-deps.sh
     - name: "Run notcurses-demo -h"
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
@@ -224,7 +232,7 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
-        .github/workflows/Xvfb-contour-run.sh \
+        ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
