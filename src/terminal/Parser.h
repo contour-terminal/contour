@@ -718,22 +718,22 @@ constexpr ParserTable ParserTable::get() // {{{
     t.transition(State::CSI_Intermediate, State::CSI_Ignore, Range{0x30_b, 0x3F_b});
     t.transition(State::CSI_Intermediate, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
 
-    // * -> Ground
+    // * -> Ground, ...
     for (State anywhere = std::numeric_limits<State>::min(); anywhere <= std::numeric_limits<State>::max(); ++anywhere)
     {
         t.transition(anywhere, State::Ground, 0x18_b);
         t.transition(anywhere, State::Ground, 0x1A_b);
-        t.transition(anywhere, State::Ground, 0x9C_b);
-        t.transition(anywhere, State::Ground, Range{0x80_b, 0x8F_b});
-        t.transition(anywhere, State::Ground, Range{0x91_b, 0x97_b});
-
         t.transition(anywhere, State::Escape, 0x1B_b);
 
-        t.transition(anywhere, State::DCS_Entry, 0x90_b);
-
-        t.transition(anywhere, State::IgnoreUntilST, 0x98_b);
-        t.transition(anywhere, State::IgnoreUntilST, 0x9E_b);
-        t.transition(anywhere, State::IgnoreUntilST, 0x9F_b);
+        // C1 control need special 2-byte treatment due to this Parser
+        // being UTF-8.
+        // t.transition(anywhere, State::Ground, 0x9C_b);
+        // t.transition(anywhere, State::Ground, Range{0x80_b, 0x8F_b});
+        // t.transition(anywhere, State::Ground, Range{0x91_b, 0x97_b});
+        // t.transition(anywhere, State::DCS_Entry, 0x90_b);     // C1: DCS
+        // t.transition(anywhere, State::IgnoreUntilST, 0x98_b); // C1: SOS
+        // t.transition(anywhere, State::IgnoreUntilST, 0x9E_b); // C1: PM
+        // t.transition(anywhere, State::IgnoreUntilST, 0x9F_b); // C1: APC
     }
 
     // TODO: verify the above is correct (programatically as much as possible)
