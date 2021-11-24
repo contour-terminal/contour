@@ -901,25 +901,7 @@ namespace fmt { // {{{
         template <typename FormatContext>
         auto format(terminal::parser::Action _value, FormatContext& _ctx)
         {
-            auto constexpr mappings = std::array<std::string_view, 16>{
-                "Undefined",
-                "Ignore",
-                "Print",
-                "Execute",
-                "Clear",
-                "Collect",
-                "CollectLeader",
-                "Param",
-                "ESC_Dispatch",
-                "CSI_Dispatch",
-                "Hook",
-                "Put",
-                "Unhook",
-                "OSC_Start",
-                "OSC_Put",
-                "OSC_End"
-            };
-            return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
+            return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
         }
     };
 
@@ -929,26 +911,9 @@ namespace fmt { // {{{
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
 
         template <typename FormatContext>
-        auto format(terminal::parser::State state, FormatContext& ctx)
+        auto format(terminal::parser::State _state, FormatContext& _ctx)
         {
-            auto static const mappings = std::array<std::string_view, 15>{
-                "Undefined",
-                "Ground",
-                "Escape",
-                "EscapeIntermediate",
-                "CSI_Entry",
-                "CSI_Param",
-                "CSI_Intermediate",
-                "CSI_Ignore",
-                "DCS_Entry",
-                "DCS_Param",
-                "DCS_Intermediate",
-                "DCS_PassThrough",
-                "DCS_Ignore",
-                "OSC_String",
-                "IgnoreUntilST",
-            };
-            return format_to(ctx.out(), "{}", mappings.at(static_cast<unsigned>(state)));
+            return format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
         }
     };
 } // }}}
