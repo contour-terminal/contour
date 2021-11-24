@@ -22,6 +22,7 @@ class MockParserEvents : public terminal::BasicParserEvents {
   public:
     std::string text;
     std::string apc;
+    std::string pm;
 
     void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
     void print(char32_t _ch) override { text += unicode::convert_to<char>(_ch); }
@@ -30,6 +31,10 @@ class MockParserEvents : public terminal::BasicParserEvents {
     void startAPC() override { apc += "{"; }
     void putAPC(char32_t ch) override { apc += unicode::convert_to<char>(ch); }
     void dispatchAPC() override { apc += "}"; }
+
+    void startPM() override { pm += "{"; }
+    void putPM(char32_t ch) override { pm += unicode::convert_to<char>(ch); }
+    void dispatchPM() override { pm += "}"; }
 };
 
 TEST_CASE("Parser.utf8_single", "[Parser]")
@@ -40,6 +45,17 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
     p.parseFragment("\xC3\xB6");  // ö
 
     REQUIRE(textListener.text == "\xC3\xB6");
+}
+
+TEST_CASE("Parser.PM")
+{
+    MockParserEvents listener;
+    auto p = parser::Parser(listener);
+    REQUIRE(p.state() == parser::State::Ground);
+    p.parseFragment("ABC\033^hello\033\\DEF"sv);
+    CHECK(p.state() == parser::State::Ground);
+    CHECK(listener.pm == "{hello}");
+    CHECK(listener.text == "ABCDEF");
 }
 
 TEST_CASE("Parser.APC")
