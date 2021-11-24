@@ -51,6 +51,9 @@ public:
     void startAPC() override {}
     void putAPC(char32_t) override {}
     void dispatchAPC() override {}
+    void startPM() override {}
+    void putPM(char32_t) override {}
+    void dispatchPM() override {}
 };
 
 struct BenchOptions

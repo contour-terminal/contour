@@ -2,6 +2,7 @@
 
 - Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.
 - Fixes Qt-related CLI options that that were largely ignored.
+- Fixes crash caused by VT sequence PM and SOS (#513).
 - Changes `contour` exit code to reflect the shell's exit code of the last closed window.
 - Adds CLI option `terminal early-exit-threshold SECS` (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.
 - Adds CLI option `terminal dump-state-at-exit` to auto-dump internal state at exit.
