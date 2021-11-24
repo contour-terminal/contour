@@ -16,7 +16,7 @@ on:
 
 # Attempt to cancel any in-progress jobs for a given PR.
 concurrency:
-  group: ${{ github.ref }}-${{ github.head_ref }}
+  group: codechecker-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
