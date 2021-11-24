@@ -812,6 +812,13 @@ inline void Parser::processInput(char32_t _ch)
 inline void Parser::handle(ActionClass _actionClass, Action _action, char32_t _char)
 {
     (void) _actionClass;
+    // if (_action != Action::Ignore && _action != Action::Undefined)
+    //     fmt::print("Parser.handle: {} {} {} {}\n",
+    //         state_,
+    //         _actionClass,
+    //         _action,
+    //         crispy::escape(unicode::convert_to<char>(_char))
+    //     );
 
     switch (_action)
     {
