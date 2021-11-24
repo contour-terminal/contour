@@ -146,6 +146,10 @@ class ParserEvents {
     virtual void startAPC() = 0;
     virtual void putAPC(char32_t) = 0;
     virtual void dispatchAPC() = 0;
+
+    virtual void startPM() = 0;
+    virtual void putPM(char32_t) = 0;
+    virtual void dispatchPM() = 0;
 };
 
 class BasicParserEvents : public ParserEvents {
@@ -169,5 +173,8 @@ class BasicParserEvents : public ParserEvents {
     void startAPC() override {}
     void putAPC(char32_t) override {}
     void dispatchAPC() override {}
+    void startPM() override {}
+    void putPM(char32_t) override {}
+    void dispatchPM() override {}
 };
 } // end namespace terminal

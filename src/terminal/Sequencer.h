@@ -495,6 +495,9 @@ class Sequencer : public ParserEvents {
     void startAPC() override {}
     void putAPC(char32_t) override {}
     void dispatchAPC() override {}
+    void startPM() override {}
+    void putPM(char32_t) override {}
+    void dispatchPM() override {}
 
   private:
     void executeControlFunction(char _c0);
