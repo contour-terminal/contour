@@ -63,6 +63,11 @@ using std::vector;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
+#if !defined(HB_FEATURE_GLOBAL_END)
+// Ubuntu 18.04 has a too old harfbuzz that doesn't provide this definition yet.
+#define HB_FEATURE_GLOBAL_END ((size_t)-1)
+#endif
+
 namespace
 {
 
@@ -523,7 +528,18 @@ namespace // {{{ helper
 
         prepareBuffer(_hbBuf, _codepoints, _clusters, _script);
 
-        hb_shape(_hbFont, _hbBuf, nullptr, 0); // TODO: support font features
+        vector<hb_feature_t> hbFeatures;
+        for (font_feature const feature: _fontInfo.description.features)
+        {
+            hb_feature_t hbFeature;
+            hbFeature.tag = HB_TAG(feature.name[0], feature.name[1], feature.name[2], feature.name[3]);
+            hbFeature.value = 1;
+            hbFeature.start = 0;
+            hbFeature.end = HB_FEATURE_GLOBAL_END;
+            hbFeatures.emplace_back(hbFeature);
+        }
+
+        hb_shape(_hbFont, _hbBuf, hbFeatures.data(), hbFeatures.size());
         hb_buffer_normalize_glyphs(_hbBuf);    // TODO: lookup again what this one does
 
         auto const glyphCount = hb_buffer_get_length(_hbBuf);
