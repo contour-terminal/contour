@@ -1,3 +1,8 @@
+- [x] box drawing (e.g. helping fira code to not look shit w/ p10k zsh prompts): https://github.com/s417-lama/terminal-glyph-patcher#preset-glyphs
+- [ ] dump creation should create (overwrite) symlink to always point to the latest dump (`.../dump/latest` -> `.../dump/TIMESTAMP`)
+- [ ] reduce font cache key capacity. `notcurses-demo u` generates 10 atlases just for glyphs. That's too much and makes it slow. what makes it slow exactly?
+- [ ] enusre LRU rolling works on the atlas-side, too
+- [ ] [FEATURE;PERF] Do not evict ASCII (32..127?) from cache! Aka. have a speed-optimization code path for ASCII in glyph image caching.
 
 - [x] get screenshot before exit working
 - [ ] CI: notcureses test for each scene
