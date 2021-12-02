@@ -22,6 +22,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <vector>
 #include <utility>
 
 namespace text {
@@ -113,6 +114,17 @@ constexpr std::optional<font_spacing> make_font_spacing(std::string_view _text)
     });
 }
 
+struct font_feature
+{
+    std::array<char, 4> name; // well defined unique four-letter font feature identifier.
+
+    font_feature(char a, char b, char c, char d): name{a, b, c, d} {}
+    font_feature(font_feature const&) = default;
+    font_feature(font_feature&&) = default;
+    font_feature& operator=(font_feature const&) = default;
+    font_feature& operator=(font_feature&&) = default;
+};
+
 struct font_description
 {
     std::string familyName;
@@ -124,6 +136,8 @@ struct font_description
     font_slant slant = font_slant::normal;
     font_spacing spacing = font_spacing::proportional;
     bool strict_spacing = false;
+
+    std::vector<font_feature> features;
 
     // returns "familyName [weight] [slant]"
     std::string toPattern() const;
@@ -421,6 +435,22 @@ namespace fmt { // {{{
         auto format(text::glyph_key const& _key, FormatContext& ctx)
         {
             return format_to(ctx.out(), "({}, {}, {})", _key.font, _key.size, _key.index);
+        }
+    };
+
+    template <>
+    struct formatter<text::font_feature> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(text::font_feature _value, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}{}{}{}",
+                _value.name[0],
+                _value.name[1],
+                _value.name[2],
+                _value.name[3]
+            );
         }
     };
 

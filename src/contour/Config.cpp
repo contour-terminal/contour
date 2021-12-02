@@ -963,7 +963,19 @@ void softLoadFont(UsedKeys& _usedKeys,
 
         if (node["features"].IsSequence())
         {
-            // TODO: array of strings into _store.features
+            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "features"));
+            YAML::Node featuresNode = node["features"];
+            for (int i = 0; i < featuresNode.size(); ++i)
+            {
+                YAML::Node const featureNode = featuresNode[i];
+                if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)
+                {
+                    errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
+                    continue;
+                }
+                auto const tag = featureNode.as<string>();
+                _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
+            }
         }
     }
 }

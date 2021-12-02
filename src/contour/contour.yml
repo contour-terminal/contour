@@ -210,6 +210,15 @@ profiles:
                 # Font slant can be one of: normal, italic, oblique.
                 slant: normal
 
+                # Set of optional font features to be enabled. This
+                # is usually a 4-letter code, such as ss01 or ss02 etc.
+                #
+                # Please see your font's documentation to find out what it
+                # supports.
+                #
+                # Default: []
+                features: []
+
             # If bold/italic/bold_italic are not explicitely specified, the regular font with
             # the respective weight and slant will be used.
             #bold: "Hack"

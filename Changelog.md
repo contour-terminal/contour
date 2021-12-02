@@ -7,6 +7,7 @@
 - Adds CLI option `terminal early-exit-threshold SECS` (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.
 - Adds CLI option `terminal dump-state-at-exit` to auto-dump internal state at exit.
 - Adds support for CoreText for matching font descriptions and font fallback (#479).
+- Adds support for font feature settings (#520).
 
 ### 0.2.2 (2021-11-19)
 
