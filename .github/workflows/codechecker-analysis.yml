@@ -9,7 +9,17 @@ on:
       - '*.md'
     branches:
       - master
-      - codechecker
+      - 'codechecker*'
+
+      # Note: Keep these in sync with release.yml!
+      - 'release*'
+      - 'prerelease*'
+      - 'prerelease'
+      - 'testing' # for public testing
+      - 'gh-actions' # only for testing
+    # Note: Keep this in sync with relase.yml!
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
   pull_request:
     branches:
       - master
@@ -23,12 +33,10 @@ jobs:
   ubuntu_2004:
     name: "Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
-    env:
-      CODECHECKER_CONFIG: .github/codechecker/config.json
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v2
-      - name: "Set Contour CI variables"
+      - name: "Set variables for Contour build-like CI"
         id: set_vars
         run: ./scripts/ci-set-vars.sh
         env:
@@ -39,117 +47,53 @@ jobs:
           cat /etc/apt/sources.list
           sudo apt-get -qy update
           sudo ./scripts/install-deps.sh
-      - name: "Check out repository Ericsson/CodeChecker"
-        uses: actions/checkout@v2
-        with:
-          repository: Ericsson/CodeChecker
-          path: CodeChecker
-      - name: "Install analysis dependencies"
-        id: anal_deps
-        run: |
-          export DISTRO_FANCYNAME="$(lsb_release -c | awk '{ print $2 }')"
-          sudo apt-get -qy update
-          sudo apt-get -y --no-install-recommends install \
-            build-essential \
-            curl            \
-            gcc-multilib    \
-            python3-dev     \
-            python3-venv
-          curl -sL http://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo add-apt-repository -y "deb http://apt.llvm.org/$DISTRO_FANCYNAME/ llvm-toolchain-$DISTRO_FANCYNAME main"
-          # Get the largest Clang package number available.
-          export LLVM_VER="$(apt-cache search --full 'clang-[[:digit:]]*$' | grep '^Package: clang' | cut -d ' ' -f 2 | sort -V | tail -n 1 | sed 's/clang-//')"
-          sudo apt-get -y --no-install-recommends install \
-            clang-$LLVM_VER      \
-            clang-tidy-$LLVM_VER
-          sudo update-alternatives --install                   \
-            /usr/bin/clang clang /usr/bin/clang-$LLVM_VER 1000 \
-            --slave                                            \
-              /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-$LLVM_VER
-          update-alternatives --query clang
-          echo "::set-output name=LLVM_REAL_VERSION::$(clang --version | head -n 1 | cut -d' ' -f4-)"
-      - name: "Build and Package CodeChecker"
-        id: codechecker
-        run: |
-          cat "$CODECHECKER_CONFIG"
-          pushd CodeChecker/analyzer
-          make venv
-          source venv/bin/activate
-          make standalone_package
-          deactivate
-          echo "::set-output name=CODECHECKER_PATH::$(readlink -f ./build/CodeChecker/bin)"
-          echo "::set-output name=CODECHECKER_VERSION::$(./build/CodeChecker/bin/CodeChecker analyzer-version | grep 'Base package' | cut -d'|' -f 2 | tr -d ' ')"
-          echo "::set-output name=CODECHECKER_GITSEVEN::$(./build/CodeChecker/bin/CodeChecker analyzer-version | grep 'Git commit' | cut -d'|' -f 2 | cut -c 2-8)"
-          popd
-      - name: "Build Contour"
+      - name: "Prepare building Contour"
         # Note: Keep this in sync with that in build.yml!
         run: |
           BUILD_DIR="Build" \
             CMAKE_BUILD_TYPE="Debug" \
             CXX="g++-9" \
             ./scripts/ci-prepare-contour.sh
-          pushd Build
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            log \
-            --build "cmake --build . -- -j3" \
-            --output "../logged_compilation.json"
-          popd
-      - name: "Perform static analysis (non-CTU for normal development)"
-        if: ${{ github.ref != 'refs/heads/master' || github.event_name == 'pull_request' }}
-        run: |
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            analyzers --detail
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            analyze \
-            "logged_compilation.json" \
-            --config "$CODECHECKER_CONFIG" \
-            --jobs $(nproc) \
-            --output "Results" \
-          || true
-      - name: "Perform static analysis (CTU for pushes on master)"
-        if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
-        run: |
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            analyzers --detail
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            analyze \
-            "logged_compilation.json" \
-            --config "$CODECHECKER_CONFIG" \
-            --jobs $(nproc) \
-            --output "Results" \
-            \
-            --ctu \
-            --ctu-ast-mode load-from-pch \
-          || true
-      - name: "Convert static analysis results to HTML"
-        # Ignore the exit status of the parse command - the fact that we have
-        # reports will be obvious from the arfect and the CI output.
-        run: |
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            parse \
-            "Results" \
-            --config "$CODECHECKER_CONFIG" \
-            --export html \
-            --output "Results-HTML" \
-          || true
-      - name: "Dump analysis results to CI log"
-        # Ignore the exit status of the parse command - the fact that we have
-        # reports will be obvious from the arfect and the CI output.
-        run: |
-          "${{ steps.codechecker.outputs.CODECHECKER_PATH }}"/CodeChecker \
-            parse \
-            "Results" \
-            --config "$CODECHECKER_CONFIG" \
-          || true
-      - name: "Upload HTML results"
+
+      - name: "Execute Static Analysis"
+        uses: whisperity/codechecker-analysis-action@v1
+        id: codechecker
+        continue-on-error: true
+        with:
+          llvm-version: 'latest'
+
+          config: .github/codechecker/config.json
+
+          build-command: "cd Build && cmake --build . -- -j3"
+
+          ctu: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+
+          # Don't do differential check for now.
+          # diff: false
+          # diff-url: ${{ secrets.CODECHECKER_URL }}
+          # diff-username: ${{ secrets.CODECHECKER_USERNAME }}
+          # diff-password: ${{ secrets.CODECHECKER_PASSWORD }}
+
+          # Only upload the results as a CI artefact later, not to the server.
+          # store: false
+          # store-url: ${{ secrets.CODECHECKER_URL }}
+          # store-username: ${{ secrets.CODECHECKER_USERNAME }}
+          # store-password: ${{ secrets.CODECHECKER_PASSWORD }}
+
+      - name: "Upload HTML reports"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.CODECHECKER_VERSION }}+${{ steps.codechecker.outputs.CODECHECKER_GITSEVEN }}-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-results"
-          path: "Results-HTML"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-results"
+          path: "${{ steps.codechecker.outputs.result-html-dir }}"
           if-no-files-found: error
-      - name: "Upload analysis failure collections"
+      - name: "Upload analysis failure reproducers"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.CODECHECKER_VERSION }}+${{ steps.codechecker.outputs.CODECHECKER_GITSEVEN }}-llvm-${{ steps.anal_deps.outputs.LLVM_REAL_VERSION }}-failure-zips"
-          path: "Results/failed"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-failure-zips"
+          path: "${{ steps.codechecker.outputs.analyze-output }}/failed"
           if-no-files-found: ignore
+
+      - name: "Finish job"
+        run: |
+          echo "::notice title=Static analysis job set to always pass::The job is configured in a way that it always passes. Please see the reports in the generated and uploaded artefacts."
+          exit 0
