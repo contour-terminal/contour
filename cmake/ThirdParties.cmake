@@ -9,7 +9,7 @@ set(3rdparty_harfbuzz_version     "720ab0883b4bd7daa32a3c46031a9d8adb5c8a5f" CAC
 set(3rdparty_libunicode_version   "3c59a3a0eb0c57c3081d48ea77c22809ac7c2d6e" CACHE STRING "libunicode: commit hash")
 set(3rdparty_mimalloc_version     "0be71a2cac17062bd8913cbd272c472a44331b7f" CACHE STRING "mimalloc: commit hash")
 set(3rdparty_range_v3_version     "83783f578e0e6666d68a3bf17b0038a80e62530e" CACHE STRING "range_v3: commit hash")
-set(3rdparty_yaml_cpp_version     "5057a5329332993fa5618f4c7f1aff4c31c21413" CACHE STRING "yaml-cpp: commit hash")
+set(3rdparty_yaml_cpp_version     "1713859b054b0a7fd867a59905dfbb0d3f774d54" CACHE STRING "yaml-cpp: commit hash")
 set(3rdparty_termbenchpro_version "513cc8a7eb15b3b1a7940816944056d168d2c22a" CACHE STRING "termbench-pro: commit hash")
 
 if(CONTOUR_TESTING OR CRISPY_TESTING OR LIBTERMINAL_TESTING)
