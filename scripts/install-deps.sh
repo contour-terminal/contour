@@ -36,11 +36,33 @@ install_deps_ubuntu()
     sudo snap install --classic powershell
 }
 
+install_deps_fedora()
+{
+    local packages=(
+	fontconfig-devel
+        cmake
+        extra-cmake-modules
+        freetype-devel
+        gcc-c++
+        harfbuzz-devel
+        kf5-kwindowsystem-devel
+        ninja-build
+        pkgconf
+        qt5-qtbase-devel
+        qt5-qtbase-gui
+    )
+    sudo dnf install ${packages[*]}
+}
+
 main_linux()
 {
-    local ID=`lsb_release --id | awk '{print $NF}'`
+    #local ID=`lsb_release --id | awk '{print $NF}'`
+    local ID=$(grep ^ID= /etc/os-release | cut -d= -f2)
 
     case "${ID}" in
+        fedora)
+            install_deps_fedora
+            ;;
         Ubuntu|Neon)
             install_deps_ubuntu
             ;;
