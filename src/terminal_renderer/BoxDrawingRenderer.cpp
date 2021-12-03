@@ -101,33 +101,26 @@ enum Arc
 /// This is needed in order to fill the gaps.
 using GapFills = std::vector<std::basic_string<unsigned>>;
 
-void drawArc(atlas::Buffer& _buffer,
-             int _width,
-             int _height,
-             int rx,
-             int ry,
-             Arc _arc,
-             GapFills& _rec)
+template <typename PutPixel>
+constexpr void drawArc(PutPixel _putpixel,
+                       int _width,
+                       int _height,
+                       int rx,
+                       int ry,
+                       Arc _arc)
 {
     auto const cx = _width  / 2;
     auto const cy = _height / 2;
 
     auto const draw4WaySymmetric = [&](double x, double y)
     {
-        auto const putpixel = [&](double x, double y, uint8_t _alpha = 0xFFu)
-        {
-            auto const fy = min(_height - 1, static_cast<int>(y));
-            auto const fx = min(_width - 1, static_cast<int>(x));
-            _buffer[fy * _width + fx] = _alpha;
-            _rec.at(fy).push_back(fx);
-        };
         switch (_arc)
         {
-            case Arc::BottomLeft:  putpixel(_width - x, _height - y); break;
-            case Arc::TopLeft:     putpixel(_width - x,           y); break;
+            case Arc::BottomLeft:  _putpixel(_width - x, _height - y); break;
+            case Arc::TopLeft:     _putpixel(_width - x,           y); break;
 
-            case Arc::TopRight:    putpixel(         x,           y); break;
-            case Arc::BottomRight: putpixel(         x, _height - y); break;
+            case Arc::TopRight:    _putpixel(         x,           y); break;
+            case Arc::BottomRight: _putpixel(         x, _height - y); break;
             case Arc::NoArc:       break;
         }
     };
@@ -199,23 +192,29 @@ void drawArc(atlas::Buffer& _buffer,
     GapFills gaps;
     gaps.resize(_height);
 
+    auto const putpixel = [&](double x, double y, uint8_t _alpha = 0xFFu)
+    {
+        auto const fy = min(_height - 1, static_cast<int>(y));
+        auto const fx = min(_width - 1, static_cast<int>(x));
+        _buffer[fy * _width + fx] = _alpha;
+        gaps.at(fy).push_back(fx);
+    };
+
     // inner circle
-    drawArc(_buffer,
+    drawArc(putpixel,
             _width,
             _height,
             _width / 2 - _thickness/2,
             _height / 2 - _thickness/2,
-            _arc,
-            gaps);
+            _arc);
 
     // outer circle
-    drawArc(_buffer,
+    drawArc(putpixel,
             _width,
             _height,
             _width / 2 + _thickness/2 - 1,
             _height / 2 + _thickness/2 - 1,
-            _arc,
-            gaps);
+            _arc);
 
     // close arc at open ends to filling works
     bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
